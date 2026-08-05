@@ -75,40 +75,29 @@ function newRuntime(sm: ReturnType<typeof StorageManager.emulate>) {
   return new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: sm,
-    experimental: { persistentSchedulerState: true },
   });
 }
 
-/** The durable identity of every persisted scheduler action for this pattern. */
-async function collectIdentities(
+/**
+ * The durable identity of every registered scheduler action for this
+ * pattern, read from the live scheduler graph. Restart-stable action
+ * identity stays load-bearing for server-execution v2 (the basis index's
+ * `action` column — serving-loop.md §3b), so this invariant keeps its
+ * guard even with the persisted-observation instrument deleted.
+ */
+function collectIdentities(
   runtime: Runtime,
-): Promise<{ actionId: string; fingerprint: string }[]> {
-  const provider = runtime.storageManager.open(space) as {
-    listSchedulerActionSnapshots?: (
-      q: Record<string, unknown>,
-    ) => Promise<{
-      snapshots: {
-        observation: { actionId?: string; implementationFingerprint?: string };
-      }[];
-    }>;
-  };
-  const res = await provider.listSchedulerActionSnapshots!({
-    ownerSpace: space,
-    limit: 1000,
-  });
-  return res.snapshots
-    .filter((s) => (s.observation.actionId ?? "").startsWith("cf:module/"))
-    .map((s) => ({
-      actionId: s.observation.actionId!,
-      fingerprint: s.observation.implementationFingerprint ?? "",
-    }))
+): { actionId: string }[] {
+  return runtime.scheduler.getGraphSnapshot().nodes
+    .map((node) => ({ actionId: node.id }))
+    .filter(({ actionId }) => actionId.startsWith("cf:module/"))
     .sort((a, b) => a.actionId.localeCompare(b.actionId));
 }
 
 /** Run PROGRAM to a settled, persisted state and return its identity set. */
 async function runAndCollect(
   storageManager: ReturnType<typeof StorageManager.emulate>,
-): Promise<{ actionId: string; fingerprint: string }[]> {
+): Promise<{ actionId: string }[]> {
   const runtime = newRuntime(storageManager);
   try {
     const compiled = await runtime.patternManager.compilePattern(PROGRAM);
@@ -130,7 +119,7 @@ async function runAndCollect(
       sum: 16,
       label: "v=11:16",
     });
-    return await collectIdentities(runtime);
+    return collectIdentities(runtime);
   } finally {
     await runtime.dispose();
   }
@@ -148,14 +137,12 @@ Deno.test(
     );
 
     expect(baseline.length).toBeGreaterThan(0);
-    for (const { actionId, fingerprint } of baseline) {
+    for (const { actionId } of baseline) {
       // Content-addressed `cf:module/<hash>:<symbol>` — NOT a `:line:col`
       // (`.src`-derived) id. A regression to source-location ids ends in
       // `:<line>:<col>`.
       expect(actionId).toMatch(/^cf:module\//);
       expect(actionId).not.toMatch(/:\d+:\d+$/);
-      expect(fingerprint).toMatch(/^impl:cf:module\//);
-      expect(fingerprint).not.toMatch(/:\d+:\d+$/);
     }
     // No two distinct primitives collide on an id under real `.src`.
     expect(new Set(baseline.map((b) => b.actionId)).size).toBe(baseline.length);
@@ -168,7 +155,7 @@ Deno.test(
     __setSrcAnnotationTransformForTest((loc) =>
       `GARBLED-SRC-${counter++}-len${loc.length}`
     );
-    let garbled: { actionId: string; fingerprint: string }[];
+    let garbled: { actionId: string }[];
     try {
       garbled = await runAndCollect(StorageManager.emulate({ as: signer }));
     } finally {
@@ -249,7 +236,7 @@ const MULTI_INSTANCE_PROGRAM: RuntimeProgram = {
 
 async function runMultiAndCollect(
   storageManager: ReturnType<typeof StorageManager.emulate>,
-): Promise<{ actionId: string; fingerprint: string }[]> {
+): Promise<{ actionId: string }[]> {
   const runtime = newRuntime(storageManager);
   try {
     const compiled = await runtime.patternManager.compilePattern(
@@ -265,7 +252,7 @@ async function runMultiAndCollect(
     }
     await runtime.storageManager.synced();
     expect(resultCell.getAsQueryResult()).toEqual({ da: 10, db: 18 });
-    return await collectIdentities(runtime);
+    return collectIdentities(runtime);
   } finally {
     await runtime.dispose();
   }
@@ -295,7 +282,7 @@ Deno.test(
     __setSrcAnnotationTransformForTest((loc) =>
       `GARBLED-SRC-${counter++}-len${loc.length}`
     );
-    let garbled: { actionId: string; fingerprint: string }[];
+    let garbled: { actionId: string }[];
     try {
       garbled = await runMultiAndCollect(
         StorageManager.emulate({ as: signer }),
@@ -326,12 +313,9 @@ Deno.test(
 
     expect(observations.length).toBe(2);
     expect(new Set(observations.map((o) => o.actionId)).size).toBe(2);
-    for (const { actionId, fingerprint } of observations) {
+    for (const { actionId } of observations) {
       // Per-instance id: content address + `:dbl` symbol + instance suffix.
       expect(actionId).toMatch(/^cf:module\/[^:]+:dbl:[^:]+$/);
-      // Per-symbol fingerprint: NO instance suffix, shared by both instances.
-      expect(fingerprint).toMatch(/^impl:cf:module\/[^:]+:dbl$/);
     }
-    expect(new Set(observations.map((o) => o.fingerprint)).size).toBe(1);
   },
 );

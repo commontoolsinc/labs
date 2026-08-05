@@ -67,9 +67,6 @@ function createRuntime(identity: Identity, base: URL): Runtime {
     }),
     experimental: {
       modernCellRep: readExperimentalFlag("EXPERIMENTAL_MODERN_CELL_REP"),
-      persistentSchedulerState: readExperimentalFlag(
-        "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
-      ),
     },
   });
 }

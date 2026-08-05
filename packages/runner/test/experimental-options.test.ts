@@ -9,10 +9,8 @@ import {
 } from "@commonfabric/data-model/cell-rep";
 import {
   getCommitPreconditionsConfig,
-  getPersistentSchedulerStateConfig,
   getServerExecutionConfig,
   resetCommitPreconditionsConfig,
-  resetPersistentSchedulerStateConfig,
   resetServerExecutionConfig,
 } from "@commonfabric/memory/v2";
 
@@ -27,7 +25,6 @@ describe("ExperimentalOptions", () => {
   afterEach(() => {
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
-    resetPersistentSchedulerStateConfig();
     resetServerExecutionConfig();
   });
 
@@ -46,7 +43,6 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         plainResultReceipts: false,
         computedCellIds: false,
@@ -70,7 +66,6 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: true,
-        persistentSchedulerState: false,
         commitPreconditions: true,
         plainResultReceipts: true,
         computedCellIds: true,
@@ -90,7 +85,6 @@ describe("ExperimentalOptions", () => {
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: true,
         plainResultReceipts: true,
         computedCellIds: true,
@@ -116,22 +110,6 @@ describe("ExperimentalOptions", () => {
       });
 
       expect(getModernCellRepConfig()).toBe(true);
-
-      await runtime.dispose();
-      await sm.close();
-    });
-
-    it("constructing Runtime with persistentSchedulerState sets global config", async () => {
-      const sm = StorageManager.emulate({ as: signer });
-      const runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager: sm,
-        experimental: {
-          persistentSchedulerState: true,
-        },
-      });
-
-      expect(getPersistentSchedulerStateConfig()).toBe(true);
 
       await runtime.dispose();
       await sm.close();
@@ -217,7 +195,6 @@ describe("ExperimentalOptions", () => {
       await sm.close();
 
       expect(getModernCellRepConfig()).toBe(initial);
-      expect(getPersistentSchedulerStateConfig()).toBe(false);
       expect(getCommitPreconditionsConfig()).toBe(true);
       expect(getServerExecutionConfig()).toBe(false);
     });

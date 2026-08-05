@@ -36,7 +36,7 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
   assertStrictEquals(options.storageManager, storageManager);
   assertEquals(options.experimental?.modernCellRep, true);
   // Unset flags stay unset (tri-state fidelity), not coerced.
-  assertEquals(options.experimental?.persistentSchedulerState, undefined);
+  assertEquals(options.experimental?.eagerSourceAnnotation, undefined);
   assertEquals(options.cfcEnforcementMode, "enforce-explicit");
 });
 

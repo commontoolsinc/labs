@@ -34,7 +34,6 @@ Deno.test({
     const mod = await withPatchedGlobals({
       $API_URL: "http://shell.test/",
       $EXPERIMENTAL_MODERN_CELL_REP: "true",
-      $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "true",
       // Explicit define overrides the environment-derived default (this
       // unpatched module resolves ENVIRONMENT=development, whose default
       // would otherwise be true).
@@ -43,7 +42,6 @@ Deno.test({
 
     expect(mod.EXPERIMENTAL).toEqual({
       modernCellRep: true,
-      persistentSchedulerState: true,
       eagerSourceAnnotation: false,
       // Default ON — one flag covers default-app and home roots alike.
       systemPatternAutoUpdate: true,

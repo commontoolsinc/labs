@@ -214,7 +214,7 @@ Stages, one PR each except C, which is a three-PR train (below):
         under `packages/ts-transformers/test/fixtures/` in the same
         PR. Deleting at the source collapses the rest (spec §4's
         measured lesson).
-  - [ ] **C.2 — protocol + engine + client + tools**: replace the
+  - [x] **C.2 — protocol + engine + client + tools**: replace the
         observation tables with the v2 basis index — standalone
         `(action, entity, seq)` rows keyed per scope INSTANCE
         (scopes.md §8), NOT reshaped from `scheduler_read_index` /

@@ -5,10 +5,7 @@ import {
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import {
-  getPersistentSchedulerStateConfig,
-  type SchedulerActionSnapshotCursor,
-} from "@commonfabric/memory/v2";
+import {} from "@commonfabric/memory/v2";
 import type { EntityKind } from "./entity-kind.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
@@ -42,10 +39,6 @@ import {
 } from "./builder/pattern.ts";
 import { type Cell, createCell, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
-import {
-  isSchedulerActionObservation,
-  type PersistedSchedulerObservationSnapshot,
-} from "./scheduler/persistent-observation.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import {
   findAllWriteRedirectCells,
@@ -83,7 +76,6 @@ import {
 import type { Runtime } from "./runtime.ts";
 import type {
   IExtendedStorageTransaction,
-  IStorageProvider,
   IStorageSubscription,
   MemorySpace,
   URI,
@@ -751,36 +743,16 @@ type JavaScriptActionResultCells = {
 };
 
 type SchedulerRehydrationSubscriptionOptions = {
-  rehydrateFromStorage?: {
-    space: MemorySpace;
-    pieceId: string;
-    processGeneration: number;
-    // Resumed from a synced state: propagated so container-minting builtins and
-    // cross-space child runs defer their initial runs until sync too.
-    awaitSync?: boolean;
-    snapshotsByActionId?: ReadonlyMap<
-      string,
-      readonly PersistedSchedulerObservationSnapshot[]
-    >;
-    addressesCurrentAtOrBelow?: NonNullable<
-      IStorageProvider["areSchedulerAddressesCurrentAtOrBelow"]
-    >;
-    hasPendingWriteOverlapping?: NonNullable<
-      IStorageProvider["schedulerHasPendingWriteOverlapping"]
-    >;
-  };
-  // The owning pattern instance for this reader, set unconditionally (not only
-  // under persistent scheduler state) so the scheduler can group a pattern's
-  // shaped cell-flip wakes by instance (timing side-channel mitigation, plan B)
-  // and tell a pattern reader from internal machinery.
+  // The owning pattern instance for this reader, set unconditionally so the
+  // scheduler can group a pattern's shaped cell-flip wakes by instance
+  // (timing side-channel mitigation, plan B) and tell a pattern reader from
+  // internal machinery.
   observationIdentity?: {
     pieceId: string;
     ownerSpace: MemorySpace;
   };
-  // Defer initial action runs until the space finishes syncing, without
-  // restoring persisted scheduler state. Set for resumed patterns when
-  // persistent scheduler state is disabled, so re-running actions read
-  // confirmed-loaded inputs.
+  // Defer initial action runs until the space finishes syncing, so
+  // re-running actions read confirmed-loaded inputs.
   awaitSyncBeforeInitialRun?: {
     space: MemorySpace;
   };
@@ -792,8 +764,7 @@ type SchedulerRehydrationSubscriptionOptions = {
 function defersInitialRunUntilSynced(
   options: SchedulerRehydrationSubscriptionOptions,
 ): boolean {
-  return !!(options.rehydrateFromStorage?.awaitSync ||
-    options.awaitSyncBeforeInitialRun);
+  return !!options.awaitSyncBeforeInitialRun;
 }
 
 // Options shared by run()/startWithTx()/startAfterSuccessfulCommit().
@@ -1173,35 +1144,6 @@ export class Runner {
   private resultPatternCache = new Map<
     `${MemorySpace}/${CellScope}/${URI}`,
     string
-  >();
-  // Per-transaction accumulator of cross-space child spaces, so that when a
-  // parent materializes several `Child.inSpace(...)` results into different
-  // spaces we commit ALL child spaces before the parent (the parent's link to
-  // each child must never be durable before that child's target). Each call
-  // re-supplies the full order rather than replacing it with just the latest
-  // child + parent. Keyed weakly by transaction so it is reclaimed with the tx.
-  // Per-doc rehydration (docs/specs/scheduler-v2/per-doc-rehydration.md):
-  // one space-wide snapshot listing per resumed boot, bucketed per piece doc
-  // (`${scope}:${id}` of each piece's result cell). Descendants started with
-  // resume intent consume their own bucket synchronously at registration.
-  // Replaced by the next top-level resume load for the space; the in-flight
-  // map single-flights concurrent resumes onto one listing.
-  private resumeSnapshotsBySpace = new Map<
-    MemorySpace,
-    ReadonlyMap<
-      string,
-      ReadonlyMap<string, readonly PersistedSchedulerObservationSnapshot[]>
-    >
-  >();
-  private resumeSnapshotLoads = new Map<
-    MemorySpace,
-    Promise<
-      | ReadonlyMap<
-        string,
-        ReadonlyMap<string, readonly PersistedSchedulerObservationSnapshot[]>
-      >
-      | undefined
-    >
   >();
   // Invalidates asynchronous start/resume continuations when stopAll() begins.
   // A later explicit start captures the new epoch and may proceed normally.
@@ -2317,7 +2259,6 @@ export class Runner {
       const schedulerRehydration = initialSchedulerRehydrationAvailable
         ? options.schedulerRehydration ?? this.schedulerRehydrationOptions(
           resultCell,
-          undefined,
           options.awaitSyncBeforeInitialRun,
         )
         : this.schedulerRehydrationOptions(resultCell);
@@ -2932,17 +2873,6 @@ export class Runner {
         return await this.doStart(rootCell, seenCells, attempt);
       }
 
-      const snapshotsStart = performance.now();
-      const snapshotsByActionId = await this
-        .loadSchedulerRehydrationSnapshots(rootCell, attempt.lifecycleEpoch);
-      if (!this.isStartAttemptCurrent(attempt)) return false;
-      logger.time(snapshotsStart, "start", "loadRehydrationSnapshots");
-      // The listing is another asynchronous gap. If patternIdentity changed,
-      // its snapshots and resolved implementation belong to the old pattern;
-      // re-enter doStart before installing either one.
-      if (!patternIdentityStillCurrent()) {
-        return await this.doStart(rootCell, seenCells, attempt);
-      }
       // we may already be in the midst of starting this, so don't start again
       if (this.cancels.has(this.getDocKey(rootCell))) {
         return true;
@@ -2955,7 +2885,6 @@ export class Runner {
           schedulePatternUpdate: attempt.schedulePatternUpdate,
           schedulerRehydration: this.schedulerRehydrationOptions(
             rootCell,
-            snapshotsByActionId,
             // Resumed from a synced state (it just awaited
             // syncCellsForRunningPattern): hold each action's initial run
             // until the space finishes syncing so we don't race the data
@@ -3437,183 +3366,17 @@ export class Runner {
 
   private schedulerRehydrationOptions(
     resultCell: Cell<any>,
-    snapshotsByActionId?: ReadonlyMap<
-      string,
-      readonly PersistedSchedulerObservationSnapshot[]
-    >,
     awaitSync?: boolean,
   ): SchedulerRehydrationSubscriptionOptions {
-    const { space, id, scope } = resultCell.getAsNormalizedFullLink();
+    const { space } = resultCell.getAsNormalizedFullLink();
     const observationIdentity = this.schedulerObservationIdentity(resultCell);
-    if (!getPersistentSchedulerStateConfig()) {
-      // Persistent scheduler state is off: actions always re-run on resume.
-      // When resuming from a synced state, hold the initial run until the space
-      // is synced so re-derivations read confirmed-loaded inputs.
-      return {
-        observationIdentity,
-        ...(awaitSync ? { awaitSyncBeforeInitialRun: { space } } : {}),
-      };
-    }
-    // Per-doc restore: a piece started with resume intent (awaitSync) but no
-    // explicitly threaded snapshots — a sub-pattern node or a per-element
-    // child run — looks up its own bucket from the boot's space-wide listing,
-    // keyed by the doc it derives. See per-doc-rehydration.md §3.2.
-    const pieceId = `${scope}:${id}`;
-    const snapshots = snapshotsByActionId ??
-      (awaitSync
-        ? this.resumeSnapshotsBySpace.get(space)?.get(pieceId)
-        : undefined);
-    const provider = this.runtime.storageManager.open(space);
-    const addressesCurrentAtOrBelow = provider
-      .areSchedulerAddressesCurrentAtOrBelow?.bind(provider);
-    const hasPendingWriteOverlapping = provider
-      .schedulerHasPendingWriteOverlapping?.bind(provider);
+    // Actions always re-run on resume. When resuming from a synced state,
+    // hold the initial run until the space is synced so re-derivations read
+    // confirmed-loaded inputs.
     return {
       observationIdentity,
-      rehydrateFromStorage: {
-        space,
-        pieceId,
-        processGeneration: 0,
-        ...(awaitSync ? { awaitSync: true } : {}),
-        ...(snapshots !== undefined ? { snapshotsByActionId: snapshots } : {}),
-        ...(addressesCurrentAtOrBelow !== undefined
-          ? { addressesCurrentAtOrBelow }
-          : {}),
-        ...(hasPendingWriteOverlapping !== undefined
-          ? { hasPendingWriteOverlapping }
-          : {}),
-      },
-      // Resume intent also arms the synced-hold: any action that does not
-      // rehydrate from a snapshot (miss, fingerprint mismatch, or an
-      // always-run coordinator) holds its initial run until the space syncs
-      // instead of racing the data — restoring flag-off parity for children.
       ...(awaitSync ? { awaitSyncBeforeInitialRun: { space } } : {}),
     };
-  }
-
-  private async loadSchedulerRehydrationSnapshots(
-    resultCell: Cell<any>,
-    lifecycleEpoch: number,
-  ): Promise<
-    | ReadonlyMap<string, readonly PersistedSchedulerObservationSnapshot[]>
-    | undefined
-  > {
-    if (!getPersistentSchedulerStateConfig()) {
-      return undefined;
-    }
-    const { space, id, scope } = resultCell.getAsNormalizedFullLink();
-    const byPiece = await this.loadResumeSnapshotsForSpace(
-      space,
-      lifecycleEpoch,
-    );
-    return byPiece?.get(`${scope}:${id}`);
-  }
-
-  // One space-wide snapshot listing per resumed boot, bucketed per piece doc.
-  // Concurrent resumes of the same space share one in-flight listing; a later
-  // resume refreshes (replaces) the cached buckets. Descendant registrations
-  // read the cache synchronously via schedulerRehydrationOptions, so the
-  // resume phase stays "load once, then register" (spec §9.2) for the whole
-  // piece tree — no per-child async lookups.
-  private loadResumeSnapshotsForSpace(
-    space: MemorySpace,
-    lifecycleEpoch: number,
-  ): Promise<
-    | ReadonlyMap<
-      string,
-      ReadonlyMap<string, readonly PersistedSchedulerObservationSnapshot[]>
-    >
-    | undefined
-  > {
-    const inFlight = this.resumeSnapshotLoads.get(space);
-    if (inFlight) return inFlight;
-
-    const provider = this.runtime.storageManager.open(space);
-    const listSnapshots = provider.listSchedulerActionSnapshots;
-    if (!listSnapshots) {
-      return Promise.resolve(undefined);
-    }
-
-    const load = (async () => {
-      const byPiece = new Map<
-        string,
-        Map<string, PersistedSchedulerObservationSnapshot[]>
-      >();
-      // A transient listing failure must degrade to "resume fresh" rather
-      // than hard-failing start(): returning undefined runs the boot without
-      // rehydrating persisted observations.
-      try {
-        let cursor: SchedulerActionSnapshotCursor | undefined;
-        let listingServerSeq: number | undefined;
-        do {
-          if (lifecycleEpoch !== this.lifecycleEpoch) return undefined;
-          const page = await listSnapshots.call(provider, {
-            ownerSpace: space,
-            processGeneration: 0,
-            ...(cursor ? { cursor } : {}),
-          });
-          if (listingServerSeq === undefined) {
-            listingServerSeq = page.serverSeq;
-          } else if (page.serverSeq !== listingServerSeq) {
-            throw new Error(
-              `scheduler snapshot listing changed epoch (${listingServerSeq} -> ${page.serverSeq})`,
-            );
-          }
-          for (const snapshot of page.snapshots) {
-            if (!isSchedulerActionObservation(snapshot.observation)) continue;
-            const { pieceId, actionId } = snapshot.observation;
-            let byAction = byPiece.get(pieceId);
-            if (!byAction) {
-              byAction = new Map();
-              byPiece.set(pieceId, byAction);
-            }
-            const candidates = byAction.get(actionId) ?? [];
-            candidates.push({
-              executionContextKey: snapshot.executionContextKey,
-              observation: snapshot.observation,
-              ...(snapshot.directDirtySeq !== undefined
-                ? { directDirtySeq: snapshot.directDirtySeq }
-                : {}),
-              ...(snapshot.staleSeq !== undefined
-                ? { staleSeq: snapshot.staleSeq }
-                : {}),
-              ...(snapshot.unknownReason !== undefined
-                ? { unknownReason: snapshot.unknownReason }
-                : {}),
-            });
-            byAction.set(actionId, candidates);
-          }
-          cursor = page.nextCursor;
-        } while (cursor !== undefined);
-        // Close the list/register gap: catch this replica up through at least
-        // the listing epoch before any synchronous snapshot apply. Tracked
-        // inputs and outputs can then be checked against their observation seq
-        // without missing a write that landed during pagination.
-        await provider.synced();
-        if (lifecycleEpoch !== this.lifecycleEpoch) return undefined;
-      } catch (error) {
-        logger.warn(
-          "Failed to list scheduler rehydration snapshots; resuming fresh",
-          error,
-        );
-        return undefined;
-      }
-      return byPiece;
-    })();
-
-    this.resumeSnapshotLoads.set(space, load);
-    load.then((byPiece) => {
-      if (lifecycleEpoch !== this.lifecycleEpoch) return;
-      // Failure degrades the WHOLE boot to resume-fresh: drop any stale cache
-      // so descendants do not rehydrate from a previous boot's listing.
-      if (byPiece) this.resumeSnapshotsBySpace.set(space, byPiece);
-      else this.resumeSnapshotsBySpace.delete(space);
-    }).finally(() => {
-      if (this.resumeSnapshotLoads.get(space) === load) {
-        this.resumeSnapshotLoads.delete(space);
-      }
-    });
-    return load;
   }
 
   /** Load the stored argument and return a transaction guard for that state. */
@@ -4177,8 +3940,6 @@ export class Runner {
     // storage teardown, but they can neither publish a cache nor call
     // startCore under the new epoch.
     this.lifecycleEpoch++;
-    this.resumeSnapshotsBySpace.clear();
-    this.resumeSnapshotLoads.clear();
     // Cancel all tracked operations
     for (const cancel of this.allCancels) {
       try {
@@ -6358,10 +6119,6 @@ export class Runner {
     const useDeclaredReadsAsDependencies = isRawBuiltinResult(builtinResult)
       ? builtinResult.useDeclaredReadsAsDependencies
       : false;
-    const builtinResumeMode = isRawBuiltinResult(builtinResult)
-      ? builtinResult.resumeMode
-      : undefined;
-
     // Name the raw action for debugging - use implementation name or fallback to "raw"
     const impl = module.implementation as ((...args: unknown[]) => Action) & {
       src?: string;
@@ -6441,9 +6198,6 @@ export class Runner {
       debounce,
       noDebounce,
       throttle,
-      ...(builtinResumeMode !== undefined
-        ? { resumeMode: builtinResumeMode }
-        : {}),
       ...schedulerRehydration,
     };
 

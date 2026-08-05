@@ -3,14 +3,14 @@
 // required, since those tables are usually absent).
 
 import type { CommitRow, SpaceDb } from "./db.ts";
-import { hasSchedulerTables } from "./db.ts";
+import { hasSchedulerBasisTable } from "./db.ts";
 import { decodeStored } from "./decode.ts";
 
 export interface SpaceSummary {
   path: string;
-  hasSchedulerTables: boolean;
-  /** Persisted scheduler observation rows (0 even when the tables exist empty). */
-  schedulerObservations: number;
+  hasSchedulerBasisTable: boolean;
+  /** Scheduler basis rows (0 even when the table exists empty). */
+  schedulerBasisRows: number;
   commits: number;
   commitSeqRange: [number, number] | null;
   sessions: number;
@@ -46,21 +46,21 @@ export function summarizeSpace(space: SpaceDb): SpaceSummary {
     )
     .all<{ scope_key: string; count: number }>();
 
-  const hasSched = hasSchedulerTables(db);
-  let schedulerObservations = 0;
+  const hasSched = hasSchedulerBasisTable(db);
+  let schedulerBasisRows = 0;
   if (hasSched) {
     try {
-      schedulerObservations =
-        one<{ n: number }>(`SELECT count(*) n FROM scheduler_observation`).n;
+      schedulerBasisRows =
+        one<{ n: number }>(`SELECT count(*) n FROM scheduler_basis`).n;
     } catch {
-      schedulerObservations = 0;
+      schedulerBasisRows = 0;
     }
   }
 
   return {
     path: space.path,
-    hasSchedulerTables: hasSched,
-    schedulerObservations,
+    hasSchedulerBasisTable: hasSched,
+    schedulerBasisRows,
     commits: commitAgg.n,
     commitSeqRange: commitAgg.lo === null
       ? null

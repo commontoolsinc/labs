@@ -101,12 +101,10 @@ export function map(
   >();
 
   // Only the initial (resume) reconcile should defer its per-element sub-pattern
-  // runs until storage sync completes. This coordinator registers as
-  // resumeMode "always-run" with a synced-hold (it never rehydrates clean —
-  // see the return below), so its first reconcile runs against synced data;
-  // the per-element runs it starts carry the same intent, which is what lets
-  // each child rehydrate its own persisted state at registration. Elements
-  // added by later (post-resume) reconciles are fresh and must not wait.
+  // runs until storage sync completes: with a synced-hold, its first
+  // reconcile runs against synced data, and the per-element runs it starts
+  // carry the same intent. Elements added by later (post-resume) reconciles
+  // are fresh and must not wait.
   let resumeBatchAwaitSync = !!awaitSync;
 
   // Hold the durable container while the input list itself confirms. On a resume
@@ -428,5 +426,5 @@ export function map(
   // reconcile must run to re-attach the per-element children (which then
   // rehydrate their own persisted state). See
   // docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
-  return { action: reconcile, resumeMode: "always-run" };
+  return { action: reconcile };
 }

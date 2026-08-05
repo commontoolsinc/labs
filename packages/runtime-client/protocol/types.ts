@@ -162,7 +162,6 @@ export interface InitializationData {
   // Experimental space-model feature flags.
   experimental?: {
     modernCellRep?: boolean;
-    persistentSchedulerState?: boolean;
     eagerSourceAnnotation?: boolean;
     // Roll a space's system root pattern (home included) forward in place
     // when its toolshed serves a newer identity. Default off.

@@ -46,16 +46,14 @@ const nextResponse = <Result>(
       return assertResponse<Result>(message);
     }
     // Only MARKER-ONLY frames may be skipped implicitly: no upserts, no
-    // removes, no scheduler observations, and carrying the caughtUpLocalSeq
-    // marker that is such a frame's reason to exist. Anything else is
-    // content a test must consume explicitly, or an erroneous self-echo,
-    // observation delivery, or markerless empty frame would be silently
-    // swallowed here.
+    // removes, and carrying the caughtUpLocalSeq marker that is such a
+    // frame's reason to exist. Anything else is content a test must consume
+    // explicitly, or an erroneous self-echo or markerless empty frame would
+    // be silently swallowed here.
     const effect = (message as SessionEffectMessage)
       .effect as unknown as SessionSync;
     if (
       effect.upserts.length > 0 || effect.removes.length > 0 ||
-      (effect.observations?.length ?? 0) > 0 ||
       effect.caughtUpLocalSeq === undefined
     ) {
       throw new Error(

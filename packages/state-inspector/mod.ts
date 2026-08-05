@@ -25,4 +25,3 @@ export * from "./clone.ts";
 export * from "./fingerprint.ts";
 export * from "./detail.ts";
 export * from "./html.ts";
-export * from "./scheduler.ts";

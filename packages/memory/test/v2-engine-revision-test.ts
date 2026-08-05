@@ -31,18 +31,62 @@ Deno.test("memory v2 engine bootstraps the revision schema", async () => {
         "head",
         "invocation",
         "revision",
-        "scheduler_action_snapshot",
-        "scheduler_action_state",
-        "scheduler_context_floor",
-        "scheduler_observation",
-        "scheduler_observation_replay",
-        "scheduler_read_index",
-        "scheduler_write_index",
+        "scheduler_basis",
         "snapshot",
       ],
     );
   } finally {
     close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine drops the observation tables and never backfills scheduler_basis", async () => {
+  // Server-execution v2 Phase 1 stage C.2 (serving-loop.md §3b): a store that
+  // carries any of the SEVEN observation-era tables — scheduler_context_floor
+  // included, the one main's old CORE_SCHEDULER_TABLES constant omitted (D6) —
+  // has them dropped at open, and scheduler_basis starts EMPTY (D10: rows are
+  // never migrated; a warm start is lost once, by design).
+  const { engine, path } = await createEngine();
+  close(engine);
+  try {
+    const { Database } = await import("@db/sqlite");
+    const raw = await new Database(path);
+    raw.exec(`
+      CREATE TABLE scheduler_observation (
+        observation_id INTEGER PRIMARY KEY,
+        payload JSON NOT NULL
+      );
+      INSERT INTO scheduler_observation (observation_id, payload)
+      VALUES (1, '{}');
+      CREATE TABLE scheduler_context_floor (
+        piece_id TEXT NOT NULL,
+        floor_scope TEXT NOT NULL
+      );
+      CREATE TABLE scheduler_read_index (read_id TEXT NOT NULL);
+      CREATE TABLE scheduler_write_index (write_id TEXT NOT NULL);
+      CREATE TABLE scheduler_action_state (action_id TEXT NOT NULL);
+      CREATE TABLE scheduler_action_snapshot (action_id TEXT NOT NULL);
+      CREATE TABLE scheduler_observation_replay (local_seq INTEGER NOT NULL);
+    `);
+    raw.close();
+
+    const reopened = await open({ url: toFileUrl(path) });
+    try {
+      const tables = reopened.database.prepare(
+        `SELECT name FROM sqlite_schema
+         WHERE type = 'table' AND name LIKE 'scheduler_%'
+         ORDER BY name`,
+      ).all() as Array<{ name: string }>;
+      assertEquals(tables.map((row) => row.name), ["scheduler_basis"]);
+      const basisRows = reopened.database.prepare(
+        `SELECT count(*) AS n FROM scheduler_basis`,
+      ).get() as { n: number };
+      assertEquals(basisRows.n, 0);
+    } finally {
+      close(reopened);
+    }
+  } finally {
     await Deno.remove(path);
   }
 });

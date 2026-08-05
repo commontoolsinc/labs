@@ -832,13 +832,12 @@ code, the survival test was skipped — reject the diff:
 FORBIDDEN lease shapes, greppable — DR1's per-process holder is the
 fence; a reappearing generation/token field is v1 revival).
 
-Scope: the tripwires bind NEW v2 code. Main still carries a
+Scope: the tripwires bind ALL v2-era code. The pre-existing
 `completeSchedulerScopeSummary` / `completeActionScopeSummary`
-observation surface pre-deletion — the certificate has TWO
-identifiers, and naming only the first has already let inventories
-undercount the surface; its
-removal is tracked as plan Phase 1 work, and the existing main files do
-not trip the list until that deletion lands.
+observation surface — the certificate had TWO identifiers, and naming
+only the first let inventories undercount it — was deleted from main
+by plan Phase 1 stage C, so a reappearing identifier is a revival, not
+a leftover.
 
 The intentional exceptions: `execution_lease` (§2 — CREATED in
 Phase 1; the v1 branch's shape is prior art, not existing substrate)

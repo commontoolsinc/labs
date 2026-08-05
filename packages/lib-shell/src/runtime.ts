@@ -30,7 +30,6 @@ const identityLogger = getLogger("lib-shell.identity", {
 
 export type ExperimentalRuntimeFlags = {
   modernCellRep?: boolean;
-  persistentSchedulerState?: boolean;
   eagerSourceAnnotation?: boolean;
   systemPatternAutoUpdate?: boolean;
 };

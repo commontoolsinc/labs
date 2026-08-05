@@ -1412,14 +1412,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       reactivityLogFromActivities(this.tx.journal.activity());
   }
 
-  setSchedulerObservation(observation: FabricValue): void {
-    this.tx.setSchedulerObservation?.(observation);
-  }
-
-  getSchedulerObservation(): FabricValue {
-    return this.tx.getSchedulerObservation?.();
-  }
-
   addCommitPrecondition(
     space: MemorySpace,
     precondition: CommitPrecondition,
@@ -2194,14 +2186,6 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   getReactivityLog(): TransactionReactivityLog {
     return this.wrapped.getReactivityLog?.() ??
       reactivityLogFromActivities(this.wrapped.journal.activity());
-  }
-
-  setSchedulerObservation(observation: FabricValue): void {
-    this.wrapped.setSchedulerObservation?.(observation);
-  }
-
-  getSchedulerObservation(): FabricValue {
-    return this.wrapped.getSchedulerObservation?.();
   }
 
   addCommitPrecondition(

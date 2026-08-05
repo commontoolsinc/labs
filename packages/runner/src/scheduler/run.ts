@@ -1,7 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import type { Runtime } from "../runtime.ts";
-import { toMemorySpaceAddress } from "../link-utils.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
   ChangeGroup,
@@ -28,8 +26,7 @@ import {
 } from "./diagnosis.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
 import { toActionRunTraceAddress } from "./diagnostics.ts";
-import { buildSchedulerActionObservation } from "./persistent-observation.ts";
-import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
+import { txToReactivityLog } from "./reactivity.ts";
 import { type ActionTimingState, recordActionTime } from "./timing.ts";
 import type { NodeRegistry } from "./node-record.ts";
 import { restoreInvalidCauses, takeInvalidCauses } from "./invalidation.ts";
@@ -38,7 +35,6 @@ import type {
   ActionRunTraceEntry,
   EventHandler,
   ReactivityLog,
-  TelemetryAnnotations,
 } from "./types.ts";
 import type { NonIdempotentReport, SchedulerActionInfo } from "../telemetry.ts";
 
@@ -561,7 +557,6 @@ function finalizeReactiveActionCommit(
     beforeCommit: () => {
       log = txToReactivityLog(args.tx);
       warnOnWriteSurfaceViolations(state, args, log);
-      attachSchedulerActionObservation(state, args, log);
       hasPostCommitEffects = args.tx.hasPendingPostCommitEffects();
     },
   });
@@ -672,113 +667,6 @@ function surfaceCoversWrite(
     surface.path.every((segment, index) => segment === write.path[index]);
 }
 
-function attachSchedulerActionObservation(
-  state: SchedulerActionRunState,
-  args: {
-    readonly action: Action;
-    readonly actionId: string;
-    readonly tx: IExtendedStorageTransaction;
-    readonly error?: unknown;
-  },
-  log: ReactivityLog,
-): void {
-  if (!getPersistentSchedulerStateConfig()) {
-    return;
-  }
-
-  const observationTarget = args.tx.setSchedulerObservation
-    ? args.tx
-    : args.tx.tx;
-  if (!observationTarget.setSchedulerObservation) {
-    return;
-  }
-
-  const annotated = args.action as Partial<TelemetryAnnotations>;
-  const observationIdentity = annotated.schedulerObservationIdentity;
-  if (!observationIdentity) {
-    // Only doc-keyed observations persist. An action registered without
-    // rehydration identity (session-scoped effects: cell sinks, pull, the
-    // wish resolver) can never be rehydrated — its registration carries no
-    // identity to match on — and a fallback pieceId would violate the
-    // doc→deriver keying the per-doc restore lists by
-    // (docs/specs/scheduler-v2/per-doc-rehydration.md §2).
-    return;
-  }
-  const telemetry = state.getActionTelemetryInfo(args.action);
-  const actionOptions = schedulerActionOptions(state, args.action);
-  const implementationFingerprint = schedulerImplementationFingerprint(
-    args.action,
-    args.actionId,
-    telemetry,
-  );
-  const runtimeFingerprint = schedulerRuntimeFingerprint();
-  const observation = buildSchedulerActionObservation({
-    ...(observationIdentity.ownerSpace !== undefined
-      ? { ownerSpace: observationIdentity.ownerSpace }
-      : {}),
-    branch: observationIdentity.branch ?? "",
-    pieceId: observationIdentity.pieceId,
-    processGeneration: observationIdentity.processGeneration ?? 0,
-    actionId: args.actionId,
-    actionKind: state.nodes.isKnownEffect(args.action)
-      ? "effect"
-      : "computation",
-    implementationFingerprint,
-    runtimeFingerprint,
-    // The memory engine overwrites this with the accepting head/commit seq.
-    observedAtSeq: 0,
-    transactionKind: "action-run",
-    transactionLog: log,
-    // The live registered surface — for actions without a `.writes` annotation
-    // it came from subscribe's ReactivityLog. Persisted so rehydration can
-    // restore the surface (the log is gone after a restart). `declaredWrites`
-    // (annotation-only) is slimmed out; the annotation is still available live.
-    currentKnownWrites: state.getSchedulingWrites(args.action) ?? [],
-    materializerWriteEnvelopes:
-      state.getMaterializerWriteEnvelopes(args.action) ?? [],
-    ignoredSchedulingWrites: filterIgnoredAddresses(
-      (annotated.ignoredSchedulingWrites ?? []).map(toMemorySpaceAddress),
-      [],
-    ),
-    ...(actionOptions ? { actionOptions } : {}),
-    status: args.error ? "failed" : "success",
-    ...(args.error
-      ? { errorFingerprint: schedulerErrorFingerprint(args.error) }
-      : {}),
-  });
-
-  try {
-    observationTarget.setSchedulerObservation(observation);
-  } catch (error) {
-    if (isInactiveObservationTargetError(error)) {
-      logger.debug("scheduler-observation-skipped", () => [
-        `Action observation skipped for inactive transaction: ${args.actionId}`,
-      ]);
-      return;
-    }
-    throw error;
-  }
-}
-
-function isInactiveObservationTargetError(error: unknown): boolean {
-  return typeof error === "object" && error !== null &&
-    "name" in error &&
-    (
-      error.name === "StorageTransactionAborted" ||
-      error.name === "StorageTransactionCompleteError"
-    );
-}
-
-function schedulerObservationPieceId(
-  actionId: string,
-  telemetry: SchedulerActionInfo | undefined,
-): string {
-  return [
-    telemetry?.patternName,
-    telemetry?.moduleName,
-  ].filter((part): part is string => !!part).join(":") || `action:${actionId}`;
-}
-
 export function schedulerImplementationFingerprint(
   action: Action,
   actionId: string,
@@ -797,34 +685,15 @@ export function schedulerImplementationFingerprint(
   if (typeof implementationHash === "string" && implementationHash.length > 0) {
     return `impl:${implementationHash}`;
   }
-  const telemetryId = schedulerObservationPieceId(actionId, telemetry);
+  const telemetryId = [
+    telemetry?.patternName,
+    telemetry?.moduleName,
+  ].filter((part): part is string => !!part).join(":") || `action:${actionId}`;
   return `action:${telemetryId}:${actionId}`;
 }
 
 export function schedulerRuntimeFingerprint(): string {
   return "runner:scheduler:v3";
-}
-
-function schedulerActionOptions(
-  state: SchedulerActionRunState,
-  action: Action,
-) {
-  const debounceMs = state.getDebounce(action);
-  const noDebounce = state.getNoDebounce(action);
-  const throttleMs = state.getThrottle(action);
-  const options = {
-    ...(debounceMs !== undefined ? { debounceMs } : {}),
-    ...(noDebounce !== undefined ? { noDebounce } : {}),
-    ...(throttleMs !== undefined ? { throttleMs } : {}),
-  };
-  return Object.keys(options).length > 0 ? options : undefined;
-}
-
-function schedulerErrorFingerprint(error: unknown): string {
-  if (error instanceof Error) {
-    return `${error.name}:${error.message}`;
-  }
-  return String(error);
 }
 
 function recordOptionalActionRunDiagnostics(

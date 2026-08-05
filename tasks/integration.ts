@@ -527,10 +527,6 @@ export async function runPackageIntegration(
     env.API_URL = apiUrl;
   }
 
-  if (pkg === "patterns-reload") {
-    env.CF_EXPECT_PERSISTENT_SCHEDULER_STATE = "1";
-  }
-
   // For browser test packages, pass through HEADLESS and PIPE_CONSOLE
   if (HEADLESS_PACKAGES.includes(pkg)) {
     // Default HEADLESS to "1" unless explicitly set in environment
@@ -773,10 +769,6 @@ async function main(): Promise<void> {
   try {
     if (needsServer) {
       const serverEnv: Record<string, string> = {};
-      if (packagesToRun.includes("patterns-reload")) {
-        serverEnv.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE = "true";
-      }
-
       if (portOffsetWasSet) {
         // Reuse the requested offset, stopping anything already on its ports.
         await stopServers(portOffset, rootDir);

@@ -36,23 +36,18 @@ export function hasRegisteredTriggers(
 // Only interactive input (renderer `$value` keystrokes) is shaped here, under a
 // per-pattern `|input` bucket.
 //
-// Server pushes (`pull`/`integrate`) are deliberately NOT shaped, because
-// deferring them breaks incremental observation adoption
-// (docs/specs/scheduler-v2/incremental-observation-adoption.md). Adoption
-// requires the push's readers to be marked dirty SYNCHRONOUSLY: a sync delivers
-// its `integrate` notification and the writer's `scheduler-observations` in the
-// same synchronous turn, and adoption clears exactly the dirt that integrate
-// just created (see adoptRemoteObservations in facade.ts). Holding the wake
-// moves the mark-dirty to a later macrotask, so adoption finds nothing to clear
-// and the receiver re-runs every computation the writer already ran instead of
-// adopting it. The two cannot both hold at this seam — the shaper's hold IS the
-// mark-dirty — so the push path stays synchronous.
+// Server pushes (`pull`/`integrate`) are NOT shaped. The original reason —
+// observation adoption needed the push's readers marked dirty synchronously —
+// deleted with the adoption machinery (server-execution v2 Phase 1 stage C;
+// runtime-mapping.md N62), so whether pushes should now be shaped is an open
+// re-check (N10), not something this comment decides.
 //
-// The security cost is small and was already the design's stated position: a
-// pattern cannot drive server pushes at sub-second cadence (it has no way to
-// make the server push faster than real network traffic arrives), which is the
-// same network-bounded assumption the separate `|push` bucket already rested on.
-// See the channel-5 row in docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md.
+// The security cost of leaving them unshaped is small and was already the
+// design's stated position: a pattern cannot drive server pushes at
+// sub-second cadence (it has no way to make the server push faster than real
+// network traffic arrives), which is the same network-bounded assumption the
+// separate `|push` bucket already rested on. See the channel-5 row in
+// docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md.
 export function shapableWakeGroupKey(
   state: StorageNotificationState,
   notification: StorageNotification,

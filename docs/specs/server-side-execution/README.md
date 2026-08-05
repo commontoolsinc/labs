@@ -428,14 +428,13 @@ intent, the following have no decision left to make:
 - the arc's write-firewall-as-admission (write bounding moves to handle
   grant time; client computational commits narrow to event appends)
 
-Two entries are live on MAIN, not only on the archived branches:
+Two entries lived on MAIN, not only on the archived branches:
 `completeSchedulerScopeSummary`/`completeActionScopeSummary` emission
-and its consumers, and
-`persistentSchedulerState`'s observation tables (full-JSON payloads,
-OFF by default). For those two, "delete" is live Phase 1 deletion work
-on main — tracked in the plan, which carries the measured size —
-not merely "do not rebuild"; the
-observation tables reduce to the v2 basis index
+and its consumers, and `persistentSchedulerState`'s observation tables
+(full-JSON payloads, OFF by default). For those two, "delete" was live
+Phase 1 stage C deletion work on main, not merely "do not rebuild":
+the certificate surface deleted at its transformer source and every
+consumer, and the observation tables reduced to the v2 basis index
 (serving-loop.md §3b).
 
 Anything on this list that seems needed during the rebuild triggers the

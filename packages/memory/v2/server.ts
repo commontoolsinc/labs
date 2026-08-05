@@ -14,7 +14,6 @@ import {
   type EntityIdListResult,
   type EntityIdLookupRequest,
   type EntityIdLookupResult,
-  getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
@@ -23,10 +22,6 @@ import {
   type Operation,
   parseMemoryProtocolFlags,
   type ResponseMessage,
-  type SchedulerActionSnapshotQuery,
-  type SchedulerExecutionContextKey,
-  type SchedulerSnapshotListRequest,
-  type SchedulerSnapshotListResult,
   type ServerMessage,
   type SessionAckRequest,
   type SessionAckResult,
@@ -182,53 +177,6 @@ const randomHex = (bytes: number): string => {
 const isNonNegativeInteger = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
-const schedulerApplicableContextKeys = (
-  principal: string | undefined,
-  sessionId: string,
-): SchedulerExecutionContextKey[] => {
-  const keys: SchedulerExecutionContextKey[] = ["space"];
-  if (principal === undefined) return keys;
-  keys.push(
-    Engine.resolveScopeKey("user", {
-      principal,
-    }) as SchedulerExecutionContextKey,
-    Engine.resolveScopeKey("session", {
-      principal,
-      sessionId,
-    }) as SchedulerExecutionContextKey,
-  );
-  return keys;
-};
-
-type CommitSchedulerObservation = {
-  localSeq: number;
-  observation: Engine.SchedulerActionObservation;
-};
-
-const schedulerObservationsFromCommit = (
-  commit: ClientCommit,
-): CommitSchedulerObservation[] => {
-  const single = Engine.schedulerObservationFromValue(
-    commit.schedulerObservation,
-  );
-  if (single) {
-    return [{ localSeq: commit.localSeq, observation: single }];
-  }
-
-  const batch = commit.schedulerObservationBatch ?? [];
-  const observations: CommitSchedulerObservation[] = [];
-  for (const item of batch) {
-    const observation = Engine.schedulerObservationFromValue(
-      item.schedulerObservation,
-    );
-    if (!observation) {
-      continue;
-    }
-    observations.push({ localSeq: item.localSeq, observation });
-  }
-  return observations;
-};
-
 const toError = (name: string, message: string): V2Error => ({
   name,
   message,
@@ -364,12 +312,6 @@ class Connection {
   #ready = false;
   #closed = false;
   #syncSchemaTable = false;
-  // Negotiated persistentSchedulerState: when both sides carry the flag,
-  // subscription sync pushes to this connection include the scheduler
-  // observation rows of the sync window, so its runtimes can ADOPT other
-  // clients' action runs instead of re-running them
-  // (docs/specs/scheduler-v2/incremental-observation-adoption.md §4).
-  #persistentSchedulerState = false;
   #sessions = new Map<string, SessionHandle>();
   #sessionOpenChallenge: SessionOpenChallengeState | null = null;
   #receiving: Promise<void> = Promise.resolve();
@@ -616,9 +558,6 @@ class Connection {
       const serverFlags = parseMemoryProtocolFlags(response.flags);
       this.#syncSchemaTable = clientFlags?.syncSchemaTableV2 === true &&
         serverFlags?.syncSchemaTableV2 === true;
-      this.#persistentSchedulerState =
-        clientFlags?.persistentSchedulerState === true &&
-        serverFlags?.persistentSchedulerState === true;
       this.#ready = true;
       return;
     }
@@ -799,28 +738,6 @@ class Connection {
           );
         }
         return;
-      case "scheduler.snapshot.list":
-        if (
-          !this.requireSession(
-            parsed.requestId,
-            parsed.space,
-            parsed.sessionId,
-          )
-        ) {
-          return;
-        }
-        {
-          const response = await this.server.listSchedulerActionSnapshots(
-            parsed,
-          );
-          this.sendSessionResponse(
-            parsed.space,
-            parsed.sessionId,
-            parsed.requestId,
-            response,
-          );
-        }
-        return;
       case "session.ack":
         if (
           !this.requireSession(
@@ -869,7 +786,6 @@ class Connection {
         sessionId,
         dirtyIds,
         dirtyOrigins,
-        { adoptionObservations: this.#persistentSchedulerState },
       );
       if (this.#closed) {
         // Evaluation already advanced the session cache past this content;
@@ -931,10 +847,6 @@ export class Server {
   #dirtyOriginsBySpace = new Map<string, Map<string, DirtyOrigin>>();
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
   #refreshing: Promise<void> | null = null;
-  // The owner commit is synchronous, but cross-space scheduler fan-out awaits
-  // other engines. Preserve owner apply order across concurrent connections so
-  // an older mirror cannot land after a newer one.
-  #schedulerSideEffectsByOwnerSpace = new Map<string, Promise<void>>();
   #lastRefreshDurationMs = 0;
   #store?: URL;
   // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
@@ -1442,17 +1354,7 @@ export class Server {
       // (protocol.md §1's third row — the memory server itself as producer).
       commitClass: "system",
     });
-    // Dirty BEFORE the side-effect await, matching the transact path
-    // (CT-1927): a batch pass running during the await must see this
-    // durable write.
     this.markSpaceDirty(space, [toDirtyKey(id)]);
-    await this.runPostCommitSchedulerSideEffects(
-      space,
-      commit,
-      [],
-      new Map(),
-      undefined,
-    );
     return commit;
   }
 
@@ -2140,53 +2042,13 @@ export class Server {
               deny,
             );
           }
-          // Scheduler ownership is derived from an authenticated principal.
-          // An otherwise-authorized anonymous memory session may still commit
-          // cell data, but cannot persist scoped scheduler metadata.
-          const schedulerStateEnabled = getPersistentSchedulerStateConfig() &&
-            session.principal !== undefined;
-          const commitPayload = schedulerStateEnabled ? message.commit : {
-            ...message.commit,
-            schedulerObservation: undefined,
-            schedulerObservationBatch: undefined,
-          };
-          const schedulerObservations = schedulerStateEnabled
-            ? schedulerObservationsFromCommit(commitPayload)
-            : [];
-          const previousReadSpaces = new Map<number, Set<string>>();
-          for (const { localSeq, observation } of schedulerObservations) {
-            const previousSnapshots = Engine.listSchedulerActionSnapshots(
-              engine,
-              {
-                branch: message.commit.branch ?? "",
-                ownerSpace: message.space,
-                pieceId: observation.pieceId,
-                processGeneration: observation.processGeneration,
-                actionId: observation.actionId,
-                applicableExecutionContextKeys: schedulerApplicableContextKeys(
-                  session.principal,
-                  message.sessionId,
-                ),
-              },
-            ).snapshots;
-            previousReadSpaces.set(
-              localSeq,
-              new Set(
-                previousSnapshots.flatMap((
-                  snapshot,
-                ) => [...this.schedulerObservationReadSpaces(
-                  snapshot.observation,
-                )]),
-              ),
-            );
-          }
           // Fold-in SQLite writes: ATTACH their cell-db(s) BEFORE applyCommit (ATTACH
           // cannot run inside a transaction); the engine executes them inside the
           // commit txn (atomic with cell ops). Detach in finally.
           const sqliteAttachments = this.#attachCommitSqliteDbs(
             engine,
             message.space,
-            commitPayload.operations,
+            message.commit.operations,
             { principal: session.principal, sessionId: message.sessionId },
           );
           let commit: Engine.AppliedCommit;
@@ -2199,7 +2061,7 @@ export class Server {
                     sessionId: message.sessionId,
                     space: message.space,
                     principal: session.principal,
-                    commit: commitPayload,
+                    commit: message.commit,
                     sqliteAttachments,
                     // Session-facing transact admission: `authored`, always.
                     // The class is determined HERE, by the admission path —
@@ -2222,10 +2084,10 @@ export class Server {
               detachDatabase(engine.database, alias);
             }
           }
-          // Mark dirty IMMEDIATELY after the durable apply, before the first
-          // await (CT-1927): a batch pass running during the scheduler
-          // side-effect await below must see this durable write's dirty
-          // ids — otherwise a frame whose marker claims to reflect decided
+          // Mark dirty IMMEDIATELY after the durable apply, before any
+          // later await (CT-1927): a batch pass running during a
+          // subsequent await must see this durable write's dirty ids —
+          // otherwise a frame whose marker claims to reflect decided
           // outcomes could miss earlier durable watched novelty.
           this.markSpaceDirty(
             message.space,
@@ -2241,10 +2103,10 @@ export class Server {
           );
           // CT-1927: stage the accept's catch-up obligation SYNCHRONOUSLY
           // with the dirty-marking above — before any await. A flush pass
-          // running during the scheduler side-effect await below consumes
-          // the dirty batch; an obligation staged only afterwards would
-          // ride nothing and schedule nothing, stranding the client's
-          // parked promotion forever (CT-1927 review, round 5). Staged
+          // running during a later await consumes the dirty batch; an
+          // obligation staged only afterwards would ride nothing and
+          // schedule nothing, stranding the client's parked promotion
+          // forever (CT-1927 review, round 5). Staged
           // here, the obligation either rides that concurrent pass (the
           // marker may then precede the verdict on the socket — the client
           // handles both orders) or the still-scheduled batch timer. The
@@ -2282,13 +2144,6 @@ export class Server {
               message.sessionId,
             );
           }
-          await this.runPostCommitSchedulerSideEffects(
-            message.space,
-            commit,
-            schedulerObservations,
-            previousReadSpaces,
-            session,
-          );
           span.setAttribute("commit.seq", commit.seq);
           span.setAttribute(
             "entity.count",
@@ -2551,99 +2406,6 @@ export class Server {
       };
     } catch (error) {
       return respondTypedError<EntityIdLookupResult>(
-        message.requestId,
-        toError(
-          "QueryError",
-          error instanceof Error ? error.message : String(error),
-        ),
-      );
-    }
-  }
-
-  async listSchedulerActionSnapshots(
-    message: SchedulerSnapshotListRequest,
-  ): Promise<ResponseMessage<SchedulerSnapshotListResult>> {
-    const session = this.#sessions.get(message.space, message.sessionId);
-    if (session === null) {
-      return respondTypedError<SchedulerSnapshotListResult>(
-        message.requestId,
-        toError("SessionError", "Unknown session for space"),
-      );
-    }
-    const aclEngine = this.#aclMode() === "off"
-      ? undefined
-      : await this.openEngine(message.space);
-    {
-      const deny = aclEngine === undefined
-        ? await this.#authorizeMessage(
-          message.space,
-          session.principal,
-          "READ",
-        )
-        : this.#authorizeCurrentSessionWithEngine(
-          aclEngine,
-          message.space,
-          message.sessionId,
-          session,
-          "READ",
-        );
-      if (deny) {
-        return respondTypedError<SchedulerSnapshotListResult>(
-          message.requestId,
-          deny,
-        );
-      }
-    }
-
-    try {
-      const engine = aclEngine ?? await this.openEngine(message.space);
-      if (!getPersistentSchedulerStateConfig()) {
-        return {
-          type: "response",
-          requestId: message.requestId,
-          ok: {
-            serverSeq: Engine.serverSeq(engine),
-            snapshots: [],
-          },
-        };
-      }
-      const page = Engine.listSchedulerActionSnapshots(
-        engine,
-        {
-          ...message.query,
-          applicableExecutionContextKeys: schedulerApplicableContextKeys(
-            session.principal,
-            message.sessionId,
-          ),
-        },
-      );
-      const snapshots = page.snapshots.map((snapshot) => ({
-        observationId: snapshot.observationId,
-        commitSeq: snapshot.commitSeq,
-        observedAtSeq: snapshot.observedAtSeq,
-        executionContextKey: snapshot.executionContextKey,
-        observation: snapshot.observation,
-        ...(snapshot.directDirtySeq !== undefined
-          ? { directDirtySeq: snapshot.directDirtySeq }
-          : {}),
-        ...(snapshot.staleSeq !== undefined
-          ? { staleSeq: snapshot.staleSeq }
-          : {}),
-        ...(snapshot.unknownReason !== undefined
-          ? { unknownReason: snapshot.unknownReason }
-          : {}),
-      }));
-      return {
-        type: "response",
-        requestId: message.requestId,
-        ok: {
-          serverSeq: Engine.serverSeq(engine),
-          snapshots,
-          ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-        },
-      };
-    } catch (error) {
-      return respondTypedError<SchedulerSnapshotListResult>(
         message.requestId,
         toError(
           "QueryError",
@@ -3058,7 +2820,6 @@ export class Server {
     sessionId: string,
     dirtyIds?: ReadonlySet<string>,
     dirtyOrigins?: ReadonlyMap<string, DirtyOrigin>,
-    options?: { adoptionObservations?: boolean },
   ): Promise<SessionEffectMessage | null> {
     const session = this.#sessions.get(space, sessionId);
     if (session === null) {
@@ -3095,10 +2856,9 @@ export class Server {
           const pendingCaughtUpLocalSeq = session.pendingCaughtUpLocalSeq;
           const hasPendingCatchUp =
             pendingCaughtUpLocalSeq > session.caughtUpLocalSeq;
-          const finishCatchUp = async (
+          const finishCatchUp = (
             sync: SessionSync,
-            candidateTrackedIds?: ReadonlySet<string>,
-          ): Promise<SessionEffectMessage> => {
+          ): SessionEffectMessage => {
             if (hasPendingCatchUp) {
               session.caughtUpLocalSeq = Math.max(
                 session.caughtUpLocalSeq,
@@ -3109,13 +2869,6 @@ export class Server {
               }
               sync.caughtUpLocalSeq = session.caughtUpLocalSeq;
             }
-            await this.attachAdoptionObservations(
-              space,
-              sessionId,
-              sync,
-              options,
-              candidateTrackedIds,
-            );
             return {
               type: "session/effect",
               space,
@@ -3127,14 +2880,11 @@ export class Server {
             fromSeq = session.lastSyncedSeq,
             toSeq?: number,
           ): Promise<SessionEffectMessage | null> => {
-            const serverSeq = toSeq ??
-              Engine.serverSeq(await this.openEngine(space));
-            const mayCarryAdoption = options?.adoptionObservations === true &&
-              session.watches.length > 0 &&
-              serverSeq > fromSeq;
-            if (!hasPendingCatchUp && !mayCarryAdoption) {
+            if (!hasPendingCatchUp) {
               return null;
             }
+            const serverSeq = toSeq ??
+              Engine.serverSeq(await this.openEngine(space));
             session.lastSyncedSeq = Math.max(session.lastSyncedSeq, serverSeq);
             const sync: SessionSync = {
               type: "sync",
@@ -3143,18 +2893,7 @@ export class Server {
               upserts: [],
               removes: [],
             };
-            const message = await finishCatchUp(sync);
-            // Do not manufacture an empty push solely to probe the adoption
-            // window. When a row is present, however, the sync must cross the
-            // wire even without a document diff or the session watermark can
-            // advance past that row forever.
-            if (
-              !hasPendingCatchUp &&
-              (sync.observations?.length ?? 0) === 0
-            ) {
-              return null;
-            }
-            return message;
+            return finishCatchUp(sync);
           };
           if (session.watches.length === 0) {
             return await emptyCatchUp();
@@ -3268,7 +3007,7 @@ export class Server {
             recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
               watches: session.watches.length,
             });
-            const message = await finishCatchUp({
+            const message = finishCatchUp({
               type: "sync",
               fromSeq,
               toSeq,
@@ -3277,7 +3016,7 @@ export class Server {
                 left.id.localeCompare(right.id)
               ),
               removes: [],
-            }, candidateTrackedIds);
+            });
             commitEntities();
             session.lastSyncedSeq = toSeq;
             return message;
@@ -3313,13 +3052,13 @@ export class Server {
             commitWatchState();
             return await emptyCatchUp(sync.fromSeq, sync.toSeq);
           }
-          const message = await finishCatchUp(sync, evaluatedTrackedIds);
+          const message = finishCatchUp(sync);
           commitWatchState();
           return message;
         } catch (error) {
           // A throwing evaluation may have consumed the marker obligation
-          // (finishCatchUp advances caughtUpLocalSeq before adoption
-          // attachment, which can also throw). Roll both counters back to
+          // (finishCatchUp advances caughtUpLocalSeq before the frame is
+          // returned). Roll both counters back to
           // their pre-call values so the obligation re-stages and a later
           // pass re-emits the marker; document state needs no restore here
           // — the caller's requeue machinery re-dirties the batch.
@@ -3336,104 +3075,6 @@ export class Server {
         }
       },
     );
-  }
-
-  // Attach the sync window's scheduler observation rows so the receiving
-  // client can ADOPT other clients' committed action runs instead of
-  // re-running them (incremental-observation-adoption.md §4). Only for
-  // connections that negotiated persistentSchedulerState, on any advancing
-  // sync window (including an empty catch-up), and echo-suppressed by the
-  // observation writer session.
-  // Adoption is an optimization: a failed observation query must never fail
-  // the sync push.
-  private async attachAdoptionObservations(
-    space: string,
-    sessionId: string,
-    sync: SessionSync,
-    options?: { adoptionObservations?: boolean },
-    candidateTrackedIds?: ReadonlySet<string>,
-  ): Promise<void> {
-    if (
-      options?.adoptionObservations !== true ||
-      !getPersistentSchedulerStateConfig() ||
-      sync.toSeq <= sync.fromSeq
-    ) {
-      return;
-    }
-    try {
-      // Watch-scope the rows exactly like the doc diff: a row whose read set
-      // reaches outside this session's tracked docs must not ship. The
-      // receiver could never verify those reads current (their changes are
-      // never pushed to it), and adopting such a row would skip the very run
-      // that loads and subscribes them — a permanently stale action. Dropping
-      // the row also keeps observation metadata (doc ids, fingerprints)
-      // inside the watch boundary that scopes every other byte of this push.
-      const session = this.#sessions.get(space, sessionId);
-      if (session === null) return;
-      // The session cache commits only after the frame is built, so during
-      // catch-up construction `session.trackedIds` is the PREVIOUS watch
-      // scope. The caller passes the candidate set for the frame being
-      // built; scoping against the stale set would drop rows for newly
-      // reached entities or admit rows for entities leaving the watch
-      // (CT-1927 review, round 7).
-      const trackedIds = candidateTrackedIds ?? session.trackedIds;
-      const adoptionSurfaceTracked = (
-        observation: Engine.SchedulerActionObservation,
-      ): boolean =>
-        [
-          ...(observation.reads ?? []),
-          ...(observation.shallowReads ?? []),
-          ...(observation.actualChangedWrites ?? []),
-          ...(observation.currentKnownWrites ?? []),
-        ].every((address) =>
-          address.space === space &&
-          trackedIds.has(toDirtyKey(address.id, declaredScope(address.scope)))
-        );
-      const engine = await this.openEngine(space);
-      const page = Engine.listSchedulerActionSnapshots(engine, {
-        sinceCommitSeq: sync.fromSeq,
-        throughCommitSeq: sync.toSeq,
-        applicableExecutionContextKeys: schedulerApplicableContextKeys(
-          session.principal,
-          sessionId,
-        ),
-      });
-      const receiverWriterSessionKey = Engine.resolveCommitSessionKey(
-        sessionId,
-        session.principal,
-      );
-      const observations = page.snapshots
-        .filter((snapshot) =>
-          snapshot.writerSessionId !== receiverWriterSessionKey &&
-          adoptionSurfaceTracked(snapshot.observation)
-        )
-        .map((snapshot) => ({
-          observationId: snapshot.observationId,
-          commitSeq: snapshot.commitSeq,
-          observedAtSeq: snapshot.observedAtSeq,
-          executionContextKey: snapshot.executionContextKey,
-          observation: snapshot.observation,
-          ...(snapshot.directDirtySeq !== undefined
-            ? { directDirtySeq: snapshot.directDirtySeq }
-            : {}),
-          ...(snapshot.staleSeq !== undefined
-            ? { staleSeq: snapshot.staleSeq }
-            : {}),
-          ...(snapshot.unknownReason !== undefined
-            ? { unknownReason: snapshot.unknownReason }
-            : {}),
-        }));
-      // A window with more rows than one page (nextCursor set) sends the
-      // first page only; receivers degrade to running the remainder.
-      if (observations.length > 0) {
-        sync.observations = observations;
-      }
-    } catch (error) {
-      console.warn(
-        "attachAdoptionObservations failed; sync pushed without observations",
-        error,
-      );
-    }
   }
 
   markSpaceDirty(
@@ -3731,196 +3372,6 @@ export class Server {
     return Promise.resolve(null);
   }
 
-  private async mirrorSchedulerObservation(
-    ownerSpace: string,
-    observation: Engine.SchedulerActionObservation,
-    originExecutionContextKey: SchedulerExecutionContextKey,
-    commit: Engine.AppliedCommit,
-    previousReadSpaces: ReadonlySet<string>,
-    session: SessionState | undefined,
-  ): Promise<void> {
-    if (session?.principal === undefined) {
-      return;
-    }
-    const mirrorSpaces = this.schedulerObservationReadSpaces(observation);
-    for (const space of previousReadSpaces) {
-      mirrorSpaces.add(space);
-    }
-    mirrorSpaces.delete(ownerSpace);
-
-    for (const space of mirrorSpaces) {
-      if (
-        !previousReadSpaces.has(space) &&
-        !this.canMirrorSchedulerObservationToSpace(space, session)
-      ) {
-        continue;
-      }
-      const engine = await this.openEngine(space);
-      Engine.upsertMirroredSchedulerObservation(engine, {
-        branch: commit.branch,
-        ownerSpace,
-        observedAtSeq: commit.seq,
-        scopeContext: {
-          principal: session.principal,
-          sessionId: session.id,
-        },
-        writerSessionId: Engine.resolveCommitSessionKey(
-          session.id,
-          session.principal,
-        ),
-        originExecutionContextKey,
-        observation,
-      });
-    }
-  }
-
-  private runPostCommitSchedulerSideEffects(
-    ownerSpace: string,
-    commit: Engine.AppliedCommit,
-    observations: readonly CommitSchedulerObservation[],
-    previousReadSpaces: ReadonlyMap<number, ReadonlySet<string>>,
-    session: SessionState | undefined,
-  ): Promise<void> {
-    const run = () =>
-      this.applyPostCommitSchedulerSideEffects(
-        ownerSpace,
-        commit,
-        observations,
-        previousReadSpaces,
-        session,
-      );
-    const previous = this.#schedulerSideEffectsByOwnerSpace.get(ownerSpace);
-    const queued = previous?.then(run, run) ?? run();
-    const tracked = queued.finally(() => {
-      if (this.#schedulerSideEffectsByOwnerSpace.get(ownerSpace) === tracked) {
-        this.#schedulerSideEffectsByOwnerSpace.delete(ownerSpace);
-      }
-    });
-    this.#schedulerSideEffectsByOwnerSpace.set(ownerSpace, tracked);
-    return tracked;
-  }
-
-  private async applyPostCommitSchedulerSideEffects(
-    ownerSpace: string,
-    commit: Engine.AppliedCommit,
-    observations: readonly CommitSchedulerObservation[],
-    previousReadSpaces: ReadonlyMap<number, ReadonlySet<string>>,
-    session: SessionState | undefined,
-  ): Promise<void> {
-    if (!getPersistentSchedulerStateConfig()) {
-      return;
-    }
-
-    try {
-      await this.propagateSchedulerDirtyToOwnerSpaces(ownerSpace, commit);
-      const observationResults = commit.schedulerObservationResults
-        ? new Map(
-          commit.schedulerObservationResults.map((result) => [
-            result.localSeq,
-            result,
-          ]),
-        )
-        : undefined;
-      // A semantic commit replay can outlive an observation that was removed by
-      // later context narrowing. There is no active owner context to mirror in
-      // that case; replaying the stale payload would resurrect invalid state.
-      if (observations.length > 0 && observationResults === undefined) {
-        return;
-      }
-      for (const { localSeq, observation } of observations) {
-        const result = observationResults?.get(localSeq);
-        if (result === undefined) {
-          throw new Error(
-            `scheduler observation ${localSeq} missing owner result`,
-          );
-        }
-        if (result.status === "dropped") {
-          continue;
-        }
-        // A kept replay remains idempotently acknowledged even after a later
-        // observation replaced or narrowed its owner snapshot. The engine omits
-        // the effective context in that case so this stale payload cannot
-        // recreate or roll back a mirror.
-        if (result.executionContextKey === undefined) {
-          continue;
-        }
-        await this.mirrorSchedulerObservation(
-          ownerSpace,
-          observation,
-          result.executionContextKey,
-          commit,
-          previousReadSpaces.get(localSeq) ?? new Set(),
-          session,
-        );
-      }
-    } catch (error) {
-      console.warn(
-        "Post-commit scheduler state update failed after semantic commit:",
-        error,
-      );
-    }
-  }
-
-  private canMirrorSchedulerObservationToSpace(
-    readSpace: string,
-    session: SessionState | undefined,
-  ): boolean {
-    if (!this.options.authorizeSessionOpen) {
-      return true;
-    }
-    if (!session) {
-      return false;
-    }
-    return this.#sessions.hasOpenSessionForPrincipal(
-      readSpace,
-      session.principal,
-    );
-  }
-
-  private async propagateSchedulerDirtyToOwnerSpaces(
-    writeSpace: string,
-    commit: Engine.AppliedCommit,
-  ): Promise<void> {
-    const readersByOwner = new Map<
-      string,
-      Engine.SchedulerReaderIndexEntry[]
-    >();
-    for (const reader of commit.schedulerDirtiedReaders ?? []) {
-      if (!reader.ownerSpace || reader.ownerSpace === writeSpace) {
-        continue;
-      }
-      let readers = readersByOwner.get(reader.ownerSpace);
-      if (!readers) {
-        readers = [];
-        readersByOwner.set(reader.ownerSpace, readers);
-      }
-      readers.push(reader);
-    }
-
-    for (const [ownerSpace, readers] of readersByOwner) {
-      const engine = await this.openEngine(ownerSpace);
-      Engine.markSchedulerActionsDirectDirty(engine, {
-        branch: commit.branch,
-        ownerSpace,
-        dirtySeq: commit.seq,
-        actions: readers,
-      });
-    }
-  }
-
-  private schedulerObservationReadSpaces(
-    observation: Engine.SchedulerActionObservation | undefined,
-  ): Set<string> {
-    const spaces = new Set<string>();
-    if (!observation) {
-      return spaces;
-    }
-    for (const read of [...observation.reads, ...observation.shallowReads]) {
-      spaces.add(read.space);
-    }
-    return spaces;
-  }
-
   private openEngine(space: string): Promise<Engine.Engine> {
     const existing = this.#engines.get(space);
     if (existing !== undefined) {
@@ -3948,84 +3399,6 @@ export class Server {
     return opened;
   }
 }
-
-const isSchedulerExecutionContextKey = (
-  value: unknown,
-): value is SchedulerExecutionContextKey =>
-  value === "space" ||
-  (typeof value === "string" &&
-    (/^user:[^:]+$/.test(value) || /^session:[^:]+:[^:]+$/.test(value)));
-
-const parseSchedulerSnapshotQuery = (
-  value: Record<string, unknown>,
-): SchedulerActionSnapshotQuery | undefined => {
-  // Context is selected only from the authenticated server session. A cursor
-  // may carry the last returned context for stable continuation, but the query
-  // itself has no arbitrary context selector.
-  if (
-    "executionContextKey" in value ||
-    "execution_context_key" in value ||
-    (value.branch !== undefined && typeof value.branch !== "string") ||
-    (value.ownerSpace !== undefined && typeof value.ownerSpace !== "string") ||
-    (value.pieceId !== undefined && typeof value.pieceId !== "string") ||
-    (value.processGeneration !== undefined &&
-      !isNonNegativeInteger(value.processGeneration)) ||
-    (value.actionId !== undefined && typeof value.actionId !== "string") ||
-    (value.sinceCommitSeq !== undefined &&
-      !isNonNegativeInteger(value.sinceCommitSeq)) ||
-    (value.throughCommitSeq !== undefined &&
-      !isNonNegativeInteger(value.throughCommitSeq)) ||
-    (value.limit !== undefined && !isNonNegativeInteger(value.limit))
-  ) {
-    return undefined;
-  }
-  let cursor: SchedulerActionSnapshotQuery["cursor"];
-  if (value.cursor !== undefined) {
-    if (
-      !isRecord(value.cursor) ||
-      (value.cursor.ownerSpace !== undefined &&
-        typeof value.cursor.ownerSpace !== "string") ||
-      typeof value.cursor.pieceId !== "string" ||
-      !isNonNegativeInteger(value.cursor.processGeneration) ||
-      typeof value.cursor.actionId !== "string" ||
-      !isSchedulerExecutionContextKey(value.cursor.executionContextKey)
-    ) {
-      return undefined;
-    }
-    cursor = {
-      ...(value.cursor.ownerSpace !== undefined
-        ? { ownerSpace: value.cursor.ownerSpace }
-        : {}),
-      pieceId: value.cursor.pieceId,
-      processGeneration: value.cursor.processGeneration,
-      actionId: value.cursor.actionId,
-      executionContextKey: value.cursor.executionContextKey,
-    };
-  }
-  return {
-    ...(value.branch !== undefined ? { branch: value.branch as string } : {}),
-    ...(value.ownerSpace !== undefined
-      ? { ownerSpace: value.ownerSpace as string }
-      : {}),
-    ...(value.pieceId !== undefined
-      ? { pieceId: value.pieceId as string }
-      : {}),
-    ...(value.processGeneration !== undefined
-      ? { processGeneration: value.processGeneration as number }
-      : {}),
-    ...(value.actionId !== undefined
-      ? { actionId: value.actionId as string }
-      : {}),
-    ...(value.sinceCommitSeq !== undefined
-      ? { sinceCommitSeq: value.sinceCommitSeq as number }
-      : {}),
-    ...(value.throughCommitSeq !== undefined
-      ? { throughCommitSeq: value.throughCommitSeq as number }
-      : {}),
-    ...(value.limit !== undefined ? { limit: value.limit as number } : {}),
-    ...(cursor !== undefined ? { cursor } : {}),
-  };
-};
 
 export const parseClientMessage = (
   payload: string,
@@ -4241,24 +3614,6 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       watches: parsed.watches as WatchSpec[],
-    };
-  }
-
-  if (
-    parsed.type === "scheduler.snapshot.list" &&
-    typeof parsed.requestId === "string" &&
-    typeof parsed.space === "string" &&
-    typeof parsed.sessionId === "string" &&
-    isRecord(parsed.query)
-  ) {
-    const query = parseSchedulerSnapshotQuery(parsed.query);
-    if (query === undefined) return null;
-    return {
-      type: "scheduler.snapshot.list",
-      requestId: parsed.requestId,
-      space: parsed.space,
-      sessionId: parsed.sessionId,
-      query,
     };
   }
 

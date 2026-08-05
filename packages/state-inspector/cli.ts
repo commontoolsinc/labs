@@ -271,7 +271,7 @@ export function main(argv: string[]): number {
             }`,
           );
           console.log(
-            `scheduler tables: ${s.hasSchedulerTables ? "yes" : "no"}`,
+            `scheduler basis table: ${s.hasSchedulerBasisTable ? "yes" : "no"}`,
           );
         });
         return 0;
