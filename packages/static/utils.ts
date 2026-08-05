@@ -1,5 +1,5 @@
 import { isDeno } from "@commonfabric/utils/env";
-import { FS_URL, InnerCache, type StaticCache } from "./cache.ts";
+import { StaticCache } from "./cache.ts";
 
 // What a test fetches when it needs an asset and does not care which one. Any
 // entry in `assets` serves, under two constraints: `TEST_ASSET_CONTENT` has to
@@ -12,20 +12,14 @@ export const TEST_ASSET = "types/dom.d.ts";
 // needing an update.
 export const TEST_ASSET_CONTENT = "interface AddEventListenerOptions";
 
-// `TestStaticCache` uses StaticCacheFS in Deno and `${window.location.origin}/static`
-// in non-Deno, used for tests that run via deno-web-test that target both environments.
-export class TestStaticCache extends InnerCache implements StaticCache {
-  constructor() {
-    let url;
-    if (isDeno()) {
-      if (!FS_URL) {
-        throw new Error("Could not create static cache in Deno.");
-      }
-      url = new URL(FS_URL);
-    } else {
-      url = new URL(globalThis.location.origin);
-      url.pathname = "static";
-    }
-    super(url);
+// Reads assets from the file system in Deno and from
+// `${window.location.origin}/static` in non-Deno, used for tests that run via
+// deno-web-test that target both environments.
+export function createTestStaticCache(): StaticCache {
+  if (isDeno()) {
+    return StaticCache.fromFileSystem();
   }
+  const url = new URL(globalThis.location.origin);
+  url.pathname = "static";
+  return new StaticCache(url);
 }

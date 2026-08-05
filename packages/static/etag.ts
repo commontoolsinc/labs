@@ -50,25 +50,9 @@ export function compareETags(
  * Create cache headers with ETag support.
  * Uses no-cache strategy to always validate with ETag.
  */
-export function createCacheHeaders(
-  etag: string,
-  options: {
-    noCache?: boolean;
-    public?: boolean;
-  } = {},
-): Record<string, string> {
-  const {
-    noCache = true,
-    public: isPublic = true,
-  } = options;
-
-  const headers: Record<string, string> = {
+export function createCacheHeaders(etag: string): Record<string, string> {
+  return {
     "ETag": etag,
+    "Cache-Control": "public, no-cache",
   };
-
-  if (noCache) {
-    headers["Cache-Control"] = isPublic ? "public, no-cache" : "no-cache";
-  }
-
-  return headers;
 }

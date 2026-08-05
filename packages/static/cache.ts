@@ -9,7 +9,7 @@ import { toFileUrl } from "@std/path/posix/to-file-url";
 import { join } from "@std/path/posix/join";
 import { generateETag } from "./etag.ts";
 
-export const FS_URL = (import.meta.dirname && isDeno())
+const FS_URL = (import.meta.dirname && isDeno())
   ? toFileUrl(join(import.meta.dirname, "assets"))
   : undefined;
 
@@ -21,18 +21,24 @@ export interface CachedAsset {
   etag: string;
 }
 
-export interface StaticCache {
-  get(assetName: string): Promise<Uint8Array>;
-  getText(assetName: string): Promise<string>;
-  getUrl(assetName: string): URL;
-  getWithETag(assetName: string): Promise<CachedAsset>;
-}
-
-export class InnerCache {
+export class StaticCache {
   private cache: Map<string, Promise<CachedAsset>> = new Map();
   private baseUrl: URL;
   constructor(baseUrl: URL) {
     this.baseUrl = baseUrl;
+  }
+
+  /**
+   * Serve the assets bundled alongside this module from the file system.
+   * Only available in Deno.
+   */
+  static fromFileSystem(): StaticCache {
+    if (!FS_URL) {
+      throw new Error(
+        "The file system static cache is only available in Deno.",
+      );
+    }
+    return new StaticCache(new URL(FS_URL));
   }
 
   /**
@@ -67,13 +73,9 @@ export class InnerCache {
       throw new Error(`No static asset "${assetName}" found.`);
     }
 
-    const url = this.getBaseUrl();
+    const url = new URL(this.baseUrl);
     url.pathname = join(url.pathname, assetName);
     return url;
-  }
-
-  getBaseUrl(): URL {
-    return new URL(this.baseUrl);
   }
 
   /**
@@ -101,20 +103,5 @@ export class InnerCache {
 
     const etag = await generateETag(buffer);
     return { buffer, etag };
-  }
-}
-
-export class StaticCacheHTTP extends InnerCache implements StaticCache {
-  constructor(baseUrl: URL) {
-    super(baseUrl);
-  }
-}
-
-export class StaticCacheFS extends InnerCache implements StaticCache {
-  constructor() {
-    if (!FS_URL) {
-      throw new Error("FsCache only available in Deno.");
-    }
-    super(new URL(FS_URL));
   }
 }

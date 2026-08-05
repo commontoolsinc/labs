@@ -1,8 +1,8 @@
 import { assert, assertMatch, assertNotMatch } from "@std/assert";
-import { StaticCacheFS } from "@commonfabric/static";
+import { StaticCache } from "@commonfabric/static";
 import { transformSource } from "../utils.ts";
 
-const staticCache = new StaticCacheFS();
+const staticCache = StaticCache.fromFileSystem();
 const commonfabric = await staticCache.getText("types/commonfabric.d.ts");
 const commonfabricSchema = await staticCache.getText(
   "types/commonfabric-schema.d.ts",
