@@ -269,13 +269,14 @@ Tests to extend first:
 - `packages/cf-harness/test/openai-client.test.ts`
 - `packages/cf-harness/test/interactive-chat-service.test.ts`
 
-### WP1.3 — Generalize attempt provenance compatibly
+### WP1.3 — Generalize attempt provenance
 
 - [x] Add provider-neutral model-attempt records to run reports with provider,
   operation, endpoint origin, timing, request summary, status, selected request
   id, and bounded error metadata.
-- [x] Preserve reading and producing the current `gatewayAttempts` field for the
-  existing gateway until an explicit artifact-version migration removes it.
+- [x] Record each attempt exactly once, in the provider-neutral `modelAttempts`
+  field. A gateway turn carries the same kind of record as any other turn, with
+  `operation` naming the API that served it.
 - [x] Never record authorization, cookies, account ids, refresh responses, or
   arbitrary response headers.
 
