@@ -1,5 +1,5 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { encodableFormOf, hasEncodableForm } from "./encodable-form.ts";
+import { encodableFormOf } from "./encodable-form.ts";
 import { hasEntityUriScheme } from "./entity-kind.ts";
 import {
   BaseFabricPrimitive,
@@ -96,9 +96,7 @@ export function createRef(
     // A builder artifact is replaced by its encodable form, then descended
     // into: what the ref is derived from is the form that gets written.
     // Functions qualify because a pattern factory is one.
-    if (hasEncodableForm(obj)) {
-      obj = encodableFormOf(obj) ?? obj;
-    }
+    obj = encodableFormOf(obj) ?? obj;
 
     if (isReactive(obj)) {
       const val = obj.export().value;

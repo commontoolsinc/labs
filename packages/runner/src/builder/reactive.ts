@@ -8,7 +8,7 @@ import {
   type Stream,
 } from "./types.ts";
 import { getTopFrame } from "./pattern.ts";
-import { encodableFormOf, hasEncodableForm } from "../encodable-form.ts";
+import { encodableFormOf } from "../encodable-form.ts";
 import { createCell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 
@@ -89,7 +89,5 @@ export function stream<T>(
 function defaultForValue(value: unknown): JSONValue {
   // A builder artifact stands in as its encodable form: that is what a
   // default written from it has to be.
-  return (hasEncodableForm(value)
-    ? encodableFormOf(value)
-    : value) as JSONValue;
+  return encodableFormOf(value) as JSONValue;
 }
