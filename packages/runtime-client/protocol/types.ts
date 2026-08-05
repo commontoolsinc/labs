@@ -995,31 +995,14 @@ export interface PendingWritesNotification {
 }
 
 /**
- * VDOM operation for IPC.
+ * The vocabulary of DOM mutations carried by a VDOM batch. The worker
+ * reconciler that produces them and the main-thread applicator that consumes
+ * them both live in `@commonfabric/html`, which defines the union; the protocol
+ * re-exports it so a message shape and the ops inside it cannot describe
+ * different things.
  */
-export type VDomOp =
-  | { op: "create-element"; nodeId: number; tagName: string }
-  | { op: "create-text"; nodeId: number; text: string }
-  | { op: "update-text"; nodeId: number; text: string }
-  | { op: "set-prop"; nodeId: number; key: string; value: JSONValue }
-  | { op: "remove-prop"; nodeId: number; key: string }
-  | { op: "set-event"; nodeId: number; eventType: string; handlerId: number }
-  | { op: "remove-event"; nodeId: number; eventType: string }
-  | { op: "set-binding"; nodeId: number; propName: string; cellRef: CellRef }
-  | {
-    op: "insert-child";
-    parentId: number;
-    childId: number;
-    beforeId: number | null;
-  }
-  | {
-    op: "move-child";
-    parentId: number;
-    childId: number;
-    beforeId: number | null;
-  }
-  | { op: "remove-node"; nodeId: number }
-  | { op: "set-attrs"; nodeId: number; attrs: Record<string, JSONValue> };
+import type { VDomOp } from "@commonfabric/html/vdom-ops";
+export type { VDomOp };
 
 /**
  * VDOM batch notification sent from worker to main thread.
