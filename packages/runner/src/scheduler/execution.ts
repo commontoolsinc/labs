@@ -1,3 +1,4 @@
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import { assessPullWork, type PullSchedulingState } from "./work-oracle.ts";
 import type { SpaceScopeAndURI } from "./types.ts";
@@ -142,6 +143,8 @@ export type SchedulerSettleResult = {
 };
 
 export interface SchedulerSettleLoopState {
+  /** Identity entity keys resolve scoped addresses against (keys.ts). */
+  readonly scopeKeyIdentity: () => ScopeKeyIdentity;
   readonly getCollectSettleStats: () => boolean;
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;

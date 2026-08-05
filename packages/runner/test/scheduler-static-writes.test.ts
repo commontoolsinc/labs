@@ -60,6 +60,13 @@ async function runActionOnce(
   return log;
 }
 
+// Identity entity keys resolve scoped addresses against (stage E).
+const TEST_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+const identityThunk = () => TEST_IDENTITY;
+
 describe("static write surface demand", () => {
   let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
@@ -724,8 +731,9 @@ describe("dependency graph reachability", () => {
       [second, [address]],
     ]);
     const state = {
+      scopeKeyIdentity: identityThunk,
       writersByEntity: new Map([[
-        entityKey(address),
+        entityKey(address, TEST_IDENTITY),
         new Set([first, second]),
       ]]),
       getSchedulingWrites: (action: Action) => writes.get(action),

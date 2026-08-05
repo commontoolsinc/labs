@@ -28,10 +28,13 @@
 // Phase 1 stage F. The machinery lands dark, exercised by tests.
 
 import type { CellScope } from "@commonfabric/api";
-import type {
-  CommitPrecondition,
-  DerivedWriteAnnotation,
-  Operation,
+import {
+  type CommitPrecondition,
+  type DerivedWriteAnnotation,
+  type Operation,
+  resolveScopeKey,
+  type ScopeKey,
+  type ScopeKeyIdentity,
 } from "@commonfabric/memory/v2";
 import type {
   CommitError,
@@ -96,12 +99,13 @@ export interface WaveRunContext {
    * parent folds this contribution into the requeue set (§3d; the
    * model's C8d rollback closure). */
   parentEventId?: string;
-  /** The scope INSTANCE this run ran as, for basis rows' action_scope_key.
-   * Defaults to `"space"` — the pre-narrowing instance. Stage E re-keys
-   * the vocabulary per instance; until then, at OFF-arm cardinality 1, the
-   * instance dimension is derivable from the runtime's own authenticated
-   * session (plan Phase 1 stage E). */
-  actionScopeKey?: string;
+  /** The scope INSTANCE this run ran as, for basis rows'
+   * action_scope_key. Typed as the shared `ScopeKey` vocabulary so a
+   * caller cannot hand the basis index a scope NAME or a hand-rolled
+   * format (key-vocabulary.md §4). Defaults to `"space"` — the
+   * pre-narrowing instance; stage F's serving loop supplies per-run
+   * demanded instances. */
+  actionScopeKey?: ScopeKey;
 }
 
 const waveRunContexts = new WeakMap<object, WaveRunContext>();
@@ -144,10 +148,10 @@ export type WaveWriteAnnotation = DerivedWriteAnnotation;
  */
 export interface SchedulerBasisRow {
   action: string;
-  actionScopeKey: string;
+  actionScopeKey: ScopeKey;
   entitySpace: MemorySpace;
   entity: string;
-  entityScopeKey: string;
+  entityScopeKey: ScopeKey;
   seq: number | null;
 }
 
@@ -156,7 +160,7 @@ export interface SchedulerBasisRow {
  * instance's stored set. */
 export interface WaveBasisInstanceRows {
   action: string;
-  actionScopeKey: string;
+  actionScopeKey: ScopeKey;
   rows: SchedulerBasisRow[];
 }
 
@@ -338,7 +342,7 @@ export class WaveAccumulator
   implements TransactionSealDestination, ITransactionSealSink {
   readonly #space: MemorySpace;
   readonly #basisSeq: number;
-  readonly #resolveScopeKey: (scope: CellScope) => string;
+  readonly #scopeKeyIdentity: ScopeKeyIdentity;
   readonly #replicaFor: (space: MemorySpace) => ISpaceReplica;
   readonly #lease: WaveLease | undefined;
   readonly #sealedTenure: number;
@@ -353,17 +357,19 @@ export class WaveAccumulator
      * (serving-loop.md §3b's snapshot discipline — mid-wave commits are
      * the NEXT wave's input). */
     basisSeq: number;
-    /** Maps a scope KIND to the concrete instance key. At OFF-arm
-     * cardinality 1 the identity is the runtime's own authenticated
-     * session (key-vocabulary.md §3); stage E moves the vocabulary to the
-     * wire-shape module and feeds per-instance values. */
-    resolveScopeKey: (scope: CellScope) => string;
+    /** The acting identity scoped writes resolve their instance keys
+     * against, via the shared scope_key constructor — never a caller-
+     * supplied format (key-vocabulary.md §3/§4). At OFF-arm cardinality 1
+     * this is the runtime's own authenticated session; stage F's serving
+     * loop supplies per-run demanded identities when it builds real
+     * accumulators. */
+    scopeKeyIdentity: ScopeKeyIdentity;
     replicaFor: (space: MemorySpace) => ISpaceReplica;
     lease?: WaveLease;
   }) {
     this.#space = options.space;
     this.#basisSeq = options.basisSeq;
-    this.#resolveScopeKey = options.resolveScopeKey;
+    this.#scopeKeyIdentity = options.scopeKeyIdentity;
     this.#replicaFor = options.replicaFor;
     this.#lease = options.lease;
     this.#sealedTenure = options.lease?.tenure ?? 0;
@@ -926,10 +932,8 @@ export class WaveAccumulator
     return docs;
   }
 
-  #scopeKeyFor(scope: CellScope | undefined): string {
-    return scope === undefined || scope === "space"
-      ? "space"
-      : this.#resolveScopeKey(scope);
+  #scopeKeyFor(scope: CellScope | undefined): ScopeKey {
+    return resolveScopeKey(scope, this.#scopeKeyIdentity);
   }
 
   #homeOpCount(contribution: WaveContribution): number {

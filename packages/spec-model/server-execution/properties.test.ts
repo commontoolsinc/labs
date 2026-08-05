@@ -8,6 +8,10 @@
 
 import { assert, assertEquals } from "@std/assert";
 import {
+  resolvePrincipalSessionKey,
+  resolveScopeKey,
+} from "@commonfabric/memory/v2";
+import {
   admitDerived,
   applicableSet,
   apply,
@@ -16,6 +20,7 @@ import {
   makeWorld,
   pushRowsFor,
   sessionKey,
+  SPACE_KEY,
   type Step,
   userKey,
   type World,
@@ -792,4 +797,40 @@ Deno.test("C0-guards: connection guards; no-actor space writes carry no attribut
   const t = w3.spaces.B.streams.t.entries[0];
   assertEquals(t.firedAt.session, "server");
   assertEquals(t.firedAt.user, U1);
+});
+
+// ---------- conformance bridge: model keys === the wire vocabulary ----------
+
+Deno.test("bridge: model scope-key constructors byte-agree with the real wire vocabulary (LD3, key-vocabulary §3)", () => {
+  // The model RESTATES the constructors (model.ts stays import-free);
+  // this bridge is what keeps the restatement honest. Corpus includes
+  // `:`-bearing principals (DIDs contain `:`), `/`-bearing components,
+  // pre-encoded-looking strings (must stay distinct from their decoded
+  // forms), and non-ASCII.
+  const principals = [
+    "did:u1",
+    "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+    "a:b",
+    "a/b",
+    "a%3Ab",
+    "user with spaces",
+    "ünïcode:∆",
+  ];
+  const sessionIds = ["sess1", "b:c", "s/1", "s%2F1", "s ü:∆"];
+  assertEquals(SPACE_KEY, resolveScopeKey("space", {}));
+  assertEquals(SPACE_KEY, resolveScopeKey(undefined, {}));
+  for (const p of principals) {
+    assertEquals(userKey(p), resolveScopeKey("user", { principal: p }));
+    for (const s of sessionIds) {
+      assertEquals(
+        sessionKey(p, s),
+        resolveScopeKey("session", { principal: p, sessionId: s }),
+      );
+      assertEquals(sessionKey(p, s), resolvePrincipalSessionKey(p, s));
+    }
+  }
+  // The injectivity witness the un-encoded constructors failed: encoding
+  // keeps the literal `:` separators exact, so these no longer collide.
+  assert(sessionKey("a:b", "c") !== sessionKey("a", "b:c"));
+  assert(userKey("session:x") !== sessionKey("x", "x"));
 });

@@ -20,10 +20,11 @@
 // is an APPROXIMATION — "the most-specific scope that holds this id" — not the
 // runtime's resolution. {@link scopeOverlay} (every scope side-by-side) is the
 // honest, runtime-true divergence view; prefer it. Scope-key construction reuses
-// the engine's exported `resolveScopeKey` so encoding never drifts.
+// the wire-shape module's `resolveScopeKey` — the ONE definition of the
+// scope_key format (key-vocabulary.md §3) — so encoding never drifts.
 
 import type { SpaceDb } from "./db.ts";
-import { resolveScopeKey } from "@commonfabric/memory/v2/engine";
+import { resolveScopeKey } from "@commonfabric/memory/v2";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { annotate, summarize } from "./decode.ts";
 import { type EntityDocument, reconstructDocument } from "./reconstruct.ts";
@@ -102,7 +103,7 @@ export function listScopes(
 /**
  * The most-specific-first chain of stored scope_keys for an identity. With a
  * sessionId: `[session:X:sid, user:X, space]`; without: `[user:X, space]`.
- * Encoding goes through the engine's `resolveScopeKey`, so the keys are exactly
+ * Encoding goes through the shared `resolveScopeKey`, so the keys are exactly
  * what the runtime writes (no hand-rolled %-encoding to drift).
  */
 export function resolveScopeChain(

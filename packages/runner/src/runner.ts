@@ -65,6 +65,7 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { resolveScopeKey, type ScopeKey } from "@commonfabric/memory/v2";
 import {
   type AddCancel,
   type Cancel,
@@ -738,7 +739,14 @@ type JavaScriptNodeContext = BoundNodeIO & {
 };
 
 type JavaScriptActionResultCells = {
-  byScope: Map<CellScope, Cell<any>>;
+  // One result cell PER SCOPE INSTANCE, keyed by the shared scope_key
+  // vocabulary (key-vocabulary.md §1 site 3) — never by the scope NAME:
+  // on a serving runtime `byScope.get("session")` would return ONE cell
+  // where the server needs one per session. The keys are built from the
+  // acting identity at lookup time; in the OFF arm that is the runtime's
+  // own session, so exactly one instance exists per scope name and the
+  // map partitions as the name-keyed form did.
+  byScope: Map<ScopeKey, Cell<any>>;
 };
 
 type SchedulerRehydrationSubscriptionOptions = {
@@ -1100,7 +1108,7 @@ function dedupeNormalizedLinks(
 }
 
 export class Runner {
-  readonly cancels = new Map<`${MemorySpace}/${CellScope}/${URI}`, Cancel>();
+  readonly cancels = new Map<`${MemorySpace}/${ScopeKey}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
   // In-flight unloadable-pointer roll-forward commits (CT-1923). Deliberately
   // outside the scheduler, like PatternUpdater's checks — dispose() settles
@@ -1122,11 +1130,11 @@ export class Runner {
   // for that reason — a result key names one result document, and a pattern
   // that keeps starting and stopping children adds keys it will never revisit.
   private locallyPreparedResults = new BoundedKeyMap<
-    `${MemorySpace}/${CellScope}/${URI}`,
+    `${MemorySpace}/${ScopeKey}/${URI}`,
     string
   >(RESULT_SHORTCUT_LIMIT);
   private locallyStoppedResults = new BoundedKeyMap<
-    `${MemorySpace}/${CellScope}/${URI}`,
+    `${MemorySpace}/${ScopeKey}/${URI}`,
     string
   >(RESULT_SHORTCUT_LIMIT);
   // Successful event-result starts that are still live in this runner. This is
@@ -1135,13 +1143,13 @@ export class Runner {
   // create-only receipt guard rejects the duplicate. It is not a replacement
   // for the system-wide commit precondition.
   private locallyCommittedHandlerResultStarts = new Set<
-    `${MemorySpace}/${CellScope}/${URI}`
+    `${MemorySpace}/${ScopeKey}/${URI}`
   >();
   // Map whose key is the result cell's full key, and whose values are a hash
   // of the pattern's encodable form -- what `writeJavaScriptActionResult`
   // compares to decide whether a returned sub-pattern has changed.
   private resultPatternCache = new Map<
-    `${MemorySpace}/${CellScope}/${URI}`,
+    `${MemorySpace}/${ScopeKey}/${URI}`,
     string
   >();
   // Invalidates asynchronous start/resume continuations when stopAll() begins.
@@ -1180,9 +1188,28 @@ export class Runner {
         const space = notification.space;
         if ("changes" in notification) {
           for (const change of notification.changes) {
+            // Same key construction as getDocKey (site 2's cache): the
+            // notification names the scope by NAME; the runtime's own
+            // identity maps it to the same instance key the cache entry
+            // was stored under. NOTE (stage E, deliberate healing):
+            // pre-re-keying, getDocKey interpolated the scope raw — an
+            // unscoped cell's cache entry carried an "undefined" scope
+            // segment this delete (which normalized) could never name,
+            // so eviction silently missed real unscoped entries. The
+            // eviction-on-notification CONTRACT is what the storage
+            // subscription exists for and is pinned by the "clears
+            // cached patterns when storage notifies of changes" test
+            // (with normalized keys); re-keying makes the WRITER
+            // conform to that contract. The extra work on the healed
+            // path — re-preparing an unchanged pattern — commits no
+            // differing bytes (writeJavaScriptActionResult's unchanged
+            // path is idempotent).
             this.resultPatternCache.delete(
               `${space}/${
-                change.address.scope ?? "space"
+                resolveScopeKey(
+                  change.address.scope,
+                  this.runtime.scopeKeyIdentity,
+                )
               }/${change.address.id}`,
             );
           }
@@ -3348,9 +3375,15 @@ export class Runner {
       : resultCell;
   }
 
-  private getDocKey(cell: Cell<any>): `${MemorySpace}/${CellScope}/${URI}` {
+  // Result-pattern cache key, per scope INSTANCE (key-vocabulary.md §1
+  // site 2): two instances of one doc may resolve to different patterns,
+  // so the key carries the shared scope_key, resolved against the
+  // runtime's own session (the OFF arm's one identity).
+  private getDocKey(cell: Cell<any>): `${MemorySpace}/${ScopeKey}/${URI}` {
     const { space, id, scope } = cell.getAsNormalizedFullLink();
-    return `${space}/${scope}/${id}`;
+    return `${space}/${
+      resolveScopeKey(scope, this.runtime.scopeKeyIdentity)
+    }/${id}`;
   }
 
   // The scheduler observation identity (pieceId + owning space) for a piece's
@@ -5043,9 +5076,15 @@ export class Runner {
       schemaCellScope(resultPattern.resultSchema),
       narrowestReadScope,
     ]);
-    // See if the resultCell was already in this effective output scope
-    const previousScopedResultCell = previousResultCellRef.byScope.get(
+    // See if the resultCell was already in this effective output INSTANCE
+    // (the discovered scope name resolved against the run's acting
+    // identity — the runtime's own session in the OFF arm).
+    const effectiveOutputScopeKey = resolveScopeKey(
       effectiveOutputScope,
+      this.runtime.scopeKeyIdentity,
+    );
+    const previousScopedResultCell = previousResultCellRef.byScope.get(
+      effectiveOutputScopeKey,
     );
     if (previousScopedResultCell === undefined) {
       const baseResultCell = this.runtime.getCell(
@@ -5064,7 +5103,10 @@ export class Runner {
           },
           tx,
         );
-      previousResultCellRef.byScope.set(effectiveOutputScope, newResultCell);
+      previousResultCellRef.byScope.set(
+        effectiveOutputScopeKey,
+        newResultCell,
+      );
       resultCell = newResultCell;
     } else {
       resultCell = previousScopedResultCell;

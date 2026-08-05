@@ -6,6 +6,10 @@ import {
   FabricSpecialObject,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 import type {
   IMemoryAddress,
   IMemoryChange,
@@ -15,7 +19,13 @@ import type {
 import * as Address from "./transaction/address.ts";
 import { normalizeCellScope } from "../scope.ts";
 
-export const create = () => new Changes();
+// A differential merges one notification batch's changes per address
+// IDENTITY — per scope instance (key-vocabulary.md §1 site 8), so two
+// instances of one doc in a batch never collapse into one change entry.
+// `identity` is the session the batch belongs to: the changes arrive
+// scope-NAMED on today's per-session wire, and the owning session's
+// identity maps each name to the same instance the session's reads map to.
+export const create = (identity: ScopeKeyIdentity) => new Changes(identity);
 
 interface Memory {
   get(entry: IMemoryAddress): State | undefined;
@@ -27,8 +37,8 @@ const stateScope = (state: State) =>
 const unclaimedWithScope = (state: State): State =>
   ({ ...unclaimed(state), scope: stateScope(state) }) as State;
 
-const toKey = (state: State) =>
-  `/${stateScope(state)}/${state.the}/${state.of}`;
+const toKey = (state: State, identity: ScopeKeyIdentity) =>
+  `/${resolveScopeKey(stateScope(state), identity)}/${state.the}/${state.of}`;
 const toAddress = (
   state: State,
   path: readonly string[] = [],
@@ -250,8 +260,12 @@ const addStateChange = (
  * Checks out facts from the given memory so that we can compute changes
  * later on.
  */
-export const checkout = (memory: Memory, facts: Iterable<State>) => {
-  const checkout = new Checkout();
+export const checkout = (
+  memory: Memory,
+  facts: Iterable<State>,
+  identity: ScopeKeyIdentity,
+) => {
+  const checkout = new Checkout(identity);
   for (const member of facts) {
     const address = toAddress(member);
     const existing = memory.get(address);
@@ -264,16 +278,18 @@ export const checkout = (memory: Memory, facts: Iterable<State>) => {
   return checkout;
 };
 
-export const load = (facts: Iterable<State>) => create().set(facts);
+export const load = (facts: Iterable<State>, identity: ScopeKeyIdentity) =>
+  create(identity).set(facts);
 
 class Checkout {
   #model: Map<string, State> = new Map();
+  constructor(readonly identity: ScopeKeyIdentity) {}
   add(state: State) {
-    this.#model.set(toKey(state), state);
+    this.#model.set(toKey(state, this.identity), state);
   }
 
   compare(memory: Memory) {
-    const changes = new Changes();
+    const changes = new Changes(this.identity);
     for (const fact of this.#model.values()) {
       const before = fact?.is;
       const after = memory.get(toAddress(fact))?.is;
@@ -285,6 +301,7 @@ class Checkout {
 
 class Changes implements IMergedChanges {
   #model: Map<string, IMemoryChange> = new Map();
+  constructor(readonly identity: ScopeKeyIdentity) {}
   *[Symbol.iterator]() {
     yield* this.#model.values();
   }
@@ -313,7 +330,7 @@ class Changes implements IMergedChanges {
   }
 
   add(change: IMemoryChange) {
-    const key = Address.toString(change.address);
+    const key = Address.toString(change.address, this.identity);
 
     if (!this.#model.has(key)) {
       this.#model.set(key, change);

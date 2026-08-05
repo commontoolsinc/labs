@@ -1170,6 +1170,7 @@ export function validateAndTransform(
     tx!,
     selector,
     createDefaultTraversalContext(
+      runtime.scopeKeyIdentity,
       options?.traverseCells ?? false,
       undefined,
       undefined,

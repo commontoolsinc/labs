@@ -1,7 +1,21 @@
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 import type { IMemoryAddress } from "../interface.ts";
 import { normalizeCellScope } from "../../scope.ts";
-export const toString = (address: IMemoryAddress) =>
-  `/${normalizeCellScope(address.scope)}/${address.id}/${
+
+/**
+ * Address identity string, per scope INSTANCE (key-vocabulary.md §1
+ * site 8): the scope segment is the shared scope_key, resolved against the
+ * acting identity of the transaction/notification context the address
+ * belongs to — one action tx may carry writes to several instances of one
+ * doc (its own narrow instance plus the broad redirect slot), and those
+ * must not collapse to one entry. No space segment: the string is
+ * per-space by construction.
+ */
+export const toString = (address: IMemoryAddress, identity: ScopeKeyIdentity) =>
+  `/${resolveScopeKey(address.scope, identity)}/${address.id}/${
     JSON.stringify(address.path)
   }`;
 

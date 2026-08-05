@@ -247,7 +247,7 @@ Stages, one PR each except C, which is a three-PR train (below):
       accumulator server-side; per-doc CAS with per-write-class
       conflict handling; CFC stays per action RUN — `action ×
       instance`, never per action (serving-loop.md §3c–§3d).
-- [ ] **E — instance re-keying (scopes.md §7 M2)**, declared
+- [x] **E — instance re-keying (scopes.md §7 M2)**, declared
       **OFF-ARM NEUTRAL**: re-key the scheduler, the dependency
       graph, and the basis index from scope NAME to scope INSTANCE
       at every site in
@@ -271,7 +271,18 @@ Stages, one PR each except C, which is a three-PR train (below):
       demand-/`firedAt`-supplied identity, never from ambient state
       (OFF arm: the identity is the runtime's own authenticated
       session — key-vocabulary.md §3). The stage LEADS with that
-      definition move.
+      definition move. LANDED 2026-08-04: the vocabulary (constructor
+      + parse/inspect helpers + `ProtocolError`) lives in
+      `packages/memory/v2.ts` beside `CellScope`, and the engine
+      re-exports the same objects — no twin exists; all nine sites
+      (plus the server's query/watch doc keys, which share the
+      tracker strings with sites 5–6) construct instance keys from an
+      explicitly supplied identity — `Runtime.scopeKeyIdentity` /
+      `IStorageManager.scopeKeyIdentity()` in the OFF arm, the
+      querying session's on the server query path; the wave
+      accumulator takes a `ScopeKeyIdentity` and constructs through
+      the shared definition, so basis-index instance VALUES flow
+      through the engine-side writer as specced.
 - [ ] **F — host + SpaceServer + watermark + gates**: executor host,
       per-space activation/park with demand-driven value pull — no
       per-piece start/stop (serving-loop.md §1, §3); pure structural
@@ -320,9 +331,14 @@ Success criteria (flag OFF — the ON gates are Phase 2's):
       `scheduler_context_floor`; the basis index is the only
       persisted scheduler state besides W and `eventWatermark`
       (landed 2026-08-04 as the C.1–C.3 train).
-- [ ] Stage E lands with the OFF arm byte-identical: the re-keyed
+- [x] Stage E lands with the OFF arm byte-identical: the re-keyed
       vocabulary partitions state exactly as the scope-NAME form did
-      at cardinality 1.
+      at cardinality 1 (2026-08-04: partition equivalence pinned by
+      `packages/runner/test/scope-key-rekeying.test.ts` against the
+      name-keyed form; full runner + memory unit suites green; the
+      runner package integration suite run in BOTH arms —
+      flag-OFF and flag-ON toolshed — 14/14 each, ON-arm skip list
+      still empty).
 
 ## Phase 2 — Flag ON: server derives and the client does not
 

@@ -20,6 +20,13 @@ const signer = await Identity.fromPassphrase("bench operator");
 const space = signer.did();
 
 // Setup helper
+
+// Identity entity keys resolve scoped addresses against (stage E).
+const TEST_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+
 function setup() {
   const storageManager = StorageManager.emulate({
     as: signer,
@@ -745,7 +752,7 @@ Deno.bench(
   { group: "utilities" },
   () => {
     const addresses = generateAddresses(100, 10);
-    addressesToPathByEntity(addresses);
+    addressesToPathByEntity(addresses, TEST_IDENTITY);
   },
 );
 
@@ -754,7 +761,7 @@ Deno.bench(
   { group: "utilities" },
   () => {
     const addresses = generateAddresses(1000, 50);
-    addressesToPathByEntity(addresses);
+    addressesToPathByEntity(addresses, TEST_IDENTITY);
   },
 );
 

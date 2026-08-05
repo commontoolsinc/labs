@@ -10,6 +10,10 @@ import {
 import type { JSONSchemaObj, SchemaPathSelector } from "@commonfabric/api";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
 import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
+import {
   FabricInstance,
   FabricPrimitive,
   FabricSpecialObject,
@@ -1078,6 +1082,16 @@ export type PointerCycleTracker = CompoundCycleTracker<
 export type TraversalContext = {
   tracker: PointerCycleTracker;
   schemaTracker: MapSet<string, SchemaPathSelector>;
+  /**
+   * The acting identity this traversal's schema-tracker keys resolve
+   * scoped addresses against (key-vocabulary.md §1 sites 5–6): coverage
+   * proven for one scope INSTANCE is not coverage of another, so tracker
+   * keys carry the shared scope_key, built from this identity. The
+   * identity arrives with the work — a client traversal supplies its
+   * runtime's own session (`Runtime.scopeKeyIdentity`); the memory
+   * server's query path supplies the querying session's.
+   */
+  scopeKeyIdentity: ScopeKeyIdentity;
   includeMeta: boolean;
   metaDocsVisited: Set<string>;
   /**
@@ -1098,6 +1112,7 @@ export type TraversalContext = {
 export function createTraversalContext(
   tracker: PointerCycleTracker,
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  scopeKeyIdentity: ScopeKeyIdentity,
   includeMeta: boolean = false,
   metaDocsVisited: Set<string> = new Set<string>(),
   onMissingLinkTarget?: (
@@ -1108,6 +1123,7 @@ export function createTraversalContext(
   return {
     tracker,
     schemaTracker,
+    scopeKeyIdentity,
     includeMeta,
     metaDocsVisited,
     onMissingLinkTarget,
@@ -1115,6 +1131,7 @@ export function createTraversalContext(
 }
 
 export function createDefaultTraversalContext(
+  scopeKeyIdentity: ScopeKeyIdentity,
   includeMeta: boolean = true,
   schemaTracker: MapSet<string, SchemaPathSelector> =
     new MapSetStringToPathSelectors(true),
@@ -1130,6 +1147,7 @@ export function createDefaultTraversalContext(
       JSONSchema | undefined
     >(),
     schemaTracker,
+    scopeKeyIdentity,
     includeMeta,
     metaDocsVisited,
     onMissingLinkTarget,
@@ -1381,10 +1399,13 @@ function getNormalizedLink(
 // Value traversed must be a DAG, though it may have aliases or cell links
 // that make it seem like it has cycles
 export abstract class BaseObjectTraverser {
+  // `context` is required: it carries the traversal's acting identity
+  // (scopeKeyIdentity), which no default could supply — identity arrives
+  // with the work, never from ambient state (key-vocabulary.md §3).
   constructor(
     protected tx: IExtendedStorageTransaction,
     protected selector: SchemaPathSelector = DEFAULT_SELECTOR,
-    protected context: TraversalContext = createDefaultTraversalContext(),
+    protected context: TraversalContext,
     public objectCreator: IObjectCreator<FabricValue> =
       new StandardObjectCreator(),
   ) {
@@ -1676,6 +1697,23 @@ export abstract class BaseObjectTraverser {
     if (link?.id === undefined) {
       return false;
     }
+    // OFF-ARM NEUTRALITY (stage E, deliberate): coverage is only ever
+    // consulted for links that DECLARE a scope. The pre-stage-E key here
+    // interpolated `link.scope` raw, so an unscoped link produced an
+    // "undefined" scope segment that never matched the tracker's
+    // normalized entries — the covered-skip paths (which replace a
+    // repeat link's value with `null` in traverseCells mode) never fired
+    // for unscoped links, and consumers of traversed values (the html
+    // reconciler's cell reads) rely on that. Re-keying must not widen
+    // when the skip fires (testing.md §2: the OFF arm stays
+    // byte-identical), so the old never-matches outcome is kept
+    // explicitly. Enabling the coverage memo for unscoped links is a
+    // separate, deliberate change — gated on first resolving the html
+    // reconciler's `get({ traverseCells: true })` value consumption —
+    // never a side effect of re-keying.
+    if (link.scope === undefined) {
+      return false;
+    }
 
     const targetSelector = narrowAndCombineSelectorForLink(
       doc.address.path,
@@ -1686,7 +1724,10 @@ export abstract class BaseObjectTraverser {
 
     return schemaTrackerCoversSelector(
       this.schemaTracker,
-      `${link.space}/${link.scope}/${link.id}`,
+      // Same key construction as getTrackerKey (key-vocabulary.md §1
+      // site 5): coverage proven for one scope instance is not coverage
+      // of another.
+      getTrackerKey(link, this.context.scopeKeyIdentity),
       this.internCoverageSelector(targetSelector),
     );
   }
@@ -1948,14 +1989,17 @@ function reportMissingLinkTarget(
 }
 
 /**
- * Get a string to use as a key for the specified address
- *
- * @param address an IMemorySpaceAddress
+ * Schema-tracker key for an address: one entry per scope INSTANCE
+ * (key-vocabulary.md §1 site 6), built from the traversal's acting
+ * identity via the shared scope_key constructor.
  */
 function getTrackerKey(
-  address: IMemorySpaceAddress,
+  address: Pick<IMemorySpaceAddress, "space" | "id" | "scope">,
+  identity: ScopeKeyIdentity,
 ): string {
-  return `${address.space}/${address.scope ?? "space"}/${address.id}`;
+  return `${address.space}/${
+    resolveScopeKey(address.scope, identity)
+  }/${address.id}`;
 }
 
 /**
@@ -2182,7 +2226,7 @@ function trackVisitedDoc(
   // and update our targetDoc
   if (selector !== undefined) {
     context.schemaTracker.add(
-      getTrackerKey(target),
+      getTrackerKey(target, context.scopeKeyIdentity),
       internPathSelector(selector),
     );
   }
@@ -2212,6 +2256,7 @@ function loadMetaLinkedDoc(
   valueEntry: IMemorySpaceAttestation,
   meta: "cfc" | "result" | "pattern" | "argument" | "internal",
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  identity: ScopeKeyIdentity,
 ): MetaLinkedDoc[] {
   const targetObj = valueEntry.value as Immutable<JSONObject>;
   if (!isRecord(targetObj) || !(meta in targetObj)) return [];
@@ -2238,6 +2283,7 @@ function loadMetaLinkedDoc(
           tx,
           valueEntry,
           schemaTracker,
+          identity,
           manifestEntry.link,
         );
         if (item !== undefined) {
@@ -2263,6 +2309,7 @@ function loadMetaLinkedDoc(
       tx,
       valueEntry,
       schemaTracker,
+      identity,
       linkObj,
     );
     if (item !== undefined) {
@@ -2276,6 +2323,7 @@ function loadMetaLinkedDocFromLink(
   tx: IExtendedStorageTransaction,
   valueEntry: IMemorySpaceAttestation,
   schemaTracker: MapSet<string, SchemaPathSelector>,
+  identity: ScopeKeyIdentity,
   linkObj: SigilLink,
 ) {
   const link = parseLink(linkObj, valueEntry.address)!;
@@ -2294,7 +2342,7 @@ function loadMetaLinkedDocFromLink(
   if (result.error) {
     return undefined;
   }
-  const docKey = getTrackerKey(address);
+  const docKey = getTrackerKey(address, identity);
   schemaTracker.add(docKey, REJECTING_SELECTOR);
   return { address, value: result.ok.value, selector: REJECTING_SELECTOR };
 }
@@ -2334,6 +2382,7 @@ function traverseMetaLinkedDoc(
       JSONSchema | undefined
     >(),
     context.schemaTracker,
+    context.scopeKeyIdentity,
     context.includeMeta,
     context.metaDocsVisited,
     context.onMissingLinkTarget,
@@ -2359,7 +2408,10 @@ export function loadMetaLinkedDocs(
   valueEntry: IMemorySpaceAttestation,
   context: TraversalContext,
 ) {
-  const valueEntryKey = getTrackerKey(valueEntry.address);
+  const valueEntryKey = getTrackerKey(
+    valueEntry.address,
+    context.scopeKeyIdentity,
+  );
   if (context.metaDocsVisited.has(valueEntryKey)) {
     return;
   }
@@ -2382,13 +2434,17 @@ export function loadMetaLinkedDocs(
         currentDoc,
         meta,
         context.schemaTracker,
+        context.scopeKeyIdentity,
       );
       for (const linkedDoc of linkedDocs) {
         // Don't recurse into invalid docs or cid docs
         if (linkedDoc.address.id.startsWith("cid:")) {
           continue;
         }
-        const linkedDocKey = getTrackerKey(linkedDoc.address);
+        const linkedDocKey = getTrackerKey(
+          linkedDoc.address,
+          context.scopeKeyIdentity,
+        );
         if (context.metaDocsVisited.has(linkedDocKey)) continue;
         context.metaDocsVisited.add(linkedDocKey);
         traverseMetaLinkedDoc(tx, linkedDoc, context);
@@ -2887,7 +2943,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   constructor(
     tx: IExtendedStorageTransaction,
     selector: SchemaPathSelector = DEFAULT_SELECTOR,
-    context: TraversalContext = createDefaultTraversalContext(),
+    context: TraversalContext,
     objectCreator?: IObjectCreator<V>,
     sharedSchemaMemo?: SchemaMemo,
   ) {
@@ -2996,7 +3052,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
 
     logger.timeStart("traverse");
     this.schemaTracker.add(
-      getTrackerKey(doc.address),
+      getTrackerKey(doc.address, this.context.scopeKeyIdentity),
       internPathSelector(this.selector),
     );
     // Flag the top level read of doc for the scheduler

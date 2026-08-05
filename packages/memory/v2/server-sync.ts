@@ -7,6 +7,7 @@ import {
   type SessionSyncUpsert,
   type WatchSpec,
 } from "../v2.ts";
+import { toDirtyKey } from "./query.ts";
 
 export type SessionCacheEntry = SessionSyncUpsert & { scope: CellScope };
 
@@ -61,7 +62,7 @@ export const trackedIdsFromEntries = (
 ): Set<string> => {
   const ids = new Set<string>();
   for (const entry of entries) {
-    ids.add(`${entry.scope}\0${entry.id}`);
+    ids.add(toDirtyKey(entry.id, entry.scope));
   }
   return ids;
 };

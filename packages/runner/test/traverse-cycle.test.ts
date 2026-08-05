@@ -12,6 +12,7 @@ import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 import {
   CompoundCycleTracker,
+  createDefaultTraversalContext,
   ManagedStorageTransaction,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
@@ -32,6 +33,13 @@ import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 const TYPE = "application/json" as const;
 const SPACE = "did:null:null";
 
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E).
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+
 function getTraverser(
   store: Map<string, Revision<State>>,
   selector: SchemaPathSelector,
@@ -39,7 +47,11 @@ function getTraverser(
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const tx = new ExtendedStorageTransaction(managedTx);
-  return new SchemaObjectTraverser(tx, selector);
+  return new SchemaObjectTraverser(
+    tx,
+    selector,
+    createDefaultTraversalContext(TEST_SCOPE_IDENTITY),
+  );
 }
 
 function storeWith(

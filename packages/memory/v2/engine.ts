@@ -34,85 +34,42 @@ import {
   isEntityDocument,
   type Operation,
   type PatchOp,
+  ProtocolError,
   type Reference,
+  resolvePrincipalSessionKey,
+  resolveScopeKey,
+  type ScopeKey,
+  scopeOfScopeKey,
   type SessionId,
   type SqliteOperation,
   tableDeclaresRowLabel,
 } from "../v2.ts";
 
+// The scope_key vocabulary is PROTOCOL vocabulary and lives in the
+// wire-shape module (../v2.ts, beside CellScope) as the ONE definition —
+// ledger LD3 (key-vocabulary.md §3). The engine imports it and re-exports
+// the names its consumers historically reached through `Engine.*`; it
+// defines no scope-key format of its own. Identity DERIVATION stays
+// engine-owned: admission threads the authenticated session's
+// principal/sessionId into the constructor for `authored` traffic.
+export {
+  principalOfSessionKey,
+  ProtocolError,
+  resolveScopeKey,
+} from "../v2.ts";
+
 const DEFAULT_SCOPE: CellScope = "space";
-const DEFAULT_SCOPE_KEY = "space" as const;
+// The space scope's one shared instance, per the shared vocabulary (the
+// `scope ?? "space"` construction below and every stored default agree).
+const DEFAULT_SCOPE_KEY: ScopeKey = "space";
 const normalizeScope = (scope: CellScope | undefined): CellScope =>
   scope ?? DEFAULT_SCOPE;
-
-const encodeScopeKeyPart = (value: string): string => encodeURIComponent(value);
-
-const resolvePrincipalSessionKey = (
-  principal: string,
-  sessionId: SessionId,
-): string =>
-  `session:${encodeScopeKeyPart(principal)}:${encodeScopeKeyPart(sessionId)}`;
 
 export const resolveCommitSessionKey = (
   sessionId: SessionId,
   principal?: string,
 ): string =>
   principal ? resolvePrincipalSessionKey(principal, sessionId) : sessionId;
-
-// Principal segment of a stored commit/observation session key
-// (`session:<principal>:<sessionId>` per resolvePrincipalSessionKey).
-// Principal-less sessions store the bare session id — no principal. The
-// segments are encodeURIComponent-encoded, so splitting on ":" is exact.
-export const principalOfSessionKey = (key: string): string | undefined => {
-  if (!key.startsWith("session:")) return undefined;
-  const parts = key.split(":");
-  if (parts.length !== 3) return undefined;
-  try {
-    return decodeURIComponent(parts[1]);
-  } catch {
-    return undefined;
-  }
-};
-
-export const resolveScopeKey = (
-  scope: CellScope | undefined,
-  options: { principal?: string; sessionId?: SessionId },
-): string => {
-  const declared = normalizeScope(scope);
-  switch (declared) {
-    case "space":
-      return DEFAULT_SCOPE_KEY;
-    case "user":
-      if (!options.principal) {
-        throw new ProtocolError(
-          "user scoped memory operations require a principal",
-        );
-      }
-      return `user:${encodeScopeKeyPart(options.principal)}`;
-    case "session":
-      if (!options.principal) {
-        throw new ProtocolError(
-          "session scoped memory operations require a principal",
-        );
-      }
-      if (!options.sessionId) {
-        throw new ProtocolError(
-          "session scoped memory operations require a session id",
-        );
-      }
-      return resolvePrincipalSessionKey(options.principal, options.sessionId);
-  }
-};
-
-const declaredScopeFromScopeKey = (scopeKey: string): CellScope => {
-  if (scopeKey.startsWith("session:")) {
-    return "session";
-  }
-  if (scopeKey.startsWith("user:")) {
-    return "user";
-  }
-  return "space";
-};
 
 const PRAGMAS = `
   PRAGMA journal_mode = WAL;
@@ -791,12 +748,8 @@ export class PreconditionFailedError extends Error {
   }
 }
 
-export class ProtocolError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ProtocolError";
-  }
-}
+// ProtocolError moved to the wire-shape module (../v2.ts) with the shared
+// scope-key vocabulary that throws it; re-exported near the imports above.
 
 export type OpenOptions = {
   url: URL;
@@ -1425,7 +1378,7 @@ const readStateForScopeKey = (
     seq?: number;
   },
 ): EntityState | null => {
-  const declaredScope = scope ?? declaredScopeFromScopeKey(scopeKey);
+  const declaredScope = scope ?? scopeOfScopeKey(scopeKey);
   const targetSeq = seq ?? headSeq(engine, branch);
   const resolved = readRowForBranch(engine, {
     id,
@@ -1841,7 +1794,7 @@ const applyCommitTransaction = (
             "annotation (protocol.md §1)",
         );
       }
-      if (declaredScopeFromScopeKey(annotated) !== declared) {
+      if (scopeOfScopeKey(annotated) !== declared) {
         throw new ProtocolError(
           `derived-class commit rejected: annotated scope_key ` +
             `"${annotated}" does not match the write's declared scope ` +
@@ -2586,7 +2539,7 @@ const selectCommitRevisions = (
   return rows.map((row) => {
     const base = {
       id: row.id,
-      scope: declaredScopeFromScopeKey(row.scope_key),
+      scope: scopeOfScopeKey(row.scope_key),
       scopeKey: row.scope_key,
       branch: row.branch,
       seq: row.seq,

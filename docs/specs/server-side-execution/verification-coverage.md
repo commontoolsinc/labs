@@ -12,7 +12,7 @@ mapping pass is due.
 
 ## 1. The map
 
-292 binding rules. Instruments: the scenario traces (T1–T12), the
+295 binding rules. Instruments: the scenario traces (T1–T12), the
 field-provenance chains, the executable model (C1–C10 property
 families), the Phase 1 dry-run, and the doc-review panels
 (weak — counted only where nothing else applies).
@@ -25,7 +25,7 @@ families), the Phase 1 dry-run, and the doc-review panels
 | scopes | 25 | 17 | 3 | 1 | 2 | 2 |
 | builtins | 15 | 6 | 3 | 1 | 4 | 1 |
 | serving-loop | 77 | 45 | 20 | 1 | 5 | 6 |
-| key-vocabulary | 6 | 5 | 1 | 0 | 0 | 0 |
+| key-vocabulary | 9 | 5 | 3 | 0 | 0 | 1 |
 | speculation | 15 | 10 | 2 | 0 | 1 | 2 |
 | testing | 14 | 4 | 10 | 0 | 0 | 0 |
 | runtime-mapping | 17 | 5 | 3 | 1 | 5 | 3 |
@@ -145,6 +145,18 @@ Delta 2026-08-05 (follow-up) — Q1-ruling propagation (serving-loop
   (impl-gate, above) and §4's identity-carriage miss rule (FP6,
   RULED 2026-08-03).
 
+Delta 2026-08-05 — the name-keyed boundary surface
+(key-vocabulary §5, stage E's review batch): three new rules
+(key-vocabulary 6 → 9). The §4 tripwire extension (a new
+name-keyed identity key, or a change to a listed boundary site,
+must update §5) is an implementation gate of the same grep-tripwire
+class as the rest of §4. The coverage-memo enablement gate
+(unscoped-link coverage stays off until the html reconciler's
+`get({ traverseCells: true })` value consumption is resolved —
+key-vocabulary §5) is an implementation gate on the PR that flips
+it. The schema-memo single-identity invariant (cross-identity memo
+sharing FORBIDDEN) is OWED an explicit guard — OW10.
+
 ## 3. The owed register (every genuine orphan, with its trigger)
 
 Nothing here blocks Phase 1. Each item names the instrument
@@ -187,6 +199,12 @@ trace, T13 candidate):**
   its own owner ruling first).
 - OW6 — pattern-pointer hot-swap runs server-side (serving-loop
   §3e; N40/41).
+- OW10 — the schema-memo single-identity guard (key-vocabulary §5):
+  an explicit tripwire or assertion that no memo instance is shared
+  across identities, landed BEFORE any cross-run memo sharing.
+  Today every sharing scope is single-identity by construction;
+  the guard is what keeps a future sharing change from silently
+  becoming value-bleed.
 
 **Stage G pre-gate:**
 

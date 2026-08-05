@@ -2,6 +2,13 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import * as Address from "../src/storage/transaction/address.ts";
 
+// The identity address strings resolve scoped addresses against
+// (key-vocabulary.md §1 site 8). Space-scoped addresses ignore it.
+const TEST_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+
 describe("Address Module", () => {
   describe("toString function", () => {
     it("should convert address with empty path to string", () => {
@@ -11,7 +18,7 @@ describe("Address Module", () => {
         path: [],
       } as const;
 
-      const result = Address.toString(address);
+      const result = Address.toString(address, TEST_IDENTITY);
 
       expect(result).toBe("/space/user:1/[]");
     });
@@ -23,7 +30,7 @@ describe("Address Module", () => {
         path: ["profile"],
       } as const;
 
-      const result = Address.toString(address);
+      const result = Address.toString(address, TEST_IDENTITY);
 
       expect(result).toBe('/space/user:1/["profile"]');
     });
@@ -35,7 +42,7 @@ describe("Address Module", () => {
         path: ["profile", "settings", "theme"],
       } as const;
 
-      const result = Address.toString(address);
+      const result = Address.toString(address, TEST_IDENTITY);
 
       expect(result).toBe(
         '/space/user:1/["profile","settings","theme"]',
@@ -49,7 +56,7 @@ describe("Address Module", () => {
         path: ["items", "0", "name"],
       } as const;
 
-      const result = Address.toString(address);
+      const result = Address.toString(address, TEST_IDENTITY);
 
       expect(result).toBe('/space/array:1/["items","0","name"]');
     });
@@ -61,7 +68,7 @@ describe("Address Module", () => {
         path: ["data"],
       } as const;
 
-      const result = Address.toString(address);
+      const result = Address.toString(address, TEST_IDENTITY);
 
       expect(result).toBe(
         '/space/user:special-chars_123/["data"]',
@@ -75,9 +82,40 @@ describe("Address Module", () => {
         path: ["metadata", "title"],
       } as const;
 
-      const result = Address.toString(address);
+      const result = Address.toString(address, TEST_IDENTITY);
 
       expect(result).toBe('/space/document:1/["metadata","title"]');
+    });
+
+    it("keys scoped addresses per INSTANCE via the shared scope_key vocabulary (stage E)", () => {
+      // key-vocabulary.md §1 site 8: the scope segment is the scope_key
+      // resolved against the acting identity — never the scope NAME.
+      const userAddress = {
+        id: "user:1",
+        type: "application/json",
+        scope: "user",
+        path: [],
+      } as const;
+      const sessionAddress = {
+        id: "user:1",
+        type: "application/json",
+        scope: "session",
+        path: [],
+      } as const;
+
+      expect(Address.toString(userAddress, TEST_IDENTITY)).toBe(
+        "/user:did%3Atest%3Aalice/user:1/[]",
+      );
+      expect(Address.toString(sessionAddress, TEST_IDENTITY)).toBe(
+        "/session:did%3Atest%3Aalice:session-1/user:1/[]",
+      );
+      // Two identities' instances of one address never collapse.
+      expect(Address.toString(userAddress, TEST_IDENTITY)).not.toBe(
+        Address.toString(userAddress, {
+          principal: "did:test:bob",
+          sessionId: "session-2",
+        }),
+      );
     });
   });
 
@@ -272,7 +310,9 @@ describe("Address Module", () => {
         path: [],
       } as const;
 
-      expect(Address.toString(address1)).toBe("/space/user:1/[]");
+      expect(Address.toString(address1, TEST_IDENTITY)).toBe(
+        "/space/user:1/[]",
+      );
       expect(Address.includes(address1, address2)).toBe(true);
     });
 
@@ -283,7 +323,7 @@ describe("Address Module", () => {
         path: ["data", "attributes", "nested-property"],
       } as const;
 
-      const result = Address.toString(address);
+      const result = Address.toString(address, TEST_IDENTITY);
 
       expect(result).toBe(
         '/space/namespace:complex-id-with-dashes_and_underscores.123/["data","attributes","nested-property"]',

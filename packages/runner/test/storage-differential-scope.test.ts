@@ -18,7 +18,10 @@ Deno.test("differential checkout preserves scope for missing facts", () => {
     get: (address: IMemoryAddress) => current.get(key(address)),
   };
 
-  const before = Differential.checkout(memory, [fact]);
+  const before = Differential.checkout(memory, [fact], {
+    principal: "did:test:alice",
+    sessionId: "session-1",
+  });
   current.set(
     key({ id: fact.of, type: fact.the, scope: "user", path: [] }),
     fact,

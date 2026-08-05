@@ -10,22 +10,24 @@ scope-mechanics scout pass of 2026-08-02 (§Anchors, §7). Read
 [serving-loop.md](serving-loop.md) vocabulary.
 MUST/NEVER language is binding on implementers.
 
-## Anchors (verified 2026-08-02, scout pass)
+## Anchors (scout pass 2026-08-02; re-verified 2026-08-05)
 
 Today's scope machinery, pinned read-only by the scout. Paths are
 relative to `packages/runner/src/` unless another package is named;
-runtime-mapping.md rows 49/56/57/60 remain the mapping rows.
+runtime-mapping.md rows 49/56/57/60 remain the mapping rows. Line
+anchors resolve against THIS branch's tree; §7's inventory of main's
+machinery marks the cites that resolve only against main.
 
 - **Lattice and enum**: `scope.ts:11`; `narrowestScope` picks the
   narrowest by rank (`scope.ts:129-139`).
 - **Discovered output scope**: a per-transaction ratchet,
   `narrowestReadScope`
-  (`storage/extended-storage-transaction.ts:273`, `827-847`) — every
+  (`storage/extended-storage-transaction.ts:275`, `858-871`) — every
   read, link hops included, ratchets it. The runner resets it before
-  reading inputs (`runner.ts:5515`), reads the floor after the fn
-  returns (`runner.ts:5598`), and derives `effectiveOutputScope`
-  from it (`runner.ts:5062-5066`).
-- **The narrowing redirect write**: `pattern-binding.ts:281-307` —
+  reading inputs (`runner.ts:5572`), reads the floor after the fn
+  returns (`runner.ts:5655`), and derives `effectiveOutputScope`
+  from it (`runner.ts:5074-5084`).
+- **The narrowing redirect write**: `pattern-binding.ts:279-305` —
   when the discovered scope is narrower than the resolved binding,
   the runtime writes the value at `{...ref, scope: outputScope}`
   (same space, same doc id, same path — only the scope differs) and
@@ -34,28 +36,31 @@ runtime-mapping.md rows 49/56/57/60 remain the mapping rows.
   `{scope: "user"|"session", id: <same doc id>}` (asserted by
   `packages/runner/test/pattern-scope.test.ts:2837-2848`).
 - **Declared-scope redirects** (schema `asCell: [{kind, scope}]`):
-  `data-updating.ts:646-692`; eager redirects for omitted scoped
-  properties `data-updating.ts:1478-1517`.
+  `data-updating.ts:681-727`; eager redirects for omitted scoped
+  properties `data-updating.ts:1516-1583`.
 - **Scoped-slot writes outside the declared surface**: warn-only
   diagnostics, with per-user/per-session writes exempted
-  (`scheduler/run.ts:616-654`, exemption `631-638`).
+  (`scheduler/run.ts:619-657`, exemption `633-640`).
 - **Session-scoped result cells**: the runner keeps result cells per
-  scope, `previousResultCellRef.byScope` (`runner.ts:5068-5092`);
+  scope, `previousResultCellRef.byScope` (`runner.ts:5086-5110`);
   `navigateTo`'s result cell is session-scoped
-  (`builtins/navigate-to.ts:46`).
+  (`builtins/navigate-to.ts:45`).
 - **Instance addressing**: scope never changes the doc id. Storage
   rows are keyed `(branch, id, scope_key)`
-  (`packages/memory/v2/engine.ts:368-403`), with scope keys
+  (`packages/memory/v2/engine.ts:160`, `:177`), with scope keys
   `'space'`, `'user:<principal>'`,
-  `'session:<principal>:<sessionId>'`, resolved by `resolveScopeKey`
-  (`engine.ts:98-126`) from the authenticated session.
-- **Dirtiness**: storage-side reader matching is by exact
-  `scope_key` (`packages/memory/v2/engine.ts:3024-3066`); the
-  client dependency graph is keyed by scope NAME only —
-  `${space}/${scope}/${id}` (`entityKey`,
-  `scheduler/keys.ts:5-9`). The full inventory of key-construction
-  sites that carry the scope NAME is
-  [key-vocabulary.md](key-vocabulary.md).
+  `'session:<principal>:<sessionId>'` — the shared vocabulary
+  `resolveScopeKey` in the wire-shape module
+  (`packages/memory/v2.ts:120-147`; LD3, key-vocabulary.md §3) —
+  resolved from the authenticated session at admission for
+  `authored` traffic.
+- **Dirtiness**: the server's query/watch tracking and the client
+  dependency graph are keyed per scope INSTANCE via the shared
+  vocabulary (`entityKey`, `scheduler/keys.ts:26-33`;
+  `packages/memory/v2/query.ts`'s `toDocKey` — stage E, §7 M2). The
+  per-session wake path still keys dirtiness by `(id, scope-name)`
+  (M4 — stage F re-keys push). The full inventory of instance-keyed
+  construction sites is [key-vocabulary.md](key-vocabulary.md).
 
 ## 1. North star
 
@@ -291,14 +296,20 @@ The scout inventory (2026-08-02) surfaced five load-bearing
 assumptions in today's scope machinery. All five hold for a client
 that computes ONLY ITS OWN instance and break for a SpaceServer
 deriving EVERY instance (§1). Each is live code, not spec debt;
-Phases 1–5 meet them wherever scoped state appears.
+Phases 1–5 meet them wherever scoped state appears. Cites resolve
+against this branch's tree except where marked `main`: those name
+machinery the landed stages have already deleted or replaced here,
+kept because the assumption they document is main's.
 
 - **M1 — Scope is discovered by running AS (principal, session).**
   Discovery is ambient per-transaction state
-  (`storage/extended-storage-transaction.ts:273`): a run's scope is
+  (`storage/extended-storage-transaction.ts:275`): a run's scope is
   learned by BEING the principal+session whose reads ratchet it,
   and the floor ratchet assumes monotone evidence per fingerprint
-  (`packages/memory/v2/engine.ts:3990-4004`). → v2: the server must
+  (main `packages/memory/v2/engine.ts:3990-4004` — the floor
+  machinery is deleted on this branch with the observation
+  reduction; closing note, migration drop at `engine.ts:1221`).
+  → v2: the server must
   evaluate per-instance just to DISCOVER per-instance scope — N
   runs under N identities, with N time-varying (§2).
   The READ side is the half R-Q6b did not cover, and it is now
@@ -313,31 +324,34 @@ Phases 1–5 meet them wherever scoped state appears.
   the same one equality check as derived writes. Without it a
   SpaceServer read under its service envelope resolves
   `user:<serviceDID>` and returns an EMPTY instance silently:
-  `resolveScopeKey` (`packages/memory/v2/engine.ts:98-126`) throws
+  `resolveScopeKey` (`packages/memory/v2.ts:120-147`) throws
   on a MISSING principal, never on a wrong one. Which identity a
   run assumes is §5's run-identity rule.
-- **M2 — Every in-memory identity key uses the scope NAME, never
-  the scope_key.** `getDocKey` (`runner.ts:3201-3204`), `entityKey`
-  (`scheduler/keys.ts:5-9`), `byScope` (`runner.ts:708`,
-  `5068-5092`, `5456`) — all `${space}/${scope}/${id}`, sound only
-  at cardinality 1; per-instance keying exists only in storage
-  columns. Three subsystems is an UNDERCOUNT: the same scope-NAME
-  key shape is built at `data-updating.ts:102` (`seedMemoKey`),
-  `traverse.ts:1693` and `traverse.ts:1962` (`getTrackerKey`),
-  `storage/v2.ts:1247` (pending-load key),
-  `storage/transaction/address.ts:4` (`toString`), and
-  `scheduler/graph-snapshot.ts:245` (`formatAddress`). All nine
-  sites, with their required instance dimension and OFF-arm-neutral
-  form, are inventoried in
-  [key-vocabulary.md](key-vocabulary.md). → v2: the scheduler, the
-  dependency graph, and the basis index must re-key per instance —
-  the single biggest scope cost of the arc.
+- **M2 — Every in-memory identity key used the scope NAME, never
+  the scope_key** — sound only at cardinality 1; per-instance
+  keying existed only in storage columns. Three subsystems was an
+  UNDERCOUNT: the closure of storage-row-aligned identity
+  construction is NINE construction sites, inventoried with their
+  required instance dimension in
+  [key-vocabulary.md](key-vocabulary.md). → v2, RESOLVED for the
+  storage-row-aligned closure (stage E, landed dark): the nine
+  sites key per instance via the shared scope_key vocabulary,
+  built from an explicitly supplied identity — the runtime's own
+  authenticated session at OFF-arm cardinality 1, so the partition
+  is unchanged until stage F supplies per-run identities
+  (key-vocabulary.md §1–§2). The remainder — the name-keyed
+  boundary surface, key-vocabulary.md §5 — re-keys with stage F:
+  wire-coupled sites with M4's push re-key, serving-identity sites
+  with M1's per-run identities (key-vocabulary.md §4's tripwires
+  police both inventories).
 - **M3 — There is no all-principals write path.** `resolveScopeKey`
   is fed from the authenticated session at admission (`applyCommit`
   threads principal + sessionId,
-  `packages/memory/v2/server.ts:2128-2132`, into
-  `engine.ts:5374-5375`), and mirrors refuse to
-  re-derive scope context (`engine.ts:2580-2596`): a scoped write
+  `packages/memory/v2/server.ts:2060-2063`, into
+  `engine.ts:2031-2032`), and mirrors refuse to
+  re-derive scope context (main `engine.ts:2580-2596`,
+  `upsertMirroredSchedulerObservation` — mirror machinery deleted
+  on this branch with the observation reduction): a scoped write
   requires that instance's principal. → v2, RESOLVED (R-Q6b,
   2026-08-02): derived commits carry an explicit `scope_key` on
   every scoped write WITHIN the commit (protocol.md §1, §7), so
@@ -346,16 +360,23 @@ Phases 1–5 meet them wherever scoped state appears.
   unchanged — no per-principal admission, no delegated-capability
   extension to scoped derived writes.
 - **M4 — Wake/sync dirties by scope NAME.** Storage-side reader
-  matching is exact-scope_key
-  (`packages/memory/v2/engine.ts:3024-3066`), but the wake/sync
-  path keys dirtiness by `(id, scope-name)` (`server.ts:3233-3239`)
-  — fine while each session re-evaluates only itself, quadratic
-  waste once one server hosts every instance. → v2: the push path
-  must key by scope_key.
+  matching is exact-scope_key (main
+  `packages/memory/v2/engine.ts:3024-3066`,
+  `findSchedulerReadersForWrite` — deleted on this branch with the
+  observation reduction; the branch's query/watch tracking is
+  scope_key-keyed, M2), but the wake/sync path keys dirtiness by
+  `(id, scope-name)` (`toDirtyKey`,
+  `packages/memory/v2/query.ts:773-776`; marked at
+  `server.ts:2092-2098`, dirty sets `server.ts:845-847`;
+  key-vocabulary.md §5's M4-coupled list) — fine while each session
+  re-evaluates only itself, quadratic waste once one server hosts
+  every instance. → v2: the push path must key by scope_key.
 - **M5 — Retention assumes instances are cheap to re-derive per
   owner.** Session EXECUTION CONTEXTS are capped at 32 per action
-  (`packages/memory/v2/engine.ts:55`); session DATA rows are never
-  GC'd — nothing retires session data today. → v2: §3's
+  (main `packages/memory/v2/engine.ts:55`,
+  `MAX_RETAINED_SCHEDULER_SESSION_CONTEXTS_PER_ACTION` — the
+  machinery it bounds is deleted on this branch); session DATA rows
+  are never GC'd — nothing retires session data today. → v2: §3's
   durable-with-retirement needs an actual GC design (§8 item 2),
   and a server owning ALL instances cannot have its working set
   silently evicted.
@@ -398,7 +419,7 @@ citations use it):
    cover NON-SESSION keys (S8): narrowing strands basis rows at
    `space` and `user:<p>` keys that no session retirement ever
    touches, and main's 32-per-action execution-context cap
-   (`packages/memory/v2/engine.ts:55`) dies with the dropped tables
+   (main `packages/memory/v2/engine.ts:55`) dies with the dropped tables
    while `scheduler_basis` specifies no bound of its own. The
    deletion rule in serving-loop.md §3b keeps the stranding from
    growing without bound in the narrowing case; a retirement design

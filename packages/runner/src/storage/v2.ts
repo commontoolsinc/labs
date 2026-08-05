@@ -29,6 +29,7 @@ import {
   type EntityIdListResult,
   getCommitPreconditionsConfig,
   type PatchOp,
+  type ScopeKeyIdentity,
   type SessionSync,
   type SqliteDbRef,
   type SqliteOperation,
@@ -62,6 +63,7 @@ import {
   parseLinkPrimitive,
 } from "../link-types.ts";
 import type { Cancel } from "../cancel.ts";
+import { entityKey } from "../scheduler/keys.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import type {
@@ -975,6 +977,16 @@ export class StorageManager implements IStorageManager {
     this.#spaceIdentities.set(identity.did() as MemorySpace, identity);
   }
 
+  /**
+   * The manager's own authenticated session identity (IStorageManager
+   * contract): every provider session authenticates as `this.as` and mounts
+   * with `#sessionId`, so this pair is exactly what the memory server
+   * resolves this manager's scoped operations against.
+   */
+  scopeKeyIdentity(): ScopeKeyIdentity {
+    return { principal: this.as.did(), sessionId: this.#sessionId };
+  }
+
   open(space: MemorySpace): IStorageProvider {
     let provider = this.#providers.get(space);
     if (!provider) {
@@ -988,6 +1000,7 @@ export class StorageManager implements IStorageManager {
         space,
         settings: this.#settings,
         subscription: this.#subscription,
+        scopeKeyIdentity: () => this.scopeKeyIdentity(),
         routeState,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
           ? (routeGeneration, routeSignal) =>
@@ -1326,8 +1339,14 @@ export class StorageManager implements IStorageManager {
     this.#crossSpacePromises.delete(promise);
   }
 
-  // In-flight document loads keyed `space/scope/id` (the scheduler's
-  // entityKey format). Refcounted: concurrent syncCell calls for the same
+  // In-flight document loads keyed `space/scope_key/id` (the scheduler's
+  // entityKey format — one entry per scope INSTANCE, key-vocabulary.md §1
+  // site 7: two instances of one doc are two loads, and collapsing them
+  // would make one waiter observe another's failure). Keys are BUILT with
+  // entityKey so the strings cross-match the scheduler's
+  // (collectPendingLoadParkKeys correlates the two maps); both sides
+  // resolve against this manager's own session identity.
+  // Refcounted: concurrent syncCell calls for the same
   // document share one entry. Waiters resolve when the count returns to zero
   // — whether the load produced a value or found the document absent.
   #pendingLoads = new Map<string, {
@@ -1347,7 +1366,7 @@ export class StorageManager implements IStorageManager {
   private registerPendingLoad(
     address: { space: MemorySpace; scope: CellScope; id: URI },
   ): (failure?: unknown) => void {
-    const key = `${address.space}/${address.scope}/${address.id}`;
+    const key = entityKey(address, this.scopeKeyIdentity());
     const entry = this.#pendingLoads.get(key) ??
       {
         count: 0,
@@ -1712,6 +1731,12 @@ type ProviderOptions = {
   space: MemorySpace;
   settings: IRemoteStorageProviderSettings;
   subscription: IStorageSubscription;
+  /**
+   * The owning manager's authenticated session identity
+   * (IStorageManager.scopeKeyIdentity) — what the replica's notification
+   * differentials resolve scoped change addresses against.
+   */
+  scopeKeyIdentity: () => ScopeKeyIdentity;
   routeState: ProviderRouteState;
   createSession: (
     routeGeneration: number,
@@ -2021,6 +2046,7 @@ const docKey = (id: URI, scope?: CellScope): string =>
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
+  readonly #scopeKeyIdentity: () => ScopeKeyIdentity;
   readonly #createSession: () => Promise<{
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
@@ -2132,6 +2158,7 @@ class SpaceReplica implements ISpaceReplica {
   constructor(options: SpaceReplicaOptions) {
     this.#space = options.space;
     this.#subscription = options.subscription;
+    this.#scopeKeyIdentity = options.scopeKeyIdentity;
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
     this.#settings = options.settings;
@@ -2531,7 +2558,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#subscription.next({
       type: "load",
       space: this.#space,
-      changes: Differential.load(known),
+      changes: Differential.load(known, this.#scopeKeyIdentity()),
     });
     return await this.pull(entries);
   }
@@ -2826,6 +2853,7 @@ class SpaceReplica implements ISpaceReplica {
       ? Differential.checkout(
         this,
         touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+        this.#scopeKeyIdentity(),
       )
       : undefined;
 
@@ -3218,6 +3246,7 @@ class SpaceReplica implements ISpaceReplica {
           ? Differential.checkout(
             this,
             touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+            this.#scopeKeyIdentity(),
           )
           : undefined,
     );
@@ -3662,6 +3691,7 @@ class SpaceReplica implements ISpaceReplica {
       ? Differential.checkout(
         this,
         touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+        this.#scopeKeyIdentity(),
       )
       : undefined;
     await this.waitForConflictReadRepair(rejection);
@@ -3918,6 +3948,7 @@ class SpaceReplica implements ISpaceReplica {
       ? Differential.checkout(
         this,
         touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+        this.#scopeKeyIdentity(),
       )
       : undefined;
 

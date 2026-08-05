@@ -1,3 +1,4 @@
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import { entityKey } from "./keys.ts";
 import type { MaterializerIndexState } from "./materializers.ts";
@@ -12,6 +13,8 @@ import type {
 } from "./types.ts";
 
 export interface DependencyGraphState {
+  /** Identity entity keys resolve scoped addresses against (keys.ts). */
+  readonly scopeKeyIdentity: () => ScopeKeyIdentity;
   readonly triggerIndex: TriggerIndexState;
   readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
@@ -73,10 +76,11 @@ export function setNodeProvisionalDemand(
 
 export function groupReadsByEntity(
   reads: readonly IMemorySpaceAddress[],
+  identity: ScopeKeyIdentity,
 ): Map<SpaceScopeAndURI, IMemorySpaceAddress[]> {
   const readsByEntity = new Map<SpaceScopeAndURI, IMemorySpaceAddress[]>();
   for (const read of reads) {
-    const entity = entityKey(read);
+    const entity = entityKey(read, identity);
     let entityReads = readsByEntity.get(entity);
     if (!entityReads) {
       entityReads = [];
@@ -136,6 +140,7 @@ export function hasInvalidUpstream(
 }
 
 export function collectDirectWritersForLog(state: {
+  readonly scopeKeyIdentity: () => ScopeKeyIdentity;
   readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly effects: ReadonlySet<Action>;
   readonly getSchedulingWrites: (
@@ -166,6 +171,7 @@ export function collectDirectWritersForLog(state: {
 
 export function collectReverseDependenciesForLog(
   state: {
+    readonly scopeKeyIdentity: () => ScopeKeyIdentity;
     readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
     readonly getSchedulingWrites: (
       action: Action,

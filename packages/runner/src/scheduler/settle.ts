@@ -97,6 +97,7 @@ type PullSettleIteration = { settled: true } | {
 
 function buildPullIterationWorkSet(state: {
   readonly initialSeeds: ReadonlySet<Action>;
+  readonly scopeKeyIdentity: SchedulerSettleLoopState["scopeKeyIdentity"];
   readonly nodes: SchedulerSettleLoopState["nodes"];
   readonly dependencies: SchedulerSettleLoopState["dependencies"];
   readonly materializerIndex: SchedulerSettleLoopState["materializerIndex"];
@@ -154,6 +155,7 @@ function buildPullIterationWorkSet(state: {
 
 function addDeclaredReadWriterClosure(
   state: {
+    readonly scopeKeyIdentity: SchedulerSettleLoopState["scopeKeyIdentity"];
     readonly nodes: SchedulerSettleLoopState["nodes"];
     readonly materializerIndex: SchedulerSettleLoopState["materializerIndex"];
     readonly writersByEntity: SchedulerSettleLoopState["writersByEntity"];
@@ -191,6 +193,7 @@ function addDeclaredReadWriterClosure(
       // O(workSet x allNodes) full-registry fixpoint scan).
       forEachOverlappingWriter(
         {
+          scopeKeyIdentity: state.scopeKeyIdentity,
           writersByEntity: state.writersByEntity,
           getSchedulingWrites: state.getSchedulingWrites,
         },
@@ -454,6 +457,7 @@ function buildAndLogPullIterationWorkSet(
   const buildPullWorkSetStart = performance.now();
   const result = buildPullIterationWorkSet({
     initialSeeds,
+    scopeKeyIdentity: state.scopeKeyIdentity,
     nodes: state.nodes,
     dependencies: state.dependencies,
     materializerIndex: state.materializerIndex,
