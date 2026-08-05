@@ -8,6 +8,9 @@
 //   path is today's, byte for byte (nothing here runs off the flag; the
 //   whole existing suite is the OFF-arm witness), and installing one off
 //   the flag is refused;
+// - unstamped seals are REFUSED at the destination (serving-loop.md §3d,
+//   RULED 2026-08-05): every server-side commit path stamps its run
+//   context before sealing — no anonymous fallback;
 // - the layered view: a later action tx reads an earlier tx's sealed
 //   writes through the ordinary read path, and nothing reaches the store
 //   until the wave commits — then everything lands as ONE commit;
@@ -165,6 +168,32 @@ describe("stage D seal-into-wave", () => {
       await offRuntime.dispose();
       await offManager.close();
     }
+  });
+
+  it("refuses an unstamped seal: every server-side commit path stamps its run context (RULED 2026-08-05)", async () => {
+    const wave = newWave();
+    runtime.installSealDestination(wave);
+    const doc = runtime.getCell<{ value: number }>(
+      space,
+      "wave-unstamped",
+      undefined,
+    );
+    const seqBefore = Engine.serverSeq(engine);
+
+    // No stampWaveRunContext call: the seal destination must refuse
+    // loudly — never fall back to an anonymous derivation. (Red-first:
+    // pre-ruling, this commit was ACCEPTED as an anonymous
+    // contribution — error undefined, contributionCount 1.)
+    const tx = runtime.edit();
+    doc.withTx(tx).set({ value: 1 });
+    await expect(tx.commit()).rejects.toThrow(
+      "unstamped transaction sealed into a wave",
+    );
+
+    // Nothing entered the wave and nothing reached the store.
+    expect(wave.contributionCount).toBe(0);
+    expect(Engine.serverSeq(engine)).toBe(seqBefore);
+    runtime.clearSealDestination();
   });
 
   it("seals into the wave instead of committing; later txs read the layered view; the wave commits once", async () => {
@@ -711,9 +740,16 @@ describe("stage D seal-into-wave", () => {
       "wave-mixed",
       undefined,
     );
+    const input = runtime.getCell<{ value: number }>(
+      space,
+      "wave-mixed-input",
+      undefined,
+    );
     const seedTx = runtime.edit();
     doc.withTx(seedTx).set({ a: 1, b: 1 });
+    input.withTx(seedTx).set({ value: 5 });
     expect((await seedTx.commit()).error).toBeUndefined();
+    const inputSeq = Engine.serverSeq(engine);
 
     const wave = newWave({ lease });
     runtime.installSealDestination(wave);
@@ -730,15 +766,16 @@ describe("stage D seal-into-wave", () => {
     doc.withTx(handlerTx).key("a").set(2);
     expect((await handlerTx.commit()).error).toBeUndefined();
 
-    // A pure derivation whole-doc-sets the SAME doc: its write must be
-    // judged on its own — superseded, dropped — not ride the handler's
-    // rebase.
+    // A pure derivation READS an input and whole-doc-sets the SAME doc:
+    // its write must be judged on its own — superseded, dropped — not
+    // ride the handler's rebase.
     const derivationTx = runtime.edit();
     stampWaveRunContext(derivationTx, {
       actionId: "derive-mixed",
       kind: "derivation",
     });
-    doc.withTx(derivationTx).set({ a: 5, b: 5 });
+    const seen = input.withTx(derivationTx).get();
+    doc.withTx(derivationTx).set({ a: seen!.value, b: seen!.value });
     expect((await derivationTx.commit()).error).toBeUndefined();
     runtime.clearSealDestination();
 
@@ -768,6 +805,22 @@ describe("stage D seal-into-wave", () => {
     // derivation clobbered nothing.
     const stored = Engine.readState(engine, { id: link.id });
     expect(stored?.document).toEqual({ value: { a: 2, b: 50 } });
+    // The Q1 corollary (§3d, RULED 2026-08-05): the dropped-write
+    // SURVIVOR still lands its basis rows — its reads are true, and no
+    // recompute-owed mark exists.
+    const derivationBasis = selectSchedulerBasisRows(engine, {
+      branch: "",
+      action: "derive-mixed",
+      actionScopeKey: "space",
+    });
+    const inputLink = input.getAsNormalizedFullLink();
+    expect(derivationBasis.find((row) => row.entity === inputLink.id))
+      .toEqual({
+        entitySpace: space,
+        entity: inputLink.id,
+        entityScopeKey: "space",
+        seq: inputSeq,
+      });
   });
 
   it("requeues a second handler whose patch overlaps the concurrent write, while the first handler's disjoint patch rebases", async () => {

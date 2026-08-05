@@ -63,8 +63,9 @@ const logger = getLogger("wave-accumulator", {
  * class at the wave commit's per-doc CAS (serving-loop.md §3d):
  *
  * - `derivation` writes are PURE — re-derivable, so a write whose doc head
- *   advanced past the wave's basis is DROPPED (the concurrent commit is
- *   the next wave's input and recomputes it from fresher state);
+ *   advanced past the wave's basis is DROPPED; the drop re-arms nothing —
+ *   recomputation arrives only through the ordinary dependency path
+ *   (serving-loop.md §3d, RULED 2026-08-05);
  * - `event-handler` writes are NON-RE-DERIVABLE consequences — rebased and
  *   retried on conflict, and REQUEUED (rolled back to unconsequenced,
  *   never lost) when the rebase conflicts semantically.
@@ -111,10 +112,12 @@ const waveRunContexts = new WeakMap<object, WaveRunContext>();
 
 /**
  * Stamp the run context onto an action's transaction before the run
- * commits. The wave machinery that drives the scheduler owns the stamp;
- * an unstamped transaction seals as an anonymous derivation (no acting
- * identity, no basis rows — sound but conservative: nothing records its
- * inputs as current, so recovery re-runs it).
+ * commits. The wave machinery that drives the scheduler owns the stamp,
+ * and it is MANDATORY: `seal()` REFUSES an unstamped transaction
+ * (serving-loop.md §3d, RULED 2026-08-05) — every server-side commit
+ * path declares its run context, and stage F names the sanctioned
+ * internal stamp kinds (e.g. a bookkeeping kind) when it installs the
+ * seal destination.
  */
 export function stampWaveRunContext(
   tx: IExtendedStorageTransaction,
@@ -268,9 +271,6 @@ export interface WaveLease {
 interface WaveContribution {
   index: number;
   context: WaveRunContext;
-  /** True when the sealing tx carried no stamped run context: basis rows
-   * are skipped (no durable action identity to overwrite under). */
-  anonymous: boolean;
   /** Per-space sealed commits, in the tx's commit order (children first,
    * home last — protocol.md §2b). */
   spaces: SealedSpaceContribution[];
@@ -307,7 +307,8 @@ export interface WaveCommitOutcome {
    * §7's `supersededWrites` counter feeds from this. */
   supersededWrites: number;
   /** Pure-derivation ops dropped because they read a withdrawn
-   * contribution's sealed writes — re-derivable, recomputed next wave.
+   * contribution's sealed writes — re-derivable, and re-run through
+   * their own reads when fresh state lands (§3d, RULED 2026-08-05).
    * Counted apart from `supersededWrites` so that counter keeps §3d's
    * exact meaning (doc head advanced past the basis). */
   dependencyDroppedWrites: number;
@@ -324,11 +325,8 @@ const docInstanceKey = (id: string, scopeKey: string): string =>
 
 interface PendingAssembly {
   context: WaveRunContext;
-  anonymous: boolean;
   spaces: SealedSpaceContribution[];
 }
-
-let anonymousRunCounter = 0;
 
 /**
  * The wave accumulator: seal destination for one wave's action
@@ -419,11 +417,22 @@ export class WaveAccumulator
         },
       };
     }
-    const stamped = waveRunContextOf(tx);
-    const context = stamped ?? {
-      actionId: `anonymous-run-${++anonymousRunCounter}`,
-      kind: "derivation" as const,
-    };
+    const context = waveRunContextOf(tx);
+    if (context === undefined) {
+      // No anonymous fallback (serving-loop.md §3d, RULED 2026-08-05):
+      // an unstamped seal is a wave-host bug — every server-side commit
+      // path stamps its run context before sealing, and stage F names
+      // the sanctioned internal stamp kinds when it installs the seal
+      // destination. Unreachable from the OFF arm: without a
+      // destination installed, seal == commit and this class never
+      // runs.
+      throw new Error(
+        "unstamped transaction sealed into a wave: stamp the run " +
+          "context (stampWaveRunContext) before sealing — every " +
+          "server-side commit path declares its run context " +
+          "(serving-loop.md §3d, RULED 2026-08-05)",
+      );
+    }
     // seal() runs one tx at a time: sealInto hands spaces back through
     // sealSpaceCommit below, and actions run serially per space
     // (serving-loop.md §3d), so a live assembly means interleaved seals —
@@ -436,7 +445,6 @@ export class WaveAccumulator
     }
     this.#assembly = {
       context,
-      anonymous: stamped === undefined,
       spaces: [],
     };
     try {
@@ -459,7 +467,6 @@ export class WaveAccumulator
         this.#contributions.push({
           index: this.#contributions.length,
           context: assembly.context,
-          anonymous: assembly.anonymous,
           spaces: assembly.spaces,
         });
       }
@@ -670,8 +677,9 @@ export class WaveAccumulator
           }
           if (contribution.context.kind === "derivation") {
             // Pure derivation write superseded: DROP, sound because
-            // re-derivable — the racing commit is the next wave's input
-            // and recomputes it from fresher state (§3d).
+            // re-derivable. The drop re-arms nothing — recomputation
+            // arrives only through the ordinary dependency path
+            // (§3d, RULED 2026-08-05).
             droppedDocs[contribution.index].add(key);
             outcome.supersededWrites += this.#homeOpCountFor(
               contribution,
@@ -1088,14 +1096,15 @@ export class WaveAccumulator
       if (context.kind === "event-handler" && context.eventId !== undefined) {
         consequenceOf.push(context.eventId);
       }
-      if (!contribution.anonymous) {
-        const actionScopeKey = context.actionScopeKey ?? "space";
-        basisInstances.set(`${context.actionId} ${actionScopeKey}`, {
-          action: context.actionId,
-          actionScopeKey,
-          rows: this.#basisRowsFor(contribution),
-        });
-      }
+      // Every survivor lands its basis rows — including one whose writes
+      // were dropped per-doc as superseded: its reads are true, and no
+      // recompute-owed mark exists (§3d, RULED 2026-08-05).
+      const actionScopeKey = context.actionScopeKey ?? "space";
+      basisInstances.set(`${context.actionId} ${actionScopeKey}`, {
+        action: context.actionId,
+        actionScopeKey,
+        rows: this.#basisRowsFor(contribution),
+      });
     }
     // The rebased ops stay in the batch; the sink re-verifies each
     // rebased doc still sits at the head the merge decision observed.
@@ -1229,7 +1238,8 @@ export class WaveAccumulator
         this.#withdraw(
           contribution,
           "pure derivation dropped: derived from a withdrawn contribution; " +
-            "the next wave recomputes it (serving-loop.md §3d)",
+            "its own reads re-run it when fresh state lands " +
+            "(serving-loop.md §3d)",
         );
         continue;
       }
