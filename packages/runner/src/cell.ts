@@ -7,6 +7,7 @@ import {
 import {
   cloneIfNecessary,
   fabricFromNativeValue,
+  FabricInstance,
   type FabricOrConvertibleNativeValue,
   FabricPrimitive,
   FabricSpecialObject,
@@ -3322,8 +3323,18 @@ export function frameAnchorIds(
  * fabric value or a native convertible to one, and on top of that the `Cell`s
  * the conversion exists to replace. None of it is durable until it has been
  * through there.
+ *
+ * `FabricOrConvertibleNativeValue` is an arm rather than something restated, so
+ * this stays true of whatever that comes to admit. The container arms are here
+ * as well, and they are not redundant with it: theirs hold only what is already
+ * fabric or convertible, where a cell may sit at any depth in what a pattern
+ * produced. Replacing a nested one is the whole of what this conversion is for.
  */
-export type CellLinkInput = FabricOrConvertibleNativeValue | Cell<any>;
+export type CellLinkInput =
+  | FabricOrConvertibleNativeValue
+  | readonly CellLinkInput[]
+  | { readonly [key: string]: CellLinkInput }
+  | Cell<any>;
 
 /** The options by which a cell becomes the link that reaches it. */
 type CellLinkOptions = {
@@ -3439,15 +3450,22 @@ export function convertCellsToLinks(
       // This catches both forms that arrive here: one the caller already built,
       // and one `shallowFabricFromNativeValue()` just minted from a native (a
       // `Uint8Array`, a `Date`) immediately above.
-      //
-      // TODO(danfuzz): Latent -- a `FabricInstance` is NOT a leaf either, and
-      // it is not caught here. It is a container reached by its codec contents
-      // rather than by property name, so it falls to the object branch and is
-      // rebuilt from enumerable own properties it is not supposed to have.
-      // Descending one wants codec-mediated traversal. Same marker as the
-      // sibling walks in `builder/to-encodable-form.ts` and
-      // `builtins/llm-dialog.ts`.
       return converted;
+    } else if (converted instanceof FabricInstance) {
+      // A `FabricInstance` is NOT a leaf. It is a container reached by its
+      // codec contents rather than by property name, which this walk cannot do,
+      // so the object branch below would rebuild it from enumerable own
+      // properties it is not supposed to have -- and a cell nested in its state
+      // would go unconverted, which is the whole of what this walk is for. It
+      // refuses instead of doing that quietly.
+      //
+      // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at
+      // which point this becomes a walk rather than a refusal. See "Flag-gated
+      // tripwires" in `docs/development/EXPERIMENTAL_OPTIONS.md`.
+      throw new Error(
+        `Cannot yet handle \`${converted.constructor.name}\` (a ` +
+          "`FabricInstance`) when converting cells to links.",
+      );
     }
 
     // A member arrives here `unknown`: the shallow conversion above converted
