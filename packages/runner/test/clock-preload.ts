@@ -29,5 +29,12 @@ installFakeClock({
     // exists to observe, so it needs the real clock. The test itself waits on
     // transport edges, never on a delay.
     "list-resume-preserve",
+    // The serving loop (server-execution v2 stage F) is wall-clock-paced
+    // by design: the lease renew cadence, the consequence-flush deadline
+    // (T_flush), and IDLE_PARK_MS are real-time policies, and
+    // auto-advance fires the renew interval and park timers as fast as
+    // they arm — a semantics change, not a speedup. The test waits on
+    // watermark/subscription edges with bounded timeouts.
+    "executor-serving-loop",
   ],
 });
