@@ -9,9 +9,10 @@ Neighboring guidance: [`../README.md`](../README.md) governs the documentation
 tree, including which spelling of English everything written here uses, and
 [`DEVELOPMENT.md`](DEVELOPMENT.md) carries the rest of the coding standards,
 the 80-column line width among them. The `describe()` and `it()` description
-strings of a test are a separate matter, covered by
-[`unit-test-coding-style.md`](unit-test-coding-style.md); they take the markup
-rules below and nothing else from this guide.
+strings of a test have their own guide,
+[`unit-test-coding-style.md`](unit-test-coding-style.md), which governs how
+they are worded. What they take from here is the markup below, and the rule
+that they describe the system as it stands.
 
 Not every comment in the tree follows this guide, so a neighboring file is not
 evidence of what to write. New code follows it closely. An edit to existing code
@@ -62,8 +63,12 @@ State the present-tense fact and stop:
 // Shown as alternative snippets.
 
 // Wrong: half of this describes code that is not here.
-// Previously this returned `undefined` for a frozen input; it now
-// returns the input itself, preserving the old caller's expectations.
+
+/**
+ * Freezes `value` if it is not already frozen. Previously this returned
+ * `undefined` for a frozen input; it now returns the input itself,
+ * preserving the old caller's expectations.
+ */
 function normalize(value: object): object {
   return Object.isFrozen(value) ? value : Object.freeze(value);
 }
@@ -73,6 +78,7 @@ function normalize(value: object): object {
 // Shown as alternative snippets.
 
 // Right: what a caller needs, and nothing about how it came to be.
+
 /**
  * Freezes `value` if it is not already frozen, and returns it either way.
  */
@@ -81,10 +87,10 @@ function normalize(value: object): object {
 }
 ```
 
-This applies to test files too. A test added in response to a bug reads like
-every other test: it states the behavior being pinned. "Regression test for the
-case where …" explains why the test was written, which is again pull request
-material.
+This reaches test files, and the description strings in them as much as the
+comments. A test added in response to a bug reads like every other test: it
+states the behavior being pinned. "Regression test for the case where …"
+explains why the test was written, which is again pull request material.
 
 ### Not the road not taken
 
