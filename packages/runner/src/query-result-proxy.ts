@@ -511,8 +511,18 @@ export function createQueryResultProxy<T>(
       // `toString`. Storage traversal deliberately considers own properties
       // only; keeping the same boundary here also avoids recording spurious
       // reactive dependencies for prototype members.
+      //
+      // The receiver is the container, not this proxy: a prototype accessor
+      // has to run against the object that actually holds the state. Every
+      // `FabricInstance` keeps its state in private fields behind accessors,
+      // and a private field is unreachable from a proxy that does not declare
+      // it. (The receiver is immaterial for a data property, which is what
+      // every prototype member of a plain object or array is, so this costs
+      // those nothing.) A `FabricInstance` leafs through storage traversal
+      // whole, so the read of the container already covers what an accessor
+      // returns.
       if (!Object.hasOwn(value, prop) && prop in value) {
-        return Reflect.get(value, prop, receiver);
+        return Reflect.get(value, prop);
       }
 
       return createQueryResultProxy(
