@@ -143,12 +143,12 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     return NATIVE_TAGS.Array;
   }
 
-  // The constructor is read from the PROTOTYPE, not from the value. What is
+  // The constructor is read from the _prototype_, not from the value. What is
   // being asked is which class the value is an instance of, and that is a fact
   // about its prototype; an own `constructor` property is ordinary data that
   // happens to share the name, and must not decide the value's type. Reading
-  // it off the value would let `{constructor: Error}` -- a plain record --
-  // be tagged `Error` and silently rebuilt as one.
+  // it off the value would let `{constructor: Error}` -- a plain record -- be
+  // tagged `Error` and silently rebuilt as one.
   //
   // Guard: a null-prototype object has no constructor to find, and an exotic
   // one may not have a callable one.

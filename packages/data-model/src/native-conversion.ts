@@ -150,7 +150,7 @@ export function shallowCleanPlainObject(
  * or `FabricInstance` types by the conversion layer.
  *
  * Arrays, plain objects, and system-defined special primitives are recognized
- * by `tagFromNativeValue()` but are NOT convertible native instances -- they
+ * by `tagFromNativeValue()` but are _not_ convertible native instances -- they
  * have their own handling paths in the conversion layer.
  */
 export function isConvertibleNativeInstance(value: object): boolean {
@@ -250,7 +250,7 @@ export function shallowFabricFromNativeValue(
     }
 
     case NATIVE_TAGS.Array: {
-      // An array in this system is INERT: a direct `Array` instance, which
+      // An array in this system is _inert_: a direct `Array` instance, which
       // may only carry numeric index properties, each a data property. A named
       // or symbol-keyed property has no fabric representation, and an
       // accessor-backed index is live code rather than inert data -- as is the
@@ -275,13 +275,12 @@ export function shallowFabricFromNativeValue(
     }
 
     case NATIVE_TAGS.Object: {
-      // A plain object in this system is INERT: `FabricPlainObject` is keyed
-      // by `string`, so a symbol key has no fabric representation, and
-      // neither does a non-enumerable string key; an accessor-backed
-      // property is live code rather than inert data. Reject any of them
-      // outright rather than dropping or flattening it on the way through
-      // ("death before confusion"), matching how an array's non-index
-      // properties are treated.
+      // A plain object in this system is _inert_: `FabricPlainObject` is keyed
+      // by `string`, so a symbol key has no fabric representation, and neither
+      // does a non-enumerable string key; an accessor-backed property is live
+      // code rather than inert data. Reject any of them outright rather than
+      // dropping or flattening it on the way through ("death before
+      // confusion"), matching how an array's non-index properties are treated.
       if (!isInertPlainObject(value)) {
         throw new Error(
           "Not representable as a `FabricValue`: object that is not an " +
@@ -289,8 +288,8 @@ export function shallowFabricFromNativeValue(
         );
       }
       // A restriction of this implementation rather than of the model, so it
-      // says so rather than blaming inertness: such an object IS inert, and a
-      // runtime that does not route property assignment through a prototype
+      // says so rather than blaming inertness: such an object _is_ inert, and
+      // a runtime that does not route property assignment through a prototype
       // chain reserves no names at all.
       const unsafeKey = unsafeObjectKeyIn(value as object);
       if (unsafeKey !== undefined) {
@@ -381,7 +380,7 @@ const PROCESSING = Symbol("PROCESSING");
  * optimization).
  *
  * @param value - The value to convert. Declared `unknown` for caller
- *   convenience, but the call THROWS unless it is in fact a
+ *   convenience, but the call _throws_ unless it is in fact a
  *   `FabricOrConvertibleNativeValue`; `isFabricCompatible()` reports in
  *   advance whether it is.
  * @param freeze - When `true` (default), deep-freezes the result tree.
