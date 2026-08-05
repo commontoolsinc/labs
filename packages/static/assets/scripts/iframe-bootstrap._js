@@ -548,23 +548,3 @@ if (document.readyState === "loading") {
 } else {
   globalThis.initializeApp()
 }
-
-// This is the third listener to "message";
-// consider condensing into one handler.
-//
-// Leave the sigil below as an indicator that
-// health checks are supported:
-// <PING-HANDLER>
-globalThis.addEventListener("message", e => {
-  if (e.data.type !== "ping") {
-    return
-  }
-  const nonce = e.data.data
-  globalThis.parent.postMessage(
-    {
-      type: "pong",
-      data: nonce,
-    },
-    "*"
-  )
-})
