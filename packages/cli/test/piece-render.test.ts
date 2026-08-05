@@ -1,0 +1,253 @@
+/**
+ * `cf piece render` turns a piece's UI into HTML by running the reconciler and
+ * the DOM applicator in the CLI's own process, against a mock document.
+ *
+ * The trees here are shaped the way the renderer's schema delivers one: props
+ * and children arrive as cells rather than as plain values. A renderer that
+ * cannot follow those cells produces a bare tag with nothing inside it.
+ */
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { type Cell, Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { defer } from "@commonfabric/utils/defer";
+import { renderVDomToHtml } from "../lib/piece-render.ts";
+
+const signer = await Identity.fromPassphrase("cli piece render test");
+const space = signer.did();
+
+function makeRuntime(): Runtime {
+  return new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: StorageManager.emulate({ as: signer }),
+  });
+}
+
+/** Commit `value` into a fresh cell and hand back the cell. */
+async function cellHolding(
+  runtime: Runtime,
+  name: string,
+  value: unknown,
+): Promise<Cell<unknown>> {
+  const tx = runtime.edit();
+  const cell = runtime.getCell<unknown>(space, name, undefined, tx);
+  cell.set(value);
+  await tx.commit();
+  return cell;
+}
+
+async function setCell(
+  runtime: Runtime,
+  cell: Cell<unknown>,
+  value: unknown,
+): Promise<void> {
+  const tx = runtime.edit();
+  cell.withTx(tx).set(value);
+  await tx.commit();
+}
+
+const vnode = (name: string, props: unknown, children: unknown[]) => ({
+  type: "vnode",
+  name,
+  props,
+  children,
+});
+
+describe("renderVDomToHtml — static", () => {
+  it("serializes nested elements, props and text", async () => {
+    const runtime = makeRuntime();
+    try {
+      const vdom = await cellHolding(
+        runtime,
+        "static-greeting",
+        vnode("div", { id: "hello" }, [
+          vnode("p", { class: "line" }, ["Hello world!"]),
+          vnode("span", {}, ["and again"]),
+        ]),
+      );
+
+      const html = await renderVDomToHtml(vdom, () => runtime.idle());
+
+      expect(html).toBe(
+        '<div id="hello"><p class="line">Hello world!</p>' +
+          "<span>and again</span></div>",
+      );
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("follows a cell in child position", async () => {
+    const runtime = makeRuntime();
+    try {
+      const label = await cellHolding(runtime, "static-label", "from a cell");
+      const vdom = await cellHolding(
+        runtime,
+        "static-labelled",
+        vnode("div", {}, [label]),
+      );
+
+      const html = await renderVDomToHtml(vdom, () => runtime.idle());
+
+      expect(html).toBe("<div>from a cell</div>");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("converts a style object into a style attribute", async () => {
+    const runtime = makeRuntime();
+    try {
+      const vdom = await cellHolding(
+        runtime,
+        "static-styled",
+        vnode("div", { style: { backgroundColor: "red", marginTop: 10 } }, []),
+      );
+
+      const html = await renderVDomToHtml(vdom, () => runtime.idle());
+
+      expect(html).toBe(
+        '<div style="background-color: red; margin-top: 10px"></div>',
+      );
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("renders an empty tree as the empty string", async () => {
+    const runtime = makeRuntime();
+    try {
+      const vdom = await cellHolding(runtime, "static-empty", undefined);
+
+      const html = await renderVDomToHtml(vdom, () => runtime.idle());
+
+      expect(html).toBe("");
+    } finally {
+      await runtime.dispose();
+    }
+  });
+});
+
+describe("renderVDomToHtml — watch", () => {
+  it("reports the settled tree, then reports each change", async () => {
+    const runtime = makeRuntime();
+    let cancel: (() => void) | undefined;
+    try {
+      const label = await cellHolding(runtime, "watch-label", "first");
+      const vdom = await cellHolding(
+        runtime,
+        "watch-root",
+        vnode("div", {}, [label]),
+      );
+
+      const updates: string[] = [];
+      let next = defer<string>();
+      cancel = renderVDomToHtml(vdom, () => runtime.idle(), (html) => {
+        updates.push(html);
+        next.resolve(html);
+      }) as () => void;
+
+      expect(await next.promise).toBe("<div>first</div>");
+
+      next = defer<string>();
+      await setCell(runtime, label, "second");
+      expect(await next.promise).toBe("<div>second</div>");
+
+      // Each settled tree is reported once, not once per operation batch.
+      expect(updates).toEqual(["<div>first</div>", "<div>second</div>"]);
+    } finally {
+      cancel?.();
+      await runtime.dispose();
+    }
+  });
+
+  it("stops reporting once cancelled", async () => {
+    const runtime = makeRuntime();
+    try {
+      const label = await cellHolding(runtime, "cancel-label", "before");
+      const vdom = await cellHolding(
+        runtime,
+        "cancel-root",
+        vnode("div", {}, [label]),
+      );
+
+      const updates: string[] = [];
+      const first = defer<string>();
+      const cancel = renderVDomToHtml(vdom, () => runtime.idle(), (html) => {
+        updates.push(html);
+        first.resolve(html);
+      }) as () => void;
+
+      await first.promise;
+      cancel();
+
+      await setCell(runtime, label, "after");
+      await runtime.idle();
+
+      expect(updates).toEqual(["before"].map((t) => `<div>${t}</div>`));
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("returns a cancel function rather than HTML in watch mode", async () => {
+    const runtime = makeRuntime();
+    try {
+      const vdom = await cellHolding(
+        runtime,
+        "watch-shape",
+        vnode("div", {}, ["x"]),
+      );
+      const seen = defer<string>();
+      const result = renderVDomToHtml(
+        vdom,
+        () => runtime.idle(),
+        (html) => seen.resolve(html),
+      );
+
+      expect(typeof result).toBe("function");
+      expect(await seen.promise).toBe("<div>x</div>");
+      (result as () => void)();
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("keeps reporting after a read fails", async () => {
+    const runtime = makeRuntime();
+    let cancel: (() => void) | undefined;
+    try {
+      const label = await cellHolding(runtime, "failing-label", "one");
+      const vdom = await cellHolding(
+        runtime,
+        "failing-root",
+        vnode("div", {}, [label]),
+      );
+
+      // The first settle rejects; the render must not latch shut on it.
+      let failNext = true;
+      const idle = () => {
+        if (failNext) {
+          failNext = false;
+          return Promise.reject(new Error("settle failed"));
+        }
+        return runtime.idle();
+      };
+
+      const updates: string[] = [];
+      const next = defer<string>();
+      cancel = renderVDomToHtml(vdom, idle, (html) => {
+        updates.push(html);
+        next.resolve(html);
+      }) as () => void;
+
+      await setCell(runtime, label, "two");
+      expect(await next.promise).toBe("<div>two</div>");
+      expect(updates).toEqual(["<div>two</div>"]);
+    } finally {
+      cancel?.();
+      await runtime.dispose();
+    }
+  });
+});
