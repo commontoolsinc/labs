@@ -6,10 +6,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { type Replacements, replacingWalk } from "../src/replacing-walk.ts";
+import { type Replacer, replacingWalk } from "../src/replacing-walk.ts";
 
 /** Replaces any string beginning with `@` with the rest of it, uppercased. */
-const AT_NAMES: Replacements = {
+const AT_NAMES: Replacer = {
   replace: (value) =>
     typeof value === "string" && value.startsWith("@")
       ? { value: value.slice(1).toUpperCase() }
@@ -29,14 +29,14 @@ describe("replacing-walk", () => {
     });
 
     it("does not descend into what a replacement returns", () => {
-      const replacements: Replacements = {
+      const replacer: Replacer = {
         ...AT_NAMES,
         replace: (value) =>
           value === "seed" ? { value: { nested: "@a" } } : undefined,
       };
       // `@a` sits inside the replacement, so a walk that descended into it
       // would have uppercased it.
-      expect(replacingWalk("seed", replacements)).toEqual({ nested: "@a" });
+      expect(replacingWalk("seed", replacer)).toEqual({ nested: "@a" });
     });
 
     it("passes a value no replacement claims through unchanged", () => {
@@ -46,14 +46,14 @@ describe("replacing-walk", () => {
     });
 
     it("lets a replacement refuse a value by throwing", () => {
-      const replacements: Replacements = {
+      const replacer: Replacer = {
         ...AT_NAMES,
         replace: (value) => {
           if (typeof value === "number") throw new Error("no numbers");
           return undefined;
         },
       };
-      expect(() => replacingWalk({ a: 1 }, replacements)).toThrow("no numbers");
+      expect(() => replacingWalk({ a: 1 }, replacer)).toThrow("no numbers");
     });
   });
 
@@ -96,50 +96,50 @@ describe("replacing-walk", () => {
 
   describe("entering a container", () => {
     it("descends into what `enter` returns", () => {
-      const replacements: Replacements = {
+      const replacer: Replacer = {
         ...AT_NAMES,
         enter: (value) => ({ into: { ...value as object, added: "@b" } }),
       };
-      expect(replacingWalk({ kept: "@a" }, replacements))
+      expect(replacingWalk({ kept: "@a" }, replacer))
         .toEqual({ kept: "A", added: "B" });
     });
 
     it("stops at a container `enter` returns a value for", () => {
-      const replacements: Replacements = {
+      const replacer: Replacer = {
         ...AT_NAMES,
         enter: (value) =>
           Array.isArray(value) ? { value: "flattened" } : { into: value },
       };
-      expect(replacingWalk({ list: ["@a"] }, replacements))
+      expect(replacingWalk({ list: ["@a"] }, replacer))
         .toEqual({ list: "flattened" });
     });
 
     it("clears the ancestor even when `enter` stops the descent", () => {
       const shared: unknown[] = ["@a"];
-      const replacements: Replacements = {
+      const replacer: Replacer = {
         ...AT_NAMES,
         enter: (value) =>
           Array.isArray(value) ? { value: "flattened" } : { into: value },
       };
       // The second position must not be treated as a cycle.
-      expect(replacingWalk({ x: shared, y: shared }, replacements))
+      expect(replacingWalk({ x: shared, y: shared }, replacer))
         .toEqual({ x: "flattened", y: "flattened" });
     });
 
     it("clears the ancestor even when `enter` throws", () => {
       const shared = { boom: true };
       let thrown = 0;
-      const replacements: Replacements = {
+      const replacer: Replacer = {
         ...AT_NAMES,
         enter: (value) => {
           if (value === shared && thrown++ === 0) throw new Error("first only");
           return { into: value };
         },
       };
-      expect(() => replacingWalk({ x: shared }, replacements))
+      expect(() => replacingWalk({ x: shared }, replacer))
         .toThrow("first only");
       // A leaked ancestor would make this second, independent walk see a cycle.
-      expect(replacingWalk({ x: shared }, replacements)).toEqual({
+      expect(replacingWalk({ x: shared }, replacer)).toEqual({
         x: { boom: true },
       });
     });

@@ -10,7 +10,7 @@ export {
   type NormalizedFullLink,
   parseLLMFriendlyLink,
 } from "./link-types.ts";
-export { type Replacements, replacingWalk } from "./replacing-walk.ts";
+export { type Replacer, replacingWalk } from "./replacing-walk.ts";
 export {
   isLinkRef,
   type LinkRef,

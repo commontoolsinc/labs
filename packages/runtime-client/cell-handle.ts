@@ -9,7 +9,7 @@ import {
   linkRefFrom,
   linkRefPayload,
   linkRefPayloadToString,
-  type Replacements,
+  type Replacer,
   replacingWalk,
   type SigilLink,
 } from "@commonfabric/runner/shared";
@@ -504,7 +504,7 @@ export class CellHandle<T = unknown> {
  * value this side has no way to send, so it is refused rather than passed along
  * to be misread at the far end.
  */
-const CELL_HANDLE_REFS: Replacements = {
+const CELL_HANDLE_REFS: Replacer = {
   replace: (value) => {
     if (isCellHandle(value)) return { value: value.ref() };
     if (

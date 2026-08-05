@@ -101,7 +101,7 @@ import {
 import { toURI } from "./uri-utils.ts";
 import { createRef } from "./create-ref.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
-import { type Replacements, replacingWalk } from "./replacing-walk.ts";
+import { type Replacer, replacingWalk } from "./replacing-walk.ts";
 import {
   type SigilLink,
   type SigilWriteRedirectLink,
@@ -3330,7 +3330,7 @@ function linkToCell(cell: Cell<any>, options: CellLinkOptions): SigilLink {
  * values it meets: a cell becomes a link, a cycle becomes a link to where the
  * value sits, and every container is converted to fabric form on the way in.
  */
-function cellsToLinks(options: CellLinkOptions): Replacements {
+function cellsToLinks(options: CellLinkOptions): Replacer {
   return {
     replace: (value) => {
       if (

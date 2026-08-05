@@ -1,12 +1,12 @@
 import { isFunction, isRecord } from "@commonfabric/utils/types";
 
 /**
- * What a walk does with the values it meets. Each member is a question the
- * walk cannot decide for itself, because deciding it is what distinguishes one
- * walk from another: which values stand for something else, what a container
- * becomes on the way in, and what a cycle looks like once found.
+ * Decides what a walk does with each value it meets. Each member is a question
+ * the walk cannot settle for itself, because settling it is what distinguishes
+ * one walk from another: which values stand for something else, what a
+ * container becomes on the way in, and what a cycle looks like once found.
  */
-export type Replacements = {
+export type Replacer = {
   /**
    * Returns what stands in for `value`, or `undefined` to let the walk carry
    * on with it. What this returns is never descended into.
@@ -45,21 +45,21 @@ export type Replacements = {
  * identity. A caller wanting identity preserved can compare and discard.
  *
  * @param value The value to walk.
- * @param replacements What to do with the values met along the way.
+ * @param replacer Decides what becomes of the values met along the way.
  * @param path Where `value` sits, from the root of the walk.
  * @param ancestors The values the walk is currently inside, by their paths.
  */
 export function replacingWalk(
   value: unknown,
-  replacements: Replacements,
+  replacer: Replacer,
   path: readonly string[] = [],
   ancestors: Map<object, readonly string[]> = new Map(),
 ): unknown {
   if ((isRecord(value) || isFunction(value)) && ancestors.has(value)) {
-    return replacements.cycle(value, ancestors.get(value)!);
+    return replacer.cycle(value, ancestors.get(value)!);
   }
 
-  const replaced = replacements.replace(value);
+  const replaced = replacer.replace(value);
   if (replaced !== undefined) return replaced.value;
 
   // Only a container has members to walk. A function is offered to `enter`
@@ -69,7 +69,7 @@ export function replacingWalk(
   const original = value;
   ancestors.set(original, path);
   try {
-    const entered = replacements.enter?.(original) ?? { into: original };
+    const entered = replacer.enter?.(original) ?? { into: original };
     if ("value" in entered) return entered.value;
     const into = entered.into;
 
@@ -77,7 +77,7 @@ export function replacingWalk(
       return into.map((element, index) =>
         replacingWalk(
           element,
-          replacements,
+          replacer,
           [...path, String(index)],
           ancestors,
         )
@@ -86,7 +86,7 @@ export function replacingWalk(
     return Object.fromEntries(
       Object.entries(into).map(([key, member]) => [
         key,
-        replacingWalk(member, replacements, [...path, key], ancestors),
+        replacingWalk(member, replacer, [...path, key], ancestors),
       ]),
     );
   } finally {
