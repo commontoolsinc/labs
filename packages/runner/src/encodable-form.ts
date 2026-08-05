@@ -52,13 +52,24 @@ export function hasEncodableForm(value: unknown): boolean {
  * stands" asks once. Asking `hasEncodableForm()` first and then calling this
  * reads the member twice, and the member can be accessor-backed.
  *
+ * `ifNone` replaces the value as the answer for a value carrying no form, so a
+ * caller whose fallback is something else also asks once. Pass `undefined` to
+ * stand a computed fallback behind a `??`. Passing it explicitly is not the same
+ * as omitting it.
+ *
  * A caller that needs to tell a value with no form from one whose form is
  * nullish asks `hasEncodableForm()`, which is the question that distinguishes
  * them.
  */
-export function encodableFormOf<T>(value: T): unknown | T {
+export function encodableFormOf<T>(value: T): unknown | T;
+export function encodableFormOf<F>(value: unknown, ifNone: F): unknown | F;
+export function encodableFormOf(
+  value: unknown,
+  ...ifNone: [] | [unknown]
+): unknown {
   const method = encodableFormMethod(value);
-  return method === undefined ? value : encodableFormFrom(method, value);
+  if (method !== undefined) return encodableFormFrom(method, value);
+  return ifNone.length === 0 ? value : ifNone[0];
 }
 
 /**
