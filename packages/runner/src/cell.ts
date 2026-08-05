@@ -485,6 +485,7 @@ declare module "@commonfabric/api" {
     getAsReactiveProxy(
       boundTarget?: (...args: unknown[]) => unknown,
     ): Reactive<T>;
+
     /**
      * Returns the sigil link naming this cell, or `null` when the cell has no
      * full link yet (one that has not been created). The link is what stands in
@@ -493,6 +494,7 @@ declare module "@commonfabric/api" {
      * recognized as a cell. The two members below return the same link.
      */
     toSigilLinkOrNull(): SigilLink | null;
+
     /**
      * Returns the same link, under the name `encodableFormOf()` reads by. That
      * is how a cell survives a walk over an arbitrary graph -- deriving a
@@ -501,9 +503,10 @@ declare module "@commonfabric/api" {
      * the `toEncodableForm` a builder artifact carries, and assignable to it.
      */
     toEncodableForm(): SigilLink | null;
+
     /**
-     * Answers the JSON protocol with the same link, so a cell reads as what it
-     * names wherever a renderer honors that protocol.
+     * Returns the same link under the JSON protocol's name, so a cell reads as
+     * what it names wherever a renderer honors that protocol.
      * `toCompactDebugString()` does, and it is what pattern-test assertion
      * diagnostics render their operands with. Nothing on the way to storage
      * consults it.
