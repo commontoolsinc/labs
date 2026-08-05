@@ -98,30 +98,16 @@ Prose written here — comments, documents, error and log messages, test
 descriptions — uses American spellings: `behavior`, `color`, `center`,
 `serialize`, `analyze`, `gray`.
 
-This is standardization and nothing more. It makes no claim about which
-variety of English is better, and it asks nothing of how anyone writes
-anywhere else. It exists because a tree that spells a word two ways is a tree
-where searching for one spelling finds only part of what is there, and where a
-reader's attention catches on the seam instead of the content. One spelling
-per word is the whole of the benefit.
+This is standardization rather than a claim about which English is better: one
+spelling per word means a search for a word finds all of it, and this is the
+variety already in overwhelming use in these files.
 
-The variety is the one already in overwhelming use in these files rather than
-a preference imposed on them: `behavior` outnumbers `behaviour` by more than
-twenty to one, and `center` outnumbers `centre` by more than two hundred. The
-convention mostly describes the repository, and writing it down is a way to
-keep it that way.
-
-Two things it does not reach:
-
-- **Quoted external material.** A dependency's name, a message relayed from
-  another system, a specification's wording, and the contents of a data file
-  keep whatever spelling they arrived with. Repeating a name accurately
-  outranks spelling it consistently.
-- **Identifiers already established in the codebase.** `cancelled` is spelled
-  that way across several hundred sites, exported names among them. Changing
-  it is a rename with real blast radius, not a spelling fix. Match the
-  surrounding code when extending a vocabulary like that, and treat any change
-  to it as the code change it is.
+Two carve-outs. Material quoted from outside — a dependency's name, a message
+relayed from another system, a specification's wording, a data file's contents
+— keeps whatever spelling it arrived with. And an identifier vocabulary
+already established in the codebase, `cancelled` among them, is a rename
+rather than a spelling fix: match the surrounding code, and treat a change to
+it as the code change it is.
 
 ## Map of this tree
 
