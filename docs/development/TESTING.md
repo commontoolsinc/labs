@@ -46,12 +46,16 @@ it, so a test that collects a coverage profile under one version and reports it
 under the other gets a report with every file missing.
 
 Deno resolves an allowlist entry of `deno` through `PATH` as well, so
-`--allow-run=deno` refuses the very binary the test is running under. A task line
-cannot name that binary, because its path is only known at run time. The test
-tasks that start Deno take a plain `--allow-run` for that reason. To keep the
-allowlist narrow instead, run the tests through a script that computes the grant,
-as `packages/dashboard/test/runner.ts` does with
-`--allow-run=${Deno.execPath()},git`.
+`--allow-run=deno` refuses the very binary the test is running under. Name that
+binary instead of widening the grant. A task line can compute it, because `deno`
+inside one runs the Deno running the task whatever `PATH` says:
+
+```
+--allow-run=$(deno eval "console.log(Deno.execPath())")
+```
+
+A test launched from a script can read `Deno.execPath()` directly, as
+`packages/dashboard/test/runner.ts` does with `--allow-run=${Deno.execPath()},git`.
 
 ### Test Structure
 

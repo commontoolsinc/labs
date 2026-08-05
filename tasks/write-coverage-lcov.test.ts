@@ -3,7 +3,7 @@ import { dirname, fromFileUrl, join, toFileUrl } from "@std/path";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
   collectCoverageProfileFiles,
-  isRepositoryFile,
+  isTrackedFile,
   normalizeLcovInstancePaths,
   parseFilesMissingTranspiledSource,
   parseFilesWithNoSource,
@@ -201,13 +201,14 @@ Deno.test("write-coverage-lcov converts real profiles to a normalized LCOV repor
   }
 });
 
-// A repository file the report is meant to cover, which nothing has compiled, so
-// the cache holds no transpiled form of it while the file is there to be read.
-// It has to live in the repository for the conversion to count it as one of ours,
-// so it gets a unique dot-prefixed name and is removed by the caller.
-async function writeUncompiledRepositoryFile(): Promise<string> {
+// A file the coverage-debt metric tracks, which nothing has compiled, so the
+// cache holds no transpiled form of it while the file is there to be read. The
+// metric tracks `packages/` and `tasks/`, so it goes in `tasks/` under a unique
+// dot-prefixed name that `.gitignore` covers, and the caller removes it.
+async function writeUncompiledTrackedFile(): Promise<string> {
   const filePath = join(
     REPO_ROOT,
+    "tasks",
     `.write-lcov-uncompiled.${Deno.pid}.${crypto.randomUUID()}.ts`,
   );
   await Deno.writeTextFile(
@@ -220,9 +221,9 @@ async function writeUncompiledRepositoryFile(): Promise<string> {
 // The dangerous case, because `deno coverage` exits zero and writes a report
 // that simply lacks the file: the report looks healthy, and every line of the
 // dropped file reads as uncovered downstream.
-Deno.test("write-coverage-lcov fails when a repository file is left out", async () => {
+Deno.test("write-coverage-lcov fails when a tracked file is left out", async () => {
   const root = await Deno.makeTempDir({ prefix: "write-lcov-" });
-  const dropped = await writeUncompiledRepositoryFile();
+  const dropped = await writeUncompiledTrackedFile();
   try {
     const rawDir = await generateSampleProfiles(root);
     await writeProfileForSource(rawDir, "dropped.json", dropped);
@@ -231,7 +232,7 @@ Deno.test("write-coverage-lcov fails when a repository file is left out", async 
     const result = await runScript([rawDir, output]);
 
     assertEquals(result.code, 1);
-    assertStringIncludes(result.stderr, "repository file(s) out of");
+    assertStringIncludes(result.stderr, "tracked file(s) out of");
     assertStringIncludes(result.stderr, ".write-lcov-uncompiled.");
     // The report of what did convert is written and named, so it can be read
     // while the failure is diagnosed. It is not announced on stdout as a
@@ -256,9 +257,9 @@ Deno.test("write-coverage-lcov fails when a repository file is left out", async 
 // Same loss, but with nothing left to report, so `deno coverage` calls it an
 // error too. The exit status must still say the conversion broke rather than
 // let the empty report stand as a measurement.
-Deno.test("write-coverage-lcov fails when every file left out is a repository file", async () => {
+Deno.test("write-coverage-lcov fails when every file left out is a tracked file", async () => {
   const root = await Deno.makeTempDir({ prefix: "write-lcov-" });
-  const dropped = await writeUncompiledRepositoryFile();
+  const dropped = await writeUncompiledTrackedFile();
   try {
     const profileDir = join(root, "raw");
     await Deno.mkdir(profileDir);
@@ -269,7 +270,7 @@ Deno.test("write-coverage-lcov fails when every file left out is a repository fi
 
     assertEquals(result.code, 1);
     assertStringIncludes(result.stderr, "failed to convert");
-    assertStringIncludes(result.stderr, "repository file(s) out of");
+    assertStringIncludes(result.stderr, "tracked file(s) out of");
     // An output file is still there for a caller that collects it as an
     // artifact, so the failure surfaces here rather than as a missing file.
     assertEquals(await Deno.readTextFile(output), "");
@@ -384,14 +385,26 @@ Deno.test("write-coverage-lcov succeeds when the file left out is outside the re
   }
 });
 
-Deno.test("isRepositoryFile tells a repository file from one outside it", () => {
-  assert(isRepositoryFile("file:///repo/packages/a/mod.ts", "/repo"));
-  assert(!isRepositoryFile("file:///elsewhere/mod.ts", "/repo"));
+// The conversion fails only for a file the coverage-debt metric charges for, so
+// this answers the same question the metric does.
+Deno.test("isTrackedFile agrees with what the coverage metric charges for", () => {
+  assert(isTrackedFile("file:///repo/packages/a/mod.ts", "/repo"));
+  assert(isTrackedFile("file:///repo/tasks/a.ts", "/repo"));
+  assert(!isTrackedFile("file:///elsewhere/mod.ts", "/repo"));
   // A sibling directory whose name merely starts with the root's name.
-  assert(!isRepositoryFile("file:///repo-other/mod.ts", "/repo"));
+  assert(!isTrackedFile("file:///repo-other/mod.ts", "/repo"));
   // The cache-busting query some tests import with does not hide the path.
-  assert(isRepositoryFile("file:///repo/packages/a/mod.ts?testRun=x", "/repo"));
-  assert(!isRepositoryFile("https://example.com/mod.ts", "/repo"));
+  assert(isTrackedFile("file:///repo/packages/a/mod.ts?testRun=x", "/repo"));
+  assert(!isTrackedFile("https://example.com/mod.ts", "/repo"));
+  // In the repository, but outside what the metric walks or counts, so losing
+  // it from the report costs nothing.
+  assert(!isTrackedFile("file:///repo/docs/x.ts", "/repo"));
+  assert(!isTrackedFile("file:///repo/scripts/x.ts", "/repo"));
+  assert(!isTrackedFile("file:///repo/packages/a/test/helper.ts", "/repo"));
+  assert(!isTrackedFile("file:///repo/packages/a/fixtures/x.ts", "/repo"));
+  assert(!isTrackedFile("file:///repo/packages/a/mod.test.ts", "/repo"));
+  assert(!isTrackedFile("file:///repo/packages/a/mod.d.ts", "/repo"));
+  assert(!isTrackedFile("file:///repo/packages/a/README.md", "/repo"));
 });
 
 Deno.test("parseFilesMissingTranspiledSource reads every dropped file out of the warnings", () => {

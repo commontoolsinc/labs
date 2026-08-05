@@ -39,8 +39,8 @@ regression that no change in the tree explains.
 and `tasks/write-coverage-lcov.ts` acts on the difference:
 
 - `Missing transpiled source code for: "<url>"` — the source is on disk but the
-  cache holds no transpiled form of it. For a file in the repository that is a
-  file the report should have carried: the script names those files and exits
+  cache holds no transpiled form of it. For a file the debt metric tracks that is
+  a file the report should have carried: the script names those files and exits
   non-zero, after writing the report of what did convert so it can be read while
   the cause is found. Two things cause it. The profiles were collected by one
   Deno version and reported by another, which happens when a test starts the Deno
@@ -51,11 +51,13 @@ and `tasks/write-coverage-lcov.ts` acts on the difference:
   file and then deleted it. No report could name it, so the script warns and
   carries on.
 
-A file outside the repository is only ever warned about, whichever message it
-came with. The debt metric tracks `packages/` and `tasks/` and charges nothing
-for anything else, so its absence from the report costs nothing. This is what a
-test that copies a fixture project into a temporary directory and runs Deno there
-produces, and it is why the failure is not simply "any file was dropped".
+A file the metric does not track is only ever warned about, whichever message it
+came with, because its absence from the report costs nothing. The conversion asks
+the metric's own `isTrackedSourcePath`, so the two cannot drift apart. That
+covers a file outside the repository, which is what a test that copies a fixture
+project into a temporary directory and runs Deno there produces, as well as one
+inside it that the metric never charges for — anything under `docs/` or
+`scripts/`, a test or fixture directory, a `.test.ts` or `.d.ts`.
 
 An empty report is not a failure by itself. `deno coverage` calls it an error
 when nothing survives its filters, which happens honestly whenever a profile set

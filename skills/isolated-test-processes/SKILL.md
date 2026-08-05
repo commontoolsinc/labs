@@ -68,9 +68,11 @@ command's `--lock` flag.
   `Deno.execPath()` is that binary rather than Deno, so code that has to run
   both compiled and under Deno needs its own way to find a Deno.)
 - A `--allow-run=deno` grant does not permit spawning `Deno.execPath()`, because
-  Deno resolves the allowlist entry through `PATH` as well, and a task line
-  cannot name a path known only at run time. Either give the test task a plain
-  `--allow-run`, or run its tests through a script that computes the grant, as
+  Deno resolves the allowlist entry through `PATH` as well. Name the binary
+  rather than widening the grant to a bare `--allow-run`. In a task line,
+  `--allow-run=$(deno eval "console.log(Deno.execPath())")` computes it, because
+  `deno` inside a task runs the Deno running the task whatever `PATH` says. From
+  a script, read `Deno.execPath()` directly, as
   `packages/dashboard/test/runner.ts` does with
   `--allow-run=${Deno.execPath()},git`.
 

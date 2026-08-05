@@ -1,5 +1,6 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-run
 import * as path from "@std/path";
+import { isTrackedSourcePath } from "./coverage-metrics.ts";
 
 // Taken from this file's own location rather than the working directory, which
 // the conversion inherits from its caller.
@@ -104,26 +105,28 @@ export function parseFilesWithNoSource(stderr: string): string[] {
 }
 
 /**
- * Whether a dropped file is one this report is meant to cover, which is to say
- * whether it lives in the repository.
+ * Whether a dropped file costs anything downstream, which is to say whether the
+ * coverage-debt metric charges for it. The metric's own predicate decides, so
+ * the two cannot drift apart.
  *
- * A file outside the repository is not part of the measurement, and it has an
+ * Anything else is dropped without cost. A file the metric does not track is not
+ * part of the measurement at all, and a file outside the repository has an
  * ordinary reason to be missing from the cache the report is built from: the
  * cache key covers the Deno configuration in scope where the file was compiled,
  * so a module a test compiled from a working directory outside the repository is
  * filed under a scope the conversion never looks in. Tests that copy a fixture
  * project into a temporary directory and run Deno there produce exactly that.
  */
-export function isRepositoryFile(url: string, repositoryRoot: string): boolean {
+export function isTrackedFile(url: string, repositoryRoot: string): boolean {
   let filePath: string;
   try {
     filePath = path.fromFileUrl(url);
   } catch {
-    // A specifier naming no local file — an http or data URL — is not a file in
-    // the repository.
+    // A specifier naming no local file — an http or data URL — is never tracked.
     return false;
   }
-  return filePath.startsWith(`${repositoryRoot}${path.SEPARATOR}`);
+  if (!filePath.startsWith(`${repositoryRoot}${path.SEPARATOR}`)) return false;
+  return isTrackedSourcePath(path.relative(repositoryRoot, filePath));
 }
 
 async function removeEmptyCoverageProfiles(files: string[]): Promise<number> {
@@ -193,11 +196,9 @@ async function main(): Promise<void> {
   const stderr = new TextDecoder().decode(result.stderr);
 
   const missingTranspiled = parseFilesMissingTranspiledSource(stderr);
-  const lost = missingTranspiled.filter((url) =>
-    isRepositoryFile(url, REPO_ROOT)
-  );
+  const lost = missingTranspiled.filter((url) => isTrackedFile(url, REPO_ROOT));
   const untracked = [
-    ...missingTranspiled.filter((url) => !isRepositoryFile(url, REPO_ROOT)),
+    ...missingTranspiled.filter((url) => !isTrackedFile(url, REPO_ROOT)),
     ...parseFilesWithNoSource(stderr),
   ];
   if (untracked.length > 0) {
@@ -210,7 +211,7 @@ async function main(): Promise<void> {
 
   const reportLostFiles = () => {
     console.error(
-      `deno coverage left ${lost.length} repository file(s) out of ${outputPath}:\n  ${
+      `deno coverage left ${lost.length} tracked file(s) out of ${outputPath}:\n  ${
         lost.join("\n  ")
       }`,
     );
@@ -227,8 +228,8 @@ async function main(): Promise<void> {
 
     // `deno coverage` leaves test files out of a report by design, so profiles
     // covering nothing else convert to nothing and it calls that an error. With
-    // no repository file lost, nothing downstream is charged for the emptiness,
-    // so it is honest.
+    // no tracked file lost, nothing downstream is charged for the emptiness, so
+    // it is honest.
     if (
       lost.length === 0 &&
       stderr.includes("No covered files included in the report")
