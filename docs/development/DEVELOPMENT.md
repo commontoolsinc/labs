@@ -33,6 +33,17 @@ about one aspect of the runtime, are indexed in
 - Import either from `@commonfabric/api` (internal API) or
   `@commonfabric/api/interface` (external API), but not both.
 
+### Comments
+
+- Comments explain **why**, not what. The code already says what it does, and a
+  comment that restates it is noise that eventually goes stale.
+- Describe the system as it stands. Not what it used to do, not the approach
+  that was not taken, and not the plan that got it here.
+- Every export, every class and public member, and every non-trivial internal
+  function carries a JSDoc doc comment.
+- [`code-comment-style.md`](code-comment-style.md) is the full guide, including
+  the Markdown markup that comments, error messages, and log messages all use.
+
 ## Code Design & Principles
 
 ### Error Handling
@@ -44,9 +55,10 @@ about one aspect of the runtime, are indexed in
 ### TypeScript
 
 - Export types explicitly using `export type { ... }`.
-- Provide descriptive JSDoc comments on public interfaces. What belongs in a
-  comment, and what belongs in a document instead, is in
-  [the documentation guide](../README.md#comments-in-code).
+- Provide descriptive JSDoc comments on public interfaces; see
+  [`code-comment-style.md`](code-comment-style.md) for what one carries, and
+  [the documentation guide](../README.md#comments-in-code) for when the
+  reasoning belongs in a document instead.
 - Prefer strong typing with interfaces or types instead of `any`.
 - Update package-level README.md files.
 

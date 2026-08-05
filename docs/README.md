@@ -30,8 +30,10 @@ itself, so a comment describes rather than defends it.
   constraint from being edited away by someone who never saw the argument for
   it.
 
-Public interfaces additionally carry descriptive JSDoc; see the style section
-of [`development/DEVELOPMENT.md`](development/DEVELOPMENT.md).
+Public interfaces additionally carry descriptive JSDoc.
+[`development/code-comment-style.md`](development/code-comment-style.md) is the
+full guide to both kinds of comment: what earns one, how it is marked up, what
+a doc comment carries, and the shapes that make a comment go stale or mislead.
 
 ## Live documentation
 

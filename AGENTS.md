@@ -100,6 +100,11 @@ If you are developing runtime code, start with:
 
 - `docs/development/DEVELOPMENT.md` - Coding style, design principles, and best
   practices
+- `docs/development/code-comment-style.md` - How a comment is written, both the
+  `//` kind and the JSDoc kind: what earns one, what a doc comment carries, the
+  Markdown markup that comments and error messages share, and the rule that a
+  comment describes the system as it stands — not its own past, not the road not
+  taken, not the plan that got it here
 - `docs/development/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
   servers correctly (use `dev-local` for shell, not `dev`)
 - `docs/development/TESTING.md` - Running the test suites and the general unit
