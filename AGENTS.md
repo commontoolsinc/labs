@@ -100,6 +100,10 @@ If you are developing runtime code, start with:
 
 - `docs/development/DEVELOPMENT.md` - Coding style, design principles, and best
   practices
+- `docs/development/code-comment-style.md` - How a comment is written, both the
+  `//` kind and the JSDoc kind. The rule that catches people out is that a
+  comment describes the system as it stands: not its own past, not the road not
+  taken, not the plan that got it here
 - `docs/development/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
   servers correctly (use `dev-local` for shell, not `dev`)
 - `docs/development/TESTING.md` - Running the test suites and the general unit
@@ -131,9 +135,9 @@ change a subsystem you have not worked on before.
 Three obligations that are easy to miss:
 
 - `docs/README.md` governs everything this repository writes down. It says how
-  to write a comment in code, how to write documentation, which spelling of
-  English both use, and where a new document belongs. Read it before you write
-  either.
+  to write documentation, where a new document belongs, which examples belong in
+  one, and which spelling of English both documents and comments use. Read it
+  before you write either.
 - `docs/development/EXPERIMENTAL_OPTIONS.md` is the central registry of every
   experimental flag. Read it before adding, changing, or removing a flag, and
   update it in the same change.

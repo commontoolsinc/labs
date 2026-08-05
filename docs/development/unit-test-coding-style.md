@@ -35,6 +35,18 @@ tree mirrors them: a test for `src/codec-json/encode.ts` lives at
 `test/codec-json/encode.test.ts`. That keeps a test findable from its source,
 and its source findable from the test, as a package grows.
 
+That rule is about a package of interdependent source files. A directory whose
+entries are instead independent components — each self-contained, with no
+shared structure for a parallel tree to mirror — keeps each component's test
+beside it, and that arrangement is correct where it is already in use.
+`packages/ui` is one, a component and its test sitting together in the
+component's own directory. `packages/patterns` is another, where a pattern and
+its test are a pair; its tests are pattern tests, so nothing else in this guide
+reaches them, but the placement question is the same one. A `test/` tree buys
+nothing in either case: what it would mirror is a flat list of unrelated
+components, and splitting a pair across two trees makes both halves harder to
+find. Follow whichever arrangement the directory already uses.
+
 Name the file `<topic>.test.ts`, where `<topic>` is one of:
 
 - The base name of the source file under test — `value-hash.test.ts` for

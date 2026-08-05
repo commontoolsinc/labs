@@ -145,7 +145,6 @@ export const isTaskPerform = (source: unknown): source is TaskPerform =>
   "output" in source && isJSONSchema(source.output);
 
 export enum HostMessageType {
-  Ping = "ping",
   Update = "update",
   LLMResponse = "llm-response",
   ReadWebpageResponse = "readwebpage-response",
@@ -153,7 +152,6 @@ export enum HostMessageType {
 }
 
 export type HostMessage =
-  | { type: HostMessageType.Ping; data: string }
   | { type: HostMessageType.Update; data: [string, unknown] }
   | {
     type: HostMessageType.LLMResponse;
@@ -193,7 +191,6 @@ export enum GuestMessageType {
   LLMRequest = "llm-request",
   WebpageRequest = "readwebpage-request",
   Perform = "perform",
-  Pong = "pong",
 }
 
 export type GuestMessage =
@@ -204,8 +201,7 @@ export type GuestMessage =
   | { type: GuestMessageType.Write; data: [string, unknown] }
   | { type: GuestMessageType.LLMRequest; data: string }
   | { type: GuestMessageType.WebpageRequest; data: string }
-  | { type: GuestMessageType.Perform; data: TaskPerform }
-  | { type: GuestMessageType.Pong; data: string };
+  | { type: GuestMessageType.Perform; data: TaskPerform };
 
 /**
  * Message asking a host to perform certain task.
@@ -257,8 +253,7 @@ export function isGuestMessage(message: unknown): message is GuestMessage {
     }
     case GuestMessageType.LLMRequest:
     case GuestMessageType.WebpageRequest:
-    case GuestMessageType.Read:
-    case GuestMessageType.Pong: {
+    case GuestMessageType.Read: {
       return typeof message.data === "string";
     }
     case GuestMessageType.Subscribe:
