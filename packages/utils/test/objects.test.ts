@@ -169,14 +169,14 @@ describe("objects", () => {
         expect(isInertPlainObject(Object.create(null))).toBe(false);
       });
 
-      it("answers rather than throwing for `null` and `undefined`", () => {
+      it("returns rather than throwing for `null` and `undefined`", () => {
         expect(isInertPlainObject(null)).toBe(false);
         expect(isInertPlainObject(undefined)).toBe(
           false,
         );
       });
 
-      it("answers rather than throwing for primitives", () => {
+      it("returns rather than throwing for primitives", () => {
         expect(isInertPlainObject("abc")).toBe(false);
         expect(isInertPlainObject(42)).toBe(false);
         expect(isInertPlainObject(true)).toBe(false);

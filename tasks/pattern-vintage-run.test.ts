@@ -2158,7 +2158,7 @@ describe("deciding when the next generation is due", () => {
     ])).toEqual([]);
   });
 
-  it("answers per test key", () => {
+  it("returns per test key", () => {
     expect(staleTestKeys([
       outcome("a/a.test.tsx", 0),
       outcome("b/b.test.tsx", 2),
