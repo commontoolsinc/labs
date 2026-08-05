@@ -94,6 +94,23 @@ created as live documents and archived later. A plan you intend to execute
 starts in `docs/plans/` (a pending plan is live) and is archived when it is
 done.
 
+## Examples in documentation
+
+An example that illustrates a general rule is invented. Donuts, glazes, and
+flavors do the job, and code lifted from this repository does it worse for two
+reasons that compound. Real code moves, and nothing about moving it brings
+anyone back to the document that quoted it. And while it sits there it answers
+searches for the identifier it names, with a hit that is not a use of it —
+the same reason [the spelling rule](#spelling) exists, pointed at a different
+target.
+
+An example that documents a specific hazard is the exception, because the
+hazard is the real thing: a guide to what goes wrong with a particular
+function has to name that function. Such an example takes both costs
+knowingly. `deno task check-docs` covers only the first half of the first one,
+catching drift that stops the block compiling and never drift that compiles
+and is no longer true.
+
 ## Spelling
 
 Prose written here — comments, documents, error and log messages, test
