@@ -281,14 +281,6 @@ const collapseEmptyJsonDocumentEnvelope = (
 };
 
 const EMPTY_META = Object.freeze({});
-const SCHEDULER_OBSERVATION_ADDRESS_LISTS = [
-  "actualChangedWrites",
-  "currentKnownWrites",
-  "declaredWrites",
-  "materializerWriteEnvelopes",
-  "reads",
-  "shallowReads",
-] as const;
 
 type PathInspection =
   | {
@@ -358,29 +350,6 @@ const inspectPath = (
   };
 };
 
-const schedulerObservationCommitSpace = (
-  observation: unknown,
-): MemorySpace | undefined => {
-  if (!isRecord(observation)) {
-    return undefined;
-  }
-  if (typeof observation.ownerSpace === "string") {
-    return observation.ownerSpace as MemorySpace;
-  }
-
-  for (const key of SCHEDULER_OBSERVATION_ADDRESS_LISTS) {
-    const addresses = observation[key];
-    if (!Array.isArray(addresses)) {
-      continue;
-    }
-    for (const address of addresses) {
-      if (!isRecord(address) || typeof address.space !== "string") {
-        continue;
-      }
-      return address.space as MemorySpace;
-    }
-  }
-};
 const findMaterializedParentPath = (
   currentRoot: FabricValue | undefined,
   path: readonly string[],
@@ -855,7 +824,6 @@ export class V2StorageTransaction implements IStorageTransaction {
   #activityClock = 0;
   #writeAttemptLog: IWriteAttempt[] = [];
   #reactivityLogCache?: TransactionReactivityLog;
-  #schedulerObservation?: FabricValue;
   #commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
   #createOnlyMarks = new Map<
     MemorySpace,
@@ -959,19 +927,6 @@ export class V2StorageTransaction implements IStorageTransaction {
   getReactivityLog() {
     this.#reactivityLogCache ??= this.buildReactivityLog();
     return this.#reactivityLogCache;
-  }
-
-  setSchedulerObservation(observation: FabricValue): void {
-    this.assertWritable("setSchedulerObservation()");
-    const ready = this.editable();
-    if (ready.error) {
-      throw ready.error;
-    }
-    this.#schedulerObservation = observation;
-  }
-
-  getSchedulerObservation(): FabricValue {
-    return this.#schedulerObservation;
   }
 
   addCommitPrecondition(
@@ -1153,9 +1108,6 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   getNativeCommit(space: MemorySpace): NativeStorageCommit | undefined {
     const branch = this.#branches.get(space);
-    const schedulerObservation = this.schedulerObservationForNativeCommit(
-      space,
-    );
     const preconditions = this.#commitPreconditions.get(space);
     const createOnlyMarks = this.#createOnlyMarks.get(space);
     const createOnlyPreconditions = [...(createOnlyMarks?.values() ?? [])].map(
@@ -1171,7 +1123,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     ];
     const sqliteOps = this.#sqliteOps.get(space);
     if (
-      !branch && schedulerObservation === undefined &&
+      !branch &&
       nativePreconditions.length === 0 && !sqliteOps?.length
     ) {
       return undefined;
@@ -1232,7 +1184,6 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     return {
       operations,
-      ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
       ...(nativePreconditions.length
         ? { preconditions: nativePreconditions }
         : {}),
@@ -1950,8 +1901,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       return this.commitMultiSpace();
     }
 
-    const writeSpace = this.#writeSpace ??
-      schedulerObservationCommitSpace(this.#schedulerObservation);
+    const writeSpace = this.#writeSpace;
     if (!writeSpace) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
       this.#finish(result);
@@ -1963,11 +1913,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       () => this.getNativeCommit(writeSpace),
     );
     const operations = native?.operations ?? [];
-    const hasSchedulerObservation = native?.schedulerObservation !== undefined;
     const hasCommitPreconditions = (native?.preconditions?.length ?? 0) > 0;
     const hasSqliteOps = (native?.sqliteOps?.length ?? 0) > 0;
     if (
-      operations.length === 0 && !hasSchedulerObservation &&
+      operations.length === 0 &&
       !hasCommitPreconditions && !hasSqliteOps
     ) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
@@ -2023,13 +1972,11 @@ export class V2StorageTransaction implements IStorageTransaction {
     for (const space of this.orderedCommitSpaces()) {
       const native = this.getNativeCommit(space);
       const operations = native?.operations ?? [];
-      const hasSchedulerObservation =
-        native?.schedulerObservation !== undefined;
       const hasCommitPreconditions = (native?.preconditions?.length ?? 0) > 0;
       const hasSqliteOps = (native?.sqliteOps?.length ?? 0) > 0;
       if (
         !native ||
-        (operations.length === 0 && !hasSchedulerObservation &&
+        (operations.length === 0 &&
           !hasCommitPreconditions && !hasSqliteOps)
       ) {
         continue;
@@ -2136,24 +2083,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       }
     }
     return { ok: {} };
-  }
-
-  private schedulerObservationForNativeCommit(
-    space: MemorySpace,
-  ): FabricValue {
-    if (this.#schedulerObservation === undefined) {
-      return undefined;
-    }
-    if (this.#writeSpace === space) {
-      return this.#schedulerObservation;
-    }
-    if (
-      this.#writeSpace === undefined &&
-      schedulerObservationCommitSpace(this.#schedulerObservation) === space
-    ) {
-      return this.#schedulerObservation;
-    }
-    return undefined;
   }
 
   private editable(): Result<Unit, InactiveTransactionError> {

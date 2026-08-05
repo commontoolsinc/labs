@@ -23,13 +23,10 @@ import {
 } from "@commonfabric/data-model/cell-rep";
 import {
   getCommitPreconditionsConfig,
-  getPersistentSchedulerStateConfig,
   getServerExecutionConfig,
   resetCommitPreconditionsConfig,
-  resetPersistentSchedulerStateConfig,
   resetServerExecutionConfig,
   setCommitPreconditionsConfig,
-  setPersistentSchedulerStateConfig,
   setServerExecutionConfig,
 } from "@commonfabric/memory/v2";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
@@ -213,8 +210,6 @@ export type PieceCreatedCallback = (piece: Cell<any>) => void;
 export interface ExperimentalOptions {
   /** Enable the modern "cell representation" classes. */
   modernCellRep?: boolean | undefined;
-  /** Persist scheduler observations and use them for scheduler rehydration. */
-  persistentSchedulerState?: boolean | undefined;
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
   commitPreconditions?: boolean | undefined;
   /**
@@ -968,7 +963,6 @@ export class Runtime {
   constructor(options: RuntimeOptions) {
     this.experimental = {
       modernCellRep: undefined,
-      persistentSchedulerState: undefined,
       commitPreconditions: undefined,
       plainResultReceipts: undefined,
       computedCellIds: undefined,
@@ -1010,11 +1004,6 @@ export class Runtime {
     // `undefined` and probably get very confused).
     setModernCellRepConfig(this.experimental.modernCellRep);
     this.experimental.modernCellRep = getModernCellRepConfig();
-    setPersistentSchedulerStateConfig(
-      this.experimental.persistentSchedulerState,
-    );
-    this.experimental.persistentSchedulerState =
-      getPersistentSchedulerStateConfig();
     setCommitPreconditionsConfig(this.experimental.commitPreconditions);
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
     setServerExecutionConfig(this.experimental.serverExecution);
@@ -1445,7 +1434,6 @@ export class Runtime {
 
     // Reset experimental config to defaults.
     resetModernCellRepConfig();
-    resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
     resetServerExecutionConfig();
 

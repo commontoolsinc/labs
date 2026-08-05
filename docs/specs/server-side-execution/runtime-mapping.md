@@ -514,15 +514,20 @@ exist on main (`scopeSummary`, `contextKey`, replay table) — the
 Phase 0 main-surface audit (plan §Phase 0) should record this
 mapping's inventory as that audit.
 
-**N62 (observation adoption).** Adoption exists so N client runtimes
-don't all re-run what one already ran — the multi-client symptom v2
+**N62 (observation adoption).** Adoption existed so N client runtimes
+didn't all re-run what one already ran — the multi-client symptom v2
 removes at the root. Under the flag clients no longer run committed
 derivations at all (reload is read-and-render, §3b), so adoption has
 nothing to adopt; server-side there is no second runtime to adopt
-from. Delete under ON; keep OFF-arm. The one caveat: the sync-path
-comment in `scheduler/invalidation.ts:39-49` (pushes must stay
-unshaped for adoption) loses its reason once adoption goes — re-check
-the shaping decision (N10) then.
+from. DELETED in Phase 1 stage C.2, ahead of the original
+delete-under-ON/keep-OFF-arm disposition: the stage's D7 protocol
+deletions (serving-loop §3b) removed the feature's entire substrate —
+the persisted rows it listed, the hello negotiation that gated it, and
+the commit carriage that fed it — so keeping the receive path would
+have kept dead code no server could ever feed. The caveat that came
+with the disposition still stands: the sync-path comment in
+`scheduler/invalidation.ts` (pushes had to stay unshaped for adoption)
+lost its reason, so the shaping decision is due a re-check (N10).
 
 **N64 (execution_lease does not exist).** serving-loop §Anchors and
 §2 describe `execution_lease` as "an existing table"; it is not in

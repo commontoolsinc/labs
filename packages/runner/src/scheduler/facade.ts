@@ -88,12 +88,7 @@ import {
   type EventPreflightDependencyState,
   snapshotEventPreflightTraceContext,
 } from "./event-preflight-dependencies.ts";
-import {
-  runSchedulerAction,
-  type SchedulerActionRunState,
-  schedulerImplementationFingerprint,
-  schedulerRuntimeFingerprint,
-} from "./run.ts";
+import { runSchedulerAction, type SchedulerActionRunState } from "./run.ts";
 import {
   buildPullInitialSeeds,
   createSettlingTracker,
@@ -106,11 +101,6 @@ import {
   type SettlingTracker,
 } from "./execution.ts";
 import { runPullSchedulerSettleLoop } from "./settle.ts";
-import {
-  isSchedulerActionObservation,
-  type PersistedSchedulerObservationSnapshot,
-  type SchedulerActionObservation,
-} from "./persistent-observation.ts";
 import { collectPullIterationSeeds as collectPullIterationSeedsState } from "./settle.ts";
 import {
   type DirtyPullRunnableState,
@@ -135,7 +125,6 @@ import {
   unsubscribeSchedulerAction,
 } from "./registration.ts";
 import {
-  resolveRegistrationSurface,
   resubscribePullSchedulerAction,
   subscribePullSchedulerAction,
 } from "./registration.ts";
@@ -183,39 +172,6 @@ const logger = getLogger("scheduler", {
 
 type FilterStatsState = { filtered: number; executed: number };
 
-const schedulerContextRank = (contextKey: string): number =>
-  contextKey === "space"
-    ? 0
-    : contextKey.startsWith("user:")
-    ? 1
-    : contextKey.startsWith("session:")
-    ? 2
-    : -1;
-
-// Without a transformer-proven completeness certificate — deleted from the
-// tree (docs/specs/server-side-execution/serving-loop.md §3b) — no observation
-// can prove it is safe to share across principals or sessions, so only the
-// exact-session context row is ever adoptable (the fail-closed arm of
-// incremental-observation-adoption.md C6).
-const SCHEDULER_MINIMUM_CONTEXT_RANK = 2;
-
-type SchedulerStorageRehydrationOptions =
-  & SchedulerObservationIdentity
-  & {
-    space: MemorySpace;
-    snapshotsByActionId?: ReadonlyMap<
-      string,
-      readonly PersistedSchedulerObservationSnapshot[]
-    >;
-    addressesCurrentAtOrBelow?: (
-      addresses: readonly IMemorySpaceAddress[],
-      seq: number,
-    ) => boolean;
-    hasPendingWriteOverlapping?: (
-      addresses: readonly IMemorySpaceAddress[],
-    ) => boolean;
-  };
-
 type SchedulerRegistrationInput = ReactivityLog;
 type SchedulerRegisterOptions = {
   isEffect?: boolean;
@@ -223,12 +179,9 @@ type SchedulerRegisterOptions = {
   noDebounce?: boolean;
   throttle?: number;
   changeGroup?: ChangeGroup;
-  rehydrateFromStorage?: SchedulerStorageRehydrationOptions;
   // Hold the action's initial run until its space finishes syncing (bounded by
   // timeoutMs), so a resumed re-derivation reads confirmed-loaded inputs
-  // instead of racing the data. Applies whenever the action did NOT rehydrate
-  // from a snapshot: the flag-off resume path, and the flag-on degrade path
-  // (snapshot miss/mismatch, or an "always-run" action). See runner.ts.
+  // instead of racing the data. See runner.ts.
   awaitSyncBeforeInitialRun?: { space: MemorySpace; timeoutMs?: number };
   // Tag the action with its owning pattern instance without rehydrating from
   // storage. Pattern readers then always carry a pieceId, used to group shaped
@@ -237,10 +190,6 @@ type SchedulerRegisterOptions = {
   observationIdentity?: SchedulerObservationIdentity & {
     space?: MemorySpace;
   };
-  // "always-run": never rehydrate this action clean on resume — its run has
-  // instantiation side effects (starting child runs) that a clean skip would
-  // strand. See docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
-  resumeMode?: "always-run";
 };
 
 function isReactivityLog(value: unknown): value is ReactivityLog {
@@ -272,35 +221,6 @@ function normalizeRegistrationArgs(
     dependencies: dependenciesOrOptions,
     options,
   };
-}
-
-function observationIdentityKey(
-  identity: {
-    ownerSpace?: string;
-    branch: string;
-    pieceId: string;
-    processGeneration: number;
-    actionId: string;
-  },
-): string {
-  return [
-    identity.ownerSpace ?? "",
-    identity.branch,
-    identity.pieceId,
-    String(identity.processGeneration),
-    identity.actionId,
-  ].join("\0");
-}
-
-function observationAdoptionAddresses(
-  observation: SchedulerActionObservation,
-): IMemorySpaceAddress[] {
-  return [
-    ...observation.reads,
-    ...observation.shallowReads,
-    ...observation.actualChangedWrites,
-    ...(observation.currentKnownWrites ?? []),
-  ];
 }
 
 // Re-export types that tests expect from scheduler
@@ -435,24 +355,6 @@ export class Scheduler {
   private eventPreflightTelemetryEnabled = false;
   private eventPassDemandRefresh?: (demand: Set<Action>) => void;
   private storageNotificationState!: StorageNotificationState;
-  // Full durable-identity index for incremental observation adoption
-  // (docs/specs/scheduler-v2/incremental-observation-adoption.md): a remote
-  // observation names its action by id; the nodes registry is a WeakMap, so
-  // adoption keeps this registration-scoped map. Action ids are only unique
-  // within a piece; owner space, branch and generation are part of the durable
-  // identity and must participate in lookup as well.
-  private actionsByObservationIdentity = new Map<string, Action>();
-
-  // Actions registered with resumeMode "always-run" — the map/filter/flatMap
-  // coordinators that must run their reconcile to (re)register per-element
-  // children. Live adoption must exclude them for the SAME reason register()
-  // excludes them on reload: adopting one clean skips the reconcile, so a
-  // remotely-appended row's child action is never registered and that row's
-  // reactivity is dead. Object-keyed (once a coordinator, always a
-  // coordinator) and the only failure direction is refusing a safe adoption,
-  // so a stale membership just runs the action locally — never incorrect.
-  private alwaysRunActions = new WeakSet<Action>();
-
   // Parent-child action tracking for proper execution ordering
   // When a child action is created during parent execution, parent must run first
   private executingAction: Action | null = null;
@@ -501,12 +403,6 @@ export class Scheduler {
   // distinguish a genuine concurrent refresh from a load kicked by preflight
   // itself (the latter must not re-arm the same event forever).
   private preflightPendingLoadGenerations = new Map<string, number>();
-  // Depth of the initial-rehydration apply window (the rehydration barrier reads
-  // this, NOT backgroundTasks — see createPullSchedulingState). Phase 7 made
-  // resume a synchronous snapshot apply at registration, so this is >0 only
-  // inside applyPreloadedInitialActionRehydration; backgroundTasks now holds
-  // only event-driven piece-start tasks, which must not pause pull scheduling.
-  private initialRehydrationInFlight = 0;
   private errorHandlers = new Set<ErrorHandler>();
   private consoleHandler: ConsoleHandler;
   private _running: Promise<unknown> | undefined = undefined;
@@ -612,33 +508,12 @@ export class Scheduler {
       dependenciesOrOptions,
       maybeOptions,
     );
-    const { rehydrateFromStorage } = options;
-    const previousObservationIdentityKey = this
-      .observationIdentityKeyForAction(action);
-    // Tag the action with its owning pattern instance. rehydrateFromStorage
-    // carries this only under persistent scheduler state; observationIdentity
-    // is set unconditionally so pattern readers always carry a pieceId (used to
-    // group shaped cell-flip wakes by instance and to distinguish pattern
-    // readers from internal machinery — plan B).
-    if (rehydrateFromStorage) {
-      this.setActionObservationIdentity(action, rehydrateFromStorage);
-    } else if (options.observationIdentity) {
+    // Tag the action with its owning pattern instance so pattern readers
+    // always carry a pieceId (used to group shaped cell-flip wakes by
+    // instance and to distinguish pattern readers from internal machinery —
+    // plan B).
+    if (options.observationIdentity) {
       this.setActionObservationIdentity(action, options.observationIdentity);
-    }
-    const observationIdentityKey = this.observationIdentityKeyForAction(action);
-    if (
-      previousObservationIdentityKey !== undefined &&
-      previousObservationIdentityKey !== observationIdentityKey &&
-      this.actionsByObservationIdentity.get(previousObservationIdentityKey) ===
-        action
-    ) {
-      this.actionsByObservationIdentity.delete(previousObservationIdentityKey);
-    }
-    if (observationIdentityKey !== undefined) {
-      this.actionsByObservationIdentity.set(observationIdentityKey, action);
-    }
-    if (options.resumeMode === "always-run") {
-      this.alwaysRunActions.add(action);
     }
     const subscribeOptions = {
       isEffect: options.isEffect,
@@ -654,24 +529,7 @@ export class Scheduler {
       dependencies,
       subscribeOptions,
     );
-    // Rehydration and the synced-hold are independent: apply the snapshot when
-    // one is preloaded for this action (unless the action declares it must
-    // always run on resume), and hold the initial run of any action that did
-    // NOT rehydrate. A snapshot miss thus degrades to the same synced-hold
-    // fresh run the flag-off path gets, instead of racing the data.
-    let rehydrated = false;
-    const snapshotsByActionId = rehydrateFromStorage?.snapshotsByActionId;
-    if (
-      rehydrateFromStorage &&
-      snapshotsByActionId &&
-      options.resumeMode !== "always-run"
-    ) {
-      rehydrated = this.applyPreloadedInitialActionRehydration(
-        action,
-        { ...rehydrateFromStorage, snapshotsByActionId },
-      );
-    }
-    if (!rehydrated && options.awaitSyncBeforeInitialRun) {
+    if (options.awaitSyncBeforeInitialRun) {
       this.holdInitialRunUntilSynced(action, options.awaitSyncBeforeInitialRun);
     }
     return cancel;
@@ -774,292 +632,6 @@ export class Scheduler {
     );
   }
 
-  rehydrateActionFromObservation(
-    action: Action,
-    snapshot: PersistedSchedulerObservationSnapshot,
-  ): boolean {
-    const actionId = this.getActionId(action);
-    const { observation } = snapshot;
-    if (observation.actionId !== actionId) {
-      return false;
-    }
-
-    // Annotation first; otherwise restore the persisted live surface —
-    // mirroring registration, where subscribe's ReactivityLog supplies the
-    // surface for annotation-less actions.
-    const surface = resolveRegistrationSurface(action, {
-      reads: [],
-      shallowReads: [],
-      writes: observation.currentKnownWrites ?? [],
-    });
-    if (observation.actionKind !== "effect" && surface.length > 0) {
-      this.writeIndex.setSurface(action, surface);
-      registerDependentsForWriterSurface(
-        this.dependencyGraphState,
-        action,
-        surface,
-      );
-    }
-
-    this.resubscribe(action, {
-      reads: observation.reads,
-      shallowReads: observation.shallowReads,
-      writes: [],
-    }, {
-      isEffect: observation.actionKind === "effect",
-    });
-    if (observation.materializerWriteEnvelopes.length > 0) {
-      this.materializers.registerAddresses(
-        action,
-        observation.materializerWriteEnvelopes,
-      );
-    }
-
-    const { actionOptions } = observation;
-    if (actionOptions?.debounceMs !== undefined) {
-      this.gates.setDebounce(action, actionOptions.debounceMs);
-    }
-    if (actionOptions?.noDebounce !== undefined) {
-      this.gates.setNoDebounce(action, actionOptions.noDebounce);
-    }
-    if (actionOptions?.throttleMs !== undefined) {
-      this.gates.setThrottle(action, actionOptions.throttleMs);
-    }
-
-    if (
-      observation.status === "failed" ||
-      snapshot.directDirtySeq !== undefined ||
-      snapshot.staleSeq !== undefined ||
-      snapshot.unknownReason !== undefined
-    ) {
-      this.markAndScheduleInvalidAction(action);
-      return true;
-    }
-
-    const record = this.nodes.get(action);
-    if (record) {
-      this.nodes.setStatus(action, "clean");
-      record.invalidCauses = [];
-    }
-    this.pending.delete(action);
-    return true;
-  }
-
-  // Returns whether the action actually rehydrated from its snapshot; a miss
-  // (no snapshot for this actionId, fingerprint mismatch, malformed payload)
-  // leaves the action on the normal initial-run path.
-  private selectSchedulerSnapshotCandidate(
-    action: Action,
-    candidates: readonly PersistedSchedulerObservationSnapshot[],
-  ): PersistedSchedulerObservationSnapshot | undefined {
-    let selected: PersistedSchedulerObservationSnapshot | undefined;
-    let selectedRank = -1;
-    for (const candidate of candidates) {
-      const observation = candidate.observation;
-      if (
-        !isSchedulerActionObservation(observation) ||
-        !this.observationMatchesCurrentAction(action, observation)
-      ) {
-        continue;
-      }
-      const contextRank = schedulerContextRank(
-        candidate.executionContextKey,
-      );
-      if (
-        contextRank < SCHEDULER_MINIMUM_CONTEXT_RANK ||
-        contextRank <= selectedRank
-      ) {
-        continue;
-      }
-      selected = candidate;
-      selectedRank = contextRank;
-    }
-    return selected;
-  }
-
-  private applyPreloadedInitialActionRehydration(
-    action: Action,
-    rehydration: SchedulerStorageRehydrationOptions & {
-      snapshotsByActionId: ReadonlyMap<
-        string,
-        readonly PersistedSchedulerObservationSnapshot[]
-      >;
-    },
-  ): boolean {
-    // Engage the rehydration barrier for the duration of the apply: if
-    // rehydrateActionFromObservation triggers a synchronous settle, no pull
-    // seed may promote this resuming action before its status is restored.
-    this.initialRehydrationInFlight++;
-    try {
-      const candidates = rehydration.snapshotsByActionId.get(
-        this.getActionId(action),
-      ) ?? [];
-      const snapshot = this.selectSchedulerSnapshotCandidate(
-        action,
-        candidates,
-      );
-      if (!snapshot) {
-        logger.debug("rehydrate/fallback-run/no-match", () => []);
-        return false;
-      }
-      const addresses = observationAdoptionAddresses(snapshot.observation);
-      if (
-        rehydration.addressesCurrentAtOrBelow?.(
-            addresses,
-            snapshot.observation.observedAtSeq,
-          ) === true &&
-        rehydration.hasPendingWriteOverlapping?.(addresses) !== true &&
-        this.rehydrateActionFromObservation(action, snapshot)
-      ) {
-        logger.debug("rehydrate/ok", () => []);
-        return true;
-      }
-
-      logger.debug("rehydrate/fallback-run/no-match", () => []);
-      return false;
-    } finally {
-      this.initialRehydrationInFlight--;
-    }
-  }
-
-  // Incremental observation adoption
-  // (docs/specs/scheduler-v2/incremental-observation-adoption.md): apply
-  // another client's committed action observations to the local equivalent
-  // actions instead of re-running them. Called by the storage layer after a
-  // subscription push's writes have been applied (and their readers marked
-  // dirty), before the next scheduling pass dispatches — adoption clears
-  // exactly the dirt those writes caused for actions the writer already ran.
-  //
-  // The caller supplies the storage-side checks: `readsCurrentAtSeq` (no doc
-  // in the read set has a local commit newer than the observation — else the
-  // action is genuinely stale relative to state the writer did not observe)
-  // and `hasPendingLocalWriteOverlapping` (a local uncommitted write makes
-  // the local view diverge from the writer's basis — run normally).
-  //
-  // An adoption that races a mid-flight local run is harmless: the run's
-  // completion resubscribes from its own log and re-sets clean, an
-  // equivalent view (deterministic action over the same committed reads).
-  // Returns the number of actions adopted.
-  adoptRemoteObservations(
-    snapshots: readonly PersistedSchedulerObservationSnapshot[],
-    oracle: {
-      readsCurrentAtSeq(
-        reads: readonly IMemorySpaceAddress[],
-        seq: number,
-      ): boolean;
-      hasPendingLocalWriteOverlapping(
-        reads: readonly IMemorySpaceAddress[],
-      ): boolean;
-    },
-  ): number {
-    const candidatesByAction = new Map<
-      Action,
-      PersistedSchedulerObservationSnapshot[]
-    >();
-    for (const snapshot of snapshots) {
-      const observation = snapshot.observation;
-      if (!isSchedulerActionObservation(observation)) continue;
-      // Computations only: effects render locally, and event handlers only
-      // run at their origin.
-      if (observation.actionKind !== "computation") continue;
-      const action = this.actionsByObservationIdentity.get(
-        observationIdentityKey(observation),
-      );
-      if (!action) continue;
-      // Only live registrations adopt (the id index may hold entries whose
-      // node was removed through a path that bypassed unsubscribe()).
-      if (!this.nodes.get(action)) continue;
-      if (this.nodes.isKnownEffect(action)) continue;
-      // Never adopt a child-starting coordinator clean: its reconcile is what
-      // (re)registers per-element children, so skipping it strands a remotely
-      // appended row unregistered — the reload path's always-run guard, live.
-      if (this.alwaysRunActions.has(action)) {
-        logger.debug("adopt/miss/always-run", () => [observation.actionId]);
-        continue;
-      }
-      let candidates = candidatesByAction.get(action);
-      if (!candidates) {
-        candidates = [];
-        candidatesByAction.set(action, candidates);
-      }
-      candidates.push(snapshot);
-    }
-
-    let adopted = 0;
-    for (const [action, candidates] of candidatesByAction) {
-      const snapshot = this.selectSchedulerSnapshotCandidate(
-        action,
-        candidates,
-      );
-      if (!snapshot) {
-        continue;
-      }
-      const observation = snapshot.observation;
-      // A dirty/failed narrower row wins candidate selection and forces the
-      // receiver to run normally; never fall back to a clean broader row.
-      if (
-        observation.status !== "success" ||
-        snapshot.directDirtySeq !== undefined ||
-        snapshot.staleSeq !== undefined ||
-        snapshot.unknownReason !== undefined
-      ) {
-        continue;
-      }
-      const addresses = observationAdoptionAddresses(observation);
-      if (!oracle.readsCurrentAtSeq(addresses, observation.observedAtSeq)) {
-        logger.debug("adopt/miss/stale-reads", () => [observation.actionId]);
-        continue;
-      }
-      if (oracle.hasPendingLocalWriteOverlapping(addresses)) {
-        logger.debug("adopt/miss/local-pending", () => [observation.actionId]);
-        continue;
-      }
-      // Same barrier as registration-time rehydration: no pull seed may
-      // promote the action while its status is being restored.
-      this.initialRehydrationInFlight++;
-      try {
-        if (this.rehydrateActionFromObservation(action, snapshot)) {
-          adopted++;
-          logger.debug("adopt/ok", () => [observation.actionId]);
-        }
-      } finally {
-        this.initialRehydrationInFlight--;
-      }
-    }
-    return adopted;
-  }
-
-  private observationMatchesCurrentAction(
-    action: Action,
-    observation: SchedulerActionObservation,
-  ): boolean {
-    const actionId = this.getActionId(action);
-    if (observation.actionId !== actionId) {
-      logger.debug("rehydrate/miss/action-id", () => []);
-      return false;
-    }
-
-    const identity = (action as Partial<TelemetryAnnotations>)
-      .schedulerObservationIdentity;
-    if (
-      identity === undefined ||
-      identity.ownerSpace !== observation.ownerSpace ||
-      (identity.branch ?? "") !== observation.branch ||
-      identity.pieceId !== observation.pieceId ||
-      (identity.processGeneration ?? 0) !== observation.processGeneration
-    ) {
-      logger.debug("rehydrate/miss/identity", () => []);
-      return false;
-    }
-
-    const telemetry = getSchedulerActionTelemetryInfo(action);
-    const matches = observation.implementationFingerprint ===
-        schedulerImplementationFingerprint(action, actionId, telemetry) &&
-      observation.runtimeFingerprint === schedulerRuntimeFingerprint();
-    if (!matches) logger.debug("rehydrate/miss/fingerprint", () => []);
-    return matches;
-  }
-
   private setActionObservationIdentity(
     action: Action,
     identity: SchedulerObservationIdentity & { space?: MemorySpace },
@@ -1074,38 +646,12 @@ export class Scheduler {
     };
   }
 
-  private observationIdentityKeyForAction(action: Action): string | undefined {
-    const identity = (action as Partial<TelemetryAnnotations>)
-      .schedulerObservationIdentity;
-    if (identity === undefined || identity.ownerSpace === undefined) {
-      return undefined;
-    }
-    return observationIdentityKey({
-      ownerSpace: identity.ownerSpace,
-      branch: identity.branch ?? "",
-      pieceId: identity.pieceId,
-      processGeneration: identity.processGeneration ?? 0,
-      actionId: this.getActionId(action),
-    });
-  }
-
   unsubscribe(
     action: Action,
     options: { preserveChangeGroup?: boolean } = {},
   ): void {
     unsubscribeSchedulerAction(this.unsubscribeState, action, options);
     this.materializers.clearAction(action);
-    // Drop the adoption index entry only if it still points at this action
-    // (a re-registration may have overwritten it). Cancel paths that bypass
-    // this method leave stale entries; the adoption path re-checks node
-    // liveness before applying, so stale entries are inert.
-    const identityKey = this.observationIdentityKeyForAction(action);
-    if (
-      identityKey !== undefined &&
-      this.actionsByObservationIdentity.get(identityKey) === action
-    ) {
-      this.actionsByObservationIdentity.delete(identityKey);
-    }
   }
 
   async run(action: Action): Promise<any> {
@@ -2163,32 +1709,6 @@ export class Scheduler {
   }
 
   private processStorageNotification(notification: StorageNotification): void {
-    if (notification.type === "scheduler-observations") {
-      // Subscription-carried observations arrive AFTER their sync's
-      // integrate notification (same synchronous turn): the writes have been
-      // applied and their readers marked dirty; adoption now clears the dirt
-      // the writer already resolved, before the deferred dispatch runs.
-      // Payload validation happens inside adoptRemoteObservations.
-      this.adoptRemoteObservations(
-        notification.observations.map((row) => ({
-          executionContextKey: row.executionContextKey,
-          observation: row.observation as SchedulerActionObservation,
-          ...(row.directDirtySeq !== undefined
-            ? { directDirtySeq: row.directDirtySeq }
-            : {}),
-          ...(row.staleSeq !== undefined ? { staleSeq: row.staleSeq } : {}),
-          ...(row.unknownReason !== undefined
-            ? { unknownReason: row.unknownReason }
-            : {}),
-        })),
-        {
-          readsCurrentAtSeq: notification.seqCurrentAtOrBelow,
-          hasPendingLocalWriteOverlapping:
-            notification.hasPendingWriteOverlapping,
-        },
-      );
-      return;
-    }
     processStorageNotification(
       this.storageNotificationState,
       notification,
@@ -2240,7 +1760,6 @@ export class Scheduler {
       // post-phase-7). MUST NOT read backgroundTasks: its sole populator is now
       // the event-driven piece-start task (events.ts), so gating on it would
       // pause all pull scheduling on every piece-start.
-      hasPendingInitialRehydrations: () => this.initialRehydrationInFlight > 0,
       // Per-node convergence episode state prevents one exhausted subgraph
       // from releasing idle for unrelated work.
       isConvergenceHoldActive: (action) => this.isConvergenceHoldActive(action),

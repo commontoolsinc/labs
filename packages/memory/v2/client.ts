@@ -10,7 +10,6 @@ import {
   type EntityIdLookupResult,
   type EntitySnapshot,
   getMemoryProtocolFlags,
-  getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryResult,
   MAX_ENTITY_ID_PAGE_SIZE,
@@ -18,8 +17,6 @@ import {
   type MemoryProtocolFlags,
   parseMemoryProtocolFlags,
   type ResponseMessage,
-  type SchedulerActionSnapshotQuery,
-  type SchedulerSnapshotListResult,
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
   type SessionOpenChallenge,
@@ -795,25 +792,6 @@ export class SpaceSession {
       id,
       path,
     });
-  }
-
-  async listSchedulerActionSnapshots(
-    query: SchedulerActionSnapshotQuery = {},
-  ): Promise<SchedulerSnapshotListResult> {
-    this.#assertOpen();
-    if (!getPersistentSchedulerStateConfig()) {
-      return { serverSeq: this.#serverSeq, snapshots: [] };
-    }
-    const result = await this.client.request<SchedulerSnapshotListResult>({
-      type: "scheduler.snapshot.list",
-      requestId: crypto.randomUUID(),
-      space: this.space,
-      sessionId: this.#sessionId,
-      query,
-    });
-
-    this.noteResult(result.serverSeq);
-    return result;
   }
 
   async watchSet(watches: WatchSpec[]): Promise<WatchView> {

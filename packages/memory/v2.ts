@@ -224,18 +224,6 @@ export type PendingRead = {
   nonRecursive?: boolean;
 };
 
-export type SchedulerObservationCommit = {
-  localSeq: number;
-  reads: {
-    confirmed: ConfirmedRead[];
-    pending: PendingRead[];
-  };
-  /** The observation, opaque here: this layer stores and forwards it, and
-   *  the runner owns its shape and validation. `FabricValue` says only what
-   *  the wire requires of it. */
-  schedulerObservation: FabricValue;
-};
-
 export type CommitPrecondition =
   | {
     kind: "origin-committed";
@@ -263,11 +251,6 @@ export type ClientCommit = {
   };
   operations: Operation[];
   preconditions?: CommitPrecondition[];
-  /** The observation, opaque here: this layer stores and forwards it, and
-   *  the runner owns its shape and validation. `FabricValue` says only what
-   *  the wire requires of it. */
-  schedulerObservation?: FabricValue;
-  schedulerObservationBatch?: SchedulerObservationCommit[];
   codeCID?: Reference;
   branch?: BranchName;
   merge?: {
@@ -290,7 +273,6 @@ export type SessionOpenResult = {
 
 export type MemoryProtocolFlags = {
   modernCellRep: boolean;
-  persistentSchedulerState: boolean;
   commitPreconditions: boolean;
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
@@ -345,7 +327,6 @@ export type MemoryProtocolFlags = {
  */
 export type WireMemoryProtocolFlags = {
   modernCellRep?: boolean;
-  persistentSchedulerState?: boolean;
   commitPreconditions?: boolean;
   syncSchemaTableV2?: boolean;
   sqliteCommitRowLabelEval?: boolean;
@@ -476,15 +457,6 @@ export type SessionSync = {
   caughtUpLocalSeq?: number;
   upserts: SessionSyncUpsert[];
   removes: SessionSyncRemove[];
-  // Scheduler observation rows for commits inside this sync's
-  // (fromSeq, toSeq] window, so subscribers can ADOPT the writer's action
-  // runs instead of re-running them
-  // (docs/specs/scheduler-v2/incremental-observation-adoption.md §4).
-  // Present only when both the server flag and the receiving connection's
-  // negotiated persistentSchedulerState flag are on. Same row shape as the
-  // scheduler.snapshot.list result; `observation` is intentionally
-  // `unknown` — the runner owns validation.
-  observations?: SchedulerActionSnapshotResult[];
 };
 
 export type WatchSetResult = {
@@ -673,146 +645,6 @@ export type SessionAckRequest = {
   seenSeq: number;
 };
 
-export type SchedulerActionSnapshotQuery = {
-  branch?: BranchName;
-  ownerSpace?: string;
-  pieceId?: string;
-  processGeneration?: number;
-  actionId?: string;
-  // Commit-seq window (exclusive since, inclusive through): rows whose
-  // carrying commit landed inside a subscription sync's (fromSeq, toSeq]
-  // window — the incremental-adoption fan-out query. Rows with a NULL
-  // commit seq never match a window filter.
-  sinceCommitSeq?: number;
-  throughCommitSeq?: number;
-  limit?: number;
-  cursor?: SchedulerActionSnapshotCursor;
-};
-
-/**
- * Server-derived ownership partition for durable scheduler state. The opaque
- * principal and session components use the same encoding as resolved memory
- * scope keys; clients must never construct one to select another context.
- */
-export type SchedulerActionKind =
-  | "computation"
-  | "effect"
-  | "event-handler";
-
-export type SchedulerObservationTransactionKind =
-  | "dependency-collection"
-  | "action-run"
-  | "event-preflight";
-
-export type SchedulerObservationAddress = {
-  space: string;
-  id: EntityId;
-  scope?: CellScope;
-  path: readonly string[];
-};
-
-export type CompleteActionScopeSummary = {
-  version: 1;
-  complete: true;
-  implementationFingerprint: string;
-  runtimeFingerprint: string;
-  piece: SchedulerObservationAddress;
-  reads: SchedulerObservationAddress[];
-  writes: SchedulerObservationAddress[];
-  materializerWriteEnvelopes: SchedulerObservationAddress[];
-  directOutputs: SchedulerObservationAddress[];
-};
-
-/**
- * A scheduler action observation as it is stored and carried across the memory
- * boundary.
- *
- * A parallel declaration of the same concept lives in the runner, at
- * `runner/src/scheduler/persistent-observation.ts`. The two are not the same
- * type and differ in strictness:
- *
- * - addresses here are {@link SchedulerObservationAddress} (`space: string`);
- *   the runner uses `IMemorySpaceAddress` (`space: MemorySpace`)
- * - `branch` here is `BranchName`; the runner declares it `string`
- *
- * The runner produces observations and this side stores them, so this one is
- * deliberately the wider of the pair. Nothing checks that they agree: the wire
- * fields that carry an observation (`CommitData.schedulerObservation` and
- * `SchedulerActionSnapshotResult.observation`) are declared `unknown`, so a
- * change to either declaration will not surface at the seam. Keep them in sync
- * by hand until one of them owns the shape.
- */
-export type SchedulerActionObservation = {
-  version: 1 | 2;
-  ownerSpace?: string;
-  branch: BranchName;
-  pieceId: string;
-  processGeneration: number;
-  actionId: string;
-  actionKind: SchedulerActionKind;
-  implementationFingerprint: string;
-  runtimeFingerprint: string;
-  completeActionScopeSummary?: CompleteActionScopeSummary;
-  observedAtSeq: number;
-  observedAtLocalSeq?: number;
-  transactionKind: SchedulerObservationTransactionKind;
-  reads: SchedulerObservationAddress[];
-  shallowReads: SchedulerObservationAddress[];
-  actualChangedWrites: SchedulerObservationAddress[];
-  currentKnownWrites: SchedulerObservationAddress[];
-  declaredWrites?: SchedulerObservationAddress[];
-  materializerWriteEnvelopes: SchedulerObservationAddress[];
-  ignoredSchedulingWrites?: SchedulerObservationAddress[];
-  actionOptions?: {
-    debounceMs?: number;
-    noDebounce?: boolean;
-    throttleMs?: number;
-  };
-  status: "success" | "failed";
-  errorFingerprint?: string;
-};
-
-export type SchedulerExecutionContextKey =
-  | "space"
-  | `user:${string}`
-  | `session:${string}:${string}`;
-
-export type SchedulerActionSnapshotCursor = {
-  ownerSpace?: string;
-  pieceId: string;
-  processGeneration: number;
-  actionId: string;
-  executionContextKey: SchedulerExecutionContextKey;
-};
-
-export type SchedulerActionSnapshotResult = {
-  observationId: number;
-  commitSeq: number | null;
-  observedAtSeq: number;
-  executionContextKey: SchedulerExecutionContextKey;
-  /** The observation, opaque here: this layer stores and forwards it, and the
-   *  runner owns its shape and validation. `FabricValue` says only what the
-   *  wire requires of it. */
-  observation: FabricValue;
-  directDirtySeq?: number;
-  staleSeq?: number;
-  unknownReason?: string;
-};
-
-export type SchedulerSnapshotListResult = {
-  serverSeq: number;
-  snapshots: SchedulerActionSnapshotResult[];
-  nextCursor?: SchedulerActionSnapshotCursor;
-};
-
-export type SchedulerSnapshotListRequest = {
-  type: "scheduler.snapshot.list";
-  requestId: string;
-  space: string;
-  sessionId: SessionId;
-  query: SchedulerActionSnapshotQuery;
-};
-
 export type ResponseMessage<Result> = {
   type: "response";
   requestId: string;
@@ -864,7 +696,6 @@ export type ClientMessage =
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
   | WatchAddRequest
-  | SchedulerSnapshotListRequest
   | SessionAckRequest;
 export type ServerMessage =
   | HelloOkMessage
@@ -880,35 +711,17 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 // These ambient flags and the memory protocol flags below are catalogued, with
 // their defaults and removal paths, in docs/development/EXPERIMENTAL_OPTIONS.md.
 // Update that registry when adding or removing one.
-let persistentSchedulerStateEnabled = false;
 let serverExecutionEnabled = false;
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
-
-/**
- * Ambient runtime flag for persistent scheduler observations and rehydration.
- * The runner owns the feature, but the memory protocol needs the value during
- * client/server handshakes, so it lives beside the memory protocol flags.
- */
-export function setPersistentSchedulerStateConfig(enabled?: boolean): void {
-  persistentSchedulerStateEnabled = enabled ?? false;
-}
-
-export function getPersistentSchedulerStateConfig(): boolean {
-  return persistentSchedulerStateEnabled;
-}
-
-export function resetPersistentSchedulerStateConfig(): void {
-  persistentSchedulerStateEnabled = false;
-}
 
 /**
  * Ambient runtime flag for server-execution v2
  * (`EXPERIMENTAL_SERVER_EXECUTION`; docs/specs/server-side-execution/). OFF is
  * today's behavior byte-for-byte. The runner owns the feature, but the
  * per-class commit admission rows (protocol.md §2) are enforced by the memory
- * server under the flag, so the value lives beside the memory protocol flags
- * like `persistentSchedulerState` does. Not a handshake capability: admission
+ * server under the flag, so the value lives beside the memory protocol flags.
+ * Not a handshake capability: admission
  * enforcement is server-local, so nothing about it is negotiated per
  * connection.
  */
@@ -960,7 +773,6 @@ export function resetSyncSchemaTableConfig(): void {
 
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
-  persistentSchedulerState: getPersistentSchedulerStateConfig(),
   commitPreconditions: getCommitPreconditionsConfig(),
   // A build-inherent capability, not configuration: this build's engine always
   // evaluates row-label rules at commit (sqlite/commit-eval.ts), so it always
@@ -984,10 +796,10 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
 });
 
 /**
- * Scheduler-state persistence and commit preconditions are optional
- * capabilities, not data-model wire contracts. Peers with different scheduler
- * flags can still share memory data; the server's flags control whether
- * scheduler rows and precondition checks are accepted on that connection.
+ * Commit preconditions and the other capability flags are optional
+ * capabilities, not data-model wire contracts. Peers with different
+ * capability flags can still share memory data; the server's flags control
+ * what is accepted on that connection.
  */
 export const compatibleMemoryProtocolFlags = (
   left: MemoryProtocolFlags,
@@ -1002,14 +814,6 @@ export const parseMemoryProtocolFlags = (
   value: unknown,
 ): MemoryProtocolFlags | null => {
   if (!isRecord(value) || Array.isArray(value)) {
-    return null;
-  }
-
-  const persistentSchedulerState = value.persistentSchedulerState;
-  if (
-    persistentSchedulerState !== undefined &&
-    typeof persistentSchedulerState !== "boolean"
-  ) {
     return null;
   }
 
@@ -1087,7 +891,6 @@ export const parseMemoryProtocolFlags = (
 
   return {
     modernCellRep: modernCellRep === true,
-    persistentSchedulerState: persistentSchedulerState === true,
     commitPreconditions: commitPreconditions === true,
     syncSchemaTableV2: syncSchemaTableV2 === true,
     // Absent (an older peer) parses to false: the capability must be
@@ -1113,7 +916,6 @@ export const wireMemoryProtocolFlags = (
   flags: MemoryProtocolFlags,
 ): WireMemoryProtocolFlags => ({
   modernCellRep: flags.modernCellRep,
-  persistentSchedulerState: flags.persistentSchedulerState,
   commitPreconditions: flags.commitPreconditions,
   syncSchemaTableV2: flags.syncSchemaTableV2,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,

@@ -28,7 +28,7 @@ was last checked against the code.
 | Flag | Toggle via | Default today | Originally added by | Planned end state | Status |
 |------|-----------|---------------|---------------------|-------------------|---------------------|
 | [`modernCellRep`](#moderncellrep) | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental` | off | Dan Bornstein (#3818) | graduate to always-on, then delete flag | implemented, off by default |
-| [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | SUPERSEDED — no longer graduating to always-on: the persisted form is replaced by the v2 basis index and the flag deletes with it ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md) §3b; plan Phase 1 stage C) | implemented, off by default; graduation stopped pending that replacement |
+| [`persistentSchedulerState`](#persistentschedulerstate) | none — deleted | — | Bernhard Seefeld (#3646) | EXECUTED — the persisted form is replaced by the v2 basis index and the flag deleted with it ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md) §3b; plan Phase 1 stage C.2) | deleted from the tree; entry moves to Appendix A in stage C.3 |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`plainResultReceipts`](#plainresultreceipts) | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental` | on | Mike Salisbury (verb contract WS-C) | fold into receipt semantics and delete flag after a bake period | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
@@ -72,9 +72,9 @@ The mapping from environment variable to flag is defined once, canonically, as
 and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
 the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines.
-Seven flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
-`eagerSourceAnnotation`, `plainResultReceipts`, `systemPatternAutoUpdate`,
-`computedCellIds`, `serverExecution`);
+Six flags are env-reachable (`modernCellRep`, `eagerSourceAnnotation`,
+`plainResultReceipts`, `systemPatternAutoUpdate`, `computedCellIds`,
+`serverExecution`);
 `commitPreconditions` is deliberately mapped to `null` there, which records
 "not env-reachable" as a decision rather than an omission.
 The mapping accepts exactly `"true"` and `"false"`; any other value is ignored
@@ -130,15 +130,19 @@ propagate](#how-flags-propagate).
   than a data-model contract, so peers with different settings can still share
   memory data; the server's setting controls whether scheduler rows are accepted
   on a connection.
-- **Status on 2026-07-08.** Implemented; the durable tables, the rehydration
-  primitives, and the memory-protocol capability are wired. Off by default,
-  rollout in progress. See
-  [`docs/specs/persistent-scheduler-state.md`](../specs/persistent-scheduler-state.md)
-  and [`docs/specs/scheduler-v2/`](../specs/scheduler-v2/) for the tracked
-  status.
-- **Path to removal.** Confirm rehydration falls back cleanly when observations
-  are absent or stale; graduate the default to on across the fleet; then fold
-  the behavior into the base scheduler and delete the flag.
+- **Status on 2026-08-04.** DELETED (server-execution v2 Phase 1 stage C.2):
+  the flag, its ambient control point, the hello negotiation, the
+  `scheduler.snapshot.list` RPC, the commit-carried observation payload, and
+  the seven observation tables are all gone from the tree; the persisted form
+  is replaced by the `scheduler_basis` index
+  ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md) §3b),
+  which starts empty and is written only when the serving loop lands. A store
+  that had opted in loses warm start once at the migration, by design (D10).
+  Old clients take the existing hello-degrade path (a server that advertises
+  nothing to negotiate reads as "state absent, run fresh").
+- **Path to removal.** Superseded and executed by stage C: the persisted form
+  did not graduate; it was reduced away. This registry entry moves to
+  Appendix A in stage C.3, which also archives the describing specs.
 
 ### `plainResultReceipts`
 

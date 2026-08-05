@@ -27,11 +27,7 @@ import {
   type EntityIdListOptions,
   type EntityIdListResult,
   getCommitPreconditionsConfig,
-  getPersistentSchedulerStateConfig,
   type PatchOp,
-  type SchedulerActionSnapshotQuery,
-  type SchedulerObservationCommit,
-  type SchedulerSnapshotListResult,
   type SessionSync,
   type SqliteDbRef,
   type SqliteOperation,
@@ -69,7 +65,6 @@ import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import type {
   IMemoryAddress,
-  IMemorySpaceAddress,
   IMergedChanges,
   IPreconditionFailedError,
   IRemoteStorageProviderSettings,
@@ -809,40 +804,15 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
         ? { ...read, localSeq: scalarizeLocalSeq(read.localSeq) }
         : read
     );
-  const needsCommit = hasStack(commit.reads.pending);
-  const needsBatch =
-    commit.schedulerObservationBatch?.some((entry) =>
-      hasStack(entry.reads.pending)
-    ) === true;
-  if (!needsCommit && !needsBatch) {
+  if (!hasStack(commit.reads.pending)) {
     return commit;
   }
   return {
     ...commit,
-    ...(needsCommit
-      ? {
-        reads: {
-          confirmed: commit.reads.confirmed,
-          pending: scalarizeReads(commit.reads.pending),
-        },
-      }
-      : {}),
-    ...(needsBatch
-      ? {
-        schedulerObservationBatch: commit.schedulerObservationBatch!.map(
-          (entry) =>
-            hasStack(entry.reads.pending)
-              ? {
-                ...entry,
-                reads: {
-                  confirmed: entry.reads.confirmed,
-                  pending: scalarizeReads(entry.reads.pending),
-                },
-              }
-              : entry,
-        ),
-      }
-      : {}),
+    reads: {
+      confirmed: commit.reads.confirmed,
+      pending: scalarizeReads(commit.reads.pending),
+    },
   };
 };
 
@@ -1911,27 +1881,6 @@ class Provider implements IStorageProvider {
     return this.followReplacement((replica) => replica.entityIdExists(id));
   }
 
-  listSchedulerActionSnapshots(
-    query: SchedulerActionSnapshotQuery = {},
-  ): Promise<SchedulerSnapshotListResult> {
-    return this.followReplacement((replica) =>
-      replica.listSchedulerActionSnapshots(query)
-    );
-  }
-
-  areSchedulerAddressesCurrentAtOrBelow(
-    addresses: readonly IMemorySpaceAddress[],
-    seq: number,
-  ): boolean {
-    return this.replica.areSchedulerAddressesCurrentAtOrBelow(addresses, seq);
-  }
-
-  schedulerHasPendingWriteOverlapping(
-    addresses: readonly IMemorySpaceAddress[],
-  ): boolean {
-    return this.replica.schedulerHasPendingWriteOverlapping(addresses);
-  }
-
   sqliteQuery(
     db: SqliteDbRef,
     sql: string,
@@ -2013,13 +1962,6 @@ type NativeCommitOperation =
     value: EntityDocument;
   }
   | { op: "delete"; id: URI; scope?: CellScope };
-
-type SchedulerObservationBatchEntry = {
-  commit: SchedulerObservationCommit;
-  pending: PromiseWithResolvers<Result<Unit, StorageTransactionRejected>>;
-  source?: IStorageTransaction;
-  batchGeneration: number;
-};
 
 class StorageTransactionRejectionError extends Error {
   constructor(readonly rejection: StorageTransactionRejected) {
@@ -2115,15 +2057,6 @@ class SpaceReplica implements ISpaceReplica {
   // withhold indefinitely; close()/closeNow() drain the set after client
   // teardown rejects every in-flight request.
   readonly #suppressedVerdicts = new Set<Promise<void>>();
-  readonly #schedulerObservationBatch: SchedulerObservationBatchEntry[] = [];
-  readonly #unsettledSchedulerObservations = new Set<
-    SchedulerObservationBatchEntry
-  >();
-  #schedulerObservationBatchGeneration = 0;
-  #schedulerObservationFlushScheduled = false;
-  #schedulerObservationFlushPromise:
-    | Promise<Result<Unit, StorageTransactionRejected>>
-    | undefined;
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
   readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<
@@ -2280,12 +2213,6 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   async synced(): Promise<void> {
-    if (
-      this.#schedulerObservationBatch.length > 0 ||
-      this.#schedulerObservationFlushPromise
-    ) {
-      await this.flushSchedulerObservationBatch();
-    }
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
   }
 
@@ -2426,56 +2353,16 @@ class SpaceReplica implements ISpaceReplica {
     );
   }
 
-  async listSchedulerActionSnapshots(
-    query: SchedulerActionSnapshotQuery = {},
-  ): Promise<SchedulerSnapshotListResult> {
-    if (!getPersistentSchedulerStateConfig()) {
-      return { serverSeq: 0, snapshots: [] };
-    }
-    const { client, session } = await this.activeSessionHandle();
-    // Optional capability, negotiated at hello: a server that did not
-    // advertise `persistentSchedulerState` keeps no scheduler rows (and an
-    // older build may not know the message at all) — treat as "no snapshots"
-    // so the resume path degrades to running fresh, instead of depending on
-    // a capability-specific RPC the server never offered.
-    if (client.serverFlags?.persistentSchedulerState !== true) {
-      return { serverSeq: 0, snapshots: [] };
-    }
-    return await session.listSchedulerActionSnapshots(query);
-  }
-
-  areSchedulerAddressesCurrentAtOrBelow(
-    addresses: readonly IMemorySpaceAddress[],
-    seq: number,
-  ): boolean {
-    for (const address of addresses) {
-      if (address.space !== this.#space) return false;
-      const record = this.#docs.get(
-        docKey(address.id as URI, address.scope as CellScope | undefined),
-      );
-      // Missing/unconfirmed docs cannot prove either the observation's inputs
-      // or its committed output surface are present in this replica.
-      if (record === undefined || record.confirmed.seq === 0) return false;
-      if (record.confirmed.seq > seq) return false;
-    }
-    return true;
-  }
-
-  schedulerHasPendingWriteOverlapping(
-    addresses: readonly IMemorySpaceAddress[],
-  ): boolean {
-    for (const address of addresses) {
-      if (address.space !== this.#space) continue;
-      const record = this.#docs.get(
-        docKey(address.id as URI, address.scope as CellScope | undefined),
-      );
-      if (record !== undefined && record.pending.length > 0) return true;
-    }
-    return false;
-  }
-
   getDocument(uri: URI, scope?: CellScope): EntityDocument | undefined {
     return this.visibleDocument(uri, scope);
+  }
+
+  /** Whether an optimistic local write for this doc is still pending — not
+   *  yet promoted into the confirmed mirror (a parked accept keeps it
+   *  pending until its marker arrives; CT-1927). */
+  hasPendingWrite(id: URI, scope?: CellScope): boolean {
+    const record = this.#docs.get(docKey(id, scope));
+    return record !== undefined && record.pending.length > 0;
   }
 
   async close(): Promise<void> {
@@ -2487,18 +2374,6 @@ class SpaceReplica implements ISpaceReplica {
     // cannot outlive close(); `#closed` also makes refreshWatchSet fail closed
     // for any refresh already in flight.
     this.cancelQueuedWatchRefresh();
-    // Send any batched scheduler observations so they reach the server, but do
-    // not await commit confirmation here. A commit whose response is withheld
-    // past dispose — the server holding it for a gated read that never arrives —
-    // never settles on its own, so awaiting it before the client teardown below
-    // would deadlock close(), just as awaiting an in-flight read would. Kicking
-    // the flush issues the observation commit into `#commitPromises`; the client
-    // teardown rejects every in-flight request, reads and commits alike, and the
-    // post-teardown drain settles them.
-    const observationFlush = (this.#schedulerObservationBatch.length > 0 ||
-        this.#schedulerObservationFlushPromise)
-      ? this.flushSchedulerObservationBatch()
-      : undefined;
     this.#watchView?.close();
     this.#watchView = null;
     // Also close the view the update consumer is bound to, in case it diverged
@@ -2534,7 +2409,6 @@ class SpaceReplica implements ISpaceReplica {
     // resolves. Suppressed verdicts (server responses superseded by a local
     // rejection) live outside #commitPromises and join the same drain.
     await Promise.allSettled([
-      ...(observationFlush ? [observationFlush] : []),
       ...this.#commitPromises,
       ...this.#suppressedVerdicts,
     ]);
@@ -2789,9 +2663,6 @@ class SpaceReplica implements ISpaceReplica {
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    const schedulerObservation = getPersistentSchedulerStateConfig()
-      ? transaction.schedulerObservation
-      : undefined;
     const preconditions = activeCommitPreconditions(transaction.preconditions);
     const operations = withCommitTiming(
       ["commitNative", "normalize"],
@@ -2825,7 +2696,7 @@ class SpaceReplica implements ISpaceReplica {
     const sqliteOps = transaction.sqliteOps ?? [];
 
     if (
-      operations.length === 0 && schedulerObservation === undefined &&
+      operations.length === 0 &&
       !preconditions?.length &&
       sqliteOps.length === 0
     ) {
@@ -2838,7 +2709,6 @@ class SpaceReplica implements ISpaceReplica {
         this.commitOperations(
           operations,
           source,
-          schedulerObservation,
           preconditions,
           sqliteOps,
         ),
@@ -3046,218 +2916,9 @@ class SpaceReplica implements ISpaceReplica {
     }
   }
 
-  private enqueueSchedulerObservationCommit(
-    schedulerObservation: FabricValue,
-    source?: IStorageTransaction,
-  ): Promise<Result<Unit, StorageTransactionRejected>> {
-    if (!getPersistentSchedulerStateConfig()) {
-      return Promise.resolve({ ok: {} });
-    }
-    // Known-unsupported server (hello already negotiated): drop the
-    // observation without batching. The flush-time gate below is the
-    // authoritative check; this just spares every action commit the
-    // batch/flush round once the session has established that scheduler
-    // payloads have nowhere to go.
-    if (
-      this.#sessionClient !== undefined &&
-      this.#sessionClient.serverFlags?.persistentSchedulerState !== true
-    ) {
-      return Promise.resolve({ ok: {} });
-    }
-    const localSeq = this.#nextLocalSeq++;
-    const pending = Promise.withResolvers<
-      Result<Unit, StorageTransactionRejected>
-    >();
-    const entry: SchedulerObservationBatchEntry = {
-      commit: {
-        localSeq,
-        reads: this.buildReads(source, localSeq),
-        schedulerObservation,
-      },
-      pending,
-      source,
-      batchGeneration: this.#schedulerObservationBatchGeneration,
-    };
-    this.#schedulerObservationBatch.push(entry);
-    this.#unsettledSchedulerObservations.add(entry);
-    void pending.promise.then(() => {
-      this.#unsettledSchedulerObservations.delete(entry);
-    });
-    this.scheduleSchedulerObservationFlush();
-    return pending.promise;
-  }
-
-  private schedulerObservationDependenciesBefore(
-    localSeq: number,
-  ): Promise<Result<Unit, StorageTransactionRejected>>[] {
-    return [...this.#unsettledSchedulerObservations]
-      .filter((entry) => entry.commit.localSeq < localSeq)
-      .map((entry) => entry.pending.promise);
-  }
-
-  private scheduleSchedulerObservationFlush(): void {
-    if (this.#schedulerObservationFlushScheduled) {
-      return;
-    }
-    this.#schedulerObservationFlushScheduled = true;
-    queueMicrotask(() => {
-      this.#schedulerObservationFlushScheduled = false;
-      void this.flushSchedulerObservationBatch();
-    });
-  }
-
-  private async flushSchedulerObservationBatch(): Promise<
-    Result<Unit, StorageTransactionRejected>
-  > {
-    let lastResult: Result<Unit, StorageTransactionRejected> = { ok: {} };
-    let firstError: Result<Unit, StorageTransactionRejected> | undefined;
-    while (true) {
-      const activeFlush = this.#schedulerObservationFlushPromise;
-      if (activeFlush) {
-        lastResult = await activeFlush;
-        if ("error" in lastResult) {
-          firstError ??= lastResult;
-        }
-        continue;
-      }
-
-      if (this.#schedulerObservationBatch.length === 0) {
-        return firstError ?? lastResult;
-      }
-
-      lastResult = await this.startSchedulerObservationBatchFlush();
-      if ("error" in lastResult) {
-        firstError ??= lastResult;
-      }
-    }
-  }
-
-  private startSchedulerObservationBatchFlush(): Promise<
-    Result<Unit, StorageTransactionRejected>
-  > {
-    const batchGeneration = this.#schedulerObservationBatch[0].batchGeneration;
-    const nextGeneration = this.#schedulerObservationBatch.findIndex((entry) =>
-      entry.batchGeneration !== batchGeneration
-    );
-    const entries = this.#schedulerObservationBatch.splice(
-      0,
-      nextGeneration === -1
-        ? this.#schedulerObservationBatch.length
-        : nextGeneration,
-    );
-    const localSeq = this.#nextLocalSeq++;
-    const commit: ClientCommit = {
-      localSeq,
-      reads: { confirmed: [], pending: [] },
-      operations: [],
-      schedulerObservationBatch: entries.map((entry) => entry.commit),
-    };
-    const promise = (async (): Promise<
-      Result<Unit, StorageTransactionRejected>
-    > => {
-      // Persistent scheduler state is an OPTIONAL capability negotiated at
-      // hello (memory/v2.ts `compatibleMemoryProtocolFlags`): peers with
-      // different scheduler flags must still share memory data. A server that
-      // did not advertise it strips scheduler payloads at `transact`, so this
-      // observation-only commit would arrive as zero operations and be
-      // TERMINALLY rejected ("memory v2 commit requires at least one
-      // operation") — and the flush-before-semantic-commit ordering in
-      // pushCommit would then spread that rejection to every subsequent
-      // semantic commit (event handlers drop their writes without retry;
-      // the whole session's writes starve). Fail closed instead: drop the
-      // observations — the feature degrades to flag-off semantics (resumes
-      // re-run fresh) while semantic traffic proceeds untouched.
-      const { client } = await this.activeSessionHandle();
-      if (client.serverFlags?.persistentSchedulerState !== true) {
-        return { ok: {} };
-      }
-      // Same fail-closed degradation for the OTHER capability gap: against a
-      // server without `pendingReadStacks`, an observation whose read sat on
-      // MORE than one pending layer cannot be expressed soundly — the scalar
-      // wire would omit lower layers, and the old server could persist an
-      // observation that observed a dropped write (data commits get the
-      // pushCommit hold instead; observations are droppable bookkeeping, so
-      // dropping beats holding — a held envelope would chain verdict latency
-      // into every semantic commit awaiting this flush). Resolve the dropped
-      // entries {ok} and send the rest.
-      let wireEntries = entries;
-      if (client.serverFlags?.pendingReadStacks !== true) {
-        const expressible = (entry: SchedulerObservationBatchEntry): boolean =>
-          entry.commit.reads.pending.every((read) =>
-            !Array.isArray(read.localSeq) || read.localSeq.length <= 1
-          );
-        wireEntries = entries.filter(expressible);
-        for (const entry of entries) {
-          if (!expressible(entry)) {
-            entry.pending.resolve({ ok: {} });
-          }
-        }
-        if (wireEntries.length === 0) {
-          return { ok: {} };
-        }
-      }
-      const wireBatch: ClientCommit = wireEntries === entries ? commit : {
-        ...commit,
-        schedulerObservationBatch: wireEntries.map((entry) => entry.commit),
-      };
-      const routeSources: IStorageTransaction[] = [];
-      const prepareIssue = (issueCommit: ClientCommit): boolean => {
-        const issueEntries: SchedulerObservationBatchEntry[] = [];
-        for (const entry of wireEntries) {
-          const validation = entry.source?.validateReplicaRoutes?.();
-          if (validation?.error !== undefined) {
-            entry.pending.resolve({ error: validation.error });
-            continue;
-          }
-          issueEntries.push(entry);
-          if (
-            entry.source !== undefined &&
-            !routeSources.includes(entry.source)
-          ) {
-            routeSources.push(entry.source);
-          }
-        }
-        issueCommit.schedulerObservationBatch = issueEntries.map((entry) =>
-          entry.commit
-        );
-        return issueEntries.length > 0;
-      };
-      return await this.pushCommit(
-        localSeq,
-        [],
-        wireBatch,
-        undefined,
-        { routeSources, prepareIssue },
-      );
-    })()
-      .then((result) => {
-        for (const entry of entries) {
-          entry.pending.resolve(result);
-        }
-        return result;
-      }, (error) => {
-        const rejection = toRejectedError(error, commit, this.#space);
-        const result = { error: rejection };
-        for (const entry of entries) {
-          entry.pending.resolve(result);
-        }
-        return result;
-      });
-    this.#schedulerObservationFlushPromise = promise;
-    this.#commitPromises.add(promise);
-    promise.finally(() => {
-      this.#commitPromises.delete(promise);
-      if (this.#schedulerObservationFlushPromise === promise) {
-        this.#schedulerObservationFlushPromise = undefined;
-      }
-    });
-    return promise;
-  }
-
   private async commitOperations(
     operations: NativeCommitOperation[],
     source?: IStorageTransaction,
-    schedulerObservation?: FabricValue,
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
@@ -3266,18 +2927,10 @@ class SpaceReplica implements ISpaceReplica {
       operations.length === 0 && sqliteOps.length === 0 &&
       activePreconditions.length === 0
     ) {
-      if (schedulerObservation === undefined) {
-        return { ok: {} };
-      }
-      return await this.enqueueSchedulerObservationCommit(
-        schedulerObservation,
-        source,
-      );
+      return { ok: {} };
     }
 
     const localSeq = this.#nextLocalSeq++;
-    // Observations created after this direct commit form a later batch.
-    this.#schedulerObservationBatchGeneration++;
     if (source !== undefined) {
       recordCommitLocalSeq(source, this.#space, localSeq);
     }
@@ -3311,7 +2964,6 @@ class SpaceReplica implements ISpaceReplica {
           }),
           ...sqliteOps,
         ],
-        ...(schedulerObservation !== undefined ? { schedulerObservation } : {}),
         ...(activePreconditions.length > 0
           ? { preconditions: [...activePreconditions] }
           : {}),
@@ -3368,7 +3020,6 @@ class SpaceReplica implements ISpaceReplica {
           operations,
           commit,
           source,
-          { waitForSchedulerObservations: true },
         ),
     );
     this.#commitPromises.add(promise);
@@ -3498,15 +3149,10 @@ class SpaceReplica implements ISpaceReplica {
     options: {
       routeSources?: readonly IStorageTransaction[];
       prepareIssue?: (commit: ClientCommit) => boolean;
-      waitForSchedulerObservations?: boolean;
     } = {},
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const routeSources = options.routeSources ??
       (source === undefined ? [] : [source]);
-    const schedulerObservationDependencies =
-      options.waitForSchedulerObservations === true
-        ? this.schedulerObservationDependenciesBefore(localSeq)
-        : [];
     // Register BEFORE any await: commitOperations calls pushCommit
     // synchronously after applyPending, so registration is atomic with the
     // optimistic write — a dependency drop can never slip between the two.
@@ -3536,8 +3182,8 @@ class SpaceReplica implements ISpaceReplica {
           );
         }
       }
-      // The push marker window covers observation flush + (re)dial + send +
-      // confirm: the full client-side cost of durably landing this commit.
+      // The push marker window covers (re)dial + send + confirm: the full
+      // client-side cost of durably landing this commit.
       // (space.did, commit.local_seq) joins to the server's memory.transact span.
       const telemetry = this.#getTelemetry();
       const pushOpId = `push:${this.#space}:${localSeq}`;
@@ -3549,17 +3195,6 @@ class SpaceReplica implements ISpaceReplica {
         spaceDid: this.#space,
       });
       try {
-        if (schedulerObservationDependencies.length > 0) {
-          const flushResults = await Promise.all(
-            schedulerObservationDependencies,
-          );
-          const rejection = flushResults.find((result) =>
-            result.error !== undefined
-          )?.error;
-          if (rejection !== undefined) {
-            throw new StorageTransactionRejectionError(rejection);
-          }
-        }
         const { client, session } = await this.activeSessionHandle();
         if (
           options.prepareIssue !== undefined &&
@@ -4022,14 +3657,9 @@ class SpaceReplica implements ISpaceReplica {
     sync: SessionSync,
     type: "pull" | "integrate",
   ): void {
-    const hasAdoptionObservations = type === "integrate" &&
-      sync.observations !== undefined &&
-      sync.observations.length > 0 &&
-      getPersistentSchedulerStateConfig();
     if (
       sync.upserts.length === 0 &&
-      sync.removes.length === 0 &&
-      !hasAdoptionObservations
+      sync.removes.length === 0
     ) {
       this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
       return;
@@ -4099,22 +3729,6 @@ class SpaceReplica implements ISpaceReplica {
       }
     } else if (shouldNotifySinks) {
       this.notifySinksForIds(touched);
-    }
-    // Subscription-carried scheduler observations — other clients' committed
-    // action runs for this sync window. Handed to the scheduler AFTER the
-    // integrate invalidation above (same synchronous turn, before the
-    // deferred dispatch), so adoption clears exactly the dirt these writes
-    // caused. See incremental-observation-adoption.md §4.
-    if (hasAdoptionObservations) {
-      this.#subscription.next({
-        type: "scheduler-observations",
-        space: this.#space,
-        observations: sync.observations!,
-        seqCurrentAtOrBelow: (addresses, seq) =>
-          this.areSchedulerAddressesCurrentAtOrBelow(addresses, seq),
-        hasPendingWriteOverlapping: (addresses) =>
-          this.schedulerHasPendingWriteOverlapping(addresses),
-      } as StorageNotification);
     }
   }
 

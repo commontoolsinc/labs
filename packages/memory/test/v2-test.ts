@@ -17,10 +17,8 @@ import {
   MEMORY_PROTOCOL,
   parseMemoryProtocolFlags,
   resetCommitPreconditionsConfig,
-  resetPersistentSchedulerStateConfig,
   resetSyncSchemaTableConfig,
   setCommitPreconditionsConfig,
-  setPersistentSchedulerStateConfig,
   setSyncSchemaTableConfig,
   toDocumentPath,
   toDocumentSelector,
@@ -128,17 +126,14 @@ describe("memory v2 paths", () => {
 describe("memory v2 flags", () => {
   it("reflects the active runtime storage flags", () => {
     resetModernCellRepConfig();
-    resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
     resetSyncSchemaTableConfig();
     setModernCellRepConfig(false);
-    setPersistentSchedulerStateConfig(false);
     setCommitPreconditionsConfig(false);
     setSyncSchemaTableConfig(false);
 
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: false,
-      persistentSchedulerState: false,
       commitPreconditions: false,
       // Build-inherent capability, not configuration: always advertised.
       sqliteCommitRowLabelEval: true,
@@ -151,13 +146,11 @@ describe("memory v2 flags", () => {
     });
 
     setModernCellRepConfig(true);
-    setPersistentSchedulerStateConfig(true);
     setCommitPreconditionsConfig(true);
     setSyncSchemaTableConfig(true);
 
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: true,
-      persistentSchedulerState: true,
       commitPreconditions: true,
       sqliteCommitRowLabelEval: true,
       pendingReadStacks: true,
@@ -169,7 +162,6 @@ describe("memory v2 flags", () => {
     });
 
     resetModernCellRepConfig();
-    resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
     resetSyncSchemaTableConfig();
   });
@@ -178,7 +170,6 @@ describe("memory v2 flags", () => {
     assert(compatibleMemoryProtocolFlags(
       {
         modernCellRep: true,
-        persistentSchedulerState: true,
         commitPreconditions: true,
         syncSchemaTableV2: true,
         sqliteCommitRowLabelEval: true,
@@ -190,7 +181,6 @@ describe("memory v2 flags", () => {
       },
       {
         modernCellRep: true,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
         // A peer without commit-time sqlite row-label evaluation stays
@@ -211,7 +201,6 @@ describe("parseMemoryProtocolFlags", () => {
   it("accepts the modernCellRep key", () => {
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: true }), {
       modernCellRep: true,
-      persistentSchedulerState: false,
       commitPreconditions: false,
       syncSchemaTableV2: false,
       sqliteCommitRowLabelEval: false,
@@ -223,7 +212,6 @@ describe("parseMemoryProtocolFlags", () => {
     });
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       modernCellRep: false,
-      persistentSchedulerState: false,
       commitPreconditions: false,
       syncSchemaTableV2: false,
       sqliteCommitRowLabelEval: false,
@@ -235,26 +223,6 @@ describe("parseMemoryProtocolFlags", () => {
     });
   });
 
-  it("accepts the canonical persistentSchedulerState key", () => {
-    assertEquals(
-      parseMemoryProtocolFlags({
-        persistentSchedulerState: true,
-      }),
-      {
-        modernCellRep: false,
-        persistentSchedulerState: true,
-        commitPreconditions: false,
-        syncSchemaTableV2: false,
-        sqliteCommitRowLabelEval: false,
-        pendingReadStacks: false,
-        verdictCatchUpMarkers: false,
-        entityIdListing: false,
-        entityIdPagination: false,
-        entityIdLookup: false,
-      },
-    );
-  });
-
   it("accepts the canonical commitPreconditions key", () => {
     assertEquals(
       parseMemoryProtocolFlags({
@@ -262,7 +230,6 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: true,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
@@ -282,7 +249,6 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: true,
         sqliteCommitRowLabelEval: false,
@@ -302,7 +268,6 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: true,
@@ -330,7 +295,6 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
@@ -351,7 +315,6 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
@@ -369,7 +332,6 @@ describe("parseMemoryProtocolFlags", () => {
       parseMemoryProtocolFlags({ entityIdListing: true }),
       {
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
@@ -390,7 +352,6 @@ describe("parseMemoryProtocolFlags", () => {
       }),
       {
         modernCellRep: false,
-        persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
@@ -428,13 +389,6 @@ describe("parseMemoryProtocolFlags", () => {
       null,
     );
     assertEquals(parseMemoryProtocolFlags({ entityIdLookup: "true" }), null);
-    assertEquals(
-      parseMemoryProtocolFlags({
-        modernCellRep: true,
-        persistentSchedulerState: "true",
-      }),
-      null,
-    );
     assertEquals(
       parseMemoryProtocolFlags({
         modernCellRep: true,

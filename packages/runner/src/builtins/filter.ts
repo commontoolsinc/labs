@@ -473,5 +473,5 @@ export function filter(
   // reconcile must run to re-attach the per-element children (which then
   // rehydrate their own persisted state). See
   // docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
-  return { action: reconcile, resumeMode: "always-run" };
+  return { action: reconcile };
 }

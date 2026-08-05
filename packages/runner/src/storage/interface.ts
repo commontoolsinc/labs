@@ -10,9 +10,6 @@ import type {
   EntityIdListOptions,
   EntityIdListResult,
   PatchOp,
-  SchedulerActionSnapshotQuery,
-  SchedulerExecutionContextKey,
-  SchedulerSnapshotListResult,
   SqliteDbRef,
   SqliteOperation,
   SqliteParamsWire,
@@ -368,29 +365,6 @@ export interface IStorageProvider {
   /** Test one live space-scoped entity identifier without loading its value. */
   entityIdExists?(id: string): Promise<boolean | undefined>;
 
-  /**
-   * Internal scheduler persistence query. Memory v2 providers implement this
-   * so the runner can rebuild scheduler indexes from persisted observations.
-   */
-  listSchedulerActionSnapshots?(
-    query?: SchedulerActionSnapshotQuery,
-  ): Promise<SchedulerSnapshotListResult>;
-
-  /**
-   * Conservative scheduler-snapshot currency oracle. Returns true only when
-   * every address belongs to this provider, has a confirmed local base, and
-   * that base is no newer than the observation sequence.
-   */
-  areSchedulerAddressesCurrentAtOrBelow?(
-    addresses: readonly IMemorySpaceAddress[],
-    seq: number,
-  ): boolean;
-
-  /** Whether an optimistic local write overlaps any supplied address. */
-  schedulerHasPendingWriteOverlapping?(
-    addresses: readonly IMemorySpaceAddress[],
-  ): boolean;
-
   /** Run a server-side read-only SQLite query against a cell-derived db. */
   sqliteQuery?(
     db: SqliteDbRef,
@@ -503,7 +477,6 @@ export type StorageNotification =
   | ILoadNotification
   | IPullNotification
   | IIntegrateNotification
-  | ISchedulerObservationsNotification
   | IResetNotification;
 
 /**
@@ -593,38 +566,6 @@ export interface IIntegrateNotification {
   type: "integrate";
   space: MemorySpace;
   changes: IMergedChanges;
-}
-
-/**
- * Broadcast after an integrate whose subscription push carried scheduler
- * observation rows for the sync window: other clients' committed action runs
- * that this runtime's scheduler may ADOPT instead of re-running
- * (docs/specs/scheduler-v2/incremental-observation-adoption.md). Fired after
- * the corresponding {@link IIntegrateNotification} in the same synchronous
- * turn, so adoption clears the dirt those writes caused before dispatch.
- * `observations` entries are protocol-shaped (observation payload is
- * `unknown`); the scheduler owns validation. `seqCurrentAtOrBelow` and
- * `hasPendingWriteOverlapping` are the storage-side adoption oracles
- * (per-doc replica seq currency; local uncommitted-write overlap).
- */
-export interface ISchedulerObservationsNotification {
-  type: "scheduler-observations";
-  space: MemorySpace;
-  observations: readonly {
-    observedAtSeq: number;
-    executionContextKey: SchedulerExecutionContextKey;
-    observation: unknown;
-    directDirtySeq?: number;
-    staleSeq?: number;
-    unknownReason?: string;
-  }[];
-  seqCurrentAtOrBelow(
-    reads: readonly IMemorySpaceAddress[],
-    seq: number,
-  ): boolean;
-  hasPendingWriteOverlapping(
-    reads: readonly IMemorySpaceAddress[],
-  ): boolean;
 }
 
 /**
@@ -779,8 +720,6 @@ export interface IStorageTransaction {
    * memory transaction. When there are no semantic writes, storage backends may
    * still commit this metadata as an internal no-op observation.
    */
-  setSchedulerObservation?(observation: FabricValue): void;
-  getSchedulerObservation?(): FabricValue;
 
   /**
    * Optional commit-time preconditions attached to this transaction's commit in
@@ -1766,7 +1705,6 @@ export type NativeStorageCommitOperation =
 
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
-  schedulerObservation?: FabricValue;
   preconditions?: readonly CommitPrecondition[];
   /**
    * Folded SQLite write ops, applied in the same wire commit as `operations`

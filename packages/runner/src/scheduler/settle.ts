@@ -30,9 +30,6 @@ export function collectPullIterationSeeds(
   state: PullSchedulingState,
   workSet: Set<Action>,
 ): void {
-  // Rehydration barrier: hold every pull seed until all in-flight resumes
-  // resolve (see PullSchedulingState.hasPendingInitialRehydrations).
-  if (state.hasPendingInitialRehydrations()) return;
   const initialSize = workSet.size;
   collectPrimaryPullIterationSeeds(state, workSet);
 

@@ -180,7 +180,6 @@ function fakeRuntime(piecesCell: FakePiecesCell) {
   return {
     experimental: {
       modernCellRep: true,
-      persistentSchedulerState: false,
     },
     storageManager: {
       syncedCount: 0,

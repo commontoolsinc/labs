@@ -72,16 +72,14 @@ const nextResponse = <Result>(
       return assertResponse<Result>(message);
     }
     // Only MARKER-ONLY frames may be skipped implicitly: no upserts, no
-    // removes, no scheduler observations, and carrying the caughtUpLocalSeq
-    // marker that is such a frame's reason to exist. Anything else is
-    // content a test must consume explicitly, or an erroneous self-echo,
-    // observation delivery, or markerless empty frame would be silently
-    // swallowed here.
+    // removes, and carrying the caughtUpLocalSeq marker that is such a
+    // frame's reason to exist. Anything else is content a test must consume
+    // explicitly, or an erroneous self-echo or markerless empty frame would
+    // be silently swallowed here.
     const effect = (message as SessionEffectMessage)
       .effect as unknown as SessionSync;
     if (
       effect.upserts.length > 0 || effect.removes.length > 0 ||
-      (effect.observations?.length ?? 0) > 0 ||
       effect.caughtUpLocalSeq === undefined
     ) {
       throw new Error(
@@ -507,86 +505,6 @@ Deno.test("memory v2 server rejects oversized unpaginated identifier responses",
   } finally {
     await server.close();
   }
-});
-
-Deno.test("memory v2 scheduler listing rejects arbitrary context selectors", () => {
-  assertEquals(
-    parseClientMessage(encodeMemoryBoundary({
-      type: "scheduler.snapshot.list",
-      requestId: "scheduler-list-context",
-      space: "did:key:z6Mk-space",
-      sessionId: "session:alice",
-      query: { executionContextKey: "user:did%3Akey%3Abob" },
-    })),
-    null,
-  );
-
-  assertEquals(
-    parseClientMessage(encodeMemoryBoundary({
-      type: "scheduler.snapshot.list",
-      requestId: "scheduler-list-cursor",
-      space: "did:key:z6Mk-space",
-      sessionId: "session:alice",
-      query: {
-        branch: "feature",
-        ownerSpace: "did:key:z6Mk-owner",
-        pieceId: "space:of:piece",
-        processGeneration: 0,
-        actionId: "pattern.tsx:computed:1",
-        sinceCommitSeq: 1,
-        throughCommitSeq: 2,
-        limit: 10,
-        cursor: {
-          ownerSpace: "did:key:z6Mk-owner",
-          pieceId: "space:of:piece",
-          processGeneration: 0,
-          actionId: "pattern.tsx:computed:1",
-          executionContextKey: "session:did%3Akey%3Aalice:session%3Aalice",
-        },
-      },
-    })),
-    {
-      type: "scheduler.snapshot.list",
-      requestId: "scheduler-list-cursor",
-      space: "did:key:z6Mk-space",
-      sessionId: "session:alice",
-      query: {
-        branch: "feature",
-        ownerSpace: "did:key:z6Mk-owner",
-        pieceId: "space:of:piece",
-        processGeneration: 0,
-        actionId: "pattern.tsx:computed:1",
-        sinceCommitSeq: 1,
-        throughCommitSeq: 2,
-        limit: 10,
-        cursor: {
-          ownerSpace: "did:key:z6Mk-owner",
-          pieceId: "space:of:piece",
-          processGeneration: 0,
-          actionId: "pattern.tsx:computed:1",
-          executionContextKey: "session:did%3Akey%3Aalice:session%3Aalice",
-        },
-      },
-    },
-  );
-
-  assertEquals(
-    parseClientMessage(encodeMemoryBoundary({
-      type: "scheduler.snapshot.list",
-      requestId: "scheduler-list-invalid-cursor",
-      space: "did:key:z6Mk-space",
-      sessionId: "session:alice",
-      query: {
-        cursor: {
-          pieceId: "space:of:piece",
-          processGeneration: -1,
-          actionId: "pattern.tsx:computed:1",
-          executionContextKey: "space",
-        },
-      },
-    })),
-    null,
-  );
 });
 
 Deno.test("memory v2 session registry scopes session ids by space", () => {
@@ -1374,7 +1292,7 @@ Deno.test("memory v2 server accepts scheduler-state flag mismatch", async () => 
       protocol: MEMORY_PROTOCOL,
       flags: {
         ...HELLO_FLAGS,
-        persistentSchedulerState: !HELLO_FLAGS.persistentSchedulerState,
+        commitPreconditions: !HELLO_FLAGS.commitPreconditions,
       },
     }));
 
