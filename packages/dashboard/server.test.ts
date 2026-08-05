@@ -6,7 +6,6 @@
 import {
   assert,
   assertEquals,
-  assertMatch,
   assertRejects,
   assertStringIncludes,
 } from "@std/assert";
@@ -1089,7 +1088,13 @@ Deno.test("sse: /events opens a stream, tick pushes new tile markup, disconnect 
   assertEquals(await chunk(reader), ": connected\n\n");
   assertEquals(clients.size, 1);
   const initial = updateFromEvent(await chunk(reader));
-  assertMatch(initial.shellVersion, /^[0-9a-f]{40}$/);
+  // The page reloads itself when these two disagree, so the version the stream
+  // reports has to be the one the page it is feeding was built with.
+  const page = await (await handle(req("/"))).text();
+  assertStringIncludes(
+    page,
+    `const SHELL_VERSION = ${JSON.stringify(initial.shellVersion)};`,
+  );
   assert(initial.ageSeconds >= 0);
   assert(["good", "warn", "bad"].includes(initial.faviconStatus));
   assert(Object.hasOwn(initial, "faviconRedSince"));

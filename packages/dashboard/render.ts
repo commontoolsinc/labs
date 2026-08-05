@@ -15,6 +15,44 @@ const PAINT_STATUS_FAVICON = paintStatusFavicon.toString();
 
 export const FAVICON_CRY_AFTER_MS = 60 * 60 * 1000;
 
+/**
+ * A tiling background image of one stroked path, for the texture that sits
+ * behind a tile's flat colour wash. The tile is 48 by 24 CSS pixels and the
+ * path is drawn in that coordinate space.
+ */
+function strokeTexture(path: string, stroke: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" ` +
+    `width="48" height="24" viewBox="0 0 48 24">` +
+    `<path d="${path}" fill="none" stroke="${stroke}" stroke-width="1"/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
+const WAVE_TEXTURE = strokeTexture(
+  "M0 12q6-8 12 0t12 0t12 0t12 0",
+  "rgba(224,168,82,.13)",
+);
+const ZIGZAG_TEXTURE = strokeTexture(
+  "M0 18l12-12 12 12 12-12 12 12",
+  "rgba(226,80,74,.13)",
+);
+// Two copies of the same dot grid make a triangular lattice, where each dot has
+// six neighbours at one distance rather than a square lattice's four near ones
+// and four far ones. The copies are one dot spacing apart across, one spacing
+// times the square root of three apart down, and the second copy is shifted by
+// half of each. That puts its dots above the midpoint of the gap between two
+// dots of the first copy, one spacing away from both, and the same distance
+// again from the two below.
+const DOT_SPACING_PX = 16;
+const DOT_ROW_PX = DOT_SPACING_PX * Math.sqrt(3);
+const DOT_TEXTURE = [
+  `background-image:radial-gradient(rgba(124,130,140,.15) 1px,transparent 1px),`,
+  `radial-gradient(rgba(124,130,140,.15) 1px,transparent 1px);`,
+  `background-position:0 0,${DOT_SPACING_PX / 2}px ${
+    (DOT_ROW_PX / 2).toFixed(2)
+  }px;`,
+  `background-size:${DOT_SPACING_PX}px ${DOT_ROW_PX.toFixed(2)}px`,
+].join("");
+
 type ViewerTimeElement = Pick<HTMLTimeElement, "dateTime" | "textContent">;
 
 /** Replace marked absolute timestamps with the viewer's local wall-clock time. */
@@ -62,7 +100,11 @@ export function renderTile(v: TileView, id?: string, wide = false): string {
       durationTag(v.duration)
     }</div>`
     : (v.extra ?? "");
-  const inner = `${header}${big}${sub}${body}`;
+  // The status texture is painted by this empty layer rather than by the tile,
+  // because the texture is turned on an angle and drawn past every edge, while
+  // the fade that thins it towards the bottom is measured against the tile.
+  // Those are two frames of reference, so they need two boxes.
+  const inner = `<div class="texture"></div>${header}${big}${sub}${body}`;
   if (!v.href) return `<div class="${cls}"${key}>${inner}</div>`;
   const tgt = /^https?:/.test(v.href) ? ` target="_blank" rel="noopener"` : "";
   return `<a class="${cls}"${key} href="${
@@ -89,12 +131,27 @@ ${faviconLink(status)}
   .badge{font-size:11px;color:#62d18d;border:1px solid rgba(67,197,116,.4);border-radius:6px;padding:2px 8px;margin-left:8px}
   .live{font-size:12px;color:#9aa0ab}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:12px}
-  .tile{background:#16181d;border:1px solid #23262d;border-radius:12px;padding:14px 16px}
+  .tile{background:#16181d;border:1px solid #23262d;border-radius:12px;padding:14px 16px;position:relative;isolation:isolate;overflow:hidden}
   .tile.wide{margin-bottom:12px}
   .tile.good,.tile.wide.good{border-color:rgba(67,197,116,.34);background:rgba(67,197,116,.08)}
   .tile.warn,.tile.wide.warn{border-color:rgba(224,168,82,.42);background:rgba(224,168,82,.09)}
   .tile.bad,.tile.wide.bad{border-color:rgba(226,80,74,.5);background:rgba(226,80,74,.11)}
   .tile.unknown,.tile.wide.unknown{border-color:#2f333c}
+  /* Each status carries a texture as well as a colour, so the wall reads at a
+     glance and without relying on colour alone: dots for gray, waves for
+     amber, zig-zags for red. The waves run across the zig-zags, a quarter turn
+     from the angle the others take. The texture layer covers the tile and sits
+     above the colour wash and below the content. It carries the fade: whole
+     for the top fifth of the tile, thinning from there, and gone four fifths
+     of the way down. Inside it the texture is turned on an angle and drawn
+     past all four edges, so the turned corners still reach the tile's. The
+     fade is measured against the tile and the texture is drawn in the turned
+     frame, which is why they are two boxes rather than one. */
+  .texture{position:absolute;inset:0;z-index:-1;overflow:hidden;mask-image:linear-gradient(to bottom,#000 20%,transparent 80%)}
+  .texture::before{content:"";position:absolute;inset:-100%;transform:rotate(30deg)}
+  .tile.unknown .texture::before{${DOT_TEXTURE}}
+  .tile.warn .texture::before{background-image:${WAVE_TEXTURE};background-size:48px 24px;transform:rotate(120deg)}
+  .tile.bad .texture::before{background-image:${ZIGZAG_TEXTURE};background-size:48px 24px}
   .lbl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#878d97;margin:0 0 7px;display:flex;align-items:center;gap:7px}
   .lbl .spacer{flex:1}
   .drill{font-size:10px;color:#6f757f;letter-spacing:0;text-transform:none}
