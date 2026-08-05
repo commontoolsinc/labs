@@ -364,8 +364,8 @@ export function sanitizeForPostMessage(
 
   const obj = value as object;
 
-  // Circular reference protection. `seen` holds the _ancestors_ of `obj`, so
-  // a value reached twice by different paths is shown at both rather than
+  // Circular reference protection. `seen` holds the _ancestors_ of `obj`, so a
+  // value reached twice by different paths is shown at both rather than
   // reported as a cycle it is not part of -- two identical siblings in a dump
   // are a common shape, and calling the second one circular misdescribes the
   // data this exists to show. Cleared on the way back out, below.
@@ -395,9 +395,8 @@ function sanitizedBody(
   }
 
   // Check for query result proxy (has toCell symbol) - walk the data _and_
-  // show the ref
-  // Wrap in try-catch since isCellResult accesses a symbol property, which
-  // can throw on hostile Proxies with throwing get traps
+  // show the ref. Wrap in try-catch since isCellResult accesses a symbol
+  // property, which can throw on hostile Proxies with throwing get traps.
   try {
     if (isCellResult(value)) {
       const cell = getCellOrThrow(value);
