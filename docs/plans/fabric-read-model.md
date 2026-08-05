@@ -10,6 +10,12 @@ since the first two are closely coupled and the third moves on its own timeline.
 - [CLI surface shape](cli-surface-shape.md) — **the command surface.** What it
   should look like, and how to get there without breaking callers.
 
+Call-specific investigation detail — what produces a receipt and what its
+existence proves, how its address is derived, the entity-URI change to
+`--piece`, error conventions and sequencing — is collected in
+[Verb calls: working notes](verb-result-selection.md). Sketches to draw from,
+not a settled contract.
+
 It assumes no prior familiarity with the runtime. If you want the full
 background rather than the working vocabulary below,
 [the tutorial](../tutorial/README.md) covers cells in chapter 2, what a cell

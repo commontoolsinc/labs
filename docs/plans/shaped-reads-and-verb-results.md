@@ -90,9 +90,11 @@ storage partition to read, and who may see the data:
 They are the runtime's understanding of the value, not data stored in the cell,
 so they are not a caller's to assert.
 
-**Structural composition is unimplemented for caller shapes: `$ref`, `$defs`,
-`anyOf`/`oneOf`/`allOf`/`not`, and the conditional keywords.** These are the
-JSON Schema features for describing *possible* shapes — `$ref` points at a named
+**Structural composition is unimplemented for caller shapes** — sixteen keys,
+including `$ref`, `$defs`, `anyOf`/`oneOf`/`allOf`/`not`, the conditional
+keywords, `patternProperties`, `prefixItems`, `propertyNames`, and
+`contentSchema`. These are the JSON Schema features for describing *possible*
+shapes — `$ref` points at a named
 definition elsewhere in the document, and the combinators express "matches any
 of these." Source schemas use them constantly: every named interface becomes a
 `$ref` into `$defs`, and the projection resolves those while selecting. What a
@@ -174,9 +176,10 @@ wrote it.
 
 The mechanism underneath already exists either way, and needs no new traversal
 machinery. A selector can be told to reject a position — load nothing there.
-Marked positions get exactly that, composed into the same set of paths the
-projection already builds, so the address comes back without its target being
-loaded.
+Marked positions would get exactly that, composed into the same set of paths
+the projection already builds, so the address comes back without its target
+being loaded. The rejecting selector exists and is used at roughly nine gate
+sites in `traverse.ts`; wiring it into the projection's path mask is the work.
 
 ### Collections are all or nothing
 
@@ -369,9 +372,10 @@ compatibility gate does not reach them and the Fabric-types work would supersede
 the source of that schema rather than the slot it fills.
 
 **Invocation id namespace.** Nothing in a receipt's address identifies who
-called. The address is derived from the verb's graph position plus the caller's
-id string verbatim, so an invocation id is a read key shared by everyone using
-that verb in that space: two callers picking the same id read one receipt, and a
+called. A supplied id is hashed together with the stream link, so it is
+namespaced per verb binding but not by principal — no DID or session enters the
+hash. An invocation id is therefore a read key shared by everyone using that
+verb in that space: two callers picking the same id read one receipt, and a
 guessed id reads someone else's result. Pre-existing, and reachable once
 receipts are read deliberately. The consequences and the three ways out are
 worked through in [Verb calls: working notes](verb-result-selection.md).

@@ -31,7 +31,7 @@ pattern, piece, verb, receipt, schema, and shape. Four more terms appear here:
 | **Handler** (or `action`) | The function body that runs when a verb is invoked. |
 | **Invocation** | One call to one verb. Its id is the idempotency key: replaying a settled id returns the original outcome instead of executing again. |
 | **`of:`** | The URI scheme on an entity id (`of:fid1:<hash>`). From the memory protocol's fact record — `the` (type) / `of` (entity) / `is` (value) — so an entity id names the subject a fact is *of*. The unkinded default. |
-| **`computed:`** | The same slot, marking an entity whose contents are re-derivable. Not independently addressable. |
+| **`computed:`** | The same slot, marking an entity whose contents are re-derivable. Reduced to a bare hash it aliases its `of:` sibling, which is a different entity — the reason `--piece` must refuse it rather than strip it. |
 
 ## The call-specific problem
 
@@ -77,7 +77,9 @@ Losing that address is the case these notes do not solve; see
 Only JavaScript handler dispatches.
 `handleJavaScriptHandlerResult` (`packages/runner/src/runner.ts`) mints the
 receipt cell **unconditionally at its top**, before any branching, and all three
-downstream sub-paths share that one cell: the receipt-only branch writes it, the
+downstream sub-paths resolve to that one address — a second `Cell` object is
+minted later for it, so the sharing is address-level, not object-level: the
+receipt-only branch writes it, the
 `deferForNavigate` branch is the **sole** caller of
 `setupDeferredHandlerResultPattern` (the navigateTo case, not the reactive one),
 and ordinary reactive results go through `runWithStartOwnership`. Other
@@ -96,10 +98,12 @@ runtime produces none, the response omits `receipt` — absent, never fabricated
 background-piece-service runs, and pattern-internal chains all dispatch handlers
 and write receipts with deterministic ids: `queueSchedulerEvent`
 (`packages/runner/src/scheduler/events.ts`, behind the `queueEvent` facade) sets
-`id = args.eventId ?? mintEventId(eventLink, originTx)`. So the unit is **a
-handler dispatch someone can name**, not a CLI call — which is what
-reconstruction has to address, since the dispatch it recovers may never have
-come from a terminal.
+`id = args.eventId ?? mintEventId(eventLink, originTx)`. The fallback branch is
+a per-transaction key plus a sequence, or a random UUID — so those receipts are
+**not** re-derivable, and only dispatches that supply an id are nameable at all.
+That bounds any recovery scheme to callers who chose an id in advance, and is a
+reason to prefer fixing replay in the runner over deriving addresses in a
+client: replay safety helps every dispatch, nameable or not.
 
 **Should recovery ever get a name, `invocation` not `receipt`.** CFC single-use grants write a
 *consumption receipt* under the reserved `grant:cfc:` scheme
@@ -145,6 +149,19 @@ cause           = { ...inputs, $event: tx.dispatchedEventId }
 result cell's space**, not necessarily the caller's, and is created with **no
 scope argument**, so receipts are space-scoped today.
 
+**`$event` is not the caller's id.** A caller-supplied id is bound to the stream
+it was sent to before it becomes an event id: `scopeCallerEventId`
+(`packages/runner/src/scheduler/event-identity.ts`) hashes
+`{caller, id, path, space}` — the id string plus the stream link — into
+`evt:caller:<hash>`, and `Cell.send` routes every supplied id through it. That
+binding is deliberate: two verbs sharing input bindings must not collide on one
+receipt. The hash is deterministic across processes, so a retry from a fresh CLI
+invocation derives the same id — which is what makes any re-derivation scheme
+possible at all.
+
+Where no id is supplied, `mintEventId` produces `evt:<per-transaction key>:<seq>`
+or `evt:<random uuid>:<id>`. Those are not re-derivable.
+
 Holding the address already, a caller needs nothing verb-aware: a receipt is a
 cell and reading it is an ordinary read. Deriving the address without it is the
 deferred case below.
@@ -161,8 +178,9 @@ reader **subscribes and wakes when it appears**; it must not poll
 [waiting-in-tests.md](../development/waiting-in-tests.md)). `--wait <seconds>`
 bounds a caller's own patience, as on `cf piece call`.
 
-`tx.handlingReceiptLink` is published at commit time, so `--no-wait` returns
-`receipt` in its response. It also returns the invocation id — minted or
+`tx.handlingReceiptLink` is published at commit time, so `--no-wait` *can*
+return `receipt` — that is what migration step 2 adds. Today its exit returns
+`{id, status: "committed", deduplicated?}` and no receipt field. It also returns the invocation id — minted or
 supplied — both on stdout and, once, on stderr at the dispatch phase before any
 network work. So collect-later does **not** require supplying an id. Supplying
 one buys something narrower: it is known *before* the call, so it survives
@@ -262,8 +280,8 @@ Not one layer lower: `FabricHash.fromString` has non-entity users
 (`packages/memory/fact.ts` parses a cause with it), and `of:` is a URI scheme,
 not a hash tag. `entityIdFrom` is the entity-specific wrapper and the right seam.
 
-**One fix reaches everyone.** Every path turning an address string into a cell
-goes through `entityIdFrom`: the CLI, the shell (`runtime-processor`, four call
+**One fix reaches most callers.** The address-string paths that matter here go
+through `entityIdFrom`: the CLI, the shell (`runtime-processor`, four call
 sites), the background piece service, and slug resolution. That breadth is a
 reason to make the change carefully, not a reason to avoid it — the alternative
 is the CLI hand-stripping on its own, which is the eleventh copy of a conversion
@@ -281,9 +299,11 @@ worked changes spelling or meaning. Three things to verify rather than assume:
    already-bare id is a no-op.
 
 **What stays out of scope.** Ten hand-rolled prefix conversions exist across
-nine files in five packages — `lib-shell`, `patterns` (three files, two in
+eleven files in five packages — `lib-shell`, `patterns` (three files, two in
 user-space pattern code), `fuse`, `state-inspector` (two inside embedded browser
-JS), and `runtime-client` — running in **both** directions. Removing them is
+JS), and `runtime-client` (three) — running in **both** directions, with roughly
+eight more hand-rolled sites outside those packages in `shell`, `toolshed`,
+`memory`, and `runner`. Removing them is
 follow-up cleanup on a separate review path, and nothing here depends on it.
 
 **A bare hash is not a complete identity**, which is why the emitted form keeps
@@ -297,10 +317,15 @@ to `fid1:<h>` discards the distinction and re-resolving silently defaults to the
 ### Is the invocation id namespace per-user? — owner: Berni
 
 **The finding: nothing in a receipt's address identifies the caller.** `inputs`
-is graph structure, identical for every caller; `$event` is the caller's string
-verbatim (`resolveInvocationId` applies no namespacing); scope is a symbolic tag,
-not a user identifier; and the payload is excluded by design — which is what lets
-a same-id retry replay instead of execute.
+is graph structure, identical for every caller; scope is a symbolic tag, not a
+user identifier; and the payload is excluded by design — which is what lets a
+same-id retry replay instead of execute.
+
+`$event` *is* namespaced, but not by principal: `scopeCallerEventId` hashes the
+supplied id together with the stream link, so the same id sent to two different
+verbs yields two receipts. What the hash does not contain is any identity — no
+DID, no session — so two callers passing the same id to the same verb still
+compute one address, and a guessed id still computes it from public inputs.
 
 So an invocation id is a **read key shared per (space, verb binding)**, and it is
 the read, not the write, that this breaks.
@@ -327,9 +352,9 @@ never by authorship.
 | Keep the shared key, stop treating unguessability as privacy | Honest about what the address proves | Needs explicit authorization on receipt reads; does not address aliasing |
 
 Pre-existing (WS-D), but reading receipts deliberately makes it reachable. The exposure is entirely
-in caller-chosen ids — and the human-friendly ones current documentation teaches
-(`add-comment-1`, `create-note-7`) are what two agents following one convention
-derive *systematically*.
+in caller-chosen ids — and the human-friendly convention
+[Verbs over the CLI](../common/verbs-over-the-cli.md) teaches (`add-comment-1`,
+`add-1`) is what two agents following it derive *systematically*.
 
 ## Migration
 
@@ -352,8 +377,8 @@ layer's call, not this half's.
    receipt exists.
 3. **Receipt cells created with a schema**, so a shape over a receipt matches a
    declaration and can be pushed into the read.
-4. **`piece call` gains `--schema`/`--filter`** by reusing the shared read
-   implementation rather than growing a second output path.
+4. **`piece call` gains the read options** — `--shape`/`--filter` — by reusing
+   the shared read implementation rather than growing a second output path.
 
 Reading a receipt directly needs no step of its own: it is an ordinary cell
 read, reachable once step 1 lands. Step 4 depends on the read layer having a
@@ -370,9 +395,10 @@ so without the address it is unreachable.
 **Why this is narrower than it sounds.** Three ways to want an outcome you do
 not have, and only the third is unserved:
 
-- *Dispatched detached.* `--no-wait` already returns the receipt address on
-  stdout and the invocation id on stderr, before any network work. The address
-  was handed over; keeping it is the answer.
+- *Dispatched detached.* `--no-wait` returns the invocation id on stderr before
+  any network work, and once migration step 2 lands it returns the receipt
+  address too. Keeping that address is the answer — but this bullet is
+  conditional on step 2, not on today's behaviour.
 - *Lost the response, verb has no effects outside its transaction.* Replaying
   with the same invocation id returns the original outcome. The body re-runs and
   loses the create-only race, so the commit is refused and nothing is duplicated.
@@ -426,6 +452,9 @@ first condition arrives on its own.
 - **Collection windowing.** Carried by the read layer; see
   [Shaped reads and verb results](shaped-reads-and-verb-results.md).
 - **A canonical locator** carrying host, space, id, scope and path in one string.
+  This absorbs the question of whether `--piece` should accept a rendered
+  address directly: a path-bearing one does not name a piece, so the locator is
+  where that belongs rather than the `--piece` parser.
 - **A local receipt cache.** `markCreateOnly` makes a receipt **write-once** and
   its address deterministic, so the *document* is safely cacheable. Its rendered
   value is not: the receipt holds links into live cells, so a materialized copy
@@ -435,6 +464,7 @@ first condition arrives on its own.
   and it must not outlive server retention.
 - **A retention policy** and the linked receipt collection that would make expiry
   distinguishable from error.
-- **Removing the ten hand-rolled `of:` conversions.**
+- **Removing the hand-rolled `of:` conversions** — a dozen in the packages
+  inventoried above, plus more outside them.
 - **Recovering an outcome whose address was lost** — discussed above, with its
   three options and the condition that would make it worth building.
