@@ -12,9 +12,11 @@ export const TEST_ASSET = "types/dom.d.ts";
 // needing an update.
 export const TEST_ASSET_CONTENT = "interface AddEventListenerOptions";
 
-// Reads assets from the file system in Deno and from
-// `${window.location.origin}/static` in non-Deno, used for tests that run via
-// deno-web-test that target both environments.
+/**
+ * Creates a cache for a test that targets both Deno and the browser, as the
+ * tests run under deno-web-test do. It reads assets from the file system under
+ * Deno, and from `/static` on the page origin elsewhere.
+ */
 export function createTestStaticCache(): StaticCache {
   if (isDeno()) {
     return StaticCache.fromFileSystem();

@@ -21,21 +21,31 @@ export interface CachedAsset {
   etag: string;
 }
 
+/**
+ * The cache of static assets served from one base location, holding each
+ * asset's content together with a strong ETag over that content. An asset is
+ * read at most once per instance: under Deno it is read off the file system,
+ * and elsewhere it is fetched over the network.
+ */
 export class StaticCache {
   private cache: Map<string, Promise<CachedAsset>> = new Map();
   private baseUrl: URL;
+
+  /**
+   * Constructs an instance which resolves asset names against `baseUrl`.
+   */
   constructor(baseUrl: URL) {
     this.baseUrl = baseUrl;
   }
 
   /**
-   * Serve the assets bundled alongside this module from the file system.
-   * Only available in Deno.
+   * Constructs an instance reading the assets bundled alongside this module,
+   * which requires the file system and so is available only under Deno.
    */
   static fromFileSystem(): StaticCache {
     if (!FS_URL) {
       throw new Error(
-        "The file system static cache is only available in Deno.",
+        "`StaticCache.fromFileSystem()` is only available in Deno.",
       );
     }
     return new StaticCache(new URL(FS_URL));
