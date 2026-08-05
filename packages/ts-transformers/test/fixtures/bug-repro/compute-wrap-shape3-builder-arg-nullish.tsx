@@ -6,8 +6,10 @@
 // compiler error: binary expression compute-wrap decision disagreed with
 // reactive-context classification"); `deno task cf check <this file> --no-run`
 // must now report the `reactive:call-argument-computation` hoist diagnostic
-// instead. The hoisted remedy lives in compute-wrap-shape3c-*.tsx.
-// Pipeline regression: test/builder-argument-computation-diagnostic.test.ts.
+// instead. The hoisted remedy is golden-pinned at
+// fixtures/ast-transform/builder-arg-hoisted-nullish-selection; the diagnostic
+// itself is pinned by test/builder-argument-computation-diagnostic.test.ts.
+// This file cannot be a golden pair — see README.md in this directory.
 import {
   type Cell,
   Default,
