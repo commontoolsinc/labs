@@ -203,5 +203,20 @@ describe("objects", () => {
         isInertPlainObject(new Proxy(withSymbol, {})),
       ).toBe(false);
     });
+
+    it("returns `false` for a `Proxy` that disowns a key it reported", () => {
+      // A proxy whose `ownKeys()` names a key its `getOwnPropertyDescriptor()`
+      // then answers `undefined` for. Inertness cannot be established, so the
+      // answer is `false`; only a trap that throws on its own account takes
+      // this check off its "answers rather than throws" contract.
+      const ghosted = new Proxy({ a: 1 }, {
+        ownKeys: () => ["a", "ghost"],
+        getOwnPropertyDescriptor: (target, key) =>
+          key === "ghost"
+            ? undefined
+            : Object.getOwnPropertyDescriptor(target, key),
+      });
+      expect(isInertPlainObject(ghosted)).toBe(false);
+    });
   });
 });

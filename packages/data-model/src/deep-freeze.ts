@@ -266,7 +266,15 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
     return true;
   }
 
-  const result = isFabricValue(value) && isDeepFrozen(value);
+  // The frozen-ness question goes first because it is the cheap one, and a
+  // `false` from it settles the conjunction. `isDeepFrozen()` answers in
+  // constant time for anything not frozen at its root, and memoizes every
+  // subtree it does walk; `isFabricValue()` walks the whole tree afresh on
+  // every call. With the walk second, a mutable tree -- what the write path
+  // hands this function at every level of its own recursion -- costs one
+  // `Object.isFrozen()` call rather than a full membership walk of its
+  // subtree.
+  const result = isDeepFrozen(value) && isFabricValue(value);
 
   if (result && typeof value === "object" && value !== null) {
     deepFrozenFabricValueCache.add(value);
