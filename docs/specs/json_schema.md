@@ -209,8 +209,12 @@ Deliberate extensions beyond the 2020-12 vocabulary:
   (`FABRIC_SPECIAL_OBJECT_BRAND` in `packages/api/index.ts`), which
   generated schemas name in `required`, has no runtime existence and counts
   as present on any fabric value. Property sub-schemas are still not walked
-  against a primitive: presence is checked, shapes are not. The
-  authoritative name list is `FABRIC_PRIMITIVE_SCHEMA_TYPES` in
+  against a primitive: presence is checked, shapes are not, so
+  `{ "type": "object", "properties": { "source": { "type": "number" } } }`
+  matches a `FabricRegExp` even though its `source` is a string. Schemas
+  generated from the real class types cannot express such a mismatch; only
+  hand-written schemas can, and they get no shape enforcement on opaque
+  leaves. The authoritative name list is `FABRIC_PRIMITIVE_SCHEMA_TYPES` in
   `packages/api/index.ts`.
 
 Generated schemas also hoist named types into `$defs` and reference them via

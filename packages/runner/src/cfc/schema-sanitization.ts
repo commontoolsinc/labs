@@ -1662,6 +1662,12 @@ const validateAgainstSchemaInternal = (
       // `required: ["length"]`. `typeMatches` stays a permissive filter;
       // this is the complete check behind it. A fabric-primitive-typed
       // schema is not gated (its type never includes "object").
+      //
+      // Presence only: `properties` sub-schemas are not enforced against
+      // accessor values (a schema declaring `source` as a number still
+      // matches a FabricRegExp, whose `source` is a string) — the type
+      // system doesn't produce such schemas, and the property walk below
+      // deliberately stays limited to plain objects.
       const typeAllowsObject = schema.type === undefined ||
         asTypeArray(schema.type).includes("object");
       if (typeAllowsObject && Array.isArray(schema.required)) {

@@ -4711,6 +4711,14 @@ function schemaTypeIncludesObject(type: JSONSchemaObj["type"]): boolean {
  * nominal brand key generated schemas require has no runtime existence and
  * is satisfied by the instance itself. A fabric-primitive-typed schema is
  * not gated here (its type never includes "object").
+ *
+ * Presence is the whole check: property sub-schemas are NOT enforced
+ * against a primitive's accessor values, so
+ * `{type: "object", properties: {source: {type: "number"}}}` matches a
+ * `FabricRegExp` even though its `source` is a string. Schemas generated
+ * from the real class types cannot express that mismatch, so enforcement
+ * would only ever act on hand-written schemas; until that is worth the
+ * accessor walk, shape errors of this kind pass validation.
  */
 function opaqueLeafMissesRequired(
   schema: JSONSchemaObj,
