@@ -1697,6 +1697,22 @@ export abstract class BaseObjectTraverser {
     if (link?.id === undefined) {
       return false;
     }
+    // OFF-ARM NEUTRALITY (stage E, deliberate): coverage is only ever
+    // consulted for links that DECLARE a scope. The pre-stage-E key here
+    // interpolated `link.scope` raw, so an unscoped link produced an
+    // "undefined" scope segment that never matched the tracker's
+    // normalized entries — the covered-skip paths (which replace a
+    // repeat link's value with `null` in traverseCells mode) never fired
+    // for unscoped links, and consumers of traversed values (the html
+    // reconciler's cell reads) rely on that. Re-keying must not widen
+    // when the skip fires (testing.md §2: the OFF arm stays
+    // byte-identical), so the old never-matches outcome is kept
+    // explicitly. Whether the coverage memo SHOULD apply to unscoped
+    // links is a real question — but it is a separate, deliberate
+    // change, not a side effect of re-keying.
+    if (link.scope === undefined) {
+      return false;
+    }
 
     const targetSelector = narrowAndCombineSelectorForLink(
       doc.address.path,

@@ -33,6 +33,7 @@ import {
   type DerivedWriteAnnotation,
   type Operation,
   resolveScopeKey,
+  type ScopeKey,
   type ScopeKeyIdentity,
 } from "@commonfabric/memory/v2";
 import type {
@@ -97,12 +98,13 @@ export interface WaveRunContext {
    * parent folds this contribution into the requeue set (§3d; the
    * model's C8d rollback closure). */
   parentEventId?: string;
-  /** The scope INSTANCE this run ran as, for basis rows' action_scope_key.
-   * Defaults to `"space"` — the pre-narrowing instance. Stage E re-keys
-   * the vocabulary per instance; until then, at OFF-arm cardinality 1, the
-   * instance dimension is derivable from the runtime's own authenticated
-   * session (plan Phase 1 stage E). */
-  actionScopeKey?: string;
+  /** The scope INSTANCE this run ran as, for basis rows'
+   * action_scope_key. Typed as the shared `ScopeKey` vocabulary so a
+   * caller cannot hand the basis index a scope NAME or a hand-rolled
+   * format (key-vocabulary.md §4). Defaults to `"space"` — the
+   * pre-narrowing instance; stage F's serving loop supplies per-run
+   * demanded instances. */
+  actionScopeKey?: ScopeKey;
 }
 
 const waveRunContexts = new WeakMap<object, WaveRunContext>();
@@ -143,10 +145,10 @@ export type WaveWriteAnnotation = DerivedWriteAnnotation;
  */
 export interface SchedulerBasisRow {
   action: string;
-  actionScopeKey: string;
+  actionScopeKey: ScopeKey;
   entitySpace: MemorySpace;
   entity: string;
-  entityScopeKey: string;
+  entityScopeKey: ScopeKey;
   seq: number | null;
 }
 
@@ -155,7 +157,7 @@ export interface SchedulerBasisRow {
  * instance's stored set. */
 export interface WaveBasisInstanceRows {
   action: string;
-  actionScopeKey: string;
+  actionScopeKey: ScopeKey;
   rows: SchedulerBasisRow[];
 }
 
@@ -901,7 +903,7 @@ export class WaveAccumulator
     return docs;
   }
 
-  #scopeKeyFor(scope: CellScope | undefined): string {
+  #scopeKeyFor(scope: CellScope | undefined): ScopeKey {
     return resolveScopeKey(scope, this.#scopeKeyIdentity);
   }
 

@@ -3113,6 +3113,46 @@ describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
     return (traverser as any).schemaTracker;
   }
 
+  it("repeat unscoped links keep their values (stage-E neutrality guard)", () => {
+    // Two links to one unscoped target inside one traversal. The coverage
+    // memo must NOT fire for unscoped links (isLinkedDocumentCovered's
+    // neutrality guard): pre-stage-E the coverage key never matched for
+    // them, and the covered-skip path replaces a repeat link's value with
+    // `null` in traverseCells mode — which value consumers (the html
+    // reconciler's cell reads) would render. Both occurrences must carry
+    // the value.
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:repeat-link-root" as URI;
+    const targetUri = "of:repeat-link-target" as URI;
+
+    const rootValue = {
+      a: makeLink(targetUri),
+      b: makeLink(targetUri),
+    };
+    putDoc(store, rootUri, rootValue);
+    putDoc(store, targetUri, { label: "hello" });
+
+    const linkedSchema = {
+      type: "object",
+      properties: { label: { type: "string" } },
+    } as const;
+    const schema = {
+      type: "object",
+      properties: { a: linkedSchema, b: linkedSchema },
+    } as JSONSchema;
+
+    const traverser = getTraverser(store, { path: ["value"], schema });
+    const { ok: result } = traverser.traverse({
+      address: { space: SPACE, id: rootUri, type: TYPE, path: ["value"] },
+      value: rootValue,
+    });
+
+    expect(result).toEqual({
+      a: { label: "hello" },
+      b: { label: "hello" },
+    });
+  });
+
   it("tracks same-id linked docs in different scopes separately", () => {
     const store = new Map<string, Revision<State>>();
     const rootUri = "of:scoped-coverage-root" as URI;
@@ -4474,17 +4514,16 @@ describe("SchemaObjectTraverser slow-traverse reporting", () => {
     for (const entry of listed) {
       expect(entry).toMatch(/^.{20}\.\.=\d+$/);
     }
-    // Most-visited first. The container is read once per link hop, so it
-    // dominates; each target is walked once — its later link occurrences
-    // hit schema-tracker coverage and are skipped. (Pre-stage-E the
-    // inline coverage key wrote a literal "undefined" scope segment for
-    // unscoped links, so coverage never matched and target `i` was
-    // re-walked `i + 1` times; the shared scope_key constructor resolves
-    // an absent scope to the space instance, which is what the tracker
-    // records — the memo now works for unscoped links too.)
+    // Most-visited first. Target `i` was linked `i + 1` times, so the two
+    // least-visited targets are the ones the cap dropped. (These links
+    // are unscoped, so the coverage memo deliberately does not skip
+    // their re-walks — the stage-E neutrality guard in
+    // isLinkedDocumentCovered preserves the pre-re-keying behavior, and
+    // this assertion doubles as its regression test.)
     const counts = listed.map((entry) => Number(entry.split("=")[1]));
     expect(counts).toEqual([...counts].sort((a, b) => b - a));
-    expect(counts[0]).toBeGreaterThan(counts[1]);
+    expect(counts).not.toContain(1);
+    expect(counts).not.toContain(2);
   });
 
   it("collects nothing when diagnostics are off", () => {

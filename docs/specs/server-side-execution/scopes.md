@@ -316,7 +316,7 @@ Phases 1–5 meet them wherever scoped state appears.
   the same one equality check as derived writes. Without it a
   SpaceServer read under its service envelope resolves
   `user:<serviceDID>` and returns an EMPTY instance silently:
-  `resolveScopeKey` (`packages/memory/v2/engine.ts:98-126`) throws
+  `resolveScopeKey` (`packages/memory/v2.ts:120-153`) throws
   on a MISSING principal, never on a wrong one. Which identity a
   run assumes is §5's run-identity rule.
 - **M2 — Every in-memory identity key used the scope NAME, never

@@ -1188,6 +1188,19 @@ export class Runner {
         const space = notification.space;
         if ("changes" in notification) {
           for (const change of notification.changes) {
+            // OFF-ARM NEUTRALITY (stage E, deliberate): only SCOPED
+            // change notifications evict. Pre-stage-E, getDocKey
+            // interpolated the scope raw, so an unscoped result cell's
+            // cache entry carried an "undefined" scope segment this
+            // delete (which normalized to "space") could never name —
+            // notification eviction simply never happened for unscoped
+            // docs, and only the reset/rollback paths cleared them.
+            // Re-keying must not change when eviction fires (testing.md
+            // §2), so the old unscoped no-op is kept explicitly. Whether
+            // unscoped result docs SHOULD evict on change notifications
+            // is a real question — a separate, deliberate change, not a
+            // side effect of re-keying.
+            if (change.address.scope === undefined) continue;
             // Same key construction as getDocKey (site 2's cache): the
             // notification names the scope by NAME; the runtime's own
             // identity maps it to the same instance key the cache entry
