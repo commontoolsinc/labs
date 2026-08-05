@@ -1902,6 +1902,88 @@ Deno.test("runCfHarnessCli forwards --compact-threshold to a fresh run", async (
   assertEquals(createdOptions?.compactThreshold, 12_000);
 });
 
+Deno.test("runCfHarnessCli reads CF_HARNESS_COMPACT_THRESHOLD from the process environment", async () => {
+  // Every other CLI test injects `env`, which bypasses the default projection
+  // built from `Deno.env.get` — exactly where this variable was missing:
+  // documented and parsed, but never populated in a real run.
+  const projected = [
+    "CF_HARNESS_COMPACT_THRESHOLD",
+    "CF_HARNESS_API_KEY",
+    "CF_HARNESS_MODEL",
+    "CF_HARNESS_MODEL_PROVIDER",
+    "CF_HARNESS_REASONING_EFFORT",
+    "CF_HARNESS_PROMPT_CACHE_MODE",
+    "CF_HARNESS_GATEWAY_BASE_URL",
+    "CF_HARNESS_GATEWAY_AUTH_MODE",
+  ];
+  const saved = new Map(projected.map((name) => [name, Deno.env.get(name)]));
+  for (const name of projected) Deno.env.delete(name);
+  Deno.env.set("CF_HARNESS_API_KEY", "test-key");
+  Deno.env.set("CF_HARNESS_COMPACT_THRESHOLD", "9000");
+  try {
+    const { io } = createIoBuffers();
+    let createdOptions: Record<string, unknown> | undefined;
+    const exitCode = await runCfHarnessCli(
+      [
+        "--workspace",
+        "/tmp/project",
+        "--focus-root",
+        "packages/cf-harness",
+        "--prompt",
+        "Inspect the workspace",
+        "--model",
+        "gpt-5.4",
+        "--print-transcript",
+      ],
+      {
+        io,
+        createPromptLoop: (options) => {
+          createdOptions = options as Record<string, unknown>;
+          return {
+            runPrompt: () => {
+              return Promise.resolve(
+                ({
+                  model: "gpt-5.4",
+                  finalAssistantText: "Inspection complete.",
+                  transcript: [
+                    { role: "user", content: "Inspect the workspace" },
+                    { role: "assistant", content: "Inspection complete." },
+                  ],
+                  modelTurns: 1,
+                  runState: {
+                    runId: "run-cli",
+                    status: "completed",
+                    createdAt: "2026-04-15T22:00:00.000Z",
+                    updatedAt: "2026-04-15T22:00:01.000Z",
+                    cfcEnforcementMode: "disabled",
+                    currentDir: "/workspace",
+                    artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli",
+                    transcriptPath:
+                      "/tmp/project/.cf-harness-artifacts/run-cli/transcript.json",
+                    runReportPath:
+                      "/tmp/project/.cf-harness-artifacts/run-cli/run-report.json",
+                    policyEvents: [],
+                    toolOutputs: [],
+                  },
+                }) satisfies HarnessPromptLoopResult,
+              );
+            },
+            runTranscript: () =>
+              Promise.reject(new Error("unexpected resume path")),
+          };
+        },
+      },
+    );
+    assertEquals(exitCode, 0);
+    assertEquals(createdOptions?.compactThreshold, 9_000);
+  } finally {
+    for (const [name, value] of saved) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
+});
+
 Deno.test("runCfHarnessCli passes image attachments to the prompt loop", async () => {
   const workspace = await Deno.makeTempDir();
   await Deno.writeFile(join(workspace, "capture.png"), ONE_PIXEL_PNG);

@@ -1276,6 +1276,9 @@ export const parseCfHarnessCliArgs = async (
       CF_HARNESS_PROMPT_CACHE_MODE: Deno.env.get(
         "CF_HARNESS_PROMPT_CACHE_MODE",
       ),
+      CF_HARNESS_COMPACT_THRESHOLD: Deno.env.get(
+        "CF_HARNESS_COMPACT_THRESHOLD",
+      ),
       CF_HARNESS_HOME: Deno.env.get("CF_HARNESS_HOME"),
       HOME: Deno.env.get("HOME"),
       CF_HARNESS_CFC_ENFORCEMENT_MODE: Deno.env.get(

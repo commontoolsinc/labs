@@ -2816,7 +2816,13 @@ export class CfHarnessPromptLoop {
       engine: childEngine,
       modelClient: this.modelClient,
       cacheAffinityKey: childRunId,
-      ...(this.#compactThreshold !== undefined
+      // A positive threshold is calibrated to the parent model's input
+      // budget, so it follows only a child that inherits that model; a
+      // profile-overridden child keeps its own model's derived default (and a
+      // chat-routed override like web_search could not honour it at all).
+      // `0` is model-independent — the off-switch stays run-wide.
+      ...(this.#compactThreshold !== undefined &&
+          (this.#compactThreshold === 0 || childModel.source === "parent")
         ? { compactThreshold: this.#compactThreshold }
         : {}),
       ...(this.#promptCacheMode !== undefined
