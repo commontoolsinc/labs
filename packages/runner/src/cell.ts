@@ -3374,10 +3374,12 @@ function cellsToLinks(options: CellLinkOptions): Replacer {
       // so it still descends and is rebuilt from zero enumerable own
       // properties. Same marker as the sibling walk in
       // `builder/to-encodable-form.ts`.
-      // `FabricValueLayer` is looser than `FabricExecValue` by design -- its
-      // members may still be unconverted natives, which the recursion is about
-      // to reach and convert. The cast is that gap, and holds only because the
-      // walk descends into what it is given here.
+      // Both stand-in branches hold a `FabricExecValue` in fact -- a primitive
+      // or a `FabricPrimitive` -- but the type does not follow. `isRecord()`
+      // reports `value is Record<string, unknown>`, which an array is not a
+      // subtype of, so its false branch cannot rule `unknown[]` out of
+      // `FabricValueLayer`. The cast is that gap in the predicate, not a claim
+      // about the value.
       return (!isRecord(converted) || converted instanceof FabricPrimitive)
         ? { value: converted as FabricExecValue }
         : { into: converted };
