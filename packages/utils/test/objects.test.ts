@@ -204,7 +204,7 @@ describe("objects", () => {
       ).toBe(false);
     });
 
-    it("answers for a `Proxy` that disowns a key it reported", () => {
+    it("returns `false` for a `Proxy` that disowns a key it reported", () => {
       // A proxy whose `ownKeys()` names a key its `getOwnPropertyDescriptor()`
       // then answers `undefined` for. Inertness cannot be established, so the
       // answer is `false`; only a trap that throws on its own account takes

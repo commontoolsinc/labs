@@ -81,8 +81,8 @@ export function isInertPlainObject(
   // accessor carries `get` / `set` where a data property carries `value`. The
   // keys walked here are every own key, the two reads above having established
   // that there are no others.
-  for (let i = 0; i < keys.length; i++) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, keys[i]!)!;
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
     if (!("value" in descriptor)) {
       return false;
     }
