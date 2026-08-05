@@ -308,7 +308,7 @@ kept because the assumption they document is main's.
   and the floor ratchet assumes monotone evidence per fingerprint
   (main `packages/memory/v2/engine.ts:3990-4004` — the floor
   machinery is deleted on this branch with the observation
-  reduction; closing note, migration drop at `engine.ts:1215`).
+  reduction; closing note, migration drop at `engine.ts:1221`).
   → v2: the server must
   evaluate per-instance just to DISCOVER per-instance scope — N
   runs under N identities, with N time-varying (§2).
@@ -348,7 +348,7 @@ kept because the assumption they document is main's.
   is fed from the authenticated session at admission (`applyCommit`
   threads principal + sessionId,
   `packages/memory/v2/server.ts:2060-2063`, into
-  `engine.ts:2002-2003`), and mirrors refuse to
+  `engine.ts:2031-2032`), and mirrors refuse to
   re-derive scope context (main `engine.ts:2580-2596`,
   `upsertMirroredSchedulerObservation` — mirror machinery deleted
   on this branch with the observation reduction): a scoped write

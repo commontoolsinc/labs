@@ -304,7 +304,10 @@ Stages, one PR each except C, which is a three-PR train (below):
       `pattern-update-testing.md` scenarios are the acceptance
       surface); the watermark doc + `derivedThrough` +
       `waitForSettled(space, seq)` (protocol.md §4, testing.md §3);
-      the §7 counters.
+      the §7 counters; engine-side derived-envelope admission check —
+      a derived commit's producing session must be the holder's own
+      service session (defense-in-depth, RULED 2026-08-05;
+      protocol.md §2).
 - [ ] **G — effectful + outbox**: serve `fetch*`, `generate*`,
       `sqlite*` behind request-hash memoization; the outbox; egress
       performed only here (effect authority per README §3.8; quota

@@ -604,11 +604,21 @@ export class WaveAccumulator
     const homeWrites = this.#contributions.map((contribution) =>
       this.#homeDocInstances(contribution)
     );
-    const byLocalSeq = new Map<number, number>();
+    /** Per SPACE: sealed localSeq → contribution index. LocalSeqs are
+     * per-space replica counters, so the mapping must be per-space too —
+     * a pending read in a FOREIGN sealed commit resolves its layers
+     * against that space's seals, which is what folds a reader of a
+     * withdrawn foreign write into the withdrawal (the cross-space half
+     * of the closure below). */
+    const byLocalSeq = new Map<MemorySpace, Map<number, number>>();
     for (const contribution of this.#contributions) {
-      const home = this.#homeSealed(contribution);
-      if (home !== undefined) {
-        byLocalSeq.set(home.sealed.localSeq, contribution.index);
+      for (const sealed of contribution.spaces) {
+        let perSpace = byLocalSeq.get(sealed.space);
+        if (perSpace === undefined) {
+          perSpace = new Map();
+          byLocalSeq.set(sealed.space, perSpace);
+        }
+        perSpace.set(sealed.sealed.localSeq, contribution.index);
       }
     }
     const allDocs = new Map<
@@ -692,13 +702,16 @@ export class WaveAccumulator
       // that READ a withdrawn sealed write — whether its owner withdrew
       // whole (requeue, dependency drop) or exactly that doc's write was
       // dropped as superseded. A write derived from withdrawn state must
-      // not commit.
+      // not commit. The per-doc droppedDocs clause is scoped to the HOME
+      // space: superseded drops are only ever resolved for home docs,
+      // and doc-instance keys carry no space component.
       const readSawWithdrawnWrite = (
         ownerIndex: number,
         readDocKey: string,
+        readSpace: MemorySpace,
       ): boolean =>
         requeued.has(ownerIndex) || droppedWhole.has(ownerIndex) ||
-        droppedDocs[ownerIndex].has(readDocKey);
+        (readSpace === this.#space && droppedDocs[ownerIndex].has(readDocKey));
       let grew = true;
       while (grew) {
         grew = false;
@@ -764,7 +777,15 @@ export class WaveAccumulator
         rebasedHeads,
       );
 
-      if (batch.operations.length === 0 && batch.consequenceOf.length === 0) {
+      // Empty-wave short-circuit — ONLY when there is truly nothing for
+      // the store to see. A batch with preconditions still goes to the
+      // sink even with zero ops: preconditions are commit GATES, and
+      // short-circuiting them would resolve their contributions
+      // committed without the engine ever validating the gate.
+      if (
+        batch.operations.length === 0 && batch.consequenceOf.length === 0 &&
+        batch.preconditions.length === 0
+      ) {
         this.#settleVerdicts(
           outcome,
           requeued,
@@ -956,25 +977,44 @@ export class WaveAccumulator
     return true;
   }
 
+  /** Whether this contribution READ a sealed write that is being
+   * withdrawn — in ANY space it sealed into, resolving each space's
+   * pending-read layers against that space's own seals (localSeqs are
+   * per-space counters). A withdrawn writer's foreign write never lands
+   * (#buildForeignBatches excludes it), so a reader deriving from it
+   * must fold in exactly like a home reader (§3d: no blind derived
+   * writes). Bounded by what SEALS: the tx seals only spaces it wrote
+   * (or gated), so a read in a space the run wrote nothing to never
+   * reaches the accumulator — the third stage-D bound, documented at
+   * the sink (engine-wave-sink.ts). */
   #readsWithdrawnContribution(
     contribution: WaveContribution,
-    byLocalSeq: ReadonlyMap<number, number>,
-    sawWithdrawnWrite: (ownerIndex: number, readDocKey: string) => boolean,
+    byLocalSeq: ReadonlyMap<MemorySpace, ReadonlyMap<number, number>>,
+    sawWithdrawnWrite: (
+      ownerIndex: number,
+      readDocKey: string,
+      readSpace: MemorySpace,
+    ) => boolean,
   ): boolean {
-    const home = this.#homeSealed(contribution);
-    if (home === undefined) return false;
-    for (const read of home.sealed.commit.reads.pending) {
-      const layers = Array.isArray(read.localSeq)
-        ? read.localSeq
-        : [read.localSeq];
-      const readDocKey = docInstanceKey(
-        read.id,
-        this.#scopeKeyFor(read.scope),
-      );
-      for (const layer of layers) {
-        const owner = byLocalSeq.get(layer);
-        if (owner !== undefined && sawWithdrawnWrite(owner, readDocKey)) {
-          return true;
+    for (const spaceContribution of contribution.spaces) {
+      const perSpace = byLocalSeq.get(spaceContribution.space);
+      if (perSpace === undefined) continue;
+      for (const read of spaceContribution.sealed.commit.reads.pending) {
+        const layers = Array.isArray(read.localSeq)
+          ? read.localSeq
+          : [read.localSeq];
+        const readDocKey = docInstanceKey(
+          read.id,
+          this.#scopeKeyFor(read.scope),
+        );
+        for (const layer of layers) {
+          const owner = perSpace.get(layer);
+          if (
+            owner !== undefined &&
+            sawWithdrawnWrite(owner, readDocKey, spaceContribution.space)
+          ) {
+            return true;
+          }
         }
       }
     }

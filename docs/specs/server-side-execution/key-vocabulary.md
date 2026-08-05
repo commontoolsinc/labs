@@ -28,7 +28,7 @@ producing `space`, `user:<principal>`,
 encodeURIComponent-encoded, so `:` splits segments exactly); storage
 rows are keyed `(branch, id, scope_key)`
 (`packages/memory/v2/engine.ts:160`, `:177`), constructed at
-admission through the same shared definition (`engine.ts:2002-2003`).
+admission through the same shared definition (`engine.ts:2031-2032`).
 
 ## 1. The nine sites
 
@@ -97,7 +97,7 @@ not coin flip:
   the identity from the authenticated session at admission —
   `applyCommit` threads `session.principal` + `message.sessionId`
   (`packages/memory/v2/server.ts:2060-2063`) into the engine's
-  write path, which constructs the key (`engine.ts:2002-2003`) —
+  write path, which constructs the key (`engine.ts:2031-2032`) —
   via the shared definition. Clients never name keys — their
   identity rides the session, established at session open, never
   the commit (protocol.md §1) — so the derivation step is admission

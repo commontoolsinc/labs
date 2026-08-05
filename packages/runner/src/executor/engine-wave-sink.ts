@@ -8,14 +8,28 @@
 // itself. Stage F's SpaceServer wires this sink under the serving loop;
 // until then tests drive it.
 //
-// Two deliberate stage-D bounds, both assigned elsewhere in the plan:
+// Three deliberate stage-D bounds, all assigned elsewhere in the plan:
 // - foreign provisioning batches apply authored-class WITHOUT the acting
 //   identity + capabilityRef admission row (protocol.md §2's
 //   server-produced authored row) — that admission lands with the
 //   provisioning relocation (stage F); the accumulator already carries
-//   the annotations so the wiring is a sink change, not a re-plumb;
+//   the annotations so the wiring is a sink change, not a re-plumb.
+//   SCOPED ops in a foreign batch are REFUSED outright (commitWave
+//   below): this plain applyCommit path drops the batch's annotations,
+//   so a scoped foreign write would silently key from the sink's own
+//   principal — the empty-instance trap, cross-space edition — and no
+//   stage-D producer emits one (`.inSpace` provisioning is
+//   space-scoped);
 // - sqlite ops in wave batches need cell-db attachments the effect
-//   channel owns (stage G); this sink passes none.
+//   channel owns (stage G); this sink passes none;
+// - the accumulator's withdrawn-read closure sees only reads RECORDED
+//   in sealed commits, and a tx seals only the spaces it WROTE (or
+//   gated): a read in a space the run wrote nothing to — e.g. a
+//   foreign read feeding a home-only write — never reaches the
+//   accumulator, so a withdrawn writer in that space cannot fold the
+//   reader in. Stage F's serving loop MUST NOT lean on read-only
+//   cross-space layered reads folding into withdrawals until the seal
+//   handoff carries read-only spaces' read sets.
 
 import type { Engine } from "@commonfabric/memory/v2/engine";
 import {
@@ -40,11 +54,24 @@ export class EngineWaveCommitSink implements WaveCommitSink {
   readonly #principal: string | undefined;
   #localSeq = 0;
 
+  /**
+   * Replay keying, a caller obligation: the engine dedupes commits by
+   * UNIQUE (session_id, local_seq) — returning the STORED result for a
+   * byte-identical replay and throwing "commit replay mismatch" for a
+   * different one — while `#localSeq` restarts at 0 per sink INSTANCE.
+   * Reusing one `sessionId` across sink instances whose commits reach
+   * the same engine therefore collides the second instance's early
+   * localSeqs with the first's: an identical batch silently returns the
+   * OLD commit's seq (stale, nothing applied), a different one throws.
+   * Give every instance a distinct `sessionId` (e.g. suffix a
+   * wave/process nonce) or hold ONE long-lived instance per service
+   * session — stage F's SpaceServer owns that choice.
+   */
   constructor(options: {
     /** The co-hosted engine per space (memory server's own engines). */
     engineFor: (space: MemorySpace) => Engine;
     /** The service session framing the wave's commits are recorded
-     * under (replay detection keys on it). */
+     * under (replay detection keys on it — see the constructor doc). */
     sessionId: string;
     principal?: string;
   }) {
@@ -97,6 +124,35 @@ export class EngineWaveCommitSink implements WaveCommitSink {
         // Foreign provisioning commit (protocol.md §2b): authored-class,
         // idempotent by deterministic destination ids — no wave-basis
         // re-verification and no basis rows.
+        //
+        // Scoped writes are REFUSED here, not silently mis-keyed: this
+        // plain applyCommit path drops the batch's annotations, so a
+        // scoped op would key from the sink's own principal/session —
+        // the empty-instance trap, cross-space edition (protocol.md §1,
+        // §2). No stage-D producer emits scoped foreign writes
+        // (`.inSpace` provisioning is space-scoped); admitting one takes
+        // the acting-identity + capabilityRef delegated-admission row,
+        // which lands with stages F/G.
+        for (const op of batch.operations) {
+          if (
+            op.op === "sqlite" || op.scope === undefined ||
+            op.scope === "space"
+          ) {
+            continue;
+          }
+          return Promise.resolve({
+            error: {
+              name: "WaveCommitRejected",
+              message: "scoped write in a foreign wave batch refused " +
+                `(op ${op.id}, scope "${op.scope}"): the stage-D sink ` +
+                "applies foreign batches without identity annotations, " +
+                "so the row would silently key from the sink's own " +
+                "principal; foreign scoped admission needs the " +
+                "stage-F/G delegated-admission carriage (protocol.md " +
+                "§2, §2b)",
+            },
+          });
+        }
         const applied = applyCommit(engine, {
           sessionId: this.#sessionId,
           space: batch.space,

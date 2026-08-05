@@ -12,7 +12,7 @@ mapping pass is due.
 
 ## 1. The map
 
-284 binding rules. Instruments: the scenario traces (T1–T12), the
+289 binding rules. Instruments: the scenario traces (T1–T12), the
 field-provenance chains, the executable model (C1–C10 property
 families), the Phase 1 dry-run, and the doc-review panels
 (weak — counted only where nothing else applies).
@@ -20,7 +20,7 @@ families), the Phase 1 dry-run, and the doc-review panels
 | doc | rules | instrument-covered | impl-gate | deferral | derivable | owed |
 | --- | --- | --- | --- | --- | --- | --- |
 | README | 31 | 17 | 9 | 1 | 2 | 2* |
-| protocol | 53 | 43 | 3 | 2 | 4 | 1* |
+| protocol | 58 | 44 | 6 | 3 | 4 | 1* |
 | events | 34 | 25 | 4 | 2 | 2 | 1 |
 | scopes | 25 | 17 | 3 | 1 | 2 | 2 |
 | builtins | 15 | 6 | 3 | 1 | 4 | 1 |
@@ -70,16 +70,45 @@ same property family (C1/C10's event-first processing). The
 other budgets. The recorded write-class fallback is not built —
 no instrument owed unless it is ever adopted.
 
+Delta 2026-08-04/05 — stage D's carriage sentences and the
+2026-08-05 ruling pair (protocol 53 → 58):
+
+- §7's stored-representation sentences (the annotation pair's
+  carriage is server-internal admission input; its stored form is a
+  per-op-indexed sidecar on the commit row — recorded, never wire,
+  never pushed; admission consumes only the addressing half): +2
+  rules, impl-gate, verification home = the stage-D PR's engine
+  tests (`packages/memory/test/v2-wave-commit-test.ts` pins the
+  stored pair, the addressing-keyed rows, the
+  space-scoped-annotation refusal, and the non-derived refusal).
+- §1's `system`-row widening (RULED 2026-08-05): the
+  new-direct-write-caller-is-a-spec-decision sentence is
+  panel-covered (+1 instrument-covered — a prose-discipline rule,
+  the same instrument family as §7's "spec edit here first"); the
+  accepted no-user-attribution posture with its named blob-write
+  hardening is a deferral (+1) — deferrals are answers.
+- §2's derived-envelope defense-in-depth sentence (RULED
+  2026-08-05): +1 rule, impl-gate, assigned to Phase 1 stage F —
+  the plan's stage F bullet carries the task. The MODEL side needs
+  no extension: `admitDerived` already compares the envelope
+  principal to `holderId`; the impl-side operand mapping is the
+  stage F design question.
+
+The same review recorded a model/impl asymmetry in §3d's conflict
+handling — the impl's three-way drop/rebase/requeue disposition is
+pinned by impl tests only — now owed as OW9 below.
+
 Delta 2026-08-05 — the name-keyed boundary surface
-(key-vocabulary §5): three new rules. The §4 tripwire extension
-(a new name-keyed identity key, or a change to a listed boundary
-site, must update §5) is an implementation gate of the same grep-
-tripwire class as the rest of §4. The coverage-memo enablement
-gate (unscoped-link coverage stays off until the html reconciler's
+(key-vocabulary §5, stage E's review batch): three new rules
+(key-vocabulary 6 → 9). The §4 tripwire extension (a new
+name-keyed identity key, or a change to a listed boundary site,
+must update §5) is an implementation gate of the same grep-tripwire
+class as the rest of §4. The coverage-memo enablement gate
+(unscoped-link coverage stays off until the html reconciler's
 `get({ traverseCells: true })` value consumption is resolved —
 key-vocabulary §5) is an implementation gate on the PR that flips
 it. The schema-memo single-identity invariant (cross-identity memo
-sharing FORBIDDEN) is OWED an explicit guard — OW9.
+sharing FORBIDDEN) is OWED an explicit guard — OW10.
 
 ## 3. The owed register (every genuine orphan, with its trigger)
 
@@ -93,6 +122,13 @@ extension owed and WHEN it earns its cost:
   scopes §5). One C6-style negative.
 - OW2 — a lease renewal is NEVER a commit (serving-loop §2): renew
   transition asserts zero commit records.
+- OW9 — the §3d rebase arm: the model's conflict machinery requeues
+  EVERY raced consequence — it has no field-level-merge disposition —
+  so the impl's three-way drop/rebase/requeue split (serving-loop
+  §3d) is pinned by impl tests alone
+  (`packages/runner/test/executor-wave.test.ts`). Owed: a model
+  rebase-arm extension (commuting-patch merge plus the
+  re-CAS-at-the-observed-head rule).
 
 **Phase 2 pre-gate (when fan-out/speculation semantics go live —
 extend the model with narrowing, and the traces with a client-side
@@ -116,7 +152,7 @@ trace, T13 candidate):**
   its own owner ruling first).
 - OW6 — pattern-pointer hot-swap runs server-side (serving-loop
   §3e; N40/41).
-- OW9 — the schema-memo single-identity guard (key-vocabulary §5):
+- OW10 — the schema-memo single-identity guard (key-vocabulary §5):
   an explicit tripwire or assertion that no memo instance is shared
   across identities, landed BEFORE any cross-run memo sharing.
   Today every sharing scope is single-identity by construction;

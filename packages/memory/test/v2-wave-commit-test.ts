@@ -204,6 +204,53 @@ Deno.test("wave carriage: an annotated scope_key must match the write's declared
   }
 });
 
+Deno.test("wave carriage: a scope_key annotation targeting a space-scoped write is refused (addressing is one per SCOPED write)", async () => {
+  const { engine, path } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = withLiveLease(engine);
+    // protocol.md §1's ADDRESSING is "one per SCOPED write" and §7's
+    // closed list sanctions nothing else: an annotation aimed at a
+    // space-scoped op must be refused, never silently applied as the
+    // row's key (which would re-key a space-visible doc into a scoped
+    // instance nothing declared).
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:executor",
+          space: SPACE,
+          commit: setCommit(1, [{ id: "of:plain" }]),
+          commitClass: "derived",
+          holder,
+          annotations: [{ op: 0, scopeKey: "user:did%3Akey%3Aalice" }],
+        }),
+      ProtocolError,
+      "space-scoped",
+    );
+    // The wave path refuses identically: the annotation must key neither
+    // the conflict pre-check nor the write.
+    assertThrows(
+      () =>
+        applyWaveCommit(engine, {
+          sessionId: "server:executor",
+          space: SPACE,
+          commit: setCommit(2, [{ id: "of:plain" }]),
+          commitClass: "derived",
+          holder,
+          annotations: [{ op: 0, scopeKey: "user:did%3Akey%3Aalice" }],
+          waveBasis: { basisSeq: 0, rebasedHeads: [] },
+        }),
+      ProtocolError,
+      "space-scoped",
+    );
+    // Nothing was applied under either key.
+    assertEquals(revisionScopeKeys(path, "of:plain"), []);
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
 Deno.test("wave carriage: annotations and consequenceOf are refused on non-derived classes (closed metadata list)", async () => {
   const { engine } = await createEngine();
   try {
