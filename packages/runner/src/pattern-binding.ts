@@ -41,6 +41,7 @@ import type {
   DerivedInternalCellDescriptor,
 } from "./builder/types.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
+import { getServerExecutionConfig } from "@commonfabric/memory/v2";
 
 type SendValueToBindingOptions = {
   narrowestReadScope?: CellScope;
@@ -295,6 +296,32 @@ function sendValueToBindingInner<T>(
           { cell: cell.getAsNormalizedFullLink(), binding },
           { meta: ignoreReadForScheduling, schemaRole: "output" },
         );
+      }
+      // The eager via-user hop (scopes.md §2's MUST, flag-gated so the
+      // OFF arm keeps today's one-hop-per-event behavior): a
+      // space→session narrowing writes CHAINED redirects, space→user→
+      // session — ALWAYS via user, even when discovery jumps straight to
+      // session, so every chain has the one uniform shape and a later
+      // user-level reader finds a well-formed user link to follow.
+      if (
+        getServerExecutionConfig() &&
+        outputScope === "session" &&
+        scopeRank(ref.scope) < scopeRank("user")
+      ) {
+        const userRef = { ...ref, scope: "user" as const };
+        tx.writeValueOrThrow(
+          userRef,
+          createSigilLinkFromParsedLink(scopedRef, {
+            base: userRef,
+          }),
+        );
+        tx.writeValueOrThrow(
+          bindingLink,
+          createSigilLinkFromParsedLink(userRef, {
+            base: bindingLink,
+          }),
+        );
+        return;
       }
       tx.writeValueOrThrow(
         bindingLink,

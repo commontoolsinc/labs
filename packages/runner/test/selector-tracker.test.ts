@@ -26,7 +26,9 @@ describe("SelectorTracker", () => {
       storageManager,
     });
 
-    selectorTracker = new SelectorTracker();
+    selectorTracker = new SelectorTracker(() =>
+      storageManager.scopeKeyIdentity()
+    );
   });
 
   afterEach(async () => {

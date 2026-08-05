@@ -29,6 +29,7 @@ import {
   type EntityIdListResult,
   getCommitPreconditionsConfig,
   type PatchOp,
+  resolveScopeKey,
   type ScopeKeyIdentity,
   type SessionSync,
   type SqliteDbRef,
@@ -1311,7 +1312,7 @@ export class StorageManager implements IStorageManager {
     if (hasDataUriScheme(id)) {
       return false;
     }
-    const key = `${space}\0${docKey(id, scope)}`;
+    const key = `${space}\0${this.#pullKickKey(id, scope)}`;
     if (this.#docPullKicks.has(key)) {
       return false;
     }
@@ -1328,7 +1329,16 @@ export class StorageManager implements IStorageManager {
   }
 
   retractDocPullKick(space: MemorySpace, id: URI, scope?: CellScope): void {
-    this.#docPullKicks.delete(`${space}\0${docKey(id, scope)}`);
+    this.#docPullKicks.delete(`${space}\0${this.#pullKickKey(id, scope)}`);
+  }
+
+  /** Pull-kick keys are per scope INSTANCE (key-vocabulary.md §5's
+   * M4-coupled list, stage F): name-keyed, A's kick suppressed B's pull
+   * and B's doc never loaded at cardinality > 1. Resolved against the
+   * manager's own identity — partition-unchanged at cardinality 1
+   * (key-vocabulary.md §2). */
+  #pullKickKey(id: URI, scope?: CellScope): string {
+    return `${resolveScopeKey(scope, this.scopeKeyIdentity())}\0${id}`;
   }
 
   addCrossSpacePromise(promise: Promise<void>): void {
@@ -2100,7 +2110,9 @@ class SpaceReplica implements ISpaceReplica {
   // only `#watchView` can leave the consumer's view open, hanging dispose() on
   // `Promise.allSettled([...#updatePromises])`.
   #subscribedWatchView: MemoryV2Client.WatchView | null = null;
-  #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
+  #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
+    () => this.#scopeKeyIdentity(),
+  );
   #watchedIds = new Set<string>();
   #nextLocalSeq = 1;
   #closed = false;
@@ -2445,7 +2457,9 @@ class SpaceReplica implements ISpaceReplica {
     await Promise.allSettled([...this.#syncPromises]);
     await Promise.allSettled([...this.#updatePromises]);
     this.#syncTasks.clear();
-    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
+    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
+    () => this.#scopeKeyIdentity(),
+  );
   }
 
   private resetConflictAdmissionState(): void {
@@ -2543,7 +2557,9 @@ class SpaceReplica implements ISpaceReplica {
     void Promise.allSettled([...this.#suppressedVerdicts]);
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
-    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
+    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
+    () => this.#scopeKeyIdentity(),
+  );
   }
 
   async load(
@@ -2993,7 +3009,9 @@ class SpaceReplica implements ISpaceReplica {
     this.resetConflictAdmissionState();
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica reset"));
     this.cancelQueuedWatchRefresh();
-    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
+    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
+    () => this.#scopeKeyIdentity(),
+  );
     this.#subscription.next({
       type: "reset",
       space: this.#space,
@@ -3017,7 +3035,10 @@ class SpaceReplica implements ISpaceReplica {
         this.#settings.experimentalConcurrentWatchRefresh === true,
       );
       const rawEntries = [...entries];
-      const watchEntries = compactWatchEntries(rawEntries);
+      const watchEntries = compactWatchEntries(
+        rawEntries,
+        this.#scopeKeyIdentity(),
+      );
       if (watchEntries.length === 0) {
         return { ok: {} };
       }

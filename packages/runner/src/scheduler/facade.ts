@@ -842,6 +842,7 @@ export class Scheduler {
         this.shapedEventDeliver,
         this.pieceIdForEventLink(eventLink),
         eventLink,
+        this.runtime.scopeKeyIdentity,
         event,
         retries,
         onCommit,

@@ -1,5 +1,9 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 import { type NormalizedFullLink } from "../link-utils.ts";
 import {
   isRendererTrustedEvent,
@@ -337,11 +341,19 @@ export function stripClockFields(event: unknown): unknown {
   return scrubClockFields(event);
 }
 
-function linkKey(link: NormalizedFullLink): string {
+function linkKey(
+  link: NormalizedFullLink,
+  identity: ScopeKeyIdentity,
+): string {
   // Mirror the identity used by areNormalizedLinksSame (space, scope, id, and
-  // element-wise path). JSON-encode the path so distinct paths cannot collide
-  // (e.g. ["a","b"] vs ["a b"]).
-  return `${link.space}|${link.scope ?? "space"}|${link.id}|${
+  // element-wise path), with the scope segment resolved to the scope INSTANCE
+  // (key-vocabulary.md §5's stage-F serving-hazard list): name-keyed, shaper
+  // groups collapsed across principals — cross-principal budget consumption
+  // and a timing channel correlating one principal's activity with another's
+  // wakes. At cardinality 1 the resolved instance partitions exactly as the
+  // name did (key-vocabulary.md §2). JSON-encode the path so distinct paths
+  // cannot collide (e.g. ["a","b"] vs ["a b"]).
+  return `${link.space}|${resolveScopeKey(link.scope, identity)}|${link.id}|${
     JSON.stringify(link.path)
   }`;
 }
@@ -381,6 +393,7 @@ export function holdShapedEvent(
   deliver: DeliverFn,
   groupKey: string | undefined,
   eventLink: NormalizedFullLink,
+  identity: ScopeKeyIdentity,
   event: unknown,
   retries: boolean,
   onCommit: ((tx: IExtendedStorageTransaction) => void) | undefined,
@@ -400,7 +413,7 @@ export function holdShapedEvent(
   // cannot silently strip the closed-world gate's exemption.
   const runtimeInjectedEventKeys = opts.runtimeInjectedEventKeys;
   shaper.hold({
-    groupKey: EVENT_GROUP_PREFIX + (groupKey ?? linkKey(eventLink)),
+    groupKey: EVENT_GROUP_PREFIX + (groupKey ?? linkKey(eventLink, identity)),
     deliver: () =>
       deliver(eventLink, stripped, retries, onCommit, {
         eventId,

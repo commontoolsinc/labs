@@ -20,6 +20,7 @@ import { type CellScope, type JSONSchema } from "./builder/types.ts";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import { ContextualFlowControl } from "./cfc.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
+import { getServerExecutionConfig } from "@commonfabric/memory/v2";
 import { createRef } from "./create-ref.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import {
@@ -697,6 +698,54 @@ export function normalizeAndDiff(
     !isCell(newValue)
   ) {
     const scopedLink: NormalizedFullLink = { ...link, scope: declaredScope };
+    // The eager via-user hop (scopes.md §2's MUST, flag-gated so the OFF
+    // arm keeps today's one-hop-per-event behavior): a space→session
+    // narrowing writes CHAINED redirects, space→user→session — ALWAYS
+    // via user, even when the declaration jumps straight to session, so
+    // every chain has the one uniform shape.
+    if (
+      getServerExecutionConfig() &&
+      declaredScope === "session" &&
+      scopeRank(link.scope) < scopeRank("user")
+    ) {
+      const userLink: NormalizedFullLink = { ...link, scope: "user" };
+      return [
+        // Content goes into the session instance.
+        ...normalizeAndDiff(
+          runtime,
+          tx,
+          scopedLink,
+          newValue,
+          context,
+          options,
+          state,
+          NO_PRECOMPUTED,
+          undefined,
+          isArrayElement,
+        ),
+        // The user-level slot points to the session instance.
+        ...normalizeAndDiff(
+          runtime,
+          tx,
+          userLink,
+          createSigilLinkFromParsedLink(scopedLink, { base: userLink }) as
+            unknown,
+          context,
+          options,
+          state,
+        ),
+        // The broader slot points via user.
+        ...normalizeAndDiff(
+          runtime,
+          tx,
+          link,
+          createSigilLinkFromParsedLink(userLink, { base: link }) as unknown,
+          context,
+          options,
+          state,
+        ),
+      ];
+    }
     return [
       // Content goes into the narrower-scope instance (its missing container
       // structure is created by the storage write, which builds parents for the
@@ -1551,6 +1600,46 @@ export function normalizeAndDiff(
           ...childLink,
           scope: childScope,
         };
+        // The eager via-user hop (scopes.md §2's MUST, flag-gated): an
+        // eager space→session redirect chains via user like every other
+        // narrowing write, so the chain shape stays uniform.
+        if (
+          getServerExecutionConfig() &&
+          childScope === "session" &&
+          scopeRank(link.scope) < scopeRank("user")
+        ) {
+          const userLink: NormalizedFullLink = {
+            ...childLink,
+            scope: "user",
+          };
+          changes.push(
+            ...normalizeAndDiff(
+              runtime,
+              tx,
+              userLink,
+              createSigilLinkFromParsedLink(scopedLink, {
+                base: userLink,
+              }) as unknown,
+              context,
+              options,
+              state,
+            ),
+            ...normalizeAndDiff(
+              runtime,
+              tx,
+              childLink,
+              createSigilLinkFromParsedLink(userLink, {
+                base: childLink,
+              }) as unknown,
+              context,
+              options,
+              state,
+              currentRecord[key],
+            ),
+          );
+          eagerScopedKeys.add(key);
+          continue;
+        }
         changes.push(
           ...normalizeAndDiff(
             runtime,

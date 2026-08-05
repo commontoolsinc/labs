@@ -4,7 +4,7 @@ import {
   REJECTING_SELECTOR,
 } from "@commonfabric/data-model/schema-utils";
 import type { MIME } from "@commonfabric/memory/interface";
-import type { CellScope } from "@commonfabric/memory/v2";
+import type { CellScope, ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { pruneCfcSchemaDefinitions } from "../cfc/schema-refs.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
@@ -37,8 +37,9 @@ export const normalizeSyncEntries = (
 
 export const compactWatchEntries = (
   entries: [ScopedWatchAddress, SchemaPathSelector][],
+  identity: ScopeKeyIdentity,
 ): [ScopedWatchAddress, SchemaPathSelector][] => {
-  const tracker = new SelectorTracker<Result<Unit, PullError>>();
+  const tracker = new SelectorTracker<Result<Unit, PullError>>(() => identity);
   const compacted: [ScopedWatchAddress, SchemaPathSelector][] = [];
 
   for (const entry of entries) {

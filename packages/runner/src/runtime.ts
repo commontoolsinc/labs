@@ -26,6 +26,7 @@ import {
   getServerExecutionConfig,
   resetCommitPreconditionsConfig,
   resetServerExecutionConfig,
+  resolveScopeKey,
   type ScopeKeyIdentity,
   setCommitPreconditionsConfig,
   setServerExecutionConfig,
@@ -1616,7 +1617,16 @@ export class Runtime {
     sourceSpace?: MemorySpace,
   ): void {
     const { space, id, scope } = link;
-    const key = `${space}\0${normalizeCellScope(scope)}\0${id}`;
+    // Kick keys are per scope INSTANCE (key-vocabulary.md §5's stage-F
+    // serving-hazard list): name-keyed, A's kick suppressed B's load and
+    // B's absent read never healed at cardinality > 1. Resolved against
+    // the runtime's own identity — the OFF arm's one identity, so the
+    // partition is unchanged at cardinality 1 (key-vocabulary.md §2);
+    // served per-run reads arrive with stage F's run contexts and pull
+    // through the demand path, not this dedup set.
+    const key = `${space}\0${
+      resolveScopeKey(scope, this.scopeKeyIdentity)
+    }\0${id}`;
     if (this.missingDocLoadKicks.has(key)) return;
     // A same-space target the replica already has state for (or a manager
     // without lazy replication) needs no fetch.
