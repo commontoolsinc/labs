@@ -329,9 +329,9 @@ export function sparkline(
     const tail = pts.slice(vals.length - highlight.count);
     lines.push(`<polyline points="${tail.join(" ")}" fill="none" stroke="${highlight.color}" stroke-width="2"/>`);
   }
-  // display:block keeps the chart's box the height it draws. An inline svg sits on
-  // a text baseline, so its line box reserves descender space below it, and a tile
-  // whose tallest content is a chart ends up taller than the chart by that much.
+  // The svg is a block, so the chart's box is the height it draws: an inline svg
+  // sits on a text baseline, and the line box around it reserves descender space
+  // underneath.
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="24" preserveAspectRatio="none" style="display:block;margin-top:9px">${defs}${lines.join("")}</svg>`;
 }
 
