@@ -156,6 +156,23 @@ export class CellHandle<T = unknown> {
     value: T,
     type: RequestType.CellSet | RequestType.CellPush,
   ): Promise<void> {
+    // Serialized FIRST, because it can refuse. The local update below is
+    // optimistic about the WRITE -- it assumes a value the connection accepts
+    // will land -- and not about whether the value can be sent at all. Were the
+    // refusal to come after, a value the runtime is never going to see would
+    // already be this handle's cached value and would already have reached
+    // every subscriber, leaving the display showing state that does not exist.
+    //
+    // `T` is unconstrained, so this says what the write path requires rather
+    // than what the class guarantees. Constraining `T` to `ClientCellValue` is
+    // the honest fix and is not a small one: the schema-derived types
+    // (`ObjectFromProperties<...>`) and the looser `Props` of `vnode-types.ts`
+    // do not satisfy it, an interface having no implicit index signature where
+    // an identical type alias does.
+    //
+    // TODO(danfuzz): constrain `T`, once those types are assignable.
+    const serialized = CellHandle.serialize(value as ClientCellValue);
+
     this.#value = value;
 
     for (const callback of this.#callbacks.values()) {
@@ -168,15 +185,6 @@ export class CellHandle<T = unknown> {
     }
 
     const cell = this.ref();
-    // `T` is unconstrained, so this says what the write path requires rather
-    // than what the class guarantees. Constraining `T` to `ClientCellValue` is
-    // the honest fix and is not a small one: the schema-derived types
-    // (`ObjectFromProperties<...>`) and the looser `Props` of `vnode-types.ts`
-    // do not satisfy it, an interface having no implicit index signature where
-    // an identical type alias does.
-    //
-    // TODO(danfuzz): constrain `T`, once those types are assignable.
-    const serialized = CellHandle.serialize(value as ClientCellValue);
     const request = type === RequestType.CellPush
       ? this.#conn.request<RequestType.CellPush>({
         type: RequestType.CellPush,

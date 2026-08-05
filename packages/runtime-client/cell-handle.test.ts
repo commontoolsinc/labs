@@ -806,3 +806,67 @@ describe("CellHandle special-object refusal", () => {
       .toEqual({ a: 1, b: [true, null], c: undefined });
   });
 });
+
+describe("CellHandle refused write leaves no local trace", () => {
+  const ref: CellRef = {
+    id: "of:refused-cell" as CellRef["id"],
+    space: "did:key:test" as CellRef["space"],
+    scope: "space",
+    path: [],
+  };
+
+  const runtimeCapturing = (requests: unknown[]): RuntimeClient =>
+    ({
+      [$conn]: () => ({
+        request: (request: unknown) => {
+          requests.push(request);
+          return Promise.resolve({});
+        },
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+        signal: { aborted: false },
+      }),
+    }) as unknown as RuntimeClient;
+
+  // The local update is optimistic about the WRITE landing, not about whether
+  // the value can be sent at all. A value the connection refuses is one the
+  // runtime will never hold, so it must not become the cached value or reach a
+  // subscriber -- that would show state that does not exist anywhere.
+
+  it("keeps the prior value after a refused set", async () => {
+    const requests: unknown[] = [];
+    const cell = new CellHandle<unknown>(runtimeCapturing(requests), ref);
+    cell[$onCellUpdate]("before");
+
+    await expect(cell.set(new FabricBytes(new Uint8Array([1])))).rejects
+      .toThrow("Cannot yet handle `FabricBytes`");
+
+    expect(cell.get()).toBe("before");
+  });
+
+  it("notifies no subscriber of a refused set", async () => {
+    const requests: unknown[] = [];
+    const cell = new CellHandle<unknown>(runtimeCapturing(requests), ref);
+    cell[$onCellUpdate]("before");
+    const seen: unknown[] = [];
+    cell.subscribe((value) => {
+      seen.push(value);
+    });
+    seen.length = 0; // Drop any initial delivery; what follows is the point.
+
+    await expect(cell.set(new FabricBytes(new Uint8Array([1])))).rejects
+      .toThrow("Cannot yet handle `FabricBytes`");
+
+    expect(seen).toEqual([]);
+  });
+
+  it("sends nothing over the connection for a refused set", async () => {
+    const requests: unknown[] = [];
+    const cell = new CellHandle<unknown>(runtimeCapturing(requests), ref);
+
+    await expect(cell.set(new FabricBytes(new Uint8Array([1])))).rejects
+      .toThrow("Cannot yet handle `FabricBytes`");
+
+    expect(requests).toEqual([]);
+  });
+});
