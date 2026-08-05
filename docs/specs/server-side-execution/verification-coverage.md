@@ -12,7 +12,7 @@ mapping pass is due.
 
 ## 1. The map
 
-294 binding rules. Instruments: the scenario traces (T1–T12), the
+295 binding rules. Instruments: the scenario traces (T1–T12), the
 field-provenance chains, the executable model (C1–C10 property
 families), the Phase 1 dry-run, and the doc-review panels
 (weak — counted only where nothing else applies).
@@ -24,7 +24,7 @@ families), the Phase 1 dry-run, and the doc-review panels
 | events | 34 | 25 | 4 | 2 | 2 | 1 |
 | scopes | 25 | 17 | 3 | 1 | 2 | 2 |
 | builtins | 15 | 6 | 3 | 1 | 4 | 1 |
-| serving-loop | 76 | 45 | 20 | 1 | 4 | 6 |
+| serving-loop | 77 | 45 | 20 | 1 | 5 | 6 |
 | key-vocabulary | 9 | 5 | 3 | 0 | 0 | 1 |
 | speculation | 15 | 10 | 2 | 0 | 1 | 2 |
 | testing | 14 | 4 | 10 | 0 | 0 | 0 |
@@ -124,6 +124,26 @@ Delta 2026-08-05 — the stage-D review's Q1/Q2/Q4 ruling batch
   stage-F half (naming the sanctioned internal stamp kinds when the
   seal destination is installed) is +1 impl-gate assigned to Phase 1
   stage F, alongside §2's derived-envelope check.
+
+Delta 2026-08-05 (follow-up) — Q1-ruling propagation (serving-loop
+76 → 77; no other rows move):
+
+- The retracted unconditional "next wave recomputes" sentence
+  survived outside §3d — protocol §1 (threat model) and §2
+  (admission note), README §1, runtime-mapping N15/N17 — and two
+  trace cells (T9.Q1, T12.Q4) had drifted. All now state the
+  dependency-only rule and cite serving-loop §3d (RULED
+  2026-08-05). CHANGED sentences only: every location keeps its
+  existing row; no counts move for these.
+- Completion-path clarification (adjudicated 2026-08-05, vetoable):
+  the completion commit (serving-loop §4) never passes §3d's
+  sealing, but its identity annotations are sourced from outbox
+  carriage captured at the ORIGINAL run's seal — necessarily
+  stamped under Q4's refusal — so completion commits inherit
+  stamped provenance transitively and no unstamped derived path
+  exists. +1 rule, DERIVABLE — covering cells: the Q4 refusal row
+  (impl-gate, above) and §4's identity-carriage miss rule (FP6,
+  RULED 2026-08-03).
 
 Delta 2026-08-05 — the name-keyed boundary surface
 (key-vocabulary §5, stage E's review batch): three new rules

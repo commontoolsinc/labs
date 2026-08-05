@@ -81,10 +81,12 @@ invariant it actually is:
 malicious client holding today's write authority on a doc can still
 author into it — derived-output docs and the watermark doc included
 (forgery possible, accepted for now). v2 defines the outcome rather
-than a defense: the intruding write is ordinary authored input and
-the next wave recomputes over it (protocol.md §1). **v2 adds no
-security guarantees beyond today's unless trivial (owner,
-2026-08-02); tightening is future work.**
+than a defense: the intruding write is ordinary authored input;
+recompute over it is NOT automatic — it follows serving-loop.md
+§3d's dependency-only rule (RULED 2026-08-05), so a derivation that
+never reads the doc it writes is not re-armed by the intrusion
+(protocol.md §1). **v2 adds no security guarantees beyond today's
+unless trivial (owner, 2026-08-02); tightening is future work.**
 
 The egress rule falls out of the same line: **speculate on anything you can
 throw away; never on anything you can't take back.** A derived value is
