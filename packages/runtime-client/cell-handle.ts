@@ -37,9 +37,6 @@ const logger = getLogger("cell-handle", { enabled: false });
 export const $onCellUpdate = Symbol("$onCellUpdate");
 
 /**
- * CellHandle provides a cell interface for cells living in a web worker.
- */
-/**
  * A cell's value as the CLIENT holds it: what a cell holds, with a
  * `CellHandle` wherever a cell sits. That is the substitution
  * `vnode-types.ts` already makes for the render types -- `Cell` replaced by
@@ -60,6 +57,9 @@ export type ClientCellValue =
   | { readonly [key: string]: ClientCellValue }
   | CellHandle<unknown>;
 
+/**
+ * CellHandle provides a cell interface for cells living in a web worker.
+ */
 export class CellHandle<T = unknown> {
   #rt: RuntimeClient;
   #conn: InitializedRuntimeConnection;
