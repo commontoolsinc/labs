@@ -35,17 +35,17 @@ function factoryArtifact(serialized: unknown): () => void {
 describe("encodable-form", () => {
   describe("replaceArtifacts()", () => {
     describe("values carrying no artifact", () => {
-      it("answers a record by identity", () => {
+      it("returns a record by identity", () => {
         const value = { a: 1, b: { c: [1, 2, 3] } };
         expect(flatten(value)).toBe(value);
       });
 
-      it("answers a nested array by identity", () => {
+      it("returns a nested array by identity", () => {
         const value = [{ a: 1 }, [2, [3]]];
         expect(flatten(value)).toBe(value);
       });
 
-      it("answers a value carrying a sparse hole by identity", () => {
+      it("returns a value carrying a sparse hole by identity", () => {
         const value = [1, , 3];
         const result = flatten(value);
         expect(result).toBe(value);
@@ -346,7 +346,7 @@ describe("encodable-form", () => {
   });
 
   describe("encodableFormOf()", () => {
-    it("answers what `toEncodableForm` returns", () => {
+    it("returns the result of `toEncodableForm`", () => {
       expect(encodableFormOf({ toEncodableForm: () => ({ a: 1 }) }))
         .toEqual({ a: 1 });
     });
@@ -374,7 +374,7 @@ describe("encodable-form", () => {
       expect(encodableFormOf(value)).toEqual({ saw: "self" });
     });
 
-    it("answers `undefined` for a value carrying neither name", () => {
+    it("returns `undefined` for a value carrying neither name", () => {
       expect(encodableFormOf({ a: 1 })).toBe(undefined);
     });
   });

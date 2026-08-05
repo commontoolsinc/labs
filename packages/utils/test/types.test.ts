@@ -247,7 +247,7 @@ describe("types", () => {
       expect(isPlainObject(Object.create(null), true)).toBe(true);
     });
 
-    it("answers the same either way for everything else", () => {
+    it("returns the same either way for everything else", () => {
       class MyClass {}
       for (const value of [{}, { a: 1 }, [], new Date(), new MyClass(), null]) {
         expect(isPlainObject(value, false)).toBe(isPlainObject(value, true));
