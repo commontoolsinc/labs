@@ -44,6 +44,11 @@ code:
 - `expect()` over `assert*()`, always for structured values. Plain `assert(x)`
   only where truthiness itself is the assertion.
 
+On placement: a test goes in the package's `test/` tree, mirroring `src/`. The
+exception is a directory of independent components, `packages/ui` and
+`packages/patterns` among them, where each test sits beside its component and
+belongs there.
+
 The "Which comparison decides the outcome?" section is the one to read before
 writing a test that turns on a fine distinction — `-0`, `NaN`, or a boxed
 value such as a `FabricHash`.
