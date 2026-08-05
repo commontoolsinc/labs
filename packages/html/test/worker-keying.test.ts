@@ -3,11 +3,7 @@
  */
 
 import { assertEquals, assertNotEquals } from "@std/assert";
-import {
-  generateChildKeys,
-  generateKey,
-  keysMatch,
-} from "../src/worker/keying.ts";
+import { generateChildKeys, generateKey } from "../src/worker/keying.ts";
 
 Deno.test("keying - generateKey", async (t) => {
   await t.step("generates stable keys for strings", () => {
@@ -169,16 +165,5 @@ Deno.test("keying - generateChildKeys", async (t) => {
     const keys = generateChildKeys(["only"]);
     assertEquals(keys.length, 1);
     assertEquals(keys[0], `${generateKey("only")}-0`);
-  });
-});
-
-Deno.test("keying - keysMatch", async (t) => {
-  await t.step("returns true for matching keys", () => {
-    assertEquals(keysMatch("foo-0", "foo-0"), true);
-  });
-
-  await t.step("returns false for non-matching keys", () => {
-    assertEquals(keysMatch("foo-0", "foo-1"), false);
-    assertEquals(keysMatch("foo", "bar"), false);
   });
 });

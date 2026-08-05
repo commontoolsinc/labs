@@ -129,11 +129,3 @@ export function generateChildKeys(children: readonly unknown[]): string[] {
 
   return keys;
 }
-
-/**
- * Check if two keys represent the same node identity.
- * Used for determining if a node can be reused vs recreated.
- */
-export function keysMatch(oldKey: string, newKey: string): boolean {
-  return oldKey === newKey;
-}

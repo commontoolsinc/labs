@@ -306,10 +306,11 @@ describe("encodable-form", () => {
       expect(hasEncodableForm({ toEncodableForm: () => ({}) })).toBe(true);
     });
 
-    it("returns true for a value carrying only `toSigilLinkOrNull`", () => {
-      // A `Cell` answers this name -- the link is what stands in for a cell on
-      // the way to storage -- and a cell is not a builder artifact.
-      expect(hasEncodableForm({ toSigilLinkOrNull: () => ({}) })).toBe(true);
+    it("returns false for a value carrying only `toSigilLinkOrNull`", () => {
+      // A cell returns the link that stands in for it, and it returns
+      // under the one name asked here. The link accessor is not that name, so
+      // a value that merely names a link does not become storable by saying so.
+      expect(hasEncodableForm({ toSigilLinkOrNull: () => ({}) })).toBe(false);
     });
 
     it("returns false for a value carrying only `toJSON`", () => {
@@ -340,9 +341,8 @@ describe("encodable-form", () => {
       expect(hasEncodableForm({ a: 1 })).toBe(false);
     });
 
-    it("returns false for a non-callable member of either name", () => {
-      expect(hasEncodableForm({ toEncodableForm: 1, toSigilLinkOrNull: 2 }))
-        .toBe(false);
+    it("returns false for a non-callable `toEncodableForm`", () => {
+      expect(hasEncodableForm({ toEncodableForm: 1 })).toBe(false);
     });
 
     it("returns false for `null` and for a primitive", () => {
@@ -359,19 +359,6 @@ describe("encodable-form", () => {
         .toEqual({ a: 1 });
     });
 
-    it("falls back to `toSigilLinkOrNull` when that is the only name", () => {
-      expect(encodableFormOf({ toSigilLinkOrNull: () => ({ b: 2 }) }))
-        .toEqual({ b: 2 });
-    });
-
-    it("prefers `toEncodableForm` when a value carries both", () => {
-      const value = {
-        toEncodableForm: () => ({ preferred: true }),
-        toSigilLinkOrNull: () => ({ preferred: false }),
-      };
-      expect(encodableFormOf(value)).toEqual({ preferred: true });
-    });
-
     it("calls the member ON the value, so `this` is the receiver", () => {
       const value = {
         marker: "self",
@@ -383,22 +370,23 @@ describe("encodable-form", () => {
     });
 
     it("returns the result of a member only `Reflect.apply` can call", () => {
-      // A `Reactive` is a proxy over a cell, and it answers a method name with
-      // a PROXY over that method. Reading `.call` off that goes back through
-      // the proxy as data navigation and comes out uncallable, so the invoke
-      // has to reach the function's own call behavior rather than a property
-      // of it.
+      // A method can arrive wrapped in a proxy that answers EVERY property
+      // read with something of its own, so nothing read off the method --
+      // `.call` included -- is callable, while the method itself still is. So
+      // the invoke has to reach a function's call behavior rather than read a
+      // property that names it.
+      //
+      // The live producer of that shape is the reactive proxy in `cell.ts`: a
+      // `cellMethods` name comes back as a proxy over the bound method, and
+      // every read off THAT is data navigation.
       const method = new Proxy(function () {
         return { invoked: true };
-      }, {
-        get: (target, prop) =>
-          prop === "call" ? { notAFunction: true } : Reflect.get(target, prop),
-      });
+      }, { get: () => ({ notAFunction: true }) });
       expect(encodableFormOf({ toEncodableForm: method }))
         .toEqual({ invoked: true });
     });
 
-    it("returns `undefined` for a value carrying neither name", () => {
+    it("returns `undefined` for a value carrying no such member", () => {
       expect(encodableFormOf({ a: 1 })).toBe(undefined);
     });
   });
@@ -470,9 +458,10 @@ describe("encodable-form", () => {
     });
 
     it("are left alone by the walk, being no builder's artifacts", () => {
-      // Neither is a plain object, so the walk does not descend into one. What
-      // stands in for a cell is `replaceArtifacts`'s `replaceOther` hook, whose
-      // caller knows an `isCell()` when it holds one.
+      // Neither is a plain object, so the walk does not descend into one --
+      // the member each carries never comes up. What stands in for a cell is
+      // `replaceArtifacts`'s `replaceOther` hook, whose caller knows an
+      // `isCell()` when it holds one.
       const { cell, reactive } = subjects();
       const held = { cell, reactive };
       expect(flatten(held)).toBe(held);
