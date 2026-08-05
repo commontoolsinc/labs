@@ -355,9 +355,7 @@ function parseObjectInput(
   // JSON input validation is deferred to the runner.
   if (!usedJson) {
     for (const key of requiredFlags(schema)) {
-      // `Object.hasOwn`: a required flag named for a prototype member would
-      // otherwise read as supplied on every input.
-      if (!Object.hasOwn(input, key)) {
+      if (!(key in input)) {
         throw new Error(`Missing required flag --${flagNameForKey(key)}`);
       }
     }

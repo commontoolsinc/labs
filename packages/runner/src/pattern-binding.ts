@@ -359,11 +359,7 @@ function sendValueToBindingInner<T>(
     // slots rather than codec contents). Mark ahead of that.
   } else if (isRecord(binding) && isRecord(value)) {
     for (const key of Object.keys(binding)) {
-      // `Object.hasOwn`, not `in`: `key` comes from the binding shape and
-      // `value` is data. `in` walks the prototype chain, so a binding key
-      // called `toString` matched every object and forwarded
-      // `Object.prototype.toString` — a function — as the bound value.
-      if (Object.hasOwn(value, key)) {
+      if (key in value) {
         sendValueToBindingInner(
           tx,
           cell,

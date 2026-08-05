@@ -344,7 +344,7 @@ function cloneWithoutBoundToolKeys(
 
   const required = Array.isArray(schema.required)
     ? (schema.required as string[]).filter((key) =>
-      key !== "result" && !Object.hasOwn(extraParams, key)
+      key !== "result" && !(key in extraParams)
     )
     : undefined;
 

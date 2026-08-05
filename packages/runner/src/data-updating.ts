@@ -1660,10 +1660,7 @@ function hasPath(value: unknown, path: readonly string[]): boolean {
   }
 
   const obj = value as Record<string, unknown>;
-  // `Object.hasOwn`, not `in`: presence on a RECORD is an own-property
-  // question. The array branch above keeps `in` deliberately — there it is
-  // sparse-hole detection, and arrays do not inherit index properties.
-  if (!Object.hasOwn(obj, first)) return false;
+  if (!(first in obj)) return false;
   return hasPath(obj[first], rest);
 }
 

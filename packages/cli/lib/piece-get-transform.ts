@@ -895,8 +895,7 @@ function projectValue(
     return projected;
   }
   for (const [key, childSchema] of Object.entries(properties)) {
-    // `Object.hasOwn`: schema-declared `key` against data.
-    if (Object.hasOwn(value, key)) {
+    if (key in value) {
       projected[key] = projectValue(
         value[key],
         childSchema,
@@ -1046,9 +1045,7 @@ export function selectSourceSchema(
       purpose,
     );
   }
-  const selectedRequired = required?.filter((key) =>
-    Object.hasOwn(properties, key)
-  );
+  const selectedRequired = required?.filter((key) => key in properties);
   return {
     ...metadata,
     properties,

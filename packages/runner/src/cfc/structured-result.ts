@@ -210,9 +210,7 @@ const childSchemaForKey = (
     }
   }
   if (
-    // `Object.hasOwn`: data-derived `key` against schema properties.
-    !(isRecord(resolved.properties) &&
-      Object.hasOwn(resolved.properties, key)) &&
+    !(isRecord(resolved.properties) && key in resolved.properties) &&
     (typeof resolved.additionalProperties === "boolean" ||
       isRecord(resolved.additionalProperties))
   ) {

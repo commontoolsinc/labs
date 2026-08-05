@@ -207,10 +207,7 @@ function decodeRowLinkColumns(
     // reactive read path.
     let out: Record<string, unknown> | undefined;
     for (const c of cols) {
-      // `Object.hasOwn`: `c` is a column name and `r` is a row record. `in`
-      // matched a column named e.g. `toString` against every row and then
-      // handed the inherited function to the decoder below.
-      if (!Object.hasOwn(r, c)) continue;
+      if (!(c in r)) continue;
       let decoded: unknown;
       try {
         decoded = parseCfLinkToSigil(r[c]);

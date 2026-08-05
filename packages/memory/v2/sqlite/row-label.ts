@@ -598,9 +598,7 @@ function evalMatch(
   row: Record<string, unknown>,
 ): string[] {
   const field = node.field as string;
-  // `Object.hasOwn`: `field` names row data, so a field named for a prototype
-  // member must not read as present on every row.
-  if (!Object.hasOwn(row, field)) {
+  if (!(field in row)) {
     return fail(`rule input field "${field}" is absent from the row`);
   }
   const value = row[field];
@@ -649,7 +647,7 @@ function evalTest(
     return fail("malformed when gate (use whenMatches())");
   }
   const { field, source, flags } = test.match as Record<string, unknown>;
-  if (typeof field !== "string" || !Object.hasOwn(row, field)) {
+  if (typeof field !== "string" || !(field in row)) {
     return fail(`rule input field "${String(field)}" is absent from the row`);
   }
   const value = row[field];
