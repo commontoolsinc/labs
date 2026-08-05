@@ -8,6 +8,7 @@ import {
 
 import type { FabricPrimitive } from "@/interface.ts";
 import {
+  BaseFabricPrimitive,
   codecClasses,
   FabricBytes,
   FabricEpochDays,
@@ -84,6 +85,14 @@ describe("schemaTypeOfFabricPrimitive()", () => {
       expect(tableNames.has(name)).toBe(true);
     }
     expect(FABRIC_PRIMITIVE_SCHEMA_TYPES.length).toBe(CASES.length);
+  });
+
+  it("throws on a FabricPrimitive subclass outside the mapping", () => {
+    // Death before confusion: a primitive class that reaches the mapping
+    // without a schema type name must fail loudly, not degrade to "object".
+    class RogueFabricPrimitive extends BaseFabricPrimitive {}
+    expect(() => schemaTypeOfFabricPrimitive(new RogueFabricPrimitive()))
+      .toThrow(/RogueFabricPrimitive/);
   });
 
   it("isFabricPrimitiveSchemaType() accepts exactly the vocabulary", () => {
