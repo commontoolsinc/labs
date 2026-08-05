@@ -48,6 +48,7 @@ import {
 import {
   type Cell,
   CHIP_UI,
+  getPatternIdentityRef,
   getPatternSetupIdentityRef,
   isCell,
   isStream,
@@ -611,10 +612,10 @@ const VNODE = Object.freeze({ "[vnode]": true });
  * Whether a value is a RENDERING rather than state.
  *
  * `type: "vnode"` is the whole test, and it is the runner's own definition of
- * one — `vnodeSchema` in `runner/src/schemas.ts` requires that tag. It is
- * deliberately NOT `html`'s `isVNodeish`, which also answers yes to any object
- * carrying a `$UI`: that shape is a piece with a rendering ON it, whose other
- * keys are exactly the state this comparison exists to check.
+ * one — `vnodeSchema` in `runner/src/schemas.ts` requires that tag. An object
+ * carrying a `$UI` is deliberately not counted: that shape is a piece with a
+ * rendering ON it, whose other keys are exactly the state this comparison
+ * exists to check.
  */
 function isVNode(value: object): boolean {
   return (value as { type?: unknown }).type === "vnode";
@@ -1206,19 +1207,31 @@ export function isPresentRootValue(value: unknown): boolean {
  * there. Measured: with a companion store truncated to zero bytes, a break that
  * the gate is built to catch replays with no failures at all.
  *
- * The evidence is the SETUP MARKER, not a value. The runner stamps
- * `patternSetupIdentity` under the same condition that reports an instantiation
- * to the capture observer (`runner.ts` — deliberately the same, so the store
- * cannot label roots the observer missed or vice versa), so every manifest
- * entry's cell carries one by construction. A value check would instead depend
- * on the pattern's result shape, and a root whose result is legitimately `{}`
- * would read as missing.
+ * The evidence is a RUNNER-WRITTEN MARKER, not a value. A value check would
+ * depend on the pattern's result shape, and a root whose result is
+ * legitimately `{}` would read as missing. For a NATIVE capture the marker is
+ * `patternSetupIdentity`: the runner stamps it under the same condition that
+ * reports an instantiation to the capture observer (`runner.ts` —
+ * deliberately the same, so the store cannot label roots the observer missed
+ * or vice versa), so every observer-recorded entry's cell carries one by
+ * construction. An ADOPTED fixture's manifest is written by
+ * `tasks/vintage-adopt.ts` instead of the observer, and its store may predate
+ * the setup marker entirely — its roots carry only `patternIdentity`.
  *
  * PRESENCE only — this does not check that the marker names the entry's own
  * identity and symbol. Deliberately: a root set up twice under different
  * identities in one capture would then false-red, and correspondence is not
  * reachable from a legitimate capture anyway, since the observer and the stamp
  * describe the same `resultCell`.
+ *
+ * EITHER marker satisfies presence, therefore. `patternSetupIdentity` (#4915)
+ * postdates spaces the runner still rolls forward in production, whose roots
+ * carry only `patternIdentity` — a fixture captured by an old toolchain
+ * (CT-1941) holds exactly that shape, and refusing it would exclude the
+ * vintages this tier exists to replay. The older marker is a weaker claim
+ * (pattern loaded, not setup completed), but for THIS question — "was
+ * something really captured here, or is this a valid empty database?" —
+ * either stamp is evidence only the runner writes.
  */
 export async function vintageHoldsRoot(
   vintage: VintageRuntime,
@@ -1233,7 +1246,8 @@ export async function vintageHoldsRoot(
   );
   try {
     await cell.sync();
-    return getPatternSetupIdentityRef(cell as Cell<unknown>) !== undefined;
+    return getPatternSetupIdentityRef(cell as Cell<unknown>) !== undefined ||
+      getPatternIdentityRef(cell as Cell<unknown>) !== undefined;
   } catch {
     // An absent doc surfaces as a throw rather than `undefined`, and for this
     // question the two are the same answer: nothing was captured here.

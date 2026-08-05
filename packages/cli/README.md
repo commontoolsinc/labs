@@ -163,11 +163,19 @@ remains the ordinary successful `null` CLI response, as does a valid projected
 null.
 
 Both transforms run as a short-lived computed pattern in the caller's session.
-The runtime's list filter/map builtins therefore handle CFC exactly as authored
-pattern expressions do: predicate observations label array membership,
-projection reads propagate labels, and filtered elements retain their source
-links. Projection map/lift nodes construct the requested shape from a
-source-schema-selected read rather than returning a widening identity alias.
+When the declared source schema fixes the root container shape, the pattern
+constructs its first storage read from the union of predicate-observed and
+projected paths. Structurally declared properties, including local `$ref` item
+schemas, are pruned to that union: predicate-only fields can decide membership
+without appearing in the result, and omitted linked subgraphs are not hydrated.
+Schema-less or root-union sources retain a value-shape read before the transform
+because their array/object projection semantics cannot be established from the
+declaration. Ambiguous source-schema compositions remain intact and can retain a
+wider selector. The runtime's list filter/map builtins therefore handle CFC
+exactly as authored pattern expressions do: predicate observations label array
+membership, projection reads propagate labels, and filtered elements retain
+their source links. Projection map/lift nodes construct the requested shape from
+a source-schema-selected read rather than returning a widening identity alias.
 Nested non-stream Cell handles are materialized before the predicate/projection
 JavaScript runs; stream handles remain capabilities. The source cell's schema
 remains authoritative for Common Fabric metadata. A caller cannot introduce or

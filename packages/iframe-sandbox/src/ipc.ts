@@ -1,29 +1,3 @@
-import { type JSONSchema } from "@commonfabric/runner";
-import { isObject, isRecord } from "@commonfabric/utils/types";
-
-export const isJSONSchema = (source: unknown): source is JSONSchema => {
-  if (!isRecord(source)) {
-    return false;
-  }
-
-  if (!("type" in source) || !source.type) {
-    return "anyOf" in source && Array.isArray(source.anyOf);
-  }
-
-  switch (source.type) {
-    case "object":
-    case "array":
-    case "string":
-    case "integer":
-    case "number":
-    case "boolean":
-    case "null":
-      return true;
-    default:
-      return false;
-  }
-};
-
 // Types used by the `common-iframe-sandbox` IPC.
 
 // Diagram of the IPC messages between the Host
@@ -137,49 +111,13 @@ export function isGuestError(e: object): e is GuestError {
     "stacktrace" in e && typeof e.stacktrace === "string";
 }
 
-export const isTaskPerform = (source: unknown): source is TaskPerform =>
-  isRecord(source) &&
-  "intent" in source && typeof source.intent === "string" &&
-  "description" in source && typeof source.description === "string" &&
-  "input" in source && isObject(source.input) &&
-  "output" in source && isJSONSchema(source.output);
-
 export enum HostMessageType {
   Update = "update",
-  LLMResponse = "llm-response",
-  ReadWebpageResponse = "readwebpage-response",
-  Effect = "command-effect",
 }
 
-export type HostMessage =
-  | { type: HostMessageType.Update; data: [string, unknown] }
-  | {
-    type: HostMessageType.LLMResponse;
-    request: string;
-    data: object | null;
-    error: unknown;
-  }
-  | {
-    type: HostMessageType.ReadWebpageResponse;
-    request: string;
-    data: object | null;
-    error: unknown;
-  }
-  | Effect;
-
-export type Effect = {
-  type: HostMessageType.Effect;
-  /**
-   * ID of the corresponding GuestCommand.
-   */
-  id: string;
-
-  /**
-   * Result of performing the GuestCommand. It MUST match the `output` schema
-   * provided by the command. It is expected that system will ensure schema
-   * conformance but there is no way for us to ensure this on wire.
-   */
-  result: { ok: object; error?: void } | { error: Error; ok?: void };
+export type HostMessage = {
+  type: HostMessageType.Update;
+  data: [string, unknown];
 };
 
 export enum GuestMessageType {
@@ -188,9 +126,6 @@ export enum GuestMessageType {
   Unsubscribe = "unsubscribe",
   Write = "write",
   Read = "read",
-  LLMRequest = "llm-request",
-  WebpageRequest = "readwebpage-request",
-  Perform = "perform",
 }
 
 export type GuestMessage =
@@ -198,42 +133,7 @@ export type GuestMessage =
   | { type: GuestMessageType.Subscribe; data: string | string[] }
   | { type: GuestMessageType.Unsubscribe; data: string | string[] }
   | { type: GuestMessageType.Read; data: string }
-  | { type: GuestMessageType.Write; data: [string, unknown] }
-  | { type: GuestMessageType.LLMRequest; data: string }
-  | { type: GuestMessageType.WebpageRequest; data: string }
-  | { type: GuestMessageType.Perform; data: TaskPerform };
-
-/**
- * Message asking a host to perform certain task.
- */
-export interface TaskPerform {
-  /**
-   * Intent is a semantic identifier that describes the task guest wishes
-   * to be performed.
-   */
-  intent: string;
-
-  /**
-   * Description of the expected effect performing this command should have.
-   */
-  description: string;
-
-  /**
-   * Parameters of the command.
-   */
-  input: object;
-
-  /**
-   * A schema of the result produced by this effect.
-   */
-  output: JSONSchema;
-
-  /**
-   * Unique identifier for this command. It is used by the host to send
-   * corresponding effect message.
-   */
-  id: string;
-}
+  | { type: GuestMessageType.Write; data: [string, unknown] };
 
 export function isGuestMessage(message: unknown): message is GuestMessage {
   if (
@@ -251,8 +151,6 @@ export function isGuestMessage(message: unknown): message is GuestMessage {
     case GuestMessageType.Error: {
       return isGuestError(message.data);
     }
-    case GuestMessageType.LLMRequest:
-    case GuestMessageType.WebpageRequest:
     case GuestMessageType.Read: {
       return typeof message.data === "string";
     }
@@ -266,9 +164,6 @@ export function isGuestMessage(message: unknown): message is GuestMessage {
       return Array.isArray(message.data) &&
         message.data.length === 2 &&
         typeof message.data[0] === "string";
-    }
-    case GuestMessageType.Perform: {
-      return isTaskPerform(message.data);
     }
   }
 

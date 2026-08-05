@@ -277,9 +277,7 @@ export function createVDomDebugHelpers() {
         rows.push({
           index: i++,
           container: parent,
-          cellId: entry.cell?.ref()?.id ?? "(none)",
-          path: entry.path,
-          renderer: entry.renderer ? "VDomRenderer" : "(legacy)",
+          cellId: entry.cell.ref()?.id ?? "(none)",
         });
       }
       console.table(rows);
@@ -295,10 +293,6 @@ export function createVDomDebugHelpers() {
         console.warn("No active render found.");
         return undefined;
       }
-      if (!target.cell) {
-        console.warn("No cell handle available (legacy render without cell).");
-        return undefined;
-      }
       return await readCellAsync(target.cell.asSchema(debugVDOMSchema));
     },
 
@@ -309,10 +303,6 @@ export function createVDomDebugHelpers() {
       const target = resolveTarget(el);
       if (!target) {
         console.warn("No active render found.");
-        return;
-      }
-      if (!target.cell) {
-        console.warn("No cell handle available (legacy render without cell).");
         return;
       }
       const tree = await readCellAsync(
@@ -326,7 +316,7 @@ export function createVDomDebugHelpers() {
     },
 
     /**
-     * Show node/listener counts per active renderer (worker path only).
+     * Show node/listener counts per active renderer.
      */
     stats() {
       const renders = getActiveRenders();
@@ -337,26 +327,15 @@ export function createVDomDebugHelpers() {
       const rows: Record<string, unknown>[] = [];
       let i = 0;
       for (const [parent, entry] of renders) {
-        if (entry.renderer) {
-          const info = entry.renderer.getApplicator().getDebugInfo();
-          rows.push({
-            index: i,
-            container: parent,
-            nodeCount: info.nodeCount,
-            listenerCount: info.listenerCount,
-            totalListeners: info.totalListeners,
-            rootNodeId: info.rootNodeId,
-          });
-        } else {
-          rows.push({
-            index: i,
-            container: parent,
-            nodeCount: "(legacy)",
-            listenerCount: "(legacy)",
-            totalListeners: "(legacy)",
-            rootNodeId: "(legacy)",
-          });
-        }
+        const info = entry.renderer.getApplicator().getDebugInfo();
+        rows.push({
+          index: i,
+          container: parent,
+          nodeCount: info.nodeCount,
+          listenerCount: info.listenerCount,
+          totalListeners: info.totalListeners,
+          rootNodeId: info.rootNodeId,
+        });
         i++;
       }
       console.table(rows);
@@ -367,8 +346,8 @@ export function createVDomDebugHelpers() {
      */
     nodeForId(id: number, el?: HTMLElement | number): Node | undefined {
       const target = resolveTarget(el);
-      if (!target?.renderer) {
-        console.warn("No worker-path renderer found.");
+      if (!target) {
+        console.warn("No active render found.");
         return undefined;
       }
       return target.renderer.getApplicator().getNode(id);

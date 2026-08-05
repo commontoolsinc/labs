@@ -17,7 +17,8 @@ import {
   internSchemaAsTaggedHashString,
   isInternedSchema,
 } from "./schema-hash.ts";
-import { type FabricValue } from "./interface.ts";
+import { FabricPrimitive, type FabricValue } from "./interface.ts";
+import { schemaTypeOfFabricPrimitive } from "./fabric-primitives/index.ts";
 
 /**
  * Map from `JSONSchema` type names (and special names) to corresponding
@@ -260,6 +261,11 @@ export function schemaForValueType(
         return getBasicSchema("null");
       } else if (Array.isArray(value)) {
         return getBasicSchema("array");
+      } else if (value instanceof FabricPrimitive) {
+        // A fabric primitive gets its specific type name (e.g.
+        // "FabricBytes") rather than "object": it is an opaque leaf, so
+        // "object" would invite structural keywords that cannot apply.
+        return getBasicSchema(schemaTypeOfFabricPrimitive(value));
       }
       break;
     }

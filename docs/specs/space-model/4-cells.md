@@ -325,7 +325,7 @@ to pretend that state and events have identical execution semantics.
 
 The current system does **not** add timestamps or unique IDs to event payloads:
 - `stream.send(event)` passes the payload directly to the scheduler
-- DOM events have a `timeStamp` property, but `sanitizeEvent()` does not
+- DOM events have a `timeStamp` property, but `serializeEvent()` does not
   include it in the allowlist of properties passed through
 
 However, each handler **invocation** does receive a unique identity. When an
@@ -340,7 +340,7 @@ context, not in the event data itself.
 
 For unification, timestamps or IDs would need to be part of the **event payload
 or cell value** (not just the invocation context) — either injected at the
-`send()` layer, in `sanitizeEvent()`, or by event producers explicitly.
+`send()` layer, in `serializeEvent()`, or by event producers explicitly.
 
 #### Event Replay Consideration
 
