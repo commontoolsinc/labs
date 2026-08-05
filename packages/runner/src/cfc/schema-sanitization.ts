@@ -1,13 +1,20 @@
-import type { JSONSchema, JSONValue } from "@commonfabric/api";
+import {
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  isFabricPrimitiveSchemaType,
+  type JSONSchema,
+  type JSONValue,
+} from "@commonfabric/api";
 import type { CfcConfClause } from "./clause.ts";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import {
   cloneIfNecessary,
   type FabricPlainObject,
+  FabricPrimitive,
   type FabricValue,
   isFabricPlainObject,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
@@ -504,8 +511,16 @@ const typeMatches = (
     case "array":
       return Array.isArray(value);
     case "object":
-      return isFabricPlainObjectValue(value);
+      // A fabric primitive satisfies "object" too: each fabric-primitive
+      // type is a subtype of "object" (the same rule the read side's
+      // schemaTypeMatchesValueType applies in traverse.ts).
+      return isFabricPlainObjectValue(value) ||
+        value instanceof FabricPrimitive;
     default:
+      if (isFabricPrimitiveSchemaType(type)) {
+        return value instanceof FabricPrimitive &&
+          schemaTypeOfFabricPrimitive(value) === type;
+      }
       return !rejectUnknownType;
   }
 };
@@ -560,6 +575,7 @@ const SUPPORTED_SCHEMA_TYPES = new Set([
   "undefined",
   "array",
   "object",
+  ...FABRIC_PRIMITIVE_SCHEMA_TYPES,
 ]);
 
 const SUPPORTED_SCHEMA_FORMATS = new Set([

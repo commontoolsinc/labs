@@ -1,4 +1,7 @@
+import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
+
 import type { FabricClassWithCodec } from "@/codec-common/interface.ts";
+import type { FabricPrimitive } from "@/interface.ts";
 import { FabricBytes } from "./FabricBytes.ts";
 import { FabricEpochDays } from "./FabricEpochDays.ts";
 import { FabricEpochNsec } from "./FabricEpochNsec.ts";
@@ -31,3 +34,31 @@ const CODEC_CLASSES: readonly FabricClassWithCodec[] = Object.freeze([
   FabricEpochDays,
   FabricRegExp,
 ]);
+
+/**
+ * The JSON Schema `type` name for a `FabricPrimitive` instance, resolved by
+ * prototype. This is the value-side counterpart of the api package's
+ * `FABRIC_PRIMITIVE_SCHEMA_TYPES` vocabulary: schema validation compares the
+ * name returned here against a schema's `type`. The mapping is explicit
+ * (`instanceof` per class) rather than derived from `constructor.name`, which
+ * minified bundles do not preserve.
+ *
+ * Uses "death before confusion": a `FabricPrimitive` subclass missing from
+ * this mapping throws rather than degrade to a broader type, so adding a new
+ * primitive class forces the vocabulary (here and in `@commonfabric/api`) to
+ * be extended in the same change.
+ */
+export function schemaTypeOfFabricPrimitive(
+  value: FabricPrimitive,
+): FabricPrimitiveSchemaType {
+  if (value instanceof FabricBytes) return "FabricBytes";
+  if (value instanceof FabricEpochDays) return "FabricEpochDays";
+  if (value instanceof FabricEpochNsec) return "FabricEpochNsec";
+  if (value instanceof FabricHash) return "FabricHash";
+  if (value instanceof FabricRegExp) return "FabricRegExp";
+  throw new Error(
+    `Shouldn't happen: \`FabricPrimitive\` subclass without a schema type ` +
+      `name: \`${value.constructor.name}\`. Add it to ` +
+      "`schemaTypeOfFabricPrimitive()` and `FABRIC_PRIMITIVE_SCHEMA_TYPES`.",
+  );
+}
