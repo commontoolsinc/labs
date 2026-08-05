@@ -101,6 +101,7 @@ import {
 import { toURI } from "./uri-utils.ts";
 import { createRef } from "./create-ref.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import type { FabricExecValue } from "@commonfabric/api";
 import { type Replacer, replacingWalk } from "./replacing-walk.ts";
 import {
   type SigilLink,
@@ -3373,8 +3374,12 @@ function cellsToLinks(options: CellLinkOptions): Replacer {
       // so it still descends and is rebuilt from zero enumerable own
       // properties. Same marker as the sibling walk in
       // `builder/to-encodable-form.ts`.
+      // `FabricValueLayer` is looser than `FabricExecValue` by design -- its
+      // members may still be unconverted natives, which the recursion is about
+      // to reach and convert. The cast is that gap, and holds only because the
+      // walk descends into what it is given here.
       return (!isRecord(converted) || converted instanceof FabricPrimitive)
-        ? { value: converted }
+        ? { value: converted as FabricExecValue }
         : { into: converted };
     },
   };

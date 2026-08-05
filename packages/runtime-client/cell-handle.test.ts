@@ -797,6 +797,10 @@ describe("CellHandle.serialize", () => {
   it("refuses a value the connection cannot carry", () => {
     expect(() => CellHandle.serialize({ fn: () => 1 })).toThrow("Unknown type");
     expect(() => CellHandle.serialize({ n: 1n })).toThrow("Unknown type");
+    // A symbol throws on implicit string conversion, so the refusal has to
+    // convert it explicitly or it reports a `TypeError` naming nothing.
+    expect(() => CellHandle.serialize({ s: Symbol.for("k") }))
+      .toThrow("Unknown type");
   });
 
   it("flattens a native object to its enumerable members", () => {

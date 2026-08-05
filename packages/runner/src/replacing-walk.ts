@@ -1,3 +1,4 @@
+import type { FabricExecValue } from "@commonfabric/api";
 import { isFunction, isRecord } from "@commonfabric/utils/types";
 
 /**
@@ -15,21 +16,21 @@ export type Replacer = {
    * link that reaches it, say. It may also throw, which is how a walk refuses
    * a value it cannot represent.
    */
-  replace(value: unknown): { value: unknown } | undefined;
+  replace(value: FabricExecValue): { value: FabricExecValue } | undefined;
 
   /**
    * Returns what stands in for a value the walk is already inside, which is to
    * say a cycle. `path` locates that value from the root of the walk, for a
    * caller that represents it with a reference.
    */
-  cycle(value: object, path: readonly string[]): unknown;
+  cycle(value: object, path: readonly string[]): FabricExecValue;
 
   /**
    * Returns the container to descend into, given one the walk is about to
    * descend into -- or `{ value }` to stop there and stand for it with that
    * instead. A walk that transforms containers on the way in does it here.
    */
-  enter?(value: object): { into: object } | { value: unknown };
+  enter?(value: object): { into: object } | { value: FabricExecValue };
 };
 
 /**
@@ -44,17 +45,22 @@ export type Replacer = {
  * A container carrying nothing replaced still comes back rebuilt rather than by
  * identity. A caller wanting identity preserved can compare and discard.
  *
+ * The domain is `FabricExecValue` rather than `FabricValue` on both sides: what
+ * arrives may hold live things a durable value may not -- a `Cell`, a handler
+ * -- which is the reason to walk it at all, and what a replacement stands in
+ * with is a caller's business rather than this one's.
+ *
  * @param value The value to walk.
  * @param replacer Decides what becomes of the values met along the way.
  * @param path Where `value` sits, from the root of the walk.
  * @param ancestors The values the walk is currently inside, by their paths.
  */
 export function replacingWalk(
-  value: unknown,
+  value: FabricExecValue,
   replacer: Replacer,
   path: readonly string[] = [],
   ancestors: Map<object, readonly string[]> = new Map(),
-): unknown {
+): FabricExecValue {
   if ((isRecord(value) || isFunction(value)) && ancestors.has(value)) {
     return replacer.cycle(value, ancestors.get(value)!);
   }

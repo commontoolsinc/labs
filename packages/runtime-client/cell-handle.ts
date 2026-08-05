@@ -514,7 +514,10 @@ const CELL_HANDLE_REFS: Replacer = {
     ) {
       return undefined;
     }
-    throw new Error(`Unknown type: ${value}`);
+    // `String()` rather than interpolation: a symbol throws on implicit
+    // conversion, which would replace this refusal with a `TypeError`
+    // naming nothing.
+    throw new Error(`Unknown type: ${String(value)}`);
   },
 
   // A value that holds itself cannot be sent: the far end rebuilds what it
