@@ -81,11 +81,18 @@ The **concise** form is a different thing wearing the same flag:
 ```
 
 The concise form is a shorthand, and it exists because full schemas are verbose
-enough that nobody writes one to select two fields. That is a good reason for it
-to exist and a bad reason for it to share a flag with the thing it abbreviates.
-A reader who sees `--schema title,createdBy.name` and asks "how is that a
-schema?" has spotted the real problem: one flag, two syntaxes, one name that
-only describes one of them.
+enough that nobody writes one to select two fields. It is modelled on
+[`llm`'s schemas](https://llm.datasette.io/en/stable/schemas.html), which is
+worth recording so the next reader does not have to re-derive why it looks the
+way it does.
+
+`llm` keeps both syntaxes under one flag, so one flag is demonstrably livable
+and "the shorthand is not a schema" is not on its own a reason to split. The
+reason to split anyway is that **our shorthand is growing notation that is not
+schema syntax at all** — a suffix marking a path as an address, below — and a
+separate flag gives that room without every addition needing a justification as
+a schema dialect. A reader who sees `--schema title,createdBy.name@` and asks
+"how is that a schema?" is right, and will get righter.
 
 **Give the shorthand its own flag and leave `--schema` for full schemas.** That
 resolves the ambiguity rather than papering over it, and it leaves room for the
@@ -101,8 +108,14 @@ shorthand flag is open.
 `scope`, and `ifc` stay the source's — they decide how a value is treated, not
 which values come back. `$ref`, `$defs`, and the combinators are unsupported.
 Both checks run against the parsed projection whatever syntax produced it, so
-writing the full form does not unlock them. That is worth knowing before
-designing shorthand notation on top of `asCell`, since it is refused today.
+writing the full form does not unlock them.
+
+That rule needs no carve-out for the address suffix. `asCell` carries a handle
+contract as well as a boundary, and a handle cannot cross a serialized channel —
+so a reader supplying it would be asking for something the channel silently
+downgrades to an address. The suffix desugars to a projection-only `$link`
+instead; see
+[shaped reads](shaped-reads-and-verb-results.md) for the reasoning.
 
 ## What it should look like
 
@@ -173,6 +186,25 @@ a caller depends on — steps 1–5 only add.
 Steps 1–5 are mechanical. Step 7 needs real decisions and belongs last, because
 each pair is two working commands whose merge changes behaviour rather than
 spelling.
+
+**Each step carries its own documentation.** `--input`, `--piece`, and
+`piece get` appear across the tutorial, `packages/cli/README.md`, and the
+pattern documentation, so a single sweep at the end would leave every
+intermediate state wrong. What each step owes:
+
+| Step | Documentation owed |
+| --- | --- |
+| 2 | The read options gain a second host — `piece call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs-over-the-cli.md), which is already stale |
+| 3 | Address forms wherever `--piece` is taught: the CLI README and the tutorial's workflow chapter |
+| 4 | `#argument` beside every `--input` example, in the same places |
+| 5 | The new spellings alongside the old ones everywhere both work |
+| 6 | Removal of the old spellings, once redirects have carried traffic |
+| 7 | Whatever the merges decide |
+
+**Old spellings stay as redirects, not errors, until step 6 has traffic behind
+it.** A deprecated spelling that still works costs a line of aliasing; one that
+fails costs every script and skill file that used it, including ones outside
+this repository.
 
 ## Decisions this document does not make
 

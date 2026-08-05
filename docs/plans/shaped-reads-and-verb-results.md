@@ -118,46 +118,18 @@ caller cannot do is introduce its own. A disjunction has no single answer to
 "return this subtree," so honouring one would mean picking a branch on the
 caller's behalf.
 
-### What a shape cannot yet say: which positions are addresses
+### Saying which positions are addresses
 
-Everything above selects *values*. What is missing is a way to say "at this
-position, give me the address rather than what is behind it."
+Everything above selects *values*. A shape also needs to say "at this position,
+give me the address rather than what is behind it."
 
 That is what preserves identity. If a verb creates a note and the result
 flattens it into its contents, the caller cannot then call a verb on that note —
 there is no address to pass along. If instead the position renders as an
 address, the next command can use it directly.
 
-Four spellings are available, and the choice is not cosmetic:
-
-| Spelling | Where the address comes from |
-| --- | --- |
-| Omission-driven (`--add-ids`) | positions the shape did not project |
-| Path list (`--id-for-paths`) | a second list, parallel to the shape |
-| Marked at the position | a keyword beside `properties`, inside the shape |
-| Selected as a field | a reserved name inside the selection set |
-| Suffixed in the shorthand | a marker on a path — `createdBy.user@` |
-
-The last is sugar rather than a rival: the shorthand desugars into a schema, so
-it needs one of the others underneath it. It is listed because the shorthand is
-where the common case actually gets typed, and a spelling nobody writes is not
-much of a win. Of the first four, two cannot do the job at all.
-
-**Omission-driven cannot express the case that motivates this.** A caller
-creating a topic usually wants its address *and* one field from it — the title,
-to confirm the write landed. That needs both from the same subtree. If the shape
-projects `topic.title`, then `topic` is on the path being traversed and renders
-as a value, so no address is produced. Address or field, not both.
-
-**A path list does not compose.** It is a second addressing language running
-beside the shape, and it cannot describe nested structure the way the shape can.
-It brings back path enumeration precisely where the shape exists to avoid it.
-
-The other two both work, and both express the motivating case. They differ in
-where the marker sits.
-
-**Marking at the position** puts a keyword beside `properties`, so a position
-can be descended into and rendered as an address at once:
+**A `$link` marker beside `properties`.** A position can be descended into and
+rendered as an address at once:
 
 ```json
 { "properties": {
@@ -165,43 +137,88 @@ can be descended into and rendered as an address at once:
                "properties": { "title": true } } } }
 ```
 
-**Selecting it as a field** puts a reserved name inside the selection set,
-alongside the fields that genuinely exist:
-
-```json
-{ "properties": {
-    "topic": { "properties": { "$id": true, "title": true } } } }
-```
-
-Either returns the same thing:
+returning
 
 ```json
 { "topic": { "$link": { "id": "of:fid1:…", "space": "did:key:…" },
              "title": "New topic" } }
 ```
 
-The second borrows GraphQL's selection sets, where `{ topic { id title } }`
-treats identity as a field you ask for rather than a special form. It needs one
-mechanism instead of two and composes at any depth with no rule about where a
-marker may sit. Its wrinkle is that our documents have no `id` field — identity
-lives on the link, not in the data — so the name is synthetic and sits in an
-allowlist beside names that are not. Only the idea transfers, not the syntax:
-the argument for schema-shaped shapes is that a caller can lift a source schema
-and prune it, which a different query syntax would break.
+**Semantics: link *instead of* contents.** A bare marker returns the address and
+nothing else. Address-plus-summary is spelled as two paths — `topic@,topic.title`
+— which merge by union into the shape above and render as one result carrying
+both. One rule, no special case: you get what you asked for, and asking for the
+link is not asking for the contents.
 
-Whichever wins, the marker must be **projection-only**, not a borrowed `asCell`.
-A reader is barred from supplying `asCell` by name, alongside `ifc`, in either
-syntax; reusing it would either breach that rule or give one keyword two
-meanings depending on who wrote it. That constraint binds the shorthand suffix
-too — reading `@` as "as cell" is the natural intuition, and it is the one
-spelling the current rules refuse.
+**The shorthand desugars one-to-one.** `createdBy.user@` rewrites the leaf in
+place to `{"user": {"$link": true}}` — an annotation on the position, not a
+structural change.
 
-The mechanism underneath already exists either way, and needs no new traversal
-machinery. A selector can be told to reject a position — load nothing there.
-Marked positions would get exactly that, composed into the same set of paths
-the projection already builds, so the address comes back without its target
-being loaded. The rejecting selector exists and is used at roughly nine gate
-sites in `traverse.ts`; wiring it into the projection's path mask is the work.
+#### Why this spelling
+
+Two decisions, and they are separable.
+
+**The name is `$link`, not `$id`.** Cells do have ids at one layer, but
+addresses are many-to-one over cells: a holder of an address cannot tell a
+canonical id from an alias, and nothing in normal use requires them to. What a
+caller needs is a link it can read next, not a claim about canonical identity.
+The rendered output already returns a link object, and the request vocabulary
+should match the response vocabulary. `$id` would also teach something false —
+our documents carry no `id` field, because identity lives on the link.
+
+**The placement is the position, not a field inside the selection set.** The
+link is physically stored in the *parent* document, on the edge — which is
+exactly why a list of marked addresses costs one document read. `$link: true`
+beside `properties` annotates where the data actually is. The alternative,
+borrowed from GraphQL's selection sets, puts a synthetic member inside the
+*child's* selection set, claiming the address is data belonging to a target
+that is never touched. GraphQL carries that off because its objects genuinely
+have `id` fields; ours do not. There is an implementation asymmetry too: the
+rejecting selector takes a positional instruction, so `$link: true` maps onto it
+directly, while a field spelling has to infer "load nothing here" from the
+absence of real members — fetch-suppression by omission rather than by
+statement. And the shorthand suffix would have to convert a leaf into a
+container selecting a synthetic member, rather than annotating it in place.
+
+**Two spellings were considered and rejected outright.** Deriving addresses from
+what a shape *omitted* cannot express the motivating case at all: projecting
+`topic.title` puts `topic` on the traversed path, so it renders as a value and
+no address is produced — address or field, never both. And a parallel path list
+alongside the shape is a second addressing language that cannot describe nested
+structure, reintroducing path enumeration precisely where the shape exists to
+avoid it.
+
+#### Why not `asCell`
+
+The marker is **projection-only**. Reusing `asCell` — the natural intuition,
+since `@` reads as "as cell" — fails for a reason beyond the rule that bars
+readers from supplying it.
+
+`asCell` bundles two things: a traversal boundary, and a *handle contract*. What
+comes back is a live cell — readable, writable, subscribable — and in a pattern,
+asking for `asCell` is often how an author signals intent to mutate. A read
+needs only the boundary and an address rendering.
+
+Over a serialized channel the handle half cannot be delivered at all. A cell
+does not cross a process boundary; the only faithful serialization of one is its
+link. So a reader-supplied `asCell` would be a request the channel silently
+degrades — a name promising handle semantics and delivering an address, which is
+the same defect this work exists to remove. `asCell` also spans five variants,
+only some of them boundaries; opening it to readers would import that whole
+surface, and a reader asserting `writeonly` in a read is nonsense that would
+then need refusing case by case.
+
+`$link` names exactly what a serialized read can return, leaves `asCell` meaning
+what it means in patterns, and keeps the rule that treatment keywords are never
+a reader's at full strength, with no carve-out.
+
+#### The mechanism already exists
+
+A selector can be told to reject a position — load nothing there. Marked
+positions get exactly that, composed into the same set of paths the projection
+already builds, so the address comes back without its target being loaded. The
+rejecting selector is used at roughly nine gate sites in `traverse.ts`; wiring
+it into the projection's path mask is the work.
 
 ### Collections are all or nothing
 
@@ -306,7 +323,16 @@ failing to engage rather than anything special about receipts:
   declaration — field names that happen to coincide, rather than a subtree of a
   declared structure.
 
-Giving the receipt cell a schema when it is created addresses both.
+Giving the receipt cell a schema addresses both. It goes in the durable schema
+metadata — `setMetaRaw("schema", …)`, the field `piece get` reads back through
+`asSchema` — not the schema argument to `getCell`, which seeds the link scope
+and the in-memory cell only. The receipt is minted before the handler runs, so
+there is no shape at that moment; it is written at result-write time, in the
+same create-only transaction, from the value the runtime is already holding.
+
+What is recorded is **descriptive**: what this receipt holds, never a contract
+constraining anything later. That is a safe thing for a write-once document,
+where description and authority cannot diverge.
 
 This is **not** the same as emitting a declared result schema for a verb, which
 is deferred to the Fabric-types stream design. That would be a published
@@ -382,23 +408,19 @@ unless noted.
 
 ## Open questions
 
-**Which spelling marks addresses in a shape.** Two of the four are ruled out
-above: omission-driven cannot express an address beside a summary field, and a
-path list does not compose. The live choice is between marking at the position
-and selecting identity as a field. The second is the smaller mechanism; the
-first keeps the selection set free of synthetic names. Decide before
-implementation, since the rendered output is identical either way and only the
-request syntax differs.
-
 **Whether a caller-supplied shape may fix the root container kind.** Narrowing
 keys on the *source* schema today. A caller's shape states the root kind too,
 and honouring it would let schema-less sources narrow. The rule barring caller
 metadata covers `ifc`/`asCell`/`scope`/`default`; root container kind is
-structure rather than metadata, so this may be a clean exception.
+structure rather than metadata, so this may be a clean exception. Largely moot
+if receipts carry a schema, since the receipt is the schema-less source that
+motivated the question.
 
-**Whether creating receipt cells with a schema is acceptable**, given the
-compatibility gate does not reach them and the Fabric-types work would supersede
-the source of that schema rather than the slot it fills.
+**What shape a receipt should declare.** A structural schema is enough for
+narrowing to engage — it only needs the root container kind. Whether that shape
+should also record which positions hold links, and in what encoding, is open:
+the obvious spelling is `asCell`, which would put a treatment keyword on a
+document nothing can be written through.
 
 **Invocation id namespace.** Nothing in a receipt's address identifies who
 called. A supplied id is hashed together with the stream link, so it is
