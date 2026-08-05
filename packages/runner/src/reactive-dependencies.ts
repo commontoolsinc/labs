@@ -3,10 +3,12 @@ import {
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { isPrimitiveCellLink } from "./link-utils.ts";
 import { normalizeCellScope } from "./scope.ts";
 import { arrayEqual } from "./path-utils.ts";
 import type { Action, SpaceScopeAndURI } from "./scheduler.ts";
+import { entityKey } from "./scheduler/keys.ts";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
@@ -78,12 +80,13 @@ export function sortAndCompactPaths(
  */
 export function addressesToPathByEntity(
   addresses: IMemorySpaceAddress[],
+  identity: ScopeKeyIdentity,
 ): Map<SpaceScopeAndURI, SortedAndCompactPaths> {
   const map = new Map<SpaceScopeAndURI, SortedAndCompactPaths>();
   for (const address of addresses) {
-    const key: SpaceScopeAndURI = `${address.space}/${
-      normalizeCellScope(address.scope)
-    }/${address.id}`;
+    // Same key vocabulary as the dependency graph — one map entry per
+    // scope instance, via the shared constructor (no inline restatement).
+    const key = entityKey(address, identity);
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(address.path);
   }

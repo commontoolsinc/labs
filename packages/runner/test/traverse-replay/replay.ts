@@ -228,10 +228,18 @@ function wrapTxWithReadLog(
   });
 }
 
+// The acting identity replayed traversals resolve scoped addresses against
+// (stage E) — fixtures are recorded from space-scoped runs.
+const REPLAY_SCOPE_IDENTITY = {
+  principal: "did:test:replay",
+  sessionId: "replay-session",
+};
+
 function makeContext(includeMeta: boolean): TraversalContext {
   return createTraversalContext(
     new CompoundCycleTracker(),
     new MapSetStringToPathSelectors(true),
+    REPLAY_SCOPE_IDENTITY,
     includeMeta,
   );
 }

@@ -28,6 +28,7 @@ import { processDefaultValue } from "../src/schema.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import {
+  createDefaultTraversalContext,
   ManagedStorageTransaction,
   SchemaObjectTraverser,
 } from "../src/traverse.ts";
@@ -36,6 +37,13 @@ import { ExtendedStorageTransaction } from "../src/storage/extended-storage-tran
 
 const signer = await Identity.fromPassphrase("fabric-safety traverse leaf");
 const space = signer.did();
+
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E).
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
 
 describe("FabricPrimitive leaf routing in schema traversal", () => {
   let runtime: Runtime;
@@ -213,7 +221,11 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
     const manager = new StoreObjectManager(store);
     const managedTx = new ManagedStorageTransaction(manager);
     const storeTx = new ExtendedStorageTransaction(managedTx);
-    const traverser = new SchemaObjectTraverser(storeTx, selector);
+    const traverser = new SchemaObjectTraverser(
+      storeTx,
+      selector,
+      createDefaultTraversalContext(TEST_SCOPE_IDENTITY),
+    );
 
     const { ok: result } = traverser.traverse({
       address: {
@@ -255,7 +267,11 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
     const manager = new StoreObjectManager(store);
     const managedTx = new ManagedStorageTransaction(manager);
     const storeTx = new ExtendedStorageTransaction(managedTx);
-    const traverser = new SchemaObjectTraverser(storeTx, selector);
+    const traverser = new SchemaObjectTraverser(
+      storeTx,
+      selector,
+      createDefaultTraversalContext(TEST_SCOPE_IDENTITY),
+    );
 
     const { ok: result } = traverser.traverse({
       address: {

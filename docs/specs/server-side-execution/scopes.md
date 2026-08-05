@@ -45,17 +45,20 @@ runtime-mapping.md rows 49/56/57/60 remain the mapping rows.
   (`builtins/navigate-to.ts:46`).
 - **Instance addressing**: scope never changes the doc id. Storage
   rows are keyed `(branch, id, scope_key)`
-  (`packages/memory/v2/engine.ts:368-403`), with scope keys
+  (`packages/memory/v2/engine.ts:161`, `:178`), with scope keys
   `'space'`, `'user:<principal>'`,
-  `'session:<principal>:<sessionId>'`, resolved by `resolveScopeKey`
-  (`engine.ts:98-126`) from the authenticated session.
-- **Dirtiness**: storage-side reader matching is by exact
-  `scope_key` (`packages/memory/v2/engine.ts:3024-3066`); the
-  client dependency graph is keyed by scope NAME only —
-  `${space}/${scope}/${id}` (`entityKey`,
-  `scheduler/keys.ts:5-9`). The full inventory of key-construction
-  sites that carry the scope NAME is
-  [key-vocabulary.md](key-vocabulary.md).
+  `'session:<principal>:<sessionId>'` — the shared vocabulary
+  `resolveScopeKey` in the wire-shape module
+  (`packages/memory/v2.ts:120-153`; LD3, key-vocabulary.md §3) —
+  resolved from the authenticated session at admission for
+  `authored` traffic.
+- **Dirtiness**: the server's query/watch tracking and the client
+  dependency graph are keyed per scope INSTANCE via the shared
+  vocabulary (`entityKey`, `scheduler/keys.ts:26-33`;
+  `packages/memory/v2/query.ts`'s `toDocKey` — stage E, §7 M2). The
+  per-session wake path still keys dirtiness by `(id, scope-name)`
+  (M4 — stage F re-keys push). The full inventory of instance-keyed
+  construction sites is [key-vocabulary.md](key-vocabulary.md).
 
 ## 1. North star
 
@@ -316,22 +319,18 @@ Phases 1–5 meet them wherever scoped state appears.
   `resolveScopeKey` (`packages/memory/v2/engine.ts:98-126`) throws
   on a MISSING principal, never on a wrong one. Which identity a
   run assumes is §5's run-identity rule.
-- **M2 — Every in-memory identity key uses the scope NAME, never
-  the scope_key.** `getDocKey` (`runner.ts:3201-3204`), `entityKey`
-  (`scheduler/keys.ts:5-9`), `byScope` (`runner.ts:708`,
-  `5068-5092`, `5456`) — all `${space}/${scope}/${id}`, sound only
-  at cardinality 1; per-instance keying exists only in storage
-  columns. Three subsystems is an UNDERCOUNT: the same scope-NAME
-  key shape is built at `data-updating.ts:102` (`seedMemoKey`),
-  `traverse.ts:1693` and `traverse.ts:1962` (`getTrackerKey`),
-  `storage/v2.ts:1247` (pending-load key),
-  `storage/transaction/address.ts:4` (`toString`), and
-  `scheduler/graph-snapshot.ts:245` (`formatAddress`). All nine
-  sites, with their required instance dimension and OFF-arm-neutral
-  form, are inventoried in
-  [key-vocabulary.md](key-vocabulary.md). → v2: the scheduler, the
-  dependency graph, and the basis index must re-key per instance —
-  the single biggest scope cost of the arc.
+- **M2 — Every in-memory identity key used the scope NAME, never
+  the scope_key** — sound only at cardinality 1; per-instance
+  keying existed only in storage columns. Three subsystems was an
+  UNDERCOUNT: the closure is NINE construction sites, inventoried
+  with their required instance dimension in
+  [key-vocabulary.md](key-vocabulary.md). → v2, RESOLVED (stage E,
+  landed dark): all nine sites key per instance via the shared
+  scope_key vocabulary, built from an explicitly supplied identity
+  — the runtime's own authenticated session at OFF-arm
+  cardinality 1, so the partition is unchanged until stage F
+  supplies per-run identities (key-vocabulary.md §1–§2;
+  key-vocabulary.md §4's tripwires police the closure).
 - **M3 — There is no all-principals write path.** `resolveScopeKey`
   is fed from the authenticated session at admission (`applyCommit`
   threads principal + sessionId,

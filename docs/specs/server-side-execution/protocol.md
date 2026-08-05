@@ -95,8 +95,9 @@ carries the user principal and session id — established once, at
 session open, never sent per commit — and scoped writes inside the
 transaction name only the scope KIND (`scope: "user"`). It is the
 memory server that maps kind → concrete `scope_key` at admission,
-derived from the session that had the commit (`resolveScopeKey`,
-`packages/memory/v2/engine.ts:98-126`). That model is UNCHANGED for
+derived from the session that had the commit (the shared
+`resolveScopeKey`, `packages/memory/v2.ts:120-153` — the wire-shape
+module owns the one definition per LD3). That model is UNCHANGED for
 every `authored` commit: clients never name keys, per commit or
 otherwise; their keys keep deriving from the authenticated session.
 
@@ -129,8 +130,8 @@ quote above before "fixing" it:
   `user:<serviceDID>` here."* The function itself is a pure
   constructor; it is its admission-side CALLERS that feed it
   identity derived from the authenticated session (`applyCommit`,
-  `packages/memory/v2/server.ts:2128-2132` →
-  `engine.ts:5374-5375`) — the client-commit model. Server-side
+  `packages/memory/v2/server.ts:2052` →
+  `engine.ts:2003-2004`) — the client-commit model. Server-side
   runs never derive identity from their own session: identity
   arrives WITH the work (the demand, or the stamped `firedAt`) and
   is carried into keys, not resolved from ambient state (scopes.md
@@ -204,7 +205,7 @@ load-bearing enforcement; commit-level identity is not load-bearing
 | `authored`, server-produced (outbox event append, `.inSpace` provisioning) | commit metadata carries the acting identity (`actingPrincipal` + `actingSession` — the ORIGINATING chain actor, events.md §2) + `capabilityRef` → admission validates that capability grant against the target doc/stream (a delegated-capability check, NEVER session-identity impersonation) → for event appends, `firedAt` stamps from the validated acting identity (the stamping paragraph below) → CAS |
 | `derived` | producer holds the live `execution_lease` for the space (one equality check) → CAS |
 | `system` | unchanged from today |
-| READ naming an explicit `entity_scope_key` (not a commit — the read side of R-Q6b; S1; widened by FP2, RULED 2026-08-03) | requester holds A live `execution_lease` on the co-hosted memory server — its OWN space's lease, not necessarily the read space's (the read-side twin of §2's inter-server trust ruling: a home SpaceServer reads FOREIGN scoped instances for cross-space derivations, closing the silent-empty-instance trap cross-space) → the named instance is read. A non-lease-holder naming a `scope_key` is REJECTED (today the wire cannot even express one); a request naming none resolves from the authenticated session as today (`resolveScopeKey`, `packages/memory/v2/engine.ts:98-126`) |
+| READ naming an explicit `entity_scope_key` (not a commit — the read side of R-Q6b; S1; widened by FP2, RULED 2026-08-03) | requester holds A live `execution_lease` on the co-hosted memory server — its OWN space's lease, not necessarily the read space's (the read-side twin of §2's inter-server trust ruling: a home SpaceServer reads FOREIGN scoped instances for cross-space derivations, closing the silent-empty-instance trap cross-space) → the named instance is read. A non-lease-holder naming a `scope_key` is REJECTED (today the wire cannot even express one); a request naming none resolves from the authenticated session as today (the shared `resolveScopeKey`, `packages/memory/v2.ts:120-153`) |
 
 That is the ENTIRE admission surface — the last row is the one
 READ-side check; every row above it is commit admission. No scope

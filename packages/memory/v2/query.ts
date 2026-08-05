@@ -21,16 +21,31 @@ import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, MIME, URI } from "../interface.ts";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
+  canResolveScopeKey,
   type CellScope,
   type EntitySnapshot,
   type GraphQuery,
+  isScopeKey,
+  resolveScopeKey,
+  type ScopeKey,
+  type ScopeKeyIdentity,
+  scopeOfScopeKey,
   toDocumentSelector,
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
 
 const DEFAULT_SCOPE: CellScope = "space";
 
-export type QueryDocKey = `${string}/${CellScope}/${string}`;
+/**
+ * Query/watch doc keys are per scope INSTANCE (scopes.md §7 M2, stage E):
+ * the middle segment is the shared scope_key vocabulary, resolved against
+ * the querying session's identity — the same identity the manager resolves
+ * scoped reads with, so a key names exactly the instance the tracked read
+ * saw. Per tracked-graph state the identity is fixed, so this re-keying
+ * partitions state exactly as the scope-NAME form did (key-vocabulary.md
+ * §2).
+ */
+export type QueryDocKey = `${string}/${ScopeKey}/${string}`;
 
 export type TrackedGraphState = {
   branch: string;
@@ -76,6 +91,16 @@ const addTraverserStats = (
   stats.getDocAtPathCalls += traverser.getDocAtPathCalls;
   stats.schemaMemoHits += traverser.schemaMemoHits;
 };
+
+/**
+ * The identity a manager's tracked-graph keys resolve against: the
+ * querying session's own (the same identity the manager threads into every
+ * scoped engine read).
+ */
+const identityOf = (manager: EngineObjectManager): ScopeKeyIdentity => ({
+  principal: manager.principal,
+  sessionId: manager.sessionId,
+});
 
 export class EngineObjectManager implements ObjectStorageManager {
   #attestations = new Map<string, IAttestation>();
@@ -316,6 +341,7 @@ export const trackGraph = (
   const traversalContext = createTraversalContext(
     tracker,
     schemaTracker,
+    identityOf(manager),
     true,
   );
   const sharedMemo = createSchemaMemo();
@@ -342,7 +368,7 @@ export const trackGraph = (
       );
     } else {
       schemaTracker.add(
-        toDocKey(space, root.id, rootScope),
+        toDocKey(space, root.id, rootScope, identityOf(manager)),
         selector,
       );
     }
@@ -395,6 +421,7 @@ export const extendTrackedGraph = (
       space,
       root.id,
       rootScope,
+      identityOf(manager),
     );
     touched.add(rootKey);
     evaluateTrackedDocument(
@@ -413,7 +440,9 @@ export const extendTrackedGraph = (
     if (previouslyLoaded.has(key)) {
       continue;
     }
-    touched.add(toDocKey(space, address.id, address.scope));
+    touched.add(
+      toDocKey(space, address.id, address.scope, identityOf(manager)),
+    );
   }
 
   const updates = new Map<QueryDocKey, EntitySnapshot>();
@@ -450,7 +479,12 @@ export const isGraphQueryCoveredByState = (
 ): boolean =>
   query.roots.every((root) => {
     const selector = toDocumentSelector(root.selector);
-    const rootKey = toDocKey(space, root.id, root.scope ?? DEFAULT_SCOPE);
+    const rootKey = toDocKey(
+      space,
+      root.id,
+      root.scope ?? DEFAULT_SCOPE,
+      identityOf(state.manager),
+    );
     return schemaTrackerCoversSelector(state.tracker, rootKey, selector);
   });
 
@@ -487,6 +521,7 @@ export const refreshTrackedGraph = (
 } | null => {
   const affectedDocs = new Map<QueryDocKey, Set<SchemaPathSelector>>();
   const invalidations = new Map<CellScope, Set<string>>();
+  const identity = identityOf(state.manager);
   for (const dirtyId of dirtyIds) {
     const { id, scope } = fromDirtyKey(dirtyId);
     let scopedIds = invalidations.get(scope);
@@ -495,7 +530,15 @@ export const refreshTrackedGraph = (
       invalidations.set(scope, scopedIds);
     }
     scopedIds.add(id);
-    const key = toDocKey(space, id, scope);
+    // Dirtiness arrives keyed by scope NAME (the M4 wake path — instance
+    // keying of push is stage F). A scope this state's session holds no
+    // identity for cannot have tracker entries — its loads throw for this
+    // session — so there is no instance key to build; skip rather than
+    // let the shared constructor throw on the watch path.
+    if (!canResolveScopeKey(scope, identity)) {
+      continue;
+    }
+    const key = toDocKey(space, id, scope, identity);
     const selectors = state.tracker.get(key);
     if (selectors !== undefined && selectors.size > 0) {
       affectedDocs.set(key, new Set(selectors));
@@ -536,7 +579,7 @@ export const refreshTrackedGraph = (
 
   const touched = new Set<QueryDocKey>(affectedDocs.keys());
   for (const address of manager.loadedAddresses()) {
-    const key = toDocKey(space, address.id, address.scope);
+    const key = toDocKey(space, address.id, address.scope, identity);
     const previous = state.entities.get(key);
     const detail = manager.detail({ id: address.id, scope: address.scope });
     if (previous !== undefined && detail?.seq === previous.seq) {
@@ -594,6 +637,7 @@ const loadFactsForDoc = (
     space,
     fact.address.id,
     fact.address.scope ?? DEFAULT_SCOPE,
+    identityOf(manager),
   );
   const internedSelector = internPathSelector(selector);
   if (
@@ -669,7 +713,12 @@ const evaluateTrackedDocument = (
   const loaded = manager.load(address);
   if (loaded === null || loaded.value === undefined) {
     schemaTracker.add(
-      toDocKey(space, address.id, address.scope ?? DEFAULT_SCOPE),
+      toDocKey(
+        space,
+        address.id,
+        address.scope ?? DEFAULT_SCOPE,
+        identityOf(manager),
+      ),
       internPathSelector(selector),
     );
     return;
@@ -681,6 +730,7 @@ const evaluateTrackedDocument = (
   const traversalContext = createTraversalContext(
     tracker,
     schemaTracker,
+    identityOf(manager),
     true,
   );
   loadFactsForDoc(
@@ -698,18 +748,23 @@ export const toDocKey = (
   space: string,
   id: string,
   scope: CellScope = DEFAULT_SCOPE,
-): QueryDocKey => `${space}/${scope}/${id}`;
+  identity: ScopeKeyIdentity,
+): QueryDocKey => `${space}/${resolveScopeKey(scope, identity)}/${id}`;
 
 export const fromDocKey = (key: QueryDocKey): {
   space: string;
   id: string;
   scope: CellScope;
 } => {
+  // Scope-key segments never contain "/" (their parts are
+  // encodeURIComponent-encoded), so the three-way split is exact; the
+  // scope NAME is recovered from the instance key because readers resolve
+  // rows by (scope, session identity) as before.
   const parts = key.split("/");
   if (parts.length === 3) {
-    const [space, scope, id] = parts;
-    if (scope === "space" || scope === "user" || scope === "session") {
-      return { space, scope, id };
+    const [space, scopeKey, id] = parts;
+    if (isScopeKey(scopeKey)) {
+      return { space, scope: scopeOfScopeKey(scopeKey), id };
     }
   }
   throw new Error(`invalid memory v2 query doc key: ${key}`);

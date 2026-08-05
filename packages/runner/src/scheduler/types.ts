@@ -1,5 +1,6 @@
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
-import type { CellScope, Module, Pattern } from "../builder/types.ts";
+import type { ScopeKey } from "@commonfabric/memory/v2";
+import type { Module, Pattern } from "../builder/types.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import type {
   IExtendedStorageTransaction,
@@ -74,9 +75,14 @@ export type EventPreflightTraceContext = SchedulerEventPreflightStats & {
   rootDirectWriterActions: Set<Action>;
 };
 
-export type SpaceScopeAndURI = `${MemorySpace}/${CellScope}/${URI}`;
+/**
+ * In-memory identity keys carry the scope INSTANCE (the shared `ScopeKey`
+ * vocabulary), never the scope NAME (scopes.md §7 M2, stage E). Built by
+ * `entityKey` — see `keys.ts` for the identity-threading contract.
+ */
+export type SpaceScopeAndURI = `${MemorySpace}/${ScopeKey}/${URI}`;
 export type SpaceScopeURIAndType =
-  `${MemorySpace}/${CellScope}/${URI}/${MediaType}`;
+  `${MemorySpace}/${ScopeKey}/${URI}/${MediaType}`;
 
 /** Per-iteration stats captured during the settle loop. */
 export interface SettleIterationStats {

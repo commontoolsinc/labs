@@ -25,9 +25,12 @@ import type { SpaceDb } from "./db.ts";
 import {
   patchOverlapsNonRecursiveRead,
   patchOverlapsRead,
-  resolveScopeKey,
 } from "@commonfabric/memory/v2/engine";
-import type { CellScope, PatchOp } from "@commonfabric/memory/v2";
+import {
+  type CellScope,
+  type PatchOp,
+  resolveScopeKey,
+} from "@commonfabric/memory/v2";
 import { decodeStored } from "./decode.ts";
 import { parseScope } from "./scopes.ts";
 

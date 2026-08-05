@@ -479,7 +479,7 @@ shared `scope_key` vocabulary, key-vocabulary.md §3) and LD5 (the
 lease-holder read row, protocol.md §2).
 scopes.md §7 M3 resolves the same way — `resolveScopeKey`'s
 session-fed admission path (`applyCommit`,
-`packages/memory/v2/server.ts:2128-2132` → `engine.ts:5374-5375`)
+`packages/memory/v2/server.ts:2052` → `engine.ts:2003-2004`)
 narrows to
 authored commits only; derived admission stays the lease check.
 Effects still run under the capability handle's grant (README

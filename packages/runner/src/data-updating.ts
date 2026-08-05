@@ -1,4 +1,8 @@
 import { isObject, isRecord } from "@commonfabric/utils/types";
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 import type { CfcConfClause } from "./cfc/clause.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { forEachSubschema } from "./schema-walk.ts";
@@ -97,11 +101,17 @@ const seededDocs = (runtime: Runtime): Set<string> => {
   }
   return docs;
 };
-// Scope is part of the key: per-user/per-session instances share an id with
-// the space-scoped doc, and one scope's presence must not suppress another's
-// seed.
-const seedMemoKey = (link: NormalizedFullLink): string =>
-  `${link.space}/${link.scope ?? "space"}/${link.id}`;
+// The scope INSTANCE is part of the key (key-vocabulary.md §1 site 4):
+// per-user/per-session instances share an id with the space-scoped doc, and
+// one instance's presence must not suppress another's seed — at fan-out one
+// USER's presence must not suppress another's. Keys are built from the
+// acting identity via the shared constructor; in the OFF arm that is the
+// runtime's own session.
+const seedMemoKey = (
+  link: NormalizedFullLink,
+  identity: ScopeKeyIdentity,
+): string =>
+  `${link.space}/${resolveScopeKey(link.scope, identity)}/${link.id}`;
 
 const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   space: link.space,
@@ -776,7 +786,9 @@ export function normalizeAndDiff(
       // cell skip it — the check would otherwise run on EVERY defaulted-cell
       // serialization, a measurable hot-path cost (the CI perf check caught
       // +22–36% on the CLI integration suites for the unmemoized version).
-      !seededDocs(runtime).has(seedMemoKey(seedTarget))
+      !seededDocs(runtime).has(
+        seedMemoKey(seedTarget, runtime.scopeKeyIdentity),
+      )
     ) {
       // Don't subscribe the serializing action to the seed doc — mirror
       // materializeDerivedInternalCells' read for the same check.
@@ -784,7 +796,9 @@ export function normalizeAndDiff(
         meta: ignoreReadForScheduling,
       }) === undefined;
       if (!absent) {
-        seededDocs(runtime).add(seedMemoKey(seedTarget));
+        seededDocs(runtime).add(
+          seedMemoKey(seedTarget, runtime.scopeKeyIdentity),
+        );
       }
       if (absent) {
         try {

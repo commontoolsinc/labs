@@ -1,3 +1,5 @@
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
+import { resolveScopeKey } from "@commonfabric/memory/v2";
 import { arraysOverlap } from "../reactive-dependencies.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type { IMemorySpaceAddress } from "../storage/interface.ts";
@@ -12,6 +14,8 @@ import type { NodeRegistry } from "./node-record.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
 export interface SchedulerGraphSnapshotState {
+  /** Identity entity keys resolve scoped addresses against (keys.ts). */
+  readonly scopeKeyIdentity: () => ScopeKeyIdentity;
   readonly effects: ReadonlySet<Action>;
   readonly computations: ReadonlySet<Action>;
   readonly pending: ReadonlySet<Action>;
@@ -44,6 +48,7 @@ export function buildSchedulerGraphSnapshot(
   const edges: SchedulerGraphEdge[] = [];
   const actionById = new Map<string, Action>();
   const actions = [...state.effects, ...state.computations];
+  const identity = state.scopeKeyIdentity();
 
   // Build nodes from all known actions (effects + computations)
   for (const action of actions) {
@@ -58,9 +63,13 @@ export function buildSchedulerGraphSnapshot(
 
     // Get reads and writes for diagnostics
     const deps = state.dependencies.get(action);
-    const reads = deps?.reads.map(formatAddress);
-    const shallowReads = deps?.shallowReads.map(formatAddress);
-    const writes = state.getSchedulingWrites(action)?.map(formatAddress);
+    const reads = deps?.reads.map((read) => formatAddress(read, identity));
+    const shallowReads = deps?.shallowReads.map((read) =>
+      formatAddress(read, identity)
+    );
+    const writes = state.getSchedulingWrites(action)?.map((write) =>
+      formatAddress(write, identity)
+    );
 
     // Get timing controls
     const debounceMs = state.getDebounce(action);
@@ -128,7 +137,7 @@ export function buildSchedulerGraphSnapshot(
     const deps = state.dependencies.get(action);
     if (deps) {
       for (const read of [...deps.reads, ...deps.shallowReads]) {
-        const entity = entityKey(read);
+        const entity = entityKey(read, identity);
         if (!entityReaders.has(entity)) {
           entityReaders.set(entity, new Set());
         }
@@ -139,7 +148,7 @@ export function buildSchedulerGraphSnapshot(
     const writes = state.getSchedulingWrites(action);
     if (writes) {
       for (const write of writes) {
-        writtenEntities.add(entityKey(write));
+        writtenEntities.add(entityKey(write, identity));
       }
     }
   }
@@ -216,7 +225,7 @@ function isInvalidAction(nodes: NodeRegistry, action: Action): boolean {
 export function findOverlappingCells(
   state: Pick<
     SchedulerGraphSnapshotState,
-    "dependencies" | "getSchedulingWrites"
+    "dependencies" | "getSchedulingWrites" | "scopeKeyIdentity"
   >,
   producer: Action,
   consumer: Action,
@@ -225,6 +234,7 @@ export function findOverlappingCells(
   const consumerDeps = state.dependencies.get(consumer);
   if (!consumerDeps) return [];
 
+  const identity = state.scopeKeyIdentity();
   const overlapping: string[] = [];
   for (const write of producerWrites) {
     for (const read of [...consumerDeps.reads, ...consumerDeps.shallowReads]) {
@@ -234,15 +244,21 @@ export function findOverlappingCells(
         normalizeCellScope(write.scope) === normalizeCellScope(read.scope) &&
         arraysOverlap(write.path, read.path)
       ) {
-        overlapping.push(entityKey(write));
+        overlapping.push(entityKey(write, identity));
       }
     }
   }
   return [...new Set(overlapping)]; // Deduplicate
 }
 
-function formatAddress(address: IMemorySpaceAddress): string {
-  return `${address.space}/${address.id}/${normalizeCellScope(address.scope)}/${
-    address.path.join("/")
-  }`;
+// Diagnostic label, per instance like every other in-memory identity key
+// (key-vocabulary.md §1 site 9): a per-instance graph would otherwise
+// render N indistinguishable rows, which is how a fan-out bug hides.
+function formatAddress(
+  address: IMemorySpaceAddress,
+  identity: ScopeKeyIdentity,
+): string {
+  return `${address.space}/${address.id}/${
+    resolveScopeKey(address.scope, identity)
+  }/${address.path.join("/")}`;
 }

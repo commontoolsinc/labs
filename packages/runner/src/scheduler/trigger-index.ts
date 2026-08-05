@@ -7,6 +7,7 @@ import {
 } from "../reactive-dependencies.ts";
 import type { Cancel } from "../cancel.ts";
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type {
   IMemoryChange,
   IMemorySpaceAddress,
@@ -15,6 +16,8 @@ import { entityKey } from "./keys.ts";
 import type { Action, ReactivityLog, SpaceScopeAndURI } from "./types.ts";
 
 export interface TriggerIndexState {
+  /** Identity entity keys resolve scoped addresses against (keys.ts). */
+  readonly scopeKeyIdentity: () => ScopeKeyIdentity;
   readonly triggers: Map<
     SpaceScopeAndURI,
     Map<Action, SortedAndCompactPaths>
@@ -97,6 +100,10 @@ export class SchedulerTriggerSubscriptions implements TriggerSubscriptionState {
     },
   ) {}
 
+  get scopeKeyIdentity(): TriggerIndexState["scopeKeyIdentity"] {
+    return this.state.triggerIndex.scopeKeyIdentity;
+  }
+
   get triggers(): TriggerIndexState["triggers"] {
     return this.state.triggerIndex.triggers;
   }
@@ -173,6 +180,11 @@ export class SchedulerTriggerSubscriptions implements TriggerSubscriptionState {
 }
 
 export class SchedulerTriggerIndex implements TriggerIndexState {
+  constructor(
+    /** Identity entity keys resolve scoped addresses against (keys.ts). */
+    readonly scopeKeyIdentity: () => ScopeKeyIdentity,
+  ) {}
+
   readonly triggers = new Map<
     SpaceScopeAndURI,
     Map<Action, SortedAndCompactPaths>
@@ -194,8 +206,12 @@ export class SchedulerTriggerIndex implements TriggerIndexState {
     entities: Set<SpaceScopeAndURI>;
     triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
   } {
-    const pathsByEntity = addressesToPathByEntity(reads);
-    const nonRecursivePathsByEntity = addressesToPathByEntity(shallowReads);
+    const identity = this.scopeKeyIdentity();
+    const pathsByEntity = addressesToPathByEntity(reads, identity);
+    const nonRecursivePathsByEntity = addressesToPathByEntity(
+      shallowReads,
+      identity,
+    );
     const entities = new Set<SpaceScopeAndURI>();
     const triggerPathsByEntity = new Map<
       SpaceScopeAndURI,
@@ -249,7 +265,7 @@ export class SchedulerTriggerIndex implements TriggerIndexState {
   }
 
   collectReadersForWrite(write: IMemorySpaceAddress): Set<Action> {
-    const entity = entityKey(write);
+    const entity = entityKey(write, this.scopeKeyIdentity());
     const readers = new Set<Action>();
 
     const recursiveReaders = this.triggers.get(entity);
@@ -294,7 +310,14 @@ export class SchedulerTriggerIndex implements TriggerIndexState {
     hasMatchingTriggerPaths: boolean;
     triggeredActions: Action[];
   } {
-    const entity = entityKey({ ...change.address, space });
+    // The change notification names the scope by NAME (the storage layer's
+    // per-session wire shape); this runtime's own identity maps it to the
+    // same instance key the registered reads mapped to — the same
+    // name→instance function on both sides, so matching is preserved.
+    const entity = entityKey(
+      { ...change.address, space },
+      this.scopeKeyIdentity(),
+    );
     const paths = this.triggers.get(entity);
     const nonRecursivePaths = this.nonRecursiveTriggers.get(entity);
 
@@ -350,13 +373,16 @@ export function applyActionReadDelta(
   entities: Set<SpaceScopeAndURI>;
   triggerPathsByEntity: Map<SpaceScopeAndURI, SortedAndCompactPaths>;
 } {
-  const prevPathsByEntity = addressesToPathByEntity(prevLog.reads);
-  const nextPathsByEntity = addressesToPathByEntity(nextLog.reads);
+  const identity = state.scopeKeyIdentity();
+  const prevPathsByEntity = addressesToPathByEntity(prevLog.reads, identity);
+  const nextPathsByEntity = addressesToPathByEntity(nextLog.reads, identity);
   const prevNonRecursivePathsByEntity = addressesToPathByEntity(
     prevLog.shallowReads,
+    identity,
   );
   const nextNonRecursivePathsByEntity = addressesToPathByEntity(
     nextLog.shallowReads,
+    identity,
   );
 
   applyActionReadDeltaToMap(

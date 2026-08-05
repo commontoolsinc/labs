@@ -102,12 +102,13 @@ describe("stage D seal-into-wave", () => {
       space,
       basisSeq: Engine.serverSeq(engine),
       // OFF-arm cardinality 1: the instance keys derive from the
-      // runtime's own authenticated session (plan Phase 1 stage E).
-      resolveScopeKey: (scope) =>
-        Engine.resolveScopeKey(scope, {
-          principal: signer.did(),
-          sessionId: "wave-test-session",
-        }),
+      // runtime's own authenticated session (plan Phase 1 stage E). The
+      // accumulator constructs keys via the ONE shared constructor — a
+      // test cannot hand it a different format (key-vocabulary.md §4).
+      scopeKeyIdentity: {
+        principal: signer.did(),
+        sessionId: "wave-test-session",
+      },
       replicaFor: (s) => storageManager.open(s).replica,
       ...(options.lease !== undefined ? { lease: options.lease } : {}),
     });

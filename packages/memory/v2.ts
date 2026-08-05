@@ -24,6 +24,177 @@ export type BranchName = string;
 export type SessionId = string;
 export type SessionToken = string;
 export type CellScope = "space" | "user" | "session";
+
+/**
+ * Protocol-level failure: a request whose SHAPE or identity preconditions
+ * are invalid at this protocol layer (as opposed to a storage conflict or
+ * an authorization denial). Defined here in the wire-shape module because
+ * the shared scope-key vocabulary below throws it; `engine.ts` re-exports
+ * it, so `Engine.ProtocolError` remains the same class object.
+ */
+export class ProtocolError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProtocolError";
+  }
+}
+
+/**
+ * The `scope_key` vocabulary — PROTOCOL vocabulary, defined ONCE here
+ * beside {@link CellScope} (ledger LD3, owner 2026-08-03;
+ * docs/specs/server-side-execution/key-vocabulary.md §3).
+ *
+ * A scope key names one INSTANCE of a scoped document: `space` (the one
+ * shared instance), `user:<principal>` (one per user), or
+ * `session:<principal>:<sessionId>` (one per session). Storage rows are
+ * keyed by it, derived-commit write annotations carry it
+ * ({@link DerivedWriteAnnotation}), lease-holder reads may name it
+ * (protocol.md §2's read row), and the runner's in-memory identity keys
+ * are built from it (the key-vocabulary.md §1 nine-site closure).
+ * Segments are encodeURIComponent-encoded, so `:` splits segments
+ * exactly and a key never contains `/`.
+ *
+ * Two rules keep this the ONE definition (key-vocabulary.md §4):
+ * neither the engine's row keys nor the runner's in-memory keys may
+ * restate the format, and a key is only ever CONSTRUCTED from an
+ * explicitly supplied identity — the memory server derives that identity
+ * from the authenticated session at admission for `authored` traffic; a
+ * runner-side run receives it with the work (the demand for derivations,
+ * the server-stamped `firedAt` for handlers; in the OFF arm it is the
+ * runtime's own authenticated session) — never resolved from ambient
+ * state.
+ */
+export type ScopeKey =
+  | "space"
+  | `user:${string}`
+  | `session:${string}:${string}`;
+
+/**
+ * The identity a {@link resolveScopeKey} construction resolves against.
+ * Supplied explicitly by the caller — see the construction rule on
+ * {@link ScopeKey}.
+ */
+export type ScopeKeyIdentity = {
+  principal?: string;
+  sessionId?: SessionId;
+};
+
+const encodeScopeKeyPart = (value: string): string => encodeURIComponent(value);
+
+/**
+ * Constructor for the `session:<principal>:<sessionId>` key form, shared
+ * between scope keys and the engine's commit session keys (which store the
+ * same form for principal-carrying sessions).
+ */
+export const resolvePrincipalSessionKey = (
+  principal: string,
+  sessionId: SessionId,
+): ScopeKey =>
+  `session:${encodeScopeKeyPart(principal)}:${encodeScopeKeyPart(sessionId)}`;
+
+/**
+ * Principal segment of a `session:<principal>:<sessionId>` key (scope key
+ * or stored commit session key — same form). Principal-less commit
+ * session keys store the bare session id — no principal — and yield
+ * `undefined` here. The segments are encodeURIComponent-encoded, so
+ * splitting on ":" is exact.
+ */
+export const principalOfSessionKey = (key: string): string | undefined => {
+  if (!key.startsWith("session:")) return undefined;
+  const parts = key.split(":");
+  if (parts.length !== 3) return undefined;
+  try {
+    return decodeURIComponent(parts[1]);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * THE shared `(scope, identity) → scope_key` constructor (LD3,
+ * key-vocabulary.md §3). Pure: it is the caller that supplies the
+ * identity — see the construction rule on {@link ScopeKey}. Throws
+ * {@link ProtocolError} when the requested scope needs an identity
+ * component the caller did not supply; it never invents or defaults one.
+ */
+export const resolveScopeKey = (
+  scope: CellScope | undefined,
+  identity: ScopeKeyIdentity,
+): ScopeKey => {
+  switch (scope ?? "space") {
+    case "space":
+      return "space";
+    case "user":
+      if (!identity.principal) {
+        throw new ProtocolError(
+          "user scoped memory operations require a principal",
+        );
+      }
+      return `user:${encodeScopeKeyPart(identity.principal)}`;
+    case "session":
+      if (!identity.principal) {
+        throw new ProtocolError(
+          "session scoped memory operations require a principal",
+        );
+      }
+      if (!identity.sessionId) {
+        throw new ProtocolError(
+          "session scoped memory operations require a session id",
+        );
+      }
+      return resolvePrincipalSessionKey(identity.principal, identity.sessionId);
+  }
+};
+
+/**
+ * Inspect half of the vocabulary: the {@link CellScope} a scope key is an
+ * instance of. Total — any string without a `user:`/`session:` prefix
+ * reads as the space scope; use {@link isScopeKey} first where a value
+ * needs validating rather than classifying.
+ */
+export const scopeOfScopeKey = (scopeKey: string): CellScope => {
+  if (scopeKey.startsWith("session:")) {
+    return "session";
+  }
+  if (scopeKey.startsWith("user:")) {
+    return "user";
+  }
+  return "space";
+};
+
+/** Whether a string is a well-formed {@link ScopeKey}. */
+export const isScopeKey = (value: string): value is ScopeKey => {
+  if (value === "space") return true;
+  if (value.startsWith("user:")) return value.length > "user:".length;
+  if (value.startsWith("session:")) {
+    const parts = value.split(":");
+    return parts.length === 3 && parts[1].length > 0 && parts[2].length > 0;
+  }
+  return false;
+};
+
+/**
+ * Whether {@link resolveScopeKey} can construct a key for `scope` from
+ * `identity` — i.e. every identity component that scope requires is
+ * supplied. The predicate twin of the constructor's throw conditions, for
+ * paths that must SKIP unresolvable scopes (e.g. a session with no
+ * principal reacting to another principal's user-scoped dirtiness) rather
+ * than fail.
+ */
+export const canResolveScopeKey = (
+  scope: CellScope | undefined,
+  identity: ScopeKeyIdentity,
+): boolean => {
+  switch (scope ?? "space") {
+    case "space":
+      return true;
+    case "user":
+      return !!identity.principal;
+    case "session":
+      return !!identity.principal && !!identity.sessionId;
+  }
+};
+
 /**
  * The commit classes of server-execution v2
  * (docs/specs/server-side-execution/protocol.md §1). A closed set of three:

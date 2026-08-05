@@ -264,7 +264,12 @@ export class Scheduler {
   private pending = new Set<Action>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
-  private triggerIndex = new SchedulerTriggerIndex();
+  // Thunk, not a captured value: keys must always resolve against the
+  // runtime's CURRENT authenticated session (one source of truth), and a
+  // field initializer runs before constructor parameter properties assign.
+  private triggerIndex = new SchedulerTriggerIndex(
+    () => this.runtime.scopeKeyIdentity,
+  );
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   private retries = new WeakMap<Action, number>();
   private offBudgetRetries = new WeakMap<Action, number>();
@@ -339,7 +344,10 @@ export class Scheduler {
     queueExecution: () => this.queueExecution(),
   });
   private writeIndex!: SchedulerWriteIndex;
-  private materializers = new SchedulerMaterializers(this.nodes.effects);
+  private materializers = new SchedulerMaterializers(
+    this.nodes.effects,
+    () => this.runtime.scopeKeyIdentity,
+  );
   private eventPreflightDependencyState!: EventPreflightDependencyState;
   // Filter stats for diagnostics
   private filterStats: FilterStatsState = { filtered: 0, executed: 0 };
@@ -1609,11 +1617,12 @@ export class Scheduler {
   }
 
   private createWriteIndex(): SchedulerWriteIndex {
-    return new SchedulerWriteIndex();
+    return new SchedulerWriteIndex(() => this.runtime.scopeKeyIdentity);
   }
 
   private createEventPreflightDependencyState(): EventPreflightDependencyState {
     return {
+      scopeKeyIdentity: () => this.runtime.scopeKeyIdentity,
       getTrace: () => this.eventPreflightTraceContext,
       nodes: this.nodes,
       pending: this.pending,
@@ -1632,6 +1641,7 @@ export class Scheduler {
 
   private createDependencyGraphState(): DependencyGraphState {
     return {
+      scopeKeyIdentity: () => this.runtime.scopeKeyIdentity,
       triggerIndex: this.triggerIndex,
       writersByEntity: this.writeIndex.writersByEntity,
       dependencies: this.dependencies,
@@ -1860,6 +1870,7 @@ export class Scheduler {
 
   private createSettleLoopState(): SchedulerSettleLoopState {
     return {
+      scopeKeyIdentity: () => this.runtime.scopeKeyIdentity,
       getCollectSettleStats: () => this.collectSettleStats,
       effects: this.nodes.effects,
       computations: this.nodes.computations,
@@ -2048,6 +2059,7 @@ export class Scheduler {
 
   private createGraphSnapshotState(): SchedulerGraphSnapshotState {
     return {
+      scopeKeyIdentity: () => this.runtime.scopeKeyIdentity,
       effects: this.nodes.effects,
       computations: this.nodes.computations,
       pending: this.pending,
@@ -2219,7 +2231,7 @@ export class Scheduler {
       const address of this.runtime.storageManager.pendingLoadAddresses?.() ??
         []
     ) {
-      const key = entityKey(address);
+      const key = entityKey(address, this.runtime.scopeKeyIdentity);
       this.preflightPendingLoadGenerations.set(
         key,
         this.runtime.storageManager.pendingLoadGeneration?.(key) ?? 0,

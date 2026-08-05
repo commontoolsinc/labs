@@ -30,6 +30,13 @@ import { ExtendedStorageTransaction } from "../src/storage/extended-storage-tran
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+// The acting identity traversal tracker keys resolve scoped addresses
+// against (stage E); these fixtures use space-scoped docs.
+const TEST_SCOPE_IDENTITY = {
+  principal: "did:test:alice",
+  sessionId: "session-1",
+};
+
 describe("Query", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -140,6 +147,7 @@ describe("Query", () => {
       createTraversalContext(
         tracker,
         schemaTracker,
+        TEST_SCOPE_IDENTITY,
         true,
       ),
     );
@@ -235,6 +243,7 @@ describe("Query", () => {
       createTraversalContext(
         tracker,
         schemaTracker,
+        TEST_SCOPE_IDENTITY,
         true,
       ),
     );
@@ -328,6 +337,7 @@ describe("Query", () => {
       createTraversalContext(
         tracker,
         schemaTracker,
+        TEST_SCOPE_IDENTITY,
         true,
       ),
     );
@@ -452,6 +462,7 @@ describe("Query", () => {
       createTraversalContext(
         tracker,
         schemaTracker,
+        TEST_SCOPE_IDENTITY,
         true,
       ),
     );
@@ -556,6 +567,7 @@ describe("Query", () => {
       createTraversalContext(
         tracker,
         schemaTracker,
+        TEST_SCOPE_IDENTITY,
         true,
       ),
     );

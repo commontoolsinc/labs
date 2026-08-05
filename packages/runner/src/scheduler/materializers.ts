@@ -1,3 +1,4 @@
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
@@ -7,6 +8,8 @@ import { readsOverlapWrites } from "./scheduling-writes.ts";
 import type { Action, ReactivityLog, SpaceScopeAndURI } from "./types.ts";
 
 export interface MaterializerIndexState {
+  /** Identity entity keys resolve scoped addresses against (keys.ts). */
+  readonly scopeKeyIdentity: () => ScopeKeyIdentity;
   readonly materializersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly effects: ReadonlySet<Action>;
   getMaterializerWriteEnvelopes(
@@ -29,6 +32,8 @@ export class SchedulerMaterializers implements MaterializerIndexState {
 
   constructor(
     readonly effects: ReadonlySet<Action>,
+    /** Identity entity keys resolve scoped addresses against (keys.ts). */
+    readonly scopeKeyIdentity: () => ScopeKeyIdentity,
   ) {}
 
   register(
@@ -55,8 +60,9 @@ export class SchedulerMaterializers implements MaterializerIndexState {
     this.writeEnvelopes.set(action, writes);
 
     const entities = new Set<SpaceScopeAndURI>();
+    const identity = this.scopeKeyIdentity();
     for (const write of writes) {
-      const entity = entityKey(write);
+      const entity = entityKey(write, identity);
       entities.add(entity);
       let materializers = this.materializersByEntity.get(entity);
       if (!materializers) {
@@ -102,8 +108,11 @@ export function collectMaterializerWritersForLog(
 ): Set<Action> {
   const writers = new Set<Action>();
   const reads = [...log.reads, ...log.shallowReads];
+  const identity = state.scopeKeyIdentity();
   for (const read of reads) {
-    const candidates = state.materializersByEntity.get(entityKey(read));
+    const candidates = state.materializersByEntity.get(
+      entityKey(read, identity),
+    );
     if (!candidates) continue;
 
     for (const candidate of candidates) {

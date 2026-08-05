@@ -1,39 +1,48 @@
 # v2 inventory: the key vocabulary (scopes.md §7 M2)
 
-Normative inventory for the M2 re-keying, plan Phase 1 stage E. Read
-[scopes.md](scopes.md) §7 first; this document assumes its
-vocabulary. §3 records one ruling of its own — LD3, the shared
-`scope_key` vocabulary (owner, 2026-08-03).
+Normative inventory for the M2 re-keying, plan Phase 1 stage E —
+LANDED (the nine sites below construct instance keys via the shared
+vocabulary). Read [scopes.md](scopes.md) §7 first; this document
+assumes its vocabulary. §3 records one ruling of its own — LD3, the
+shared `scope_key` vocabulary (owner, 2026-08-03).
 
-M2 says every in-memory identity key uses the scope NAME and never
+M2 said every in-memory identity key used the scope NAME and never
 the `scope_key` — sound only at cardinality 1, and broken the moment
 one runtime holds every principal's instances. M2 named three
-subsystems. There are NINE construction sites. This page is the
-inventory an implementer works from, so the re-keying is a checklist
-rather than a search.
+subsystems; the closure is NINE construction sites. This page is the
+inventory those sites are held to — §4's tripwires police it.
 
-## Anchors (verified on main, 2026-08-02 — re-verify before coding)
+## Anchors (re-verified at the stage-E landing, 2026-08-04)
 
 Paths are relative to `packages/runner/src/` unless another package
-is named. `scope_key` vocabulary is `resolveScopeKey`
-(`packages/memory/v2/engine.ts:98-126`), producing `space`,
-`user:<principal>`, `session:<principal>:<sessionId>`; storage rows
-are keyed `(branch, id, scope_key)`
-(`packages/memory/v2/engine.ts:368-403`).
+is named. The `scope_key` vocabulary lives in the wire-shape module
+(LD3, §3): `resolveScopeKey` plus the parse/inspect helpers
+(`packages/memory/v2.ts:35-198`, beside `CellScope` at `v2.ts:26`),
+producing `space`, `user:<principal>`,
+`session:<principal>:<sessionId>`; storage rows are keyed
+`(branch, id, scope_key)` (`packages/memory/v2/engine.ts:161`,
+`:178`), constructed at admission through the same shared definition
+(`engine.ts:2003-2004`).
 
 ## 1. The nine sites
 
-| # | site | current string shape | required instance dimension | identity source AT that site | OFF-arm-neutral form | runner-side key construction (RULED — §3) |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | `scheduler/keys.ts:5-9` — `entityKey(address)`, type `SpaceScopeAndURI`; the dependency-graph node key | `` `${space}/${normalizeCellScope(scope)}/${id}` `` | the READ instance: dirtiness must match storage's exact-`scope_key` reader matching (`engine.ts:3024-3066`), or one principal's commit wakes every principal's node | `Pick<IMemorySpaceAddress, "space"\|"id"\|"scope">` — scope NAME only; no principal, no session | `` `${space}/${scopeKey}/${id}` `` | the §3 shared constructor |
-| 2 | `runner.ts:3201-3204` — `getDocKey(cell)`; the result-pattern cache key (N37's memo) | `` `${space}/${scope}/${id}` `` | the ACTION instance whose result pattern is cached — two instances may resolve to different patterns | `cell.getAsNormalizedFullLink()` — scope NAME only | `` `${space}/${scopeKey}/${id}` `` | the §3 shared constructor |
-| 3 | `runner.ts:708` (`JavaScriptActionResultCells.byScope`), `5068-5092` (get/set on `effectiveOutputScope`), `5456` (init) — per-scope result cells | `Map<CellScope, Cell<any>>` — keyed by the scope NAME enum | one result cell PER INSTANCE, not per scope name: `byScope.get("session")` returns one cell where the server needs one per session | `effectiveOutputScope = narrowestScope([...])` — a NAME derived from schema + read ratchet | `Map<ScopeKey, Cell<any>>`, key = the shared constructor over (scope, identity) | the §3 shared constructor |
-| 4 | `data-updating.ts:102` — `seedMemoKey(link)`; dedupes eager scoped-property seeding | `` `${space}/${scope ?? "space"}/${id}` `` | per instance — the site's own comment already says one scope's presence must not suppress another's seed; at fan-out one USER's presence must not suppress another's | `NormalizedFullLink` — scope NAME only | `` `${space}/${scopeKey}/${id}` `` | the §3 shared constructor |
-| 5 | `traverse.ts:1693` — inline coverage key passed to `schemaTrackerCoversSelector` | `` `${link.space}/${link.scope}/${link.id}` `` | per instance read: coverage proven for one instance is not coverage of another | `NormalizedFullLink` — scope NAME only | `` `${space}/${scopeKey}/${id}` `` | the §3 shared constructor |
-| 6 | `traverse.ts:1962` — `getTrackerKey(address)`; the schema-tracker key | `` `${space}/${scope ?? "space"}/${id}` `` | same as 5 — one tracker entry per instance | `IMemorySpaceAddress` — scope NAME only | `` `${space}/${scopeKey}/${id}` `` | the §3 shared constructor |
-| 7 | `storage/v2.ts:1247` — `registerPendingLoad`, the `#pendingLoads` key | `` `${space}/${scope}/${id}` `` | per instance: two instances of one doc are two loads, and collapsing them makes one waiter observe another's failure | `{ space, scope, id }` — scope NAME only | `` `${space}/${scopeKey}/${id}` `` | the §3 shared constructor |
-| 8 | `storage/transaction/address.ts:4` — `toString(address)`; transaction-journal address identity | `` `/${normalizeCellScope(scope)}/${id}/${JSON.stringify(path)}` `` (no space — it is per-space by construction) | per instance within the wave: one action tx may seal writes to several instances of one doc (scopes.md §2) | `IMemoryAddress` — scope NAME only | `` `/${scopeKey}/${id}/${JSON.stringify(path)}` `` | the §3 shared constructor |
-| 9 | `scheduler/graph-snapshot.ts:245` — `formatAddress(address)`; diagnostic graph-snapshot labels (site 1's `entityKey` is also used at `:237`) | `` `${space}/${id}/${normalizeCellScope(scope)}/${path.join("/")}` `` | per instance — diagnostic only, but a per-instance graph renders N indistinguishable rows without it, which is how a fan-out bug hides | `IMemorySpaceAddress` — scope NAME only | `` `${space}/${id}/${scopeKey}/${path.join("/")}` `` | the §3 shared constructor |
+Each site keys per scope INSTANCE: the shared constructor over
+(scope, identity), where the identity arrives WITH the work — in the
+OFF arm, the runtime's own authenticated session
+(`Runtime.scopeKeyIdentity`, delegating to
+`IStorageManager.scopeKeyIdentity()`).
+
+| # | site | instance key | required instance dimension | identity source AT that site |
+| --- | --- | --- | --- | --- |
+| 1 | `scheduler/keys.ts:26-33` — `entityKey(address, identity)`, type `SpaceScopeAndURI`; the dependency-graph node key (also the composite constructor `addressesToPathByEntity` at `reactive-dependencies.ts:81-95` builds through) | `` `${space}/${scope_key}/${id}` `` | the READ instance: dirtiness must match storage's exact-`scope_key` row keying, or one principal's commit wakes every principal's node | threaded per call from the scheduler's state (`scopeKeyIdentity` thunks wired to the runtime) |
+| 2 | `runner.ts:3373-3381` — `getDocKey(cell)`; the result-pattern cache key (N37's memo; the notification-invalidation twin at `runner.ts:1200-1215` matches it) | `` `${space}/${scope_key}/${id}` `` | the ACTION instance whose result pattern is cached — two instances may resolve to different patterns | `this.runtime.scopeKeyIdentity` |
+| 3 | `runner.ts:752` (`JavaScriptActionResultCells.byScope`), `5077-5100` (get/set on the resolved `effectiveOutputScope` key), `5504` (init) — per-instance result cells | `Map<ScopeKey, Cell<any>>` | one result cell PER INSTANCE, not per scope name: a name-keyed `byScope.get("session")` would return one cell where the server needs one per session | `this.runtime.scopeKeyIdentity`, resolved over the discovered `effectiveOutputScope` |
+| 4 | `data-updating.ts:110-113` — `seedMemoKey(link, identity)`; dedupes eager scoped-property seeding | `` `${space}/${scope_key}/${id}` `` | per instance — one instance's presence must not suppress another's seed; at fan-out one USER's presence must not suppress another's | `runtime.scopeKeyIdentity` at the call sites |
+| 5 | `traverse.ts:1707-1714` — coverage key passed to `schemaTrackerCoversSelector` (constructed via site 6's `getTrackerKey`) | `` `${space}/${scope_key}/${id}` `` | per instance read: coverage proven for one instance is not coverage of another | `TraversalContext.scopeKeyIdentity` (the traversal's acting identity; the memory server's query path supplies the querying session's — `packages/memory/v2/query.ts`) |
+| 6 | `traverse.ts:1979-1987` — `getTrackerKey(address, identity)`; the schema-tracker key | `` `${space}/${scope_key}/${id}` `` | same as 5 — one tracker entry per instance | `TraversalContext.scopeKeyIdentity` |
+| 7 | `storage/v2.ts:1367-1370` — `registerPendingLoad`, the `#pendingLoads` key (built with site 1's `entityKey`, which the scheduler cross-matches in `collectPendingLoadParkKeys`) | `` `${space}/${scope_key}/${id}` `` | per instance: two instances of one doc are two loads, and collapsing them makes one waiter observe another's failure | the manager's own `scopeKeyIdentity()` |
+| 8 | `storage/transaction/address.ts:17-20` — `toString(address, identity)`; notification-differential address identity (`storage/differential.ts`, whose `toKey` shares the vocabulary) | `` `/${scope_key}/${id}/${JSON.stringify(path)}` `` (no space — per-space by construction) | per instance within a batch: one batch may carry several instances of one doc (scopes.md §2), and they must not collapse to one change entry | the owning session's identity, threaded through `Differential.create/load/checkout` from the replica |
+| 9 | `scheduler/graph-snapshot.ts:259-266` — `formatAddress(address, identity)`; diagnostic graph-snapshot labels (site 1's `entityKey` at `:137`/`:149`/`:246`) | `` `${space}/${id}/${scope_key}/${path.join("/")}` `` | per instance — diagnostic only, but a per-instance graph renders N indistinguishable rows without it, which is how a fan-out bug hides | `SchedulerGraphSnapshotState.scopeKeyIdentity` |
 
 ## 2. Why the OFF arm does not move
 
@@ -72,15 +81,17 @@ not coin flip:
   construction. Its home is the wire-shape module —
   `packages/memory/v2.ts`, where `CellScope`, `SessionId`, and the
   other protocol types already live (`v2.ts:22-26`) — as ONE
-  exported constructor `(scope, identity) → scope_key` plus the
-  parse/inspect helpers, which `engine.ts` imports in place of its
-  private definitions.
+  exported constructor `(scope, identity) → scope_key`
+  (`v2.ts:120-153`) plus the parse/inspect helpers, which
+  `engine.ts` imports in place of private definitions
+  (`engine.ts:50-65` — it re-exports the same objects, so
+  `Engine.resolveScopeKey` IS the shared one, never a twin).
 - **What stays engine-owned is IDENTITY DERIVATION, not the
   format.** For `authored` traffic the memory server still derives
   the identity from the authenticated session at admission —
   `applyCommit` threads `session.principal` + `message.sessionId`
-  (`packages/memory/v2/server.ts:2128-2132`) into the engine's
-  write path, which constructs the key (`engine.ts:5374-5375`) —
+  (`packages/memory/v2/server.ts:2052`) into the engine's
+  write path, which constructs the key (`engine.ts:2003-2004`) —
   via the shared definition. Clients never name keys — their
   identity rides the session, established at session open, never
   the commit (protocol.md §1) — so the derivation step is admission
@@ -96,18 +107,16 @@ not coin flip:
 - **Layering: legal, and no new dependency direction.** The runner
   already imports memory-v2 protocol vocabulary
   (`@commonfabric/memory/v2` — e.g.
-  `packages/runner/src/storage/v2.ts:43`); what it must not import
-  is ENGINE internals, and after the move the format is not one.
-  (Evidence the boundary was already porous:
-  `packages/state-inspector/scopes.ts` imports `resolveScopeKey`
-  straight from `engine.ts` today — it migrates to the shared
-  module with the rest — and the runner itself already reaches into
-  `memory/v2` internals beyond the wire module,
-  `packages/runner/src/storage/v2.ts:44-49`; those other leaks are
-  out of this ruling's scope.)
+  `packages/runner/src/storage/v2.ts:21-41`); what it must not
+  import is ENGINE internals, and the format is not one.
+  (`packages/state-inspector/scopes.ts` and `conflicts.ts` import
+  `resolveScopeKey` from the shared module; the runner's remaining
+  reaches into `memory/v2` internals beyond the wire module are out
+  of this ruling's scope.)
 
-Plan Phase 1 stage E is UNBLOCKED by this ruling; the migration is
-one definition move ahead of the nine-site re-keying.
+Plan Phase 1 stage E LANDED on this ruling: the definition move
+(one shared constructor, engine re-exports) ahead of the nine-site
+re-keying, exactly as ruled.
 
 ## 4. Tripwires
 

@@ -26,6 +26,7 @@ import {
   getServerExecutionConfig,
   resetCommitPreconditionsConfig,
   resetServerExecutionConfig,
+  type ScopeKeyIdentity,
   setCommitPreconditionsConfig,
   setServerExecutionConfig,
 } from "@commonfabric/memory/v2";
@@ -696,6 +697,19 @@ export class Runtime {
   // client or in the OFF arm — installSealDestination throws off the flag.
   #transactionSealDestination: TransactionSealDestination | undefined;
   readonly userIdentityDID: DID;
+
+  /**
+   * The identity this runtime's in-memory instance keys resolve scoped
+   * addresses against (key-vocabulary.md §2): its own authenticated
+   * session, read through from the storage manager. In the OFF arm every
+   * run acts as this one identity — scoped cardinality is 1 per runtime —
+   * which is the structural neutrality argument for the stage-E
+   * re-keying. Server-side per-run identities (the demand's, the stamped
+   * `firedAt`'s) arrive with stage F's run contexts, not from here.
+   */
+  get scopeKeyIdentity(): ScopeKeyIdentity {
+    return this.storageManager.scopeKeyIdentity();
+  }
   /** Cache of resolved PatternFactory.inSpace("name") space DIDs. */
   private readonly spaceNameToDid = new Map<string, MemorySpace>();
   private defaultFrame?: Frame;

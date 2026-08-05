@@ -28,10 +28,12 @@
 // Phase 1 stage F. The machinery lands dark, exercised by tests.
 
 import type { CellScope } from "@commonfabric/api";
-import type {
-  CommitPrecondition,
-  DerivedWriteAnnotation,
-  Operation,
+import {
+  type CommitPrecondition,
+  type DerivedWriteAnnotation,
+  type Operation,
+  resolveScopeKey,
+  type ScopeKeyIdentity,
 } from "@commonfabric/memory/v2";
 import type {
   CommitError,
@@ -340,7 +342,7 @@ export class WaveAccumulator
   implements TransactionSealDestination, ITransactionSealSink {
   readonly #space: MemorySpace;
   readonly #basisSeq: number;
-  readonly #resolveScopeKey: (scope: CellScope) => string;
+  readonly #scopeKeyIdentity: ScopeKeyIdentity;
   readonly #replicaFor: (space: MemorySpace) => ISpaceReplica;
   readonly #lease: WaveLease | undefined;
   readonly #sealedTenure: number;
@@ -355,17 +357,19 @@ export class WaveAccumulator
      * (serving-loop.md §3b's snapshot discipline — mid-wave commits are
      * the NEXT wave's input). */
     basisSeq: number;
-    /** Maps a scope KIND to the concrete instance key. At OFF-arm
-     * cardinality 1 the identity is the runtime's own authenticated
-     * session (key-vocabulary.md §3); stage E moves the vocabulary to the
-     * wire-shape module and feeds per-instance values. */
-    resolveScopeKey: (scope: CellScope) => string;
+    /** The acting identity scoped writes resolve their instance keys
+     * against, via the shared scope_key constructor — never a caller-
+     * supplied format (key-vocabulary.md §3/§4). At OFF-arm cardinality 1
+     * this is the runtime's own authenticated session; stage F's serving
+     * loop supplies per-run demanded identities when it builds real
+     * accumulators. */
+    scopeKeyIdentity: ScopeKeyIdentity;
     replicaFor: (space: MemorySpace) => ISpaceReplica;
     lease?: WaveLease;
   }) {
     this.#space = options.space;
     this.#basisSeq = options.basisSeq;
-    this.#resolveScopeKey = options.resolveScopeKey;
+    this.#scopeKeyIdentity = options.scopeKeyIdentity;
     this.#replicaFor = options.replicaFor;
     this.#lease = options.lease;
     this.#sealedTenure = options.lease?.tenure ?? 0;
@@ -898,9 +902,7 @@ export class WaveAccumulator
   }
 
   #scopeKeyFor(scope: CellScope | undefined): string {
-    return scope === undefined || scope === "space"
-      ? "space"
-      : this.#resolveScopeKey(scope);
+    return resolveScopeKey(scope, this.#scopeKeyIdentity);
   }
 
   #homeOpCount(contribution: WaveContribution): number {

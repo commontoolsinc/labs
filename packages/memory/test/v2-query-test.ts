@@ -21,6 +21,7 @@ import {
   queryGraph,
   refreshTrackedGraph,
   toDirtyKey,
+  toDocKey,
   trackGraph,
 } from "../v2/query.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
@@ -47,15 +48,40 @@ const authorization = {
   access: { "proof:1": {} },
 };
 
-Deno.test("memory v2 query keys require explicit scope", () => {
+Deno.test("memory v2 query keys carry the scope INSTANCE (stage E)", () => {
+  // The doc-key constructor builds the middle segment from the shared
+  // scope_key vocabulary, resolved against the querying session's
+  // identity; fromDocKey recovers the scope NAME from the instance key.
+  const identity = { principal: "did:key:alice", sessionId: "sess-1" };
   assertEquals(
-    fromDocKey("did:key:space/user/of:doc"),
+    toDocKey("did:key:space", "of:doc", "user", identity),
+    "did:key:space/user:did%3Akey%3Aalice/of:doc",
+  );
+  assertEquals(
+    fromDocKey(toDocKey("did:key:space", "of:doc", "user", identity)),
     {
       space: "did:key:space",
       scope: "user",
       id: "of:doc",
     },
   );
+  assertEquals(
+    fromDocKey(toDocKey("did:key:space", "of:doc", "session", identity)),
+    {
+      space: "did:key:space",
+      scope: "session",
+      id: "of:doc",
+    },
+  );
+  assertEquals(
+    fromDocKey("did:key:space/space/of:doc"),
+    {
+      space: "did:key:space",
+      scope: "space",
+      id: "of:doc",
+    },
+  );
+  // Dirtiness stays keyed by scope NAME until stage F's M4 re-keys push.
   assertEquals(fromDirtyKey("session\0of:doc"), {
     scope: "session",
     id: "of:doc",
@@ -63,6 +89,13 @@ Deno.test("memory v2 query keys require explicit scope", () => {
 
   assertThrows(
     () => fromDocKey("did:key:space/of:doc" as never),
+    Error,
+    "invalid memory v2 query doc key",
+  );
+  // A scope NAME is not an instance key: the un-keyed user/session forms
+  // are invalid once the vocabulary is per instance.
+  assertThrows(
+    () => fromDocKey("did:key:space/user/of:doc" as never),
     Error,
     "invalid memory v2 query doc key",
   );

@@ -11,6 +11,7 @@ import type {
   EntityIdListOptions,
   EntityIdListResult,
   PatchOp,
+  ScopeKeyIdentity,
   SqliteDbRef,
   SqliteOperation,
   SqliteParamsWire,
@@ -119,6 +120,18 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * Can be used to derive the user's identity DID via `as.did()`.
    */
   as: Signer;
+
+  /**
+   * The manager's own authenticated session identity — the (principal,
+   * sessionId) pair the memory server derives scope keys from for this
+   * manager's commits and reads. This is what the runner's in-memory
+   * identity keys resolve scoped addresses against in the OFF arm
+   * (key-vocabulary.md §2: at cardinality 1 the instance dimension is
+   * derivable from the runtime's own authenticated session), so the
+   * client-side instance keys match the storage rows the server writes.
+   * Stable for the manager's live span; `close()` ends that span.
+   */
+  scopeKeyIdentity(): ScopeKeyIdentity;
 
   /**
    * Open a new connection to the storage provider associated with the given

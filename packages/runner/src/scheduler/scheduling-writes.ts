@@ -1,3 +1,4 @@
+import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import {
   arraysOverlap,
   nonRecursiveReadMayOverlapWrite,
@@ -8,6 +9,8 @@ import { entityKey } from "./keys.ts";
 import type { Action, SpaceScopeAndURI } from "./types.ts";
 
 export interface WriterIndexState {
+  /** Identity entity keys resolve scoped addresses against (keys.ts). */
+  readonly scopeKeyIdentity: () => ScopeKeyIdentity;
   readonly writersByEntity: Map<SpaceScopeAndURI, Set<Action>>;
   readonly actionWriteEntities: WeakMap<Action, Set<SpaceScopeAndURI>>;
   setSurface(action: Action, surface: IMemorySpaceAddress[]): void;
@@ -30,6 +33,11 @@ export interface SchedulingWriteState {
 
 export class SchedulerWriteIndex
   implements WriterIndexState, SchedulingWriteState {
+  constructor(
+    /** Identity entity keys resolve scoped addresses against (keys.ts). */
+    readonly scopeKeyIdentity: () => ScopeKeyIdentity,
+  ) {}
+
   // Current-known writes are the action's static declared write surface.
   readonly currentKnownWrites = new WeakMap<Action, IMemorySpaceAddress[]>();
   // Index: entity -> actions that write to it (for fast dependency lookup).
@@ -68,8 +76,9 @@ export class SchedulerWriteIndex
     const addedEntities = new Set<SpaceScopeAndURI>();
     const removedEntities = new Set<SpaceScopeAndURI>();
 
+    const identity = this.scopeKeyIdentity();
     for (const write of nextSchedulingWrites) {
-      const entity = entityKey(write);
+      const entity = entityKey(write, identity);
       nextEntities.add(entity);
       if (!existingEntities.has(entity)) {
         addedEntities.add(entity);
@@ -196,6 +205,7 @@ export function readsOverlapWrites(
  */
 export function forEachOverlappingWriter(
   state: {
+    readonly scopeKeyIdentity: () => ScopeKeyIdentity;
     readonly writersByEntity: ReadonlyMap<SpaceScopeAndURI, Set<Action>>;
     readonly getSchedulingWrites: (
       action: Action,
@@ -209,11 +219,12 @@ export function forEachOverlappingWriter(
     readonly onCandidate?: (writer: Action) => void;
   } = {},
 ): void {
+  const identity = state.scopeKeyIdentity();
   const scan = (
     read: IMemorySpaceAddress,
     shallow: boolean,
   ): boolean => {
-    const writers = state.writersByEntity.get(entityKey(read));
+    const writers = state.writersByEntity.get(entityKey(read, identity));
     if (!writers) return false;
     for (const writer of writers) {
       if (hooks.filter && !hooks.filter(writer)) continue;
