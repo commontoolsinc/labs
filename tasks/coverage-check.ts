@@ -6,8 +6,9 @@
  * Runs as a PR CI job after all test jobs complete. Joins the coverage
  * profiles every test job uploaded and gates the PR on coverage debt: for each
  * source group the PR changed, the count of uncovered lines must not rise above
- * the latest non-cold `main` run's count, unless the PR description accepts the
- * increase. Fails (exit 1) when a changed group regresses.
+ * the count from the `main` run for the base-branch commit this run merged,
+ * unless the PR description accepts the increase. Fails (exit 1) when a changed
+ * group regresses.
  *
  * Environment:
  *   GITHUB_TOKEN        - Required.
@@ -275,6 +276,240 @@ export function formatBaselineSourceRunAge(
 
 interface GitHubCompareResponse {
   ahead_by?: unknown;
+}
+
+async function readHeadCommitObject(): Promise<string | null> {
+  try {
+    const result = await new Deno.Command("git", {
+      args: ["cat-file", "commit", "HEAD"],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    if (!result.success) {
+      console.warn(
+        `  Warning: could not read the \`HEAD\` commit object: ${
+          new TextDecoder().decode(result.stderr).trim()
+        }`,
+      );
+      return null;
+    }
+    return new TextDecoder().decode(result.stdout);
+  } catch (error) {
+    console.warn(
+      `  Warning: could not run \`git\` to read the \`HEAD\` commit object: ${
+        formatErrorForLog(error)
+      }`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Reads the base-branch commit the checked-out tree merges this pull request
+ * into.
+ *
+ * A `pull_request` run checks out `refs/pull/<number>/merge`, a merge commit
+ * whose first parent is the base-branch commit and whose second parent is the
+ * pull request head. GitHub rebuilds that merge ref whenever the base branch
+ * moves and does not rewrite the base recorded in the triggering event, so the
+ * event can name an older commit than the one the checkout merged. The commit
+ * object names the commit whose code the test jobs ran.
+ *
+ * The parents come from the raw commit object, because `actions/checkout`
+ * clones to depth one and git treats a shallow boundary commit as having no
+ * parents. `git cat-file` prints the stored object, which still lists them.
+ *
+ * Returns null when `HEAD` has fewer than two parents, and when `git` cannot
+ * be run.
+ */
+export async function readBaseBranchSha(
+  readCommitObject: () => Promise<string | null> = readHeadCommitObject,
+): Promise<string | null> {
+  const commit = await readCommitObject();
+  if (commit === null) return null;
+
+  const parents: string[] = [];
+  for (const line of commit.split("\n")) {
+    // The header ends at the first blank line; the commit message that follows
+    // it can contain a line that reads like a parent.
+    if (line === "") break;
+    const match = /^parent ([0-9a-f]{40,64})$/.exec(line);
+    if (match) parents.push(match[1]);
+  }
+
+  return parents.length >= 2 ? parents[0] : null;
+}
+
+/** How far back from the base-branch commit a baseline may sit. */
+const BASELINE_ANCESTRY_DEPTH = 100;
+
+/** The compare endpoint returns at most this many files. */
+const COMPARE_FILE_LIMIT = 300;
+
+/**
+ * Reads how far back each recent commit sits from the base-branch commit this
+ * run merged, newest first, so that `0` is that commit itself.
+ *
+ * Listing commits from the base-branch commit walks its ancestry, so a commit
+ * absent from the result is not an ancestor. That is what keeps a `main` run
+ * that landed after this run started from becoming the baseline: it measured
+ * base-branch code this run does not contain.
+ */
+export async function fetchAncestorRanks(
+  baseSha: string,
+  depth = BASELINE_ANCESTRY_DEPTH,
+): Promise<Map<string, number>> {
+  const commits = await githubGet<{ sha: string }[]>(
+    `/repos/${REPO}/commits?sha=${
+      encodeURIComponent(baseSha)
+    }&per_page=${depth}`,
+  );
+  return new Map(commits.map((commit, index) => [commit.sha, index]));
+}
+
+/**
+ * Returns the ratchet baseline for one metric: the run for the nearest
+ * ancestor of the base-branch commit this run merged.
+ *
+ * The base-branch commit's own run is the ideal baseline, because it measured
+ * exactly the base-branch code this run merged, leaving the pull request as the
+ * only difference between the two numbers. It is often available, but a run
+ * still going or one that failed leaves the nearest ancestor with a usable run
+ * standing in for it. Whatever the base branch changed in between is then in
+ * this run and not in the baseline, so `isComparableBaseline()` withholds
+ * gating from the groups it touched.
+ *
+ * Prefers a non-cold run: a cold run covers cold-compile-only branches, and its
+ * lower debt would hold a warm pull request to an unreachable bar. Takes the
+ * nearest ancestor regardless when every ancestor is cold, which keeps the
+ * reset semantics of an override-truncated timeline.
+ *
+ * Falls back to the latest non-cold run when there is no ancestry to work from
+ * — a `main` push run, a checkout that is not a merge, or a commit listing that
+ * could not be fetched.
+ */
+export function nearestUsableBaseline(
+  samples: TimingSample[],
+  isRunCold: (runId: number) => boolean,
+  ancestorRank: Map<string, number> | null,
+): TimingSample | undefined {
+  if (ancestorRank === null) return latestNonColdSample(samples, isRunCold);
+
+  let nearest: TimingSample | undefined;
+  let nearestRank = Infinity;
+  let nearestCold: TimingSample | undefined;
+  let nearestColdRank = Infinity;
+
+  for (const sample of samples) {
+    const rank = ancestorRank.get(sample.sha);
+    if (rank === undefined) continue;
+
+    if (isRunCold(sample.runId)) {
+      if (rank < nearestColdRank) {
+        nearestCold = sample;
+        nearestColdRank = rank;
+      }
+      continue;
+    }
+    if (rank < nearestRank) {
+      nearest = sample;
+      nearestRank = rank;
+    }
+  }
+
+  return nearest ?? nearestCold;
+}
+
+/**
+ * Reads the coverage source groups the base branch changed between the baseline
+ * run's commit and the base-branch commit this run merged.
+ *
+ * A group's uncovered-line count is a total over its files, so a group the base
+ * branch touched in between has a baseline counting different code from this
+ * run. Those groups are the ones the ratchet cannot speak to. Every other
+ * group's total stays comparable, which is what lets a pull request still be
+ * gated when the base-branch commit has no run of its own.
+ */
+export async function fetchGroupsChangedOnBase(
+  baselineSha: string,
+  baseSha: string,
+  warn: (message: string) => void = console.warn,
+): Promise<Set<string>> {
+  if (baselineSha === baseSha) return new Set();
+
+  const comparison = await githubGet<{ files?: { filename: string }[] }>(
+    `/repos/${REPO}/compare/${encodeURIComponent(baselineSha)}...${
+      encodeURIComponent(baseSha)
+    }`,
+  );
+  const files = comparison.files ?? [];
+  if (files.length >= COMPARE_FILE_LIMIT) {
+    warn(
+      `  Warning: comparing ${baselineSha.slice(0, 8)} against ${
+        baseSha.slice(0, 8)
+      } hit the ${COMPARE_FILE_LIMIT}-file response cap, so a group the base ` +
+        "branch changed may still be gated.",
+    );
+  }
+  return coverageGroupsForChangedFiles(files.map((file) => file.filename));
+}
+
+/**
+ * Returns whether a metric's baseline can be held against this run.
+ *
+ * The two numbers must count the same base-branch code, or the difference
+ * between them is not the pull request's. A group the base branch changed
+ * between the baseline commit and the base-branch commit fails that, and so
+ * does a metric with no baseline at all; both are reported and not gated.
+ *
+ * A `main` push run has no base-branch commit and is informational, so it
+ * reports against whatever baseline it has.
+ */
+export function isComparableBaseline(
+  sample: TimingSample | undefined,
+  metric: string,
+  groupsChangedOnBase: Set<string>,
+  isPullRequest: boolean,
+): boolean {
+  if (!isPullRequest) return true;
+  if (sample === undefined) return false;
+
+  const group = coverageMetricGroupName(metric);
+  return group === null || !groupsChangedOnBase.has(group);
+}
+
+/**
+ * Reports which commit each baseline was measured at, and how far back from the
+ * base-branch commit that sits.
+ */
+export function reportBaselineDistance(
+  baselineShas: Set<string>,
+  baseSha: string,
+  ancestorRank: Map<string, number> | null,
+  log: (message: string) => void = console.log,
+): void {
+  if (baselineShas.size === 0) {
+    log(
+      `No \`main\` run has measured base-branch commit ${
+        baseSha.slice(0, 8)
+      } or any of its ancestors.`,
+    );
+    return;
+  }
+
+  for (const sha of [...baselineShas].sort()) {
+    const rank = ancestorRank?.get(sha);
+    const distance = rank === undefined
+      ? "at an unknown distance from"
+      : rank === 0
+      ? "at"
+      : `${pluralize(rank, "commit")} before`;
+    log(
+      `Ratchet baseline measured ${distance} the base-branch commit: ${
+        sha.slice(0, 8)
+      }.`,
+    );
+  }
 }
 
 export async function fetchCommitsBehindMain(
@@ -848,6 +1083,8 @@ export interface Row {
   current: number;
   /** Latest non-cold `main` ratchet baseline (uncovered lines). */
   median?: number;
+  /** Head SHA of the run that baseline came from. */
+  baselineSha?: string;
   n: number;
   pctIncrease?: number;
 }
@@ -1432,25 +1669,91 @@ export async function main() {
   }
 
   // 5. Compare the current run's coverage debt against the ratchet baseline.
+
+  // The base-branch commit this run's tree merges the pull request into. Its
+  // ancestry decides which main run is the baseline, so that the baseline and
+  // this run count the same base-branch code.
+  const baseSha = prNumber ? await readBaseBranchSha() : null;
+  if (prNumber && baseSha === null) {
+    console.warn(
+      "  Warning: could not read the base-branch commit this run merges " +
+        "into; coverage debt metrics will be reported but not gated.",
+    );
+  } else if (baseSha !== null) {
+    console.log(
+      `This run merges the pull request into base-branch commit ${
+        baseSha.slice(0, 8)
+      }.`,
+    );
+  }
+
+  let ancestorRank: Map<string, number> | null = null;
+  if (baseSha !== null) {
+    ancestorRank = await githubApiOrSkip(
+      "listing the base-branch commit's ancestry",
+      () => fetchAncestorRanks(baseSha),
+      currentMetrics,
+    );
+  }
+
+  const baselineByMetric = new Map<string, TimingSample | undefined>();
+  for (const metric of currentMetrics.keys()) {
+    const timeline = timelines.get(metric);
+    baselineByMetric.set(
+      metric,
+      timeline
+        ? nearestUsableBaseline(timeline.samples, isRunCold, ancestorRank)
+        : undefined,
+    );
+  }
+
+  // Groups the base branch changed between a chosen baseline and the
+  // base-branch commit. Their totals count different code on the two sides, so
+  // they are reported and not gated; every other group still is.
+  const groupsChangedOnBase = new Set<string>();
+  if (baseSha !== null) {
+    const baselineShas = new Set(
+      [...baselineByMetric.values()].map((sample) => sample?.sha).filter((
+        sha,
+      ): sha is string => sha !== undefined),
+    );
+    for (const sha of baselineShas) {
+      for (
+        const group of await githubApiOrSkip(
+          "comparing the baseline commit against the base-branch commit",
+          () => fetchGroupsChangedOnBase(sha, baseSha),
+          currentMetrics,
+        )
+      ) {
+        groupsChangedOnBase.add(group);
+      }
+    }
+    reportBaselineDistance(baselineShas, baseSha, ancestorRank);
+  }
+
   const rows: Row[] = [];
   const failures: Row[] = [];
+  const ungatedGroups = new Set<string>();
 
   for (const [metric, currentSample] of currentMetrics) {
     const current = currentSample.durationSeconds;
-    const timeline = timelines.get(metric);
-    const n = timeline?.samples.length ?? 0;
-    // Ratchet against the latest run that was not known-cold: a cold main
-    // run covers rare cold-compile-only branches, and ratcheting against
-    // its lower debt would fail later warm PRs with phantom regressions.
-    const latestBaseline = timeline
-      ? latestNonColdSample(timeline.samples, isRunCold)?.durationSeconds
-      : undefined;
+    const n = timelines.get(metric)?.samples.length ?? 0;
+    const baselineSample = baselineByMetric.get(metric);
+    const latestBaseline = baselineSample?.durationSeconds;
     const override = prOverrides.metrics.get(metric);
     const coverageReset = prOverrides.coverageBaselineReset;
-    const shouldGateCoverage = shouldGateCoverageDebtMetric(
+    const comparable = isComparableBaseline(
+      baselineSample,
       metric,
-      changedCoverageGroups,
+      groupsChangedOnBase,
+      prNumber !== null,
     );
+    if (!comparable) {
+      const group = coverageMetricGroupName(metric);
+      if (group !== null) ungatedGroups.add(group);
+    }
+    const shouldGateCoverage = comparable &&
+      shouldGateCoverageDebtMetric(metric, changedCoverageGroups);
 
     if (latestBaseline === undefined) {
       if (
@@ -1479,7 +1782,11 @@ export async function main() {
     const pctIncrease = latestBaseline === 0
       ? current > 0 ? 100 : 0
       : ((current - latestBaseline) / latestBaseline) * 100;
-    const stats = { median: latestBaseline, pctIncrease };
+    const stats = {
+      median: latestBaseline,
+      baselineSha: baselineSample?.sha,
+      pctIncrease,
+    };
 
     if (coverageReset) {
       rows.push({ metric, status: "ovrd", current, n, ...stats });
@@ -1503,6 +1810,15 @@ export async function main() {
     } else {
       rows.push({ metric, status: "OK", current, n, ...stats });
     }
+  }
+
+  if (ungatedGroups.size > 0) {
+    console.log(
+      `\nNot gated, because no baseline counts the same base-branch code as ` +
+        `this run does: ${[...ungatedGroups].sort().join(", ")}. A later run ` +
+        "of this pull request gates them, once a `main` run has measured the " +
+        "commit it merges.",
+    );
   }
 
   // 6. Report results

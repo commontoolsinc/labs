@@ -226,9 +226,11 @@ condition's own count. See
 ## Ratchet baselines and accepting debt
 
 The ratchet applies per source group and only to the groups a PR changes: for
-each such group the uncovered-line count must not rise above the latest non-cold
-`main` run's count. Debt in unchanged groups is still reported, but does not
-block the PR.
+each such group the uncovered-line count must not rise above the count from the
+`main` run for the base-branch commit the PR is merged with, or the nearest
+ancestor of it that has one (see "Which `main` run the ratchet compares
+against"). Debt in unchanged groups is still reported, but does not block the
+PR.
 
 Accept one metric's increase with the narrow per-metric marker in the PR
 description:
@@ -301,6 +303,39 @@ its cache-state artifact is missing. Fingerprint inference cannot see
 non-fingerprint cold causes (cache eviction, cache-service outages): a run cold
 for those reasons and lacking a recorded state stays unknown, so it is treated
 as not-cold and may still be used as a baseline.
+
+## Which `main` run the ratchet compares against
+
+A `pull_request` run checks out `refs/pull/<number>/merge`, whose first parent
+is the base-branch commit and whose second parent is the pull request head.
+GitHub rebuilds that merge ref whenever the base branch moves, so the run
+measures the pull request merged with `main` as it stood when the run started.
+
+The baseline is the `main` run for that commit, or for the nearest ancestor of
+it that has one. Comparing against the commit itself is exact: both numbers
+count the same base-branch code, so the only difference between them is the
+pull request. Runs that are not ancestors are never used, in either direction —
+one that landed after the run started measured code the run does not contain.
+
+The base commit's own run is usually available, but not always: it may still be
+going, or it may have failed. Rather than skip the gate, the ratchet steps back
+to the nearest ancestor that has a usable run. Whatever the base branch changed
+in between is then present in this run and absent from the baseline, so the
+groups it touched have totals that count different code on the two sides. Those
+groups are reported and not gated; every other group still is, which is the
+point of stepping back rather than giving up. A gap of one or two commits
+usually touches one or two groups.
+
+One case this does not reach: a base-branch commit that changes a test in one
+package can move the coverage of source in another, and no diff of that source
+names it. It ends when a `main` run measures the base commit.
+
+Two details of reading the base commit are load-bearing. It comes from the
+checked-out merge commit rather than the triggering event, because GitHub does
+not rewrite `pull_request.base.sha` when it rebuilds the merge ref. And it is
+read with `git cat-file commit HEAD` rather than `git log --format=%P`, because
+`actions/checkout` clones to depth one and git reports a shallow boundary commit
+as having no parents.
 
 ## A combined report for IDEs
 

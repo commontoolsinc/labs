@@ -21,9 +21,11 @@ import {
   collectCurrentCacheStates,
   copyCoverageArtifactFiles,
   currentWorkflowRunFromEvent,
+  fetchAncestorRanks,
   fetchArtifactsForRunBestEffort,
   fetchBaselineRunsForCheck,
   fetchCommitsBehindMain,
+  fetchGroupsChangedOnBase,
   fetchLatestBaselineRunSha,
   fetchMainHeadSha,
   fetchPRForCommitWithError,
@@ -36,14 +38,17 @@ import {
   formatRelativeAge,
   formatRelativeDuration,
   githubApiOrSkip,
+  isComparableBaseline,
   logBaselineSourceRuns,
   main,
   metricDisplayParts,
   metricTableRows,
+  nearestUsableBaseline,
   newestArtifactNamed,
   parseCoverageBaselineFromArtifacts,
   parseMergedBaselineOverrides,
   printMetricTable,
+  readBaseBranchSha,
   reportBaselineContextResults,
   reportBaselineRunAvailability,
   reportPRLookupResults,
@@ -1494,4 +1499,183 @@ Deno.test("baseline PR lookup summary counts found, missing, and failed lookups"
     ]),
     { found: 1, noPR: 1, failed: 1 },
   );
+});
+
+Deno.test("readBaseBranchSha reads the first parent of a merge checkout", async () => {
+  const commit = [
+    "tree 1111111111111111111111111111111111111111",
+    `parent ${SHA_A}`,
+    `parent ${SHA_B}`,
+    "author CI <ci@example.com> 1780000000 +0000",
+    "",
+    `parent ${SHA_C} looks like a header but is message text`,
+  ].join("\n");
+
+  assertEquals(await readBaseBranchSha(() => Promise.resolve(commit)), SHA_A);
+});
+
+Deno.test("readBaseBranchSha reports no base for a non-merge checkout", async () => {
+  const commit = [
+    "tree 1111111111111111111111111111111111111111",
+    `parent ${SHA_A}`,
+    "",
+    "a push run checks out the commit itself",
+  ].join("\n");
+
+  assertEquals(await readBaseBranchSha(() => Promise.resolve(commit)), null);
+  assertEquals(await readBaseBranchSha(() => Promise.resolve(null)), null);
+});
+
+function makeBaselineSample(
+  runId: number,
+  sha: string,
+  createdAt: string,
+  uncoveredLines: number,
+): TimingSample {
+  return {
+    runId,
+    runUrl: `https://github.com/commontoolsinc/labs/actions/runs/${runId}`,
+    sha,
+    createdAt,
+    durationSeconds: uncoveredLines,
+  };
+}
+
+const NEVER_COLD = () => false;
+
+/** Ancestry of base-branch commit `SHA_C`, newest first. */
+const RANKS = new Map([[SHA_C, 0], [SHA_B, 1], [SHA_A, 2]]);
+
+Deno.test("nearestUsableBaseline prefers the base-branch commit's own run", () => {
+  const samples = [
+    makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 5740),
+    makeBaselineSample(2, SHA_B, "2026-08-04T10:20:00Z", 5746),
+    makeBaselineSample(3, SHA_C, "2026-08-04T10:40:00Z", 5760),
+  ];
+
+  assertEquals(
+    nearestUsableBaseline(samples, NEVER_COLD, RANKS)?.durationSeconds,
+    5760,
+  );
+});
+
+Deno.test("nearestUsableBaseline falls back to the nearest ancestor with a run", () => {
+  // Nothing has measured SHA_C, the base-branch commit, so its parent stands
+  // in rather than the gate giving up.
+  const samples = [
+    makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 5740),
+    makeBaselineSample(2, SHA_B, "2026-08-04T10:20:00Z", 5746),
+  ];
+
+  assertEquals(
+    nearestUsableBaseline(samples, NEVER_COLD, RANKS)?.durationSeconds,
+    5746,
+  );
+});
+
+Deno.test("nearestUsableBaseline ignores a run that is not an ancestor", () => {
+  const sibling = "dddddddddddddddddddddddddddddddddddddddd";
+  const samples = [
+    makeBaselineSample(1, SHA_B, "2026-08-04T10:20:00Z", 5746),
+    // Landed after this run started, so it measured code the run lacks.
+    makeBaselineSample(2, sibling, "2026-08-04T10:50:00Z", 5700),
+  ];
+
+  assertEquals(
+    nearestUsableBaseline(samples, NEVER_COLD, RANKS)?.durationSeconds,
+    5746,
+  );
+});
+
+Deno.test("nearestUsableBaseline skips a cold ancestor for a warm one", () => {
+  const samples = [
+    makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 5740),
+    makeBaselineSample(2, SHA_B, "2026-08-04T10:20:00Z", 5600),
+  ];
+
+  assertEquals(
+    nearestUsableBaseline(samples, (runId) => runId === 2, RANKS)
+      ?.durationSeconds,
+    5740,
+  );
+});
+
+Deno.test("nearestUsableBaseline takes a cold ancestor when every ancestor is cold", () => {
+  const samples = [makeBaselineSample(2, SHA_B, "2026-08-04T10:20:00Z", 5600)];
+
+  assertEquals(
+    nearestUsableBaseline(samples, () => true, RANKS)?.durationSeconds,
+    5600,
+  );
+});
+
+Deno.test("nearestUsableBaseline falls back to the latest run without ancestry", () => {
+  const samples = [
+    makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 5740),
+    makeBaselineSample(2, SHA_B, "2026-08-04T10:20:00Z", 5746),
+  ];
+
+  assertEquals(
+    nearestUsableBaseline(samples, NEVER_COLD, null)?.durationSeconds,
+    5746,
+  );
+  assertEquals(nearestUsableBaseline([], NEVER_COLD, RANKS), undefined);
+});
+
+Deno.test("fetchAncestorRanks ranks commits by distance from the base", async () => {
+  const ranks = await withMockFetch(
+    (input) => {
+      assertStringIncludes(String(input), `/commits?sha=${SHA_C}`);
+      return new Response(
+        JSON.stringify([{ sha: SHA_C }, { sha: SHA_B }, { sha: SHA_A }]),
+      );
+    },
+    () => fetchAncestorRanks(SHA_C),
+  );
+
+  assertEquals([...ranks], [[SHA_C, 0], [SHA_B, 1], [SHA_A, 2]]);
+});
+
+Deno.test("fetchGroupsChangedOnBase reports the groups the base branch moved", async () => {
+  const groups = await withMockFetch(
+    (input) => {
+      assertStringIncludes(String(input), `/compare/${SHA_A}...${SHA_C}`);
+      return new Response(JSON.stringify({
+        files: [
+          { filename: "packages/runner/src/runner.ts" },
+          { filename: "packages/runner/test/runner.test.ts" },
+          { filename: "docs/development/COVERAGE.md" },
+        ],
+      }));
+    },
+    () => fetchGroupsChangedOnBase(SHA_A, SHA_C),
+  );
+
+  assertEquals([...groups], ["packages/runner"]);
+});
+
+Deno.test("fetchGroupsChangedOnBase compares nothing against the base itself", async () => {
+  const groups = await withMockFetch(
+    () => {
+      throw new Error("must not compare a commit against itself");
+    },
+    () => fetchGroupsChangedOnBase(SHA_C, SHA_C),
+  );
+
+  assertEquals(groups.size, 0);
+});
+
+Deno.test("isComparableBaseline withholds only the groups the base branch moved", () => {
+  const sample = makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 5740);
+  const runner = "coverage-debt: packages/runner uncovered lines";
+  const memory = "coverage-debt: packages/memory uncovered lines";
+  const moved = new Set(["packages/runner"]);
+
+  assertEquals(isComparableBaseline(sample, runner, moved, true), false);
+  assertEquals(isComparableBaseline(sample, memory, moved, true), true);
+  assertEquals(isComparableBaseline(sample, runner, new Set(), true), true);
+  assertEquals(isComparableBaseline(undefined, memory, new Set(), true), false);
+
+  // A main push run has no base-branch commit and only reports.
+  assertEquals(isComparableBaseline(sample, runner, moved, false), true);
 });
