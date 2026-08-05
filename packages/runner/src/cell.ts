@@ -487,16 +487,24 @@ declare module "@commonfabric/api" {
     ): Reactive<T>;
     /**
      * Returns the sigil link naming this cell, or `null` when the cell has no
-     * full link yet (one that has not been created). This is how a cell reaches
-     * storage: the link is what stands in for it, and `hasEncodableForm()` asks
-     * for this member by name.
+     * full link yet (one that has not been created). The link is what stands in
+     * for a cell wherever a cell itself has no representation, which is what
+     * both members below answer with.
      */
     toSigilLinkOrNull(): SigilLink | null;
     /**
-     * Answers the JSON protocol with the same link `toSigilLinkOrNull()` gives,
-     * so a cell embedded in a value being stringified reads as what it names.
-     * `packages/html`'s VDOM key generation depends on this. Nothing on the way
-     * to storage consults it.
+     * Returns the same link `toSigilLinkOrNull()` gives, this being how a cell
+     * reaches storage. `encodableFormOf()` asks for this member by name. The
+     * type is narrower than the `toEncodableForm` a builder artifact carries,
+     * and assignable to it.
+     */
+    toEncodableForm(): SigilLink | null;
+    /**
+     * Answers the JSON protocol with the same link, so a cell reads as what it
+     * names wherever a renderer honors that protocol.
+     * `toCompactDebugString()` does, and it is what pattern-test assertion
+     * diagnostics render their operands with. Nothing on the way to storage
+     * consults it.
      */
     toJSON(): SigilLink | null;
     runtime: Runtime;
@@ -557,6 +565,7 @@ const cellMethods = new Set<
   "flatMap",
   "flatMapWithPattern",
   "toSigilLinkOrNull",
+  "toEncodableForm",
   "toJSON",
   "for",
   "asSchema",
@@ -2891,14 +2900,21 @@ export class CellImpl<T extends FabricValue>
     return createSigilLinkFromParsedLink(this.link);
   }
 
+  toEncodableForm(): SigilLink | null {
+    // What a cell reaches storage as: the link that stands for it.
+    return this.toSigilLinkOrNull();
+  }
+
   toJSON(): SigilLink | null {
-    // The JSON protocol's name for the same link. `generateKey()` in
-    // `packages/html/src/worker/keying.ts` stringifies render nodes to key
-    // them, and a cell inside one has to come out as the link it names for a
-    // key to be stable across renders.
+    // The JSON protocol's name for the same link, honored by every renderer
+    // that walks a value through it -- notably `toCompactDebugString()`, which
+    // pattern-test assertion diagnostics render their operands with. Absent
+    // this, rendering a value holding a cell walks the cell's own members and
+    // reaches the whole runtime, so the rendering carries per-process detail
+    // (the runtime's id among it) and reports differently each run.
     //
     // It carries no weight on the way to storage: what a cell reaches storage
-    // as is read from `toSigilLinkOrNull()` by name.
+    // as is read from `toEncodableForm()` by name.
     return this.toSigilLinkOrNull();
   }
 

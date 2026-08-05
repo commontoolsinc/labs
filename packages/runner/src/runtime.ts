@@ -1978,7 +1978,7 @@ export class Runtime {
    * patterns and the DOM hand over, `Date`s and `Error`s included), and
    * pattern-authored schema defaults. The body converts via
    * `fabricFromNativeValue()`, which is the designed intake for exactly
-   * this: `Cell`s become sigil links (their `toJSON()`), native instances
+   * this: `Cell`s become sigil links (their `toEncodableForm()`), native instances
    * become their fabric counterparts, and input that is already a
    * deep-frozen `FabricValue` passes through by identity.
    *

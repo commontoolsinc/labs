@@ -1697,34 +1697,36 @@ export interface Module extends FabricExecPlainObject {
  * function-valued member without a word.
  *
  * Its return stays `unknown`, unlike its sibling below: this is a public
- * protocol whose contract permits any return, and outside values (notably a
- * `Cell`, which answers with a link or `null`) match this type without being
- * builder artifacts at all.
+ * protocol whose contract permits any return, and outside values match this
+ * type without being builder artifacts at all.
  */
 export type toJSON = {
   toJSON(): unknown;
 };
 
 /**
- * The member by which a builder artifact produces the form in which it gets
- * encoded. Distinct from `toJSON` in saying nothing about JSON: what it
- * answers is a value the data model can represent, which reaches storage
- * without being stringified on the way.
+ * The member by which a value produces the form in which it gets encoded.
+ * Distinct from `toJSON` in saying nothing about JSON: what it answers is a
+ * value the data model can represent, which reaches storage without being
+ * stringified on the way.
  *
- * Always a RECORD. An artifact's encodable form is built by
- * `moduleToEncodableForm` or `patternToEncodableForm`, and both answer a record by
- * construction -- there is no artifact whose serialized form is a primitive,
- * an array, or `null`.
+ * Two kinds of value carry it, and the type spans both. A builder artifact
+ * answers with a record, built by `moduleToEncodableForm` or
+ * `patternToEncodableForm` -- there is no artifact whose form is a primitive, an
+ * array, or `null`. A `Cell` answers with the link that stands for it, or `null`
+ * for a cell that has no link yet. A record-shaped bound cannot span the two:
+ * the link is an `interface`, which carries no index signature.
  *
- * Its members are {@link FabricExecValue}, NOT {@link FabricValue}: a form can
- * still hold live functions. A module whose implementation is a nested pattern
- * with no entry ref answers with that pattern's graph embedded, and such a
- * graph holds live modules. That is precisely why the artifact walk descends
- * into what this returns rather than treating it as finished -- typing it as
- * durable would assert the very thing the walk cannot assume.
+ * {@link FabricExecValue}, NOT {@link FabricValue}: a form can still hold live
+ * functions. A module whose implementation is a nested pattern with no entry ref
+ * answers with that pattern's graph embedded, and such a graph holds live
+ * modules -- so the module form's `implementation` admits a `Pattern` and the
+ * pattern form's `result` admits a function. That is precisely why the artifact
+ * walk descends into what this returns rather than treating it as finished:
+ * typing it as durable would assert the very thing the walk cannot assume.
  */
 export type toEncodableForm = {
-  toEncodableForm(): Record<string, FabricExecValue>;
+  toEncodableForm(): FabricExecValue;
 };
 
 /**

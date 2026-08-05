@@ -5,18 +5,16 @@ import { isPlainObject } from "@commonfabric/utils/types";
  * takes on the way to being encoded, which reaches storage without ever being
  * stringified.
  *
- * Two names answer, and they are asked for in this order:
+ * One name answers: `toEncodableForm`. Every builder artifact carries it -- a
+ * module, a handler, a pattern, and the factory that carries a module's members
+ * -- and so does a `Cell`, for which producing the link it names IS how it
+ * reaches storage.
  *
- * - `toEncodableForm`, carried by every builder artifact -- a module, a
- *   handler, a pattern, and the factory that carries a module's members.
- * - `toSigilLinkOrNull`, carried by a `Cell`, for which producing the link it
- *   names IS how it reaches storage.
- *
- * Both are the runtime's OWN names, and that is the point. Asking by name
- * rather than by class is what lets this module stay a leaf -- naming `Cell`
- * here would mean importing the runtime's core, and the graph already runs the
- * other way. Neither name is a public protocol, so no value acquires an
- * encodable form by carrying a member it defined for some other purpose.
+ * It is the runtime's OWN name, and that is the point. Asking by name rather
+ * than by class is what lets this module stay a leaf -- naming `Cell` here
+ * would mean importing the runtime's core, and the graph already runs the other
+ * way. The name is not a public protocol, so no value acquires an encodable
+ * form by carrying a member it defined for some other purpose.
  */
 function encodableFormMethod(value: unknown): (() => unknown) | undefined {
   if (
@@ -26,15 +24,9 @@ function encodableFormMethod(value: unknown): (() => unknown) | undefined {
     return undefined;
   }
 
-  const named = value as {
-    toEncodableForm?: unknown;
-    toSigilLinkOrNull?: unknown;
-  };
-  if (typeof named.toEncodableForm === "function") {
-    return named.toEncodableForm as () => unknown;
-  }
-  return typeof named.toSigilLinkOrNull === "function"
-    ? named.toSigilLinkOrNull as () => unknown
+  const named = value as { toEncodableForm?: unknown };
+  return typeof named.toEncodableForm === "function"
+    ? named.toEncodableForm as () => unknown
     : undefined;
 }
 
@@ -42,11 +34,10 @@ function encodableFormMethod(value: unknown): (() => unknown) | undefined {
  * Checks whether a value can produce an encodable form of itself.
  *
  * Deliberately BROADER than the walk's own test (`hasOwnEncodableForm`): this
- * accepts either name and an inherited member, because its callers ask about a
- * specific value they already hold -- a pattern, a cell -- rather than sifting
- * an arbitrary graph. A cell answers here through an inherited member, that
- * being where a class puts its methods. The walk cannot afford either latitude;
- * see there.
+ * accepts an inherited member, because its callers ask about a specific value
+ * they already hold -- a pattern, a cell -- rather than sifting an arbitrary
+ * graph. A cell answers here through an inherited member, that being where a
+ * class puts its methods. The walk cannot afford that latitude; see there.
  */
 export function hasEncodableForm(value: unknown): boolean {
   return encodableFormMethod(value) !== undefined;
@@ -311,15 +302,19 @@ function replaceInEntries(
  * Checks whether a value carries its own callable `toEncodableForm` method --
  * the walk's test for "this is a builder artifact".
  *
- * OWN, not inherited: an inherited one is not the value's own serializer, and
- * a single assignment to `Object.prototype.toEncodableForm` would otherwise
- * route every plain object in the process through this.
+ * OWN, not inherited, and that is load-bearing twice over. An inherited member
+ * is not the value's own serializer, so a single assignment to
+ * `Object.prototype.toEncodableForm` would otherwise route every plain object
+ * in the process through this. And a `Cell` carries the member on its class,
+ * which is where an inherited one comes from: asking for an own member is what
+ * keeps the walk from serializing a cell as though it were an artifact. What
+ * stands in for a cell is the `replaceOther` hook, whose caller can name one.
  *
- * And that name only, unlike `hasEncodableForm` above: this one decides, for
- * every object in an arbitrary graph, whether the runtime serializes it here
- * instead of leaving it to the conversion. Admitting `toJSON` would widen that
- * to any object carrying the JSON protocol's member, which is a question about
- * user data, not about builder artifacts.
+ * The name is asked for and no other. This decides, for every object in an
+ * arbitrary graph, whether the runtime serializes it here instead of leaving it
+ * to the conversion. Admitting `toJSON` would widen that to any object carrying
+ * the JSON protocol's member, which is a question about user data, not about
+ * builder artifacts.
  */
 function hasOwnEncodableForm(
   value: object | ((...args: unknown[]) => unknown),

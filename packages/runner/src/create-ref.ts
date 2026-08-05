@@ -113,7 +113,8 @@ export function createRef(
     }
 
     if (isCellResultForDereferencing(obj)) {
-      // It'll traverse this and call .toJSON on the doc in the reference.
+      // It'll traverse this and read the encodable form of the doc in the
+      // reference.
       obj = getCellOrThrow(obj);
     }
 

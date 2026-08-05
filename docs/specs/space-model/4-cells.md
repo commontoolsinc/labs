@@ -178,10 +178,13 @@ Regardless of cell type, all cells share:
 - `schema` — optional type information
 - `getAsLink()` — serialization to `SigilLink`
 
-The `toJSON()` method exists so a cell answers the JSON protocol's name; the
-runtime reads it through `hasEncodableForm()` / `encodableFormOf()`
-(`packages/runner/src/encodable-form.ts`), which is how a cell becomes a link
-on the way to storage. The data model gives the name no standing of its own.
+A cell becomes a link on the way to storage through `toEncodableForm()`, which
+the runtime reads by name via `hasEncodableForm()` / `encodableFormOf()`
+(`packages/runner/src/encodable-form.ts`). That name is the runtime's own. The
+separate `toJSON()` method answers the JSON protocol with the same link, so a
+cell reads as what it names in any renderer that honors the protocol —
+`toCompactDebugString()` among them. The data model gives that name no standing
+of its own, and nothing on the way to storage consults it.
 
 ---
 
