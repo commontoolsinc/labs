@@ -84,12 +84,12 @@ const IN_PROGRESS = Symbol("IN_PROGRESS");
 type OnCopy = (copy: unknown, original: unknown) => void;
 
 /**
- * Asked about each value the walk neither descends into nor replaces itself,
- * and returns what should stand in its place -- the value itself to leave it
- * alone. This is how a caller says what _else_ has no fabric representation: a
- * `Cell`, whose encodable form is the link it stands for. Recognizing one takes
- * `isCell()`, which lives in the runtime's core, so the knowledge arrives as a
- * function rather than an import.
+ * Asked about each object or function the walk neither descends into nor
+ * replaces itself, and returns what should stand in its place -- the value
+ * itself to leave it alone. This is how a caller says what _else_ has no fabric
+ * representation: a `Cell`, whose encodable form is the link it stands for.
+ * Recognizing one takes `isCell()`, which lives in the runtime's core, so the
+ * knowledge arrives as a function rather than an import.
  */
 type ReplaceOther = (value: object | AnyFunction) => unknown;
 
@@ -112,9 +112,9 @@ type AnyFunction = (...args: never[]) => unknown;
  * artifacts_.
  * An artifact carries `toJSON` as well, delegating to the same serializer (see
  * `builder/json-member.ts`), but that name belongs to `JSON.stringify` and the
- * conversion gives it no standing: a plain object carrying a `toJSON` of its
- * own is user data, and the conversion rejects it for the function-valued
- * member it is.
+ * conversion gives it no standing: a plain object carrying a `toJSON` it
+ * defined itself is user data, and the conversion rejects it, that `toJSON`
+ * being a function-valued member.
  *
  * An artifact is reached in two shapes and both are covered: a module is an
  * object, and a factory is a _function_ carrying its module's members (the
@@ -143,8 +143,9 @@ export function replaceArtifacts<T>(
  * it moved.
  *
  * `seen` doubles as the cycle guard and the record of what each value was
- * replaced by, so a value reachable twice is replaced once and comes back the
- * same object both times.
+ * replaced by, so a value reachable twice is replaced once. It comes back as
+ * the same object both times, except across a cycle edge: an ancestor still
+ * under way comes back as itself, which is what the guard is for.
  */
 function replace(
   value: unknown,

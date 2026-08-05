@@ -170,7 +170,7 @@ describe("encodable-form", () => {
         expect(reads).toBe(1);
       });
 
-      it("invokes a _function_ artifact's serializer once, on the artifact", () => {
+      it("invokes a _function_ artifact's serializer once, on it", () => {
         // The object branch has the shared-artifact case below to pin its
         // invoke count, and the pre-existing receiver case under
         // `encodableFormOf()` pins the shared invoke. Neither reaches the
@@ -327,14 +327,13 @@ describe("encodable-form", () => {
 
     describe("the `replaceOther` hook", () => {
       // The hook is how a caller names what _else_ has no fabric
-      // representation. Nothing else in this file passes a non-identity one, so
-      // this is the only place the hook's replacement is exercised at all.
+      // representation -- a `Cell`, in the runtime.
       const viaHook = (value: unknown, replace: (v: object) => unknown) => {
         const seen: { copy: unknown; original: unknown }[] = [];
         const result = replaceArtifacts(
           value,
           (copy, original) => seen.push({ copy, original }),
-          replace as (v: object | ((...args: never[]) => unknown)) => unknown,
+          replace,
         );
         return { result, seen };
       };
