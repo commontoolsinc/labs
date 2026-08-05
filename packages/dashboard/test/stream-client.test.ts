@@ -117,6 +117,23 @@ describe("stream-client", () => {
       expect(page.check(3_000)).toBe(true); // without the interval elapsing
     });
 
+    it("returns false for a stream it has just opened, with nothing reporting the loss", () => {
+      const page = fixture();
+      page.check(0);
+      page.connectionMade(0);
+
+      // Only the closed state is set here, standing for a caller that reports
+      // nothing. The answer cannot rest on a report the module does not make
+      // itself: the stream it is now being asked about is one it has heard
+      // nothing on, whatever the stream it replaced had delivered.
+      page.current().readyState = CLOSED;
+      expect(page.check(1_000)).toBe(false);
+      expect(page.opened.length).toBe(2);
+
+      page.connectionMade(1_100);
+      expect(page.check(2_000)).toBe(true);
+    });
+
     it("returns false for every tick of an outage that refuses each stream", () => {
       const page = fixture();
       page.check(0);

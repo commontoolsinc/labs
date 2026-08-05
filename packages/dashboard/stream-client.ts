@@ -59,7 +59,14 @@ export function liveUpdateStream<S extends UpdateStream>(
   let dropped = false;
 
   const replace = (now: number): S => {
-    if (stream) stream.close();
+    if (stream) {
+      // Standing in a stream the page has heard nothing on leaves it with
+      // nothing it is hearing the server on, whatever the stream being
+      // replaced had managed. The page it was opened for is the exception:
+      // that one arrived over a working connection to the same server.
+      stream.close();
+      dropped = true;
+    }
     stream = open();
     openedAt = now;
     heardOnThisStream = false;
