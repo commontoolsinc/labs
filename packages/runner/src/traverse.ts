@@ -1707,9 +1707,10 @@ export abstract class BaseObjectTraverser {
     // reconciler's cell reads) rely on that. Re-keying must not widen
     // when the skip fires (testing.md §2: the OFF arm stays
     // byte-identical), so the old never-matches outcome is kept
-    // explicitly. Whether the coverage memo SHOULD apply to unscoped
-    // links is a real question — but it is a separate, deliberate
-    // change, not a side effect of re-keying.
+    // explicitly. Enabling the coverage memo for unscoped links is a
+    // separate, deliberate change — gated on first resolving the html
+    // reconciler's `get({ traverseCells: true })` value consumption —
+    // never a side effect of re-keying.
     if (link.scope === undefined) {
       return false;
     }
