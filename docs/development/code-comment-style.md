@@ -45,9 +45,10 @@ means changing the comments that describe it.
 ## Describe the system as it is
 
 A comment describes the system as it stands, for a reader who has the code in
-front of them and no other context. That one rule generates most of what
-follows, and the sections below are the shapes it rules out — each of which
-feels helpful while being written.
+front of them and no other context — not the conversation that produced the
+code, and not the one that produced the comment. That one rule generates most
+of what follows, and the sections below are the shapes it rules out, each of
+which feels helpful while being written.
 
 ### Not the code's own past
 

@@ -14,26 +14,13 @@ Write a new one — it is historical.
 ## Comments in code
 
 A comment carries what the code cannot say on its own. The code speaks for
-itself, so a comment describes rather than defends it.
+itself, so a comment describes rather than defends it, and public interfaces
+additionally carry descriptive JSDoc.
 
-- Say what the behavior is. Do not argue for this approach over one that was
-  not taken.
-- Do not describe what the code would otherwise do, or what it used to do. A
-  reader has the code in front of them and the history a command away.
-- Leave issue and ticket numbers out. The commit message and the branch name
-  carry that trail, and they stay accurate when the tracker changes.
-- Leave asides out. A comment is read by people who were not present for the
-  conversation that produced it.
-- When the reasoning is longer than a comment can hold, write it down under
-  `docs/features/` and have the comment name that document. Several invariants
-  in this repository are held that way, and the pairing is what keeps a subtle
-  constraint from being edited away by someone who never saw the argument for
-  it.
-
-Public interfaces additionally carry descriptive JSDoc.
 [`development/code-comment-style.md`](development/code-comment-style.md) is the
-full guide to both kinds of comment: what earns one, how it is marked up, what
-a doc comment carries, and the shapes that make a comment go stale or mislead.
+guide to both kinds: what earns a comment, what a doc comment carries, the
+markup they share with error and log messages, and the shapes that make a
+comment go stale or mislead. The spelling rule below reaches comments too.
 
 ## Live documentation
 

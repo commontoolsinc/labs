@@ -35,14 +35,12 @@ about one aspect of the runtime, are indexed in
 
 ### Comments
 
-- Comments explain **why**, not what. The code already says what it does, and a
-  comment that restates it is noise that eventually goes stale.
-- Describe the system as it stands. Not what it used to do, not the approach
-  that was not taken, and not the plan that got it here.
+- Comments explain **why**, not what, and describe the system as it stands.
 - Every export, every class and public member, and every non-trivial internal
   function carries a JSDoc doc comment.
-- [`code-comment-style.md`](code-comment-style.md) is the full guide, including
-  the Markdown markup that comments, error messages, and log messages all use.
+- [`code-comment-style.md`](code-comment-style.md) is the guide to both kinds,
+  and to the Markdown markup that comments, error messages, and log messages
+  all use.
 
 ## Code Design & Principles
 
@@ -55,10 +53,6 @@ about one aspect of the runtime, are indexed in
 ### TypeScript
 
 - Export types explicitly using `export type { ... }`.
-- Provide descriptive JSDoc comments on public interfaces; see
-  [`code-comment-style.md`](code-comment-style.md) for what one carries, and
-  [the documentation guide](../README.md#comments-in-code) for when the
-  reasoning belongs in a document instead.
 - Prefer strong typing with interfaces or types instead of `any`.
 - Update package-level README.md files.
 
