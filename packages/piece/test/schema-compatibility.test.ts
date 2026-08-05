@@ -898,6 +898,23 @@ describe("piece schema compatibility", () => {
     ).toThrow(/enum\/const became more restrictive/);
   });
 
+  it("treats fabric-primitive types as subtypes of object (one-way)", () => {
+    // A "FabricBytes" source widens safely into an "object" target; the
+    // reverse narrows and must be flagged. Same-type stays compatible.
+    expect(() =>
+      assertSchemaSubset({ type: "FabricBytes" }, { type: "object" })
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset({ type: "FabricBytes" }, { type: "FabricBytes" })
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset({ type: "object" }, { type: "FabricBytes" })
+    ).toThrow(/type object is not accepted/);
+    expect(() =>
+      assertSchemaSubset({ type: "FabricBytes" }, { type: "FabricHash" })
+    ).toThrow(/type FabricBytes is not accepted/);
+  });
+
   it("compares Fabric enum and const values canonically", () => {
     const first = new FabricBytes(new Uint8Array([1]));
     const second = new FabricBytes(new Uint8Array([2]));

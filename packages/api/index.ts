@@ -1804,6 +1804,38 @@ export interface JSONObject extends Readonly<Record<string, JSONValue>> {}
  */
 export type MutableJSONValue = Mutable<JSONValue>;
 
+/**
+ * Fabric-primitive validation types -- a non-standard addition to the JSON
+ * Schema `type` vocabulary. Each name identifies a concrete `FabricPrimitive`
+ * class from the data-model, and a value matches by prototype (`instanceof`),
+ * not by structure. `"object"` also accepts these values -- every fabric
+ * primitive is a subtype of `"object"` the way an `"integer"` value satisfies
+ * a `"number"` schema -- so schemas that predate this vocabulary keep working.
+ */
+export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
+  [
+    "FabricBytes",
+    "FabricEpochDays",
+    "FabricEpochNsec",
+    "FabricHash",
+    "FabricRegExp",
+  ] as const,
+);
+
+export type FabricPrimitiveSchemaType =
+  typeof FABRIC_PRIMITIVE_SCHEMA_TYPES[number];
+
+const FABRIC_PRIMITIVE_SCHEMA_TYPE_SET: ReadonlySet<string> = new Set(
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+);
+
+/** Whether the given schema type names a `FabricPrimitive` class. */
+export function isFabricPrimitiveSchemaType(
+  type: string,
+): type is FabricPrimitiveSchemaType {
+  return FABRIC_PRIMITIVE_SCHEMA_TYPE_SET.has(type);
+}
+
 // Valid values for the "type" property of a JSONSchema
 export type JSONSchemaTypes =
   | "object"
@@ -1814,7 +1846,8 @@ export type JSONSchemaTypes =
   | "boolean"
   | "null"
   | "undefined" // undefined is a non-standard addition
-  | "unknown"; // unknown is a non-standard addition
+  | "unknown" // unknown is a non-standard addition
+  | FabricPrimitiveSchemaType; // non-standard; see FABRIC_PRIMITIVE_SCHEMA_TYPES
 
 // We can use a more complex asCell specifier to handle things like
 // `Cell<Cell<T>>` with `{ asCell: ["cell", "cell"] }`.

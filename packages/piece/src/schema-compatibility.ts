@@ -12,6 +12,7 @@ import {
   validateSchemaDefinition,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
+import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   type FabricValue,
@@ -797,7 +798,10 @@ function typeSubsetIssue(
   const rejected = sourceTypes.find((sourceType) =>
     !targetTypes.some((targetType) =>
       sourceType === targetType ||
-      (sourceType === "integer" && targetType === "number")
+      (sourceType === "integer" && targetType === "number") ||
+      // Each fabric-primitive type is a subtype of "object" (mirrors
+      // schemaTypeMatchesValueType in the runner's traverse).
+      (isFabricPrimitiveSchemaType(sourceType) && targetType === "object")
     )
   );
   return rejected === undefined
