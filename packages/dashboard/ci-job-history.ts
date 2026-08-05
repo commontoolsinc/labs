@@ -1501,10 +1501,16 @@ export class CiJobHistoryCollector {
   }
 
   // An attempt keeps its detail for exactly as long as the run index keeps the
-  // attempt. Nothing GitHub would have to serve again is discarded early:
-  // compression makes an attempt's detail small enough that the whole retention
-  // window fits, so the only detail dropped belongs to a run that has left the
-  // index altogether.
+  // attempt. Compression makes an attempt's detail small enough that the whole
+  // retention window fits, so nothing GitHub would have to serve again is
+  // discarded early.
+  //
+  // Passing every attempt the index holds, with no cap of its own, is what
+  // makes pruning safe to run against a chart being assembled: a chart draws
+  // the runs the index names, so the set kept here always covers it. A cap
+  // here would break that, and no amount of coordinating the two would repair
+  // it — a chart would simply be reading files this had already decided to
+  // drop.
   async #pruneGanttDetail(source: CiHistorySource): Promise<void> {
     await this.#detail.prune(
       source,
@@ -2143,24 +2149,18 @@ export class CiJobHistoryCollector {
     return written;
   }
 
-  // Hands over the runs of an already collected chart. Pruning waits until they
-  // have all been handed over, so nothing takes an attempt mid-chart.
+  // Hands over the runs of an already collected chart.
   async #emitGantt(
     source: CiHistorySource,
     selection: GanttSelection,
     visit: (run: CiGanttInputRun) => void | Promise<void>,
   ): Promise<number> {
-    const resume = await this.#detail.pausePruning();
-    try {
-      return await this.#eachGanttRun(
-        source,
-        selection.entries,
-        selection.exactSelection,
-        visit,
-      );
-    } finally {
-      resume();
-    }
+    return await this.#eachGanttRun(
+      source,
+      selection.entries,
+      selection.exactSelection,
+      visit,
+    );
   }
 
   async #collectGantt(
@@ -2171,9 +2171,6 @@ export class CiJobHistoryCollector {
     workflowRuns?: WorkflowRun[],
     progress?: CiJobProgressRecord,
   ): Promise<GanttSelection> {
-    // Another collection's prune must not take an attempt this one has already
-    // decided the chart contains, so pruning waits until it has decided.
-    const resume = await this.#detail.pausePruning();
     try {
       return await this.#assembleGantt(
         token,
@@ -2184,7 +2181,6 @@ export class CiJobHistoryCollector {
         progress,
       );
     } finally {
-      resume();
       // Reported rather than raised: the chart is already decided, and a
       // filesystem that cannot take this also fails the run index save.
       await this.#pruneGanttDetail(source).catch((error: unknown) => {

@@ -1389,6 +1389,85 @@ Deno.test("a chart of no runs is still a readable input file", async () => {
   }
 });
 
+Deno.test("pruning keeps the detail of every attempt the run index holds", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-prune-invariant-" });
+  const file = `${directory}/history.json`;
+  const store = new CiJobHistoryStore(file);
+  const detail = new CiGanttDetailStore(ganttDetailDirectory(file));
+  const now = Date.now();
+  // Several runs inside the index's retention window and one past it. The
+  // stale one is dropped from the index by the same save that prunes detail.
+  const retained = [17_000, 17_001, 17_002, 17_003];
+  const stale = 17_009;
+  const jobs = [{
+    attempt: 1,
+    name: "Check",
+    status: "completed",
+    conclusion: "success",
+    started_at: new Date(now - HOUR).toISOString(),
+    completed_at: new Date(now - HOUR + 30_000).toISOString(),
+    steps: [],
+  }];
+  const collector = new RateLimitedCiJobHistoryCollector(
+    store,
+    <T>(path: string) =>
+      Promise.resolve(
+        path.includes("/runs?")
+          ? { workflow_runs: [workflowRun(retained[0], now - HOUR)] } as T
+          : { jobs: [apiJob("Check", 30)] } as T,
+      ),
+    detail,
+  );
+  try {
+    for (
+      const [runId, at] of [
+        ...retained.map((runId, index) =>
+          [runId, now - (index + 1) * HOUR] as const
+        ),
+        [stale, now - (CI_JOB_CACHE_DAYS + 1) * DAY] as const,
+      ]
+    ) {
+      await seedCachedRun(store, {
+        repo: REPO,
+        workflow: CI_WORKFLOW,
+        runId,
+        runAttempt: 1,
+        runUrl: `https://github.com/${REPO}/actions/runs/${runId}`,
+        at,
+        overallSeconds: 30,
+        jobs: [{ name: "Check", seconds: 30 }],
+        gantt: {
+          status: "completed",
+          conclusion: "success",
+          event: "push",
+          headBranch: "main",
+          startedAt: new Date(at).toISOString(),
+          workflowName: "CI",
+        },
+      }, jobs);
+    }
+
+    await collector.collect("token", now, CI_HISTORY_SOURCES.labs, 45);
+
+    // This is what makes pruning safe to run alongside chart assembly: a chart
+    // draws the runs the index names, and every one of those still has its
+    // detail afterwards. Only a run the index itself has dropped loses it.
+    for (
+      const { runId, runAttempt } of store.attempts(REPO, CI_WORKFLOW)
+    ) {
+      assert(
+        await detail.read(CI_HISTORY_SOURCES.labs, runId, runAttempt),
+        `run ${runId} attempt ${runAttempt} lost its detail`,
+      );
+    }
+    assertEquals(store.attempts(REPO, CI_WORKFLOW).length, retained.length);
+    assertEquals(store.get(REPO, CI_WORKFLOW, stale, 1), undefined);
+    assertEquals(await detail.read(CI_HISTORY_SOURCES.labs, stale, 1), null);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("CI Gantt collects an attempt whose detail cannot be read", async () => {
   const directory = await Deno.makeTempDir({ prefix: "ci-gantt-unreadable-" });
   const file = `${directory}/history.json`;
