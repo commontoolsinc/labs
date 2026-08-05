@@ -74,15 +74,6 @@ for the registration logic.
 The first candidate registered becomes the `default` alias and the value used
 for `TASK_MODELS.coding` / `TASK_MODELS.json`.
 
-### LLM observability (Phoenix)
-
-| Var | Purpose |
-|---|---|
-| `CFTS_AI_LLM_PHOENIX_PROJECT` | Phoenix project name |
-| `CFTS_AI_LLM_PHOENIX_URL` | Phoenix UI URL |
-| `CFTS_AI_LLM_PHOENIX_API_URL` | Phoenix API URL |
-| `CFTS_AI_LLM_PHOENIX_API_KEY` | Phoenix API key |
-
 ---
 
 ## Other AI services

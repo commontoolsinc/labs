@@ -109,7 +109,7 @@ Deno.test(
 
     assert(spans.length > 0, "expected exported spans");
 
-    // The LLM span is the one Phoenix reads as the model call, and it is not
+    // The LLM span is the one consumers read as the model call, and it is not
     // covered by the supplemental runtime-context attributes on its own.
     const kinds = spans.map((span) =>
       span.attributes["openinference.span.kind"]
