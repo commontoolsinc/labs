@@ -243,7 +243,7 @@ Stages, one PR each except C, which is a three-PR train (below):
         `docs/specs/persistent-scheduler-state.md` plus
         `docs/specs/scheduler-v2/per-doc-rehydration.md`'s account of
         the persisted form per the documentation lifecycle.
-- [ ] **D — seal-into-wave**: action transactions seal into the wave
+- [x] **D — seal-into-wave**: action transactions seal into the wave
       accumulator server-side; per-doc CAS with per-write-class
       conflict handling; CFC stays per action RUN — `action ×
       instance`, never per action (serving-loop.md §3c–§3d).

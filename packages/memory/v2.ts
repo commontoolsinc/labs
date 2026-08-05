@@ -42,6 +42,39 @@ export const COMMIT_CLASSES: readonly CommitClass[] = [
   "derived",
   "system",
 ];
+/**
+ * The identity annotation on one write WITHIN a derived-class commit's body
+ * (protocol.md §1's transaction identity model, §7's closed metadata list).
+ * The wave's envelope carries the SpaceServer's service identity — no user
+ * principal, no session — so the identity the envelope can no longer
+ * express rides here, per write, at action-run granularity. Two distinct
+ * things, never conflated:
+ *
+ * - ADDRESSING — `scopeKey`, the explicit instance a scoped write lands
+ *   in. The engine keys rows by it; admission REQUIRES it on every scoped
+ *   write of a derived commit (a service envelope has no session for
+ *   `resolveScopeKey` to derive a key from, and silently resolving
+ *   `user:<serviceDID>` is the empty-instance trap protocol.md §2 exists
+ *   to prevent).
+ * - ATTRIBUTION — `actingUser`/`actingSession`, the acting identity of the
+ *   action RUN that produced the write (`action × instance`, never the
+ *   action). Recorded, not read: no enforcement path consumes it today
+ *   (protocol.md §1 — audit/forensics, and the anticipated signature
+ *   graduation).
+ *
+ * Server-internal carriage like `commitClass` and `holder`: `ClientCommit`
+ * cannot express annotations, and no session-facing path supplies them.
+ * Defined once here in the wire-shape module beside `CommitClass` so the
+ * engine and the runner's wave machinery share one shape (the LD3
+ * direction; stage E moves the full scope_key format here too).
+ */
+export type DerivedWriteAnnotation = {
+  /** Index into the commit's operations array. */
+  op: number;
+  scopeKey?: string;
+  actingUser?: string;
+  actingSession?: string;
+};
 export type Reference = string & {
   readonly __memoryV2Reference: unique symbol;
 };

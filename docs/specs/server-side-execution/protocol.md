@@ -3,7 +3,7 @@
 Normative. Assumes [README.md](README.md); details Phases 1–4 surface
 between client, memory server, and SpaceServer.
 
-## Anchors (verified on main, 2026-08-02 — re-verify before coding)
+## Anchors (verified on main, 2026-08-02; §2b file:line refs refreshed 2026-08-04 — re-verify before coding)
 
 - Memory server: `packages/memory/v2.ts`, toolshed mount
   `/api/storage/memory` (`packages/toolshed/routes/storage/memory/`).
@@ -305,7 +305,7 @@ transaction writes one space — by DEFAULT, with one explicit opt-in.**
 A transaction FAILS if a writer for a different space was already
 opened on it (anchor: `packages/runner/src/storage/interface.ts`
 `writer(space)`) unless it opted in through `enableMultiSpaceWrites`
-(`interface.ts:786`), reachable only via the `.inSpace()` chain below —
+(`interface.ts:690`), reachable only via the `.inSpace()` chain below —
 which is what makes an UNMARKED crossing always a bug. Reads cross
 freely (serving-loop.md §3b; cross-space label metadata flows with
 them). v2 keeps that invariant and adds the class discipline:
@@ -347,10 +347,10 @@ section.
 even mint new ones — from a handler (`profile-create.tsx`,
 `ProfileHome.inSpace()`). The real chain is an explicit opt-in
 end to end: `.inSpace()` → `optIntoInSpaceMultiSpaceCommit`
-(`builder/pattern.ts:1084`) → `enableCrossSpaceChildCommit`
-(`runner.ts:4733`, commit order `[children..., parent]`) →
-`enableMultiSpaceWrites` (`interface.ts:786`) →
-`commitMultiSpace`/`runSplitCommits` (`v2-transaction.ts:2077/2156` —
+(`builder/pattern.ts:1090`) → `enableCrossSpaceChildCommit`
+(`runner.ts:4698`, commit order `[children..., parent]`) →
+`enableMultiSpaceWrites` (`interface.ts:690`) →
+`commitMultiSpace`/`runSplitCommits` (`v2-transaction.ts:1971/2048` —
 sequential, stop at first failure): today already foreign-first,
 home-after-success. v2 keeps the API, the split, and the order,
 relocated into the wave's commit step:

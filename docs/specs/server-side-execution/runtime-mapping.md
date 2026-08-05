@@ -118,7 +118,7 @@ Status legend:
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
-| 53 | One-transaction-one-space writer rule; `enableMultiSpaceWrites(order)` child-first escape hatch | `storage/interface.ts:761`, `786`, `968-972`; `runner.ts:4733-4748` | protocol §2b | COVERED |
+| 53 | One-transaction-one-space writer rule; `enableMultiSpaceWrites(order)` child-first escape hatch | `storage/interface.ts:664`, `690`, `963`; `runner.ts:4698-4713` | protocol §2b | COVERED |
 | 54 | `.inSpace()` provisioning: destinationSpace-threaded writes, foreign-first commit order, name cache | `storage/interface.ts:1269`, `runtime.ts:671` (name cache), rows 14/53 | protocol §2b | COVERED |
 | 55 | Cross-space reads and foreign-commit wakes (per-doc client subscriptions today) | `runner.ts:1034-1036`, `storage/query.ts` | README §3.1, serving-loop §3b | CHANGED |
 | 56 | Cell scopes `space`/`user`/`session`: scoped derived outputs, scoped result cells, scoped-slot writes exempt from surface checks | `scope.ts:11`, `runner.ts:5062-5092`, exemption `scheduler/run.ts:630-637` | scopes.md (RULED 2026-08-02) | CHANGED |

@@ -22,6 +22,7 @@ import {
   type CellScope,
   type ClientCommit,
   type CommitPrecondition,
+  DEFAULT_BRANCH,
   type DocumentPath,
   type EntityDocument,
   type EntityIdListOptions,
@@ -79,6 +80,8 @@ import type {
   PullError,
   PushError,
   Result,
+  SealedCommitVerdict,
+  SealedNativeCommit,
   State,
   StorageNotification,
   StorageTransactionRejected,
@@ -2715,6 +2718,236 @@ class SpaceReplica implements ISpaceReplica {
     );
   }
 
+  /**
+   * Seal a native commit into the optimistic overlay without pushing it
+   * (server-execution v2, serving-loop.md §3d): the local half of
+   * commitNative — normalize, build the client commit with its read set,
+   * apply pending, notify — with the store half deferred to `verdict`. The
+   * wave accumulator resolves the verdict at its commit step: `committed`
+   * promotes the pending writes at the wave commit's seq, `withdrawn`
+   * rolls them back through the same rejection path a refused push takes.
+   * The pending overlay this leaves behind is the wave's layered view —
+   * later action runs read the sealed writes through the ordinary read
+   * path until the verdict settles them.
+   */
+  sealNative(
+    transaction: NativeStorageCommit,
+    source: IStorageTransaction | undefined,
+    verdict: Promise<SealedCommitVerdict>,
+  ): SealedNativeCommit {
+    const preconditions = activeCommitPreconditions(transaction.preconditions);
+    const operations = transaction.operations
+      .filter((operation) => operation.type === DOCUMENT_MIME)
+      .map((operation) =>
+        operation.op === "delete"
+          ? {
+            op: "delete" as const,
+            id: operation.id,
+            scope: operation.scope,
+          }
+          : operation.op === "patch"
+          ? {
+            op: "patch" as const,
+            id: operation.id,
+            scope: operation.scope,
+            patches: operation.patches,
+            value: toExplicitDocument(operation.value),
+          }
+          : {
+            op: "set" as const,
+            id: operation.id,
+            scope: operation.scope,
+            value: toExplicitDocument(operation.value),
+          }
+      );
+    return this.sealOperations(
+      operations,
+      source,
+      preconditions,
+      transaction.sqliteOps ?? [],
+      verdict,
+    );
+  }
+
+  private sealOperations(
+    operations: NativeCommitOperation[],
+    source: IStorageTransaction | undefined,
+    preconditions: readonly CommitPrecondition[],
+    sqliteOps: readonly SqliteOperation[],
+    verdict: Promise<SealedCommitVerdict>,
+  ): SealedNativeCommit {
+    const localSeq = this.#nextLocalSeq++;
+    if (source !== undefined) {
+      recordCommitLocalSeq(source, this.#space, localSeq);
+    }
+    const commit: ClientCommit = {
+      localSeq,
+      reads: this.buildReads(source, localSeq),
+      // Cell ops first, folded SQLite ops last — the same commit shape
+      // commitOperations builds, so the wave batch is made of ordinary
+      // client commits.
+      operations: [
+        ...operations.map((operation) => {
+          switch (operation.op) {
+            case "delete":
+              return operation;
+            case "patch":
+              return {
+                op: "patch" as const,
+                id: operation.id,
+                scope: operation.scope,
+                patches: operation.patches,
+              };
+            case "set":
+              return {
+                op: "set" as const,
+                id: operation.id,
+                scope: operation.scope,
+                value: operation.value,
+              };
+          }
+        }),
+        ...sqliteOps,
+      ],
+      ...(preconditions.length > 0
+        ? { preconditions: [...preconditions] }
+        : {}),
+    };
+    const touched = operations.map((operation) => ({
+      id: operation.id,
+      scope: operation.scope,
+    }));
+    const hasSemanticOperations = operations.length > 0;
+    const shouldNotifySubscribers = hasSemanticOperations &&
+      this.hasNotificationSubscribers();
+    const shouldNotifySinks = hasSemanticOperations &&
+      this.hasSinkSubscribers(touched);
+    const before = shouldNotifySubscribers
+      ? Differential.checkout(
+        this,
+        touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+      )
+      : undefined;
+
+    for (const operation of operations) {
+      this.applyPending(operation, localSeq);
+    }
+
+    if (before !== undefined) {
+      const optimistic = before.compare(this);
+      this.#subscription.next({
+        type: "commit",
+        space: this.#space,
+        changes: optimistic,
+        source,
+      });
+      if (shouldNotifySinks) {
+        this.notifySinks(optimistic);
+      }
+    } else if (shouldNotifySinks) {
+      this.notifySinksForIds(touched);
+    }
+
+    const settled = this.settleSealedCommit(
+      localSeq,
+      operations,
+      commit,
+      source,
+      verdict,
+    );
+    this.#commitPromises.add(settled);
+    this.#commitOutcomeBySeq.set(
+      localSeq,
+      settled.catch(() => {}).finally(() => {
+        this.#commitOutcomeBySeq.delete(localSeq);
+      }),
+    );
+    settled.finally(() => {
+      this.#commitPromises.delete(settled);
+    });
+    return { localSeq, commit, settled };
+  }
+
+  private async settleSealedCommit(
+    localSeq: number,
+    operations: NativeCommitOperation[],
+    commit: ClientCommit,
+    source: IStorageTransaction | undefined,
+    verdict: Promise<SealedCommitVerdict>,
+  ): Promise<Result<Unit, StorageTransactionRejected>> {
+    // Registered unconditionally — unlike a pushed commit, a sealed commit
+    // needs the entry even with zero pending reads: reset() sweeps
+    // in-flight entries to reject them locally, and a sealed commit's
+    // verdict is held externally by the wave, so without the entry a reset
+    // would strand its pending writes until a verdict for a wave that no
+    // longer exists.
+    const inFlight = this.registerInFlightCommit(
+      localSeq,
+      operations,
+      commit,
+      source,
+      { alwaysRegister: true },
+    )!;
+    try {
+      const outcome = await Promise.race([
+        verdict.then(
+          (v) => ({ verdict: v }),
+          // The accumulator's contract is to resolve every verdict; a
+          // rejection is a wave-machinery bug, mapped to a withdrawal so
+          // the pending writes still roll back instead of stranding.
+          (reason) => ({
+            verdict: {
+              withdrawn: {
+                message: `wave verdict rejected: ${
+                  reason instanceof Error ? reason.message : String(reason)
+                }`,
+              },
+            } satisfies SealedCommitVerdict,
+          }),
+        ),
+        inFlight.localRejection.promise.then((rejection) => ({ rejection })),
+      ]);
+      if ("rejection" in outcome) {
+        // A local rejection (dependency cascade, replica reset) beat the
+        // wave's verdict; the eventual verdict is moot. A late `committed`
+        // flags a wave that outlived its replica — the analogue of
+        // suppressLateVerdict's warn.
+        verdict.then((v) => {
+          if ("committed" in v) {
+            logger.warn("seal-late-commit", () => [
+              "wave committed a sealed commit after its local rejection; " +
+              "write not promoted",
+              { localSeq },
+            ]);
+          }
+        }, () => {});
+        return await this.finalizeRejection(
+          localSeq,
+          operations,
+          source,
+          outcome.rejection,
+        );
+      }
+      const v = outcome.verdict;
+      if ("withdrawn" in v) {
+        return await this.finalizeRejection(
+          localSeq,
+          operations,
+          source,
+          this.makeLocalRejection(commit, v.withdrawn.message),
+        );
+      }
+      this.settleAccept(localSeq, operations, {
+        seq: v.committed.seq,
+        branch: commit.branch ?? DEFAULT_BRANCH,
+        revisions: [],
+      });
+      return { ok: {} };
+    } finally {
+      this.settleInFlightCommit(localSeq);
+    }
+  }
+
   reset(): void {
     // Every unsettled in-flight commit's optimistic pending write is about to
     // be wiped by #docs.clear(); locally reject each so its pushCommit
@@ -3052,8 +3285,11 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     commit: ClientCommit,
     source?: IStorageTransaction,
+    options: { alwaysRegister?: boolean } = {},
   ): InFlightCommit | undefined {
-    if (commit.reads.pending.length === 0) {
+    if (
+      commit.reads.pending.length === 0 && options.alwaysRegister !== true
+    ) {
       return undefined;
     }
     const dependencies = new Set<number>();

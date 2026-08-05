@@ -5,7 +5,7 @@ Normative spec for Phase 1 of
 [README.md](README.md) first; this document assumes its vocabulary.
 MUST/NEVER language is binding on implementers.
 
-## Anchors (verified on main, 2026-08-02 — re-verify before coding)
+## Anchors (verified on main, 2026-08-02; §3d/§2b file:line refs refreshed 2026-08-04 — re-verify before coding)
 
 - Scheduler: `packages/runner/src/scheduler/` (`execution.ts`,
   `dependency-graph.ts`, `events.ts`, `event-identity.ts`). The scheduler
@@ -664,12 +664,12 @@ which is the failure `eventWatermark` advancement exists to prevent.
 **Multi-space seals** (`.inSpace(...)` provisioning): one tx writes one
 space by DEFAULT; a tx crosses only via the explicit opt-in chain —
 `.inSpace()` → `optIntoInSpaceMultiSpaceCommit`
-(`builder/pattern.ts:1084`) → `enableCrossSpaceChildCommit`
-(`runner.ts:4733`, commit order `[children..., parent]`) →
-`enableMultiSpaceWrites` (`interface.ts:786`). Opted-in writes are
+(`builder/pattern.ts:1090`) → `enableCrossSpaceChildCommit`
+(`runner.ts:4698`, commit order `[children..., parent]`) →
+`enableMultiSpaceWrites` (`interface.ts:690`). Opted-in writes are
 sequenced at the commit step — foreign authored commits first, home
 derived commit after success — per protocol.md §2b (today's
-`commitMultiSpace`/`runSplitCommits`, `v2-transaction.ts:2077/2156`:
+`commitMultiSpace`/`runSplitCommits`, `v2-transaction.ts:1971/2048`:
 sequential, stop at first failure). The wave does not close until the
 split completes or fails as a unit (same-host store sequencing, not a
 network await).

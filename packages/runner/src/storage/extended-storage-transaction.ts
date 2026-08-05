@@ -29,6 +29,7 @@ import type {
   StorageTransactionFailed,
   StorageTransactionStatus,
   TransactionReactivityLog,
+  TransactionSealDestination,
   TransactionWriteDetail,
   Unit,
   WriteError,
@@ -353,10 +354,39 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   private readResultCacheMisses = 0;
   private readResultCacheSets = 0;
 
+  // The seal destination (server-execution v2, serving-loop.md §3d): when
+  // installed, commit() closes by sealing into it instead of committing to
+  // the store — one abstraction, two destinations. ECMAScript-private with a
+  // write-once pin, same shape as #cfcPolicySnapshotPinned: the Runtime
+  // configures every tx exactly once in edit() (usually with `undefined` —
+  // every client, and the OFF arm always), and that state must be just as
+  // write-once as an installed destination, or handler code reaching the
+  // concrete tx via `(cell.tx as any)` could hijack the commit path.
+  #sealDestination: TransactionSealDestination | undefined;
+  #sealDestinationPinned = false;
+
   constructor(
     public tx: IStorageTransaction,
     private cfcInstrumentation: CfcInstrumentationHooks = {},
   ) {}
+
+  /**
+   * One-shot configuration of the seal destination, called by the Runtime
+   * in edit() for every transaction it creates — with `undefined` on every
+   * client and in the OFF arm, and with the wave accumulator's destination
+   * on a serving runtime under EXPERIMENTAL_SERVER_EXECUTION.
+   */
+  configureSealDestination(
+    destination: TransactionSealDestination | undefined,
+  ): void {
+    if (this.#sealDestinationPinned) {
+      throw new Error(
+        "Seal destination is already configured for this transaction",
+      );
+    }
+    this.#sealDestinationPinned = true;
+    this.#sealDestination = destination;
+  }
 
   noteCfcSinkReleaseReject(
     info: { sink: string; effectId: string; detail: string },
@@ -1888,7 +1918,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
     }
 
-    const promise = this.tx.commit();
+    // The destination switch (serving-loop.md §3d): with a seal destination
+    // installed — a serving runtime under EXPERIMENTAL_SERVER_EXECUTION —
+    // this action tx SEALS into the wave accumulator instead of committing
+    // to the store. Everything above (the per-action-run CFC gates, §3c)
+    // and below (commit callbacks, post-commit side effects) fires for both
+    // destinations: sealing fires everything commit fires today.
+    const promise = this.#sealDestination !== undefined
+      ? this.#sealDestination.seal(this)
+      : this.tx.commit();
 
     // Call commit callbacks after commit completes (success or failure) Note
     // that promise always resolves, even if the commit fails, in which case it

@@ -5,6 +5,7 @@ import type {
   SchemaPathSelector,
 } from "@commonfabric/api";
 import type {
+  ClientCommit,
   CommitPrecondition,
   EntityDocument,
   EntityIdListOptions,
@@ -960,6 +961,45 @@ export interface IStorageTransaction {
    * more direct representation than legacy fact archives.
    */
   getNativeCommit?(space: MemorySpace): NativeStorageCommit | undefined;
+
+  /**
+   * Close this transaction by SEALING instead of committing to the store
+   * (server-execution v2, serving-loop.md §3d). Runs the same close work
+   * commit() runs — validation, per-space native commit construction in
+   * commit order, terminal state transition — but hands each space's native
+   * commit to `sink` rather than the space replica, stopping at the first
+   * failure exactly like the multi-space commit path. The sink owns what
+   * "sealed" means (the wave accumulator applies the writes to the local
+   * replica overlay and defers the store commit to the wave). Absent on
+   * backends that cannot seal; the OFF arm never calls it.
+   */
+  sealInto?(sink: ITransactionSealSink): Promise<Result<Unit, CommitError>>;
+}
+
+/**
+ * Receives a sealing transaction's per-space native commits
+ * (serving-loop.md §3d). Implemented by the wave accumulator; called by
+ * {@link IStorageTransaction.sealInto} once per written space, in commit
+ * order (`.inSpace()` children first, home space last — protocol.md §2b).
+ */
+export interface ITransactionSealSink {
+  sealSpaceCommit(
+    space: MemorySpace,
+    native: NativeStorageCommit,
+    source: IStorageTransaction,
+  ): Promise<Result<Unit, CommitError>>;
+}
+
+/**
+ * The seal destination an action transaction closes into when one is
+ * installed (server-execution v2, serving-loop.md §3d): server-side, under
+ * EXPERIMENTAL_SERVER_EXECUTION, an action tx SEALS into the wave
+ * accumulator instead of committing to the store. One abstraction, two
+ * destinations — with no destination installed (every client, and the OFF
+ * arm always), commit() takes today's store path unchanged.
+ */
+export interface TransactionSealDestination {
+  seal(tx: IExtendedStorageTransaction): Promise<Result<Unit, CommitError>>;
 }
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
@@ -1624,6 +1664,51 @@ export interface ISpaceReplica extends ISpace {
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>>;
+
+  /**
+   * Seal a native commit into this replica's optimistic overlay WITHOUT
+   * pushing it to the store (server-execution v2, serving-loop.md §3d). The
+   * local half of commitNative runs unchanged — the writes apply as pending
+   * state, so later action runs read them through the ordinary read path
+   * (the wave accumulator's layered view IS this overlay) — and the store
+   * half is deferred to `verdict`, which the wave commit step resolves:
+   * confirmed writes promote at the wave commit's seq, withdrawn writes
+   * (superseded, requeued, wave aborted) roll back through the same
+   * rejection path a refused push takes.
+   */
+  sealNative?(
+    transaction: NativeStorageCommit,
+    source: IStorageTransaction | undefined,
+    verdict: Promise<SealedCommitVerdict>,
+  ): SealedNativeCommit;
+}
+
+/**
+ * The wave commit step's per-sealed-commit disposition (serving-loop.md
+ * §3d). `committed` carries the wave commit's accepted store seq — the
+ * sealed commit's pending writes promote to confirmed at that seq.
+ * `withdrawn` rolls the sealed commit's pending writes back: its ops were
+ * dropped (superseded pure derivation), requeued (raced non-re-derivable
+ * consequence), or the wave never committed (lease lost, abandon). The
+ * replica shapes the withdrawal into its own rejection type; the wave
+ * supplies only the reason.
+ */
+export type SealedCommitVerdict =
+  | { committed: { seq: number } }
+  | { withdrawn: { message: string } };
+
+/** A replica's handle for one sealed native commit. */
+export interface SealedNativeCommit {
+  /** The replica-local seq the sealed pending writes are keyed by. */
+  localSeq: number;
+  /** The built commit — operations plus the read set (confirmed reads carry
+   * the store versions the wave's per-doc CAS and basis rows are computed
+   * from; pending reads name earlier sealed commits by localSeq, the
+   * in-wave read edges). */
+  commit: ClientCommit;
+  /** Resolves when the verdict has been applied locally (promotion or
+   * rollback complete). */
+  settled: Promise<Result<Unit, StorageTransactionRejected>>;
 }
 
 export type PushError =
