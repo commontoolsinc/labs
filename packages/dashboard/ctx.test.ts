@@ -174,3 +174,45 @@ Deno.test("env(): reads the process environment, undefined when unset", () => {
   }
   assertEquals(ctx.env(key), undefined);
 });
+
+Deno.test("runs(): a run keeps only the fields tiles read", async () => {
+  // What GitHub actually sends with every entry. The repository, head
+  // repository, whole head commit, and both actors are around fifty times the
+  // size of the fields a tile reads, and the snapshot is held between
+  // collections, so none of it is kept.
+  const surplus = {
+    repository: { id: 1, full_name: REPO, description: "x".repeat(500) },
+    head_repository: { id: 1, full_name: REPO },
+    actor: { login: "someone", id: 2 },
+    triggering_actor: { login: "someone", id: 2 },
+    artifacts_url: "https://api.github.test/artifacts",
+    jobs_url: "https://api.github.test/jobs",
+    check_suite_id: 99,
+  };
+  await withGithub(
+    (url) =>
+      pageOf(url) === 1 ? [{ ...run({ id: 7 }), ...surplus } as Run] : [],
+    async (ctx) => {
+      const [only] = await ctx.runs();
+      assertEquals(only.id, 7);
+      assertEquals(only.repo, REPO);
+      assertEquals(only.head_commit, { message: "t (#1)" });
+      assertEquals(
+        Object.keys(only).filter((key) => key in surplus),
+        [],
+      );
+    },
+  );
+});
+
+Deno.test("env(): reads the process environment, undefined when unset", () => {
+  const key = "DASHBOARD_CTX_TEST_KEY";
+  const ctx = makeCtx();
+  Deno.env.set(key, "set-by-the-test");
+  try {
+    assertEquals(ctx.env(key), "set-by-the-test");
+  } finally {
+    Deno.env.delete(key);
+  }
+  assertEquals(ctx.env(key), undefined);
+});
