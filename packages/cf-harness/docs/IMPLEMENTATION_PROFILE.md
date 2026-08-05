@@ -5,9 +5,9 @@ Profile date: 2026-07-22
 
 This document describes `@commonfabric/cf-harness` against the draft Common
 Fabric
-[Agent Harness specifications](https://github.com/commontoolsinc/specs/tree/main/agent-harness).
-It is deliberately more conservative than the feature list: protocol presence
-does not imply full conformance or external dependency health.
+[Agent Harness specifications](../../../docs/specs/agent-harness/README.md). It
+is deliberately more conservative than the feature list: protocol presence does
+not imply full conformance or external dependency health.
 
 ## Claimed classes
 

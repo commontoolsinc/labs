@@ -32,6 +32,10 @@ decision is reversed or superseded).
 - [Piece source lifecycle](piece-source-lifecycle.md)
 - [Scoped cell instances](scoped-cell-instances.md)
 
+### Agent execution
+
+- [Agent harness](agent-harness/README.md)
+
 ### Data, storage, and execution
 
 - [JSON Schema](json_schema.md)
