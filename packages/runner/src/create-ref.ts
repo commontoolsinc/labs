@@ -99,10 +99,10 @@ export function createRef(
     //
     // A _nullish_ form leaves the value in place, which is what the `??` is
     // for -- a value carrying no form at all needs no fallback, since that
-    // answer is the value already. A cell whose link is not materialized answers `null`
-    // here, and the branches below need the cell itself: one of them builds the
-    // link. Collapsing to the `null` instead would derive the id `null` derives
-    // and carry none of the value's own contents into it.
+    // answer is the value already. `CellImpl` is the one implementation that
+    // answers nullish, doing so for a cell whose link is not built yet, and the
+    // branches below need that cell rather than the `null`: one of them builds
+    // the link.
     obj = encodableFormOf(obj) ?? obj;
 
     if (isReactive(obj)) {
