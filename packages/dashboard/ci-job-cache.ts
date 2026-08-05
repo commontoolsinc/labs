@@ -145,6 +145,9 @@ const SUPERSEDED_BASENAMES = ["fabric-wall-ci-job-history.json"];
 
 const defaultFile = (): string => dashboardCacheFile(CACHE_BASENAME);
 
+const describeError = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 const runKey = (
   repo: string,
   workflow: string,
@@ -539,14 +542,26 @@ export class CiJobHistoryStore {
           superseded.some((name) => entry.name.startsWith(`${name}.`))
         ) paths.push(entry.name);
       }
-    } catch {
-      // The cache directory is absent, so there is nothing to remove.
+    } catch (error) {
+      // A directory that is not there yet has nothing in it to remove. Any
+      // other reason it cannot be listed is reported: these files are the
+      // largest thing in the cache directory, and a process that cannot reach
+      // them leaves the volume full.
+      if (!(error instanceof Deno.errors.NotFound)) {
+        console.error(
+          `CI run index could not list ${directory}: ${describeError(error)}`,
+        );
+      }
     }
     for (const path of paths) {
       try {
         await Deno.remove(join(directory, path));
-      } catch {
-        // The superseded layout is absent, which is the steady state.
+      } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound)) {
+          console.error(
+            `CI run index could not remove ${path}: ${describeError(error)}`,
+          );
+        }
       }
     }
   }

@@ -104,25 +104,28 @@ Deno.test("CI job cache never removes the file it was given", async () => {
 });
 
 Deno.test("CI job cache orders retained attempts by when their run started", async () => {
-  const store = new CiJobHistoryStore(
-    `${await Deno.makeTempDir()}/history.json`,
-  );
-  // A rerun keeps its original, smaller run identifier but starts later, so
-  // ordering by identifier would put the newest attempt last.
-  store.set(cachedRun(500, 1, NOW - 3 * DAY_MS));
-  store.set(cachedRun(500, 2, NOW));
-  store.set(cachedRun(900, 1, NOW - DAY_MS));
+  const directory = await Deno.makeTempDir({ prefix: "ci-job-cache-" });
+  try {
+    const store = new CiJobHistoryStore(`${directory}/history.json`);
+    // A rerun keeps its original, smaller run identifier but starts later, so
+    // ordering by identifier would put the newest attempt last.
+    store.set(cachedRun(500, 1, NOW - 3 * DAY_MS));
+    store.set(cachedRun(500, 2, NOW));
+    store.set(cachedRun(900, 1, NOW - DAY_MS));
 
-  assertEquals(store.attempts(REPO, WORKFLOW), [
-    { runId: 500, runAttempt: 2 },
-    { runId: 900, runAttempt: 1 },
-    { runId: 500, runAttempt: 1 },
-  ]);
-  assertEquals(store.attempts(REPO, WORKFLOW, 2), [
-    { runId: 500, runAttempt: 2 },
-    { runId: 900, runAttempt: 1 },
-  ]);
-  assertEquals(store.attempts("other/repo", WORKFLOW), []);
+    assertEquals(store.attempts(REPO, WORKFLOW), [
+      { runId: 500, runAttempt: 2 },
+      { runId: 900, runAttempt: 1 },
+      { runId: 500, runAttempt: 1 },
+    ]);
+    assertEquals(store.attempts(REPO, WORKFLOW, 2), [
+      { runId: 500, runAttempt: 2 },
+      { runId: 900, runAttempt: 1 },
+    ]);
+    assertEquals(store.attempts("other/repo", WORKFLOW), []);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
 });
 
 Deno.test("CI job cache refreshes legacy and outdated samples without dropping their runs", async () => {

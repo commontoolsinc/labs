@@ -229,6 +229,11 @@ export class CiGanttDetailStore {
       throw error;
     }
     for (const path of removals) {
+      // Rechecked before each removal, not only on the way in: listing the
+      // directory and removing from it both yield, and a chart that starts in
+      // either window is one this loop would otherwise take a file from. What
+      // it leaves behind the next prune collects.
+      if (this.#charts) return;
       try {
         await Deno.remove(path);
       } catch (error) {

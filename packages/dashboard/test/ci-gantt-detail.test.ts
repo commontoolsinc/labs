@@ -272,6 +272,31 @@ describe("ci-gantt-detail", () => {
           expect(await store.read(SOURCE, 30, 1)).toBeNull();
         });
 
+        it("stops removing when a chart starts partway through", async () => {
+          for (const runId of [60, 61, 62]) {
+            await store.write(SOURCE, runId, 1, [ganttJob("Check")]);
+          }
+          // Listing the directory yields, so a chart can start after prune has
+          // passed its entry check and before it has removed anything.
+          const listing = Deno.readDir;
+          let resume: () => void = () => {};
+          try {
+            Deno.readDir = (path: string | URL) => {
+              Deno.readDir = listing;
+              resume = store.pausePruning();
+              return listing(path);
+            };
+            await store.prune(SOURCE, []);
+          } finally {
+            Deno.readDir = listing;
+            resume();
+          }
+
+          expect(await store.read(SOURCE, 60, 1)).not.toBeNull();
+          expect(await store.read(SOURCE, 61, 1)).not.toBeNull();
+          expect(await store.read(SOURCE, 62, 1)).not.toBeNull();
+        });
+
         it("returns without error when the directory does not exist", async () => {
           const absent = new CiGanttDetailStore(`${directory}/absent`);
           await absent.prune(SOURCE, []);
