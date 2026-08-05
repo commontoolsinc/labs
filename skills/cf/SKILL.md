@@ -250,10 +250,14 @@ nested container, concise projection still applies its field mask across
 encountered arrays to prevent sibling disclosure; use an explicit schema for a
 fixed output contract. The two flags compose as filter-then-project. Both run
 through runtime filter/map/lift nodes, which construct projected values from
-source-schema-selected reads, so CFC behavior is the same as a computed pattern
-expression. Source schema metadata is authoritative; projection schemas cannot
-supply `ifc`, `asCell`, `scope`, or `default`. See `packages/cli/README.md` for
-the exact syntax and supported schema subset.
+source-schema-selected reads. A declared root shape and structurally selectable
+properties make the initial read the union of predicate and projection paths, so
+omitted linked subgraphs are not hydrated; ambiguous compositions can retain a
+wider selector, and schema-less or root-union sources need a value-shape read
+first. CFC behavior is the same as a computed pattern expression. Source schema
+metadata is authoritative; projection schemas cannot supply `ifc`, `asCell`,
+`scope`, or `default`. See `packages/cli/README.md` for the exact syntax and
+supported schema subset.
 
 For `piece call`, options before the callable name configure `piece call`.
 Arguments after the callable name configure the invoked handler or tool. The

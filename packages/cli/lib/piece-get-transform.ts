@@ -684,6 +684,117 @@ function schemaIsArray(schema: JSONSchema | undefined): boolean {
   return schemaTypes(schema).includes("array");
 }
 
+type SchemaRootKind = "array" | "non-array" | "unknown";
+
+interface SchemaRootWalkBehavior<T> {
+  unknown: T;
+  fromTypes: (types: string[]) => T;
+  fromAlternatives: (values: T[]) => T;
+  fromAllOf: (values: T[]) => T;
+  unresolvedRef: (error: unknown) => T;
+}
+
+function walkSchemaRoot<T>(
+  schema: JSONSchema | undefined,
+  behavior: SchemaRootWalkBehavior<T>,
+  root: JSONSchema = schema ?? true,
+  ancestors = new Set<object>(),
+): T {
+  if (!isRecord(schema) || ancestors.has(schema)) return behavior.unknown;
+  ancestors.add(schema);
+  const documentRoot = schema.$defs !== undefined ? schema : root;
+  try {
+    // A reference is the source shape for this heuristic. Resolve it before
+    // inspecting sibling keywords so a broken reference cannot lend false
+    // shape authority through, for example, a sibling `type`.
+    if (schema.$ref !== undefined) {
+      try {
+        return walkSchemaRoot(
+          ContextualFlowControl.resolveSchemaRefsOrThrow(
+            schema,
+            documentRoot,
+          ),
+          behavior,
+          documentRoot,
+          ancestors,
+        );
+      } catch (error) {
+        return behavior.unresolvedRef(error);
+      }
+    }
+
+    const types = schemaTypes(schema);
+    // An explicit `type` is the authoritative root-shape signal here.
+    // Combinators are conjunctive with it, so contradictory branch types
+    // cannot expand the root shapes it declares.
+    if (types.length > 0) return behavior.fromTypes(types);
+
+    const alternatives = [...schema.anyOf ?? [], ...schema.oneOf ?? []];
+    if (alternatives.length > 0) {
+      return behavior.fromAlternatives(
+        alternatives.map((option) =>
+          walkSchemaRoot(option, behavior, documentRoot, ancestors)
+        ),
+      );
+    }
+
+    if (schema.allOf !== undefined) {
+      return behavior.fromAllOf(
+        schema.allOf.map((option) =>
+          walkSchemaRoot(option, behavior, documentRoot, ancestors)
+        ),
+      );
+    }
+    return behavior.unknown;
+  } finally {
+    ancestors.delete(schema);
+  }
+}
+
+/**
+ * Classify a root container only when the declared schema makes its shape
+ * unambiguous. This is intentionally conservative: an unknown shape falls
+ * back to inspecting the value so schema-less and union-shaped cells retain
+ * their existing projection semantics.
+ *
+ * @internal Exported for focused root-shape tests.
+ */
+export function schemaRootKind(
+  schema: JSONSchema | undefined,
+  root: JSONSchema = schema ?? true,
+  ancestors = new Set<object>(),
+): SchemaRootKind {
+  return walkSchemaRoot(
+    schema,
+    {
+      unknown: "unknown",
+      fromTypes: (types) => {
+        const hasArray = types.includes("array");
+        if (!hasArray) return "non-array";
+        return types.every((type) => type === "array") ? "array" : "unknown";
+      },
+      fromAlternatives: (kinds) => {
+        const first = kinds[0];
+        return first !== "unknown" && kinds.every((kind) => kind === first)
+          ? first
+          : "unknown";
+      },
+      fromAllOf: (values) => {
+        const kinds = new Set(
+          values.filter((kind) => kind !== "unknown"),
+        );
+        return kinds.size === 1 ? [...kinds][0] : "unknown";
+      },
+      // Root classification is an optimization only. A broken reference must
+      // not prevent the existing value-shaped fallback from reporting the
+      // source schema problem through the normal projection path.
+      unresolvedRef: () => "unknown",
+    },
+    root,
+    ancestors,
+  );
+}
+
 function schemaAtArrayItem(
   schema: JSONSchema | undefined,
 ): JSONSchema | undefined {
@@ -796,37 +907,27 @@ export function schemaMayBeArray(
   root: JSONSchema = schema ?? true,
   ancestors = new Set<object>(),
 ): boolean {
-  if (!isRecord(schema)) return false;
-  if (ancestors.has(schema)) return false;
-  ancestors.add(schema);
-  const documentRoot = schema.$defs !== undefined ? schema : root;
-  try {
-    if (schema.$ref !== undefined) {
-      let resolved: JSONSchema;
-      try {
-        resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
-          schema,
-          documentRoot,
-        );
-      } catch (error) {
+  return walkSchemaRoot(
+    schema,
+    {
+      unknown: false,
+      fromTypes: (types) => types.includes("array"),
+      fromAlternatives: (values) => values.some(Boolean),
+      fromAllOf: (values) => values.some(Boolean),
+      // Unlike root classification, concise-path alignment cannot safely
+      // continue without resolving the schema that determines array traversal.
+      unresolvedRef: (error) => {
         throw new PieceGetTransformError(
           `Could not resolve source schema reference for --schema: ${
             error instanceof Error ? error.message : String(error)
           }`,
           { cause: error },
         );
-      }
-      return schemaMayBeArray(resolved, documentRoot, ancestors);
-    }
-    if (schemaTypes(schema).includes("array")) return true;
-    return [
-      ...schema.anyOf ?? [],
-      ...schema.oneOf ?? [],
-      ...schema.allOf ?? [],
-    ].some((option) => schemaMayBeArray(option, documentRoot, ancestors));
-  } finally {
-    ancestors.delete(schema);
-  }
+      },
+    },
+    root,
+    ancestors,
+  );
 }
 
 function alignConciseProjectionMask(
@@ -978,7 +1079,21 @@ export function selectSourceSchema(
     return source;
   }
   if (source.$ref !== undefined) {
-    return source;
+    if (source.$ref.startsWith("#/") && source.$defs === undefined) {
+      return source;
+    }
+    try {
+      return selectSourceSchema(
+        ContextualFlowControl.resolveSchemaRefsOrThrow(source, source),
+        mask,
+        purpose,
+      );
+    } catch {
+      // A malformed or unsupported source reference is not projection's job
+      // to reinterpret. Preserve the declared selector and let the runtime
+      // report the underlying schema problem.
+      return source;
+    }
   }
   if (
     source.anyOf !== undefined || source.oneOf !== undefined ||
@@ -1178,8 +1293,11 @@ export async function derivePieceGetValue(
     return await sourceValueCell.pull();
   }
 
-  const sourceValue = await sourceValueCell.pull();
-  if (transform.filter !== undefined && !Array.isArray(sourceValue)) {
+  const rootKind = schemaRootKind(sourceSchema);
+  const sourceIsArray = rootKind === "unknown"
+    ? Array.isArray(await sourceValueCell.pull())
+    : rootKind === "array";
+  if (transform.filter !== undefined && !sourceIsArray) {
     throw new PieceGetTransformError(
       "--filter can only be applied to an array",
     );
@@ -1187,7 +1305,7 @@ export async function derivePieceGetValue(
   const projection = resolveProjection(
     transform.projection,
     sourceSchema,
-    Array.isArray(sourceValue),
+    sourceIsArray,
   );
   const sourceItemSchema = schemaAtArrayItem(sourceSchema);
   const predicateItemMask = transform.filter === undefined
@@ -1398,10 +1516,36 @@ export async function derivePieceGetValue(
     await outputCell.pull();
     await runtime.idle();
     const outputValue = outputCell.get();
-    const recorded = errors.slice(errorCountBefore).at(-1);
-    if (recorded !== undefined) {
+    const recorded = errors.slice(errorCountBefore);
+    if (recorded.length > 0) {
+      // Translate the array-shape errors emitted by the runner filter/map
+      // builtins into CLI-level messages. Keep these matches in sync with
+      // packages/runner/src/builtins/{filter,map}.ts; the mismatch regression
+      // test in piece-get-transform.test.ts guards this package-boundary
+      // coupling.
+      if (
+        transform.filter !== undefined &&
+        recorded.some((error) =>
+          error.message === "filter currently only supports arrays"
+        )
+      ) {
+        throw new PieceGetTransformError(
+          "--filter can only be applied to an array",
+        );
+      }
+      if (
+        projection?.projectsArrayItems &&
+        recorded.some((error) =>
+          error.message === "map currently only supports arrays"
+        )
+      ) {
+        throw new PieceGetTransformError(
+          "--schema can only project array items from an array value",
+        );
+      }
+      const lastError = recorded.at(-1)!;
       throw new PieceGetTransformError(
-        `Could not apply piece get transform: ${recorded.message}`,
+        `Could not apply piece get transform: ${lastError.message}`,
       );
     }
     deps.onOutputCell?.(outputCell);
