@@ -370,17 +370,14 @@ describe("encodable-form", () => {
     });
 
     it("returns the result of a member only `Reflect.apply` can call", () => {
-      // A `Reactive` is a proxy over a cell, and it answers a method name with
-      // a PROXY over that method. Reading `.call` off that goes back through
-      // the proxy as data navigation and comes out uncallable, so the invoke
-      // has to reach the function's own call behavior rather than a property
-      // of it.
+      // A method can arrive wrapped in a proxy that answers EVERY property
+      // read with something of its own, so nothing read off the method --
+      // `.call` included -- is callable, while the method itself still is. So
+      // the invoke has to reach a function's call behavior rather than read a
+      // property that names it.
       const method = new Proxy(function () {
         return { invoked: true };
-      }, {
-        get: (target, prop) =>
-          prop === "call" ? { notAFunction: true } : Reflect.get(target, prop),
-      });
+      }, { get: () => ({ notAFunction: true }) });
       expect(encodableFormOf({ toEncodableForm: method }))
         .toEqual({ invoked: true });
     });
