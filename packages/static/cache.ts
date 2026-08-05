@@ -9,7 +9,7 @@ import { toFileUrl } from "@std/path/posix/to-file-url";
 import { join } from "@std/path/posix/join";
 import { generateETag } from "./etag.ts";
 
-export const FS_URL = (import.meta.dirname && isDeno())
+const FS_URL = (import.meta.dirname && isDeno())
   ? toFileUrl(join(import.meta.dirname, "assets"))
   : undefined;
 
@@ -21,23 +21,38 @@ export interface CachedAsset {
   etag: string;
 }
 
-export interface StaticCache {
-  get(assetName: string): Promise<Uint8Array>;
-  getText(assetName: string): Promise<string>;
-  getUrl(assetName: string): URL;
-  getWithETag(assetName: string): Promise<CachedAsset>;
-}
-
-export class InnerCache {
+/**
+ * The cache of static assets served from one base location, holding each
+ * asset's content together with a strong ETag over that content. An asset is
+ * read at most once per instance: under Deno it is read off the file system,
+ * and elsewhere it is fetched over the network.
+ */
+export class StaticCache {
   private cache: Map<string, Promise<CachedAsset>> = new Map();
   private baseUrl: URL;
+
+  /**
+   * Constructs an instance which resolves asset names against `baseUrl`.
+   */
   constructor(baseUrl: URL) {
     this.baseUrl = baseUrl;
   }
 
   /**
-   * Get the content buffer of a static asset.
-   * Backward compatible method that returns only the buffer.
+   * Constructs an instance reading the assets bundled alongside this module,
+   * which requires the file system and so is available only under Deno.
+   */
+  static fromFileSystem(): StaticCache {
+    if (!FS_URL) {
+      throw new Error(
+        "`StaticCache.fromFileSystem()` is only available in Deno.",
+      );
+    }
+    return new StaticCache(new URL(FS_URL));
+  }
+
+  /**
+   * Gets the content of a static asset, without its ETag.
    */
   async get(assetName: string): Promise<Uint8Array> {
     const cached = await this.getWithETag(assetName);
@@ -45,8 +60,8 @@ export class InnerCache {
   }
 
   /**
-   * Get a static asset with its ETag for cache validation.
-   * Returns both the content buffer and the generated ETag.
+   * Gets a static asset's content together with the ETag a caller validates
+   * it against.
    */
   getWithETag(assetName: string): Promise<CachedAsset> {
     const currentValue = this.cache.get(assetName);
@@ -58,27 +73,30 @@ export class InnerCache {
     return promise;
   }
 
+  /**
+   * Gets the content of a static asset, decoded as text.
+   */
   async getText(assetName: string): Promise<string> {
     return decode(await this.get(assetName));
   }
 
+  /**
+   * Gets the location of a static asset, and throws when `assetName` is not
+   * one this package ships.
+   */
   getUrl(assetName: string): URL {
     if (!assets.includes(assetName)) {
       throw new Error(`No static asset "${assetName}" found.`);
     }
 
-    const url = this.getBaseUrl();
+    const url = new URL(this.baseUrl);
     url.pathname = join(url.pathname, assetName);
     return url;
   }
 
-  getBaseUrl(): URL {
-    return new URL(this.baseUrl);
-  }
-
   /**
-   * Fetch an asset and generate its ETag.
-   * Handles both Deno (file system) and browser (HTTP) environments.
+   * Helper for `getWithETag()`, which reads an asset and generates its ETag,
+   * off the file system under Deno and over the network elsewhere.
    */
   private async requestWithETag(assetName: string): Promise<CachedAsset> {
     const url = this.getUrl(assetName);
@@ -101,20 +119,5 @@ export class InnerCache {
 
     const etag = await generateETag(buffer);
     return { buffer, etag };
-  }
-}
-
-export class StaticCacheHTTP extends InnerCache implements StaticCache {
-  constructor(baseUrl: URL) {
-    super(baseUrl);
-  }
-}
-
-export class StaticCacheFS extends InnerCache implements StaticCache {
-  constructor() {
-    if (!FS_URL) {
-      throw new Error("FsCache only available in Deno.");
-    }
-    super(new URL(FS_URL));
   }
 }
