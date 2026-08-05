@@ -4294,7 +4294,12 @@ export class SchemaObjectTraverser<V extends FabricValue>
     // Apply defaults from our schema
     if (isRecord(schema) && schema.properties) {
       for (const propKey of Object.keys(schema.properties)) {
-        if (propKey in filteredObj) {
+        // `Object.hasOwn`, not `in`: `propKey` is a schema-declared property
+        // NAME and `filteredObj` is data. `in` walks the prototype chain, so a
+        // schema property called `toString` or `valueOf` looked already-present
+        // on every object, its default was never applied, and the caller got
+        // `Object.prototype`'s function where the schema promised a value.
+        if (Object.hasOwn(filteredObj, propKey)) {
           continue;
         }
         const subSchema = ContextualFlowControl.getSchemaAtPath(schema, [
