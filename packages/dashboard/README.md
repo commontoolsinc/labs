@@ -37,7 +37,7 @@ dashboard/
   favicon.ts    runtime status priority and access to generated PNG favicon copies
   favicon-png.generated.ts  generated runtime PNG favicon copies
   favicon-artwork.ts  build/test-only SVG source for those favicon copies
-  version.ts    Git commit used as the browser/server compatibility version
+  version.ts    the browser/server compatibility version a page reloads on
   render.ts     renderTile(view) + the page shell/CSS
   server.ts     generic runtime: scheduler, SSE, route mounting, page assembly
   registry.ts   THE ONE REGISTRATION POINT — the array of tiles
@@ -77,11 +77,17 @@ snapshot for that source and shows the combined list in gray with the error.
 Each event connection receives the current tile snapshot before it waits for
 new collections. The browser reconciles that snapshot by tile ID, leaving
 unchanged elements, focus, and scroll positions in place. Routine data updates
-never navigate the page. The server uses the current Git commit as its
-compatibility version. Local development reads the checked-out commit from Git.
-A deployed image receives the commit that its publishing workflow checked out.
-An unattended display reloads when it reconnects to a server running a
-different commit.
+never navigate the page. The page shell — the styles and the client script —
+arrives only with a full page load, so the server hands the browser a
+compatibility version and the page reloads itself as soon as the server reports
+a different one. A deployed image uses the commit its publishing workflow
+checked out, which is fixed for the life of the image, so every display on that
+image agrees. A server started from a checkout reports the moment it started
+instead, because the code under it changes between one start and the next: a
+watched restart therefore pulls every open page onto the code that restart is
+serving, and the version in the page source says which start served it.
+An unattended display reloads when it reconnects to a server reporting a
+different version.
 
 The tab favicon follows the most urgent visible tile. It is red when any tile is
 red, orange when there are no red tiles but at least one orange tile, and green
@@ -142,6 +148,14 @@ little in between worth manufacturing. Red has to stay rare and trustworthy: if
 tiles sit red or amber most of the time, people stop seeing them, and a board
 everyone has learned to ignore is worse than no board. A tile earns a color
 change; it never reaches for one to get attention.
+
+Each signal carries a texture behind the tile as well as a color, so a state is
+legible without depending on color alone. A gray tile is covered in a grid of
+tiny dots, an amber tile in wavy lines, and a red tile in zig-zags. Green tiles
+are left plain, which is the calm the rest of the wall is measured against.
+Every texture fades out down the tile: it is whole for the tile's top fifth,
+thins from there, and is gone four fifths of the way down, which leaves the
+sub line and the foot of a chart on plain color.
 
 Think about how a tile makes someone feel before you think about what it
 measures. Prefer an honest gray "unknown" over a false green — a tile that
