@@ -1252,6 +1252,20 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
+   * INBOUND settlement only (server-execution v2 stage F): the serving
+   * loop's wave-settle barrier. Awaits watch refreshes and update
+   * processing across providers, but NOT commit settlement — a sealed
+   * commit settles at the wave commit the loop performs after settling,
+   * so the full `synced()` would deadlock against it (see
+   * SpaceReplica.inputSynced).
+   */
+  async inputSynced(): Promise<void> {
+    await Promise.all(
+      [...this.#providers.values()].map((provider) => provider.inputSynced()),
+    );
+  }
+
+  /**
    * A throwable `AuthorizationError` when `space` is under a permanent
    * authorization denial (an ACL shortfall, an audience or protocol mismatch),
    * or undefined when it is authorized or was never opened. Scoped to one space
@@ -1895,6 +1909,11 @@ class Provider implements IStorageProvider {
     return this.followReplacement((replica) => replica.synced());
   }
 
+  /** See SpaceReplica.inputSynced (stage F's serving-loop barrier). */
+  inputSynced(): Promise<void> {
+    return this.followReplacement((replica) => replica.inputSynced());
+  }
+
   authorizationError(): Error | undefined {
     return this.replica.authorizationError();
   }
@@ -2256,6 +2275,29 @@ class SpaceReplica implements ISpaceReplica {
 
   async synced(): Promise<void> {
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
+  }
+
+  /**
+   * INBOUND settlement only (server-execution v2 stage F): outstanding
+   * watch refreshes/pulls, EXCLUDING commit settlement AND update
+   * processing. The serving loop's wave settle needs "requested input
+   * has arrived" — but a SEALED commit's settlement resolves only at
+   * the wave commit the loop performs AFTER settling, and update
+   * PROCESSING can park behind that same sealed commit (promotion
+   * ordering), so awaiting either is a deadlock by construction (broken
+   * only by the flush deadline — observed as every first wave of a
+   * burst flushing at T_flush). Client code keeps `synced()`:
+   * durability is exactly what a client barrier means.
+   *
+   * Residual, deliberate: an inbound frame whose processing is parked
+   * behind a sealed commit settles AFTER the wave commit, so a foreign
+   * authored frame in exactly that position can be claimed by W one
+   * wave early; its dirtiness re-enters as the next wave's input and
+   * the derived correction lands there (self-healing, flagged for the
+   * Phase 2 gate hardening).
+   */
+  async inputSynced(): Promise<void> {
+    await Promise.all([...this.#syncPromises]);
   }
 
   /**

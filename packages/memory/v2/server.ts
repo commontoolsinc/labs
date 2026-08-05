@@ -3246,6 +3246,61 @@ export class Server {
     this.scheduleRefresh();
   }
 
+  /** Whether the space has ≥1 live client session (serving-loop.md §1's
+   * ACTIVE criterion; the SpaceServer's parking policy reads it). The
+   * SpaceServer's own loopback session is not a CLIENT session — the
+   * parking policy excludes the service principal, or an active space
+   * could never park. */
+  hasLiveSessionsForSpace(
+    space: string,
+    options: { excludePrincipal?: string } = {},
+  ): boolean {
+    return this.#sessions.sessionsForSpace(space).some((session) =>
+      options.excludePrincipal === undefined ||
+      session.principal !== options.excludePrincipal
+    );
+  }
+
+  /**
+   * The space's demanded roots (serving-loop.md §1: demand is
+   * value-granular client pull — a subscription names what to serve).
+   * Distinct (id, scope) pairs across every live session's watch specs;
+   * the SpaceServer loads graph structure sufficient to resolve them.
+   */
+  watchedRootsForSpace(
+    space: string,
+    options: {
+      /** Sessions of this principal are NOT demand (the SpaceServer's
+       * own loopback session watches whatever its graph reads; mapping
+       * those back into demand would make the loop demand its own
+       * reads, recursively). */
+      excludePrincipal?: string;
+    } = {},
+  ): Array<{ id: string; scope?: CellScope }> {
+    const roots = new Map<string, { id: string; scope?: CellScope }>();
+    for (const session of this.#sessions.sessionsForSpace(space)) {
+      if (
+        options.excludePrincipal !== undefined &&
+        session.principal === options.excludePrincipal
+      ) {
+        continue;
+      }
+      for (const watch of session.watches) {
+        for (const root of watch.query.roots) {
+          const scope = root.scope ?? "space";
+          const key = `${scope}\0${root.id}`;
+          if (!roots.has(key)) {
+            roots.set(key, {
+              id: root.id,
+              ...(root.scope === undefined ? {} : { scope: root.scope }),
+            });
+          }
+        }
+      }
+    }
+    return [...roots.values()];
+  }
+
   /**
    * Attach (or clear) the ExecutorHost's in-process observer
    * (serving-loop.md §1 planes (b)/(d)). One observer per server: a

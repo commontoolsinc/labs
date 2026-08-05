@@ -384,6 +384,11 @@ export async function runSchedulerAction(
   }
   (tx.tx as { debugActionId?: string }).debugActionId = actionId;
   tx.tx.sourceAction = action;
+  // Server-execution v2 stage F (serving-loop.md §3d): a serving
+  // runtime's installed stamper attaches the wave run context here — the
+  // reactive-action choke point — so every scheduler-driven derivation
+  // seals stamped. A no-op everywhere else (one undefined check).
+  state.runtime.stampServerRun(tx, { actionId, kind: "derivation" });
   const actionStartTime = performance.now();
 
   let result: any;

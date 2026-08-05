@@ -329,6 +329,21 @@ export type PatternInstantiationObserver = (
   instantiation: PatternInstantiation,
 ) => void;
 
+/**
+ * What the scheduler knows about a run when it mints the run's
+ * transaction (server-execution v2 stage F): the durable action identity
+ * (restart-stable — `implementationHash:instanceKey`, the basis index's
+ * `action` column) and the run's kind. The serving loop's stamper
+ * enriches this with per-run identity (M1) and attaches the wave run
+ * context (serving-loop.md §3d).
+ */
+export type ServerRunInfo = {
+  actionId: string;
+  kind: "derivation" | "event-handler";
+  /** The dispatched event's durable id (event-handler runs). */
+  eventId?: string;
+};
+
 export interface RuntimeOptions {
   apiUrl: URL;
   /**
@@ -697,6 +712,16 @@ export class Runtime {
   // into it instead of committing to the store. Never installed on a
   // client or in the OFF arm — installSealDestination throws off the flag.
   #transactionSealDestination: TransactionSealDestination | undefined;
+  // The serving loop's run stamper (installed WITH the destination): the
+  // scheduler hands it each run's durable action id + kind, and it
+  // attaches the wave run context before the tx seals.
+  #serverRunStamper:
+    | ((tx: IExtendedStorageTransaction, info: ServerRunInfo) => void)
+    | undefined;
+  // Whether THIS runtime explicitly set the serverExecution flag at
+  // construction (the only case its dispose may reset the process-global
+  // ambient value — see the constructor's propagation note).
+  #explicitServerExecution: boolean | undefined;
   readonly userIdentityDID: DID;
 
   /**
@@ -1029,7 +1054,18 @@ export class Runtime {
     this.experimental.modernCellRep = getModernCellRepConfig();
     setCommitPreconditionsConfig(this.experimental.commitPreconditions);
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
-    setServerExecutionConfig(this.experimental.serverExecution);
+    // Like eagerSourceAnnotation below, propagate only when EXPLICITLY
+    // set (stage F): a co-hosted serving process (toolshed under the ON
+    // arm) constructs runtimes for many purposes, and an unconditional
+    // `undefined -> false` write from any flag-less construction would
+    // stomp the process-global ambient flag the memory server's derived
+    // admission reads — silently un-claiming `derived` mid-serve. In a
+    // process where nothing enables the flag the ambient default is
+    // already false, so the OFF arm is unchanged.
+    if (this.experimental.serverExecution !== undefined) {
+      this.#explicitServerExecution = this.experimental.serverExecution;
+      setServerExecutionConfig(this.experimental.serverExecution);
+    }
     this.experimental.serverExecution = getServerExecutionConfig();
     // Unlike the flags above, only propagate when EXPLICITLY set: the ambient
     // flag is also a test seam (tests toggle `setEagerSourceAnnotation`
@@ -1455,10 +1491,18 @@ export class Runtime {
     // Dispose the Engine (clears compiler/runtime state and the console hook)
     this.harness.dispose();
 
-    // Reset experimental config to defaults.
+    // Reset experimental config to defaults. serverExecution resets only
+    // when THIS runtime explicitly enabled it (stage F): disposing a
+    // flag-less runtime in a co-hosted serving process must not clear
+    // the ambient flag other runtimes and the memory server's admission
+    // still depend on. (Serving runtimes are per-space and park/rebuild
+    // while the process serves on; the ExecutorHost's bootstrap owns the
+    // process-level flag lifecycle.)
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
-    resetServerExecutionConfig();
+    if (this.#explicitServerExecution === true) {
+      resetServerExecutionConfig();
+    }
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
@@ -1568,7 +1612,22 @@ export class Runtime {
    * wave; waves are serial per space, so a second install while one is
    * live is a bug, not a hand-over.
    */
-  installSealDestination(destination: TransactionSealDestination): void {
+  installSealDestination(
+    destination: TransactionSealDestination,
+    options: {
+      /** The serving loop's run stamper (serving-loop.md §3d, RULED
+       * 2026-08-05: every server-side commit path declares its run
+       * context before it seals). The scheduler calls
+       * {@link stampServerRun} at its two dispatch choke points with
+       * what IT knows — the durable action id and the run's kind — and
+       * the stamper (the SpaceServer) enriches with per-run identity
+       * and attaches the wave run context. */
+      runStamper?: (
+        tx: IExtendedStorageTransaction,
+        info: ServerRunInfo,
+      ) => void;
+    } = {},
+  ): void {
     if (this.experimental.serverExecution !== true) {
       throw new Error(
         "A transaction seal destination requires EXPERIMENTAL_SERVER_EXECUTION " +
@@ -1583,11 +1642,30 @@ export class Runtime {
       );
     }
     this.#transactionSealDestination = destination;
+    this.#serverRunStamper = options.runStamper;
   }
 
   /** Remove the installed seal destination (the wave closed or aborted). */
   clearSealDestination(): void {
     this.#transactionSealDestination = undefined;
+    this.#serverRunStamper = undefined;
+  }
+
+  /**
+   * Stamp a scheduler-driven run's wave context (serving-loop.md §3d).
+   * A no-op with no destination installed — the OFF arm, and ON-arm
+   * client speculation, pay one undefined check. The scheduler calls
+   * this at exactly its two transaction-minting choke points (the
+   * reactive-action run and the event dispatch), so an installed
+   * destination sees every scheduler run stamped and the seal-time
+   * unstamped refusal is reserved for genuinely undeclared commit
+   * paths.
+   */
+  stampServerRun(
+    tx: IExtendedStorageTransaction,
+    info: ServerRunInfo,
+  ): void {
+    this.#serverRunStamper?.(tx, info);
   }
 
   // (space, scope, id) triples for which a missing-link-target load has been

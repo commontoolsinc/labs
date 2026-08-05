@@ -371,7 +371,9 @@ const docInstanceKey = (id: string, scopeKey: string): string =>
   `${id} ${scopeKey}`;
 
 interface PendingAssembly {
-  context: WaveRunContext;
+  /** Undefined until the post-seal emptiness check: a tx with writes and
+   * no context is refused; an empty tx needs none. */
+  context: WaveRunContext | undefined;
   spaces: SealedSpaceContribution[];
   readOnlyReadKeys: Set<string>;
 }
@@ -467,21 +469,6 @@ export class WaveAccumulator
       };
     }
     const context = waveRunContextOf(tx);
-    if (context === undefined) {
-      // No anonymous fallback (serving-loop.md §3d, RULED 2026-08-05):
-      // an unstamped seal is a wave-host bug — every server-side commit
-      // path stamps its run context before sealing, and stage F names
-      // the sanctioned internal stamp kinds when it installs the seal
-      // destination. Unreachable from the OFF arm: without a
-      // destination installed, seal == commit and this class never
-      // runs.
-      throw new Error(
-        "unstamped transaction sealed into a wave: stamp the run " +
-          "context (stampWaveRunContext) before sealing — every " +
-          "server-side commit path declares its run context " +
-          "(serving-loop.md §3d, RULED 2026-08-05)",
-      );
-    }
     // seal() runs one tx at a time: sealInto hands spaces back through
     // sealSpaceCommit below, and actions run serially per space
     // (serving-loop.md §3d), so a live assembly means interleaved seals —
@@ -512,15 +499,44 @@ export class WaveAccumulator
       }
       // A transaction with nothing to seal (read-only, or all-no-op)
       // contributes nothing — same as commit's empty-transaction fast
-      // path.
-      if (assembly.spaces.length > 0) {
-        this.#contributions.push({
-          index: this.#contributions.length,
-          context: assembly.context,
-          spaces: assembly.spaces,
-          readOnlyReadKeys: assembly.readOnlyReadKeys,
-        });
+      // path — and needs no run context: the §3d refusal below guards
+      // WRITES entering the wave, and a serving runtime's read probes
+      // (piece structure loads, pattern-identity reads) commit nothing.
+      if (assembly.spaces.length === 0) {
+        return result;
       }
+      if (context === undefined) {
+        // No anonymous fallback (serving-loop.md §3d, RULED 2026-08-05):
+        // an unstamped seal WITH WRITES is a wave-host bug — every
+        // server-side commit path stamps its run context before sealing,
+        // and stage F names the sanctioned internal stamp kinds
+        // ("bookkeeping", for the loop's own writes) when it installs
+        // the seal destination. The already-sealed overlay writes are
+        // withdrawn before the throw, so nothing anonymous survives in
+        // the wave OR the overlay. Unreachable from the OFF arm: without
+        // a destination installed, seal == commit and this class never
+        // runs.
+        for (const space of assembly.spaces) {
+          space.resolveVerdict({
+            withdrawn: {
+              message: "unstamped transaction refused at the seal " +
+                "destination (serving-loop.md §3d)",
+            },
+          });
+        }
+        throw new Error(
+          "unstamped transaction sealed into a wave: stamp the run " +
+            "context (stampWaveRunContext) before sealing — every " +
+            "server-side commit path declares its run context " +
+            "(serving-loop.md §3d, RULED 2026-08-05)",
+        );
+      }
+      this.#contributions.push({
+        index: this.#contributions.length,
+        context,
+        spaces: assembly.spaces,
+        readOnlyReadKeys: assembly.readOnlyReadKeys,
+      });
       return result;
     } finally {
       this.#assembly = undefined;
@@ -604,7 +620,7 @@ export class WaveAccumulator
         `${space}\0${
           docInstanceKey(
             read.id,
-            this.#scopeKeyFor(read.scope, assembly.context),
+            this.#scopeKeyFor(read.scope, assembly.context ?? undefined),
           )
         }`,
       );

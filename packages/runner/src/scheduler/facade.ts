@@ -687,6 +687,33 @@ export class Scheduler {
     return this.waitForQuiescence(true);
   }
 
+  /**
+   * Whether the scheduler is quiescent RIGHT NOW (server-execution v2
+   * stage F): nothing running, nothing scheduled, no queued events, no
+   * held wakes, no background tasks, no runnable pull work. The serving
+   * loop's settle cycle probes this between idle() and synced() passes
+   * — idle() alone can resolve while a sync frame is mid-flight, and
+   * the frame's notification re-dirties the graph.
+   */
+  isIdle(): boolean {
+    return !this.runningPromise &&
+      this.backgroundTasks.size === 0 &&
+      !this.wakeShaper.hasPending() &&
+      this.eventQueue.length === 0 &&
+      !this.scheduled &&
+      !this.hasRunnablePullWork();
+  }
+
+  /**
+   * Whether a time-gate wake timer is armed (server-execution v2
+   * stage F; runtime-mapping N9): the SpaceServer's parking policy
+   * treats a pending gate wake as "not idle" rather than losing
+   * trailing debounce flushes on park.
+   */
+  hasArmedGateWake(): boolean {
+    return this.gates.hasWakeTimer();
+  }
+
   private waitForQuiescence(awaitPendingCommits: boolean): Promise<void> {
     return new Promise<void>((resolve) => {
       // Re-evaluate every condition from scratch once the thing we are waiting

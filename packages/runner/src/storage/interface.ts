@@ -176,6 +176,11 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
+  /** INBOUND settlement only (server-execution v2 stage F): watch
+   * refreshes + update processing, excluding commit settlement — the
+   * serving loop's wave-settle barrier (a sealed commit settles at the
+   * wave commit itself, so the full synced() would deadlock there). */
+  inputSynced?(): Promise<void>;
 
   /**
    * A throwable `AuthorizationError` when `space` is under a permanent
@@ -354,6 +359,11 @@ export interface IStorageProvider {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
+  /** INBOUND settlement only (server-execution v2 stage F): watch
+   * refreshes + update processing, excluding commit settlement — the
+   * serving loop's wave-settle barrier (a sealed commit settles at the
+   * wave commit itself, so the full synced() would deadlock there). */
+  inputSynced?(): Promise<void>;
 
   /**
    * Destroy the storage provider. Used for tests only.
