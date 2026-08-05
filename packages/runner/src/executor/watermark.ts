@@ -76,13 +76,18 @@ export const waitForSettled = (
     };
     if (options.timeoutMs !== undefined) {
       timer = setTimeout(() => {
-        cancel?.();
         reject(
           new Error(
             `waitForSettled(${space}, ${seq}) timed out after ` +
               `${options.timeoutMs}ms (watermark W < ${seq})`,
           ),
         );
+        try {
+          cancel?.();
+        } catch {
+          // cancellation is best-effort; the rejection above already
+          // carried the outcome
+        }
       }, options.timeoutMs);
     }
     cancel = cell.sink((value) => {

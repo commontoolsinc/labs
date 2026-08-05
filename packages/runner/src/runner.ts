@@ -2344,6 +2344,14 @@ export class Runner {
       ) => {
         const pattern = this.resolveToPattern(loaded as Pattern);
         const setupTx = this.runtime.edit();
+        // Server-execution v2 stage F (serving-loop.md §3d): under an
+        // installed seal destination every commit path declares its run
+        // context; the swap's setup write is runtime-internal
+        // bookkeeping. A no-op everywhere else.
+        this.runtime.stampServerRun(setupTx, {
+          actionId: `pattern-swap/${newRef.identity}#${newRef.symbol}`,
+          kind: "bookkeeping",
+        });
         try {
           this.applySetupState(
             setupTx,

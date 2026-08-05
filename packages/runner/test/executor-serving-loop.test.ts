@@ -40,6 +40,7 @@ import {
   watermarkCell,
 } from "../src/executor/watermark.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { getArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
 
 class SharedServerStorageManager extends EmulatedStorageManager {
   static connectTo(
@@ -333,6 +334,135 @@ describe("stage F serving loop", () => {
     expect(
       watermarkCell(servingRuntime!, space).get()?.seq,
     ).toBeGreaterThanOrEqual(authored2);
+  });
+
+  it("hot-swaps a pattern SERVER-side: a client's pattern-pointer write dirties the piece and the SpaceServer swaps (serving-loop.md §3e, OW6)", async () => {
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+    // §3e's posture: the watcher and the swap live in the SpaceServer.
+    // The SWAP half — the patternIdentity sink reacting to a pointer
+    // write, teardown + reinstantiation included — is what this test
+    // drives, and it is installed with the piece (gated only by
+    // doNotUpdateOnPatternChange), independent of the
+    // systemPatternAutoUpdate CHECK half. The check half (network source
+    // polling + roll-forward) is enabled by the production wiring
+    // (toolshed's serving-runtime factory) and needs a real patterns
+    // route to poll; in this fully-local fixture its source probe syncs
+    // docs that never resolve and would wedge the settle — the flagged
+    // stage-F residual.
+    autoUpdate = false;
+
+    let v2Ref: { identity: string; symbol: string } | undefined;
+    onServingRuntime = async (runtime) => {
+      const compileProgram = (expression: string) => ({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { computed, pattern } from 'commonfabric';",
+            "export default pattern<{ n: number }, { total: number }>(",
+            `  ({ n }) => ({ total: computed(() => ${expression}) }),`,
+            ");",
+          ].join("\n"),
+        }],
+      });
+      const v1 = await runtime.patternManager.compilePattern(
+        compileProgram("n + 1"),
+        { space },
+      );
+      const v2 = await runtime.patternManager.compilePattern(
+        compileProgram("n + 2"),
+        { space },
+      );
+
+      // v2's durable {identity, symbol}: the content-addressed entry
+      // ref the compile indexed — exactly what the updater's pointer
+      // write names.
+      v2Ref = getArtifactEntryRef(v2);
+
+      // The served piece runs v1.
+      const argument = runtime.getCell<{ n: number }>(
+        space,
+        "swap-arg",
+        undefined,
+      );
+      const result = runtime.getCell<{ total: number }>(
+        space,
+        "swap-result",
+        v1.resultSchema,
+      );
+      for (let attempt = 0; ; attempt++) {
+        await argument.sync();
+        await result.sync();
+        const tx = runtime.edit();
+        runtime.run(tx, v1, argument, result);
+        const committed = await tx.commit();
+        if (committed.error === undefined) break;
+        if (attempt >= 4) {
+          throw new Error(
+            `serving pattern run failed: ${committed.error.message}`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await runtime.idle();
+    };
+
+    openClient();
+    const engine = await server.engineForSpace(space);
+
+    const clientResult = clientRuntime.getCell<{ total: number }>(
+      space,
+      "swap-result",
+      undefined,
+    );
+    await clientResult.sync();
+    const clientArg = clientRuntime.getCell<{ n: number }>(
+      space,
+      "swap-arg",
+      undefined,
+    );
+    await clientArg.sync();
+    const tx = clientRuntime.edit();
+    clientArg.withTx(tx).set({ n: 41 });
+    expect((await tx.commit()).error).toBeUndefined();
+    const authoredSeq = Engine.serverSeq(engine);
+    await waitForSettled(clientRuntime, space, authoredSeq, {
+      timeoutMs: 15_000,
+    });
+    await waitUntil(
+      () => clientResult.key("total").get() === 42,
+      "v1 to serve 42",
+    );
+
+    // The pattern-pointer write: an ordinary AUTHORED input under the
+    // updater's principal (here, the client) — the swap is the SERVER
+    // reacting to it (serving-loop.md §3e; runtime-mapping N40/N41).
+    expect(v2Ref?.identity).toBeDefined();
+    const pointerTx = clientRuntime.edit();
+    clientResult.withTx(pointerTx).setMetaRaw("patternIdentity", v2Ref!);
+    expect((await pointerTx.commit()).error).toBeUndefined();
+
+    // The SpaceServer's watcher swaps to v2 and the wave serves the new
+    // derivation: total becomes 43 without any client-side run — OW6's
+    // substance: the pointer write is an ordinary authored input, and
+    // the swap is the server reacting.
+    await waitUntil(
+      () => clientResult.key("total").get() === 43,
+      "the server-side swap to serve 43",
+      20_000,
+    );
+    // The swapped-in derivation landed as a DERIVED commit.
+    const derivedAfterSwap = engine.database.prepare(
+      `SELECT COUNT(*) AS n FROM "commit" WHERE class = 'derived'`,
+    ).get() as { n: number };
+    expect(derivedAfterSwap.n).toBeGreaterThanOrEqual(1);
+    // Watermark note, deliberate: W is NOT asserted past the pointer
+    // write here. The swap's by-identity reload can leave a module-doc
+    // sync pending in this fully-local fixture, and an outstanding
+    // demanded load legitimately pins W (protocol.md §4: W covers
+    // demanded derivations CURRENT through W) — the flagged stage-F
+    // settle residual, exercised properly against a real patterns route
+    // in the integration environment.
   });
 
   it("parks on lease loss when a rival holds the lease (serving-loop.md §2)", async () => {

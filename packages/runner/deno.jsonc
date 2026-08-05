@@ -35,6 +35,10 @@
     "./toolshed-http-auth": "./src/toolshed-http-auth.ts",
     "./cfc": "./src/cfc/mod.ts",
     "./cfc/label-view-core": "./src/cfc/label-view-core.ts",
+    "./executor/host": "./src/executor/host.ts",
+    "./executor/loopback-storage": "./src/executor/loopback-storage.ts",
+    "./executor/stats": "./src/executor/stats.ts",
+    "./executor/watermark": "./src/executor/watermark.ts",
     "./cfc/migration-reason": "./src/cfc/migration-reason.ts",
     "./cfc/schema-sanitization": "./src/cfc/schema-sanitization.ts"
   }

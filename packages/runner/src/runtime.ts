@@ -339,7 +339,12 @@ export type PatternInstantiationObserver = (
  */
 export type ServerRunInfo = {
   actionId: string;
-  kind: "derivation" | "event-handler";
+  /** `bookkeeping` is the sanctioned internal stamp kind
+   * (serving-loop.md §3d, RULED 2026-08-05) for runtime-internal commit
+   * paths that are neither derivations nor handler runs — the
+   * pattern-swap setup write today; the loop's own watermark write uses
+   * it directly. */
+  kind: "derivation" | "event-handler" | "bookkeeping";
   /** The dispatched event's durable id (event-handler runs). */
   eventId?: string;
 };

@@ -33,6 +33,10 @@ export const stats = createRoute({
         logCounts: z.any(),
         timingStats: z.any(),
         slowQueries: z.array(z.any()),
+        // The serving loop's counters (server-execution v2,
+        // serving-loop.md §7) — present only while an ExecutorHost runs
+        // in this process (the ON arm).
+        servingLoop: z.any().optional(),
       }),
       "Logger counts and timing statistics",
     ),
