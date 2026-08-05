@@ -3443,12 +3443,10 @@ export function convertCellsToLinks(
       // TODO(danfuzz): Latent -- a `FabricInstance` is NOT a leaf either, and
       // it is not caught here. It is a container reached by its codec contents
       // rather than by property name, so it falls to the object branch and is
-      // rebuilt from whatever enumerable own properties it happens to have.
-      // That is not the `{}` a primitive would give: a `FabricError` carries
-      // `type`, `name`, `message`, `stack`, and `cause`, so what comes back is
-      // a plausible plain record that is no longer a `FabricError`. Descending
-      // one wants codec-mediated traversal. Same marker as the sibling walks in
-      // `builder/to-encodable-form.ts` and `builtins/llm-dialog.ts`.
+      // rebuilt from enumerable own properties it is not supposed to have.
+      // Descending one wants codec-mediated traversal. Same marker as the
+      // sibling walks in `builder/to-encodable-form.ts` and
+      // `builtins/llm-dialog.ts`.
       return converted;
     }
 

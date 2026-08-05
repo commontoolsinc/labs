@@ -772,14 +772,11 @@ function traverseAndSerialize(
  *
  * TODO(danfuzz): A `FabricPrimitive` is now returned atomically, but the other
  * special-object type, `FabricInstance` (a container), still reaches the
- * `Object.fromEntries(Object.entries(...))` walk and is rebuilt from whatever
- * enumerable own properties it happens to have instead of from its codec
- * contents. For a `FabricError` that is `type`, `name`, `message`, `stack`,
- * and `cause` -- a plausible plain record that is no longer a `FabricError`,
- * rather than the obvious `{}` a primitive would give. Unlike a primitive it
- * *does* need descending into — but by its actual contents, which this walk
- * won't do correctly. This site will need attention once FabricInstances see
- * real use.
+ * `Object.fromEntries(Object.entries(...))` walk and is flattened by its
+ * internal slots (zero enumerable own-props) instead of its codec contents.
+ * Unlike a primitive it *does* need descending into — but by its actual
+ * contents, which this walk won't do correctly. This site will need attention
+ * once FabricInstances see real use.
  */
 function traverseAndCellify(
   runtime: Runtime,

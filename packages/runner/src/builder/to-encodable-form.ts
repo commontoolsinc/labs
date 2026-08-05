@@ -147,10 +147,8 @@ export function withAliasBindings(
 
   // A `FabricInstance` is NOT a leaf. It is a container reached by its codec
   // contents rather than by property name, which this walk cannot do, so the
-  // `for...in` copy would rebuild it from whatever enumerable own properties
-  // it happens to have -- for a `FabricError`, a plausible plain record of
-  // `type`, `name`, `message`, `stack`, and `cause` that is no longer a
-  // `FabricError`. It refuses instead of doing that quietly.
+  // `for...in` copy would rebuild it from zero enumerable own properties as
+  // `{}`. It refuses instead of doing that quietly.
   if (value instanceof FabricInstance) throw refuseFabricInstance(value);
 
   // What remains that is an object, is not a pattern, and is not a plain
