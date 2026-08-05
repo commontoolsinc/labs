@@ -146,6 +146,13 @@ CREATE TABLE IF NOT EXISTS "commit" (
   -- watermark DOC (one well-known doc per space) rides the commit's own
   -- operations; this column is the metadata half.
   derived_through    INTEGER,
+  -- Server-produced AUTHORED commits only (protocol.md §2's delegated
+  -- row, §2b): the ORIGINATING chain actor + the capability grant this
+  -- commit was admitted under — delegation, never session-identity
+  -- impersonation. NULL on every other admission path.
+  acting_principal   TEXT,
+  acting_session     TEXT,
+  capability_ref     TEXT,
   FOREIGN KEY (invocation_ref) REFERENCES invocation(ref),
   FOREIGN KEY (authorization_ref) REFERENCES authorization(ref)
 );
@@ -305,7 +312,10 @@ INSERT INTO "commit" (
   holder,
   annotations,
   consequence_of,
-  derived_through
+  derived_through,
+  acting_principal,
+  acting_session,
+  capability_ref
 )
 VALUES (
   :seq,
@@ -320,7 +330,10 @@ VALUES (
   :holder,
   :annotations,
   :consequence_of,
-  :derived_through
+  :derived_through,
+  :acting_principal,
+  :acting_session,
+  :capability_ref
 )
 `;
 
@@ -827,6 +840,20 @@ export type ApplyCommitOptions = {
    *  outside a serving loop (tests driving the accumulator directly) has
    *  no watermark to carry, and the column stays NULL. */
   derivedThrough?: number;
+  /** Server-produced AUTHORED admission (protocol.md §2's delegated row,
+   *  §2b — outbox event appends, `.inSpace` provisioning): the commit's
+   *  metadata carries the ORIGINATING chain actor + the capability grant,
+   *  and admission validates the grant against the target — a
+   *  delegated-capability check, NEVER session-identity impersonation.
+   *  Scoped writes key from the validated CARRIED identity (scopes.md §5:
+   *  consequences land in the actor's instances). Only meaningful with
+   *  the (default) authored class; refused elsewhere. Like the other
+   *  server-internal carriage, `ClientCommit` cannot express it. */
+  delegated?: {
+    actingPrincipal: string;
+    actingSession?: string;
+    capabilityRef: string;
+  };
 };
 
 export type AppliedRevision = {
@@ -1237,6 +1264,24 @@ ADD COLUMN derived_through INTEGER;
 `);
 };
 
+// Server-execution v2 stage F: server-produced authored commits carry the
+// delegated acting identity + capability grant they were admitted under
+// (protocol.md §2's delegated row, §2b). Historical rows stay NULL — no
+// delegated producer predates this column trio. One guard per column
+// (the migrateCommitWaveCarriage crash-window rationale).
+const migrateCommitDelegation = (database: Database): void => {
+  for (
+    const column of ["acting_principal", "acting_session", "capability_ref"]
+  ) {
+    if (!hasColumn(database, "commit", column)) {
+      database.exec(`
+ALTER TABLE "commit"
+ADD COLUMN ${column} TEXT;
+`);
+    }
+  }
+};
+
 // Server-execution v2 Phase 1 stage C.2: the observation-payload tables are
 // REPLACED by the scheduler_basis index (serving-loop.md §3b). The drop list
 // is §3b's SEVEN tables, deliberately not a constant enumerating six (D6 —
@@ -1279,6 +1324,7 @@ export const open = async (
   migrateCommitHolder(database);
   migrateCommitWaveCarriage(database);
   migrateCommitDerivedThrough(database);
+  migrateCommitDelegation(database);
   migrateSchedulerObservationTablesToBasis(database);
   return {
     url,
@@ -1842,6 +1888,7 @@ const applyCommitTransaction = (
     annotations,
     consequenceOf,
     derivedThrough,
+    delegated,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
   // The derived-class admission rule (serving-loop.md §2, protocol.md §2's
@@ -1895,6 +1942,13 @@ const applyCommitTransaction = (
           "2026-08-05)",
       );
     }
+    if (delegated !== undefined) {
+      throw new ProtocolError(
+        "delegated-identity carriage is server-produced AUTHORED " +
+          "admission only (protocol.md §2's delegated row); a derived " +
+          "commit's identity rides its per-write annotations",
+      );
+    }
   } else if (
     annotations !== undefined || consequenceOf !== undefined ||
     derivedThrough !== undefined
@@ -1909,6 +1963,38 @@ const applyCommitTransaction = (
         "derived-commit carriage only (protocol.md §1, §7)",
     );
   }
+  // The delegated row (protocol.md §2, §2b): server-produced AUTHORED
+  // commits carry the originating chain actor + capabilityRef, and
+  // admission validates the grant — delegation, never session-identity
+  // impersonation. The Phase-1 validation floor: the carriage must be
+  // COMPLETE (an actor with no grant, or a grant with no actor, is
+  // refused loudly), the class must be authored, and scoped writes key
+  // from the CARRIED identity below. Resolving the grant against a
+  // per-doc capability store is future hardening the row names
+  // (protocol.md §2's anticipated grant-scoped checks); today's ACL
+  // model has no per-doc grants to resolve against, so presence +
+  // completeness is the whole check — deliberately stated, not implied.
+  if (delegated !== undefined) {
+    if (commitClass !== "authored") {
+      throw new ProtocolError(
+        "delegated-identity carriage is authored-class admission only " +
+          "(protocol.md §2's delegated row)",
+      );
+    }
+    if (
+      delegated.actingPrincipal === undefined ||
+      delegated.actingPrincipal === "" ||
+      delegated.capabilityRef === undefined ||
+      delegated.capabilityRef === ""
+    ) {
+      throw new ProtocolError(
+        "delegated admission requires the acting principal AND the " +
+          "capability grant (protocol.md §2's server-produced authored " +
+          "row) — partial carriage is refused, never defaulted",
+      );
+    }
+  }
+
   // Derived commits key scoped writes by their EXPLICIT annotation
   // scopeKey (protocol.md §1's ADDRESSING): the wave's envelope is the
   // SpaceServer's service identity — no user principal, no session — so
@@ -2052,6 +2138,9 @@ const applyCommitTransaction = (
     derived_through: commitClass === "derived" && derivedThrough !== undefined
       ? derivedThrough
       : null,
+    acting_principal: delegated?.actingPrincipal ?? null,
+    acting_session: delegated?.actingSession ?? null,
+    capability_ref: delegated?.capabilityRef ?? null,
   });
 
   const revisions: AppliedRevision[] = [];
@@ -2071,8 +2160,13 @@ const applyCommitTransaction = (
       seq,
       opIndex,
       operation,
-      principal,
-      sessionId,
+      // A delegated commit's scoped writes key from the validated CARRIED
+      // identity (protocol.md §2's delegated row; scopes.md §5 —
+      // consequences land in the ACTOR's instances, never the delegating
+      // envelope's; stamping from the envelope would be the
+      // silent-empty-instance trap, cross-space edition).
+      principal: delegated?.actingPrincipal ?? principal,
+      sessionId: delegated?.actingSession ?? sessionId,
       scopeKeyOverride: scopeKeyByOpIndex.get(opIndex),
     });
     revisions.push(revision);

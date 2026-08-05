@@ -2147,6 +2147,30 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { error: validation.error };
     }
 
+    // Read-only spaces' read sets (stage F, discharging a stage-D bound):
+    // spaces this tx read but wrote nothing to produce no native commit,
+    // so their reads would never reach the accumulator — and a withdrawn
+    // writer there could not fold this reader into the withdrawal. Hand
+    // them over explicitly, before the space commits, inside the same
+    // seal call.
+    if (sink.sealSpaceReads !== undefined) {
+      const writtenSpaces = new Set(commits.map((commit) => commit.space));
+      const readOnlyReads = new Map<MemorySpace, IMemorySpaceAddress[]>();
+      const log = this.buildReactivityLog();
+      for (const read of log.reads) {
+        if (writtenSpaces.has(read.space)) continue;
+        let reads = readOnlyReads.get(read.space);
+        if (reads === undefined) {
+          reads = [];
+          readOnlyReads.set(read.space, reads);
+        }
+        reads.push(read);
+      }
+      for (const [space, reads] of readOnlyReads) {
+        sink.sealSpaceReads(space, reads);
+      }
+    }
+
     const promise = this.#runSealHandoffs(sink, commits);
     this.#state = { status: "pending", promise };
     try {

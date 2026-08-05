@@ -1001,6 +1001,20 @@ export interface ITransactionSealSink {
     native: NativeStorageCommit,
     source: IStorageTransaction,
   ): Promise<Result<Unit, CommitError>>;
+  /**
+   * The read set of a space this transaction READ but wrote nothing to
+   * (stage F, discharging a stage-D bound): a tx seals only spaces it
+   * wrote (or gated), so without this handoff a read in a read-only
+   * space never reaches the accumulator and a withdrawn writer there
+   * cannot fold the reader into the withdrawal (serving-loop.md §3d: no
+   * blind derived writes). Called once per read-only space, inside the
+   * same `sealInto` call as the space commits. Optional: sinks that
+   * predate the handoff simply keep the documented bound.
+   */
+  sealSpaceReads?(
+    space: MemorySpace,
+    reads: readonly IMemorySpaceAddress[],
+  ): void;
 }
 
 /**
