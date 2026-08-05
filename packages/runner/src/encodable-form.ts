@@ -58,7 +58,16 @@ export function hasEncodableForm(value: unknown): boolean {
  * value whose encodable form is itself `undefined`.
  */
 export function encodableFormOf(value: unknown): unknown {
-  return encodableFormMethod(value)?.call(value);
+  const method = encodableFormMethod(value);
+  if (method === undefined) return undefined;
+
+  // `Reflect.apply`, and not the method's own `.call`. A proxy answers each
+  // property read however it likes, so a proxied function can report `typeof
+  // "function"` while what its `.call` yields is not callable at all.
+  // `Reflect.apply` reaches a function's call behavior directly rather than
+  // reading a property off it, which holds whether the method in hand arrived
+  // plain or through a proxy.
+  return Reflect.apply(method, value, []);
 }
 
 /**

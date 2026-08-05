@@ -1,14 +1,22 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import {
   encodableFormOf,
   hasEncodableForm,
   replaceArtifacts,
 } from "../src/encodable-form.ts";
+import { createRef } from "../src/create-ref.ts";
+import { Runtime } from "../src/runtime.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 /**
  * The walk under test, with the copy callback ignored -- what a caller that
@@ -374,8 +382,100 @@ describe("encodable-form", () => {
       expect(encodableFormOf(value)).toEqual({ saw: "self" });
     });
 
+    it("returns the result of a member only `Reflect.apply` can call", () => {
+      // A `Reactive` is a proxy over a cell, and it answers a method name with
+      // a PROXY over that method. Reading `.call` off that goes back through
+      // the proxy as data navigation and comes out uncallable, so the invoke
+      // has to reach the function's own call behavior rather than a property
+      // of it.
+      const method = new Proxy(function () {
+        return { invoked: true };
+      }, {
+        get: (target, prop) =>
+          prop === "call" ? { notAFunction: true } : Reflect.get(target, prop),
+      });
+      expect(encodableFormOf({ toEncodableForm: method }))
+        .toEqual({ invoked: true });
+    });
+
     it("returns `undefined` for a value carrying neither name", () => {
       expect(encodableFormOf({ a: 1 })).toBe(undefined);
+    });
+  });
+
+  describe("a cell and the reactive that stands for it", () => {
+    let runtime: Runtime;
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let tx: IExtendedStorageTransaction;
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+    });
+
+    afterEach(async () => {
+      await tx.commit();
+      await runtime?.dispose();
+      await storageManager?.close();
+    });
+
+    /** A cell, and the `Reactive` proxy a pattern holds it through. */
+    function subjects() {
+      const cell = runtime.getCell<{ value: number }>(
+        space,
+        "encodable-form-cell",
+        undefined,
+        tx,
+      );
+      cell.set({ value: 42 });
+      return { cell, reactive: cell.getAsReactiveProxy() };
+    }
+
+    it("both return the link the cell names", () => {
+      const { cell, reactive } = subjects();
+      expect(hasEncodableForm(cell)).toBe(true);
+      expect(hasEncodableForm(reactive)).toBe(true);
+      expect(encodableFormOf(cell)).toEqual(cell.toSigilLinkOrNull());
+      expect(encodableFormOf(reactive)).toEqual(cell.toSigilLinkOrNull());
+    });
+
+    it("derive the id their own link derives as plain data", () => {
+      // An id is derived from a value's encodable form, so the reference is the
+      // link itself written out as data -- a value that reaches `createRef`
+      // through none of the cell or proxy machinery. Comparing the two subjects
+      // only to each other would hold just as well if BOTH moved; comparing
+      // each to the link pins where they land, without naming a hash that a
+      // later change to link shape would have to come back and edit.
+      const { cell, reactive } = subjects();
+      const idOf = (held: unknown) => createRef({ held }, "cause").toString();
+      const link = idOf(cell.toSigilLinkOrNull());
+
+      expect(idOf(cell)).toBe(link);
+      expect(idOf(reactive)).toBe(link);
+
+      // And the comparison discriminates: a different cell's link is a
+      // different id, so the three above do not agree merely by being ids.
+      const other = runtime.getCell<{ value: number }>(
+        space,
+        "encodable-form-other-cell",
+        undefined,
+        tx,
+      );
+      other.set({ value: 42 });
+      expect(idOf(other.toSigilLinkOrNull())).not.toBe(link);
+    });
+
+    it("are left alone by the walk, being no builder's artifacts", () => {
+      // Neither is a plain object, so the walk does not descend into one. What
+      // stands in for a cell is `replaceArtifacts`'s `replaceOther` hook, whose
+      // caller knows an `isCell()` when it holds one.
+      const { cell, reactive } = subjects();
+      const held = { cell, reactive };
+      expect(flatten(held)).toBe(held);
     });
   });
 });

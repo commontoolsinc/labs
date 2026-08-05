@@ -131,8 +131,9 @@ change a subsystem you have not worked on before.
 Three obligations that are easy to miss:
 
 - `docs/README.md` governs everything this repository writes down. It says how
-  to write a comment in code, how to write documentation, and where a new
-  document belongs. Read it before you write either.
+  to write a comment in code, how to write documentation, which spelling of
+  English both use, and where a new document belongs. Read it before you write
+  either.
 - `docs/development/EXPERIMENTAL_OPTIONS.md` is the central registry of every
   experimental flag. Read it before adding, changing, or removing a flag, and
   update it in the same change.
