@@ -1,48 +1,33 @@
 type Environment = (name: string) => string | undefined;
-type ReadGitCommit = () => string;
-interface GitCommandOutput {
-  success: boolean;
-  stdout: Uint8Array;
-  stderr: Uint8Array;
-}
-type RunGitCommand = () => GitCommandOutput;
+type Clock = () => Date;
 
-const decoder = new TextDecoder();
-const REPOSITORY_ROOT = new URL("../../", import.meta.url);
-const GIT_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
+const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 
-export function currentGitCommit(
-  runGit: RunGitCommand = () =>
-    new Deno.Command("git", {
-      args: ["rev-parse", "--verify", "HEAD^{commit}"],
-      cwd: REPOSITORY_ROOT,
-      stdout: "piped",
-      stderr: "piped",
-    }).outputSync(),
-): string {
-  const result = runGit();
-  if (!result.success) {
-    const detail = decoder.decode(result.stderr).trim();
+function validCommit(value: string): string {
+  if (!COMMIT_PATTERN.test(value)) {
     throw new Error(
-      `Could not read the dashboard Git commit${detail ? `: ${detail}` : "."}`,
-    );
-  }
-  return decoder.decode(result.stdout).trim();
-}
-
-function validGitCommit(value: string): string {
-  if (!GIT_COMMIT_PATTERN.test(value)) {
-    throw new Error(
-      "Dashboard Git commit must be a full 40-character lowercase hash.",
+      "Dashboard deployment commit must be a full 40-character lowercase hash.",
     );
   }
   return value;
 }
 
+/**
+ * The version a server started from a checkout reports, for a server whose code
+ * changes under it between starts. Two starts are further apart than the
+ * millisecond this records, so a page held open across a restart sees a version
+ * it did not load with and reloads onto the code now being served. The time is
+ * readable in the page source, which says when the server serving it started.
+ */
+export function processStartVersion(startedAt: Date): string {
+  return `local-${startedAt.toISOString()}`;
+}
+
 export function dashboardVersion(
   env: Environment = Deno.env.get,
-  readGitCommit: ReadGitCommit = currentGitCommit,
+  now: Clock = () => new Date(),
 ): string {
   const deployedCommit = env("DASHBOARD_GIT_COMMIT");
-  return validGitCommit(deployedCommit ?? readGitCommit());
+  if (deployedCommit !== undefined) return validCommit(deployedCommit);
+  return processStartVersion(now());
 }

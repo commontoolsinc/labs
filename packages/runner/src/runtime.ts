@@ -1976,10 +1976,11 @@ export class Runtime {
    * limited to `FabricValue`. Callers pass, among other things, `Cell`
    * objects (wish candidate lists), userland event payloads (whatever
    * patterns and the DOM hand over, `Date`s and `Error`s included), and
-   * pattern-authored schema defaults. The body converts via
-   * `fabricFromNativeValue()`, which is the designed intake for exactly
-   * this: `Cell`s become sigil links (their `toJSON()`), native instances
-   * become their fabric counterparts, and input that is already a
+   * pattern-authored schema defaults. A `Cell` becomes its sigil link on the
+   * way in, by `cellAsLink()`; the conversion itself has no
+   * representation for one. Everything past that converts via
+   * `fabricFromNativeValue()`, the designed intake for exactly this: native
+   * instances become their fabric counterparts, and input that is already a
    * deep-frozen `FabricValue` passes through by identity.
    *
    * @param space The space the cell claims as its own (it is not stored

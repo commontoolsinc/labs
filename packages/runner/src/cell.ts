@@ -485,18 +485,31 @@ declare module "@commonfabric/api" {
     getAsReactiveProxy(
       boundTarget?: (...args: unknown[]) => unknown,
     ): Reactive<T>;
+
     /**
      * Returns the sigil link naming this cell, or `null` when the cell has no
-     * full link yet (one that has not been created). This is how a cell reaches
-     * storage: the link is what stands in for it, and `hasEncodableForm()` asks
-     * for this member by name.
+     * full link yet (one that has not been created). The link is what stands in
+     * for a cell wherever a cell itself has no representation, and this is how
+     * the storage boundary asks for it -- by name, off a value it has already
+     * recognized as a cell. The two members below return the same link.
      */
     toSigilLinkOrNull(): SigilLink | null;
+
     /**
-     * Answers the JSON protocol with the same link `toSigilLinkOrNull()` gives,
-     * so a cell embedded in a value being stringified reads as what it names.
-     * `packages/html`'s VDOM key generation depends on this. Nothing on the way
-     * to storage consults it.
+     * Returns the same link, under the name `encodableFormOf()` reads by. That
+     * is how a cell survives a walk over an arbitrary graph -- deriving a
+     * content id, or a builder default -- where nothing has recognized it as a
+     * cell and there is no representation for one. The type is narrower than
+     * the `toEncodableForm` a builder artifact carries, and assignable to it.
+     */
+    toEncodableForm(): SigilLink | null;
+
+    /**
+     * Returns the same link under the JSON protocol's name, so a cell reads as
+     * what it names wherever a renderer honors that protocol.
+     * `toCompactDebugString()` does, and it is what pattern-test assertion
+     * diagnostics render their operands with. Nothing on the way to storage
+     * consults it.
      */
     toJSON(): SigilLink | null;
     runtime: Runtime;
@@ -523,6 +536,9 @@ export type { AnyCell, Cell, Stream } from "@commonfabric/api";
 
 export type { MemorySpace } from "@commonfabric/memory/interface";
 
+// The names a `Reactive` forwards as METHODS of the cell it proxies. Every
+// other string reads as data navigation, so a name here shadows a data key
+// spelled the same way -- which is why `query` and `exec` are gated below.
 const cellMethods = new Set<
   | keyof ICell<unknown>
   | "findIndex"
@@ -557,6 +573,7 @@ const cellMethods = new Set<
   "flatMap",
   "flatMapWithPattern",
   "toSigilLinkOrNull",
+  "toEncodableForm",
   "toJSON",
   "for",
   "asSchema",
@@ -2891,14 +2908,26 @@ export class CellImpl<T extends FabricValue>
     return createSigilLinkFromParsedLink(this.link);
   }
 
+  toEncodableForm(): SigilLink | null {
+    // The link that stands for a cell, under the name a walk over an arbitrary
+    // graph reads by -- one that has recognized nothing about the value it
+    // holds. A caller that already knows it has a cell asks the accessor above.
+    return this.toSigilLinkOrNull();
+  }
+
   toJSON(): SigilLink | null {
-    // The JSON protocol's name for the same link. `generateKey()` in
-    // `packages/html/src/worker/keying.ts` stringifies render nodes to key
-    // them, and a cell inside one has to come out as the link it names for a
-    // key to be stable across renders.
+    // TODO(danfuzz): Remove this method once `value-debug.ts` can correctly
+    // render cells without it.
     //
-    // It carries no weight on the way to storage: what a cell reaches storage
-    // as is read from `toSigilLinkOrNull()` by name.
+    // The JSON protocol's name for the same link, honored by every renderer
+    // that walks a value through it -- notably `toCompactDebugString()`, which
+    // pattern-test assertion diagnostics render their operands with. Absent
+    // this, rendering a value holding a cell walks the cell's own members and
+    // reaches the whole runtime, so the rendering carries per-process detail
+    // (the runtime's id among it) and reports differently each run.
+    //
+    // It carries no weight on the way to storage: a value bound for storage is
+    // recognized as a cell first, and its link read off it directly.
     return this.toSigilLinkOrNull();
   }
 

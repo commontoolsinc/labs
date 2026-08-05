@@ -1,14 +1,22 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import {
   encodableFormOf,
   hasEncodableForm,
   replaceArtifacts,
 } from "../src/encodable-form.ts";
+import { createRef } from "../src/create-ref.ts";
+import { Runtime } from "../src/runtime.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 /**
  * The walk under test, with the copy callback ignored -- what a caller that
@@ -298,10 +306,11 @@ describe("encodable-form", () => {
       expect(hasEncodableForm({ toEncodableForm: () => ({}) })).toBe(true);
     });
 
-    it("returns true for a value carrying only `toSigilLinkOrNull`", () => {
-      // A `Cell` answers this name -- the link is what stands in for a cell on
-      // the way to storage -- and a cell is not a builder artifact.
-      expect(hasEncodableForm({ toSigilLinkOrNull: () => ({}) })).toBe(true);
+    it("returns false for a value carrying only `toSigilLinkOrNull`", () => {
+      // A cell returns the link that stands in for it, and it returns
+      // under the one name asked here. The link accessor is not that name, so
+      // a value that merely names a link does not become storable by saying so.
+      expect(hasEncodableForm({ toSigilLinkOrNull: () => ({}) })).toBe(false);
     });
 
     it("returns false for a value carrying only `toJSON`", () => {
@@ -332,9 +341,8 @@ describe("encodable-form", () => {
       expect(hasEncodableForm({ a: 1 })).toBe(false);
     });
 
-    it("returns false for a non-callable member of either name", () => {
-      expect(hasEncodableForm({ toEncodableForm: 1, toSigilLinkOrNull: 2 }))
-        .toBe(false);
+    it("returns false for a non-callable `toEncodableForm`", () => {
+      expect(hasEncodableForm({ toEncodableForm: 1 })).toBe(false);
     });
 
     it("returns false for `null` and for a primitive", () => {
@@ -351,19 +359,6 @@ describe("encodable-form", () => {
         .toEqual({ a: 1 });
     });
 
-    it("falls back to `toSigilLinkOrNull` when that is the only name", () => {
-      expect(encodableFormOf({ toSigilLinkOrNull: () => ({ b: 2 }) }))
-        .toEqual({ b: 2 });
-    });
-
-    it("prefers `toEncodableForm` when a value carries both", () => {
-      const value = {
-        toEncodableForm: () => ({ preferred: true }),
-        toSigilLinkOrNull: () => ({ preferred: false }),
-      };
-      expect(encodableFormOf(value)).toEqual({ preferred: true });
-    });
-
     it("calls the member ON the value, so `this` is the receiver", () => {
       const value = {
         marker: "self",
@@ -374,8 +369,102 @@ describe("encodable-form", () => {
       expect(encodableFormOf(value)).toEqual({ saw: "self" });
     });
 
-    it("returns `undefined` for a value carrying neither name", () => {
+    it("returns the result of a member only `Reflect.apply` can call", () => {
+      // A method can arrive wrapped in a proxy that answers EVERY property
+      // read with something of its own, so nothing read off the method --
+      // `.call` included -- is callable, while the method itself still is. So
+      // the invoke has to reach a function's call behavior rather than read a
+      // property that names it.
+      //
+      // The live producer of that shape is the reactive proxy in `cell.ts`: a
+      // `cellMethods` name comes back as a proxy over the bound method, and
+      // every read off THAT is data navigation.
+      const method = new Proxy(function () {
+        return { invoked: true };
+      }, { get: () => ({ notAFunction: true }) });
+      expect(encodableFormOf({ toEncodableForm: method }))
+        .toEqual({ invoked: true });
+    });
+
+    it("returns `undefined` for a value carrying no such member", () => {
       expect(encodableFormOf({ a: 1 })).toBe(undefined);
+    });
+  });
+
+  describe("a cell and the reactive that stands for it", () => {
+    let runtime: Runtime;
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let tx: IExtendedStorageTransaction;
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+    });
+
+    afterEach(async () => {
+      await tx.commit();
+      await runtime?.dispose();
+      await storageManager?.close();
+    });
+
+    /** A cell, and the `Reactive` proxy a pattern holds it through. */
+    function subjects() {
+      const cell = runtime.getCell<{ value: number }>(
+        space,
+        "encodable-form-cell",
+        undefined,
+        tx,
+      );
+      cell.set({ value: 42 });
+      return { cell, reactive: cell.getAsReactiveProxy() };
+    }
+
+    it("both return the link the cell names", () => {
+      const { cell, reactive } = subjects();
+      expect(hasEncodableForm(cell)).toBe(true);
+      expect(hasEncodableForm(reactive)).toBe(true);
+      expect(encodableFormOf(cell)).toEqual(cell.toSigilLinkOrNull());
+      expect(encodableFormOf(reactive)).toEqual(cell.toSigilLinkOrNull());
+    });
+
+    it("derive the id their own link derives as plain data", () => {
+      // An id is derived from a value's encodable form, so the reference is the
+      // link itself written out as data -- a value that reaches `createRef`
+      // through none of the cell or proxy machinery. Comparing the two subjects
+      // only to each other would hold just as well if BOTH moved; comparing
+      // each to the link pins where they land, without naming a hash that a
+      // later change to link shape would have to come back and edit.
+      const { cell, reactive } = subjects();
+      const idOf = (held: unknown) => createRef({ held }, "cause").toString();
+      const link = idOf(cell.toSigilLinkOrNull());
+
+      expect(idOf(cell)).toBe(link);
+      expect(idOf(reactive)).toBe(link);
+
+      // And the comparison discriminates: a different cell's link is a
+      // different id, so the three above do not agree merely by being ids.
+      const other = runtime.getCell<{ value: number }>(
+        space,
+        "encodable-form-other-cell",
+        undefined,
+        tx,
+      );
+      other.set({ value: 42 });
+      expect(idOf(other.toSigilLinkOrNull())).not.toBe(link);
+    });
+
+    it("are left alone by the walk, being no builder's artifacts", () => {
+      // Neither is a plain object, so the walk does not descend into one --
+      // the member each carries never comes up. What stands in for a cell is
+      // `replaceArtifacts`'s `replaceOther` hook, whose caller knows an
+      // `isCell()` when it holds one.
+      const { cell, reactive } = subjects();
+      const held = { cell, reactive };
+      expect(flatten(held)).toBe(held);
     });
   });
 });
