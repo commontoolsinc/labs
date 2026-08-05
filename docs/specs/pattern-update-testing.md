@@ -299,6 +299,60 @@ a run that instantiated no upgradable pattern, or one whose roots cannot be
 mapped back to a file, because a capture the gate accepts must be a replay it
 accepts.
 
+## Adopting an externally captured fixture
+
+`--update` compiles the old pattern with the **current** in-process toolchain,
+so it structurally cannot capture the class that has actually broken production:
+a stored source the current toolchain no longer compiles. For that, the capture
+runs out of process — in a git worktree checked out at the old revision, under
+that revision's own pinned Deno, compiler, runner and memory stack — and the
+current tree **adopts** the resulting store:
+
+```
+deno run -A tasks/vintage-adopt.ts <snapshot.sqlite> <identity> <test key> <main> [cause] [--child=<cellId>=<main>]...
+```
+
+The snapshot file is the interchange format; reopening it in the current tree
+runs the memory migration chain, exactly as reopening a real old space does.
+The adopter derives the recorded root from its capture cause rather than
+trusting the old tree's id formatting — cause-derived entity ids are stable
+across revisions, and a mismatch here fails the adopt rather than producing a
+fixture whose manifest addresses nothing. It then writes the in-store manifest
+and emits a normal pinned fixture.
+
+Record the sub-pattern roots too, via `--child`. A manifest holding only the
+entry root leaves every child outside the gate's presence and state controls —
+and for a pattern like home, the children ARE the state whose survival is in
+question. A child's id is position-derived rather than cause-derived, so it
+cannot be re-derived at adopt time: enumerate the snapshot's
+`patternIdentity`-carrying cells (a SQL query over `head`/`revision` suffices)
+and hand each one's id and source path to `--child`; the identity and symbol
+come from the child's own stored marker.
+
+Two accommodations exist for adopted fixtures, both in the harness:
+
+- **Presence accepts either marker.** The per-root control looks for
+  `patternSetupIdentity`, which postdates the stores this route exists to
+  capture; a root stamped only with `patternIdentity` also counts. The older
+  marker is a weaker claim, but for "was something really captured here" either
+  stamp is evidence only a runner writes.
+- **The restore control is stamped at adopt time.** A native capture pins the
+  test run's result at the vintage-root cause; an adopted fixture has no test
+  run, so the adopter writes a marker doc at the same cause. It travels in the
+  same file, so its presence after restore proves restoration the same way.
+
+The capture side is deliberately not a committed script: it compiles only
+against the old revision's APIs, so it is written per capture from the
+procedure in the history record for the first one
+(`../history/two-toolchain-vintage-rehearsal.md`). An adopted fixture is
+identity-compared like any repo-path target — it is not the served-route
+accounting case, which materializes unconditionally and is counted apart from
+`changed` — so it counts as *changed* and materializes on every run for as
+long as its recorded identity differs from today's, which for a
+filesystem-resolved old-toolchain capture is every run in practice. That
+standing count is the cost of a fixture that exercises the load path nothing
+regenerable can reach.
+
 ## Limits
 
 Named rather than implied, because a gate's uncovered edges are part of its
@@ -311,11 +365,24 @@ specification:
   everything else here: the trigger is a memory change rather than a pattern
   change, and it wants breadth across *shapes* rather than depth per pattern.
 - **A changed value only warns.** See "Findings are graded" above.
-- **Whether a fixture rots is unresolved.** The by-identity load keys its
-  compile cache on a runtime version and falls back to recompiling the stored
-  source closure on a miss, which reintroduces "old source must still compile
-  under today's API". Whether a pinned vintage stays replayable across a
-  runtime bump, or whether the fallback needs pinning too, is not settled.
+- **Fixture rot is real, measured, and survivable in replay — but only
+  there.** The by-identity load falls back to recompiling the stored source
+  closure on a compile-cache miss, which reintroduces "old source must still
+  compile under today's API". The adopted 2026-06-18 `home.tsx` fixture
+  demonstrates the failure live: during its replay the runtime attempts to
+  load the vintage's child patterns from their stored closures and fails
+  (`pattern-load-error`), then heals because the updated root re-instantiates
+  children from today's compiled program. The gate stays green through those
+  load failures — it has no eyes on them — so a path that *depends* on such a
+  load succeeding is outside what a green run asserts. Two consequences worth
+  naming: the replay runtime leaves `systemPatternAutoUpdate` off (CFC
+  enforcement stays at its `enforce-explicit` default), so the heal above is
+  the parent re-creating children, not the production roll-forward repair —
+  that path has its own flags-on assertion in
+  `packages/runner/test/pattern-pointer-unloadable-swap.test.ts`;
+  and what an adopted fixture pins is old *source*, not old *storage format* —
+  the memory migration chain runs once at adopt time, so the committed file
+  already carries today's schema and CI does not re-exercise the migrations.
 - **The open-argument residual.** The class is validated on every update route,
   but a root carrying no `patternSetupIdentity` marker at all still skips the
   re-stage, because absence cannot be told from a pending update. The window is
