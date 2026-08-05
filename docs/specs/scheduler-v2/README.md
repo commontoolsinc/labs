@@ -11,13 +11,15 @@
 > the executed v1→v2 phase plan;
 > [`implementation/`](../../history/specs/scheduler-v2/implementation/00-README.md)
 > — the executed work orders (start at `00-README.md`).
-> **Persistence**: builds on
-> [persistent scheduler state](../persistent-scheduler-state.md). The
-> observation and rehydration model carries over with a smaller payload.
-> [Per-document rehydration](per-doc-rehydration.md) defines restoration for
-> descendant piece documents.
-> [Incremental observation adoption](incremental-observation-adoption.md)
-> extends that state into ongoing multi-user operation.
+> **Persistence**: none — server-execution v2 Phase 1 stage C deleted the
+> persisted observation form (the archived accounts:
+> [persistent scheduler state](../../history/specs/persistent-scheduler-state.md),
+> [the per-doc persisted-form record](../../history/specs/scheduler-v2/per-doc-rehydration-persisted-form.md),
+> [incremental observation adoption](../../history/specs/scheduler-v2/incremental-observation-adoption.md)).
+> The live remainder — the per-doc identity invariant and the resume hold —
+> is [per-document rehydration](per-doc-rehydration.md); the durable
+> successor is the basis index
+> ([serving-loop.md §3b](../server-side-execution/serving-loop.md)).
 
 This document re-derives the scheduler from first principles. It specifies the
 model, the invariants, the node state machine, the algorithms, and the
@@ -81,11 +83,16 @@ computations feeding the data it will read must be brought up to date
 Handlers commit real writes and are not idempotent, so they cannot be
 optimistically run-and-retried the way computations can.
 
-**D8 — Scheduler state persists across process restarts.** With persistent
-scheduler observations (see persistent-scheduler-state.md), a resumed piece
-restores its read sets and clean/dirty status instead of re-running everything.
-"Initial run" is therefore not a fundamental concept — it is the degenerate
-case of "no valid observation exists".
+**D8 — Scheduler state is reconstructible, not persisted.** The persisted
+observation form was deleted (server-execution v2 Phase 1 stage C; the
+archived account is
+[persistent scheduler state](../../history/specs/persistent-scheduler-state.md)):
+a resumed piece re-runs its actions fresh, held until the space syncs. The
+durable successor is the serving loop's basis index — ids + seqs only,
+re-marking the dirty frontier on activation
+([serving-loop.md §3b](../server-side-execution/serving-loop.md)) — so
+"initial run" stays a degenerate case, now of "nothing marks this node
+current".
 
 **D9 — Confidentiality flows through scheduling.** A run exists *because*
 certain addresses changed; CFC (§8.9.2 of the CFC spec) requires the labels of
@@ -314,11 +321,19 @@ special rules, and only these:
    only the materializer's *actual* committed changes do (through the normal
    change channel, P1/P2).
 
+The declaration contract, concretely: for generated `computed()` callbacks
+the transformer emits `materializerWriteInputPaths` only when capability
+analysis observes actual writes through captured cell inputs (each path an
+array of static string segments), and the runner resolves those input paths
+to concrete `materializerWriteEnvelopes` for the action instance. A runtime
+fallback covers only opaque-result generated computations carrying no
+write-path metadata — no normal output surface, observable work limited to
+side-writing captured Writable inputs.
+
 This carries over v1's hard-won materializer semantics essentially unchanged;
 they were redesigned recently and are sound. What v2 removes is run-time
 write-surface discovery and historical expansion for ordinary computations;
-the persisted `currentKnownWrites` field is the fixed registered surface
-described by P4.
+`currentKnownWrites` is the fixed registered surface described by P4.
 
 ### 4.4 Registration and removal
 
@@ -967,62 +982,29 @@ and its commit were still going.
 
 ## 9. Persistence and rehydration
 
-The durable model is
-[Persistent Scheduler State](../persistent-scheduler-state.md); v2 keeps its
-architecture (observation rows attached to commits, server-side read/write
-indexes for dirtying inactive pieces, durable dirty/stale markers, fingerprint
-validation) and shrinks the per-observation payload.
+Deleted, by reduction: server-execution v2 Phase 1 stage C removed the
+persisted observation form this section used to define — the observation
+rows, the server-side read/write indexes, the durable dirty/stale markers,
+the boot-time snapshot listing, and the incremental adoption that extended
+them into live operation. The archived accounts are
+[persistent scheduler state](../../history/specs/persistent-scheduler-state.md),
+[the per-doc persisted-form record](../../history/specs/scheduler-v2/per-doc-rehydration-persisted-form.md),
+and
+[incremental observation adoption](../../history/specs/scheduler-v2/incremental-observation-adoption.md).
 
-### 9.1 Node identity
+What remains live here:
 
-Unchanged from the persistent-state spec v1 identity: owner space, branch,
-piece id (result-cell scope:id), process generation, action id with
-implementation hash preferred (`impl:` > `src:` > derived). The runtime
-fingerprint loses its `pull`/`push` mode component (only one engine exists);
-the fingerprint string is versioned so v1 observations are simply misses.
-
-### 9.2 Start modes
-
-- **`fresh`** (new piece, locally re-run after stop): nodes register
-  `never-ran`; demand decides everything else.
-- **`resume`** (piece loaded from storage): the runner awaits the space's
-  sync and **one space-wide snapshot listing** before registering nodes
-  (subsumes v1's per-action `awaitSync` + shared-deadline machinery). The
-  listing is bucketed per piece doc, so the resume phase covers the whole
-  resumed piece **tree**: descendants — sub-pattern nodes and
-  map/filter/flatMap per-element runs, each persisted under its own
-  `pieceId` — register against their own bucket from the same listing
-  ([per-document rehydration](per-doc-rehydration.md)). Each node registers in
-  resume mode: look up the observation; on fingerprint match, install `reads`
-  (+ gate config)
-  directly into the indexes, set `status = clean`, or `invalid` if durable
-  dirty markers say so; on miss/mismatch, degrade that node to `fresh`
-  behind a bounded synced-hold. The successful listing path has already synced,
-  so that hold releases immediately; after a flag-off or failed-listing fallback
-  it waits briefly for sync and then releases on timeout. It is an anti-churn
-  optimization, not a correctness precondition. Child-starting coordinators
-  (map/filter/flatMap reconciles) never rehydrate clean — they run on resume to
-  re-attach their children, which then rehydrate individually.
-
-Rehydrated-clean nodes cost index inserts only. The v1 race-guard apparatus
-(per-action rehydration tokens, superseded checks, per-action timeout sharing)
-collapses because resume stays a boot-level phase — one listing loaded before
-registration — rather than per-action async lookups.
-
-### 9.3 Observation payload (slimmed)
-
-Per node: identity, kind, `reads` (+depth), the fixed registered write surface
-(`currentKnownWrites`), gate config, status (`success`/`failed` + error
-fingerprint), and watermark seq. Dropped relative to v1: `declaredWrites`,
-write-set history, and the mode fingerprint. `currentKnownWrites` is required:
-annotation-less actions may receive their static surface from the registration
-log, which is unavailable after restart.
-`sideWriteEnvelope` is declared metadata and also needs no observation copy,
-but keeping it inline is acceptable as a denormalization if graph-snapshot
-lookup at rehydration time is not yet available.
-
-Observations attach to the run's transaction at commit (including no-op
-commits, which the memory layer accepts for observation carriage — unchanged).
+- **Node identity is durable and restart-stable** — owner space, branch,
+  piece id (result-cell `scope:id`), action id with implementation hash
+  preferred. Nothing persists it per run anymore, but everything that keys
+  scheduler state per instance still constructs it the same way
+  ([per-document rehydration](per-doc-rehydration.md)), and the
+  server-execution basis index keys its rows by the same durable action
+  identity ([serving-loop.md §3b](../server-side-execution/serving-loop.md)).
+- **Start modes** collapse to `fresh`: a resumed piece registers every
+  action `never-ran`; resume intent holds each initial run until the space
+  finishes syncing (`awaitSyncBeforeInitialRun`), a bounded anti-churn
+  gate, not a correctness precondition.
 
 ---
 

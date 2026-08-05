@@ -477,14 +477,13 @@ Still open:
   entries retire when v2 lands its single flag.
 - The pre-arc, still-live behaviour specs this document leans on:
   [`scheduler-v2/`](../scheduler-v2/), [`memory-v2/`](../memory-v2/).
-- [`persistent-scheduler-state.md`](../persistent-scheduler-state.md)
-  does NOT return to its pre-arc scope, as an earlier draft of this
-  section claimed. Phase 1 stage C drops the entire PERSISTED form it
-  specifies — the observation, snapshot, replay, read-index,
-  write-index, action-state and context-floor tables — and REPLACES
+- [`persistent-scheduler-state.md`](../../history/specs/persistent-scheduler-state.md)
+  did NOT return to its pre-arc scope, as an earlier draft of this
+  section claimed. Phase 1 stage C dropped the entire PERSISTED form it
+  specified — the observation, snapshot, replay, read-index,
+  write-index, action-state and context-floor tables — and REPLACED
   it with the v2 basis index (serving-loop.md §3b). What the feature
   decided (warm start from recorded reads) survives in a new schema
-  under a new owner; the spec that describes the old form archives
-  when stage C lands, along with
-  [`scheduler-v2/per-doc-rehydration.md`](../scheduler-v2/per-doc-rehydration.md)'s
-  account of it.
+  under a new owner; the spec describing the old form is archived, along
+  with the persisted-form account extracted from
+  [`scheduler-v2/per-doc-rehydration.md`](../scheduler-v2/per-doc-rehydration.md).

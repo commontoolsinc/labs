@@ -1,3 +1,13 @@
+---
+status: historical
+created: 2026-07-14
+archived: 2026-08-04
+reason: "Implemented design for a persistentSchedulerState-gated feature;
+  the observation carriage it rode was deleted by server-execution v2
+  Phase 1 stage C.2, taking the adoption machinery with it."
+superseded-by: docs/specs/server-side-execution/serving-loop.md
+---
+
 # Incremental observation adoption (subscription-carried scheduler state)
 
 Status: Implemented. Successor to

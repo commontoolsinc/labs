@@ -930,7 +930,7 @@ Behavior:
   zero-input/no-capture computed form is handled separately as described in §8.
 
 The runtime meaning of `materializerWriteInputPaths` is specified in
-`docs/specs/persistent-scheduler-state.md` ("Materializers").
+`docs/specs/scheduler-v2/README.md` §4.3 (the write-surface tiers).
 
 If no captures are found, the lift-applied call is left unchanged.
 

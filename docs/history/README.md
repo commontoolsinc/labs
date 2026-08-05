@@ -195,6 +195,11 @@ One line per archived document; each document's header carries the fuller
 
 - [action-id-per-instance-decision.md](specs/action-id-per-instance-decision.md)
   — per-instance action identity.
+- [per-doc-rehydration-persisted-form.md](specs/scheduler-v2/per-doc-rehydration-persisted-form.md)
+  — the per-doc restore design for the deleted persisted-observation form.
+- [persistent-scheduler-state.md](specs/persistent-scheduler-state.md) — the
+  persisted scheduler-observation form, reduced to the v2 basis index by
+  server-execution v2 stage C.
 - [cfc-render-membership-lookup.md](specs/cfc-render-membership-lookup.md) —
   render-time space-membership lookup.
 - [cfc-s16-default-transition-design.md](specs/cfc-s16-default-transition-design.md)
@@ -203,6 +208,9 @@ One line per archived document; each document's header carries the fuller
   — trusted-agent tool-input integrity scoping.
 - [compilation-cache.md](specs/compilation-cache.md) — the removed AMD
   compilation cache.
+- [incremental-observation-adoption.md](specs/scheduler-v2/incremental-observation-adoption.md)
+  — the subscription-carried observation adoption the stage-C reduction
+  deleted.
 - [module-loading-amd-bundle-identity.md](specs/module-loading-amd-bundle-identity.md)
   — the removed AMD bundle pipeline and the bundle-grained identity defect that
   motivated content-addressed module loading.

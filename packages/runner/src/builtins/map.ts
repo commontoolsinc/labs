@@ -422,9 +422,7 @@ export function map(
     // long-lived maps with high element churn.
   };
 
-  // Child-starting coordinator: never rehydrates clean on resume — the
-  // reconcile must run to re-attach the per-element children (which then
-  // rehydrate their own persisted state). See
-  // docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
+  // Child-starting coordinator: its reconcile must run on resume to
+  // re-attach the per-element children.
   return { action: reconcile };
 }

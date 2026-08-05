@@ -132,7 +132,7 @@ observation, so the `"event-handler"` kind is currently never produced.
 local commits by `localSeq`), operations, and optional preconditions. A
 commit whose reads are stale relative to the space head is rejected; the
 client's scheduler re-runs the action against the newer inputs and commits
-again. The persistent-scheduler-state work already performs per-entry
+again. The (since-deleted) persistent-scheduler-state work already performed per-entry
 keep/drop decisions on exactly this read-watermark basis for no-op
 observation batches, recording dropped replay rows rather than surfacing
 conflicts.
@@ -448,27 +448,30 @@ executing code. What the design guarantees instead:
 - **Honest tagging by construction.** The kind originates in the builder's
   structural analysis, never in pattern-author-controlled values.
 
-## Relationship To Persistent Scheduler State
+## Relationship To Durable Scheduler State
 
-The two workstreams are complementary, with the dependency pointing from
-this proposal onto persistent-scheduler-state:
+This section originally leaned on the persistent-scheduler-state work,
+which server-execution v2 Phase 1 stage C deleted (the archived account is
+[persistent-scheduler-state.md](../history/specs/persistent-scheduler-state.md);
+the durable successor is the basis index,
+[serving-loop.md §3b](server-side-execution/serving-loop.md)). What that
+changes here:
 
 - The server-side machinery this policy needs — comparing a payload's read
   watermarks against heads and making per-entry keep/drop decisions with
-  dropped-replay bookkeeping — already exists for no-op observation batches.
-  Implementing this policy is largely extending that mechanism from
-  observation rows to semantic operations on computed-kind entities.
-- In return, this proposal de-risks persistent-scheduler-state's hardest
-  open problem: rehydration trust. For the computed subset of entities,
-  acting on a stale or invalid persisted observation degrades from a
-  correctness cliff to a performance cost — a wrong write is dropped and
-  recomputed — so the conservative fallback can be less conservative exactly
-  where data is replayable, even while action-identity fingerprints remain
-  version-1 placeholders.
-- Together they form the knowledge layer for the future server-side action
-  runner: persistent-scheduler-state supplies the dependency graph, read and
-  write surfaces, and dirty state; computed-kind ids supply the set of
-  entities the server is licensed to regenerate; `ClientCommit.codeCID`
+  dropped-replay bookkeeping — existed for no-op observation batches and was
+  deleted with them. It is prior art now: implementing this policy means
+  rebuilding that mechanism on the engine for semantic operations on
+  computed-kind entities, not extending a live one.
+- The rehydration-trust problem this proposal de-risked is moot in its old
+  form (nothing rehydrates from persisted observations anymore); the same
+  property — a wrong computed write degrades to a recompute, never a
+  correctness cliff — is exactly what makes computed-kind entities safe for
+  the serving loop's drop-on-stale wave commits (serving-loop.md §3d).
+- The knowledge layer for the server-side action runner is now the
+  server-execution v2 arc: the basis index supplies staleness, computed-kind
+  ids supply the set of entities the server is licensed to regenerate;
+  `ClientCommit.codeCID`
   supplies code identity. Execution remains the missing (and out-of-scope)
   half.
 
@@ -507,7 +510,8 @@ this proposal onto persistent-scheduler-state:
 2. **Server policy, drop-on-stale** (split into its own follow-up PR).
    Engine-side kind parse at commit-apply; ack-and-drop for all-computed
    stale commits, with `droppedComputed` bookkeeping for inspectability,
-   reusing the persistent-scheduler-state keep/drop path. Backed out of
+   rebuilding the deleted persistent-scheduler-state keep/drop path as
+   prior art. Backed out of
    the minting branch so phase 1 can land and be exercised under fully
    strict conflict semantics; ships gated behind its own flag.
 3. **Lineage integration** (with phase 2; semantics provisional). Settle

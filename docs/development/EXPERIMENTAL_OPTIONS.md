@@ -28,7 +28,6 @@ was last checked against the code.
 | Flag | Toggle via | Default today | Originally added by | Planned end state | Status |
 |------|-----------|---------------|---------------------|-------------------|---------------------|
 | [`modernCellRep`](#moderncellrep) | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental` | off | Dan Bornstein (#3818) | graduate to always-on, then delete flag | implemented, off by default |
-| [`persistentSchedulerState`](#persistentschedulerstate) | none — deleted | — | Bernhard Seefeld (#3646) | EXECUTED — the persisted form is replaced by the v2 basis index and the flag deleted with it ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md) §3b; plan Phase 1 stage C.2) | deleted from the tree; entry moves to Appendix A in stage C.3 |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`plainResultReceipts`](#plainresultreceipts) | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental` | on | Mike Salisbury (verb contract WS-C) | fold into receipt semantics and delete flag after a bake period | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
@@ -109,40 +108,6 @@ propagate](#how-flags-propagate).
   in the fleet negotiates `modernCellRep` true; then delete the flag, the legacy
   `{ "/" }` serialization branches in `cell-rep.ts`, and the protocol-capability
   negotiation for it.
-
-### `persistentSchedulerState`
-
-- **Toggle via.** `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` environment variable
-  (through the canonical mapping described in the category note above), or
-  `RuntimeOptions.experimental.persistentSchedulerState`. The ambient control
-  point is `setPersistentSchedulerStateConfig` in
-  [`packages/memory/v2.ts`](../../packages/memory/v2.ts) (the runner owns the
-  feature, but the value has to be known at the memory client and server
-  handshake, so it lives beside the memory protocol flags).
-- **Added by.** Bernhard Seefeld, in "persist scheduler state for rehydration"
-  (#3646, 2026-05-28).
-- **Purpose.** Persists the scheduler's observations to durable storage through
-  memory-v2 and uses them to rehydrate scheduler state after a restart, instead
-  of rediscovering everything by re-running.
-- **Current default and planned end state.** Off by default. The scheduler-v2
-  design is persistence-first, so the intended end state is to graduate this to
-  always-on. The scheduler-observation protocol is an optional capability rather
-  than a data-model contract, so peers with different settings can still share
-  memory data; the server's setting controls whether scheduler rows are accepted
-  on a connection.
-- **Status on 2026-08-04.** DELETED (server-execution v2 Phase 1 stage C.2):
-  the flag, its ambient control point, the hello negotiation, the
-  `scheduler.snapshot.list` RPC, the commit-carried observation payload, and
-  the seven observation tables are all gone from the tree; the persisted form
-  is replaced by the `scheduler_basis` index
-  ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md) §3b),
-  which starts empty and is written only when the serving loop lands. A store
-  that had opted in loses warm start once at the migration, by design (D10).
-  Old clients take the existing hello-degrade path (a server that advertises
-  nothing to negotiate reads as "state absent, run fresh").
-- **Path to removal.** Superseded and executed by stage C: the persisted form
-  did not graduate; it was reduced away. This registry entry moves to
-  Appendix A in stage C.3, which also archives the describing specs.
 
 ### `plainResultReceipts`
 
@@ -1103,6 +1068,26 @@ config reaches:
 
 These are recorded so that references to them elsewhere in the tree do not send a
 future reader hunting for a flag that no longer exists.
+
+### `persistentSchedulerState` / `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` (removed)
+
+Persisted the scheduler's observations to durable storage through memory-v2
+and used them to rehydrate scheduler state after a restart, with a live
+extension (incremental observation adoption) that let one client adopt
+another's committed action runs. Added by Bernhard Seefeld in #3646
+(2026-05-28); implemented and OFF by default throughout its life. Deleted by
+server-execution v2 Phase 1 stage C (2026-08-04): the flag, its ambient
+control point, the hello negotiation, the `scheduler.snapshot.list` RPC, the
+commit-carried observation payload, and the seven observation tables all
+left the tree, and the persisted form was REPLACED by the `scheduler_basis`
+index ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md)
+§3b) — ids + seqs only, written by the serving loop when it lands. A store
+that had opted in lost warm start once at the migration, by design; old
+clients take the hello-degrade path (a server advertising nothing to
+negotiate reads as "state absent, run fresh"). The archived specs:
+[`persistent-scheduler-state.md`](../history/specs/persistent-scheduler-state.md),
+[`per-doc-rehydration-persisted-form.md`](../history/specs/scheduler-v2/per-doc-rehydration-persisted-form.md),
+[`incremental-observation-adoption.md`](../history/specs/scheduler-v2/incremental-observation-adoption.md).
 
 ### `systemPatternAutoUpdateHome` / `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` (removed)
 

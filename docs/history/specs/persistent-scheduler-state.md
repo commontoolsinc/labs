@@ -1,3 +1,13 @@
+---
+status: historical
+created: 2026-05-28
+archived: 2026-08-04
+reason: "Executed design; the persisted observation form it specifies was
+  deleted by server-execution v2 Phase 1 stage C and reduced to the
+  scheduler_basis index."
+superseded-by: docs/specs/server-side-execution/serving-loop.md
+---
+
 # Persistent Scheduler State
 
 ## Status

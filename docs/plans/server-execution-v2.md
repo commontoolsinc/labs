@@ -204,7 +204,7 @@ Stages, one PR each except C, which is a three-PR train (below):
       memory server's clock (an expired row matches nobody). Landed
       dark: nothing drives the renew cadence until stage F's
       SpaceServer.
-- [ ] **C — main reduction** (a THREE-PR TRAIN, not one PR — the
+- [x] **C — main reduction** (a THREE-PR TRAIN, not one PR — the
       surface is ~25 source files across five packages plus ~110
       goldens, and the seams below are where it cuts cleanly):
   - [x] **C.1 — emission + consumers + goldens**: delete
@@ -237,7 +237,7 @@ Stages, one PR each except C, which is a three-PR train (below):
         `packages/memory/v2/sqlite/guard.ts:16-33` — drop the dead
         names from the `CORE_TABLE_NAMES` blocklist and ADD
         `scheduler_basis`.
-  - [ ] **C.3 — flag retirement + doc archival**: retire the
+  - [x] **C.3 — flag retirement + doc archival**: retire the
         `persistentSchedulerState` entry in
         `EXPERIMENTAL_OPTIONS.md`, and archive
         `docs/specs/persistent-scheduler-state.md` plus
@@ -311,11 +311,12 @@ Success criteria (flag OFF — the ON gates are Phase 2's):
 - [ ] Every stage lands with the OFF arm byte-identical to today
       (testing.md §2); the ON arm runs in CI from stage A with
       explicit skip lists, never silent filtering.
-- [ ] Stage C leaves no `completeSchedulerScopeSummary` or
+- [x] Stage C leaves no `completeSchedulerScopeSummary` or
       `completeActionScopeSummary` reference on
       main, no full-JSON observation payload tables, and no
       `scheduler_context_floor`; the basis index is the only
-      persisted scheduler state besides W and `eventWatermark`.
+      persisted scheduler state besides W and `eventWatermark`
+      (landed 2026-08-04 as the C.1–C.3 train).
 - [ ] Stage E lands with the OFF arm byte-identical: the re-keyed
       vocabulary partitions state exactly as the scope-NAME form did
       at cardinality 1.
