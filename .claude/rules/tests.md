@@ -16,10 +16,20 @@ learn by failing CI, or by shipping a file in the wrong shape.
 
 ## Shape of a unit test file
 
-`docs/development/unit-test-coding-style.md` is the authority, and a new test
-file is a reason to open it rather than to copy a neighbor. Not every file in
-the tree follows it, so what sits beside you in the same directory is not
-evidence of what to write.
+First check which kind of file you are in. A `*.test.tsx` under
+`packages/patterns`, and a scattering elsewhere such as those under
+`packages/piece/test/vintages`, is a **pattern test** — itself a pattern,
+driving another with `action()` and asserting with `assert()` from
+`commonfabric`, run by `deno task cf test`. Nothing in this section applies
+to one.
+`docs/common/workflows/pattern-testing.md` governs those; its "Prefer
+`assert()` over `computed()`" and "Use `assert()` only for assertions"
+sections carry the two rules easiest to get wrong.
+
+For everything else, `docs/development/unit-test-coding-style.md` is the
+authority, and a new test file is a reason to open it rather than to copy a
+neighbor. Not every file in the tree follows it, so what sits beside you in
+the same directory is not evidence of what to write.
 
 The four its readers most often get wrong by defaulting to the surrounding
 code:

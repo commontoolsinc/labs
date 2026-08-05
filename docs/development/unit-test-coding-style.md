@@ -9,6 +9,19 @@ browser tests answer to different conventions —
 [`waiting-in-tests.md`](waiting-in-tests.md) for the rule against polling,
 which applies to unit tests too.
 
+Pattern tests are a different form again, and none of this guide reaches them.
+A pattern test is itself a pattern: it instantiates the pattern under test,
+drives it with `action()`, states each expectation with `assert()` from
+`commonfabric`, and returns an ordered `tests` array for the runner to walk.
+`assert()` is preferred over a `computed()` boolean there, because a failed
+`assert()` names its operands and the values they held while a failed
+`computed()` can only say it expected `true` — the comparison ran inside the
+closure and only the verdict survived.
+[Pattern testing](../common/workflows/pattern-testing.md) is the guide, and
+its "Prefer `assert()` over `computed()`" section is the one to read first. A
+`.test.tsx` file may be either form, so establish which one you are in before
+editing it.
+
 Not every test file in the tree follows this guide, so a neighboring file is
 not evidence of what to write. A new file follows this guide closely. An edit
 to an existing file conforms the area around the edit; converting a whole file
