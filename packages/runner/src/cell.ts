@@ -3322,14 +3322,6 @@ export function frameAnchorIds(
  * @param value - The value to convert.
  * @returns The converted value.
  */
-// TODO(danfuzz): name the two domains this converts between, the way
-// `ClientCellValue` and `WireCellValue` do for the connection. What arrives is
-// what a pattern produced -- a fabric value, or a native convertible to one,
-// plus the `Cell`s this exists to replace -- and what leaves is a `FabricValue`
-// carrying links in their place. The signature says `any` at both ends and for
-// `ancestors`, so nothing here can be checked, and a walk whose domain is
-// unwritten is one that cannot be told what it must do about a member of it:
-// the `FabricInstance` gap marked below is exactly that.
 export function convertCellsToLinks(
   value: readonly any[] | Record<string, any> | any,
   options: {
@@ -3341,6 +3333,15 @@ export function convertCellsToLinks(
   path: string[] = [],
   ancestors: Map<any, string[]> = new Map(),
 ): any {
+  // TODO(danfuzz): name the two domains this converts between, the way
+  // `ClientCellValue` and `WireCellValue` do for the connection. What arrives
+  // is what a pattern produced -- a fabric value, or a native convertible to
+  // one, plus the `Cell`s this exists to replace -- and what leaves is a
+  // `FabricValue` carrying links in their place. The signature says `any` at
+  // both ends and for `ancestors`, so nothing here can be checked, and a walk
+  // whose domain is unwritten is one that cannot be told what it must do about
+  // a member of it: the `FabricInstance` gap marked below is exactly that.
+
   if (ancestors.has(value)) {
     return linkRefFrom({ path: ancestors.get(value) });
   }
