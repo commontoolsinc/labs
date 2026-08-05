@@ -1,5 +1,6 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-run
 import * as path from "@std/path";
+import ts from "typescript";
 import { normalizeLcovInstancePaths } from "./write-coverage-lcov.ts";
 
 export const COVERAGE_PROFILE_ARTIFACT_PREFIX = "coverage-profile-";
@@ -20,6 +21,9 @@ const EXCLUDED_PATH_PARTS = new Set([
 ]);
 
 const EXCLUDED_RELATIVE_PREFIXES = [
+  // Type-profiling harness: its scenario files exist to be type-checked, not
+  // run, so no test can ever cover them (see packages/api/perf/README.md).
+  "packages/api/perf/",
   "packages/generated-patterns/integration/",
   "packages/patterns/factory-outputs/",
   "packages/patterns-saves-backup/",
@@ -85,7 +89,9 @@ export async function collectCoverageDebtMetricsFromLcov(
   for (const source of sourceFiles) {
     const coverage = lcovCoverage.get(source.absolutePath);
     // A file the tests never loaded has no coverage record; every tracked
-    // line counts as uncovered, matching how the debt metric scores it.
+    // line counts as uncovered, matching how the debt metric scores it. A
+    // module that produces no executable code also never gains a record, but
+    // it carries zero tracked lines, so it adds no debt.
     const uncovered = coverage
       ? countUncoveredProfileLines(coverage)
       : source.trackedLineCount;
@@ -142,7 +148,8 @@ export async function collectUncoveredLinesForFiles(
       uncoveredLines = uncoveredProfileLineNumbers(coverage);
     } else {
       // No coverage record: the file was never loaded by any test, so every
-      // tracked line is uncovered.
+      // tracked line is uncovered — unless it produces no executable code,
+      // in which case there is nothing a test could have covered.
       let content: string;
       try {
         content = await Deno.readTextFile(absolutePath);
@@ -153,7 +160,9 @@ export async function collectUncoveredLinesForFiles(
         if (error instanceof Deno.errors.NotFound) continue;
         throw error;
       }
-      uncoveredLines = trackedSourceLineNumbers(content);
+      uncoveredLines = producesNoExecutableCode(content, relativePath)
+        ? []
+        : trackedSourceLineNumbers(content);
     }
 
     if (uncoveredLines.length > 0) result.set(relativePath, uncoveredLines);
@@ -175,11 +184,15 @@ export async function collectSourceFiles(
       if (!shouldTrackSourceFile(relativePath)) continue;
 
       const content = await Deno.readTextFile(file);
+      const trackedLineCount = countTrackedSourceLines(content);
       files.push({
         absolutePath: path.normalize(file),
         relativePath,
         metricGroup: metricGroupFor(relativePath),
-        trackedLineCount: countTrackedSourceLines(content),
+        trackedLineCount: trackedLineCount > 0 &&
+            producesNoExecutableCode(content, relativePath)
+          ? 0
+          : trackedLineCount,
       });
     }
   }
@@ -216,6 +229,63 @@ export function metricGroupFor(relativePath: string): string {
     return `packages/${parts[1]}`;
   }
   return parts[0] ?? "workspace";
+}
+
+/**
+ * True when transpiling the module would leave no executable code: every
+ * top-level statement is erased by type stripping — an interface, a type
+ * alias, a wholly type-only import or export, or an ambient (`declare`)
+ * declaration. V8 never emits a coverage record for such a module even when
+ * tests import it, so the debt metric scores it as zero tracked lines rather
+ * than as permanently uncoverable. The `.d.ts` suffix exclusion is the
+ * declared-by-name case of the same rule.
+ *
+ * Conservative on purpose: a statement this does not recognize as erased
+ * counts as executable, so a mistake here keeps a file tracked rather than
+ * silently dropping real uncovered code.
+ */
+export function producesNoExecutableCode(
+  content: string,
+  fileName: string,
+): boolean {
+  const source = ts.createSourceFile(
+    fileName,
+    content,
+    ts.ScriptTarget.Latest,
+  );
+  return source.statements.every(isErasedStatement);
+}
+
+function isErasedStatement(statement: ts.Statement): boolean {
+  if (
+    ts.isInterfaceDeclaration(statement) ||
+    ts.isTypeAliasDeclaration(statement) ||
+    statement.kind === ts.SyntaxKind.EmptyStatement
+  ) {
+    return true;
+  }
+
+  // Ambient declarations (`declare const`, `declare module`, `declare
+  // global`, ...) describe values without creating them.
+  if (
+    ts.canHaveModifiers(statement) &&
+    ts.getModifiers(statement)?.some((modifier) =>
+      modifier.kind === ts.SyntaxKind.DeclareKeyword
+    )
+  ) {
+    return true;
+  }
+
+  // A bare `import "./mod"` or a value import loads its module at runtime;
+  // only a wholly type-only clause is erased. `import { type A } from ...`
+  // keeps its module load, so it stays executable.
+  if (ts.isImportDeclaration(statement)) {
+    return statement.importClause?.isTypeOnly ?? false;
+  }
+  if (ts.isExportDeclaration(statement)) return statement.isTypeOnly;
+  if (ts.isImportEqualsDeclaration(statement)) return statement.isTypeOnly;
+
+  return false;
 }
 
 export function countTrackedSourceLines(content: string): number {

@@ -102,7 +102,9 @@ covered a line.
 
 One detail of the gate's accounting is worth knowing when reasoning about
 pattern coverage. A file with no LCOV record has every tracked line counted as
-uncovered. A file with a record is scored against the lines that record names.
+uncovered — unless the file produces no executable code, as described in the
+next section. A file with a record is scored against the lines that record
+names.
 For a file measured by Deno's V8 coverage that is every executable line; pattern
 instrumentation names only the statements it could instrument, so a pattern
 file's first record both covers real lines and drops the never-named lines out of
@@ -115,6 +117,30 @@ of the file's lines and the rest stop being counted, so it settles at a lower �
 and therefore stricter — bar rather than failing anything. The instrumented
 statements are also the only lines this mechanism can speak to: a line the
 instrumentation cannot reach is not a line a pattern test could cover.
+
+## Type-only modules are scored as zero tracked lines
+
+A module whose every top-level statement is erased by type stripping —
+interfaces, type aliases, wholly type-only imports and exports, and ambient
+(`declare`) declarations — transpiles to an empty module. V8 never emits a
+coverage record for it, even when tests import it, so treating its missing
+record as "never loaded" would charge every line as permanently uncoverable
+debt, and any PR adding type-level lines to such a file would fail the ratchet
+with an "add tests" suggestion that is impossible to follow.
+
+So `tasks/coverage-metrics.ts` parses each tracked file and scores a file that
+produces no executable code as zero tracked lines
+(`producesNoExecutableCode()`). The `.d.ts` suffix exclusion is the
+declared-by-name case of the same rule. The detection is conservative: any
+statement it does not recognize as erased — a value import, a bare
+side-effect import, an enum, a `const` — keeps the file tracked, so a mistake
+leaves debt standing rather than hiding real uncovered code.
+
+Two related exclusions sit next to it. Files whose paths end in `.bench.ts` or
+`.bench.tsx` are benchmarks, and `packages/api/perf/` is the type-profiling
+harness, whose scenario files exist to be type-checked rather than run — some
+of them contain value statements precisely to stress the checker, so the
+type-only rule alone would not release them.
 
 ## Coverage must not depend on the execution environment
 

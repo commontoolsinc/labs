@@ -8,6 +8,7 @@ import {
   countUncoveredProfileLines,
   metricGroupFor,
   parseLcov,
+  producesNoExecutableCode,
   shouldTrackSourceFile,
   trackedSourceLineNumbers,
 } from "./coverage-metrics.ts";
@@ -94,6 +95,57 @@ Deno.test("trackedSourceLineNumbers reports the executable line numbers", () => 
   );
 });
 
+Deno.test("producesNoExecutableCode recognizes wholly type-level modules", () => {
+  assertEquals(
+    producesNoExecutableCode(
+      [
+        'import type { Cell } from "commonfabric";',
+        "export type Wrapped<T> = Cell<T>;",
+        "export interface Shape {",
+        "  value: number;",
+        "}",
+        "declare const ambient: Shape;",
+        'declare module "commonfabric" {',
+        "  interface Augmented {}",
+        "}",
+        "export type { Shape as Alias };",
+      ].join("\n"),
+      "packages/example/src/types.ts",
+    ),
+    true,
+  );
+});
+
+Deno.test("producesNoExecutableCode treats value statements as executable", () => {
+  // A value statement next to ambient declarations still transpiles to code.
+  assertEquals(
+    producesNoExecutableCode(
+      [
+        "declare const ambient: { key(name: string): unknown };",
+        'const result = ambient.key("id");',
+      ].join("\n"),
+      "packages/example/src/stress.ts",
+    ),
+    false,
+  );
+  // A bare import loads its module at runtime.
+  assertEquals(
+    producesNoExecutableCode(
+      'import "./side-effect.ts";\nexport type Marker = true;',
+      "packages/example/src/marker.ts",
+    ),
+    false,
+  );
+  // A value import stays executable even when only types follow it.
+  assertEquals(
+    producesNoExecutableCode(
+      'import { helper } from "./helper.ts";\nexport type Uses = typeof helper;',
+      "packages/example/src/uses.ts",
+    ),
+    false,
+  );
+});
+
 Deno.test("source inventory helpers group tracked files by package", () => {
   assertEquals(shouldTrackSourceFile("packages/runner/src/cell.ts"), true);
   assertEquals(
@@ -102,6 +154,8 @@ Deno.test("source inventory helpers group tracked files by package", () => {
   );
   assertEquals(shouldTrackSourceFile("scripts/start-local-dev.sh"), false);
   assertEquals(shouldTrackSourceFile("scripts/build.ts"), false);
+  // The type-profiling harness holds compile-only scenario files.
+  assertEquals(shouldTrackSourceFile("packages/api/perf/schema.ts"), false);
   assertEquals(
     metricGroupFor("packages/runner/src/cell.ts"),
     "packages/runner",
@@ -164,6 +218,42 @@ Deno.test("collectCoverageDebtMetricsFromLcov computes debt from compact reports
       )?.uncoveredLines,
       1,
     );
+    assertEquals(
+      metrics.find((metric) =>
+        metric.name === "coverage-debt: packages/example uncovered lines"
+      )?.uncoveredLines,
+      1,
+    );
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
+});
+
+Deno.test("collectCoverageDebtMetricsFromLcov scores a type-only module as zero debt", async () => {
+  const rootDir = await Deno.makeTempDir({ prefix: "coverage-typeonly-test-" });
+  try {
+    const typeOnlyPath = path.join(rootDir, "packages/example/src/types.ts");
+    const executablePath = path.join(rootDir, "packages/example/src/mod.ts");
+    await Deno.mkdir(path.dirname(typeOnlyPath), { recursive: true });
+    // Never gains an LCOV record: it transpiles to an empty module, so V8
+    // emits no script coverage for it even when tests import it.
+    await Deno.writeTextFile(
+      typeOnlyPath,
+      [
+        "export interface Shape {",
+        "  value: number;",
+        "}",
+        "export type Alias = Shape;",
+      ].join("\n"),
+    );
+    await Deno.writeTextFile(executablePath, "export const uncovered = 1;\n");
+
+    const metrics = await collectCoverageDebtMetricsFromLcov({
+      rootDir,
+      lcov: "",
+    });
+
+    // Only the executable file's line counts; the type-only file adds none.
     assertEquals(
       metrics.find((metric) =>
         metric.name === "coverage-debt: packages/example uncovered lines"
@@ -261,6 +351,28 @@ Deno.test("collectUncoveredLinesForFiles resolves lines only for requested files
     assertEquals(uncovered.has("scripts/build.ts"), false);
     assertEquals(uncovered.has("packages/example/src/covered.test.ts"), false);
     assertEquals(uncovered.has("packages/example/src/other.ts"), false);
+  } finally {
+    await Deno.remove(rootDir, { recursive: true });
+  }
+});
+
+Deno.test("collectUncoveredLinesForFiles reports no lines for a type-only module", async () => {
+  const rootDir = await Deno.makeTempDir({ prefix: "coverage-lines-test-" });
+  try {
+    const typeOnlyPath = path.join(rootDir, "packages/example/src/types.ts");
+    await Deno.mkdir(path.dirname(typeOnlyPath), { recursive: true });
+    await Deno.writeTextFile(
+      typeOnlyPath,
+      "export type Alias = { value: number };\n",
+    );
+
+    const uncovered = await collectUncoveredLinesForFiles({
+      rootDir,
+      lcov: "",
+      files: ["packages/example/src/types.ts"],
+    });
+
+    assertEquals(uncovered.size, 0);
   } finally {
     await Deno.remove(rootDir, { recursive: true });
   }

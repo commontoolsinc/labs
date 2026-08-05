@@ -2,5 +2,8 @@
   // Dependency guide: ../docs/development/DEPENDENCIES.md
   "tasks": {
     "test": "deno test -A"
+  },
+  "imports": {
+    "typescript": "npm:typescript@6.0.3"
   }
 }

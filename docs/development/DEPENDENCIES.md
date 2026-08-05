@@ -167,8 +167,9 @@ disagrees with the pin.
 The runtime compiles patterns itself, using the TypeScript compiler API at
 runtime. Seven runtime and build packages (`js-compiler`, `ts-transformers`,
 `schema-generator`, `runner`, `cli`, `static`, `deno-web-test`) import
-`npm:typescript`. The `api` package imports it for the type-profiling harness.
-All eight workspace members pin the same version in their `deno.jsonc` import
+`npm:typescript`. The `api` package imports it for the type-profiling harness,
+and `tasks` imports it to detect type-only modules in the coverage accounting.
+All nine workspace members pin the same version in their `deno.jsonc` import
 maps. This npm dependency is separate from the TypeScript that `deno check`
 uses: Deno bundles its own copy of the compiler. Keeping the npm pin on the
 same minor version as the Deno-bundled compiler (`deno --version` prints it)
