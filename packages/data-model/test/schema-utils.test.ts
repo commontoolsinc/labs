@@ -825,7 +825,7 @@ describe("schema-utils", () => {
     testType("null", null);
     testType("array", [1, 2, 3]);
     testType("object", { a: 1 });
-    // Fabric primitives get their specific type name, not "object".
+    // A `FabricPrimitive` gets its specific type name, not "object".
     testType("FabricBytes", new FabricBytes(new Uint8Array([1])));
     testType("FabricEpochDays", new FabricEpochDays(1n));
     testType("FabricEpochNsec", new FabricEpochNsec(1n));

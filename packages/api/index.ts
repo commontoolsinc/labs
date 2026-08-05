@@ -1812,13 +1812,15 @@ export type MutableJSONValue = Mutable<JSONValue>;
  * primitive is a subtype of `"object"` the way an `"integer"` value satisfies
  * a `"number"` schema -- so schemas that predate this vocabulary keep working.
  */
-export const FABRIC_PRIMITIVE_SCHEMA_TYPES = [
-  "FabricBytes",
-  "FabricEpochDays",
-  "FabricEpochNsec",
-  "FabricHash",
-  "FabricRegExp",
-] as const;
+export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
+  [
+    "FabricBytes",
+    "FabricEpochDays",
+    "FabricEpochNsec",
+    "FabricHash",
+    "FabricRegExp",
+  ] as const,
+);
 
 export type FabricPrimitiveSchemaType =
   typeof FABRIC_PRIMITIVE_SCHEMA_TYPES[number];

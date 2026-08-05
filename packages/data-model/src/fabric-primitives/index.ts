@@ -36,12 +36,13 @@ const CODEC_CLASSES: readonly FabricClassWithCodec[] = Object.freeze([
 ]);
 
 /**
- * The JSON Schema `type` name for a `FabricPrimitive` instance, resolved by
- * prototype. This is the value-side counterpart of the api package's
- * `FABRIC_PRIMITIVE_SCHEMA_TYPES` vocabulary: schema validation compares the
- * name returned here against a schema's `type`. The mapping is explicit
- * (`instanceof` per class) rather than derived from `constructor.name`, which
- * minified bundles do not preserve.
+ * The `type` name in this system's schema dialect for a `FabricPrimitive`
+ * instance, resolved by prototype. This is the value-side counterpart of the
+ * api package's `FABRIC_PRIMITIVE_SCHEMA_TYPES` vocabulary: schema validation
+ * compares the name returned here against a schema's `type`. The mapping is
+ * explicit (`instanceof` per class) rather than derived from
+ * `constructor.name`, which minified bundles do not preserve (the shell's
+ * production build minifies identifiers; see `packages/shell/felt.config.ts`).
  *
  * Uses "death before confusion": a `FabricPrimitive` subclass missing from
  * this mapping throws rather than degrade to a broader type, so adding a new
