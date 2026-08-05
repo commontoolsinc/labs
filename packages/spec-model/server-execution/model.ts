@@ -31,10 +31,22 @@ export interface Acting {
   session?: SessionId;
 }
 
+/**
+ * Scope-key constructors — RESTATED from the real wire vocabulary
+ * (`packages/memory/v2.ts`: `resolveScopeKey` /
+ * `resolvePrincipalSessionKey`), never imported (model.ts stays
+ * import-free). The real constructor encodeURIComponent-encodes each
+ * component, so the literal `:` separators split segments exactly and
+ * construction is INJECTIVE for `:`-bearing principals (DIDs) and
+ * arbitrary session ids — un-encoded interpolation would collide
+ * `("a:b","c")` with `("a","b:c")`. The conformance bridge test in
+ * properties.test.ts asserts byte-agreement with the real vocabulary.
+ */
+const encodeKeyPart = (value: string): string => encodeURIComponent(value);
 export const SPACE_KEY = "space";
-export const userKey = (u: UserId): string => `user:${u}`;
+export const userKey = (u: UserId): string => `user:${encodeKeyPart(u)}`;
 export const sessionKey = (u: UserId, s: SessionId): string =>
-  `session:${u}:${s}`;
+  `session:${encodeKeyPart(u)}:${encodeKeyPart(s)}`;
 
 /** The scope kinds a handler write can declare (scopes.md §2). */
 export type ScopeKind = "space" | "user" | "session";
