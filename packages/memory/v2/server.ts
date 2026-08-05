@@ -2892,14 +2892,13 @@ export class Server {
     // instances mis-resolve to its own here; forceFullResync below and
     // the full re-evaluation repair that conservatively.)
     const instanceKeyFor = (
-      id: string,
       scope: CellScope | undefined,
     ): ScopeKey | undefined =>
       canResolveScopeKey(scope, identity)
         ? resolveScopeKey(scope, identity)
         : undefined;
     for (const upsert of sync.upserts) {
-      const scopeKey = instanceKeyFor(upsert.id, upsert.scope);
+      const scopeKey = instanceKeyFor(upsert.scope);
       if (scopeKey === undefined) continue;
       session.entities.delete(
         cacheKeyForEntity(upsert.branch, upsert.id, scopeKey),
@@ -2913,7 +2912,7 @@ export class Server {
       // emits removes, so only a full re-diff (tombstone present, entity
       // absent) regenerates the removal for the client.
       const scope = declaredScope(remove.scope);
-      const scopeKey = instanceKeyFor(remove.id, remove.scope);
+      const scopeKey = instanceKeyFor(remove.scope);
       if (scopeKey === undefined) continue;
       session.entities.set(
         cacheKeyForEntity(remove.branch, remove.id, scopeKey),

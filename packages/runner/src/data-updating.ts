@@ -728,8 +728,9 @@ export function normalizeAndDiff(
           runtime,
           tx,
           userLink,
-          createSigilLinkFromParsedLink(scopedLink, { base: userLink }) as
-            unknown,
+          createSigilLinkFromParsedLink(scopedLink, {
+            base: userLink,
+          }) as unknown,
           context,
           options,
           state,

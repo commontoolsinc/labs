@@ -126,10 +126,24 @@ Deno.test("main: no arguments behaves like an unknown suite", async () => {
 });
 
 Deno.test("main: empty lists print the report on stderr and nothing on stdout", async () => {
+  // The runner suite's list is empty (patterns carries stage F's
+  // two-deriver-interim entry).
+  const { out, err, io } = captureIo();
+  assertEquals(await main(["runner"], io), 0);
+  assertEquals(out, []);
+  assertMatch(err[0], /runner: no skips — full suite runs/);
+});
+
+Deno.test("main: the stage-F patterns entry emits its ignore flag", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
-  assertEquals(out, []);
-  assertMatch(err[0], /patterns: no skips — full suite runs/);
+  assertEquals(out, [
+    "--ignore=integration/cfc-group-chat-demo-two-browsers.test.ts",
+  ]);
+  assertMatch(
+    err[0],
+    /SKIP integration\/cfc-group-chat-demo-two-browsers\.test\.ts \(until phase-2\)/,
+  );
 });
 
 Deno.test("main: populated lists emit the --ignore flag on stdout", async () => {

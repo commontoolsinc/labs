@@ -1551,7 +1551,10 @@ describe("stage D seal-into-wave", () => {
     // Contribution 1: a derivation READS the foreign doc (read-only in
     // that space — the tx seals only the home space) and writes home.
     const tx2 = runtime.edit();
-    stampWaveRunContext(tx2, { actionId: "derive-from-foreign", kind: "derivation" });
+    stampWaveRunContext(tx2, {
+      actionId: "derive-from-foreign",
+      kind: "derivation",
+    });
     const seen = foreignDoc.withTx(tx2).get();
     homeOut.withTx(tx2).set({ value: (seen?.value ?? 0) + 1 });
     expect((await tx2.commit()).error).toBeUndefined();
@@ -1702,5 +1705,4 @@ describe("stage D seal-into-wave", () => {
     });
     expect(basis.length).toBeGreaterThanOrEqual(0);
   });
-
 });

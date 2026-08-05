@@ -200,7 +200,7 @@ describe("stage F serving loop", () => {
       // run races the client's in-flight authored writes, and the real
       // loader machinery owns exactly this presync + bounded-retry duty
       // (runtime-mapping N24/N15).
-      for (let attempt = 0; ; attempt++) {
+      for (let attempt = 0;; attempt++) {
         await argument.sync();
         await result.sync();
         const tx = runtime.edit();
@@ -390,7 +390,7 @@ describe("stage F serving loop", () => {
         "swap-result",
         v1.resultSchema,
       );
-      for (let attempt = 0; ; attempt++) {
+      for (let attempt = 0;; attempt++) {
         await argument.sync();
         await result.sync();
         const tx = runtime.edit();

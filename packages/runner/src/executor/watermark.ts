@@ -67,15 +67,19 @@ export const waitForSettled = (
 ): Promise<number> => {
   const cell = watermarkCell(runtime, space);
   return new Promise<number>((resolve, reject) => {
-    let cancel: (() => void) | undefined;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    // The timer callback closes over the sink's cancel before the sink
+    // exists, so both live on one holder object.
+    const state: {
+      cancel?: () => void;
+      timer?: ReturnType<typeof setTimeout>;
+    } = {};
     const settle = (value: number) => {
-      if (timer !== undefined) clearTimeout(timer);
-      cancel?.();
+      if (state.timer !== undefined) clearTimeout(state.timer);
+      state.cancel?.();
       resolve(value);
     };
     if (options.timeoutMs !== undefined) {
-      timer = setTimeout(() => {
+      state.timer = setTimeout(() => {
         reject(
           new Error(
             `waitForSettled(${space}, ${seq}) timed out after ` +
@@ -83,14 +87,14 @@ export const waitForSettled = (
           ),
         );
         try {
-          cancel?.();
+          state.cancel?.();
         } catch {
           // cancellation is best-effort; the rejection above already
           // carried the outcome
         }
       }, options.timeoutMs);
     }
-    cancel = cell.sink((value) => {
+    state.cancel = cell.sink((value) => {
       const current = typeof value?.seq === "number" ? value.seq : 0;
       if (current >= seq) settle(current);
     });

@@ -365,36 +365,45 @@ propagate](#how-flags-propagate).
     is enforced from it, and `stream-data` behaves as today. Any OFF-arm
     behavioral diff from a v2 stage is a phase-gate failure by itself
     (testing.md §2).
-  - **ON: the v2 posture, growing stage by stage.** With stages A, B, and D
-    landed this means: the per-class admission rows of protocol.md §2 are
-    enforced — the `derived` row is the stage-B lease equality check
-    (producer holds the space's live `execution_lease`, liveness judged by
-    the memory server's own clock; the only `derived` producer is stage D's
-    wave commit step, driven by tests until the serving loop lands, and the
-    `authored`/`system` rows equal today's checks) — the deferred
-    `stream-data` built-in is disabled with a runtime error naming
-    builtins.md §5, and the seal-into-wave transaction machinery
-    (serving-loop.md §3d) is installable: a runtime accepts a transaction
-    seal destination ONLY under the flag, and nothing in production
-    installs one until stage F's serving loop. Later stages add their
-    surfaces under this same flag (serving loop, speculation, events); both
-    halves of any coupled behavior move together on it.
+  - **ON: the v2 posture, growing stage by stage.** With stages A–F landed
+    this means: the per-class admission rows of protocol.md §2 are enforced
+    — the `derived` row is the stage-B lease equality check PLUS stage F's
+    derived-envelope defense-in-depth (the producing session must BE the
+    holder's own service session), reads may name an explicit
+    `entity_scope_key` (lease-holder-only; refused for anyone else), the
+    delegated authored row validates its acting-identity + capabilityRef
+    carriage, and the `authored`/`system` rows equal today's checks — the
+    deferred `stream-data` built-in is disabled with a runtime error naming
+    builtins.md §5 — AND the serving loop actually SERVES: toolshed
+    constructs an ExecutorHost over its memory server, spaces activate on
+    session open / authored admission, one SpaceServer per active space
+    holds and renews the lease, runs demanded derivations through the
+    seal-into-wave machinery, commits ONE derived transaction per wave
+    carrying the watermark (protocol.md §4; `waitForSettled` rides it),
+    hosts the pattern-update watcher server-side (serving-loop.md §3e),
+    and exposes the §7 `servingLoop` counters on `/api/health/stats`.
+    Narrowing writes chain the eager via-user hop (scopes.md §2's MUST).
+    Clients still derive too in this interim — the two-deriver CAS
+    storming the plan names is expected until Phase 2 removes the client
+    path. Later stages add their surfaces under this same flag
+    (speculation, events, effects); both halves of any coupled behavior
+    move together on it.
 - **Current default and planned end state.** Off by default in every process.
   The integration suites run an ON arm in CI from stage A on, with explicit
   per-phase skip lists (testing.md §2). End state: the plan's Phase 7 flips
   the default ON after Phases 1–6 gate green and a soak period, then the flag
   retires and the OFF code path is removed.
-- **Status on 2026-08-04.** Phase 1 stages A, B, and D landed: flag plumbing
-  end to end, commit `class` metadata written in every arm, the OFF+ON CI
-  arms, the `stream-data` disable, the `execution_lease` table with the
-  acquire/renew/expire cycle and the derived-class admission equality check,
-  and stage D's seal-into-wave transaction machinery — the seal destination
-  seam, the wave accumulator with its per-doc per-write-class commit step,
-  and the derived-commit annotation/consequenceOf/basis-row carriage
-  (serving-loop.md §3b–§3d, protocol.md §1) — all dark: nothing installs a
-  seal destination or drives a wave until stage F's serving loop. Off by
-  default; the ON arm changes no observable behavior beyond the
-  `stream-data` error yet.
+- **Status on 2026-08-05.** Phase 1 stages A–F landed (E re-keyed the
+  vocabulary per instance; F landed the serving loop itself): the
+  ExecutorHost + SpaceServer host one committing runtime per active space
+  — lease renewed on stage B's cadence, waves through stage D's machinery,
+  the watermark doc + `derivedThrough` + `waitForSettled`, M1 per-run
+  identity seams, M4 instance-keyed push, the read-row and
+  derived-envelope and delegated admission checks, the eager via-user
+  hop, the server-side pattern-update posture, and the §7 counters. All
+  still dark: OFF by default and byte-identical to today; the ON arm now
+  actually serves (with the documented two-deriver interim). Stage G
+  (effects + outbox) remains.
 - **Path to removal.** Execute the plan through its phase gates; at the
   Phase 7 flip, retire the flag, remove the OFF path, and close out this
   entry.

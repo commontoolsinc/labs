@@ -157,6 +157,51 @@ key-vocabulary §5) is an implementation gate on the PR that flips
 it. The schema-memo single-identity invariant (cross-identity memo
 sharing FORBIDDEN) is OWED an explicit guard — OW10.
 
+Delta 2026-08-05 — stage F lands (the serving loop; this PR):
+
+- §2's derived-envelope defense-in-depth row: impl-gate → COVERED.
+  The operand mapping landed (`resolveCommitSessionKey(sessionId,
+  principal) == holder` — the sink commits under the holder's own
+  service session) with negative tests
+  (`packages/memory/test/v2-wave-commit-test.ts`: a user session and
+  a non-holder internal session naming the right holder are both
+  refused; the holder's own session admits). protocol.md §2 records
+  the landed mapping — a CHANGED sentence, same row.
+- §3d's stage-F stamp-kind naming duty: impl-gate → COVERED. The
+  sanctioned internal kind is named (`bookkeeping`, serving-loop.md
+  §3d — a NEW binding sentence, this row is its coverage), stamped
+  at the three scheduler/runner choke points, with its conflict
+  disposition pinned in `packages/runner/test/executor-wave.test.ts`
+  (rebase-capable; drops whole on semantic conflict; nothing
+  requeues).
+- §2's read row (LD5): the admission half is now impl-covered —
+  `packages/memory/test/v2-explicit-read-test.ts` pins
+  holder-admitted / non-holder-refused / off-flag-refused on both
+  the query and watch paths. The trace/model coverage stands
+  unchanged.
+- serving-loop §2's renew cadence + stop-committing MUST: the
+  serving loop drives them for real; lease-loss and idle-park pinned
+  end to end in `packages/runner/test/executor-serving-loop.test.ts`
+  (C6/C7's impl witnesses at the loop level).
+- protocol §4's watermark: impl-gate rows land — the doc + metadata
+  carriage (`derived_through`), same-transaction watermark write,
+  W-advance-at-quiescence-only, and `waitForSettled` — pinned in the
+  serving-loop tests.
+- scopes §2's eager via-user hop: impl-gate → COVERED
+  (`packages/runner/test/eager-via-user-hop.test.ts`: both hops
+  under the flag at all three write sites' shapes, one hop pinned in
+  the OFF arm).
+- key-vocabulary §5's boundary re-keys (M4-coupled + serving-identity
+  lists): dispositions moved to RE-KEYED in the same change, per §4's
+  tripwire; the server-side partition equivalence is witnessed by the
+  full memory suite (wire frames byte-identical via `toWireUpsert`)
+  and the client-side by the full runner suite.
+- stage D's documented bounds: the delegated-admission bound and the
+  read-only-read-set bound are DISCHARGED with tests
+  (`executor-wave.test.ts`: carried-identity keying + partial-carriage
+  refusal; read-only reads folding into withdrawals). The sqlite
+  bound stays stage G.
+
 ## 3. The owed register (every genuine orphan, with its trigger)
 
 Nothing here blocks Phase 1. Each item names the instrument
@@ -189,22 +234,33 @@ journey):**
   pending; input-origin overlay retirement (ack + W ≥ seq); overlay
   never serialized to any server (speculation §2/§4/§6).
 
-**Stage F pre-gate (SpaceServer behaviors — one activation-journey
-trace, T13 candidate):**
+**Stage F pre-gate — LANDED with stage F (2026-08-05):**
 
-- OW5 — activation loads demand + queued events, never a
-  piece-start step (serving-loop §1; runtime-mapping N22/N31);
-  event-to-parked-space auto-activation; parking vs pending
-  gate-wakes (N9); wish `#now` timers vs quiescence (N50 — carries
-  its own owner ruling first).
-- OW6 — pattern-pointer hot-swap runs server-side (serving-loop
-  §3e; N40/41).
-- OW10 — the schema-memo single-identity guard (key-vocabulary §5):
-  an explicit tripwire or assertion that no memo instance is shared
-  across identities, landed BEFORE any cross-run memo sharing.
-  Today every sharing scope is single-identity by construction;
-  the guard is what keeps a future sharing change from silently
-  becoming value-bleed.
+- OW5 — LANDED as trace T13 (scenario-traces §3/§4) plus the
+  serving-loop tests: activation loads demand + queued events, never
+  a piece-start step; auto-activation on authored admission /
+  session open; parking honors pending gate wakes (N9's default,
+  adopted). One residue stays owed, carried DELIBERATELY as T13.Q8's
+  GAP: wish `#now` timers vs quiescence needs its own owner ruling
+  first (N50) — see OW11 below.
+- OW6 — LANDED: trace T13.Q5 + the end-to-end server-side hot-swap
+  test (`executor-serving-loop.test.ts`): the pointer write is
+  authored input, the SpaceServer swaps, the swapped derivation
+  serves as a derived commit.
+- OW10 — LANDED: `assertSchemaMemoIdentity`
+  (`packages/runner/src/traverse.ts`) binds a shared memo to its
+  first traversal's identity at the SchemaObjectTraverser choke
+  point and throws on any other — the future-sharing change now
+  trips loudly instead of silently value-bleeding.
+
+**Still owed from the stage-F bucket:**
+
+- OW11 — the N50 owner ruling (wish `#now` timers vs quiescence and
+  the amplification budget), carried out of OW5: a space with an
+  interval `#now` never quiesces and every tick is a derived
+  commit; parking policy and the testing §4 gate need the ruling
+  before builtins §1 ships `wish` as "port cost: none". T13.Q8
+  holds the trace cell open.
 
 **Stage G pre-gate:**
 

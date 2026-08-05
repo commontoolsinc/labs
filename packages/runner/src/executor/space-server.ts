@@ -202,8 +202,7 @@ export class SpaceServer implements TransactionSealDestination {
     this.#runtime = runtime;
     this.#disposeRuntime = dispose;
     this.#sink = new EngineWaveCommitSink({
-      engineFor: (s) =>
-        s === space ? engine : this.#foreignEngineFor(s),
+      engineFor: (s) => s === space ? engine : this.#foreignEngineFor(s),
       sessionId: this.#holder,
       localSeqRef: this.#options.localSeqRef,
     });

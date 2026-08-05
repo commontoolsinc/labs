@@ -3411,9 +3411,7 @@ export class Runner {
   private schedulerObservationIdentity(resultCell: Cell<any>) {
     const { space, id, scope } = resultCell.getAsNormalizedFullLink();
     return {
-      pieceId: `${
-        resolveScopeKey(scope, this.runtime.scopeKeyIdentity)
-      }:${id}`,
+      pieceId: `${resolveScopeKey(scope, this.runtime.scopeKeyIdentity)}:${id}`,
       ownerSpace: space,
     };
   }

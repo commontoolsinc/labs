@@ -1678,16 +1678,16 @@ WHERE seq > :from_seq AND branch = :branch
 ORDER BY seq
 LIMIT :limit
 `).all({
-    from_seq: options.fromSeq,
-    branch,
-    limit: options.limit ?? Number.MAX_SAFE_INTEGER,
-  }) as Array<{
-    seq: number;
-    branch: string;
-    class: CommitClass;
-    holder: string | null;
-    session_id: string;
-  }>;
+      from_seq: options.fromSeq,
+      branch,
+      limit: options.limit ?? Number.MAX_SAFE_INTEGER,
+    }) as Array<{
+      seq: number;
+      branch: string;
+      class: CommitClass;
+      holder: string | null;
+      session_id: string;
+    }>;
   const writesFor = engine.database.prepare(`
 SELECT DISTINCT id, scope_key FROM revision
 WHERE commit_seq = :commit_seq

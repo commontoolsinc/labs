@@ -2500,8 +2500,8 @@ class SpaceReplica implements ISpaceReplica {
     await Promise.allSettled([...this.#updatePromises]);
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
-    () => this.#scopeKeyIdentity(),
-  );
+      () => this.#scopeKeyIdentity(),
+    );
   }
 
   private resetConflictAdmissionState(): void {
@@ -2600,8 +2600,8 @@ class SpaceReplica implements ISpaceReplica {
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
-    () => this.#scopeKeyIdentity(),
-  );
+      () => this.#scopeKeyIdentity(),
+    );
   }
 
   async load(
@@ -3052,8 +3052,8 @@ class SpaceReplica implements ISpaceReplica {
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica reset"));
     this.cancelQueuedWatchRefresh();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
-    () => this.#scopeKeyIdentity(),
-  );
+      () => this.#scopeKeyIdentity(),
+    );
     this.#subscription.next({
       type: "reset",
       space: this.#space,

@@ -46,13 +46,17 @@ Deno.test("memory v2 session cache entries always include scope and instance key
   // An explicit instance key (a lease-holder read — protocol.md §2's read
   // row) wins over the session-identity resolution.
   assertEquals(
-    toCacheEntry({
-      branch: "",
-      id: "of:foreign",
-      scope: "user",
-      seq: 3,
-      document: { value: {} },
-    }, IDENTITY, "user:did%3Atest%3Abob"),
+    toCacheEntry(
+      {
+        branch: "",
+        id: "of:foreign",
+        scope: "user",
+        seq: 3,
+        document: { value: {} },
+      },
+      IDENTITY,
+      "user:did%3Atest%3Abob",
+    ),
     {
       branch: "",
       id: "of:foreign",

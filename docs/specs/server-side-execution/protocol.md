@@ -238,17 +238,22 @@ happened elsewhere. If an admission question cannot be answered by
 (target, principal, lease, CAS), the design is drifting — stop.
 
 **Derived-envelope defense-in-depth (RULED 2026-08-05; the engine
-check lands with Phase 1 stage F).** At admission, a `derived`
+check LANDED with Phase 1 stage F).** At admission, a `derived`
 commit's producing SESSION must be the lease holder's own service
 session: a derived commit arriving under a user session — or any
 session other than the declared holder's — is REFUSED. This mirrors
 the executable model's `admitDerived`, which compares the envelope
 principal to `holderId`, and closes the "single honest internal
 caller" gap before stage F multiplies the callers of the co-hosted
-engine plane. Implementation is explicitly stage F work and the
-plan's stage F bullet carries the task: the operand shape — how the
-engine-side session identity maps to the holder identity — is
-stage F design, not stage D's.
+engine plane. The operand mapping (stage F design, landed): the
+holder's own service session IS the engine session whose resolved
+commit session key equals the DR1 holder identity — the wave sink
+commits with `sessionId == holder` and no principal
+(`applyCommitTransaction`, `packages/memory/v2/engine.ts`; the
+sink's replay keying doc records the same choice), so the check is
+one equality, `resolveCommitSessionKey(sessionId, principal) ==
+holder`, and "the envelope principal IS the lease holder" (§1) reads
+literally in the stored session column too.
 
 **`firedAt` is SERVER-STAMPED, never client-minted (T1 + S6).** It
 carries BOTH the acting user and the session —
