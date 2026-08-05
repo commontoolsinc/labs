@@ -22,7 +22,7 @@ describe("convert-cells-to-links-sharing", () => {
     expect(result.b).toEqual({ n: 1 });
   });
 
-  it("converts a twice-reachable EMPTY array at both of its positions", () => {
+  it("converts a twice-reachable empty array at both of its positions", () => {
     // The shape that makes this matter. A serialized pattern graph aliases one
     // empty `path: []` from every alias in it, so a walk that reads sharing as
     // circularity rewrites all but the first into back-links.
@@ -64,8 +64,9 @@ describe("convert-cells-to-links-sharing", () => {
     const result = convertCellsToLinks(cyclic) as Record<string, unknown>;
 
     expect(result.n).toBe(1);
-    // The self-edge is a reference rather than an endless expansion.
-    expect(result.self).not.toEqual(cyclic);
-    expect(typeof result.self).toBe("object");
+    // The self-edge is a link back to the root, by the path it was reached
+    // from. Asserting the shape is the point: an object of any other shape --
+    // including a link naming the wrong path -- is a different answer.
+    expect(result.self).toEqual({ "/": { "link@1": { path: [] } } });
   });
 });

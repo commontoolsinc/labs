@@ -3282,7 +3282,7 @@ export function frameAnchorIds(
 /**
  * Converts cells and objects that can be turned to cells to links.
  *
- * `seen` tracks the ANCESTORS of the value being converted, so what it
+ * `ancestors` holds the ancestors of the value being converted, so what it
  * recognizes is a cycle. A value reachable twice by different paths is not one:
  * it is shared, and each position gets its own conversion. Answering a shared
  * reference with a back-link would rewrite one of its positions into a pointer
@@ -3302,10 +3302,10 @@ export function convertCellsToLinks(
     keepAsCell?: KeepAsCell;
   } = {},
   path: string[] = [],
-  seen: Map<any, string[]> = new Map(),
+  ancestors: Map<any, string[]> = new Map(),
 ): any {
-  if (seen.has(value)) {
-    return linkRefFrom({ path: seen.get(value) });
+  if (ancestors.has(value)) {
+    return linkRefFrom({ path: ancestors.get(value) });
   }
 
   // Early-return cases
@@ -3334,18 +3334,16 @@ export function convertCellsToLinks(
 
   // At this point `value` is a non-`null` object(ish) thing.
 
-  // Held before the conversions below reassign `value`, since what `seen` is
+  // Held before the conversions below reassign `value`, since what `ancestors` is
   // keyed on -- and cleared of on the way back out -- is the object as given.
   const original = value;
-  seen.set(original, path); // ...which needs to be tracked for circularity.
+  ancestors.set(original, path); // ...which needs to be tracked for circularity.
 
   // Everything past the line above runs inside this `try`, so that EVERY way
   // out clears the ancestor just recorded -- the exits that answer a value
-  // without descending into it as much as the ones that recur. `seen` holds
-  // ancestors rather than everything visited: a value reached again at a
-  // sibling path is converted again rather than answered as a cycle, and an
-  // exit that skipped the clearing would leave it an ancestor of all the rest
-  // of the walk.
+  // without descending into it as much as the ones that recur. An exit that
+  // skipped the clearing would leave the value an ancestor of all the rest of
+  // the walk, and the next position holding it would be answered as a cycle.
   try {
     // A schema-bearing read hangs a non-enumerable `toCell` symbol on the
     // arrays it returns. That symbol is machinery, not content, and an array
@@ -3394,17 +3392,17 @@ export function convertCellsToLinks(
 
     if (Array.isArray(value)) {
       return value.map((value, index) =>
-        convertCellsToLinks(value, options, [...path, String(index)], seen)
+        convertCellsToLinks(value, options, [...path, String(index)], ancestors)
       );
     }
     return Object.fromEntries(
       Object.entries(value).map(([key, value]) => [
         key,
-        convertCellsToLinks(value, options, [...path, String(key)], seen),
+        convertCellsToLinks(value, options, [...path, String(key)], ancestors),
       ]),
     );
   } finally {
-    seen.delete(original);
+    ancestors.delete(original);
   }
 }
 
