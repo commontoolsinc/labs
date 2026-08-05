@@ -1711,13 +1711,15 @@ export type toJSON = {
  * stringified on the way.
  *
  * Two kinds of value carry it, and the type spans both rather than describing
- * only the one that composes into the factory types below. A builder artifact
- * answers with a record, built by `moduleToEncodableForm` or
- * `patternToEncodableForm` -- there is no artifact whose form is a primitive, an
- * array, or `null`, though this type no longer says so. A `Cell` answers with
- * the link that stands for it, or `null` for a cell that has no link yet; a
- * record-shaped bound would exclude both of those, one arm of a link being a
- * class.
+ * only the one that composes into the factory types below. A `Cell` answers with
+ * the link that stands for it, or `null` for a cell that has no link yet, and a
+ * record-shaped bound would exclude both of those -- `null` plainly, and the
+ * link because one arm of it is a class, which carries no index signature.
+ *
+ * An artifact's form is always a record even so, and says so where it is built:
+ * `moduleToEncodableForm` and `patternToEncodableForm` declare
+ * {@link FabricExecPlainObject}. The narrower promise belongs at the producer,
+ * which can keep it, rather than at a name two unrelated kinds of value answer.
  *
  * {@link FabricExecValue}, NOT {@link FabricValue}: a form can still hold live
  * functions. A module whose implementation is a nested pattern with no entry ref
