@@ -52,8 +52,7 @@ export class StaticCache {
   }
 
   /**
-   * Get the content buffer of a static asset.
-   * Backward compatible method that returns only the buffer.
+   * Gets the content of a static asset, without its ETag.
    */
   async get(assetName: string): Promise<Uint8Array> {
     const cached = await this.getWithETag(assetName);
@@ -61,8 +60,8 @@ export class StaticCache {
   }
 
   /**
-   * Get a static asset with its ETag for cache validation.
-   * Returns both the content buffer and the generated ETag.
+   * Gets a static asset's content together with the ETag a caller validates
+   * it against.
    */
   getWithETag(assetName: string): Promise<CachedAsset> {
     const currentValue = this.cache.get(assetName);
@@ -74,10 +73,17 @@ export class StaticCache {
     return promise;
   }
 
+  /**
+   * Gets the content of a static asset, decoded as text.
+   */
   async getText(assetName: string): Promise<string> {
     return decode(await this.get(assetName));
   }
 
+  /**
+   * Gets the location of a static asset, and throws when `assetName` is not
+   * one this package ships.
+   */
   getUrl(assetName: string): URL {
     if (!assets.includes(assetName)) {
       throw new Error(`No static asset "${assetName}" found.`);
@@ -89,8 +95,8 @@ export class StaticCache {
   }
 
   /**
-   * Fetch an asset and generate its ETag.
-   * Handles both Deno (file system) and browser (HTTP) environments.
+   * Helper for `getWithETag()`, which reads an asset and generates its ETag,
+   * off the file system under Deno and over the network elsewhere.
    */
   private async requestWithETag(assetName: string): Promise<CachedAsset> {
     const url = this.getUrl(assetName);

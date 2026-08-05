@@ -47,8 +47,9 @@ export function compareETags(
 }
 
 /**
- * Create cache headers with ETag support.
- * Uses no-cache strategy to always validate with ETag.
+ * Creates the response headers that carry `etag` and require a client to
+ * revalidate against it on every request rather than serving from its own
+ * cache.
  */
 export function createCacheHeaders(etag: string): Record<string, string> {
   return {
