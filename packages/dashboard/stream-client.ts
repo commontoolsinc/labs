@@ -55,15 +55,15 @@ export function liveUpdateStream<S extends UpdateStream>(
   let heardAt = 0;
   let heardOnThisStream = false;
   // The page arrived over a working connection to the same server, so it starts
-  // out as connected as the browser has told it anything.
+  // out with one it is hearing the server on.
   let dropped = false;
 
   const replace = (now: number): S => {
     if (stream) {
-      // Standing in a stream the page has heard nothing on leaves it with
-      // nothing it is hearing the server on, whatever the stream being
-      // replaced had managed. The page it was opened for is the exception:
-      // that one arrived over a working connection to the same server.
+      // A stream just opened is one nothing has arrived on, so the page has
+      // nothing it is hearing the server on until something does. The stream
+      // the page itself arrived over is the exception, and it has no stream to
+      // stand in.
       stream.close();
       dropped = true;
     }
@@ -92,12 +92,12 @@ export function liveUpdateStream<S extends UpdateStream>(
       } else if (now - Math.max(heardAt, openedAt) >= silenceMs) {
         current = replace(now);
       }
-      // Every part of this is something the browser has said, not something
-      // inferred from how long ago it said it. A dropped connection is reported
-      // the moment it drops, and a stream is only heard on again when an event
-      // actually arrives. The elapsed interval is the last resort, for a
-      // connection that stays open with nothing coming down it, which is the
-      // one case the browser reports nothing about at all.
+      // Three ways of having nothing to hear the server on, in the order the
+      // browser makes them known. It reports a connection dropping as it
+      // drops, and reports a stream it has given up on through `readyState`.
+      // It reports nothing at all about a connection that stays open with
+      // nothing coming down it, which is what the elapsed interval is left to
+      // catch.
       return !dropped && current.readyState !== CLOSED &&
         now - heardAt < silenceMs;
     },

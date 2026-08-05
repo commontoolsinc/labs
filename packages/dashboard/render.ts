@@ -283,8 +283,8 @@ ${faviconLink(status)}
   }
   const updates = liveUpdateStream(RED_AFTER, () => {
     const es = new EventSource('/events');
-    // Repainting from the connection's own events puts the badge right as the
-    // connection changes, rather than up to a tick later.
+    // The connection's own events repaint, so the badge follows the connection
+    // as it changes.
     const alive = () => { updates.heard(Date.now()); paint(); };
     es.addEventListener('open', alive);
     es.addEventListener('ping', alive);
@@ -307,8 +307,8 @@ ${faviconLink(status)}
   paint();
   setInterval(paint, 1000);
   // A background tab's timers are throttled to about one a minute, and a
-  // sleeping machine's stop altogether. Both events land before the next tick
-  // would, so a page someone turns back to is checked as they look at it.
+  // sleeping machine's stop altogether. These two events fire as the page comes
+  // back into use, which is when someone is there to read it.
   document.addEventListener('visibilitychange', paint);
   addEventListener('online', paint);
 </script></body></html>`;

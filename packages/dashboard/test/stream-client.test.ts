@@ -75,16 +75,15 @@ describe("stream-client", () => {
       expect(page.opened.length).toBe(1);
     });
 
-    it("returns false one tick after the server is stopped, rather than one interval after", () => {
+    it("returns `false` on the tick after the connection drops", () => {
       const page = fixture();
       page.check(0);
       page.connectionMade(0);
       expect(page.check(1_000)).toBe(true);
 
       // Nothing answers the port, so the browser holds the stream at
-      // CONNECTING and retries on its own, reporting each failure as it
-      // happens. Waiting out the silence interval before believing it would
-      // leave the badge claiming LIVE for the best part of a minute.
+      // `CONNECTING` and retries on its own, reporting each failure as it
+      // happens. The answer follows that report, on the tick after it.
       page.connectionDropped();
       expect(page.check(2_000)).toBe(false);
       for (let now = 3_000; now < SILENCE; now += 1_000) {
@@ -117,7 +116,7 @@ describe("stream-client", () => {
       expect(page.check(3_000)).toBe(true); // without the interval elapsing
     });
 
-    it("returns false for a stream it has just opened, with nothing reporting the loss", () => {
+    it("returns `false` for a stream it has just opened, with nothing reporting the loss", () => {
       const page = fixture();
       page.check(0);
       page.connectionMade(0);
@@ -134,7 +133,7 @@ describe("stream-client", () => {
       expect(page.check(2_000)).toBe(true);
     });
 
-    it("returns false for every tick of an outage that refuses each stream", () => {
+    it("returns `false` for every tick of an outage that refuses each stream", () => {
       const page = fixture();
       page.check(0);
       page.connectionMade(0);
@@ -202,7 +201,7 @@ describe("stream-client", () => {
       page.connectionMade(0);
       page.current().readyState = CLOSED;
       page.lost();
-      page.check(0); // prompt replacement, now at CONNECTING
+      page.check(0); // prompt replacement, now at `CONNECTING`
       expect(page.opened.length).toBe(2);
 
       // The browser is retrying this one on its own schedule. Replacing it
@@ -213,7 +212,7 @@ describe("stream-client", () => {
       expect(page.opened.length).toBe(3);
     });
 
-    it("returns true through a long lull in the data, which heartbeats carry", () => {
+    it("returns `true` through a long lull in the data, which heartbeats carry", () => {
       const page = fixture();
       page.check(0);
       page.connectionMade(0);

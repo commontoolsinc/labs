@@ -470,8 +470,7 @@ export function start(
   collect: () => void | Promise<void> = tick,
 ) {
   collect();
-  // Returned so a test can run the scheduled work itself rather than wait out
-  // the interval.
+  // Returned so a caller can run one turn of the clock on demand.
   const onTick = () => serveTick(collect);
   const timer = setInterval(onTick, TICK_MS);
   const server = serve({
