@@ -50,7 +50,6 @@ function groupedSamples(values: number[]): number[] {
 // between neighbours. A level change contributes one difference however large
 // it is, so the median of them describes the noise around the levels.
 function noiseScale(logs: number[]): number {
-  if (logs.length < 2) return 0;
   const steps: number[] = [];
   for (let i = 1; i < logs.length; i++) {
     steps.push(Math.abs(logs[i] - logs[i - 1]));
@@ -140,12 +139,14 @@ function medianSlope(logs: number[]): number {
 // first, so a shift reads at its true size wherever in the window it sits.
 //
 // Sub-zero values are not timings and take no part. Fewer than
-// `MIN_TREND_DAYS` distinct days reads flat. `times` must be ascending.
+// `MIN_TREND_DAYS` distinct days reads flat, which also means the fits below
+// always have that many samples to read: a distinct day needs a sample above
+// zero to count, and grouping only ever thins a longer series. `times` must be
+// ascending.
 export function trendPct(times: number[], values: number[]): number {
   if (distinctTrendDays(times, values) < MIN_TREND_DAYS) return 0;
   const logs = groupedSamples(values.filter((value) => value > 0))
     .map((value) => Math.log(value));
-  if (logs.length < 2) return 0;
   // A scale of zero means most neighbours agree exactly. The search then treats
   // any daylight between two levels as real, and still asks for `MIN_SEGMENT`
   // samples either side of the boundary, so a single stray sample is not one.

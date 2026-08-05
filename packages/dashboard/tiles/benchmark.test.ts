@@ -2892,6 +2892,24 @@ Deno.test("benchmark: a series that only wobbles reads flat", () => {
   assertEquals(trendStatus(trendPct(times, values)), "good");
 });
 
+Deno.test("benchmark: more samples than the fit reads are grouped, and the rise survives", () => {
+  // A 45-day window holds several hundred runs, more than the fit reads
+  // directly, so they are grouped into equal-sized runs first. A step three
+  // quarters of the way along still reports at its own size afterwards, and the
+  // grouping does not smear it across the boundary it falls on.
+  const times: number[] = [], values: number[] = [];
+  for (let i = 0; i < 260; i++) {
+    times.push(Math.floor(i / 6) * DAY + (i % 6) * 4 * HOUR);
+    values.push((i < 195 ? 100 : 118) * (1 + ((i * 7919) % 13 - 6) / 1000));
+  }
+  const pct = trendPct(times, values);
+  assert(
+    Math.abs(pct - 0.18) < 0.01,
+    `an 18% step among 260 samples read as ${(pct * 100).toFixed(1)}%`,
+  );
+  assertEquals(trendStatus(pct), "warn");
+});
+
 Deno.test("benchmark: a steady climb reads as the whole of its rise", () => {
   // No step to find, so the straight line describes the series and answers with
   // its rise from the first sample to the last.
