@@ -12,7 +12,7 @@ mapping pass is due.
 
 ## 1. The map
 
-286 binding rules. Instruments: the scenario traces (T1–T12), the
+291 binding rules. Instruments: the scenario traces (T1–T12), the
 field-provenance chains, the executable model (C1–C10 property
 families), the Phase 1 dry-run, and the doc-review panels
 (weak — counted only where nothing else applies).
@@ -24,7 +24,7 @@ families), the Phase 1 dry-run, and the doc-review panels
 | events | 34 | 25 | 4 | 2 | 2 | 1 |
 | scopes | 25 | 17 | 3 | 1 | 2 | 2 |
 | builtins | 15 | 6 | 3 | 1 | 4 | 1 |
-| serving-loop | 71 | 43 | 17 | 1 | 4 | 6 |
+| serving-loop | 76 | 45 | 20 | 1 | 4 | 6 |
 | key-vocabulary | 6 | 5 | 1 | 0 | 0 | 0 |
 | speculation | 15 | 10 | 2 | 0 | 1 | 2 |
 | testing | 14 | 4 | 10 | 0 | 0 | 0 |
@@ -97,6 +97,33 @@ Delta 2026-08-04/05 — stage D's carriage sentences and the
 The same review recorded a model/impl asymmetry in §3d's conflict
 handling — the impl's three-way drop/rebase/requeue disposition is
 pinned by impl tests only — now owed as OW9 below.
+
+Delta 2026-08-05 — the stage-D review's Q1/Q2/Q4 ruling batch
+(serving-loop 71 → 76):
+
+- Q1 (§3d recompute-by-dependency, RULED 2026-08-05): the weakened
+  recompute sentence is a CHANGED rule, model-covered as before —
+  C8a's recompute flows through the model derivation's own read of
+  the raced doc (its fire predicate consults the output's current
+  value), and the model has no drop-triggered re-arm mechanism, so
+  it verifies exactly the ruled semantics. Two NEW rules: the drop
+  re-arms nothing / no recompute-owed mark exists (+1,
+  instrument-covered, the same C8a family); a survivor whose writes
+  were dropped per-doc still lands its basis rows (+1, impl-gate —
+  the mixed-disposition test in
+  `packages/runner/test/executor-wave.test.ts` asserts the
+  dropped-write survivor's rows land).
+- Q2 (per-run write classification, RULED 2026-08-05): +1 rule,
+  instrument-covered — the model's C8 contributions carry writes per
+  producing run, and the impl's per-(contribution,doc) disposition
+  test pins one handler write rebasing while a derivation's write to
+  the same doc drops.
+- Q4 (unstamped seals refused, RULED 2026-08-05): +1 rule,
+  impl-gate — the refusal throw at the seal destination is pinned
+  red-first in `packages/runner/test/executor-wave.test.ts`; the
+  stage-F half (naming the sanctioned internal stamp kinds when the
+  seal destination is installed) is +1 impl-gate assigned to Phase 1
+  stage F, alongside §2's derived-envelope check.
 
 ## 3. The owed register (every genuine orphan, with its trigger)
 
