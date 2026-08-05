@@ -276,7 +276,7 @@ discovered mid-rebuild. Five placement classes:
 | **Pure structural** | `map`, `filter`, `flatmap`, `if-else`/`when`/`unless`, `inspect-conf-label`, `wish` (the `list-*` modules, `op-pattern-ref` and `scope-policy` are helper modules, not registered built-ins — builtins.md §1) | server | yes — free to discard |
 | **Deferred** | `stream-data` | disabled in the v2 interim (unused today; the low-latency UI it promises likely wants a different mechanism — owner, 2026-08-02) | — |
 | **Effectful / network** | `fetch` (`fetchData`), `fetch-program`, `llm` (`generateText`/`generateObject`), `llm-dialog`, `sqlite*` | **server only** | **never** — speculation reads through to the last committed result |
-| **Compile / instantiate** | `compile-and-run` (charm creation, incl. from handlers) | server (sandboxed worker; toolshed already compiles) | no |
+| **Compile / instantiate** | `compile-and-run` (piece creation, incl. from handlers) | server (sandboxed worker; toolshed already compiles) | no |
 | **Client-enacted effect** | `navigate-to` | server *computes*, client *enacts* (§3.7) | echo allowed (navigate optimistically, reconcile) |
 
 Why effectful nodes are server-only rather than merely server-preferred:
