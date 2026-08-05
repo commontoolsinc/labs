@@ -5,7 +5,11 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Cell, type Pattern } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
-import { getMetaLink, parseLink } from "../src/link-utils.ts";
+import {
+  getDerivedInternalCell,
+  getMetaLink,
+  parseLink,
+} from "../src/link-utils.ts";
 import { trustExecutable } from "./support/trusted-builder.ts";
 import { JSONValue } from "@commonfabric/runner/shared";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -163,6 +167,89 @@ describe("rehydrate internal default (CT-1666)", () => {
 
       const internal2 = internalCellOf(rt2, rc2, "activeTab")!;
       expect(internal2.get()).toEqual("profile");
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+
+  it("keeps a pre-versioning generated id for an unchanged pattern", async () => {
+    const generatedCause = { $generated: 0 };
+    const generatedPattern: Pattern = {
+      argumentSchema: {},
+      resultSchema: {
+        type: "object",
+        properties: { active: { type: "string" } },
+      },
+      derivedInternalCells: [{
+        partialCause: generatedCause,
+        schema: { type: "string", default: "spaces" },
+      }],
+      result: {
+        active: { $alias: { partialCause: generatedCause, path: [] } },
+      },
+      nodes: [],
+    };
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm2,
+    });
+    try {
+      const rc1 = rt1.getCell<{ active: string }>(
+        space,
+        "legacy-generated-result",
+      );
+      await rt1.runSynced(
+        rc1,
+        trustExecutable(rt1, generatedPattern),
+        {},
+      );
+      await rc1.pull();
+
+      // Forge the exact pre-#4916 manifest shape. The fresh descriptor has no
+      // out-of-band artifact association, so it derives the legacy id whose
+      // preimage contains only the generated partial cause.
+      const legacyCell = getDerivedInternalCell(rc1, {
+        partialCause: { $generated: 0 },
+        schema: { type: "string", default: "spaces" },
+      });
+      const legacyLink = legacyCell.getAsWriteRedirectLink({
+        base: rc1,
+        includeSchema: true,
+      });
+      const tx = rt1.edit();
+      legacyCell.withTx(tx).set("profile");
+      rc1.withTx(tx).setMetaRaw("internal", [{
+        partialCause: generatedCause,
+        link: legacyLink,
+      }]);
+      await tx.commit();
+      await sm1.synced();
+
+      const rc2 = rt2.getCell<{ active: string }>(
+        space,
+        "legacy-generated-result",
+      );
+      await rt2.runSynced(
+        rc2,
+        trustExecutable(rt2, generatedPattern),
+        {},
+      );
+      expect((await rc2.pull()).active).toBe("profile");
+
+      const resumedManifest = rc2.getMetaRaw("internal");
+      expect(Array.isArray(resumedManifest)).toBe(true);
+      const resumedEntry = Array.isArray(resumedManifest)
+        ? resumedManifest[0]
+        : undefined;
+      expect(resumedEntry?.patternIdentity).toBeUndefined();
+      expect(parseLink(resumedEntry?.link, rc2)?.id).toBe(
+        parseLink(legacyLink, rc1).id,
+      );
     } finally {
       await rt2.dispose();
       await rt1.dispose();
