@@ -1838,6 +1838,72 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
   assertEquals(stderr, []);
 });
 
+Deno.test("runCfHarnessCli forwards --compact-threshold to a fresh run", async () => {
+  // Parsing was already covered; this pins the handoff. The option was
+  // forwarded on the resume path only, so a fresh run silently lost it.
+  const { io, stdout, stderr } = createIoBuffers();
+  let createdOptions: Record<string, unknown> | undefined;
+  let runPromptOptions: RunHarnessPromptOptions | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--focus-root",
+      "packages/cf-harness",
+      "--prompt",
+      "Inspect the workspace",
+      "--model",
+      "gpt-5.4",
+      "--compact-threshold",
+      "12000",
+      "--print-transcript",
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      createPromptLoop: (options) => {
+        createdOptions = options as Record<string, unknown>;
+        return {
+          runPrompt: (options) => {
+            runPromptOptions = options;
+            return Promise.resolve(
+              ({
+                model: "gpt-5.4",
+                finalAssistantText: "Inspection complete.",
+                transcript: [
+                  { role: "user", content: "Inspect the workspace" },
+                  { role: "assistant", content: "Inspection complete." },
+                ],
+                modelTurns: 1,
+                runState: {
+                  runId: "run-cli",
+                  status: "completed",
+                  createdAt: "2026-04-15T22:00:00.000Z",
+                  updatedAt: "2026-04-15T22:00:01.000Z",
+                  cfcEnforcementMode: "disabled",
+                  currentDir: "/workspace",
+                  artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli",
+                  transcriptPath:
+                    "/tmp/project/.cf-harness-artifacts/run-cli/transcript.json",
+                  runReportPath:
+                    "/tmp/project/.cf-harness-artifacts/run-cli/run-report.json",
+                  policyEvents: [],
+                  toolOutputs: [],
+                },
+              }) satisfies HarnessPromptLoopResult,
+            );
+          },
+          runTranscript: () =>
+            Promise.reject(new Error("unexpected resume path")),
+        };
+      },
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(createdOptions?.compactThreshold, 12_000);
+});
+
 Deno.test("runCfHarnessCli passes image attachments to the prompt loop", async () => {
   const workspace = await Deno.makeTempDir();
   await Deno.writeFile(join(workspace, "capture.png"), ONE_PIXEL_PNG);

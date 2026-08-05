@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import { OpenAICompatibleGatewayClient } from "../src/gateway/openai-client.ts";
 import {
   compactThresholdForBudget,
@@ -307,4 +307,139 @@ Deno.test("a compaction from another model is not replayed", async () => {
   // compaction must neither replay nor prune the transcript behind it.
   assertEquals(input.filter((i) => i.type === "compaction").length, 0);
   assert(JSON.stringify(input).includes("early contents"));
+});
+
+// ---------------------------------------------------------------------------
+// The default must work on the normal run path, with no primed catalog.
+// ---------------------------------------------------------------------------
+
+const bigTranscript = (): HarnessTranscriptMessage[] => [
+  { role: "user", content: "x".repeat(250_000) },
+];
+
+Deno.test("the default threshold applies without any listModels() call", async () => {
+  const captured: Captured[] = [];
+  // Nothing primes the catalog here: this is what a real run does.
+  const client = clientWith(captured, [
+    registry([{
+      id: MODEL,
+      capabilities: { contextWindow: 1_050_000, maxOutputTokens: 128_000 },
+    }]),
+    completed([]),
+  ]);
+
+  await client.complete(turn({ transcript: bigTranscript() }));
+
+  assertEquals(captured[0].url, `${GATEWAY}/v1/models`);
+  assertEquals(captured[1].body.context_management, [{
+    type: "compaction",
+    compact_threshold: 691_500,
+  }]);
+});
+
+Deno.test("discovery is attempted once, then reused", async () => {
+  const captured: Captured[] = [];
+  const client = clientWith(captured, [
+    registry([{
+      id: MODEL,
+      capabilities: { contextWindow: 1_050_000, maxOutputTokens: 128_000 },
+    }]),
+    completed([]),
+  ]);
+
+  await client.complete(turn({ transcript: bigTranscript() }));
+  await client.complete(turn({ transcript: bigTranscript() }));
+
+  const listCalls = captured.filter((c) => c.url.endsWith("/v1/models")).length;
+  assertEquals(listCalls, 1, "discovery must not repeat per turn");
+});
+
+Deno.test("small turns pay no discovery round trip", async () => {
+  const captured: Captured[] = [];
+  const client = clientWith(captured, [completed([])]);
+
+  // Nothing this small can approach any registry-derived threshold.
+  await client.complete(turn());
+
+  assertEquals(captured.length, 1);
+  assertEquals(captured[0].url, `${GATEWAY}/v1/responses`);
+  assertEquals(captured[0].body.context_management, undefined);
+});
+
+Deno.test("an unreachable registry degrades instead of failing the run", async () => {
+  const captured: Captured[] = [];
+  let call = 0;
+  const client = new OpenAICompatibleGatewayModelClient(
+    new OpenAICompatibleGatewayClient({
+      baseUrl: GATEWAY,
+      authMode: "none",
+      fetchFn: (input, init) => {
+        captured.push({
+          url: String(input),
+          body: init?.body
+            ? JSON.parse(String(init.body)) as Record<string, unknown>
+            : {},
+        });
+        call += 1;
+        // Discovery fails; the completion that follows must still succeed.
+        if (String(input).endsWith("/v1/models")) {
+          return Promise.resolve(new Response("nope", { status: 503 }));
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify(completed([])), { status: 200 }),
+        );
+      },
+    }),
+  );
+
+  const result = await client.complete(turn({ transcript: bigTranscript() }));
+  assertEquals(result.assistant.content, "");
+  // Compaction is a guard, so losing it is not worth failing a run over.
+  const last = captured[captured.length - 1];
+  assertEquals(last.body.context_management, undefined);
+  assert(call >= 2);
+});
+
+// ---------------------------------------------------------------------------
+// Unsupported paths must fail loudly rather than ignore the option.
+// ---------------------------------------------------------------------------
+
+Deno.test("a positive threshold on a chat-routed model is rejected", async () => {
+  const client = clientWith([], [completed([])]);
+  await assertRejects(
+    () =>
+      client.complete(turn({
+        model: "gemini-3.5-flash",
+        compactThreshold: 5_000,
+      })),
+    Error,
+    "requires a model routed through the Responses API",
+  );
+});
+
+Deno.test("a positive threshold with native tools is rejected", async () => {
+  const client = clientWith([], [completed([])]);
+  await assertRejects(
+    () =>
+      client.complete(turn({
+        nativeModelToolIds: ["google_search"],
+        compactThreshold: 5_000,
+      })),
+    Error,
+    "cannot combine provider-native tools",
+  );
+});
+
+Deno.test("0 stays harmless on unsupported paths", async () => {
+  const captured: Captured[] = [];
+  const client = clientWith(captured, [{
+    choices: [{ index: 0, message: { role: "assistant", content: "ok" } }],
+  }]);
+  // Its requested behaviour is already "do not compact", so it need not throw.
+  const result = await client.complete(turn({
+    model: "gemini-3.5-flash",
+    compactThreshold: 0,
+  }));
+  assertEquals(result.assistant.content, "ok");
+  assertEquals(captured[0].url, `${GATEWAY}/v1/chat/completions`);
 });

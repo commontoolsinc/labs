@@ -2498,11 +2498,11 @@ export const runCfHarnessCli = async (
           ? { apiKey: parsed.apiKey, apiKeySource: parsed.apiKeySource }
           : {}),
         ...(modelClient !== undefined ? { modelClient } : {}),
-        ...(parsed.compactThreshold !== undefined
-          ? { compactThreshold: parsed.compactThreshold }
-          : {}),
         ...(parsed.reasoningEffort !== undefined
           ? { reasoningEffort: parsed.reasoningEffort }
+          : {}),
+        ...(parsed.compactThreshold !== undefined
+          ? { compactThreshold: parsed.compactThreshold }
           : {}),
         ...(parsed.promptCacheMode !== undefined
           ? { promptCacheMode: parsed.promptCacheMode }
@@ -2633,6 +2633,9 @@ export const runCfHarnessCli = async (
         ...(modelClient !== undefined ? { modelClient } : {}),
         ...(parsed.reasoningEffort !== undefined
           ? { reasoningEffort: parsed.reasoningEffort }
+          : {}),
+        ...(parsed.compactThreshold !== undefined
+          ? { compactThreshold: parsed.compactThreshold }
           : {}),
         ...(parsed.promptCacheMode !== undefined
           ? { promptCacheMode: parsed.promptCacheMode }

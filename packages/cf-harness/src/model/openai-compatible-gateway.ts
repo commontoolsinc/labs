@@ -176,6 +176,28 @@ export const usesResponsesApi = (
  * `web_search`, which overrides the model to Gemini — so this fails loudly
  * rather than letting a future profile discover it as a provider error.
  */
+/**
+ * Rejects a compaction threshold on a turn that cannot honour it.
+ *
+ * `context_management` is only sent on the Responses path, so a chat-routed
+ * model would accept the option and silently ignore it — a user-supplied
+ * control that appears to work while doing nothing. `0` stays legal
+ * everywhere: its requested behaviour is already "do not compact".
+ */
+export const assertCompactThresholdSupported = (
+  model: string,
+  nativeModelToolIds: readonly LLMNativeModelToolId[],
+  compactThreshold: number | undefined,
+): void => {
+  if (compactThreshold === undefined || compactThreshold === 0) return;
+  if (!usesResponsesApi(model, nativeModelToolIds)) {
+    throw new Error(
+      `compact threshold ${compactThreshold} requires a model routed through ` +
+        `the Responses API; received ${model}`,
+    );
+  }
+};
+
 const assertSupportedToolCombination = (
   model: string,
   nativeModelToolIds: readonly LLMNativeModelToolId[],
@@ -263,24 +285,59 @@ const toModelAttempt = (
   providerId: OPENAI_COMPATIBLE_GATEWAY_PROVIDER_ID,
 });
 
+/**
+ * Transcript size below which registry discovery is not worth a round trip.
+ *
+ * The smallest input budget the registry advertises is 272,000 tokens, so the
+ * smallest 75% guard sits at 204,000 — roughly 800,000 characters. A turn
+ * under this floor cannot approach any derived threshold, so ordinary runs
+ * pay no extra request and only genuinely large contexts trigger discovery.
+ */
+const BUDGET_DISCOVERY_FLOOR_CHARS = 200_000;
+
+const transcriptSize = (
+  transcript: readonly HarnessTranscriptMessage[],
+): number =>
+  transcript.reduce((total, message) => total + message.content.length, 0);
+
 export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
   readonly providerId = OPENAI_COMPATIBLE_GATEWAY_PROVIDER_ID;
-  /**
-   * Input budgets by model id, populated by `listModels()`. Compaction is a
-   * guard, so an unknown budget simply means no threshold is sent rather than
-   * a per-turn registry fetch on the hot path.
-   */
+  /** Input budgets by model id, keyed from the gateway registry. */
   readonly #compactThresholds = new Map<string, number>();
+  /** Registry discovery is attempted once per client, successful or not. */
+  #budgetDiscovery?: Promise<void>;
 
   constructor(readonly gatewayClient: OpenAICompatibleGatewayClient) {}
 
-  #resolveCompactThreshold(
+  /**
+   * Populates model budgets so the default threshold applies without the
+   * caller having to call `listModels()` first — nothing on the normal run
+   * path does.
+   *
+   * Runs at most once per client and never fails a turn: compaction is a
+   * guard, so an unreachable registry means running without it rather than
+   * aborting the run.
+   */
+  #ensureBudgets(signal?: AbortSignal): Promise<void> {
+    this.#budgetDiscovery ??= this.listModels(signal)
+      .then(() => {})
+      .catch(() => {});
+    return this.#budgetDiscovery;
+  }
+
+  async #resolveCompactThreshold(
     request: HarnessModelTurnRequest,
-  ): number | undefined {
+  ): Promise<number | undefined> {
     if (request.compactThreshold !== undefined) {
       return request.compactThreshold > 0
         ? request.compactThreshold
         : undefined;
+    }
+    if (
+      !this.#compactThresholds.has(request.model) &&
+      transcriptSize(request.transcript) >= BUDGET_DISCOVERY_FLOOR_CHARS
+    ) {
+      await this.#ensureBudgets(request.signal);
     }
     return this.#compactThresholds.get(request.model);
   }
@@ -289,6 +346,11 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
     request: HarnessModelTurnRequest,
   ): Promise<HarnessModelTurnResult> {
     assertSupportedToolCombination(request.model, request.nativeModelToolIds);
+    assertCompactThresholdSupported(
+      request.model,
+      request.nativeModelToolIds,
+      request.compactThreshold,
+    );
     assertPromptCacheModeSupported(request.model, request.promptCacheMode);
     assertReasoningEffortSupported(
       request.model,
@@ -354,7 +416,7 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
       "drop",
     );
     const tools = toResponsesTools(request.tools);
-    const compactThreshold = this.#resolveCompactThreshold(request);
+    const compactThreshold = await this.#resolveCompactThreshold(request);
     const payload: OpenAIResponsesRequest = {
       model: request.model,
       store: false,

@@ -2816,6 +2816,9 @@ export class CfHarnessPromptLoop {
       engine: childEngine,
       modelClient: this.modelClient,
       cacheAffinityKey: childRunId,
+      ...(this.#compactThreshold !== undefined
+        ? { compactThreshold: this.#compactThreshold }
+        : {}),
       ...(this.#promptCacheMode !== undefined
         ? { promptCacheMode: this.#promptCacheMode }
         : {}),

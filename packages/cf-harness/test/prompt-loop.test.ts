@@ -6868,3 +6868,67 @@ Deno.test("CfHarnessPromptLoop includes prompt slot context on policy events", a
     "write_file requires direct-command authorization in enforce-explicit",
   );
 });
+
+Deno.test("CfHarnessPromptLoop applies the compaction threshold to delegated work", async () => {
+  // A run-wide setting has to reach children too. Without this, `0` would
+  // disable compaction in the parent while children fall back to the derived
+  // default and compact anyway.
+  for (const threshold of [12_000, 0]) {
+    const seen: (number | undefined)[] = [];
+    let parentTurns = 0;
+    const modelClient: HarnessModelClient = {
+      providerId: "test-provider",
+      complete: (request) => {
+        seen.push(request.compactThreshold);
+        if (request.model !== "gpt-5.6-terra") {
+          return Promise.resolve({
+            assistant: { role: "assistant", content: "child done" },
+          });
+        }
+        parentTurns += 1;
+        return Promise.resolve({
+          assistant: parentTurns === 1
+            ? {
+              role: "assistant" as const,
+              content: "",
+              toolCalls: [{
+                id: `call-delegate-${threshold}`,
+                type: "function" as const,
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Do the isolated part.",
+                    profile: "default",
+                  }),
+                },
+              }],
+            }
+            : { role: "assistant" as const, content: "parent done" },
+        });
+      },
+    };
+    const loop = new CfHarnessPromptLoop({
+      modelClient,
+      compactThreshold: threshold,
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["default"],
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: `run-child-compaction-${threshold}`,
+        model: "gpt-5.6-terra",
+        cfcEnforcementMode: "disabled",
+      }),
+    });
+
+    await loop.runPrompt({ prompt: "Delegate and continue." });
+
+    assert(seen.length >= 2, "expected a parent turn and a child turn");
+    assertEquals(
+      seen.every((value) => value === threshold),
+      true,
+      `every turn should carry compactThreshold ${threshold}, saw ${
+        JSON.stringify(seen)
+      }`,
+    );
+  }
+});
