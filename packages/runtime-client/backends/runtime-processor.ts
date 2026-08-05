@@ -364,10 +364,31 @@ export function sanitizeForPostMessage(
 
   const obj = value as object;
 
-  // Circular reference protection
+  // Circular reference protection. `seen` holds the ANCESTORS of `obj`, so a
+  // value reached twice by different paths is shown at both rather than
+  // reported as a cycle it is not part of -- two identical siblings in a dump
+  // are a common shape, and calling the second one circular misdescribes the
+  // data this exists to show. Cleared on the way back out, below.
   if (seen.has(obj)) return "[Circular]";
   seen.add(obj);
 
+  try {
+    return sanitizedBody(value, obj, seen, depth);
+  } finally {
+    seen.delete(obj);
+  }
+}
+
+/**
+ * Helper for `sanitizeForPostMessage()`, which holds everything it does once
+ * the value is known to be an object it has not already entered.
+ */
+function sanitizedBody(
+  value: unknown,
+  obj: object,
+  seen: WeakSet<object>,
+  depth: number,
+): unknown {
   // Check for Cell (direct cell reference)
   if (isCell(value)) {
     return formatCellLink(value);
@@ -409,7 +430,13 @@ export function sanitizeForPostMessage(
     );
   }
 
-  // Plain objects - walk properties
+  // Plain objects - walk properties.
+  //
+  // TODO(danfuzz): a `FabricSpecialObject` lands here and is shown as `{}`,
+  // its state being in private fields rather than enumerable members. A
+  // `FabricPrimitive` wants formatting by its codec and a `FabricInstance` by
+  // its codec contents -- the same gap marked at the sibling walks, and here it
+  // makes a debug dump silently wrong rather than losing stored data.
   try {
     const result: Record<string, unknown> = {};
     for (const key of Object.keys(obj)) {
