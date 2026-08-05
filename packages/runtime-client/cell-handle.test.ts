@@ -762,3 +762,47 @@ describe("CellHandle push (read-modify-write)", () => {
     );
   });
 });
+
+describe("CellHandle.serialize", () => {
+  it("converts a handle into the ref that names it", () => {
+    const ref = { space: "did:key:z6Mk", id: "of:fid1:abc", path: [] };
+    const handle = { ref: () => ref } as unknown as CellHandle;
+    Object.setPrototypeOf(handle, CellHandle.prototype);
+
+    expect(CellHandle.serialize({ a: handle, b: [handle] }))
+      .toEqual({ a: ref, b: [ref] });
+  });
+
+  it("converts a handle reachable at two positions at both of them", () => {
+    const ref = { space: "did:key:z6Mk", id: "of:fid1:abc", path: [] };
+    const handle = { ref: () => ref } as unknown as CellHandle;
+    Object.setPrototypeOf(handle, CellHandle.prototype);
+    const shared = { held: handle };
+
+    expect(CellHandle.serialize({ x: shared, y: shared }))
+      .toEqual({ x: { held: ref }, y: { held: ref } });
+  });
+
+  it("refuses a value that holds itself", () => {
+    // Nothing in a `CellRef` can stand for a cycle, and the far end rebuilds
+    // what it receives, so this is refused by name rather than recurred on
+    // until the stack gives out.
+    const cyclic: Record<string, unknown> = { a: 1 };
+    cyclic.self = cyclic;
+
+    expect(() => CellHandle.serialize(cyclic))
+      .toThrow("Cannot serialize a circular reference");
+  });
+
+  it("refuses a value the connection cannot carry", () => {
+    expect(() => CellHandle.serialize({ fn: () => 1 })).toThrow("Unknown type");
+    expect(() => CellHandle.serialize({ n: 1n })).toThrow("Unknown type");
+  });
+
+  it("flattens a native object to its enumerable members", () => {
+    // A `Date` is an object, so it is descended into and comes back as the
+    // members it has, which are none. Pinned as what crosses the connection
+    // today rather than endorsed: the far end receives `{}`.
+    expect(CellHandle.serialize({ when: new Date(0) })).toEqual({ when: {} });
+  });
+});

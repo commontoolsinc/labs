@@ -9,6 +9,8 @@ import {
   linkRefFrom,
   linkRefPayload,
   linkRefPayloadToString,
+  type Replacements,
+  replacingWalk,
   type SigilLink,
 } from "@commonfabric/runner/shared";
 import {
@@ -481,34 +483,51 @@ export class CellHandle<T = unknown> {
 
   /**
    * Recursively converts any CellHandle references in the object into CellRefs.
-   * This is a CellHandle compatible form of `convertCellsToLinks`.
+   *
+   * This is the client-side counterpart of the runtime's
+   * `convertCellsToLinks`: the same walk, answering with a `CellRef` where that
+   * one answers with a link, since a `CellHandle` is what stands for a cell on
+   * this side of the connection.
    */
   static serialize(
     value: readonly any[] | Record<string, any> | any,
   ): any {
-    if (isCellHandle(value)) {
-      value = value.ref();
-    } else if (isRecord(value)) {
-      if (Array.isArray(value)) {
-        value = value.map((value) => CellHandle.serialize(value));
-      } else {
-        value = Object.fromEntries(
-          Object.entries(value).map(([key, value]) => [
-            key,
-            CellHandle.serialize(value),
-          ]),
-        );
-      }
-    } else if (
-      !(typeof value === "string" || typeof value === "number" ||
-        typeof value === "boolean" || value === undefined || value === null)
-    ) {
-      throw new Error(`Unknown type: ${value}`);
-    }
-
-    return value;
+    return replacingWalk(value, CELL_HANDLE_REFS);
   }
 }
+
+/**
+ * How `CellHandle.serialize()` answers the values it meets.
+ *
+ * Only what the connection can carry is accepted: a `CellHandle` becomes the
+ * ref that names it, a container is descended into, and anything else is a
+ * value this side has no way to send, so it is refused rather than passed along
+ * to be misread at the far end.
+ */
+const CELL_HANDLE_REFS: Replacements = {
+  replace: (value) => {
+    if (isCellHandle(value)) return { value: value.ref() };
+    if (
+      isRecord(value) || typeof value === "string" ||
+      typeof value === "number" || typeof value === "boolean" ||
+      value === undefined || value === null
+    ) {
+      return undefined;
+    }
+    throw new Error(`Unknown type: ${value}`);
+  },
+
+  // A value that holds itself cannot be sent: the far end rebuilds what it
+  // receives, and there is nothing in a `CellRef` for a cycle to be written as.
+  // Saying so beats recurring until the stack gives out.
+  cycle: (_value, path) => {
+    throw new Error(
+      `Cannot serialize a circular reference (at ${
+        path.length === 0 ? "the root" : path.join(".")
+      }).`,
+    );
+  },
+};
 
 export function isCellHandle<T = unknown>(
   value: unknown,

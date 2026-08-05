@@ -1,6 +1,5 @@
 import {
   type Immutable,
-  isFunction,
   isPlainContainer,
   isRecord,
 } from "@commonfabric/utils/types";
@@ -102,6 +101,7 @@ import {
 import { toURI } from "./uri-utils.ts";
 import { createRef } from "./create-ref.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import { type Replacements, replacingWalk } from "./replacing-walk.ts";
 import {
   type SigilLink,
   type SigilWriteRedirectLink,
@@ -3295,115 +3295,89 @@ export function frameAnchorIds(
  */
 export function convertCellsToLinks(
   value: readonly any[] | Record<string, any> | any,
-  options: {
-    includeSchema?: boolean;
-    doNotConvertCellResults?: boolean;
-    includeCfcLabelView?: boolean;
-    keepAsCell?: KeepAsCell;
-  } = {},
-  path: string[] = [],
-  ancestors: Map<any, string[]> = new Map(),
+  options: CellLinkOptions = {},
+  path: readonly string[] = [],
+  ancestors: Map<object, readonly string[]> = new Map(),
 ): any {
-  if (ancestors.has(value)) {
-    return linkRefFrom({ path: ancestors.get(value) });
+  return replacingWalk(value, cellsToLinks(options), path, ancestors);
+}
+
+/** The options by which a cell becomes the link that reaches it. */
+type CellLinkOptions = {
+  includeSchema?: boolean;
+  doNotConvertCellResults?: boolean;
+  includeCfcLabelView?: boolean;
+  keepAsCell?: KeepAsCell;
+};
+
+/**
+ * Helper for `convertCellsToLinks()`, which answers the link that reaches a
+ * cell, carrying the cell's CFC label view onto it when asked.
+ */
+function linkToCell(cell: Cell<any>, options: CellLinkOptions): SigilLink {
+  const link = cell.getAsLink(options);
+  if (options.includeCfcLabelView) {
+    const cfcLabelView = getCarriedCfcLabelView(cell);
+    if (cfcLabelView) {
+      setLinkCfcLabelView(link, cfcLabelView);
+    }
   }
+  return link;
+}
 
-  // Early-return cases
-  if (!options.doNotConvertCellResults && isCellResultForDereferencing(value)) {
-    const cell = getCellOrThrow(value);
-    const link = cell.getAsLink(options);
-    if (options.includeCfcLabelView) {
-      const cfcLabelView = getCarriedCfcLabelView(cell);
-      if (cfcLabelView) {
-        setLinkCfcLabelView(link, cfcLabelView);
+/**
+ * Helper for `convertCellsToLinks()`, which says what the walk does with the
+ * values it meets: a cell becomes a link, a cycle becomes a link to where the
+ * value sits, and every container is converted to fabric form on the way in.
+ */
+function cellsToLinks(options: CellLinkOptions): Replacements {
+  return {
+    replace: (value) => {
+      if (
+        !options.doNotConvertCellResults && isCellResultForDereferencing(value)
+      ) {
+        return { value: linkToCell(getCellOrThrow(value), options) };
       }
-    }
-    return link;
-  } else if (isCell(value)) {
-    const link = value.getAsLink(options);
-    if (options.includeCfcLabelView) {
-      const cfcLabelView = getCarriedCfcLabelView(value);
-      if (cfcLabelView) {
-        setLinkCfcLabelView(link, cfcLabelView);
-      }
-    }
-    return link;
-  } else if (!(isRecord(value) || isFunction(value))) {
-    return value;
-  }
+      return isCell(value) ? { value: linkToCell(value, options) } : undefined;
+    },
 
-  // At this point `value` is a non-`null` object(ish) thing.
+    cycle: (_value, path) => linkRefFrom({ path: [...path] }),
 
-  // Held before the conversions below reassign `value`, since what `ancestors` is
-  // keyed on -- and cleared of on the way back out -- is the object as given.
-  const original = value;
-  ancestors.set(original, path); // ...which needs to be tracked for circularity.
+    enter: (value) => {
+      // A schema-bearing read hangs a non-enumerable `toCell` symbol on the
+      // values it returns. That symbol is machinery, not content, and a value
+      // carrying it is not a `FabricValue`, so drop it before the conversion
+      // below would reject it. Only annotated containers are cleaned: one
+      // carrying anything else non-index is genuinely unrepresentable and must
+      // still be rejected.
+      const converted = isCellResultForDereferencing(value) &&
+          isPlainContainer(value)
+        // What these produce is a valid `FabricValueLayer` already, so it wants
+        // no further conversion. Objects need this as much as arrays do -- the
+        // annotation goes on either (see `schema.ts`).
+        ? (Array.isArray(value)
+          ? shallowCleanArray(value, false)
+          : shallowCleanPlainObject(value, false))
+        // Convert the (top level of) the value to fabric form (a valid
+        // `FabricValue`) if it isn't already, or throw if it's neither already
+        // valid nor convertible.
+        : shallowFabricFromNativeValue(value);
 
-  // Everything past the line above runs inside this `try`, so that EVERY way
-  // out clears the ancestor just recorded -- the exits that answer a value
-  // without descending into it as much as the ones that recur. An exit that
-  // skipped the clearing would leave the value an ancestor of all the rest of
-  // the walk, and the next position holding it would be answered as a cycle.
-  try {
-    // A schema-bearing read hangs a non-enumerable `toCell` symbol on the
-    // arrays it returns. That symbol is machinery, not content, and an array
-    // carrying it is not a `FabricValue`, so drop it before the conversion
-    // below would reject it. Only annotated arrays are cleaned: an array
-    // carrying anything else non-index is genuinely unrepresentable and must
-    // still be rejected.
-    if (isCellResultForDereferencing(value) && isPlainContainer(value)) {
-      // What these produce is a valid `FabricValueLayer` already, so it wants
-      // no further conversion. Objects need this as much as arrays do -- the
-      // annotation goes on either (see `schema.ts`).
-      value = Array.isArray(value)
-        ? shallowCleanArray(value, false)
-        : shallowCleanPlainObject(value, false);
-    } else {
-      // Convert the (top level of) the value to fabric form (a valid
-      // `FabricValue`) if it isn't already, or throw if it's neither already
-      // valid nor convertible.
-      value = shallowFabricFromNativeValue(value);
-    }
-
-    // Recursively process arrays and objects, if we ended up with one of those.
-    //
-    // TODO(danfuzz): Both container branches below build a fresh container,
-    // throwing away the copy just made above. One copy could serve both.
-    if (!isRecord(value)) {
-      // `shallowFabricFromNativeValue()` converted this into a primitive value
-      // of some sort.
-      return value;
-    } else if (value instanceof FabricPrimitive) {
-      // An opaque scalar whose state lives in private fields, so it has zero
-      // enumerable own properties and the object branch below would rebuild it
-      // from its (empty) entries as a bare `{}`. It leaves whole instead.
-      //
-      // This catches both forms that arrive here: one the caller already built,
-      // and one `shallowFabricFromNativeValue()` just minted from a native (a
-      // `Uint8Array`, a `Date`) immediately above.
+      // A `FabricPrimitive` is an opaque scalar whose state lives in private
+      // fields, so it has zero enumerable own properties and descending would
+      // rebuild it from its (empty) entries as a bare `{}`. It stands whole
+      // instead, as does anything the conversion turned into a non-container.
       //
       // TODO(danfuzz): Latent — a `FabricInstance` is NOT a leaf. It is a
       // container reached by its codec contents rather than by property name,
-      // so it still falls to the object branch and is rebuilt from zero
-      // enumerable own properties. Same marker as the sibling walk in
+      // so it still descends and is rebuilt from zero enumerable own
+      // properties. Same marker as the sibling walk in
       // `builder/to-encodable-form.ts`.
-      return value;
-    }
-
-    if (Array.isArray(value)) {
-      return value.map((value, index) =>
-        convertCellsToLinks(value, options, [...path, String(index)], ancestors)
-      );
-    }
-    return Object.fromEntries(
-      Object.entries(value).map(([key, value]) => [
-        key,
-        convertCellsToLinks(value, options, [...path, String(key)], ancestors),
-      ]),
-    );
-  } finally {
-    ancestors.delete(original);
-  }
+      return (!isRecord(converted) || converted instanceof FabricPrimitive)
+        ? { value: converted }
+        : { into: converted };
+    },
+  };
 }
 
 /**
