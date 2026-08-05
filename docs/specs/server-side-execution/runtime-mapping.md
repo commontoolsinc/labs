@@ -118,7 +118,7 @@ Status legend:
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
-| 53 | One-transaction-one-space writer rule; `enableMultiSpaceWrites(order)` child-first escape hatch | `storage/interface.ts:761`, `786`, `968-972`; `runner.ts:4733-4748` | protocol §2b | COVERED |
+| 53 | One-transaction-one-space writer rule; `enableMultiSpaceWrites(order)` child-first escape hatch | `storage/interface.ts:664`, `690`, `963`; `runner.ts:4698-4713` | protocol §2b | COVERED |
 | 54 | `.inSpace()` provisioning: destinationSpace-threaded writes, foreign-first commit order, name cache | `storage/interface.ts:1269`, `runtime.ts:671` (name cache), rows 14/53 | protocol §2b | COVERED |
 | 55 | Cross-space reads and foreign-commit wakes (per-doc client subscriptions today) | `runner.ts:1034-1036`, `storage/query.ts` | README §3.1, serving-loop §3b | CHANGED |
 | 56 | Cell scopes `space`/`user`/`session`: scoped derived outputs, scoped result cells, scoped-slot writes exempt from surface checks | `scope.ts:11`, `runner.ts:5062-5092`, exemption `scheduler/run.ts:630-637` | scopes.md (RULED 2026-08-02) | CHANGED |
@@ -229,8 +229,9 @@ non-conflict retry (row 16), the disposition *classification*
 conflict re-queue (`run.ts:165-213`) and the event-commit backoff
 window (`events.ts:1372-1386`) — with one deriver there is no
 concurrent deriver to conflict with; the mid-wave authored race is
-handled by the §3d per-doc CAS drop (`wave.supersededWrites`), and a
-dropped write recomputes next wave. Survives client-side: the whole
+handled by the §3d per-doc CAS drop (`wave.supersededWrites`);
+recompute after a drop is dependency-only (serving-loop.md §3d,
+RULED 2026-08-05), never a re-arm. Survives client-side: the whole
 backpressure stack, now applied to *authored* commits only (UI
 bindings, event appends). `CommitConvergenceError` remains the
 client's terminal surface. events §5 covers duplicate-submit; it does

@@ -3372,6 +3372,18 @@ export class Server {
     return Promise.resolve(null);
   }
 
+  /**
+   * The co-hosted direct-engine access of server-execution v2
+   * (serving-loop.md §1): the ExecutorHost's lease writes ride plane (c)
+   * as direct table updates, and the wave commit step's sink runs its
+   * store transaction (per-doc re-verification + derived-class apply +
+   * basis rows) against this same engine. Server-internal machinery and
+   * tests only — nothing session-facing reaches an engine directly.
+   */
+  engineForSpace(space: string): Promise<Engine.Engine> {
+    return this.openEngine(space);
+  }
+
   private openEngine(space: string): Promise<Engine.Engine> {
     const existing = this.#engines.get(space);
     if (existing !== undefined) {

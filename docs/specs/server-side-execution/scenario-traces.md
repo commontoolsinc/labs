@@ -559,11 +559,14 @@ these.
   notice retires `intent(E2)` entries — the echo un-renders; notice
   is the UI hook. [speculation §4, §5; events §2, §5; README §3.2]
 
-### T9 (FLAGS(1) → fixed)
+### T9 (FLAGS(1) → fixed) (re-verified after the 2026-08-05 Q1 ruling; Q1 cell updated)
 - Q1: superseded derived write DROPPED from the wave commit (sound:
-  re-derivable; next wave recomputes); counted `supersededWrites`.
-  [serving-loop §3d] (The counter was missing from §7's stats shape
-  — FIXED with this fold.)
+  re-derivable); the drop itself RE-ARMS NOTHING — recompute, if
+  any, arrives only via the ordinary dependency path: the concurrent
+  commit is next wave's input and recomputes exactly the runs whose
+  recorded reads it dirties, with no superseded-write mark; counted
+  `supersededWrites`. [serving-loop §3d, RULED 2026-08-05] (The
+  counter was missing from §7's stats shape — FIXED with this fold.)
 - Q2: non-re-derivable writes REBASE AND RETRY with field-level
   merge; the watermark advance and its consequences move TOGETHER,
   never separately. [serving-loop §3d; events §4]
@@ -618,7 +621,7 @@ these.
   serving-loop §1's plane (b) — RECONCILED in serving-loop §1 with
   this fold; vetoable.)
 
-### T12 (adjudicated COMPLETE)
+### T12 (adjudicated COMPLETE) (re-verified after the 2026-08-05 Q1 ruling; Q4 cell updated)
 - Q1: speculate pure structural + handlers + optimistic navigate +
   overlay-local children; own instances ONLY; never effectful nodes
   (read through to last committed result, pending on key change) or
@@ -628,10 +631,17 @@ these.
 - Q3: retirement on pushed derived commits, keyed `origin:
   intent(eventId)` matched against `consequenceOf`. [speculation §1, §4]
 - Q4: the authored write is ADMITTED (target ACL + CAS only);
-  next wave recomputes over it; mid-wave, the WAVE's write is the
-  one dropped. Single-deriver protects against dual DERIVED
+  mid-wave, the WAVE's write is the one dropped
+  (`supersededWrites`). Recompute is NOT automatic: the drop
+  re-arms nothing, and a derivation that blind-writes this doc
+  without reading it back is never dirtied by the intruding write,
+  so the derived doc holds the authored value until the
+  derivation's own upstream inputs next change — "the derived
+  output waits for the next input change" (owner, RULED
+  2026-08-05). Single-deriver protects against dual DERIVED
   committers by construction; it is NOT an ACL on derived-output
-  docs. [protocol §1, §2; serving-loop §3d; README §1]
+  docs — this scenario is exactly that gap. [protocol §1, §2;
+  serving-loop §3d RULED 2026-08-05; README §1]
 - Q5: watermark forgery possible and ACCEPTED (owner 2026-08-02,
   no-new-guarantees); "what tightening requires" is an explicit
   deferral — future work. [protocol §1; README §1]

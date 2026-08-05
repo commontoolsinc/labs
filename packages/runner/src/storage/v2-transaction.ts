@@ -35,6 +35,7 @@ import type {
   IStorageTransaction,
   IStorageTransactionInconsistent,
   ITransactionJournal,
+  ITransactionSealSink,
   ITransactionWriteRequest,
   IWriteAttempt,
   IWriteOptions,
@@ -2077,6 +2078,115 @@ export class V2StorageTransaction implements IStorageTransaction {
           "multi-space-commit-rejected",
           `Cross-space commit to ${space} rejected after ${i} space(s); ` +
             `earlier spaces are not rolled back and later spaces are skipped`,
+          error,
+        );
+        return { error: toStoreError(error) };
+      }
+    }
+    return { ok: {} };
+  }
+
+  /**
+   * Close by sealing (server-execution v2, serving-loop.md §3d): the same
+   * close work commit() runs — per-space native commit construction in
+   * commit order, validation, terminal state transition — with each space's
+   * native commit handed to `sink` instead of its replica. Multi-space
+   * transactions hand over in the same children-first order the split
+   * commit path uses (protocol.md §2b), stopping at the first failure.
+   */
+  sealInto(
+    sink: ITransactionSealSink,
+  ): Promise<Result<Unit, CommitError>> {
+    const promise = this.#sealImpl(sink);
+    // Same durability-barrier registration as commit(): by the time
+    // sealInto() returns, the in-flight close is visible to
+    // hasPendingCommits().
+    this.storage.trackPendingCommit(promise);
+    return promise;
+  }
+
+  async #sealImpl(
+    sink: ITransactionSealSink,
+  ): Promise<Result<Unit, CommitError>> {
+    this.assertWritable("sealInto()");
+    const ready = this.editable();
+    if (ready.error) {
+      return { error: ready.error };
+    }
+
+    const commits: { space: MemorySpace; native: NativeStorageCommit }[] = [];
+    for (const space of this.orderedCommitSpaces()) {
+      const native = this.getNativeCommit(space);
+      const operations = native?.operations ?? [];
+      const hasCommitPreconditions = (native?.preconditions?.length ?? 0) > 0;
+      const hasSqliteOps = (native?.sqliteOps?.length ?? 0) > 0;
+      if (
+        !native ||
+        (operations.length === 0 &&
+          !hasCommitPreconditions && !hasSqliteOps)
+      ) {
+        continue;
+      }
+      commits.push({ space, native });
+    }
+
+    if (commits.length === 0) {
+      const result = { ok: {} } satisfies Result<Unit, CommitError>;
+      this.#finish(result);
+      return result;
+    }
+
+    const validation = this.validate();
+    if (validation.error) {
+      // Rejected before sealing, so the activity stays: the scheduler
+      // rebuilds this action's dependencies from it and retries.
+      this.#state = {
+        status: "done",
+        result: { error: validation.error },
+      };
+      return { error: validation.error };
+    }
+
+    const promise = this.#runSealHandoffs(sink, commits);
+    this.#state = { status: "pending", promise };
+    try {
+      const result = await promise;
+      this.#finish(result);
+      return result;
+    } catch (error) {
+      const result: Result<Unit, StorageTransactionRejected> = {
+        error: toStoreError(error),
+      };
+      this.#finish(result);
+      return result;
+    }
+  }
+
+  async #runSealHandoffs(
+    sink: ITransactionSealSink,
+    commits: { space: MemorySpace; native: NativeStorageCommit }[],
+  ): Promise<Result<Unit, StorageTransactionRejected>> {
+    for (let i = 0; i < commits.length; i++) {
+      const { space, native } = commits[i];
+      // Stop at the first per-space failure, exactly like runSplitCommits:
+      // spaces already sealed are not unwound here — the wave accumulator
+      // owns the sealed writes' lifecycle from the moment it accepts them.
+      try {
+        const result = await sink.sealSpaceCommit(space, native, this);
+        if (result.error) {
+          multiSpaceCommitLogger.error(
+            "seal-space-commit-failed",
+            `Seal into wave for ${space} failed after ${i} space(s); ` +
+              `later spaces are skipped`,
+            result.error,
+          );
+          return { error: result.error as StorageTransactionRejected };
+        }
+      } catch (error) {
+        multiSpaceCommitLogger.error(
+          "seal-space-commit-rejected",
+          `Seal into wave for ${space} rejected after ${i} space(s); ` +
+            `later spaces are skipped`,
           error,
         );
         return { error: toStoreError(error) };

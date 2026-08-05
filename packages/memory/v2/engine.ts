@@ -6,7 +6,13 @@ import {
   patchOpChangesParentKeySet,
   touchedPointerPaths,
 } from "./patch.ts";
-import { isPrefixPath, parentPath, pathsOverlap } from "./path.ts";
+import {
+  isPrefixPath,
+  parentPath,
+  parsePointer,
+  pathsOverlap,
+} from "./path.ts";
+import { replaceSchedulerBasisRows } from "./scheduler-basis.ts";
 import {
   containsReservedSchemaRefSubstring,
   containsSyncSchemaRefString,
@@ -20,6 +26,7 @@ import {
   commitPreconditionValueHash,
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
+  type DerivedWriteAnnotation,
   encodeMemoryBoundary,
   type EntityDocument,
   type EntityId,
@@ -166,6 +173,15 @@ CREATE TABLE IF NOT EXISTS "commit" (
   -- the insert (serving-loop.md §2), so a stored value names the holder that
   -- actually held the lease at admission time.
   holder             TEXT,
+  -- Per-write identity annotations WITHIN a derived commit's body
+  -- (protocol.md §1: the addressing/attribution pair, per action run) and
+  -- the eventIds the commit consequences (protocol.md §7: consequenceOf,
+  -- derived only — bounded by the wave's input, never graph-scaled). JSON
+  -- arrays; NULL on every non-derived class. Attribution is recorded, not
+  -- read (protocol.md §1); the scopeKey half was CONSUMED at admission to
+  -- key scoped rows.
+  annotations        JSON,
+  consequence_of     JSON,
   FOREIGN KEY (invocation_ref) REFERENCES invocation(ref),
   FOREIGN KEY (authorization_ref) REFERENCES authorization(ref)
 );
@@ -255,9 +271,10 @@ CREATE TABLE IF NOT EXISTS execution_lease (
 -- commits, never pushed to subscribers, never read at admission. Recovery
 -- and warm start are the same move: activation re-marks the dirty frontier
 -- by comparing recorded input seqs against current heads. The table starts
--- EMPTY: nothing is backfilled from the dropped observation tables (D10),
--- and nothing writes it until the serving loop lands (plan Phase 1 stages
--- E-F).
+-- EMPTY: nothing is backfilled from the dropped observation tables (D10).
+-- The writer is scheduler-basis.ts (stage D), invoked inside a wave's
+-- derived store transaction; nothing invokes it in production until the
+-- serving loop lands (plan Phase 1 stages E-F).
 -- One standalone table. No FOREIGN KEY clauses anywhere: v1's satellites
 -- all hung off scheduler_observation; the v2 index references nothing and
 -- nothing references it.
@@ -321,7 +338,9 @@ INSERT INTO "commit" (
   original,
   resolution,
   class,
-  holder
+  holder,
+  annotations,
+  consequence_of
 )
 VALUES (
   :seq,
@@ -333,7 +352,9 @@ VALUES (
   :original,
   :resolution,
   :class,
-  :holder
+  :holder,
+  :annotations,
+  :consequence_of
 )
 `;
 
@@ -824,6 +845,19 @@ export type ApplyCommitOptions = {
    *  a holder, and no session-facing path supplies one. Meaningless (and
    *  ignored) on other classes. */
   holder?: string;
+  /** Per-write identity annotations of a `derived`-class commit
+   *  (protocol.md §1): the explicit `scope_key` on scoped writes
+   *  (ADDRESSING — consumed here to key rows, since the service envelope
+   *  has no session to derive keys from) and the acting identity per
+   *  action run (ATTRIBUTION — stored, never read by admission).
+   *  Server-internal like `commitClass`; rejected on any other class
+   *  (protocol.md §7's closed list). */
+  annotations?: readonly DerivedWriteAnnotation[];
+  /** The eventIds whose handler consequences this `derived`-class commit
+   *  carries (protocol.md §7 — `consequenceOf`, derived only; bounded by
+   *  the wave's input, never graph-scaled). Stored on the commit row;
+   *  rejected on any other class. */
+  consequenceOf?: readonly string[];
 };
 
 export type AppliedRevision = {
@@ -1184,6 +1218,33 @@ ADD COLUMN holder TEXT;
 `);
 };
 
+// Server-execution v2 stage D: derived-class commits carry their per-write
+// identity annotations and consequenceOf inside the commit row (protocol.md
+// §1, §7). Historical rows stay NULL — both fields are derived-only and no
+// derived commit predates them. Runs after migrateCommitHolder so migrated
+// stores and fresh stores agree on column order (class, holder, annotations,
+// consequence_of).
+const migrateCommitWaveCarriage = (database: Database): void => {
+  // One guard per column, matching the prior migrations' shape: ALTERs
+  // are not transactional as a pair, and migrations run on every store
+  // open — a single first-column guard would turn a crash between the
+  // two ALTERs into a store with `annotations` present and
+  // `consequence_of` missing FOREVER (the guard forever satisfied, the
+  // second ALTER forever skipped, every commit INSERT failing).
+  if (!hasColumn(database, "commit", "annotations")) {
+    database.exec(`
+ALTER TABLE "commit"
+ADD COLUMN annotations JSON;
+`);
+  }
+  if (!hasColumn(database, "commit", "consequence_of")) {
+    database.exec(`
+ALTER TABLE "commit"
+ADD COLUMN consequence_of JSON;
+`);
+  }
+};
+
 // Server-execution v2 Phase 1 stage C.2: the observation-payload tables are
 // REPLACED by the scheduler_basis index (serving-loop.md §3b). The drop list
 // is §3b's SEVEN tables, deliberately not a constant enumerating six (D6 —
@@ -1224,6 +1285,7 @@ export const open = async (
   migrateHeadCurrentOp(database);
   migrateCommitClass(database);
   migrateCommitHolder(database);
+  migrateCommitWaveCarriage(database);
   migrateSchedulerObservationTablesToBasis(database);
   return {
     url,
@@ -1434,6 +1496,255 @@ export const applyCommit = (
   );
 };
 
+/**
+ * A wave commit's per-doc CAS re-verification failed: some doc the batch
+ * writes has a head past the wave's basis, or a rebased doc's head moved
+ * past the head the rebase decision observed. The wave commit step folds
+ * `conflictedDocs` into its conflict resolution and re-attempts —
+ * whole-wave CAS failure is forbidden (serving-loop.md §3d), so this
+ * error NAMES what moved.
+ */
+export class WaveCommitConflictError extends Error {
+  override readonly name = "WaveCommitConflictError";
+  readonly conflictedDocs: readonly string[];
+  constructor(conflictedDocs: readonly string[]) {
+    super(
+      `wave commit re-verification: doc head(s) advanced past the wave ` +
+        `basis: ${conflictedDocs.join(", ")}`,
+    );
+    this.conflictedDocs = conflictedDocs;
+  }
+}
+
+/**
+ * A wave commit's precondition pre-check failed. Unlike the shared
+ * validator's first-failure throw, this NAMES every failing precondition
+ * by index into the batch's preconditions array, so the wave commit step
+ * can resolve each failure to its owning contribution per write class
+ * (serving-loop.md §3d — one contribution's violated create-only mark
+ * must not abort every other contribution's work).
+ */
+export class WavePreconditionError extends Error {
+  override readonly name = "WavePreconditionError";
+  readonly failedPreconditions: readonly number[];
+  constructor(failedPreconditions: readonly number[], detail: string) {
+    super(
+      `wave commit precondition(s) failed at index(es) ` +
+        `${failedPreconditions.join(", ")}: ${detail}`,
+    );
+    this.failedPreconditions = failedPreconditions;
+  }
+}
+
+/** Current head seq of one doc instance (0 when never written). */
+export const selectDocHead = (
+  engine: Engine,
+  options: { branch?: BranchName; id: EntityId; scopeKey: string },
+): number => {
+  const row = engine.database.prepare(`
+SELECT seq FROM head
+WHERE branch = :branch AND id = :id AND scope_key = :scope_key
+`).get({
+      branch: options.branch ?? DEFAULT_BRANCH,
+      id: options.id,
+      scope_key: options.scopeKey,
+    }) as { seq: number } | undefined;
+  return row?.seq ?? 0;
+};
+
+/**
+ * The value paths written to one doc instance by revisions after
+ * `sinceSeq` — the field-level merge input for the wave commit step's
+ * rebase of non-re-derivable writes (serving-loop.md §3d). A `set` or
+ * `delete` revision reports the root path (it rewrites the whole doc);
+ * a `patch` revision reports its patches' pointer paths.
+ */
+export const selectWritePathsSince = (
+  engine: Engine,
+  options: {
+    branch?: BranchName;
+    id: EntityId;
+    scopeKey: string;
+    sinceSeq: number;
+  },
+): Array<readonly string[]> => {
+  const rows = engine.database.prepare(`
+SELECT op, data FROM revision
+WHERE branch = :branch AND id = :id AND scope_key = :scope_key
+  AND seq > :since_seq
+ORDER BY seq, op_index
+`).all({
+      branch: options.branch ?? DEFAULT_BRANCH,
+      id: options.id,
+      scope_key: options.scopeKey,
+      since_seq: options.sinceSeq,
+    }) as Array<{ op: string; data: string | null }>;
+  const paths: Array<readonly string[]> = [];
+  for (const row of rows) {
+    if (row.op === "patch" && row.data !== null) {
+      const patches = decodeMemoryBoundary(row.data) as PatchOp[];
+      for (const patch of patches) {
+        paths.push(parsePointer(patch.path));
+      }
+    } else {
+      paths.push([]);
+    }
+  }
+  return paths;
+};
+
+/** One basis-row overwrite unit of a wave commit (serving-loop.md §3b):
+ * `seq: null` marks an in-wave read, filled with the wave's own commit
+ * seq at write time. */
+export type WaveBasisInstance = {
+  action: string;
+  actionScopeKey: string;
+  rows: ReadonlyArray<{
+    entitySpace: string;
+    entity: string;
+    entityScopeKey: string;
+    seq: number | null;
+  }>;
+};
+
+/**
+ * The wave commit's store transaction (server-execution v2 stage D,
+ * serving-loop.md §3b–§3d): per-doc CAS re-verification against the
+ * wave's basis, the commit apply (admission included — the derived-class
+ * lease check, annotation keying, consequenceOf carriage), and the basis-
+ * index overwrites, all in ONE engine transaction. This is what makes the
+ * accumulator's sink contract implementable: between the wave's own head
+ * query and this call the engine may admit concurrent commits, and the
+ * re-verification here — inside the transaction — is the load-bearing
+ * concurrency check (§3d forbids blind derived writes). On conflict it
+ * throws {@link WaveCommitConflictError} naming the moved docs, and
+ * nothing is applied.
+ */
+export const applyWaveCommit = (
+  engine: Engine,
+  options: ApplyCommitOptions & {
+    waveBasis: {
+      /** The wave's input snapshot seq (per-doc CAS basis). */
+      basisSeq: number;
+      /** Per doc-instance key (`${id} ${scopeKey}`): the head the wave's
+       * rebase decision observed. Re-verification requires these docs to
+       * sit at EXACTLY that head — §3d's re-CAS against the new head; a
+       * further move invalidates the field-level merge. */
+      rebasedHeads: ReadonlyArray<{ doc: string; head: number }>;
+    };
+    basisInstances?: readonly WaveBasisInstance[];
+  },
+): AppliedCommit => {
+  return engine.database.transaction(
+    (txEngine: Engine, txOptions: typeof options) => {
+      const { waveBasis, basisInstances, ...applyOptions } = txOptions;
+      const rebasedHeads = new Map(
+        waveBasis.rebasedHeads.map(({ doc, head }) => [doc, head]),
+      );
+      const scopeKeyByOp = new Map<number, string>();
+      for (const annotation of applyOptions.annotations ?? []) {
+        if (annotation.scopeKey !== undefined) {
+          scopeKeyByOp.set(annotation.op, annotation.scopeKey);
+        }
+      }
+      const conflicted = new Set<string>();
+      const checked = new Set<string>();
+      for (
+        const [opIndex, operation] of applyOptions.commit.operations.entries()
+      ) {
+        if (operation.op === "sqlite") continue;
+        // A space-declared op never takes an annotated key: the apply
+        // below refuses such an annotation as a ProtocolError, and keying
+        // this pre-check by the DECLARED scope keeps that refusal — not a
+        // phantom, resolvable-looking conflict — the error the wave sees.
+        const annotated = normalizeScope(operation.scope) === "space"
+          ? undefined
+          : scopeKeyByOp.get(opIndex);
+        const scopeKey = annotated ??
+          resolveScopeKey(operation.scope, {
+            principal: applyOptions.principal,
+            sessionId: applyOptions.sessionId,
+          });
+        const key = `${operation.id} ${scopeKey}`;
+        if (checked.has(key)) continue;
+        checked.add(key);
+        const head = selectDocHead(txEngine, {
+          branch: applyOptions.commit.branch,
+          id: operation.id,
+          scopeKey,
+        });
+        const rebasedAt = rebasedHeads.get(key);
+        if (rebasedAt !== undefined) {
+          // A rebased write: sound only against the exact head its
+          // field-level merge was decided at.
+          if (head !== rebasedAt) conflicted.add(key);
+        } else if (head > waveBasis.basisSeq) {
+          conflicted.add(key);
+        }
+      }
+      if (conflicted.size > 0) {
+        throw new WaveCommitConflictError([...conflicted]);
+      }
+      // Preconditions pre-checked ONE BY ONE so a failure names its
+      // index: the shared validator throws on the first failure without
+      // saying which, and the wave commit step needs per-owner
+      // resolution (WavePreconditionError above). The synthetic
+      // single-precondition commit reuses the validator unchanged; the
+      // apply below re-runs the full set inside this same transaction,
+      // which — having passed here — cannot fail there.
+      const failedPreconditions: number[] = [];
+      let firstDetail = "";
+      const sessionKey = resolveCommitSessionKey(
+        applyOptions.sessionId,
+        applyOptions.principal,
+      );
+      const branch = applyOptions.commit.branch ?? DEFAULT_BRANCH;
+      for (
+        const [index, precondition] of (
+          applyOptions.commit.preconditions ?? []
+        ).entries()
+      ) {
+        try {
+          validateCommitPreconditions(txEngine, sessionKey, branch, {
+            ...applyOptions.commit,
+            preconditions: [precondition],
+          }, {
+            principal: applyOptions.principal,
+            sessionId: applyOptions.sessionId,
+          });
+        } catch (error) {
+          if (error instanceof PreconditionFailedError) {
+            failedPreconditions.push(index);
+            if (firstDetail === "") {
+              firstDetail = error.message;
+            }
+          } else {
+            throw error;
+          }
+        }
+      }
+      if (failedPreconditions.length > 0) {
+        throw new WavePreconditionError(failedPreconditions, firstDetail);
+      }
+      const applied = applyCommitTransaction(txEngine, applyOptions);
+      for (const instance of basisInstances ?? []) {
+        replaceSchedulerBasisRows(txEngine, {
+          branch,
+          action: instance.action,
+          actionScopeKey: instance.actionScopeKey,
+          rows: instance.rows.map((row) => ({
+            entitySpace: row.entitySpace,
+            entity: row.entity,
+            entityScopeKey: row.entityScopeKey,
+            seq: row.seq ?? applied.seq,
+          })),
+        });
+      }
+      return applied;
+    },
+  ).immediate(engine, options);
+};
+
 const applyCommitTransaction = (
   engine: Engine,
   {
@@ -1444,6 +1755,8 @@ const applyCommitTransaction = (
     sqliteAttachments,
     commitClass = "authored",
     holder,
+    annotations,
+    consequenceOf,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
   // The derived-class admission rule (serving-loop.md §2, protocol.md §2's
@@ -1476,6 +1789,65 @@ const applyCommitTransaction = (
         "derived-class commit rejected: producer does not hold the live " +
           "execution_lease for the space (serving-loop.md §2)",
       );
+    }
+  } else if (annotations !== undefined || consequenceOf !== undefined) {
+    // protocol.md §7's closed metadata list: the annotation pair and
+    // consequenceOf are DERIVED-only carriage. No session-facing path can
+    // supply them (`ClientCommit` cannot express either), so reaching here
+    // on another class is a server-side plumbing bug, refused loudly.
+    throw new ProtocolError(
+      "write annotations and consequenceOf are derived-commit carriage " +
+        "only (protocol.md §1, §7)",
+    );
+  }
+  // Derived commits key scoped writes by their EXPLICIT annotation
+  // scopeKey (protocol.md §1's ADDRESSING): the wave's envelope is the
+  // SpaceServer's service identity — no user principal, no session — so
+  // deriving keys from it would silently resolve `user:<serviceDID>`, the
+  // empty-instance trap protocol.md §2 exists to prevent. Fail closed: a
+  // scoped write with no annotated key is rejected, never defaulted.
+  const scopeKeyByOpIndex = new Map<number, string>();
+  if (commitClass === "derived") {
+    for (const annotation of annotations ?? []) {
+      if (annotation.scopeKey !== undefined) {
+        scopeKeyByOpIndex.set(annotation.op, annotation.scopeKey);
+      }
+    }
+    for (const [opIndex, operation] of commit.operations.entries()) {
+      if (operation.op === "sqlite") continue;
+      const declared = normalizeScope(operation.scope);
+      const annotated = scopeKeyByOpIndex.get(opIndex);
+      if (declared === "space") {
+        // protocol.md §1's ADDRESSING is one per SCOPED write, and §7's
+        // closed list sanctions nothing else: an annotation aimed at a
+        // space-scoped op would otherwise be silently APPLIED as the
+        // row's key (writeOperation's scopeKeyOverride below), re-keying
+        // a space-visible doc into a scoped instance nothing declared.
+        // Fail closed, like the missing-annotation branch.
+        if (annotated !== undefined) {
+          throw new ProtocolError(
+            `derived-class commit rejected: scope_key annotation ` +
+              `"${annotated}" targets a space-scoped write ` +
+              `(op ${opIndex}); addressing is one per SCOPED write ` +
+              "(protocol.md §1, §7)",
+          );
+        }
+        continue;
+      }
+      if (annotated === undefined) {
+        throw new ProtocolError(
+          `derived-class commit rejected: scoped write (op ${opIndex}, ` +
+            `scope "${declared}") carries no explicit scope_key ` +
+            "annotation (protocol.md §1)",
+        );
+      }
+      if (declaredScopeFromScopeKey(annotated) !== declared) {
+        throw new ProtocolError(
+          `derived-class commit rejected: annotated scope_key ` +
+            `"${annotated}" does not match the write's declared scope ` +
+            `"${declared}" (op ${opIndex})`,
+        );
+      }
     }
   }
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
@@ -1560,6 +1932,14 @@ const applyCommitTransaction = (
     resolution,
     class: commitClass,
     holder: commitClass === "derived" ? holder ?? null : null,
+    annotations: commitClass === "derived" && annotations !== undefined &&
+        annotations.length > 0
+      ? encodeMemoryBoundary(annotations)
+      : null,
+    consequence_of: commitClass === "derived" && consequenceOf !== undefined &&
+        consequenceOf.length > 0
+      ? encodeMemoryBoundary(consequenceOf)
+      : null,
   });
 
   const revisions: AppliedRevision[] = [];
@@ -1581,6 +1961,7 @@ const applyCommitTransaction = (
       operation,
       principal,
       sessionId,
+      scopeKeyOverride: scopeKeyByOpIndex.get(opIndex),
     });
     revisions.push(revision);
   }
@@ -1684,11 +2065,18 @@ const writeOperation = (
     operation: Exclude<Operation, SqliteOperation>;
     principal?: string;
     sessionId: SessionId;
+    /** The explicit scope_key of a derived commit's scoped write
+     * (protocol.md §1's ADDRESSING): admission validated it against the
+     * declared scope; when present it keys the row instead of a
+     * session-derived resolution — the service envelope has no session to
+     * resolve from. */
+    scopeKeyOverride?: string;
   },
 ): AppliedRevision => {
   const { branch, seq, opIndex, operation, principal, sessionId } = options;
   const scope = normalizeScope(operation.scope);
-  const scopeKey = resolveScopeKey(operation.scope, { principal, sessionId });
+  const scopeKey = options.scopeKeyOverride ??
+    resolveScopeKey(operation.scope, { principal, sessionId });
   const revisionScopeFields = scope === DEFAULT_SCOPE
     ? { scopeKey }
     : { scope, scopeKey };

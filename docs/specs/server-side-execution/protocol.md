@@ -3,7 +3,7 @@
 Normative. Assumes [README.md](README.md); details Phases 1–4 surface
 between client, memory server, and SpaceServer.
 
-## Anchors (verified on main, 2026-08-02 — re-verify before coding)
+## Anchors (verified on main, 2026-08-02; §2b file:line refs refreshed 2026-08-04 — re-verify before coding)
 
 - Memory server: `packages/memory/v2.ts`, toolshed mount
   `/api/storage/memory` (`packages/toolshed/routes/storage/memory/`).
@@ -21,11 +21,30 @@ Every commit carries a `class` in its metadata. Three values, closed set:
 | --- | --- | --- |
 | `authored` | any authorized session; server-produced only via delegated capability (§2) | doc writes (UI bindings, widget edits — and, until Phase 3 lands, client handler writes: the plan's stated interim posture) or event appends (events.md §1) |
 | `derived` | the space's SpaceServer (lease holder) | derivation results, watermark advance, `consequenceOf` |
-| `system` | memory server itself | space bootstrap, authorization changes — pre-existing, unchanged |
+| `system` | memory server itself — its own direct writes, outside any session and outside the wave (PRODUCER-defined; note below) | e.g. space bootstrap, authorization changes, blob metadata — EXEMPLARY, not a closed list (RULED 2026-08-05) |
 
 FORBIDDEN: a fourth class; per-class subtypes that alter admission;
 clients producing `derived` (there must be no client code path that can
 even construct one).
+
+**The `system` class is PRODUCER-defined, its contents exemplary
+(RULED 2026-08-05).** The stamp rides the memory server's generic
+direct-write path (`Server.writeDocument`,
+`packages/memory/v2/server.ts` — envelope `server:<uuid>`): `system`
+means "the memory server's own direct write, outside any session and
+outside the wave", and the row's contents column is examples, not a
+closed set — beyond bootstrap and authorization changes, the one
+production caller today is the toolshed blob-upload route writing
+`cid:<hash>` metadata docs
+(`packages/toolshed/routes/blobs/blobs.index.ts`). Two consequences,
+stated so neither is inferred: (i) because the stamp rides the PATH,
+any NEW direct-write caller is a spec decision — this list is
+extended deliberately, never silently by pointing more code at the
+path. (ii) `system` commits carry no user attribution in the commit
+ledger — the envelope is the server's own session — which is
+deliberately accepted; per-user attribution for blob writes is a
+named future hardening, out of v2 scope, in the same family as §2's
+grant-scoped foreign reads.
 
 **Both arms carry a class; only the ON arm enforces one.** `class`
 metadata is WRITTEN in every arm from stage A onward and ENFORCED
@@ -58,8 +77,12 @@ protection: derived-output docs get none in v2, so a malicious client
 holding today's write authority on a doc can still author into it,
 docs the SpaceServer derives into and the watermark doc included
 (watermark forgery is possible and accepted for now). v2 defines the
-outcome, not a defense: such a write is an ordinary authored input,
-and the next wave recomputes the derivation over it. v2 adds no
+outcome, not a defense: such a write is an ordinary authored input;
+whether it triggers a recompute is governed by serving-loop.md §3d's
+dependency-only rule (RULED 2026-08-05) — a derivation that reads
+the intruded-on doc recomputes through the ordinary dependency path;
+one that only writes it (a blind writer) is NOT re-armed, and the
+derived output waits for the next input change. v2 adds no
 security guarantees beyond today's unless trivial (owner,
 2026-08-02); tightening is future work.
 
@@ -213,6 +236,19 @@ validation, no certificates: no commit ever asserts that an execution
 happened elsewhere. If an admission question cannot be answered by
 (target, principal, lease, CAS), the design is drifting — stop.
 
+**Derived-envelope defense-in-depth (RULED 2026-08-05; the engine
+check lands with Phase 1 stage F).** At admission, a `derived`
+commit's producing SESSION must be the lease holder's own service
+session: a derived commit arriving under a user session — or any
+session other than the declared holder's — is REFUSED. This mirrors
+the executable model's `admitDerived`, which compares the envelope
+principal to `holderId`, and closes the "single honest internal
+caller" gap before stage F multiplies the callers of the co-hosted
+engine plane. Implementation is explicitly stage F work and the
+plan's stage F bullet carries the task: the operand shape — how the
+engine-side session identity maps to the holder identity — is
+stage F design, not stage D's.
+
 **`firedAt` is SERVER-STAMPED, never client-minted (T1 + S6).** It
 carries BOTH the acting user and the session —
 `{ user, session, clientSeq }` — because scopes.md §5 resolves a
@@ -296,7 +332,8 @@ case and keep the event's actor (scopes.md §5, server-stamped
 Note what the table does NOT do: `authored` admission checks write
 authority on the TARGET only — nothing marks a doc as derived-output,
 so admission protects derived docs no more than today does (§1's
-threat model; the next wave recomputes over an intruding write).
+threat model, sharpened by serving-loop.md §3d's dependency-only
+recompute rule, RULED 2026-08-05).
 
 ## 2b. Cross-space writes
 
@@ -305,7 +342,7 @@ transaction writes one space — by DEFAULT, with one explicit opt-in.**
 A transaction FAILS if a writer for a different space was already
 opened on it (anchor: `packages/runner/src/storage/interface.ts`
 `writer(space)`) unless it opted in through `enableMultiSpaceWrites`
-(`interface.ts:786`), reachable only via the `.inSpace()` chain below —
+(`interface.ts:690`), reachable only via the `.inSpace()` chain below —
 which is what makes an UNMARKED crossing always a bug. Reads cross
 freely (serving-loop.md §3b; cross-space label metadata flows with
 them). v2 keeps that invariant and adds the class discipline:
@@ -347,10 +384,10 @@ section.
 even mint new ones — from a handler (`profile-create.tsx`,
 `ProfileHome.inSpace()`). The real chain is an explicit opt-in
 end to end: `.inSpace()` → `optIntoInSpaceMultiSpaceCommit`
-(`builder/pattern.ts:1084`) → `enableCrossSpaceChildCommit`
-(`runner.ts:4733`, commit order `[children..., parent]`) →
-`enableMultiSpaceWrites` (`interface.ts:786`) →
-`commitMultiSpace`/`runSplitCommits` (`v2-transaction.ts:2077/2156` —
+(`builder/pattern.ts:1090`) → `enableCrossSpaceChildCommit`
+(`runner.ts:4698`, commit order `[children..., parent]`) →
+`enableMultiSpaceWrites` (`interface.ts:690`) →
+`commitMultiSpace`/`runSplitCommits` (`v2-transaction.ts:1971/2048` —
 sequential, stop at first failure): today already foreign-first,
 home-after-success. v2 keeps the API, the split, and the order,
 relocated into the wave's commit step:
@@ -524,8 +561,13 @@ disabled (README §3.5).
   the explicit `scope_key` on every scoped write (addressing) and
   the acting identity on every action RUN's writes, where the run
   has one — §1 (attribution,
-  `action × instance`). Anything further needs a spec edit here
-  first.
+  `action × instance`). The pair's CARRIAGE is server-internal
+  admission input (like `commitClass`/`holder`: `ClientCommit`
+  cannot express it), and its STORED form is a per-op-indexed
+  sidecar on the commit row — recorded, never wire, never pushed;
+  admission consumes only the addressing half, to key scoped rows
+  (§1's recorded-not-read attribution). Anything further needs a
+  spec edit here first.
 - **`scope_key` is thereby PROTOCOL vocabulary**, no longer
   engine-internal vocabulary: it appears inside derived commit
   bodies and on lease-holder reads, so its format is defined ONCE

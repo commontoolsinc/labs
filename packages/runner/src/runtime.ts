@@ -43,6 +43,7 @@ import type {
   IExtendedStorageTransaction,
   IStorageManager,
   MemorySpace,
+  TransactionSealDestination,
   URI,
 } from "./storage/interface.ts";
 import {
@@ -687,6 +688,13 @@ export class Runtime {
   readonly fetch: RuntimeFetch;
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
+  // The transaction seal destination (server-execution v2, serving-loop.md
+  // §3d): installed only on a serving runtime under
+  // EXPERIMENTAL_SERVER_EXECUTION, by the wave machinery around each wave.
+  // While installed, every transaction edit() creates closes by sealing
+  // into it instead of committing to the store. Never installed on a
+  // client or in the OFF arm — installSealDestination throws off the flag.
+  #transactionSealDestination: TransactionSealDestination | undefined;
   readonly userIdentityDID: DID;
   /** Cache of resolved PatternFactory.inSpace("name") space DIDs. */
   private readonly spaceNameToDid = new Map<string, MemorySpace>();
@@ -1533,7 +1541,38 @@ export class Runtime {
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
     wrapped.setCfcModuleDelegations(this.moduleDelegationSnapshot());
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
+    wrapped.configureSealDestination(this.#transactionSealDestination);
     return wrapped;
+  }
+
+  /**
+   * Install the transaction seal destination (server-execution v2,
+   * serving-loop.md §3d): every transaction edit() creates while one is
+   * installed closes by sealing into it instead of committing to the store.
+   * Only the wave machinery of a serving runtime installs one, around each
+   * wave; waves are serial per space, so a second install while one is
+   * live is a bug, not a hand-over.
+   */
+  installSealDestination(destination: TransactionSealDestination): void {
+    if (this.experimental.serverExecution !== true) {
+      throw new Error(
+        "A transaction seal destination requires EXPERIMENTAL_SERVER_EXECUTION " +
+          "(docs/specs/server-side-execution/serving-loop.md §3d); the OFF arm " +
+          "commits to the store",
+      );
+    }
+    if (this.#transactionSealDestination !== undefined) {
+      throw new Error(
+        "A transaction seal destination is already installed; waves are " +
+          "serial per space (serving-loop.md §3)",
+      );
+    }
+    this.#transactionSealDestination = destination;
+  }
+
+  /** Remove the installed seal destination (the wave closed or aborted). */
+  clearSealDestination(): void {
+    this.#transactionSealDestination = undefined;
   }
 
   // (space, scope, id) triples for which a missing-link-target load has been

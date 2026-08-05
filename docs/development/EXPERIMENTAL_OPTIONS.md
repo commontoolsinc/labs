@@ -33,7 +33,7 @@ was last checked against the code.
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete flag | implemented, on in the shell |
 | [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | on | Robin McCollum (#4659) | graduate to unconditional behavior, then delete flag | implemented, on by default |
-| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A) | default ON at the plan's Phase 7 flip, then delete the flag and the OFF path | Phase 1 in progress: stages A (flag, commit `class` metadata, CI arms, `stream-data` disable) and B (`execution_lease` + derived-class admission check) landed, off by default |
+| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A) | default ON at the plan's Phase 7 flip, then delete the flag and the OFF path | Phase 1 in progress: stages A (flag, commit `class` metadata, CI arms, `stream-data` disable), B (`execution_lease` + derived-class admission check), and D (seal-into-wave transaction machinery, dark) landed, off by default |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
@@ -365,28 +365,36 @@ propagate](#how-flags-propagate).
     is enforced from it, and `stream-data` behaves as today. Any OFF-arm
     behavioral diff from a v2 stage is a phase-gate failure by itself
     (testing.md §2).
-  - **ON: the v2 posture, growing stage by stage.** With stages A and B
+  - **ON: the v2 posture, growing stage by stage.** With stages A, B, and D
     landed this means: the per-class admission rows of protocol.md §2 are
     enforced — the `derived` row is the stage-B lease equality check
     (producer holds the space's live `execution_lease`, liveness judged by
-    the memory server's own clock; still no `derived` producer exists until
-    the serving loop lands, and the `authored`/`system` rows equal today's
-    checks) — and the deferred `stream-data` built-in is disabled with a
-    runtime error naming builtins.md §5. Later stages add their surfaces
-    under this same flag (serving loop, speculation, events); both halves of
-    any coupled behavior move together on it.
+    the memory server's own clock; the only `derived` producer is stage D's
+    wave commit step, driven by tests until the serving loop lands, and the
+    `authored`/`system` rows equal today's checks) — the deferred
+    `stream-data` built-in is disabled with a runtime error naming
+    builtins.md §5, and the seal-into-wave transaction machinery
+    (serving-loop.md §3d) is installable: a runtime accepts a transaction
+    seal destination ONLY under the flag, and nothing in production
+    installs one until stage F's serving loop. Later stages add their
+    surfaces under this same flag (serving loop, speculation, events); both
+    halves of any coupled behavior move together on it.
 - **Current default and planned end state.** Off by default in every process.
   The integration suites run an ON arm in CI from stage A on, with explicit
   per-phase skip lists (testing.md §2). End state: the plan's Phase 7 flips
   the default ON after Phases 1–6 gate green and a soak period, then the flag
   retires and the OFF code path is removed.
-- **Status on 2026-08-04.** Phase 1 stages A and B landed: flag plumbing end
-  to end, commit `class` metadata written in every arm, the OFF+ON CI arms,
-  the `stream-data` disable, and the `execution_lease` table with the
-  acquire/renew/expire cycle and the derived-class admission equality check
-  (enforced under the flag; the lease sits dark until the serving loop
-  consumes it). Off by default; the ON arm changes no observable behavior
-  beyond the `stream-data` error yet.
+- **Status on 2026-08-04.** Phase 1 stages A, B, and D landed: flag plumbing
+  end to end, commit `class` metadata written in every arm, the OFF+ON CI
+  arms, the `stream-data` disable, the `execution_lease` table with the
+  acquire/renew/expire cycle and the derived-class admission equality check,
+  and stage D's seal-into-wave transaction machinery — the seal destination
+  seam, the wave accumulator with its per-doc per-write-class commit step,
+  and the derived-commit annotation/consequenceOf/basis-row carriage
+  (serving-loop.md §3b–§3d, protocol.md §1) — all dark: nothing installs a
+  seal destination or drives a wave until stage F's serving loop. Off by
+  default; the ON arm changes no observable behavior beyond the
+  `stream-data` error yet.
 - **Path to removal.** Execute the plan through its phase gates; at the
   Phase 7 flip, retire the flag, remove the OFF path, and close out this
   entry.

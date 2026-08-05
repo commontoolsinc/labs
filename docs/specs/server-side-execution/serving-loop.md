@@ -5,7 +5,7 @@ Normative spec for Phase 1 of
 [README.md](README.md) first; this document assumes its vocabulary.
 MUST/NEVER language is binding on implementers.
 
-## Anchors (verified on main, 2026-08-02 — re-verify before coding)
+## Anchors (verified on main, 2026-08-02; §3d/§2b file:line refs refreshed 2026-08-04 — re-verify before coding)
 
 - Scheduler: `packages/runner/src/scheduler/` (`execution.ts`,
   `dependency-graph.ts`, `events.ts`, `event-identity.ts`). The scheduler
@@ -157,7 +157,9 @@ processes* (deploy overlap, partition) it holds via the lease:
   immediately (in-flight transaction aborts), then re-acquire or park.
 - The memory server rejects a derived-class commit whose `holder` does not
   match the live lease. This is one equality check, not admission
-  machinery.
+  machinery. (Stage F adds the envelope-session half of the same
+  check — protocol.md §2's derived-envelope defense-in-depth, RULED
+  2026-08-05.)
 - Liveness is judged by the MEMORY SERVER's clock: admission compares
   `expiresAt` against its own clock, and an expired row matches NOBODY —
   a derived commit under an expired lease is rejected even before any
@@ -611,6 +613,18 @@ wave commit step only batches what sealing attached — by then no
 single "current user" exists to consult, which is the model, not a
 gap.
 
+**Unstamped seals are FORBIDDEN (RULED 2026-08-05).** Sealing an
+unstamped transaction under the flag is REFUSED with a loud error —
+never an anonymous fallback: every server-side commit path MUST
+declare its run context (the run's kind and durable action identity)
+before it seals, and stage F names the sanctioned internal stamp
+kinds (e.g. a bookkeeping kind) when it installs the seal
+destination. The refusal lives at the seal destination and only
+there — with no destination installed (the OFF arm, and ON-arm
+client speculation) seal == commit as today, and nothing is checked.
+(The completion-commit path never seals at all; §4 clarifies why it
+opens no unstamped gap.)
+
 - The accumulator is a layered view: store snapshot at the wave's input
   seq + previously sealed writes. Actions run serially per space, so a
   later action reads earlier ones' sealed writes; intra-wave ordering is
@@ -622,14 +636,21 @@ gap.
   `packages/runner/src/storage/extended-storage-transaction.ts`.
 
 **Mid-wave concurrency rule**: the wave commit CASes PER DOC against
-the wave's read basis, and conflict handling is PER WRITE CLASS:
+the wave's read basis, and conflict handling is PER WRITE CLASS.
+A write's class is determined by the producing RUN's kind — every
+write of an event-handler run is non-re-derivable; every write of a
+derivation run is a pure derivation write (RULED 2026-08-05). The
+classes:
 
 - **Pure derivation writes**: a doc whose head advanced past the basis
   (a concurrent authored commit landed mid-wave) has its derived write
-  DROPPED from the wave commit — the concurrent commit is already the
-  next wave's input and recomputes that derivation from fresher state.
-  Dropping is sound exactly because derived values are re-derivable.
-  Count drops as `supersededWrites` (exposed in §7's counters).
+  DROPPED from the wave commit. Dropping is sound exactly because
+  derived values are re-derivable, and the drop RE-ARMS NOTHING
+  (RULED 2026-08-05): the concurrent commit is the next wave's input,
+  and it recomputes exactly the runs whose recorded reads it dirties —
+  the ordinary dependency path, with no superseded-write mark (the
+  ruling note below). Count drops as `supersededWrites` (exposed in
+  §7's counters).
 - **Non-re-derivable writes** — `eventWatermark` advances,
   handler-consequence writes, effect intents — are REBASED AND RETRIED:
   re-CAS against the new head, merging at field level (these are
@@ -644,6 +665,33 @@ Dropping would be unsound for authored values, which is one more reason
 the classes never share a commit. Whole-wave CAS failure is FORBIDDEN
 (livelock under sustained authored traffic), as are blind derived
 writes (clobber).
+
+**Recomputation after a drop arrives by DEPENDENCY ONLY (Q1, RULED
+2026-08-05).** A dropped superseded write has no recompute trigger of
+its own: basis rows are reads-only, so an intrusion on a producer's
+OUTPUT doc that the producer never read re-arms nothing — and the
+ruling keeps it that way; no re-arm mechanism exists. In the owner's
+words:
+
+> if it's truly a derived doc, there can't be other writers anyway.
+> if it's shared state (which derives can update as well), then it's
+> either a non-conflicting operation (push) or more likely it'll
+> read the value first and so it will be recomputed because it's in
+> the read list — owner, 2026-08-05
+
+Unpacked for implementers: (i) a genuinely derived doc has no
+authored writers, so the superseding race does not arise for it;
+(ii) shared state that derivations also update either uses
+non-conflicting operations or is read-modify-write — and a
+read-first derivation carries that doc in its READ LIST, hence in
+its basis rows, hence the authored intrusion re-runs it through the
+normal affected-graph path; (iii) a dropped superseded write is
+therefore NOT re-armed by the drop itself — if a blind-writing
+derivation races an authored writer on shared state, the derived
+output waits for the next input change (accepted). The corollary is
+deliberate: a survivor whose writes were dropped per-doc still lands
+its BASIS ROWS — its reads are true, and no recompute-owed mark
+exists.
 
 **The event REQUEUE above is not events.md §5's event DROP** (T3).
 Two different conflict notions share the vocabulary of this section
@@ -664,12 +712,12 @@ which is the failure `eventWatermark` advancement exists to prevent.
 **Multi-space seals** (`.inSpace(...)` provisioning): one tx writes one
 space by DEFAULT; a tx crosses only via the explicit opt-in chain —
 `.inSpace()` → `optIntoInSpaceMultiSpaceCommit`
-(`builder/pattern.ts:1084`) → `enableCrossSpaceChildCommit`
-(`runner.ts:4733`, commit order `[children..., parent]`) →
-`enableMultiSpaceWrites` (`interface.ts:786`). Opted-in writes are
+(`builder/pattern.ts:1090`) → `enableCrossSpaceChildCommit`
+(`runner.ts:4698`, commit order `[children..., parent]`) →
+`enableMultiSpaceWrites` (`interface.ts:690`). Opted-in writes are
 sequenced at the commit step — foreign authored commits first, home
 derived commit after success — per protocol.md §2b (today's
-`commitMultiSpace`/`runSplitCommits`, `v2-transaction.ts:2077/2156`:
+`commitMultiSpace`/`runSplitCommits`, `v2-transaction.ts:1971/2048`:
 sequential, stop at first failure). The wave does not close until the
 split completes or fails as a unit (same-host store sequencing, not a
 network await).
@@ -712,9 +760,14 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   through §3d's sealing (the run is long over when the response
   arrives), and the memo key cannot supply them (the instance is
   hashed in, not recoverable), so the outbox entry is the only
-  carrier. The completion WRITE's labels derive from the carried
-  request basis — an external result inherits its request's
-  confidentiality; results are never default-unlabeled. On
+  carrier. No unstamped gap opens here: the completion commit's
+  identity annotations are sourced from the carriage captured at
+  the ORIGINAL run's seal — necessarily stamped, per §3d's refusal
+  — so completion commits inherit stamped provenance transitively,
+  and no unstamped derived path exists (clarification, adjudicated
+  2026-08-05, vetoable). The completion WRITE's labels derive from
+  the carried request basis — an external result inherits its
+  request's confidentiality; results are never default-unlabeled. On
   completion, commit result + key in one derived-class commit and
   inject the result-cell dirtiness IN-PROCESS, post-commit — the next
   wave consumes it directly. The subscription's copy of the completion
