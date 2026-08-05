@@ -1,6 +1,10 @@
 import { decode } from "@commonfabric/utils/encoding";
 import { assert } from "@std/assert";
-import { createTestStaticCache, TEST_ASSET, TEST_ASSET_CONTENT } from "../utils.ts";
+import {
+  createTestStaticCache,
+  TEST_ASSET,
+  TEST_ASSET_CONTENT,
+} from "../utils.ts";
 
 Deno.test("get() and getText() returns static data", async () => {
   const cache = createTestStaticCache();

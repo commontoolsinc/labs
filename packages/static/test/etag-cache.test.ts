@@ -5,7 +5,11 @@ import {
   generateETag,
 } from "@commonfabric/static/etag";
 import { decode } from "@commonfabric/utils/encoding";
-import { createTestStaticCache, TEST_ASSET, TEST_ASSET_CONTENT } from "../utils.ts";
+import {
+  createTestStaticCache,
+  TEST_ASSET,
+  TEST_ASSET_CONTENT,
+} from "../utils.ts";
 
 Deno.test("ETag Generation - generates same ETag for same content", async () => {
   const content = new TextEncoder().encode("Hello, World!");
