@@ -178,13 +178,23 @@ Regardless of cell type, all cells share:
 - `schema` — optional type information
 - `getAsLink()` — serialization to `SigilLink`
 
-A cell becomes a link on the way to storage through `toEncodableForm()`, which
-the runtime reads by name via `hasEncodableForm()` / `encodableFormOf()`
-(`packages/runner/src/encodable-form.ts`). That name is the runtime's own. The
-separate `toJSON()` method answers the JSON protocol with the same link, so a
+A cell has no representation of its own in stored data; the link naming it
+stands in wherever one is reached. Two mechanisms produce that link, and they
+differ in what they already know about the value in hand:
+
+- The write path recognizes a cell **by class** and asks it for the link
+  (`getAsLink()` / `toSigilLinkOrNull()`).
+- A walk over an arbitrary graph — deriving a content-addressed id, or a
+  pattern-authored schema default — has recognized nothing, so it asks **by
+  member name**: `toEncodableForm()`, read via `hasEncodableForm()` /
+  `encodableFormOf()` (`packages/runner/src/encodable-form.ts`). That name is
+  the runtime's own, shared with the builder artifacts the same walk serializes.
+
+A third member, `toJSON()`, answers the JSON protocol with the same link, so a
 cell reads as what it names in any renderer that honors the protocol —
 `toCompactDebugString()` among them. The data model gives that name no standing
-of its own, and nothing on the way to storage consults it.
+of its own, and neither mechanism above consults it. All three delegate to one
+implementation, so they cannot disagree.
 
 ---
 

@@ -341,7 +341,7 @@ describe("encodable-form", () => {
       expect(hasEncodableForm({ a: 1 })).toBe(false);
     });
 
-    it("returns false for a non-callable member of the name", () => {
+    it("returns false for a non-callable `toEncodableForm`", () => {
       expect(hasEncodableForm({ toEncodableForm: 1 })).toBe(false);
     });
 
@@ -457,9 +457,10 @@ describe("encodable-form", () => {
     });
 
     it("are left alone by the walk, being no builder's artifacts", () => {
-      // The member is on the class, and the walk asks for an OWN one. What
-      // stands in for a cell is `replaceArtifacts`'s `replaceOther` hook, whose
-      // caller knows an `isCell()` when it holds one.
+      // Neither is a plain object, so the walk does not descend into one --
+      // the member each carries never comes up. What stands in for a cell is
+      // `replaceArtifacts`'s `replaceOther` hook, whose caller knows an
+      // `isCell()` when it holds one.
       const { cell, reactive } = subjects();
       const held = { cell, reactive };
       expect(flatten(held)).toBe(held);

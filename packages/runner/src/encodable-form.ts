@@ -7,8 +7,11 @@ import { isPlainObject } from "@commonfabric/utils/types";
  *
  * One name answers: `toEncodableForm`. Every builder artifact carries it -- a
  * module, a handler, a pattern, and the factory that carries a module's members
- * -- and so does a `Cell`, for which producing the link it names IS how it
- * reaches storage.
+ * -- and so does a `Cell`, whose form is the link it names. A cell is what a
+ * caller here is likeliest to hold that is not an artifact: a graph feeding a
+ * content-derived id or a builder default can carry one, and neither has a
+ * representation for the cell itself. The storage boundary is elsewhere and
+ * asks differently, recognizing a cell by class rather than by member.
  *
  * It is the runtime's OWN name, and that is the point. Asking by name rather
  * than by class is what lets this module stay a leaf -- naming `Cell` here
@@ -303,13 +306,19 @@ function replaceInEntries(
  * Checks whether a value carries its own callable `toEncodableForm` method --
  * the walk's test for "this is a builder artifact".
  *
- * OWN, not inherited, and that is load-bearing twice over. An inherited member
- * is not the value's own serializer, so a single assignment to
- * `Object.prototype.toEncodableForm` would otherwise route every plain object
- * in the process through this. And a `Cell` carries the member on its class,
- * which is where an inherited one comes from: asking for an own member is what
- * keeps the walk from serializing a cell as though it were an artifact. What
- * stands in for a cell is the `replaceOther` hook, whose caller can name one.
+ * OWN, not inherited: an inherited member is not the value's own serializer, so
+ * a single assignment to `Object.prototype.toEncodableForm` would otherwise
+ * route every plain object in the process through this.
+ *
+ * A `Cell` is out of reach of this question entirely, and not by own-ness -- it
+ * carries the member on its class, which own-ness would exclude, but `replace()`
+ * never gets this far with one. A cell is not a plain object, so it goes to the
+ * `replaceOther` hook, whose caller can name one.
+ *
+ * What this question does reach, besides an artifact, is a value carrying a
+ * user-data key of the name: a query-result proxy answers `Object.hasOwn` for
+ * any key its record holds. The `typeof` half is what settles that one, a fabric
+ * record having no function-valued member to find.
  *
  * The name is asked for and no other. This decides, for every object in an
  * arbitrary graph, whether the runtime serializes it here instead of leaving it

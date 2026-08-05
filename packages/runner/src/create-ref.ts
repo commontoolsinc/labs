@@ -113,8 +113,7 @@ export function createRef(
     }
 
     if (isCellResultForDereferencing(obj)) {
-      // It'll traverse this and read the encodable form of the doc in the
-      // reference.
+      // It'll unwrap this and answer with the referenced doc's entity id.
       obj = getCellOrThrow(obj);
     }
 
