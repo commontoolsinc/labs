@@ -285,7 +285,12 @@ describe("path helpers and prototype-named segments", () => {
   it("setValueAtPath still creates intermediate containers", () => {
     const target: Record<string, unknown> = {};
     expect(setValueAtPath(target, ["toString", "nested"], 1)).toBe(true);
-    expect((target.toString as Record<string, unknown>).nested).toBe(1);
+    // `as unknown as` rather than a direct cast: on a `Record<string, unknown>`
+    // TypeScript still resolves the NAME `toString` to `Object.prototype`'s
+    // `() => string` signature, which does not overlap a record — the type
+    // system reproducing, in miniature, the very confusion under test.
+    const nested = target["toString"] as unknown as Record<string, unknown>;
+    expect(nested.nested).toBe(1);
     // CONTROL
     const control: Record<string, unknown> = {};
     expect(setValueAtPath(control, ["a", "b"], 1)).toBe(true);
