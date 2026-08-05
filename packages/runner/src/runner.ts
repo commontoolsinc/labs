@@ -4201,7 +4201,7 @@ export class Runner {
   private stopResult<T>(resultCell: Cell<T>): void {
     const key = this.getDocKey(resultCell);
     this.independentlyStartedResults.delete(key);
-    // TODO: This reaches every pending commit-gated start for the result,
+    // TODO(hixie): This reaches every pending commit-gated start for the result,
     // which is wider than a release's authority: one that another launch
     // scheduled goes too. Narrowing it needs the release to name the pending
     // start its own launch created, the way it already names the registration
