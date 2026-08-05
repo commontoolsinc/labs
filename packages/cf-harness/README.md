@@ -1029,5 +1029,5 @@ export CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR="$HOME/.local/share/runsc-cfc
 - [roadmap](docs/ROADMAP.md)
 - [skills support design and contract](docs/SKILLS_SUPPORT_SPEC.md)
 - [runner README](../runner/README.md)
-- `specs/agent-harness/` in the sibling `specs` repo
+- [Agent Harness specifications](../../docs/specs/agent-harness/README.md)
 - `specs/cfc/18-runtime-implementation-profiles.md` in the sibling `specs` repo

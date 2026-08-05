@@ -33,6 +33,10 @@ decision is reversed or superseded).
 - [Hosted pattern authoring](hosted-pattern-authoring.md)
 - [Scoped cell instances](scoped-cell-instances.md)
 
+### Agent execution
+
+- [Agent harness](agent-harness/README.md)
+
 ### Data, storage, and execution
 
 - [JSON Schema](json_schema.md)
