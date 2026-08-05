@@ -182,19 +182,24 @@ A cell has no representation of its own in stored data; the link naming it
 stands in wherever one is reached. Two mechanisms produce that link, and they
 differ in what they already know about the value in hand:
 
-- The write path recognizes a cell **by class** and asks it for the link
-  (`getAsLink()` / `toSigilLinkOrNull()`).
+- The write path recognizes a cell **by class**, then asks the cell for its own
+  link. Which accessor it uses varies by caller, and the choice is theirs: a
+  write may want the link relative to a base, a reconciler may not.
 - A walk over an arbitrary graph — deriving a content-addressed id, or a
   pattern-authored schema default — has recognized nothing, so it asks **by
   member name**: `toEncodableForm()`, read via `hasEncodableForm()` /
   `encodableFormOf()` (`packages/runner/src/encodable-form.ts`). That name is
   the runtime's own, shared with the builder artifacts the same walk serializes.
 
-A third member, `toJSON()`, answers the JSON protocol with the same link, so a
-cell reads as what it names in any renderer that honors the protocol —
-`toCompactDebugString()` among them. The data model gives that name no standing
-of its own, and neither mechanism above consults it. All three delegate to one
-implementation, so they cannot disagree.
+`toJSON()` answers the JSON protocol with the same link, so a cell reads as what
+it names in any renderer that honors the protocol — `toCompactDebugString()`
+among them. The data model gives that name no standing of its own, and neither
+mechanism above consults it.
+
+`toSigilLinkOrNull()`, `toEncodableForm()` and `toJSON()` are one answer under
+three names: the latter two delegate, so they cannot disagree. `getAsLink()` is
+not among them — it builds a link from the options its caller passes, so asking
+it for one relative to a base deliberately answers differently.
 
 ---
 

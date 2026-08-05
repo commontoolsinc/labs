@@ -2906,7 +2906,9 @@ export class CellImpl<T extends FabricValue>
   }
 
   toEncodableForm(): SigilLink | null {
-    // What a cell reaches storage as: the link that stands for it.
+    // The link that stands for a cell, under the name a walk over an arbitrary
+    // graph reads by -- one that has recognized nothing about the value it
+    // holds. A caller that already knows it has a cell asks the accessor above.
     return this.toSigilLinkOrNull();
   }
 
@@ -2918,8 +2920,8 @@ export class CellImpl<T extends FabricValue>
     // reaches the whole runtime, so the rendering carries per-process detail
     // (the runtime's id among it) and reports differently each run.
     //
-    // It carries no weight on the way to storage: what a cell reaches storage
-    // as is read from `toEncodableForm()` by name.
+    // It carries no weight on the way to storage: a value bound for storage is
+    // recognized as a cell first, and its link read off it directly.
     return this.toSigilLinkOrNull();
   }
 

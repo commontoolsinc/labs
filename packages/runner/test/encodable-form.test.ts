@@ -375,6 +375,10 @@ describe("encodable-form", () => {
       // `.call` included -- is callable, while the method itself still is. So
       // the invoke has to reach a function's call behavior rather than read a
       // property that names it.
+      //
+      // The live producer of that shape is the reactive proxy in `cell.ts`: a
+      // `cellMethods` name answers with a proxy over the bound method, and
+      // every read off THAT is data navigation.
       const method = new Proxy(function () {
         return { invoked: true };
       }, { get: () => ({ notAFunction: true }) });
