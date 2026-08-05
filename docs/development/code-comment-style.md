@@ -65,12 +65,12 @@ State the present-tense fact and stop:
 // Wrong: half of this describes code that is not here.
 
 /**
- * Freezes `value` if it is not already frozen. Previously this returned
- * `undefined` for a frozen input; it now returns the input itself,
+ * Freezes `donut` if it is not already frozen. Previously this returned
+ * `undefined` for an already-frozen donut; it now returns the donut itself,
  * preserving the old caller's expectations.
  */
-function normalize(value: object): object {
-  return Object.isFrozen(value) ? value : Object.freeze(value);
+function freezeDonut(donut: object): object {
+  return Object.isFrozen(donut) ? donut : Object.freeze(donut);
 }
 ```
 
@@ -80,10 +80,10 @@ function normalize(value: object): object {
 // Right: what a caller needs, and nothing about how it came to be.
 
 /**
- * Freezes `value` if it is not already frozen, and returns it either way.
+ * Freezes `donut` if it is not already frozen, and returns it either way.
  */
-function normalize(value: object): object {
-  return Object.isFrozen(value) ? value : Object.freeze(value);
+function freezeDonut(donut: object): object {
+  return Object.isFrozen(donut) ? donut : Object.freeze(donut);
 }
 ```
 
@@ -99,9 +99,9 @@ considered and rejected is a record of a decision, and belongs where decisions
 are recorded.
 
 "Being total is also what keeps it honest, since the alternative is collapsing
-the value into a catch-all" is a sentence about a discussion. "Every value maps
-to a distinct key; a collision here would silently merge two records" is a
-sentence about the code.
+an unknown flavor into a catch-all" is a sentence about a discussion. "Every
+flavor maps to a distinct key; a collision here would silently merge two
+orders" is a sentence about the code.
 
 ### Not the neighbors
 
@@ -144,10 +144,10 @@ give the eventual cleanup a `TODO` phrased as a condition on the world:
 ```ts
 // Shown at module scope.
 
-// The legacy branch exists so that links written in the older form still
+// The legacy branch exists so that orders naming a glaze by number still
 // resolve.
-// TODO(DonutFry99): Remove once every deployed server emits the codec form.
-export const acceptLegacyLinks = true;
+// TODO(DonutFry99): Remove once every deployed fryer names glazes by string.
+export const acceptNumberedGlazes = true;
 ```
 
 Note the shape of that `TODO`: it names the fix and names the blocker. Removing
@@ -182,12 +182,12 @@ it. Comments that annotate surviving context nearby stay. The discriminator is
 whether the comment describes the thing being removed or something else that is
 still there.
 
-- A `// frozen means terminal` premise on an `if (Object.isFrozen(value))`
+- A `// frozen means terminal` premise on an `if (Object.isFrozen(donut))`
   short-circuit goes when the short-circuit goes.
-- A `// TODO(DonutFry99): This clone should not be necessary.` on a
-  `cloneIfNecessary(...)` call goes when the call goes.
-- A comment describing the shallow-clone-mutate-refreeze cycle around them
-  stays, because it describes behavior that remains.
+- A `// TODO(DonutFry99): This copy should not be necessary.` on a
+  `copyIfNecessary(...)` call goes when the call goes.
+- A comment describing the unbox-fill-rebox cycle around them stays, because
+  it describes behavior that remains.
 
 A premise left behind after its conditional is deleted is the most misleading
 comment there is: it is well written, it is in the right place, and it is about
@@ -293,12 +293,12 @@ mutates.
 // Shown at module scope.
 
 /**
- * Canonicalizes `selector`, returning an instance equivalent to it which is
- * safe to share. Safe on a frozen or a mutable argument, and never requires a
+ * Canonicalizes `order`, returning an instance equivalent to it which is safe
+ * to share. Safe on a frozen or a mutable argument, and never requires a
  * mutable one, though it may freeze the argument in place.
  */
-export function canonicalizeSelector<T extends object>(selector: T): T {
-  return Object.freeze(selector);
+export function canonicalizeOrder<T extends object>(order: T): T {
+  return Object.freeze(order);
 }
 ```
 
