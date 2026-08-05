@@ -4,6 +4,7 @@ import type { TileView } from "./types.ts";
 import { durationTag, escapeHtml, STATUS_DOT } from "./lib.ts";
 import { faviconHref, faviconLink, type FaviconStatus } from "./favicon.ts";
 import { paintStatusFavicon } from "./favicon-client.ts";
+import { liveUpdateStream } from "./stream-client.ts";
 
 const FAVICON_PNG_HREFS = JSON.stringify({
   good: faviconHref("good"),
@@ -12,6 +13,12 @@ const FAVICON_PNG_HREFS = JSON.stringify({
   "bad-crying": faviconHref("bad-crying"),
 });
 const PAINT_STATUS_FAVICON = paintStatusFavicon.toString();
+const LIVE_UPDATE_STREAM = liveUpdateStream.toString();
+
+// How long past the refresh interval the freshness indicator stays orange before
+// it turns red. The page treats the same span of silence from the server as a
+// stream that has stopped delivering, and reconnects.
+const STALE_GRACE_MS = 10_000;
 
 export const FAVICON_CRY_AFTER_MS = 60 * 60 * 1000;
 
@@ -193,11 +200,13 @@ ${faviconLink(status)}
   <div id="dashboard-wide">${wideHtml}</div>
 <script>
   const REFRESH = ${refreshMs};
+  const RED_AFTER = REFRESH + ${STALE_GRACE_MS};
   const SHELL_VERSION = ${JSON.stringify(shellVersion)};
   const COL = { green: '#43c574', amber: '#e0a852', red: '#e2504a' };
   const FAVICONS = ${FAVICON_PNG_HREFS};
   const FAVICON_CRY_AFTER_MS = ${FAVICON_CRY_AFTER_MS};
   const paintStatusFavicon = ${PAINT_STATUS_FAVICON};
+  const liveUpdateStream = ${LIVE_UPDATE_STREAM};
   const badge = document.getElementById('livebadge');
   const dot = document.getElementById('freshdot');
   const agotext = document.getElementById('agotext');
@@ -211,12 +220,16 @@ ${faviconLink(status)}
   let faviconServerRedAgeMs = ${serverRedAgeMs};
   let faviconStartedAt = performance.now();
   function paint() {
-    const ago = base + Math.floor((Date.now() - t0) / 1000);
+    const now = Date.now();
+    const ago = base + Math.floor((now - t0) / 1000);
     agotext.textContent = 'updated ' + ago + 's ago';
     // Fresh up to the refresh interval, then orange for 10s, then red.
-    const state = ago * 1000 <= REFRESH ? 'green' : ago * 1000 <= REFRESH + 10000 ? 'amber' : 'red';
+    const state = ago * 1000 <= REFRESH ? 'green' : ago * 1000 <= RED_AFTER ? 'amber' : 'red';
     dot.className = 'dot ' + state;
     agotext.style.color = COL[state];
+    // The badge says which of the two the stale data means: the server is there
+    // and has nothing new, or the page cannot hear it.
+    badge.textContent = updates.check(now) ? '● LIVE' : '● OFFLINE';
     // LIVE badge: green only when fresh AND no tile is gray; gray if a tile is gray;
     // when stale, the border takes the orange/red and the contents go gray.
     const anyGray = document.querySelector('.tile.unknown') !== null;
@@ -268,22 +281,36 @@ ${faviconLink(status)}
       if (atIndex !== tile) container.insertBefore(tile, atIndex ?? null);
     });
   }
-  const es = new EventSource('/events');
-  es.onmessage = (e) => { if (e.data === 'reload') location.reload(); };
-  es.addEventListener('update', (e) => {
-    const update = JSON.parse(e.data);
-    if (update.shellVersion !== SHELL_VERSION) { location.reload(); return; }
-    reconcileTiles(grid, update.gridHtml);
-    reconcileTiles(wide, update.wideHtml);
-    base = update.ageSeconds;
-    t0 = Date.now();
-    faviconServerRedSince = update.faviconRedSince;
-    faviconServerRedAgeMs = update.faviconRedAgeMs;
-    faviconStartedAt = performance.now();
-    paint();
+  const updates = liveUpdateStream(RED_AFTER, () => {
+    const es = new EventSource('/events');
+    // The connection's own events repaint, so the badge follows the connection
+    // as it changes.
+    const alive = () => { updates.heard(Date.now()); paint(); };
+    es.addEventListener('open', alive);
+    es.addEventListener('ping', alive);
+    es.addEventListener('error', () => { updates.lost(); paint(); });
+    es.addEventListener('update', (e) => {
+      updates.heard(Date.now());
+      const update = JSON.parse(e.data);
+      if (update.shellVersion !== SHELL_VERSION) { location.reload(); return; }
+      reconcileTiles(grid, update.gridHtml);
+      reconcileTiles(wide, update.wideHtml);
+      base = update.ageSeconds;
+      t0 = Date.now();
+      faviconServerRedSince = update.faviconRedSince;
+      faviconServerRedAgeMs = update.faviconRedAgeMs;
+      faviconStartedAt = performance.now();
+      paint();
+    });
+    return es;
   });
   paint();
   setInterval(paint, 1000);
+  // A background tab's timers are throttled to about one a minute, and a
+  // sleeping machine's stop altogether. These two events fire as the page comes
+  // back into use, which is when someone is there to read it.
+  document.addEventListener('visibilitychange', paint);
+  addEventListener('online', paint);
 </script></body></html>`;
 }
 
