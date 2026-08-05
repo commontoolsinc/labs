@@ -89,6 +89,49 @@ serving, and the version in the page source says which start served it.
 An unattended display reloads when it reconnects to a server reporting a
 different version.
 
+An unattended display also survives the server going away. Every serving tick
+sends a heartbeat down each open event connection, so a browser can tell a
+server with nothing new to report from a stream that has stopped delivering.
+The page watches its own stream from the same one-second tick that paints the
+freshness indicator, and reopens the stream once the server has been silent for
+the length of time it takes that indicator to turn red. That covers each way a
+stream dies. The browser reconnects one that ended in a network error by
+itself. It gives up for good on one whose reconnect was answered by an error
+page, which is what the Tailscale proxy in front of the pod returns while the
+server restarts. And a connection that outlives a sleeping laptop stays open
+with nothing ever coming down it, which the browser never reports at all.
+
+A stream that was delivering and then closed is reopened immediately. One that
+has never delivered is reopened once per silence interval, so a server that
+refuses or fails connections costs one request an interval however long it is
+away, while one that accepts a connection and then drops it is followed as fast
+as it flaps. The silence interval is the fastest tile's collection interval
+plus a serving tick plus ten seconds. That keeps it clear of the heartbeat
+period, which is one serving tick, by the whole of the fastest tile's interval.
+A heartbeat slower than the silence interval would replace a healthy stream on
+every page tick.
+
+The indicator and the reconnect run off different clocks and mean different
+things. The indicator counts from the last tile update, so red means the data
+is old. The reconnect counts from the last event of any kind, heartbeats
+included, so reaching the interval means the server cannot be heard at all. A
+page can be red on a perfectly good stream, when every collector has been slow
+at once. The header badge is what tells the two apart, reading OFFLINE instead
+of LIVE whenever the page has no stream it is hearing the server on.
+
+Reopening the stream and saying whether the server can be heard are separate
+questions and get separate answers. Reopening is paced, because each attempt
+costs a request. Saying so is not. The browser reports a connection dropping as
+it drops, whether it means to retry or has given up, and the badge turns over on
+the next tick — a second, not an interval. Stopping the server therefore stands
+the page down almost at once, and the badge comes back the moment any event
+arrives on a stream again, including a heartbeat. The elapsed interval is only
+the last resort, for a connection that stays open with nothing coming down it,
+which is the one case the browser reports nothing about at all. A background
+tab's timers are throttled to about one a minute and a sleeping machine's stop
+altogether, so the page checks its stream on becoming visible and on the browser
+regaining the network as well as on its own tick.
+
 The tab favicon follows the most urgent visible tile. It is red when any tile is
 red, orange when there are no red tiles but at least one orange tile, and green
 otherwise. Gray tiles do not turn the favicon gray. The page uses one URL-backed
