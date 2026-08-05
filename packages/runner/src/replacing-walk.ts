@@ -1,6 +1,4 @@
-import type { FabricExecValue } from "@commonfabric/api";
-import { isFabricExecPlainObject } from "@commonfabric/data-model/fabric-value";
-import { isFunction, isRecord } from "@commonfabric/utils/types";
+import { isFunction, isPlainObject, isRecord } from "@commonfabric/utils/types";
 
 /**
  * Decides what a walk does with each value it meets. Each member is a question
@@ -38,18 +36,15 @@ export type Replacer<In, Out> = {
  * Helper for `replacingWalk()`, which indicates whether a value's members are
  * reached by NAME, that being the only way the walk descends.
  *
- * A `FabricSpecialObject` is not: a `FabricPrimitive` keeps its state in
- * private fields and a `FabricInstance` in its codec contents, so rebuilding
- * either from its enumerable members yields `{}`. Neither is a native the
- * caller left alone, a `Date` having nothing to find by name either.
- *
- * The cast is the walk being generic: it cannot know how a caller's `In`
- * relates to `FabricExecValue`, and this asks a question about the value's
- * shape that holds whatever the caller calls it.
+ * The question is about SHAPE, and nothing else: whatever a caller's domain
+ * happens to be, a value whose members are somewhere other than its own
+ * enumerable properties cannot be rebuilt from them. A class instance is the
+ * case that matters -- a `FabricPrimitive` keeps its state in private fields, a
+ * `FabricInstance` in its codec contents, a `Date` in neither -- and each would
+ * come back as `{}`.
  */
 function isNameWalkable(value: unknown): boolean {
-  return isFabricExecPlainObject(value as FabricExecValue) ||
-    Array.isArray(value);
+  return isPlainObject(value) || Array.isArray(value);
 }
 
 /**

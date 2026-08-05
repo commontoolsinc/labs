@@ -31,7 +31,6 @@ export {
 } from "./value-clone.ts";
 
 export {
-  isFabricExecPlainObject,
   isFabricObjectOrArray,
   isFabricPlainObject,
   isFabricValue,
