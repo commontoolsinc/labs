@@ -256,7 +256,7 @@ describe("drag-state — createDragPreview", () => {
     expect(pill.isStatic).toBe(true);
   });
 
-  it("falls back to a static pill when the cached value carries no [UI]", () => {
+  it("falls back to a static pill when the cached value carries no `[UI]`", () => {
     const { cell } = createRenderableCellHandle({ title: "no ui here" });
 
     const { preview, cleanup: teardown } = createDragPreview(
@@ -292,7 +292,7 @@ describe("drag-state — createDragPreview", () => {
     expect(preview.style.cssText).toContain("pointer-events: none");
   });
 
-  it("renders the piece's [UI] cell rather than the whole piece", async () => {
+  it("mounts the piece's `[UI]` cell rather than the piece root", async () => {
     const { cell, log } = createRenderableCellHandle({
       $UI: { type: "vnode", name: "div", props: {}, children: [] },
       secret: "not the thing being rendered",
@@ -320,7 +320,7 @@ describe("drag-state — createDragPreview", () => {
     teardown!();
   });
 
-  it("cleanup unmounts the render it started", async () => {
+  it("unmounts the render it started when `cleanup` runs", async () => {
     const { cell, log } = createRenderableCellHandle({
       $UI: { type: "vnode", name: "div", props: {}, children: [] },
     });

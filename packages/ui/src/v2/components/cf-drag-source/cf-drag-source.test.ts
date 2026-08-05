@@ -29,7 +29,7 @@ describe("CFDragSource", () => {
     mockDocument.restore();
   });
 
-  it("is registered as cf-drag-source", () => {
+  it("is registered as `cf-drag-source`", () => {
     expect(customElements.get("cf-drag-source")).toBe(CFDragSource);
   });
 
@@ -72,7 +72,7 @@ describe("CFDragSource", () => {
     expect(getCurrentDrag()!.previewCleanup).toBeUndefined();
   });
 
-  it("ending the drag runs the preview teardown once", () => {
+  it("runs the preview teardown once when the drag ends", () => {
     const { cell, log } = createRenderableCellHandle({
       $UI: { type: "vnode", name: "div", props: {}, children: [] },
     });
