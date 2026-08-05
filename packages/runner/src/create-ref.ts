@@ -96,6 +96,13 @@ export function createRef(
     // A builder artifact is replaced by its encodable form, then descended
     // into: what the ref is derived from is the form that gets written.
     // Functions qualify because a pattern factory is one.
+    //
+    // A _nullish_ form leaves the value in place, which is what the `??` is
+    // for -- a value carrying no form at all needs no fallback, since that
+    // answer is the value already. A cell whose link is not materialized answers `null`
+    // here, and the branches below need the cell itself: one of them builds the
+    // link. Collapsing to the `null` instead would derive the id `null` derives
+    // and carry none of the value's own contents into it.
     obj = encodableFormOf(obj) ?? obj;
 
     if (isReactive(obj)) {
