@@ -5,79 +5,64 @@
  * enabling efficient diffing and reuse of DOM nodes.
  */
 
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isCell } from "@commonfabric/runner";
 
 /**
- * Stands in for a member that has no value-level identity of its own, so that
- * a node carrying one is still distinguishable from a node that does not. A
- * record cannot collide with the string, number, or boolean members a render
- * node otherwise holds.
+ * Stands in for a value with no identity of its own to key by. A record cannot
+ * collide with the strings, numbers, and booleans a render node otherwise
+ * holds.
  */
-function marker(kind: string): Record<string, string> {
-  return { "@@vdom-key": kind };
-}
+const OPAQUE: FabricValue = { "@@vdom-key": "opaque" };
 
 /**
- * Projects a render node onto a `FabricValue`, which is what
- * `hashStringOf()` can key.
+ * Replaces, in a render node, the two things it can hold that are not
+ * `FabricValue`s: a `Cell`, by the link it names, and a function, by a
+ * stand-in.
  *
- * A render node is not one already: it holds `Cell`s where reactive values go,
- * and props whose values may be event handlers. Each is replaced by something
- * that stands for it -- a cell by the link it names, a function by a marker,
- * since one render's handler and the next render's are different objects
- * carrying the same meaning.
+ * Everything else a render node may carry is a `JSONValue` (see `WorkerProps`),
+ * and every one of those is a `FabricValue` already, so it is answered by
+ * identity -- which also leaves a subtree carrying neither of the two shared
+ * rather than rebuilt.
  *
- * The projection is what makes the key `FabricValue`-aware rather than
- * JSON-aware. `bigint`, `undefined`, `NaN`, and `-0` are all members the hash
- * keeps distinct, where a JSON encoding of the same node either throws or
- * quietly maps several of them together.
+ * A function is an event handler, and one render's is not the next render's
+ * though they mean the same thing, so all of them stand alike. A cell answers
+ * with its link, which is what stays put while the payload behind it moves.
  *
  * @param node The render node to project.
- * @param seen Ancestors of `node`, so a cycle is answered rather than followed.
+ * @param seen Ancestors of `node`, so a cycle ends the walk rather than
+ *   running it forever.
  */
 function keyProjection(node: unknown, seen: Set<object>): unknown {
-  if (node === null) return null;
+  if (typeof node === "function") return OPAQUE;
+  if (node === null || typeof node !== "object") return node;
+  if (isCell(node)) return node.toSigilLinkOrNull() ?? OPAQUE;
 
-  switch (typeof node) {
-    case "undefined":
-    case "boolean":
-    case "string":
-    case "number":
-    case "bigint":
-      return node;
-    case "symbol":
-      // An interned symbol is a fabric value and keys as itself; a unique one
-      // has no portable identity, so every unique symbol keys alike.
-      return Symbol.keyFor(node) === undefined ? marker("symbol") : node;
-    case "function":
-      return marker("function");
-  }
-
-  if (isCell(node)) {
-    // The link a cell names, which is stable across renders where the cell
-    // object need not be. A cell with no link yet has nothing to name.
-    return node.toSigilLinkOrNull() ?? marker("unlinked-cell");
-  }
-
-  if (seen.has(node)) return marker("cycle");
+  if (seen.has(node)) return OPAQUE;
   seen.add(node);
   try {
     if (Array.isArray(node)) {
-      // Holes are not members; a hole and an `undefined` element are different
-      // nodes and key differently.
-      return node.map((element, i) =>
-        i in node ? keyProjection(element, seen) : marker("hole")
-      );
+      // `map()` skips a hole and leaves one in its place, which is what the
+      // hash wants: a hole is not the `undefined` that reading one reports.
+      let changed = false;
+      const projected = node.map((element) => {
+        const value = keyProjection(element, seen);
+        if (value !== element) changed = true;
+        return value;
+      });
+      return changed ? projected : node;
     }
-    // Enumerable string keys only, which is the set a render node's members
-    // live in. A symbol-keyed member is machinery rather than content.
-    return Object.fromEntries(
-      Object.entries(node).map(([key, value]) => [
-        key,
-        keyProjection(value, seen),
-      ]),
-    );
+
+    const entries = Object.entries(node);
+    let changed = false;
+    for (const entry of entries) {
+      const value = keyProjection(entry[1], seen);
+      if (value === entry[1]) continue;
+      entry[1] = value;
+      changed = true;
+    }
+    return changed ? Object.fromEntries(entries) : node;
   } finally {
     seen.delete(node);
   }
@@ -86,16 +71,37 @@ function keyProjection(node: unknown, seen: Set<object>): unknown {
 /**
  * Generate a stable key for a render node.
  *
- * The key is a hash of the node's projection onto a `FabricValue` (see
- * `keyProjection`), so two nodes key alike exactly when they carry the same
- * content, and a member the hash can tell apart -- `1n` from `1`, `-0` from
- * `0`, a present `undefined` from an absent member -- keys them apart.
+ * Two nodes key alike exactly when they carry the same content, so a member the
+ * hash tells apart -- a present `undefined` from an absent one, a hole from an
+ * `undefined` element, `NaN` from `null`, `-0` from `0` -- keys them apart too.
+ *
+ * A node holding something no render node may hold can have no such key, and
+ * answers a coarse one instead. Keying is on the render path, where an answer
+ * is needed more than a precise one is.
  *
  * @param node - The render node to generate a key for
  * @returns A stable string key
  */
 export function generateKey(node: unknown): string {
-  return hashStringOf(keyProjection(node, new Set()) as never);
+  try {
+    return hashStringOf(keyProjection(node, new Set()) as FabricValue);
+  } catch {
+    return generateFallbackKey(node);
+  }
+}
+
+/**
+ * Helper for `generateKey()`, which keys a node the hash has no answer for.
+ * Nodes sharing a fallback key are told apart only by their position among
+ * their siblings, so what it costs is the reuse of a DOM node that moved.
+ */
+function generateFallbackKey(node: unknown): string {
+  if (node === null || node === undefined) return "@@null";
+  if (typeof node !== "object") return `@@${typeof node}:${String(node)}`;
+  if (Array.isArray(node)) return `@@array:${node.length}`;
+  if (isCell(node)) return "@@cell";
+  const name = (node as { name?: unknown }).name;
+  return typeof name === "string" ? `@@vnode:${name}` : "@@object";
 }
 
 /**

@@ -75,23 +75,47 @@ Deno.test("keying - generateKey", async (t) => {
     assertEquals(generateKey(true), generateKey(true));
   });
 
-  // Members a JSON encoding of the same node either refuses or quietly maps
-  // together. Each pair below keyed alike before, so two children that differ
-  // only in one of these were reused as though they were the same child.
-  await t.step("keys members JSON cannot tell apart", () => {
+  // Members a child can differ by, each of which must key it apart: two
+  // children keying alike are reconciled as one, and the second one's content
+  // never reaches the DOM. Each of these is a value `WorkerProps` admits.
+  await t.step("keys members that differ only in fabric terms", () => {
     const key = (props: Record<string, unknown>) =>
       generateKey({ type: "vnode", name: "div", props });
-
-    // A bigint anywhere used to throw, collapsing the whole node to a
-    // type-only fallback key shared by every `div`.
-    assertNotEquals(key({ n: 1n }), key({ n: 2n }));
-    assertNotEquals(key({ n: 1n }), key({ n: 1 }));
 
     // A present-but-undefined member is not an absent one.
     assertNotEquals(key({ n: undefined }), key({}));
 
     assertNotEquals(key({ n: NaN }), key({ n: null }));
     assertNotEquals(key({ n: -0 }), key({ n: 0 }));
+
+    // A `bigint` is a fabric value, so it keys precisely even though
+    // `WorkerProps` does not admit one.
+    assertNotEquals(key({ n: 1n }), key({ n: 2n }));
+    assertNotEquals(key({ n: 1n }), key({ n: 1 }));
+  });
+
+  // The two things a render node may hold that are not `FabricValue`s.
+  await t.step("keys an event handler without falling back", () => {
+    const key = (props: Record<string, unknown>) =>
+      generateKey({ type: "vnode", name: "div", props });
+
+    // Handlers are on most interactive nodes, so a node carrying one has to
+    // key by the rest of its content rather than by a fallback that every
+    // `div` would share.
+    assertNotEquals(
+      key({ onClick: () => {}, a: 1 }),
+      key({ onClick: () => {}, a: 2 }),
+    );
+    assertEquals(key({ onClick: () => {} }), key({ onClick: () => {} }));
+    assertNotEquals(key({ onClick: () => {} }), key({}));
+  });
+
+  await t.step("answers a coarse key for a node it cannot hash", () => {
+    // A `Map` has no fabric representation, and no render node holds one. What
+    // matters is that an answer comes back at all: keying is on the render
+    // path, where a throw takes the render with it.
+    assertEquals(typeof generateKey({ n: new Map() }), "string");
+    assertEquals(generateKey({ n: new Map() }), generateKey({ n: new Map() }));
   });
 
   await t.step("keys a hole apart from an undefined element", () => {
