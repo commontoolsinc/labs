@@ -229,8 +229,9 @@ non-conflict retry (row 16), the disposition *classification*
 conflict re-queue (`run.ts:165-213`) and the event-commit backoff
 window (`events.ts:1372-1386`) — with one deriver there is no
 concurrent deriver to conflict with; the mid-wave authored race is
-handled by the §3d per-doc CAS drop (`wave.supersededWrites`), and a
-dropped write recomputes next wave. Survives client-side: the whole
+handled by the §3d per-doc CAS drop (`wave.supersededWrites`);
+recompute after a drop is dependency-only (serving-loop.md §3d,
+RULED 2026-08-05), never a re-arm. Survives client-side: the whole
 backpressure stack, now applied to *authored* commits only (UI
 bindings, event appends). `CommitConvergenceError` remains the
 client's terminal surface. events §5 covers duplicate-submit; it does

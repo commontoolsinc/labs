@@ -77,8 +77,12 @@ protection: derived-output docs get none in v2, so a malicious client
 holding today's write authority on a doc can still author into it,
 docs the SpaceServer derives into and the watermark doc included
 (watermark forgery is possible and accepted for now). v2 defines the
-outcome, not a defense: such a write is an ordinary authored input,
-and the next wave recomputes the derivation over it. v2 adds no
+outcome, not a defense: such a write is an ordinary authored input;
+whether it triggers a recompute is governed by serving-loop.md §3d's
+dependency-only rule (RULED 2026-08-05) — a derivation that reads
+the intruded-on doc recomputes through the ordinary dependency path;
+one that only writes it (a blind writer) is NOT re-armed, and the
+derived output waits for the next input change. v2 adds no
 security guarantees beyond today's unless trivial (owner,
 2026-08-02); tightening is future work.
 
@@ -328,7 +332,8 @@ case and keep the event's actor (scopes.md §5, server-stamped
 Note what the table does NOT do: `authored` admission checks write
 authority on the TARGET only — nothing marks a doc as derived-output,
 so admission protects derived docs no more than today does (§1's
-threat model; the next wave recomputes over an intruding write).
+threat model, sharpened by serving-loop.md §3d's dependency-only
+recompute rule, RULED 2026-08-05).
 
 ## 2b. Cross-space writes
 

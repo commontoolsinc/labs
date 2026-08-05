@@ -622,6 +622,8 @@ kinds (e.g. a bookkeeping kind) when it installs the seal
 destination. The refusal lives at the seal destination and only
 there — with no destination installed (the OFF arm, and ON-arm
 client speculation) seal == commit as today, and nothing is checked.
+(The completion-commit path never seals at all; §4 clarifies why it
+opens no unstamped gap.)
 
 - The accumulator is a layered view: store snapshot at the wave's input
   seq + previously sealed writes. Actions run serially per space, so a
@@ -758,9 +760,14 @@ For `fetch*`, `generate*`, `sqlite*` (the §3.5 effectful class):
   through §3d's sealing (the run is long over when the response
   arrives), and the memo key cannot supply them (the instance is
   hashed in, not recoverable), so the outbox entry is the only
-  carrier. The completion WRITE's labels derive from the carried
-  request basis — an external result inherits its request's
-  confidentiality; results are never default-unlabeled. On
+  carrier. No unstamped gap opens here: the completion commit's
+  identity annotations are sourced from the carriage captured at
+  the ORIGINAL run's seal — necessarily stamped, per §3d's refusal
+  — so completion commits inherit stamped provenance transitively,
+  and no unstamped derived path exists (clarification, adjudicated
+  2026-08-05, vetoable). The completion WRITE's labels derive from
+  the carried request basis — an external result inherits its
+  request's confidentiality; results are never default-unlabeled. On
   completion, commit result + key in one derived-class commit and
   inject the result-cell dirtiness IN-PROCESS, post-commit — the next
   wave consumes it directly. The subscription's copy of the completion
