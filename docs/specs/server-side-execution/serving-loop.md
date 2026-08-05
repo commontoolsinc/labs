@@ -534,9 +534,11 @@ silently, since no product test exercises them:
   blocklist that a pattern statement may never reference: the
   dropped names come OUT and `scheduler_basis` goes IN, or pattern
   SQL gains a reachable engine table;
-- the two live specs that describe the persisted form:
-  `docs/specs/persistent-scheduler-state.md` and
-  `docs/specs/scheduler-v2/per-doc-rehydration.md`.
+- the specs that described the persisted form — archived by stage C.3:
+  `docs/history/specs/persistent-scheduler-state.md`,
+  `docs/history/specs/scheduler-v2/per-doc-rehydration-persisted-form.md`
+  (extracted from the still-live `per-doc-rehydration.md`), and
+  `docs/history/specs/scheduler-v2/incremental-observation-adoption.md`.
 
 The stage-C TRAIN carries both halves (the plan cuts it as three
 PRs): C.2 carries this migration; C.1 deletes the certificate

@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-05-28
+archived: 2026-08-04
+reason: "Executed design; the persisted observation form it specifies was deleted by server-execution v2 Phase 1 stage C and reduced to the scheduler_basis index."
+superseded-by: docs/specs/server-side-execution/serving-loop.md
+---
+
 # Persistent Scheduler State
 
 ## Status
@@ -1097,7 +1105,7 @@ rehydration identity (session-scoped effects such as sinks or `pull`) writes no
 rows. Builtins whose run starts child runs (map/filter/flatMap) never rehydrate
 clean: their reconcile re-attaches the children, which then rehydrate
 individually. See
-[Per-doc scheduler-state restore](scheduler-v2/per-doc-rehydration.md) for the
+[Per-doc scheduler-state restore](scheduler-v2/per-doc-rehydration-persisted-form.md) for the
 full design.
 
 Snapshot listing has no correctness timeout. A request failure degrades the

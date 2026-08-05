@@ -62,9 +62,11 @@ modules are registered as content-addressed specifiers and executed through the
 SES module system, so a registry keyed by content hash cannot have filename
 collisions.
 
-The consumer that motivates the stable identity is
-[persistent scheduler state](persistent-scheduler-state.md), whose action
-implementation fingerprint must survive a reload from a different entry point.
+The consumer that motivates the stable identity is the scheduler's durable
+action identity: the implementation fingerprint must survive a reload from a
+different entry point, and server-execution v2 keys its basis index by the
+same restart-stable identity
+([serving-loop.md §3b](server-side-execution/serving-loop.md)).
 
 The iframe sandbox path (`packages/iframe-sandbox`) is entirely independent of
 this work and is out of scope.
@@ -725,10 +727,14 @@ to `cf:module/<hash>/<path>` and CFC verified-source identity does not downgrade
 Diagnostic names are `cf:module/<hash>/<path>` rather than a bundle-relative
 location, which is both stable and directly meaningful as an identity.
 
-## Interaction With Persistent Scheduler State
+## Interaction With Durable Scheduler Identity
 
-This spec supplies the stable implementation identity that
-[persistent-scheduler-state.md](persistent-scheduler-state.md) depends on:
+This spec supplies the stable implementation identity that durable scheduler
+state depends on (originally the persisted-observation form — archived at
+[persistent-scheduler-state.md](../history/specs/persistent-scheduler-state.md)
+after server-execution v2 Phase 1 stage C deleted it — and now the basis
+index's restart-stable `action` column,
+[serving-loop.md §3b](server-side-execution/serving-loop.md)):
 
 - `SchedulerActionObservationV1.implementationFingerprint` is
   `cf:module/<moduleHash(M)>:<symbol>`. It is stable across reloads and entry

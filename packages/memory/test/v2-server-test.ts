@@ -1279,9 +1279,9 @@ Deno.test("memory v2 server rejects handshakes when modernCellRep flags disagree
   }
 });
 
-Deno.test("memory v2 server accepts scheduler-state flag mismatch", async () => {
+Deno.test("memory v2 server accepts optional-capability flag mismatch", async () => {
   const server = createServer(
-    "memory://memory-v2-server-handshake-scheduler-flag",
+    "memory://memory-v2-server-handshake-optional-flag",
   );
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));

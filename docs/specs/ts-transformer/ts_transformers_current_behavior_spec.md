@@ -930,7 +930,7 @@ Behavior:
   zero-input/no-capture computed form is handled separately as described in §8.
 
 The runtime meaning of `materializerWriteInputPaths` is specified in
-`docs/specs/persistent-scheduler-state.md` ("Materializers").
+`docs/specs/scheduler-v2/README.md` §4.3 (the write-surface tiers).
 
 If no captures are found, the lift-applied call is left unchanged.
 
@@ -1201,10 +1201,10 @@ computation's input schema:
   Identity-only cell leaves receive the same opaque/comparable wrappers, while
   mixed summaries still retain and shrink their ordinary read/write paths
   (`transformers/type-shrinking.ts`; `test/type-shrinking.test.ts`).
-- Scheduler completeness is separate from path retention: identity-only roots
-  are passthrough, and `hasCompleteSchedulerScopeSummary` rejects passthrough or
-  wildcard summaries. Thus identity/comparable tracking can preserve a
-  satisfiable input schema without asserting a complete scheduler scope.
+- Identity-only roots are passthrough, so identity/comparable tracking can
+  preserve a satisfiable input schema. (The scheduler-completeness
+  assertion this bullet once described was deleted with the certificate
+  surface — server-execution v2 stage C.1.)
 
 #### 10.7.2 Imported capability contracts
 
