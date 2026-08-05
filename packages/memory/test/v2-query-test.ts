@@ -62,6 +62,7 @@ Deno.test("memory v2 query keys carry the scope INSTANCE (stage E)", () => {
     {
       space: "did:key:space",
       scope: "user",
+      scopeKey: "user:did%3Akey%3Aalice",
       id: "of:doc",
     },
   );
@@ -70,6 +71,7 @@ Deno.test("memory v2 query keys carry the scope INSTANCE (stage E)", () => {
     {
       space: "did:key:space",
       scope: "session",
+      scopeKey: "session:did%3Akey%3Aalice:sess-1",
       id: "of:doc",
     },
   );
@@ -78,11 +80,14 @@ Deno.test("memory v2 query keys carry the scope INSTANCE (stage E)", () => {
     {
       space: "did:key:space",
       scope: "space",
+      scopeKey: "space",
       id: "of:doc",
     },
   );
-  // Dirtiness stays keyed by scope NAME until stage F's M4 re-keys push.
-  assertEquals(fromDirtyKey("session\0of:doc"), {
+  // Dirtiness keys by scope INSTANCE too (stage F's M4 re-key): the
+  // dirty key's first segment is the shared scope_key vocabulary.
+  assertEquals(fromDirtyKey("session:did%3Akey%3Aalice:sess-1\0of:doc"), {
+    scopeKey: "session:did%3Akey%3Aalice:sess-1",
     scope: "session",
     id: "of:doc",
   });
@@ -98,6 +103,11 @@ Deno.test("memory v2 query keys carry the scope INSTANCE (stage E)", () => {
     () => fromDocKey("did:key:space/user/of:doc" as never),
     Error,
     "invalid memory v2 query doc key",
+  );
+  assertThrows(
+    () => fromDirtyKey("session\0of:doc"),
+    Error,
+    "invalid memory v2 dirty key",
   );
   assertThrows(
     () => fromDirtyKey("of:doc"),

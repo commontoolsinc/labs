@@ -3,9 +3,11 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import {
+  canResolveScopeKey,
   type CellScope,
   type ClientCommit,
   type ClientMessage,
+  type CommitClass,
   dbNeedsColumnProvenance,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
@@ -14,14 +16,20 @@ import {
   type EntityIdListResult,
   type EntityIdLookupRequest,
   type EntityIdLookupResult,
+  type EntitySnapshot,
+  getServerExecutionConfig,
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
+  isScopeKey,
   MAX_ENTITY_ID_PAGE_SIZE,
   type Operation,
   parseMemoryProtocolFlags,
+  resolveScopeKey,
   type ResponseMessage,
+  type ScopeKey,
+  type ScopeKeyIdentity,
   type ServerMessage,
   type SessionAckRequest,
   type SessionAckResult,
@@ -74,7 +82,9 @@ import {
 import {
   cloneTrackedGraphState,
   extendTrackedGraph,
+  fromDocKey,
   isGraphQueryCoveredByState,
+  type QueryDocKey,
   queryGraph,
   type QueryGraphReuseContext,
   refreshTrackedGraph,
@@ -82,6 +92,10 @@ import {
   type TrackedGraphState,
   trackGraph,
 } from "./query.ts";
+import {
+  liveExecutionLeaseHolder,
+  serviceIdentityOfExecutionLeaseHolder,
+} from "./execution-lease.ts";
 import { respondToHello } from "./handshake.ts";
 import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import {
@@ -95,6 +109,7 @@ import {
   sameWatchSpec,
   type SessionCacheEntry,
   toCacheEntry,
+  toWireUpsert,
   trackedIdsFromEntries,
 } from "./server-sync.ts";
 import { SessionRegistry, type SessionState } from "./session-registry.ts";
@@ -306,6 +321,35 @@ type SessionHandle = {
 type DirtyOrigin = {
   sessionId: string;
   seq: number;
+};
+
+/**
+ * One admitted commit as the serving loop's in-process feed sees it
+ * (serving-loop.md §1 planes (b)/(d)): class + holder for the self-echo
+ * skip and activation routing, the written doc INSTANCES for dirtiness.
+ * Ids and scope keys only — values travel on the ordinary session-sync
+ * path; this record never crosses the wire.
+ */
+export type AdmittedCommitNotice = {
+  space: string;
+  seq: number;
+  class: CommitClass;
+  holder?: string;
+  sessionId: string;
+  writes: Array<{ id: string; scopeKey: ScopeKey }>;
+};
+
+/**
+ * The ExecutorHost's in-process observer (serving-loop.md §1's wiring):
+ * plane (b) — `commitAdmitted` is the admission-side activation hook (an
+ * authored admission into a space with no live SpaceServer notifies the
+ * host; never a poll) — and the activation-on-session-open trigger
+ * (`sessionOpened`). Observer errors are shielded: admission never fails
+ * because an observer threw.
+ */
+export type ServerExecutionObserver = {
+  commitAdmitted?: (notice: AdmittedCommitNotice) => void;
+  sessionOpened?: (space: string) => void;
 };
 
 class Connection {
@@ -848,6 +892,10 @@ export class Server {
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
   #refreshing: Promise<void> | null = null;
   #lastRefreshDurationMs = 0;
+  // The ExecutorHost's in-process observer (serving-loop.md §1 planes
+  // (b)/(d)); undefined until a host attaches. One observer: there is one
+  // host per process.
+  #serverExecutionObserver: ServerExecutionObserver | undefined;
   #store?: URL;
   // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
   // registered id is attached read-only from its descriptor path instead of the
@@ -1355,6 +1403,16 @@ export class Server {
       commitClass: "system",
     });
     this.markSpaceDirty(space, [toDirtyKey(id)]);
+    // The feed carries system commits too (the loop classifies by class;
+    // a system write is ordinary non-authored input — it does not trigger
+    // plane (b)'s AUTHORED activation rule, which the host enforces).
+    this.#notifyCommitAdmitted({
+      space,
+      seq: commit.seq,
+      class: "system",
+      sessionId: this.#directSessionId,
+      writes: [{ id, scopeKey: "space" }],
+    });
     return commit;
   }
 
@@ -1892,6 +1950,9 @@ export class Server {
         );
       }
       const nextSessionOpen = connection.issueSessionOpenAuth();
+      // Activation trigger (serving-loop.md §1): session open makes the
+      // space ACTIVE-eligible; notify the host after the open succeeded.
+      this.#notifySessionOpened(message.space);
       return {
         type: "response",
         requestId: message.requestId,
@@ -2088,19 +2149,38 @@ export class Server {
           // later await (CT-1927): a batch pass running during a
           // subsequent await must see this durable write's dirty ids —
           // otherwise a frame whose marker claims to reflect decided
-          // outcomes could miss earlier durable watched novelty.
+          // outcomes could miss earlier durable watched novelty. Keys are
+          // per scope INSTANCE (M4): resolved from the committing
+          // session's identity — the same resolution admission keyed the
+          // rows with, so the dirty key names exactly the row written.
+          const committedWrites = message.commit.operations
+            .filter((operation) => operation.op !== "sqlite")
+            .map((operation) => ({
+              id: operation.id,
+              scopeKey: resolveScopeKey(operation.scope, {
+                principal: session.principal,
+                sessionId: message.sessionId,
+              }),
+            }));
           this.markSpaceDirty(
             message.space,
-            message.commit.operations
-              .filter((operation) => operation.op !== "sqlite")
-              .map((operation) =>
-                toDirtyKey(operation.id, declaredScope(operation.scope))
-              ),
+            committedWrites.map((write) =>
+              toDirtyKey(write.id, write.scopeKey)
+            ),
             {
               sessionId: message.sessionId,
               seq: commit.seq,
             },
           );
+          // Plane (b): the admission-side activation hook — synchronous
+          // with the dirty marking, observer errors shielded.
+          this.#notifyCommitAdmitted({
+            space: message.space,
+            seq: commit.seq,
+            class: "authored",
+            sessionId: message.sessionId,
+            writes: committedWrites,
+          });
           // CT-1927: stage the accept's catch-up obligation SYNCHRONOUSLY
           // with the dirty-marking above — before any await. A flush pass
           // running during a later await consumes the dirty batch; an
@@ -2249,6 +2329,19 @@ export class Server {
           "live graph.query subscriptions were removed; use session.watch.set",
         ),
       );
+    }
+    if (this.#namesExplicitInstance(message.query.roots)) {
+      // protocol.md §2's read row: explicit entity_scope_key roots are
+      // lease-holder-only. Gated on the sync scan so the no-key path
+      // adds no await between authorization and evaluation.
+      const deny = await this.#denyExplicitInstanceReads(
+        message.space,
+        session,
+        message.query.roots,
+      );
+      if (deny) {
+        return respondTypedError<GraphQueryResult>(message.requestId, deny);
+      }
     }
 
     try {
@@ -2446,6 +2539,23 @@ export class Server {
         return respondTypedError<WatchSetResult>(message.requestId, deny);
       }
     }
+    if (
+      this.#namesExplicitInstance(
+        message.watches.flatMap((watch) => watch.query.roots),
+      )
+    ) {
+      // protocol.md §2's read row: explicit entity_scope_key roots are
+      // lease-holder-only. Gated on the sync scan so the no-key path
+      // adds no await between authorization and evaluation.
+      const deny = await this.#denyExplicitInstanceReads(
+        message.space,
+        session,
+        message.watches.flatMap((watch) => watch.query.roots),
+      );
+      if (deny) {
+        return respondTypedError<WatchSetResult>(message.requestId, deny);
+      }
+    }
 
     try {
       const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
@@ -2518,6 +2628,23 @@ export class Server {
         return respondTypedError<WatchAddResult>(message.requestId, deny);
       }
     }
+    if (
+      this.#namesExplicitInstance(
+        message.watches.flatMap((watch) => watch.query.roots),
+      )
+    ) {
+      // protocol.md §2's read row: explicit entity_scope_key roots are
+      // lease-holder-only. Gated on the sync scan so the no-key path
+      // adds no await between authorization and evaluation.
+      const deny = await this.#denyExplicitInstanceReads(
+        message.space,
+        session,
+        message.watches.flatMap((watch) => watch.query.roots),
+      );
+      if (deny) {
+        return respondTypedError<WatchAddResult>(message.requestId, deny);
+      }
+    }
 
     try {
       const startedAt = performance.now();
@@ -2562,8 +2689,17 @@ export class Server {
 
       const nextWatches = mergeWatchesById(session.watches, newWatches);
       const graphs = new Map(session.graphs);
+      const identity = this.#sessionScopeIdentity(session);
 
       const updates = new Map<string, SessionCacheEntry>();
+      const recordUpdate = (docKey: QueryDocKey, entity: EntitySnapshot) => {
+        const { scopeKey } = fromDocKey(docKey);
+        const entry = toCacheEntry(entity, identity, scopeKey);
+        updates.set(
+          cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
+          entry,
+        );
+      };
       for (const [branch, query] of groupedQueries(newWatches)) {
         const existing = graphs.get(branch);
         if (existing === undefined) {
@@ -2578,16 +2714,8 @@ export class Server {
             },
           );
           graphs.set(branch, tracked.state);
-          for (const entity of tracked.state.entities.values()) {
-            const entry = toCacheEntry(entity);
-            updates.set(
-              cacheKeyForEntity(
-                entry.branch,
-                entry.id,
-                declaredScope(entry.scope),
-              ),
-              entry,
-            );
+          for (const [docKey, entity] of tracked.state.entities) {
+            recordUpdate(docKey, entity);
           }
           continue;
         }
@@ -2604,16 +2732,8 @@ export class Server {
           staged,
           query,
         );
-        for (const entity of extended.updates.values()) {
-          const entry = toCacheEntry(entity);
-          updates.set(
-            cacheKeyForEntity(
-              entry.branch,
-              entry.id,
-              declaredScope(entry.scope),
-            ),
-            entry,
-          );
+        for (const [docKey, entity] of extended.updates) {
+          recordUpdate(docKey, entity);
         }
       }
 
@@ -2621,9 +2741,7 @@ export class Server {
       for (const [key, entry] of updates) {
         const previous = session.entities.get(key);
         session.entities.set(key, entry);
-        session.trackedIds.add(
-          toDirtyKey(entry.id, declaredScope(entry.scope)),
-        );
+        session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
         if (!sameSnapshot(previous, entry)) {
           upserts.push(entry);
         }
@@ -2652,7 +2770,7 @@ export class Server {
             upserts: upserts.toSorted((left, right) =>
               left.branch.localeCompare(right.branch) ||
               left.id.localeCompare(right.id)
-            ),
+            ).map(toWireUpsert),
             removes: [],
           },
         },
@@ -2718,13 +2836,10 @@ export class Server {
       );
       serverSeq = result.serverSeq;
       graphs.set(branch, result.state);
-      for (const entity of result.state.entities.values()) {
-        const entry = toCacheEntry(entity);
-        const key = cacheKeyForEntity(
-          entry.branch,
-          entry.id,
-          declaredScope(entry.scope),
-        );
+      for (const [docKey, entity] of result.state.entities) {
+        const { scopeKey } = fromDocKey(docKey);
+        const entry = toCacheEntry(entity, scopeContext, scopeKey);
+        const key = cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey);
         const existing = entities.get(key);
         if (
           existing === undefined ||
@@ -2768,16 +2883,28 @@ export class Server {
       return;
     }
     const sync = undelivered.effect;
+    const identity = this.#sessionScopeIdentity(session);
     const ids: string[] = [];
+    // Wire frames carry scope NAMES; the session's own identity recovers
+    // the instance keys (M4). An unresolvable scope cannot have been in a
+    // frame built FOR this session — skip defensively rather than throw
+    // on the rollback path. (A lease-holder session's explicit foreign
+    // instances mis-resolve to its own here; forceFullResync below and
+    // the full re-evaluation repair that conservatively.)
+    const instanceKeyFor = (
+      id: string,
+      scope: CellScope | undefined,
+    ): ScopeKey | undefined =>
+      canResolveScopeKey(scope, identity)
+        ? resolveScopeKey(scope, identity)
+        : undefined;
     for (const upsert of sync.upserts) {
+      const scopeKey = instanceKeyFor(upsert.id, upsert.scope);
+      if (scopeKey === undefined) continue;
       session.entities.delete(
-        cacheKeyForEntity(
-          upsert.branch,
-          upsert.id,
-          declaredScope(upsert.scope),
-        ),
+        cacheKeyForEntity(upsert.branch, upsert.id, scopeKey),
       );
-      ids.push(toDirtyKey(upsert.id, declaredScope(upsert.scope)));
+      ids.push(toDirtyKey(upsert.id, scopeKey));
     }
     for (const remove of sync.removes) {
       // The remove's cache entry died when the frame was built; re-insert a
@@ -2786,16 +2913,22 @@ export class Server {
       // emits removes, so only a full re-diff (tombstone present, entity
       // absent) regenerates the removal for the client.
       const scope = declaredScope(remove.scope);
-      session.entities.set(cacheKeyForEntity(remove.branch, remove.id, scope), {
-        branch: remove.branch,
-        id: remove.id,
-        scope,
-        seq: 0,
-        deleted: true,
-      });
-      session.trackedIds.add(toDirtyKey(remove.id, scope));
+      const scopeKey = instanceKeyFor(remove.id, remove.scope);
+      if (scopeKey === undefined) continue;
+      session.entities.set(
+        cacheKeyForEntity(remove.branch, remove.id, scopeKey),
+        {
+          branch: remove.branch,
+          id: remove.id,
+          scope,
+          scopeKey,
+          seq: 0,
+          deleted: true,
+        },
+      );
+      session.trackedIds.add(toDirtyKey(remove.id, scopeKey));
       session.forceFullResync = true;
-      ids.push(toDirtyKey(remove.id, scope));
+      ids.push(toDirtyKey(remove.id, scopeKey));
     }
     if (sync.caughtUpLocalSeq !== undefined) {
       // The marker was consumed into `caughtUpLocalSeq` when the frame was
@@ -2914,6 +3047,7 @@ export class Server {
 
             const engine = await this.openEngine(space);
             const fromSeq = session.lastSyncedSeq;
+            const identity = this.#sessionScopeIdentity(session);
             const updates = new Map<string, SessionCacheEntry>();
 
             for (const graph of session.graphs.values()) {
@@ -2936,14 +3070,11 @@ export class Server {
               if (refreshed === null) {
                 continue;
               }
-              for (const entity of refreshed.updates.values()) {
-                const entry = toCacheEntry(entity);
+              for (const [docKey, entity] of refreshed.updates) {
+                const { scopeKey } = fromDocKey(docKey);
+                const entry = toCacheEntry(entity, identity, scopeKey);
                 updates.set(
-                  cacheKeyForEntity(
-                    entry.branch,
-                    entry.id,
-                    declaredScope(entry.scope),
-                  ),
+                  cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
                   entry,
                 );
               }
@@ -2957,10 +3088,7 @@ export class Server {
             for (const [key, entry] of updates) {
               const previous = session.entities.get(key);
               if (!sameSnapshot(previous, entry)) {
-                const dirtyKey = toDirtyKey(
-                  entry.id,
-                  declaredScope(entry.scope),
-                );
+                const dirtyKey = toDirtyKey(entry.id, entry.scopeKey);
                 const origin = dirtyOrigins?.get(dirtyKey);
                 if (
                   origin === undefined ||
@@ -2979,9 +3107,7 @@ export class Server {
             const commitEntities = () => {
               for (const [key, entry] of updates) {
                 session.entities.set(key, entry);
-                session.trackedIds.add(
-                  toDirtyKey(entry.id, declaredScope(entry.scope)),
-                );
+                session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
               }
             };
             // The frame-under-construction's watch scope: committed tracked
@@ -2989,9 +3115,7 @@ export class Server {
             // against THIS set, not the yet-uncommitted session state.
             const candidateTrackedIds = new Set(session.trackedIds);
             for (const [, entry] of updates) {
-              candidateTrackedIds.add(
-                toDirtyKey(entry.id, declaredScope(entry.scope)),
-              );
+              candidateTrackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
             }
             const toSeq = Engine.serverSeq(engine);
             if (upserts.length === 0) {
@@ -3014,7 +3138,7 @@ export class Server {
               upserts: upserts.toSorted((left, right) =>
                 left.branch.localeCompare(right.branch) ||
                 left.id.localeCompare(right.id)
-              ),
+              ).map(toWireUpsert),
               removes: [],
             });
             commitEntities();
@@ -3122,6 +3246,146 @@ export class Server {
     this.scheduleRefresh();
   }
 
+  /**
+   * Attach (or clear) the ExecutorHost's in-process observer
+   * (serving-loop.md §1 planes (b)/(d)). One observer per server: a
+   * second attach replaces the first, which only the one host per
+   * process should ever do.
+   */
+  setServerExecutionObserver(
+    observer: ServerExecutionObserver | undefined,
+  ): void {
+    this.#serverExecutionObserver = observer;
+  }
+
+  #notifyCommitAdmitted(notice: AdmittedCommitNotice): void {
+    const observer = this.#serverExecutionObserver;
+    if (observer?.commitAdmitted === undefined) return;
+    try {
+      observer.commitAdmitted(notice);
+    } catch (error) {
+      // Admission never fails because the observer threw; the host's
+      // catch-up scan (selectCommitsSince) covers a dropped notice.
+      console.warn(
+        "memory v2: server-execution observer threw on commitAdmitted",
+        error,
+      );
+    }
+  }
+
+  #notifySessionOpened(space: string): void {
+    const observer = this.#serverExecutionObserver;
+    if (observer?.sessionOpened === undefined) return;
+    try {
+      observer.sessionOpened(space);
+    } catch (error) {
+      console.warn(
+        "memory v2: server-execution observer threw on sessionOpened",
+        error,
+      );
+    }
+  }
+
+  /**
+   * The serving loop reports its own wave commit (which entered the store
+   * through the co-hosted engine plane, not through any session) so push
+   * fires for it: dirtiness keyed by scope INSTANCE (M4), no origin — a
+   * derived commit fans out authoritatively to every subscriber — and the
+   * feed record reaches the observer like any admission (the SpaceServer
+   * skips its own by class + holder — serving-loop.md §3's self-echo).
+   */
+  noteExecutorCommit(notice: AdmittedCommitNotice): void {
+    this.markSpaceDirty(
+      notice.space,
+      notice.writes.map((write) => toDirtyKey(write.id, write.scopeKey)),
+    );
+    this.#notifyCommitAdmitted(notice);
+  }
+
+  /**
+   * The read-side admission row (protocol.md §2, ratified LD5): a read
+   * naming an explicit `entity_scope_key` is admissible only for a live
+   * lease holder on this co-hosted memory server. The operand mapping
+   * (stage F design): the session's authenticated principal must equal
+   * the SERVICE-IDENTITY component of the read space's live lease holder
+   * — the identity the ExecutorHost minted its DR1 holder from. A
+   * non-holder naming a key is REJECTED; a read naming none resolves
+   * from the session as today and never reaches this check.
+   *
+   * Phase-1 bound, deliberate: the check consults the READ space's own
+   * lease row. FP2's widening — a home SpaceServer naming a FOREIGN
+   * space's instances under its own space's lease — has no producer
+   * until cross-space serving (Phase 5) and needs the cross-engine
+   * lease lookup designed with it.
+   */
+  async #denyExplicitInstanceReads(
+    space: string,
+    session: SessionState,
+    roots: Iterable<GraphQuery["roots"][number]>,
+  ): Promise<V2Error | undefined> {
+    // Synchronous fast path first: a read naming NO instance adds no
+    // microtask boundary — the request's authorization and evaluation
+    // keep sharing one engine turn (the ACL revocation-race invariant).
+    let named = false;
+    for (const root of roots) {
+      if (root.entityScopeKey === undefined) continue;
+      named = true;
+      if (!isScopeKey(root.entityScopeKey)) {
+        return toError(
+          "ProtocolError",
+          `malformed entity_scope_key "${root.entityScopeKey}" on read ` +
+            `root ${root.id}`,
+        );
+      }
+    }
+    if (!named) return undefined;
+    if (!getServerExecutionConfig()) {
+      return toError(
+        "ProtocolError",
+        "reads naming an entity_scope_key are unclaimable while " +
+          "EXPERIMENTAL_SERVER_EXECUTION is off (protocol.md §2)",
+      );
+    }
+    const engine = await this.openEngine(space);
+    const holder = liveExecutionLeaseHolder(engine, space);
+    if (
+      holder === undefined ||
+      session.principal === undefined ||
+      serviceIdentityOfExecutionLeaseHolder(holder) !== session.principal
+    ) {
+      return toError(
+        "ProtocolError",
+        "read naming an entity_scope_key rejected: requester does not " +
+          "hold a live execution_lease on this memory server " +
+          "(protocol.md §2's read row)",
+      );
+    }
+    session.leaseHolderReads = true;
+    return undefined;
+  }
+
+  /** Whether any read root names an explicit instance — the sync gate
+   * that keeps the no-key path free of added awaits. */
+  #namesExplicitInstance(
+    roots: Iterable<GraphQuery["roots"][number]>,
+  ): boolean {
+    for (const root of roots) {
+      if (root.entityScopeKey !== undefined) return true;
+    }
+    return false;
+  }
+
+  /** The identity a session's scoped reads and cache keys resolve
+   * against (the querying session's own — protocol.md §1). */
+  #sessionScopeIdentity(session: SessionState): ScopeKeyIdentity {
+    return {
+      ...(session.principal === undefined
+        ? {}
+        : { principal: session.principal }),
+      sessionId: session.id,
+    };
+  }
+
   private stageConflictRefreshDirtyIds(
     space: string,
     session: SessionState,
@@ -3131,16 +3395,25 @@ export class Server {
       session.pendingCaughtUpLocalSeq,
       commit.localSeq,
     );
+    const identity = this.#sessionScopeIdentity(session);
     const ids = new Set<string>();
+    const addInstanceKey = (id: string, scope: CellScope | undefined) => {
+      // A rejected commit's scoped addresses resolve against the
+      // rejected session's own identity (M4 instance keys). A scope the
+      // session holds no identity for could not have applied or been
+      // read by it — skip rather than throw on the repair path.
+      if (!canResolveScopeKey(scope, identity)) return;
+      ids.add(toDirtyKey(id, resolveScopeKey(scope, identity)));
+    };
     for (const operation of commit.operations) {
       if (operation.op === "sqlite") continue; // no entity id
-      ids.add(toDirtyKey(operation.id, declaredScope(operation.scope)));
+      addInstanceKey(operation.id, operation.scope);
     }
     for (const read of commit.reads.confirmed) {
-      ids.add(toDirtyKey(read.id, declaredScope(read.scope)));
+      addInstanceKey(read.id, read.scope);
     }
     for (const read of commit.reads.pending) {
-      ids.add(toDirtyKey(read.id, declaredScope(read.scope)));
+      addInstanceKey(read.id, read.scope);
     }
     this.markSpaceDirty(space, ids);
   }

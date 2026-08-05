@@ -94,6 +94,66 @@ export const replaceSchedulerBasisRows = (
   }
 };
 
+/** One stale (action, instance) the activation re-mark found: a recorded
+ * input seq behind that doc's current head (serving-loop.md §6 step 2). */
+export type StaleBasisInstance = {
+  action: string;
+  actionScopeKey: string;
+};
+
+/**
+ * The activation/recovery re-mark scan (serving-loop.md §3b, §6 step 2):
+ * "a node is dirty iff a recorded input seq is behind that doc's current
+ * head." Compares every basis row for inputs in THIS engine's own space
+ * against the head table and returns the distinct stale (action,
+ * instance) set. Index-guided re-marking, never commit replay.
+ *
+ * Rows whose `entity_space` is not `space` are cross-space reads
+ * (serving-loop.md §3b's foreign-read logging); their heads live in a
+ * different engine, so this scan cannot judge them. They are returned
+ * separately so the caller can count them; cross-space re-marking lands
+ * with the Phase 5 cross-space serving work.
+ */
+export const selectStaleBasisInstances = (
+  engine: Engine,
+  options: { branch: string; space: string },
+): {
+  stale: StaleBasisInstance[];
+  foreignReadInstances: StaleBasisInstance[];
+} => {
+  const stale = engine.database.prepare(`
+SELECT DISTINCT b.action AS action, b.action_scope_key AS action_scope_key
+FROM scheduler_basis b
+LEFT JOIN head h
+  ON h.branch = b.branch
+ AND h.id = b.entity
+ AND h.scope_key = b.entity_scope_key
+WHERE b.branch = :branch
+  AND b.entity_space = :space
+  AND COALESCE(h.seq, 0) > b.seq
+ORDER BY b.action, b.action_scope_key
+`).all({ branch: options.branch, space: options.space }) as Array<{
+    action: string;
+    action_scope_key: string;
+  }>;
+  const foreign = engine.database.prepare(`
+SELECT DISTINCT b.action AS action, b.action_scope_key AS action_scope_key
+FROM scheduler_basis b
+WHERE b.branch = :branch
+  AND b.entity_space != :space
+ORDER BY b.action, b.action_scope_key
+`).all({ branch: options.branch, space: options.space }) as Array<{
+    action: string;
+    action_scope_key: string;
+  }>;
+  const shape = (rows: Array<{ action: string; action_scope_key: string }>) =>
+    rows.map((row) => ({
+      action: row.action,
+      actionScopeKey: row.action_scope_key,
+    }));
+  return { stale: shape(stale), foreignReadInstances: shape(foreign) };
+};
+
 /** Read one instance's rows back (recovery's re-mark scan, and tests). */
 export const selectSchedulerBasisRows = (
   engine: Engine,

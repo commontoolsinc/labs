@@ -44,6 +44,41 @@ export const executionLeaseHolder = (
   processInstance: string = processInstanceId,
 ): string => `${serviceIdentity}#${processInstance}`;
 
+/**
+ * The service-identity component of a DR1 holder — everything before the
+ * process-instance suffix. The lease-holder READ admission (protocol.md
+ * §2's read row) matches a session's authenticated principal against
+ * this: the holder is `<serviceIdentity>#<processInstance>` and the
+ * process instance is a UUID (never containing `#`), so the last `#`
+ * splits exactly.
+ */
+export const serviceIdentityOfExecutionLeaseHolder = (
+  holder: string,
+): string => {
+  const separator = holder.lastIndexOf("#");
+  return separator === -1 ? holder : holder.slice(0, separator);
+};
+
+/**
+ * The space's live lease holder, judged by the caller's clock (the memory
+ * server's own — the two are co-hosted). Returns undefined when no live
+ * lease exists; an expired row matches nobody (serving-loop.md §2). The
+ * read-side admission (protocol.md §2's read row) consumes this.
+ */
+export const liveExecutionLeaseHolder = (
+  engine: Engine,
+  space: string,
+  now: number = Date.now(),
+): string | undefined => {
+  const row = engine.database.prepare(`
+SELECT holder
+FROM execution_lease
+WHERE space = :space
+  AND expires_at > :now
+`).get({ space, now }) as { holder: string } | undefined;
+  return row?.holder;
+};
+
 export type ExecutionLeaseWrite = {
   space: string;
   holder: string;
