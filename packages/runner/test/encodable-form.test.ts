@@ -307,7 +307,7 @@ describe("encodable-form", () => {
     });
 
     it("returns false for a value carrying only `toSigilLinkOrNull`", () => {
-      // A cell answers with the link that stands in for it, and it answers
+      // A cell returns the link that stands in for it, and it returns
       // under the one name asked here. The link accessor is not that name, so
       // a value that merely names a link does not become storable by saying so.
       expect(hasEncodableForm({ toSigilLinkOrNull: () => ({}) })).toBe(false);
@@ -377,7 +377,7 @@ describe("encodable-form", () => {
       // property that names it.
       //
       // The live producer of that shape is the reactive proxy in `cell.ts`: a
-      // `cellMethods` name answers with a proxy over the bound method, and
+      // `cellMethods` name comes back as a proxy over the bound method, and
       // every read off THAT is data navigation.
       const method = new Proxy(function () {
         return { invoked: true };

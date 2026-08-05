@@ -5,7 +5,7 @@ import { isPlainObject } from "@commonfabric/utils/types";
  * takes on the way to being encoded, which reaches storage without ever being
  * stringified.
  *
- * One name answers: `toEncodableForm`. Every builder artifact carries it -- a
+ * One name is asked for: `toEncodableForm`. Every builder artifact carries it -- a
  * module, a handler, a pattern, and the factory that carries a module's members
  * -- and so does a `Cell`, whose form is the link it names. A cell is what a
  * caller here is likeliest to hold that is not an artifact: a graph feeding a
@@ -39,7 +39,7 @@ function encodableFormMethod(value: unknown): (() => unknown) | undefined {
  * Deliberately BROADER than the walk's own test (`hasOwnEncodableForm`): this
  * accepts an inherited member, because its callers ask about a specific value
  * they already hold -- a pattern, a cell -- rather than sifting an arbitrary
- * graph. A cell answers here through an inherited member, that being where a
+ * graph. A cell satisfies this through an inherited member, that being where a
  * class puts its methods. The walk cannot afford that latitude; see there.
  */
 export function hasEncodableForm(value: unknown): boolean {
@@ -79,7 +79,7 @@ type OnCopy = (copy: unknown, original: unknown) => void;
 
 /**
  * Asked about each value the walk would otherwise pass through untouched,
- * and answers what should stand in its place -- the value itself to leave it
+ * and returns what should stand in its place -- the value itself to leave it
  * alone. This is how a caller says what ELSE has no fabric representation: a
  * `Cell`, whose encodable form is the link it stands for. Recognizing one takes
  * `isCell()`, and that lives in the runtime's core rather than here, so the
@@ -125,7 +125,7 @@ type AnyFunction = (...args: never[]) => unknown;
  *
  * A cycle is left for the conversion to reject. What it rejects it BY may be
  * the cycle or an artifact still raw inside the partial result: an ancestor is
- * answered as itself, so a copy's cycle edge points at the original.
+ * returned as itself, so a copy's cycle edge points at the original.
  */
 export function replaceArtifacts<T>(
   value: T,
@@ -167,8 +167,8 @@ function replace(
     );
   }
 
-  // An array is answered by the array rule whatever it carries, so an array
-  // is only ever descended into.
+  // The array rule applies whatever an array carries, so an array is only ever
+  // descended into.
   const isArray = Array.isArray(value);
   if (!isArray && !isPlainObject(value, false)) {
     // Anything else -- a `FabricInstance`, a `Date` -- carries no builder
@@ -179,7 +179,7 @@ function replace(
     // A null-prototype object is excluded too -- hence the `false` argument
     // to `isPlainObject()`. It is not a fabric record, so it is not the
     // walk's to rewrite. That is not the same as the conversion refusing one:
-    // `native-type-tags.ts` answers it `Object`. Whether to accept it is the
+    // `native-type-tags.ts` reports it as `Object`. Whether to accept it is the
     // conversion's question, asked of the value as it stands.
     return replaced(value, replaceOther, seen, onCopy);
   }
@@ -209,7 +209,7 @@ function replace(
  * Helper for `replace()`, which offers a value the walk does not descend into
  * to `replaceOther` and records whatever comes back.
  *
- * The replacement is NOT descended into. What the hook answers stands for the
+ * The replacement is NOT descended into. What the hook returns stands for the
  * value itself -- a link, say -- rather than being a container the walk has any
  * further claim on.
  */
@@ -225,12 +225,12 @@ function replaced(
 }
 
 /**
- * Records a replacement: the single place a copy becomes the answer for its
- * original.
+ * Records a replacement: the single place a copy becomes the replacement for
+ * its original.
  *
  * Every branch above returns through here, and that is deliberate. The
  * bookkeeping a copy needs -- telling the caller so identity-keyed facts can
- * follow, and remembering the answer so a value reachable twice is replaced
+ * follow, and remembering the replacement so a value reachable twice is replaced
  * once -- was previously written out at each branch, and was left off a new
  * branch three separate times. Routing every copy through one function is what
  * makes the fourth omission impossible rather than merely unlikely.
@@ -258,12 +258,12 @@ function replaceInElements(
   // array counterpart of the entries `replaceInEntries` materializes, for the
   // same reason. Copying by re-reading (`slice()`, or an index-by-index pass
   // over the original) runs an accessor-backed element a second time and
-  // keeps THAT answer, storing a value the array never held at any single
+  // keeps THAT value, storing a value the array never held at any single
   // moment and which the walk never inspected.
   //
   // So the result is built as it goes rather than cloned at the first change:
   // every element is written here, changed or not, and the original is
-  // answered by identity unless something actually moved.
+  // returned by identity unless something actually moved.
   const replaced: unknown[] = [];
   replaced.length = value.length;
   let changed = false;
@@ -288,7 +288,7 @@ function replaceInEntries(
 ): Record<string, unknown> {
   // Read each member ONCE, and build any copy from what was read: reading a
   // second time to copy would run an accessor twice and keep the second
-  // answer, so a value whose members are accessor-backed would be recorded
+  // value, so a value whose members are accessor-backed would be recorded
   // as something it never was at any single moment.
   const entries = Object.entries(value);
   let result: Record<string, unknown> | undefined;

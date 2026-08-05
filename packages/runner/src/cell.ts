@@ -490,7 +490,7 @@ declare module "@commonfabric/api" {
      * full link yet (one that has not been created). The link is what stands in
      * for a cell wherever a cell itself has no representation, and this is how
      * the storage boundary asks for it -- by name, off a value it has already
-     * recognized as a cell. The two members below answer with the same link.
+     * recognized as a cell. The two members below return the same link.
      */
     toSigilLinkOrNull(): SigilLink | null;
     /**

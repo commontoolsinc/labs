@@ -191,15 +191,15 @@ differ in what they already know about the value in hand:
   `encodableFormOf()` (`packages/runner/src/encodable-form.ts`). That name is
   the runtime's own, shared with the builder artifacts the same walk serializes.
 
-`toJSON()` answers the JSON protocol with the same link, so a cell reads as what
-it names in any renderer that honors the protocol — `toCompactDebugString()`
+`toJSON()` returns the same link under the JSON protocol's name, so a cell reads
+as what it names in any renderer that honors the protocol — `toCompactDebugString()`
 among them. The data model gives that name no standing of its own, and neither
 mechanism above consults it.
 
-`toSigilLinkOrNull()`, `toEncodableForm()` and `toJSON()` are one answer under
+`toSigilLinkOrNull()`, `toEncodableForm()` and `toJSON()` return one link under
 three names: the latter two delegate, so they cannot disagree. `getAsLink()` is
 not among them — it builds a link from the options its caller passes, so asking
-it for one relative to a base deliberately answers differently.
+it for one relative to a base deliberately returns a different link.
 
 ---
 

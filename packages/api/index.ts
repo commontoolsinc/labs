@@ -1706,24 +1706,24 @@ export type toJSON = {
 
 /**
  * The member by which a value produces the form in which it gets encoded.
- * Distinct from `toJSON` in saying nothing about JSON: what it answers is a
+ * Distinct from `toJSON` in saying nothing about JSON: what it returns is a
  * value the data model can represent, which reaches storage without being
  * stringified on the way.
  *
  * Two kinds of value carry it, and the type spans both rather than describing
- * only the one that composes into the factory types below. A `Cell` answers with
- * the link that stands for it, or `null` for a cell that has no link yet, and a
+ * only the one that composes into the factory types below. A `Cell` returns the
+ * link that stands for it, or `null` for a cell that has no link yet, and a
  * record-shaped bound would exclude both of those -- `null` plainly, and the
  * link because one arm of it is a class, which carries no index signature.
  *
  * An artifact's form is always a record even so, and says so where it is built:
  * `moduleToEncodableForm` and `patternToEncodableForm` declare
  * {@link FabricExecPlainObject}. The narrower promise belongs at the producer,
- * which can keep it, rather than at a name two unrelated kinds of value answer.
+ * which can keep it, rather than at a name two unrelated kinds of value share.
  *
  * {@link FabricExecValue}, NOT {@link FabricValue}: a form can still hold live
  * functions. A module whose implementation is a nested pattern with no entry ref
- * answers with that pattern's graph embedded, and such a graph holds live
+ * returns that pattern's graph embedded, and such a graph holds live
  * modules -- so the module form's `implementation` admits a `Pattern` and the
  * pattern form's `result` admits a function. That is precisely why the artifact
  * walk descends into what this returns rather than treating it as finished:

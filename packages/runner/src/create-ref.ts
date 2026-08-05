@@ -113,7 +113,7 @@ export function createRef(
     }
 
     if (isCellResultForDereferencing(obj)) {
-      // It'll unwrap this and answer with the referenced doc's entity id.
+      // It'll unwrap this and return the referenced doc's entity id.
       obj = getCellOrThrow(obj);
     }
 
