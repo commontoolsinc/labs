@@ -287,18 +287,6 @@ export function rewriteExpressionSite(
     return undefined;
   }
 
-  if (context.options.mode === "error") {
-    if (containerKind === "jsx-expression") {
-      context.reportDiagnostic({
-        type: "reactive:jsx-expression",
-        message:
-          "JSX expression with Reactive computation should use computed()",
-        node: expression,
-      });
-    }
-    return expression;
-  }
-
   const result = rewriteExpression({
     expression,
     analysis,
@@ -364,15 +352,6 @@ export function rewriteOwnedPreClosureJsxExpressionSite(
     shouldDeferToLateInPlaceLowering(context, expression, relevantDataFlows)
   ) {
     return undefined;
-  }
-
-  if (context.options.mode === "error") {
-    context.reportDiagnostic({
-      type: "reactive:jsx-expression",
-      message: "JSX expression with Reactive computation should use computed()",
-      node: expression,
-    });
-    return expression;
   }
 
   const result = rewriteExpression({

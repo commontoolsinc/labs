@@ -649,7 +649,6 @@ function shouldAddReactiveFor(
     expression,
     context.checker,
     context.state.typeRegistry,
-    context.options.logger,
   );
   return isCellLikeType(type, context.checker);
 }
@@ -729,7 +728,6 @@ function isReactiveArrayMethodCall(
       typeRegistry: context.state.typeRegistry,
       syntheticReactiveCollectionRegistry: context.state
         .syntheticReactiveCollectionRegistry,
-      logger: context.options.logger,
     },
   ) || isExplicitReactiveCall(target.expression, context);
 }
@@ -762,7 +760,6 @@ function shouldRetargetReactiveReference(
     target,
     context.checker,
     context.state.typeRegistry,
-    context.options.logger,
   );
   if (type) {
     return isBrandedCellType(type, context.checker) ||
@@ -899,7 +896,6 @@ function shouldUseStreamCause(
     target,
     context.checker,
     context.state.typeRegistry,
-    context.options.logger,
   );
   return isStreamLikeType(type, context.checker);
 }

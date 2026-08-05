@@ -6,7 +6,6 @@ export type {
   TransformationContext,
   TransformationDiagnostic,
   TransformationOptions,
-  TransformMode,
 } from "./core/mod.ts";
 export {
   CrossStageState,
