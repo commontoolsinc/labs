@@ -6,7 +6,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 import { convertCellsToLinks } from "../src/cell.ts";
 
@@ -45,17 +45,18 @@ describe("convert-cells-to-links-sharing", () => {
   });
 
   it("converts a twice-reachable value that converts to a primitive", () => {
-    // A `Date` becomes a `FabricEpochNsec`, which the walk answers without
-    // descending. Every exit has to leave the ancestor set as it found it, or
-    // the second position sees an ancestor that is really a sibling.
-    const shared = new Date(1234);
+    // A `Uint8Array` becomes a `FabricBytes`, which the walk stands whole
+    // rather than descending into. Every exit has to leave the ancestor set as
+    // it found it, or the second position sees an ancestor that is really a
+    // sibling. That shape occurs: a stream event payload carries binary data.
+    const shared = new Uint8Array([4, 5, 6]);
     const result = convertCellsToLinks({ a: shared, b: shared }) as {
       a: unknown;
       b: unknown;
     };
 
-    expect(result.a).toBeInstanceOf(FabricEpochNsec);
-    expect(result.b).toBeInstanceOf(FabricEpochNsec);
+    expect(result.a).toBeInstanceOf(FabricBytes);
+    expect(result.b).toBeInstanceOf(FabricBytes);
   });
 
   it("answers an ancestor with a back-link, so a cycle stays representable", () => {

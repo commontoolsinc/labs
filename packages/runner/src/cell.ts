@@ -6,6 +6,7 @@ import {
 import {
   cloneIfNecessary,
   fabricFromNativeValue,
+  type FabricOrConvertibleNativeValue,
   FabricSpecialObject,
   type FabricValue,
   shallowCleanArray,
@@ -100,7 +101,6 @@ import {
 import { toURI } from "./uri-utils.ts";
 import { createRef } from "./create-ref.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
-import type { FabricExecValue } from "@commonfabric/api";
 import { type Replacer, replacingWalk } from "./replacing-walk.ts";
 import {
   type SigilLink,
@@ -3328,8 +3328,20 @@ export function convertCellsToLinks(
   path: readonly string[] = [],
   ancestors: Map<object, readonly string[]> = new Map(),
 ): any {
-  return replacingWalk(value, cellsToLinks(options), path, ancestors);
+  return replacingWalk<CellLinkInput, FabricValue>(
+    value,
+    cellsToLinks(options),
+    path,
+    ancestors,
+  );
 }
+
+/**
+ * What this walk is handed: what a pattern produced. That is a fabric value or
+ * a native convertible to one, and on top of that the `Cell`s the walk exists
+ * to replace -- neither of which is durable until it has been through here.
+ */
+type CellLinkInput = FabricOrConvertibleNativeValue | Cell<any>;
 
 /** The options by which a cell becomes the link that reaches it. */
 type CellLinkOptions = {
@@ -3359,7 +3371,9 @@ function linkToCell(cell: Cell<any>, options: CellLinkOptions): SigilLink {
  * values it meets: a cell becomes a link, a cycle becomes a link to where the
  * value sits, and every container is converted to fabric form on the way in.
  */
-function cellsToLinks(options: CellLinkOptions): Replacer {
+function cellsToLinks(
+  options: CellLinkOptions,
+): Replacer<CellLinkInput, FabricValue> {
   return {
     replace: (value) => {
       if (
@@ -3409,7 +3423,7 @@ function cellsToLinks(options: CellLinkOptions): Replacer {
       // `FabricValueLayer` is looser than `FabricExecValue` -- its members are
       // typed `unknown`, being unconverted until the recursion reaches them --
       // so the cast is that gap rather than a claim about the value.
-      return { into: converted as FabricExecValue };
+      return { into: converted as CellLinkInput };
     },
   };
 }

@@ -6,14 +6,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import type { FabricExecValue } from "@commonfabric/api";
+import type { FabricExecPlainObject, FabricExecValue } from "@commonfabric/api";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 
 import { type Replacer, replacingWalk } from "../src/replacing-walk.ts";
 
 /** Replaces any string beginning with `@` with the rest of it, uppercased. */
-const AT_NAMES: Replacer = {
+const AT_NAMES: Replacer<FabricExecValue, FabricExecValue> = {
   replace: (value) =>
     typeof value === "string" && value.startsWith("@")
       ? { value: value.slice(1).toUpperCase() }
@@ -33,7 +33,7 @@ describe("replacing-walk", () => {
     });
 
     it("does not descend into what a replacement returns", () => {
-      const replacer: Replacer = {
+      const replacer: Replacer<FabricExecValue, FabricExecValue> = {
         ...AT_NAMES,
         replace: (value) =>
           value === "seed" ? { value: { nested: "@a" } } : undefined,
@@ -50,7 +50,7 @@ describe("replacing-walk", () => {
     });
 
     it("lets a replacement refuse a value by throwing", () => {
-      const replacer: Replacer = {
+      const replacer: Replacer<FabricExecValue, FabricExecValue> = {
         ...AT_NAMES,
         replace: (value) => {
           if (typeof value === "number") throw new Error("no numbers");
@@ -130,19 +130,23 @@ describe("replacing-walk", () => {
 
   describe("entering a container", () => {
     it("descends into what `enter` returns", () => {
-      const replacer: Replacer = {
+      const replacer: Replacer<FabricExecValue, FabricExecValue> = {
         ...AT_NAMES,
-        enter: (value) => ({ into: { ...value as object, added: "@b" } }),
+        enter: (value: object) => ({
+          into: { ...value as FabricExecPlainObject, added: "@b" },
+        }),
       };
       expect(replacingWalk({ kept: "@a" }, replacer))
         .toEqual({ kept: "A", added: "B" });
     });
 
     it("stops at a container `enter` returns a value for", () => {
-      const replacer: Replacer = {
+      const replacer: Replacer<FabricExecValue, FabricExecValue> = {
         ...AT_NAMES,
-        enter: (value) =>
-          Array.isArray(value) ? { value: "flattened" } : { into: value },
+        enter: (value: object) =>
+          Array.isArray(value)
+            ? { value: "flattened" }
+            : { into: value as FabricExecPlainObject },
       };
       expect(replacingWalk({ list: ["@a"] }, replacer))
         .toEqual({ list: "flattened" });
@@ -150,10 +154,12 @@ describe("replacing-walk", () => {
 
     it("clears the ancestor even when `enter` stops the descent", () => {
       const shared: FabricExecValue[] = ["@a"];
-      const replacer: Replacer = {
+      const replacer: Replacer<FabricExecValue, FabricExecValue> = {
         ...AT_NAMES,
-        enter: (value) =>
-          Array.isArray(value) ? { value: "flattened" } : { into: value },
+        enter: (value: object) =>
+          Array.isArray(value)
+            ? { value: "flattened" }
+            : { into: value as FabricExecPlainObject },
       };
       // The second position must not be treated as a cycle.
       expect(replacingWalk({ x: shared, y: shared }, replacer))
@@ -163,11 +169,11 @@ describe("replacing-walk", () => {
     it("clears the ancestor even when `enter` throws", () => {
       const shared = { boom: true };
       let thrown = 0;
-      const replacer: Replacer = {
+      const replacer: Replacer<FabricExecValue, FabricExecValue> = {
         ...AT_NAMES,
-        enter: (value) => {
+        enter: (value: object) => {
           if (value === shared && thrown++ === 0) throw new Error("first only");
-          return { into: value };
+          return { into: value as FabricExecPlainObject };
         },
       };
       expect(() => replacingWalk({ x: shared }, replacer))

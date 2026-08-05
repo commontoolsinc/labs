@@ -492,7 +492,7 @@ export class CellHandle<T = unknown> {
   static serialize(
     value: readonly any[] | Record<string, any> | any,
   ): any {
-    return replacingWalk(value, CELL_HANDLE_REFS);
+    return replacingWalk<unknown, JSONValue>(value, CELL_HANDLE_REFS);
   }
 }
 
@@ -510,7 +510,7 @@ export class CellHandle<T = unknown> {
  * private fields a `FabricPrimitive` keeps its state in. The walk no longer
  * flattens one, which is as far as this side can carry it alone.
  */
-const CELL_HANDLE_REFS: Replacer = {
+const CELL_HANDLE_REFS: Replacer<unknown, JSONValue> = {
   replace: (value) => {
     if (isCellHandle(value)) return { value: value.ref() };
     if (
