@@ -15,7 +15,7 @@ export interface MockElement {
   parentNode: MockElement | null;
   appendChild(child: MockElement): MockElement;
   removeChild(child: MockElement): MockElement;
-  // Components assign their own properties (cell, isStatic, …) onto elements.
+  // Components assign their own properties, `cell` and `isStatic` among them.
   [key: string]: unknown;
 }
 

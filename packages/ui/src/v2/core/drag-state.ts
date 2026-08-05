@@ -182,7 +182,7 @@ export interface DragPreview {
  * Uses the cell's [UI] property if available, otherwise falls back to
  * a static cf-cell-link pill.
  *
- * The preview renders the cell's [UI] through the same renderer the page
+ * The preview renders the cell's `[UI]` through the same renderer the page
  * uses, so the confidentiality policy that decides what a piece may show
  * decides what its drag preview shows.
  *

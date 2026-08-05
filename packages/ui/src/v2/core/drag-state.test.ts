@@ -222,10 +222,6 @@ describe("drag-state — subscribeToEndDrag", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Preview construction
-// ---------------------------------------------------------------------------
-
 describe("drag-state — createDragPreview", () => {
   let mockDocument: ReturnType<typeof installMockDocument>;
 

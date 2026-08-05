@@ -5,9 +5,9 @@
  * accessed synchronously. It emits VDomOp operations that are batched
  * and sent to the main thread for DOM application.
  *
- * It works with Cells rather than CellHandles, subscribes through cell.sink(),
- * and batches the operations it produces onto a microtask rather than touching
- * the DOM itself.
+ * It works with a `Cell` rather than a `CellHandle`, subscribes through
+ * `cell.sink()`, and batches the operations it produces onto a microtask rather
+ * than touching the DOM itself.
  *
  * Sub-piece cell regions: the retired cf-cell-context overlay could outline
  * the region of the page each cell rendered, because the renderer that held

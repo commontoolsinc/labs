@@ -30,7 +30,7 @@ export interface RenderOptions {
 }
 
 /**
- * Render a CellHandle<VNode> into a parent element.
+ * Render a `CellHandle<VNode>` into a parent element.
  *
  * The worker reconciles the VDOM and sends operations over IPC, and the main
  * thread applies those operations to the DOM. Reactive updates therefore cost

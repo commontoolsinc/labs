@@ -56,7 +56,7 @@ export interface DomApplicatorOptions {
   onEvent: (message: DomEventMessage) => void;
 
   /**
-   * RuntimeClient for creating CellHandles from CellRefs. A host with no
+   * `RuntimeClient` for turning a `CellRef` into a live handle. A host with no
    * client-side runtime proxy — the CLI, which drives the reconciler in its own
    * process and serializes the result — omits it, and a bidirectional binding
    * is then applied as the plain cell reference it names.

@@ -1,5 +1,5 @@
 /**
- * Test utility: a CellHandle whose connection speaks the VDOM session
+ * Test utility: a `CellHandle` whose connection speaks the VDOM session
  * protocol, so code that calls `render()` can be exercised without a worker.
  *
  * `createMockCellHandle` covers cell reads and writes; a renderer needs more
@@ -39,7 +39,7 @@ const DEFAULT_REF: CellRef = {
 };
 
 /**
- * Create a CellHandle backed by a connection that can host a render.
+ * Create a `CellHandle` backed by a connection that can host a render.
  *
  * Returns the handle and the log its session writes to.
  */
