@@ -78,6 +78,10 @@ describe("create-ref-cell-routes", () => {
     // closed on a cell that can name itself perfectly well.
     const causable = createCell<{ v: number }>(runtime, { space, path: [] }, tx)
       .for("explicit-cause");
+
+    // Taken before anything materializes the link, which is what both
+    // assertions below turn on: once a link exists, deriving through the cell
+    // and deriving through the link agree anyway.
     const first = idOf(causable);
 
     // Idempotent: a second derivation answers what the first did, rather than
