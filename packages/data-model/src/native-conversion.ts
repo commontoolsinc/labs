@@ -55,7 +55,7 @@ function rejectExtraProperties(value: object, typeName: string): void {
  *
  * The given array's index properties must all be enumerable data properties:
  * the copy reads elements through enumeration, which would execute an
- * accessor-backed index (silently flattening it to its momentary answer)
+ * accessor-backed index (silently flattening it to its momentary value)
  * and would turn a non-enumerable data index into a hole.
  *
  * @param value The array to clean.
@@ -255,7 +255,7 @@ export function shallowFabricFromNativeValue(
       // or symbol-keyed property has no fabric representation, and an
       // accessor-backed index is live code rather than inert data -- as is the
       // prototype of an `Array` subclass instance, which can make iteration
-      // answer differently than the indices say. Reject any of them outright
+      // yield differently than the indices say. Reject any of them outright
       // rather than silently dropping or flattening ("death before
       // confusion").
       if (!isInertArray(value)) {
@@ -448,8 +448,8 @@ function fabricFromNativeValueInternal(
   // already a `FabricValue`.
   //
   // Nothing is recorded in `converted` here. Reaching this means `original`
-  // was not a record: every record the shallow conversion accepts answers with
-  // an object, so a record cannot arrive at this branch, and a non-record is
+  // was not a record: every record the shallow conversion accepts returns an
+  // object, so a record cannot arrive at this branch, and a non-record is
   // not a key the map holds.
   if (typeof value !== "object" || value === null) {
     return value;

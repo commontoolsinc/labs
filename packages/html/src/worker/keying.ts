@@ -22,13 +22,14 @@ const OPAQUE: FabricValue = { "@@vdom-key": "opaque" };
  * stand-in.
  *
  * Everything else a render node may carry is a `JSONValue` (see `WorkerProps`),
- * and every one of those is a `FabricValue` already, so it is answered by
+ * and every one of those is a `FabricValue` already, so it is returned by
  * identity -- which also leaves a subtree carrying neither of the two shared
  * rather than rebuilt.
  *
  * A function is an event handler, and one render's is not the next render's
- * though they mean the same thing, so all of them stand alike. A cell answers
- * with its link, which is what stays put while the payload behind it moves.
+ * though they mean the same thing, so all of them stand alike. A cell is
+ * replaced by its link, which is what stays put while the payload behind it
+ * moves.
  *
  * @param node The render node to project.
  * @param seen Ancestors of `node`, so a cycle ends the walk rather than
@@ -76,8 +77,8 @@ function keyProjection(node: unknown, seen: Set<object>): unknown {
  * `undefined` element, `NaN` from `null`, `-0` from `0` -- keys them apart too.
  *
  * A node holding something no render node may hold can have no such key, and
- * answers a coarse one instead. Keying is on the render path, where an answer
- * is needed more than a precise one is.
+ * returns a coarse one instead. Keying is on the render path, where a key is
+ * needed more than a precise one is.
  *
  * @param node - The render node to generate a key for
  * @returns A stable string key
@@ -91,7 +92,7 @@ export function generateKey(node: unknown): string {
 }
 
 /**
- * Helper for `generateKey()`, which keys a node the hash has no answer for.
+ * Helper for `generateKey()`, which keys a node the hash refuses.
  * Nodes sharing a fallback key are told apart only by their position among
  * their siblings, so what it costs is the reuse of a DOM node that moved.
  */
