@@ -2150,7 +2150,7 @@ export class CiJobHistoryCollector {
     selection: GanttSelection,
     visit: (run: CiGanttInputRun) => void | Promise<void>,
   ): Promise<number> {
-    const resume = this.#detail.pausePruning();
+    const resume = await this.#detail.pausePruning();
     try {
       return await this.#eachGanttRun(
         source,
@@ -2173,7 +2173,7 @@ export class CiJobHistoryCollector {
   ): Promise<GanttSelection> {
     // Another collection's prune must not take an attempt this one has already
     // decided the chart contains, so pruning waits until it has decided.
-    const resume = this.#detail.pausePruning();
+    const resume = await this.#detail.pausePruning();
     try {
       return await this.#assembleGantt(
         token,

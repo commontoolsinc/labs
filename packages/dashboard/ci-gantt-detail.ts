@@ -103,6 +103,9 @@ export class CiGanttDetailStore {
   #directory: string | (() => string) | undefined;
   #temporaries = new Set<string>();
   #charts = 0;
+  // The removal prune has under way, if any. A chart waits for it, so that no
+  // file is unlinked after the chart has claimed one.
+  #removal: Promise<void> | null = null;
 
   constructor(directory?: string | (() => string)) {
     this.#directory = directory;
@@ -151,8 +154,13 @@ export class CiGanttDetailStore {
   // Holds off pruning while a chart is being assembled. A chart reads its
   // attempts one file at a time, and another collection's prune running in that
   // window would take a file the chart had already decided to draw.
-  pausePruning(): () => void {
+  async pausePruning(): Promise<() => void> {
     this.#charts++;
+    // Claiming the chart stops prune taking any further file, but one removal
+    // may already be under way, and the file it is unlinking could be one this
+    // chart draws. Waiting for that single removal — not the pass it belongs
+    // to — is what makes the claim exact.
+    await this.#removal;
     let released = false;
     return () => {
       if (released) return;
@@ -234,10 +242,17 @@ export class CiGanttDetailStore {
       // either window is one this loop would otherwise take a file from. What
       // it leaves behind the next prune collects.
       if (this.#charts) return;
+      // Armed before the removal starts, so a chart claimed at any point after
+      // this has something to wait for.
+      let finished!: () => void;
+      this.#removal = new Promise<void>((resolve) => finished = resolve);
       try {
         await Deno.remove(path);
       } catch (error) {
         if (!(error instanceof Deno.errors.NotFound)) throw error;
+      } finally {
+        this.#removal = null;
+        finished();
       }
     }
   }
