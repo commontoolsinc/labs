@@ -43,7 +43,7 @@ nothing else.
 | `--piece` | a piece | any cell address — the function that fetches a piece's result returns the piece unchanged, and the read path checks nothing piece-specific |
 | `piece get` | reading a piece | reading a cell at a path |
 | `--input` | a mode you switch on | an address — it follows a link stored in the document to reach the arguments cell |
-| `--schema` | a type contract you must satisfy | a selection over the value, which also accepts a bare list of paths |
+| `--schema` | one input format | two — a full schema, and a concise path shorthand that is not a schema |
 
 The `--piece` case is not cosmetic. Believing the target had to be a piece is
 what made a verb's receipt look like it needed purpose-built read machinery,
@@ -61,40 +61,48 @@ set` writes at one path. Both target the arguments cell, and the overlap invites
 merging them, but they are not the same operation — which is why any merge
 belongs in the last step rather than among the renames.
 
-### The input spec is not a schema
+### One flag, two syntaxes
 
-`--schema` is the most misleading name on the surface, and the one worth fixing
-first, because it shapes how people reason about the whole read model.
+`--schema` takes two different things, and that is what makes it confusing —
+not that it takes a schema.
 
-A schema describes what data **is**. What this flag takes describes what the
-caller **wants back**. Same syntax, opposite direction — and four things follow
-from the mismatch:
+Schemas are queries here. The schema-on-read principle runs through the whole
+system: you describe the shape of the data you want, and that description
+decides what is loaded. A reader supplying a schema is doing exactly what a
+subscription does. So the flag's *full* form is a schema in good standing, and
+the syntax should stay schema-shaped so a caller can lift a source schema and
+prune it into a request.
 
-- **It accepts input that is not a schema at all.** `--schema
-  'title,createdBy.name'` is a list of paths.
-- **It is a strict subset, stripped of what gives a Fabric schema meaning.**
-  `asCell`, `default`, `scope`, and `ifc` are forbidden to callers; `$ref`,
-  `$defs`, and the combinators are unsupported. What remains is structure with
-  the semantics removed.
-- **It is about to carry keywords that are not JSON Schema.** Marking a position
-  as an address needs a projection-only keyword, which no schema dialect
-  defines.
-- **It misleads readers in practice.** "How is `topic.title` a schema? It's a
-  path" is the reasonable question of someone reading the flag's name and
-  finding it does not hold.
+The **concise** form is a different thing wearing the same flag:
 
-The confusion is not that schemas are being used as queries. In this system they
-legitimately are — a subscription is a graph query whose selector is a schema,
-and that is why the *syntax* should stay schema-shaped, so a caller can lift a
-source schema and prune it into a request. The problem is narrower: this
-particular schema is output-directed and deliberately incomplete, and the name
-claims more than it delivers.
+```
+--schema 'title,createdBy.name'                        # a path list
+--schema '{"properties":{"title":{"type":"string"}}}'  # a schema
+```
 
-**Rename the flag; keep the syntax.** `--shape` says what it is, covers both the
-concise and nested forms, and promises no validation. Doing it now is much
-cheaper than later: `piece call` does not have this flag yet, so adding it there
-as `--shape` and aliasing on `get` costs one deprecation on a flag that is still
-young. Adding it as `--schema` doubles the footprint of the wrong name.
+The concise form is a shorthand, and it exists because full schemas are verbose
+enough that nobody writes one to select two fields. That is a good reason for it
+to exist and a bad reason for it to share a flag with the thing it abbreviates.
+A reader who sees `--schema title,createdBy.name` and asks "how is that a
+schema?" has spotted the real problem: one flag, two syntaxes, one name that
+only describes one of them.
+
+**Give the shorthand its own flag and leave `--schema` for full schemas.** That
+resolves the ambiguity rather than papering over it, and it leaves room for the
+shorthand to grow notation a schema does not need — a suffix meaning "give me
+the link at this path rather than its contents" is the obvious candidate, since
+that is the common case and spelling it in full is painful.
+
+Timing argues for doing it now: `piece call` does not have either form yet, so
+splitting them costs one deprecation on a flag that is still young. Naming the
+shorthand flag is open.
+
+**What a reader may not supply, in either syntax.** `asCell`, `default`,
+`scope`, and `ifc` stay the source's — they decide how a value is treated, not
+which values come back. `$ref`, `$defs`, and the combinators are unsupported.
+Both checks run against the parsed projection whatever syntax produced it, so
+writing the full form does not unlock them. That is worth knowing before
+designing shorthand notation on top of `asCell`, since it is refused today.
 
 ## What it should look like
 
@@ -102,7 +110,7 @@ Reading is one operation reached from several starting points, so the surface
 wants one read command and distinct commands for the distinct ways of arriving:
 
 ```
-# <read opts> = [--shape S] [--filter P] — the shared tail, identical everywhere
+# <read opts> = selection (--schema, or its shorthand) + --filter — identical everywhere
 
 cf get   <addr> [path]           <read opts>
 cf call  <addr> <verb> <payload> <read opts>
@@ -140,7 +148,7 @@ writing cells are not piece operations and stop presenting themselves as ones.
 they belong under `space`, and moving them is part of step 7 rather than
 something this shape decides.
 
-`--shape` throughout, for the reasons above.
+The same selection flags everywhere, split per the reasons above.
 
 ## How to get there
 
@@ -149,8 +157,8 @@ a caller depends on — steps 1–5 only add.
 
 1. **Factor out the shared read step** so a single implementation turns a cell
    and a shape into structured output.
-2. **Give every arrival access to it** — `piece call` gains `--shape` and
-   `--filter`, `wish` gains them, and an address renders identically from each.
+2. **Give every arrival access to it** — `piece call` gains the selection and
+   filter flags, `wish` gains them, and an address renders identically from each.
 3. **`--piece` accepts the `of:` address form**, so an emitted address composes
    into the next command. This is where addressing stops being piece-flavoured
    in practice.

@@ -33,8 +33,8 @@ really is in chapter 8, and storage in chapter 9.
 | **Piece** | A running instance of a pattern in a space. What you address, read, and call. |
 | **Verb** | A piece's callable operation, invoked with `cf piece call`. |
 | **Receipt** | The cell the runtime writes when a verb finishes, holding whatever the verb returned. |
-| **Schema** | A description a cell carries of what it holds. The runtime reads it to decide what to fetch and how to treat each value. |
-| **Shape** | A description a *caller* supplies of what it wants back from a read. Written in schema syntax, but a request rather than a declaration. |
+| **Schema** | A description of data's shape. Schemas are queries here: the runtime reads one to decide which documents to load and how to treat each value. |
+| **Shape** | The schema supplied for one particular read — what this caller wants back. Written concisely or in full. |
 
 Two ideas that carry most of the weight:
 
@@ -44,16 +44,18 @@ stop follows those links onward, and onward again, so an innocuous-looking read
 can return an enormous amount of unrelated data. That is the whole problem this
 work exists to solve.
 
-**Descriptions of data are queries here, not type annotations.** A cell's schema
-is what the runtime consults to decide which documents to load — reactivity is
-literally a subscription to a query whose selector is a schema. A caller's shape
-works the same way in the opposite direction: it becomes the set of paths
-fetched, so links outside it are never followed.
+**Schemas are queries, not type annotations.** This is the schema-on-read
+principle the rest of the system runs on: you describe the shape of the data you
+want, and that description decides what gets loaded. Reactivity is a
+subscription to a query whose selector is a schema, and a read works the same
+way — the schema supplied becomes the set of paths fetched, so links outside it
+are never followed.
 
-Keeping those two apart matters. A **schema** declares what data *is* and
-belongs to the cell; a **shape** asks for what a caller *wants* and belongs to
-the read. They share a syntax and are routinely confused, including by the flag
-that carries them.
+A cell carries a schema and a reader supplies one. They are the same kind of
+artifact; what differs is **authority**, not direction. The cell's schema is
+authoritative for how a value is treated — whether it comes back as a handle,
+what it defaults to, which partition it reads, who may see it. The reader's
+selects among what is there.
 
 ## The model
 

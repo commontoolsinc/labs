@@ -50,15 +50,15 @@ to load. So a shape does not merely trim a result that was already fetched — i
 can stop the fetch from happening. Reshaping what comes back (renaming fields,
 computing values) is `jq`'s job, downstream, where the data is already local.
 
-**A shape is written in schema syntax, but it is a request rather than a
-contract.** Borrowing the syntax is deliberate — a caller can lift a source
-schema and prune it into a request — but the two point in opposite directions: a
-source schema declares what the data *is*, while a shape asks for what the
-caller *wants back*. A shape is also a strict subset, since the annotations that
-give a source schema its meaning are the source's to declare and the composition
-keywords are unsupported. The flag carrying it is spelled `--schema` today;
-[CLI surface shape](cli-surface-shape.md) proposes `--shape`, and this
-asymmetry is why.
+**A shape is a schema, supplied for one read.** This is schema-on-read: a cell
+carries a schema and a reader supplies one, and they are the same kind of
+artifact. What differs is authority — the source's schema governs how a value is
+treated, the reader's selects among what is there. A caller can lift a source
+schema and prune it into a request, which is why the syntax is shared.
+
+What a reader supplies is a strict subset, though: the annotations that decide
+how a value is treated stay the source's, and the composition keywords are
+unsupported. Both restrictions hold whichever syntax the reader writes in.
 
 ### What a shape can say today
 
@@ -88,9 +88,11 @@ combined with an inline schema rather than the concise form, `--filter` requires
 an array root, since the schema then describes the whole returned value rather
 than each item.
 
-There are two kinds of thing a caller's shape may **not** contain, for two
+There are two kinds of thing a reader's schema may **not** contain, for two
 different reasons (`FORBIDDEN_PROJECTION_KEYS` and
-`UNSUPPORTED_PROJECTION_KEYS`, `packages/cli/lib/piece-get-transform.ts`).
+`UNSUPPORTED_PROJECTION_KEYS`, `packages/cli/lib/piece-get-transform.ts`). Both
+are checked against the parsed projection regardless of which syntax produced
+it, so writing the full form does not unlock them.
 
 **Fabric metadata is the source's: `asCell`, `default`, `scope`, `ifc`.** These
 sit beside `type` inside a schema and say what the value at that position *is* —
@@ -134,8 +136,12 @@ Four spellings are available, and the choice is not cosmetic:
 | Path list (`--id-for-paths`) | a second list, parallel to the shape |
 | Marked at the position | a keyword beside `properties`, inside the shape |
 | Selected as a field | a reserved name inside the selection set |
+| Suffixed in the shorthand | a marker on a path — `createdBy.user@` |
 
-Two of them cannot do the job.
+The last is sugar rather than a rival: the shorthand desugars into a schema, so
+it needs one of the others underneath it. It is listed because the shorthand is
+where the common case actually gets typed, and a spelling nobody writes is not
+much of a win. Of the first four, two cannot do the job at all.
 
 **Omission-driven cannot express the case that motivates this.** A caller
 creating a topic usually wants its address *and* one field from it — the title,
@@ -184,9 +190,11 @@ the argument for schema-shaped shapes is that a caller can lift a source schema
 and prune it, which a different query syntax would break.
 
 Whichever wins, the marker must be **projection-only**, not a borrowed `asCell`.
-Callers are barred from supplying `asCell` by name, alongside `ifc`; reusing it
-would either breach that rule or give one keyword two meanings depending on who
-wrote it.
+A reader is barred from supplying `asCell` by name, alongside `ifc`, in either
+syntax; reusing it would either breach that rule or give one keyword two
+meanings depending on who wrote it. That constraint binds the shorthand suffix
+too — reading `@` as "as cell" is the natural intuition, and it is the one
+spelling the current rules refuse.
 
 The mechanism underneath already exists either way, and needs no new traversal
 machinery. A selector can be told to reject a position — load nothing there.
