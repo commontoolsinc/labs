@@ -4,6 +4,7 @@ import {
   getLiftAppliedInnerCall,
   getLiftAppliedInputAndCallback,
   getTypeAtLocationWithFallback,
+  isSyntheticNode,
   isWildcardTraversalCall,
   type NormalizedDataFlow,
   visitEachChildWithJsx,
@@ -1436,7 +1437,7 @@ function reportInlineReactiveRootAccesses(
       // `(items ?? []).map(...)` or similar into a synthesized
       // `.method-on-call` shape that LOOKS like the bug but isn't
       // user-authored. This is a build-time guard for user-authored shapes.
-      node.pos >= 0 &&
+      !isSyntheticNode(node) &&
       // Skip when this access is the callee of a method call AND its
       // immediate receiver is a reactive-origin call itself
       // (`Writable.of(...).for(...)`, `wish(...).key(...)`, etc.). Those

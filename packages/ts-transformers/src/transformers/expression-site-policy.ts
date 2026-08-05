@@ -10,6 +10,7 @@ import {
   isFunctionLikeExpression,
   isInRestrictedReactiveContext,
   isReactiveOriginTaggedTemplate,
+  isSyntheticNode,
   type ReactiveContextInfo,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
@@ -661,7 +662,7 @@ function getHelperBoundaryKind(
     if (
       parent &&
       ts.isCallExpression(parent) &&
-      parent.pos >= 0 &&
+      !isSyntheticNode(parent) &&
       ts.isExpression(current) &&
       parent.arguments.includes(current)
     ) {

@@ -71,6 +71,7 @@ export {
   isFunctionParameter,
   isMethodCall,
   isOptionalMemberSymbol,
+  isSyntheticNode,
   preserveLineage,
   preserveSourceMapRange,
   setParentPointers,

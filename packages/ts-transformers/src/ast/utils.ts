@@ -51,11 +51,27 @@ export function getExpressionText(expr: ts.Expression): string {
 }
 
 /**
- * True when the node — or, if it was cloned/replaced during transformation, its
- * original — carries a real source range: i.e. it is authored pattern code the
- * author can act on, not a compiler-synthesized node. Consulted where a lowering
- * disagreement must be routed either to an author-facing diagnostic (authored
- * node) or a pipeline-invariant throw (synthetic node).
+ * PROVENANCE: true when the node — or, if it was cloned/replaced during
+ * transformation, its original — carries a real source range: i.e. an author
+ * wrote this code and can act on a diagnostic anchored to it. Consulted where
+ * a lowering disagreement must be routed either to an author-facing diagnostic
+ * (authored node) or a pipeline-invariant throw (synthetic node).
+ *
+ * This is one of two deliberately OPPOSITE questions about a node's origin —
+ * pick by what the answer is used for:
+ *
+ * - `hasAuthoredSourceSite` (this) looks THROUGH `getOriginalNode`: a
+ *   transformer-created clone of authored code still counts as authored,
+ *   because the author's text exists and a diagnostic can point at it.
+ * - {@link isSyntheticNode} deliberately does NOT look through originals: a
+ *   clone is synthetic no matter what it was cloned from, because the passes
+ *   asking that question care about who CREATED the node (idempotency /
+ *   ownership — "don't reprocess helper calls a pass emitted"), not whose
+ *   text it descends from.
+ *
+ * Using this predicate where {@link isSyntheticNode} is meant misclassifies
+ * synthetic clones as authored and re-enters subtrees a pass already owns;
+ * the reverse silently drops diagnostics for authored code that was cloned.
  */
 export function hasAuthoredSourceSite(node: ts.Node): boolean {
   if (node.getSourceFile() && node.pos >= 0) {
@@ -66,6 +82,21 @@ export function hasAuthoredSourceSite(node: ts.Node): boolean {
   return original !== node &&
     !!original.getSourceFile() &&
     original.pos >= 0;
+}
+
+/**
+ * IDENTITY: true when this node object was created by a transformer factory
+ * rather than the parser — it carries no real source range of its own.
+ * Deliberately ignores `getOriginalNode`: see the contrast table on
+ * {@link hasAuthoredSourceSite} before choosing between the two.
+ *
+ * This is the package's one spelling of the pos-based synthetic check
+ * (`pos < 0 || end < 0`). Factory nodes are created with `(-1, -1)`;
+ * `setTextRange`/lineage helpers set both ends together, so a half-set range
+ * is treated as synthetic rather than trusted.
+ */
+export function isSyntheticNode(node: ts.Node): boolean {
+  return node.pos < 0 || node.end < 0;
 }
 
 /**
