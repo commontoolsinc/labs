@@ -55,8 +55,13 @@ export interface DomApplicatorOptions {
   /** Callback when a DOM event needs to be sent back to the worker */
   onEvent: (message: DomEventMessage) => void;
 
-  /** RuntimeClient for creating CellHandles from CellRefs */
-  runtimeClient: RuntimeClient;
+  /**
+   * `RuntimeClient` for turning a `CellRef` into a live handle. A host with no
+   * client-side runtime proxy — the CLI, which drives the reconciler in its own
+   * process and serializes the result — omits it, and a bidirectional binding
+   * is then applied as the plain cell reference it names.
+   */
+  runtimeClient?: RuntimeClient;
 
   /** Optional callback for errors */
   onError?: (error: Error) => void;
@@ -80,7 +85,7 @@ export class DomApplicator {
   private readonly nodeChildren = new Map<number, Set<number>>();
   private readonly document: Document;
   private readonly onEvent: (message: DomEventMessage) => void;
-  private readonly runtimeClient: RuntimeClient;
+  private readonly runtimeClient?: RuntimeClient;
   private readonly onError?: (error: Error) => void;
   private readonly setPropHandler: SetPropHandler;
   private pendingChildInserts: PendingChildInsert[] = [];
@@ -386,6 +391,13 @@ export class DomApplicator {
   private setBinding(nodeId: number, propName: string, cellRef: CellRef): void {
     const node = this.nodes.get(nodeId);
     if (!isElementNode(node)) return;
+
+    if (!this.runtimeClient) {
+      // No client-side runtime to hand the element a live handle; the
+      // reference is what this host can say about the binding.
+      this.setPropHandler(node, propName, cellRef);
+      return;
+    }
 
     const existing = (node as any)[propName];
     if (

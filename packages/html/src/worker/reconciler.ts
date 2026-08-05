@@ -5,20 +5,18 @@
  * accessed synchronously. It emits VDomOp operations that are batched
  * and sent to the main thread for DOM application.
  *
- * Key differences from main-thread render.ts:
- * - Uses Cell directly instead of CellHandle
- * - Uses cell.sink() instead of effect() for subscriptions
- * - Emits VDomOp operations instead of DOM mutations
- * - Batches operations using queueMicrotask()
+ * It works with a `Cell` rather than a `CellHandle`, subscribes through
+ * `cell.sink()`, and batches the operations it produces onto a microtask rather
+ * than touching the DOM itself.
  *
  * Sub-piece cell regions: the retired cf-cell-context overlay could outline
- * the region of the page each cell rendered, because the legacy main-thread
- * renderer held the cells while it built the DOM. This reconciler is the
- * place that knowledge crosses the worker boundary, so restoring that kind
- * of inspection (e.g. routing a region to cf-piece-menu's Data/Actions
- * panels) means tagging emitted VDomOps with the cell identity whenever
- * reconciliation crosses a cell boundary, and letting the main thread mark
- * the applied DOM ranges. Nothing does that yet; this note is the marker.
+ * the region of the page each cell rendered, because the renderer that held
+ * the cells also built the DOM. This reconciler is the place that knowledge
+ * crosses the worker boundary, so restoring that kind of inspection (e.g.
+ * routing a region to cf-piece-menu's Data/Actions panels) means tagging
+ * emitted VDomOps with the cell identity whenever reconciliation crosses a
+ * cell boundary, and letting the main thread mark the applied DOM ranges.
+ * Nothing does that yet; this note is the marker.
  */
 
 import {
@@ -364,6 +362,16 @@ export class WorkerReconciler {
       this.queueOps([{ op: "remove-node", nodeId: this.rootChildId }]);
       this.rootChildId = null;
     }
+    this.flushOps();
+  }
+
+  /**
+   * Deliver operations that reconciliation has queued but not yet handed to
+   * `onOps`. Queued operations otherwise leave on a microtask, so a host that
+   * reads the applied result at a chosen moment — the CLI turning a piece's UI
+   * into HTML — calls this first to make that moment definite.
+   */
+  flush(): void {
     this.flushOps();
   }
 

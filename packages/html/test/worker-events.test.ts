@@ -297,6 +297,32 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals(serialized.target?.dataset?.baz, "qux");
   });
 
+  await t.step("serializes a multiple-select target's chosen options", () => {
+    // `serializeEvent` recognizes the option list by its DOM type, so the test
+    // has to supply that type: Deno has no DOM, and the global is what the
+    // production check reads.
+    class TestHTMLCollection extends Array<{ value: string }> {}
+    const globals = globalThis as { HTMLCollection?: unknown };
+    const savedHTMLCollection = globals.HTMLCollection;
+    globals.HTMLCollection = TestHTMLCollection;
+    try {
+      const selectedOptions = TestHTMLCollection.from([
+        { value: "a" },
+        { value: "c" },
+      ]);
+      const target = { value: "a", selectedOptions };
+      const event = new MockEvent("change", { target }) as unknown as Event;
+
+      const serialized = serializeEvent(event);
+      assertEquals(serialized.target?.selectedOptions, [
+        { value: "a" },
+        { value: "c" },
+      ]);
+    } finally {
+      globals.HTMLCollection = savedHTMLCollection;
+    }
+  });
+
   await t.step("serializes custom event detail", () => {
     const event = new MockCustomEvent("custom", {
       detail: { message: "hello", count: 42 },
