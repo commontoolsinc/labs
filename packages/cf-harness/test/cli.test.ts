@@ -1841,9 +1841,8 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
 Deno.test("runCfHarnessCli forwards --compact-threshold to a fresh run", async () => {
   // Parsing was already covered; this pins the handoff. The option was
   // forwarded on the resume path only, so a fresh run silently lost it.
-  const { io, stdout, stderr } = createIoBuffers();
+  const { io } = createIoBuffers();
   let createdOptions: Record<string, unknown> | undefined;
-  let runPromptOptions: RunHarnessPromptOptions | undefined;
   const exitCode = await runCfHarnessCli(
     [
       "--workspace",
@@ -1864,8 +1863,7 @@ Deno.test("runCfHarnessCli forwards --compact-threshold to a fresh run", async (
       createPromptLoop: (options) => {
         createdOptions = options as Record<string, unknown>;
         return {
-          runPrompt: (options) => {
-            runPromptOptions = options;
+          runPrompt: () => {
             return Promise.resolve(
               ({
                 model: "gpt-5.4",
