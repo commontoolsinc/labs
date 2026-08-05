@@ -16,9 +16,7 @@ let envTypesCache: Record<EnvTypeKey, string> | undefined;
 let sourceFileCache: Map<string, ts.SourceFile> | undefined;
 
 export interface TransformOptions {
-  mode?: "transform" | "error";
   types?: Record<string, string>;
-  logger?: (message: string) => void;
   typeCheck?: boolean;
   precomputedDiagnostics?: ts.Diagnostic[];
   /** If provided, pipeline diagnostics will be pushed into this array after transformation. */
@@ -295,9 +293,7 @@ export async function transformFiles(
   options: TransformOptions = {},
 ): Promise<Record<string, string>> {
   const {
-    mode = "transform",
     types = {},
-    logger,
     typeCheck = false,
   } = options;
   if (!envTypesCache) {
@@ -499,24 +495,12 @@ export async function transformFiles(
   const program = ts.createProgram(rootFiles, compilerOptions, host);
 
   // Type checking - only run diagnostics if needed
-  if (typeCheck || logger) {
+  if (typeCheck) {
     // Use precomputed diagnostics if provided, otherwise compute them
     const diagnostics = options.precomputedDiagnostics ??
       ts.getPreEmitDiagnostics(program);
 
-    if (logger && diagnostics.length > 0) {
-      logger("=== TypeScript Diagnostics ===");
-      diagnostics.forEach((diagnostic) => {
-        const message = ts.flattenDiagnosticMessageText(
-          diagnostic.messageText,
-          "\n",
-        );
-        logger(`${diagnostic.file?.fileName || "unknown"}: ${message}`);
-      });
-      logger("=== End Diagnostics ===");
-    }
-
-    if (typeCheck && diagnostics.length > 0) {
+    if (diagnostics.length > 0) {
       // Filter to only input file diagnostics (not from type definition files)
       const inputFileDiagnostics = diagnostics.filter((diagnostic) =>
         diagnostic.file &&
@@ -578,8 +562,6 @@ export async function transformFiles(
   }
 
   const pipeline = new CommonFabricTransformerPipeline({
-    mode,
-    logger,
     moduleIdentities: options.moduleIdentities,
     state: options.state,
     assertDiagnostics: options.assertDiagnostics,
@@ -606,12 +588,6 @@ export async function transformFiles(
     const output = printer.printFile(transformedFile);
     result.dispose?.();
 
-    if (logger) {
-      logger(
-        `\n=== TEST TRANSFORMER OUTPUT ===\n${output}\n=== END OUTPUT ===`,
-      );
-    }
-
     out[fileName] = output;
   }
   if (options.pipelineDiagnostics) {
@@ -624,21 +600,6 @@ export async function transformFiles(
   }
   return out;
 }
-
-export async function checkWouldTransform(
-  source: string,
-  types: Record<string, string> = {},
-): Promise<boolean> {
-  // Use validateSource to check if there are any transformation diagnostics
-  const { diagnostics } = await validateSource(source, {
-    mode: "error",
-    types,
-  });
-  // If there are any diagnostics, transformation would be needed
-  return diagnostics.length > 0;
-}
-
-transformSource.checkWouldTransform = checkWouldTransform;
 
 /**
  * Validates source code and returns any diagnostics from the transformer pipeline.
@@ -670,9 +631,7 @@ export async function validateFiles(
   outputs: Record<string, string>;
 }> {
   const {
-    mode = "transform",
     types = {},
-    logger,
   } = options;
   if (!envTypesCache) {
     envTypesCache = await loadEnvironmentTypes();
@@ -856,8 +815,6 @@ export async function validateFiles(
 
   const program = ts.createProgram(rootFiles, compilerOptions, host);
   const pipeline = new CommonFabricTransformerPipeline({
-    mode,
-    logger,
     moduleIdentities: options.moduleIdentities,
     state: options.state,
     assertDiagnostics: options.assertDiagnostics,

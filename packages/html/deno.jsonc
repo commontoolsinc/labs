@@ -11,12 +11,10 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
-    "./utils": "./src/utils.ts",
     "./jsx-runtime": "./src/jsx-runtime.ts",
     "./jsx-dev-runtime": "./src/jsx-dev-runtime.ts",
     "./mock-doc": "./src/mock-doc.ts",
     "./worker": "./src/worker/mod.ts",
-    "./main": "./src/main/mod.ts",
     "./vdom-ops": "./src/vdom-ops.ts",
     "./debug": "./src/debug.ts"
   },

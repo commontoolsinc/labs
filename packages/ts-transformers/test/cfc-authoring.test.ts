@@ -183,7 +183,6 @@ function transformWithSchemaInjection(source: string): string {
 
   const program = ts.createProgram(rootFiles, compilerOptions, host);
   const transformer = new SchemaInjectionTransformer({
-    mode: "transform",
     state: new CrossStageState(),
   });
   const sourceFile = program.getSourceFile(fileName);
