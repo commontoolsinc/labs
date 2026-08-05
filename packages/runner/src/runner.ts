@@ -3198,7 +3198,14 @@ export class Runner {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const ownership = this.createDeferredStartOwnership(resultCell);
     tx.addCommitCallback((_committedTx, result) => {
-      if (result.error || ownership.isCancelled()) return;
+      if (result.error) {
+        // Settled here for the same reason as the start above: this callback
+        // is the only thing that reaches the pending entry, so a failed
+        // transaction would otherwise strand it under the result's key.
+        ownership.cancel();
+        return;
+      }
+      if (ownership.isCancelled()) return;
 
       const startTx = this.runtime.edit();
       const committedResultCell = this.runtime.getCellFromLink<T>(

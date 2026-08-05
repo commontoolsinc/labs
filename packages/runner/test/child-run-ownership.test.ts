@@ -5,7 +5,10 @@ import type { OpaqueCell } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { Cell } from "../src/cell.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  trustExecutable,
+} from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 
 // The four guarantees a child run carries beyond "whoever created it stops it".
@@ -366,6 +369,50 @@ describe("child run ownership", () => {
     // nothing behind for the result's key.
     expect(runtime.runner.cancels.has(key(result))).toBe(false);
     expect(pending.size).toBe(0);
+  });
+
+  it("stops tracking a commit-gated pattern run when its transaction fails", async () => {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    // The commit-gated run a navigateTo handler schedules goes through its own
+    // entry point, reached here directly: driving it through a handler would
+    // mean failing whichever storage transaction the dispatch happened to
+    // land on.
+    const harness = runtime.runner as unknown as {
+      runPatternAfterSuccessfulCommit(
+        tx: unknown,
+        resultCell: unknown,
+        pattern: unknown,
+        inputs: unknown,
+        pullOnceAfterStart?: boolean,
+        markCreateOnlyResult?: boolean,
+      ): () => void;
+      pendingDeferredStarts: Map<string, Set<unknown>>;
+    };
+    const tx = runtime.edit();
+    const receipt = runtime.getCell<Record<string, unknown>>(
+      space,
+      "deferred pattern run whose transaction fails",
+      undefined,
+      tx,
+    );
+    harness.runPatternAfterSuccessfulCommit(
+      tx,
+      receipt,
+      trustExecutable(runtime, Piece),
+      { value: 3 },
+      true,
+      true,
+    );
+    expect(harness.pendingDeferredStarts.size).toBe(1);
+
+    expect(tx.abort("handler rejected").error).toBeUndefined();
+    await runtime.idle();
+
+    expect(harness.pendingDeferredStarts.size).toBe(0);
+    expect(runtime.runner.cancels.has(key(receipt))).toBe(false);
   });
 
   it("declines to release a result that has no registration", () => {
