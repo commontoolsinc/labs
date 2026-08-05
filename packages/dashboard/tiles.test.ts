@@ -602,10 +602,10 @@ Deno.test("benchmark: fewer than a week of days claims no trend", () => {
   assertEquals(trendPct(t([100, 500, 2000]), [100, 500, 2000]), 0);
 });
 
-Deno.test("benchmark: Theil–Sen trend ignores a lone spike", () => {
+Deno.test("benchmark: the trend ignores a lone spike", () => {
   const flat = [100, 100, 100, 100, 100, 100, 100, 100];
   const spiked = [...flat];
-  spiked[3] = 400; // a 4x outlier — least squares would flag it, the median slope doesn't
+  spiked[3] = 400; // a 4x outlier — a median level does not move to meet it
   const times = flat.map((_, i) => i * 86_400_000);
   assertEquals(trendStatus(trendPct(times, spiked)), "good");
 });

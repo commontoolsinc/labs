@@ -300,4 +300,82 @@ describe("CT-1240: query result proxy enumeration", () => {
       popFrame(frame);
     }
   });
+  // A trap that answers about OWN properties must not consult the prototype
+  // chain. It used to use `in`, so every member of `Object.prototype` came back
+  // as an own property of the proxy while `ownKeys` listed none of them -- two
+  // traps describing the same value, disagreeing. Downstream that made a
+  // read-back record unwritable: `unsafeObjectKeyIn()` refuses a `FabricValue`
+  // with own `__proto__`/`constructor` and asks with `Object.hasOwn()`, so
+  // writing a record back to a cell was rejected over keys it never had
+  // (loom CT-1949).
+  it("getOwnPropertyDescriptor does not report inherited names as own", () => {
+    const cell = runtime.getCell<{ a: number }>(
+      space,
+      "test-own-descriptor-not-inherited",
+      undefined,
+      tx,
+    );
+    cell.set({ a: 1 });
+
+    const proxy = createQueryResultProxy<{ a: number }>(
+      runtime,
+      tx,
+      cell.getAsNormalizedFullLink(),
+      0,
+      true,
+    );
+
+    // The two names the FabricValue boundary reserves, plus enough of
+    // `Object.prototype` to show this is about inheritance generally and not a
+    // special case for those two.
+    for (
+      const inherited of [
+        "__proto__",
+        "constructor",
+        "toString",
+        "valueOf",
+        "hasOwnProperty",
+        "isPrototypeOf",
+        "propertyIsEnumerable",
+        "toLocaleString",
+      ]
+    ) {
+      expect(Object.hasOwn(proxy, inherited)).toBe(false);
+      expect(Object.getOwnPropertyDescriptor(proxy, inherited)).toBe(undefined);
+    }
+
+    // A name that is genuinely absent stays absent, and a real own key is
+    // still reported -- so the fix narrowed the answer without emptying it.
+    expect(Object.hasOwn(proxy, "definitelyNotAKeyAnywhere")).toBe(false);
+    expect(Object.hasOwn(proxy, "a")).toBe(true);
+
+    // The two traps now agree, which is the property that was violated.
+    for (const key of Reflect.ownKeys(proxy)) {
+      expect(Object.hasOwn(proxy, key as string)).toBe(true);
+    }
+  });
+
+  // `in` IS the `has` trap's own operator, so inherited names SHOULD answer
+  // true there. Pinned so a future cleanup does not "fix" both traps alike.
+  it("the `in` operator still sees inherited names", () => {
+    const cell = runtime.getCell<{ a: number }>(
+      space,
+      "test-in-operator-still-inherits",
+      undefined,
+      tx,
+    );
+    cell.set({ a: 1 });
+
+    const proxy = createQueryResultProxy<{ a: number }>(
+      runtime,
+      tx,
+      cell.getAsNormalizedFullLink(),
+      0,
+      true,
+    );
+
+    expect("toString" in proxy).toBe(true);
+    expect("a" in proxy).toBe(true);
+    expect("definitelyNotAKeyAnywhere" in proxy).toBe(false);
+  });
 });
