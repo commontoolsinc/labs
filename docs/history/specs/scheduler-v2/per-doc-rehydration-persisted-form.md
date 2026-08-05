@@ -2,9 +2,7 @@
 status: historical
 created: 2026-07-14
 archived: 2026-08-04
-reason: "The persisted-form account extracted from per-doc-rehydration.md:
-  the snapshot listing, per-doc rehydration, and always-run machinery it
-  describes were deleted by server-execution v2 Phase 1 stage C.2."
+reason: "The persisted-form account extracted from per-doc-rehydration.md: the snapshot listing, per-doc rehydration, and always-run machinery it describes were deleted by server-execution v2 Phase 1 stage C.2."
 superseded-by: docs/specs/scheduler-v2/per-doc-rehydration.md
 ---
 
@@ -14,7 +12,7 @@ Status: Implemented behind the persistent-scheduler-state flag.
 Scope: persistent-scheduler-state flag ON only (`getPersistentSchedulerStateConfig()`);
 flag-off behavior is unchanged. Companions:
 [persistent scheduler state](../persistent-scheduler-state.md) defines the
-durable model, and [Scheduler v2](README.md#9-persistence-and-rehydration)
+durable model, and [Scheduler v2](../../../specs/scheduler-v2/README.md#9-persistence-and-rehydration)
 defines the resume model. Follow-up CT from PR #4288.
 
 ## 1. Problem addressed

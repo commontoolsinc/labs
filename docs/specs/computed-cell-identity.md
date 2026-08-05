@@ -120,10 +120,10 @@ transactions, but only in process memory:
 - Event dispatch sets `tx.dispatchedEventId` and `tx.tx.immediate`
   (`packages/runner/src/scheduler/events.ts`).
 
-Behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`, reactive runs attach a
-`SchedulerActionObservation` to their commit with
-`actionKind: "computation" | "effect"`; the event path attaches no
-observation, so the `"event-handler"` kind is currently never produced.
+(A retired mechanism once attached a `SchedulerActionObservation` to
+reactive runs' commits behind `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`;
+both were deleted by server-execution v2 Phase 1 stage C — see
+[the archived spec](../history/specs/persistent-scheduler-state.md).)
 
 ### Commit conflict handling
 

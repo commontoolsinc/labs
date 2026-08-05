@@ -2,16 +2,14 @@
 status: historical
 created: 2026-07-14
 archived: 2026-08-04
-reason: "Implemented design for a persistentSchedulerState-gated feature;
-  the observation carriage it rode was deleted by server-execution v2
-  Phase 1 stage C.2, taking the adoption machinery with it."
+reason: "Implemented design for a persistentSchedulerState-gated feature; the observation carriage it rode was deleted by server-execution v2 Phase 1 stage C.2, taking the adoption machinery with it."
 superseded-by: docs/specs/server-side-execution/serving-loop.md
 ---
 
 # Incremental observation adoption (subscription-carried scheduler state)
 
 Status: Implemented. Successor to
-[per-document rehydration](per-doc-rehydration.md), where reload is the
+[per-document rehydration](per-doc-rehydration-persisted-form.md), where reload is the
 degenerate case of this mechanism. Flag-on only
 (`persistentSchedulerState`). Goal: with the flag on, multi-user flows get
 FASTER than main — clients use scheduler information to skip work in ongoing

@@ -5,7 +5,6 @@ import {
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import {} from "@commonfabric/memory/v2";
 import type { EntityKind } from "./entity-kind.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
