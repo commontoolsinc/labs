@@ -36,8 +36,8 @@ function encodableFormMethod(value: unknown): (() => unknown) | undefined {
 /**
  * Checks whether a value can produce an encodable form of itself.
  *
- * BROADER than the walk's own test (`ownEncodableFormMethod()`), and
- * intentionally: this accepts an INHERITED member, which is how a cell
+ * _Broader_ than the walk's own test (`ownEncodableFormMethod()`), and
+ * intentionally: this accepts an _inherited_ member, which is how a cell
  * satisfies it, a class putting its methods on the prototype. The walk requires
  * an own member; see there for what that buys it.
  */
@@ -86,7 +86,7 @@ type OnCopy = (copy: unknown, original: unknown) => void;
 /**
  * Asked about each value the walk neither descends into nor replaces itself,
  * and returns what should stand in its place -- the value itself to leave it
- * alone. This is how a caller says what ELSE has no fabric representation: a
+ * alone. This is how a caller says what _else_ has no fabric representation: a
  * `Cell`, whose encodable form is the link it stands for. Recognizing one takes
  * `isCell()`, which lives in the runtime's core, so the knowledge arrives as a
  * function rather than an import.
@@ -108,7 +108,8 @@ type AnyFunction = (...args: never[]) => unknown;
  * pattern author put it -- under a tool's `handler` key, in a result, inside a
  * node's `inputs` -- so finding one takes a walk.
  *
- * The `toEncodableForm` name is what bounds the subject to BUILDER ARTIFACTS.
+ * The `toEncodableForm` name is what bounds the subject to _builder
+ * artifacts_.
  * An artifact carries `toJSON` as well, delegating to the same serializer (see
  * `builder/json-member.ts`), but that name belongs to `JSON.stringify` and the
  * conversion gives it no standing: a plain object carrying a `toJSON` of its
@@ -116,7 +117,7 @@ type AnyFunction = (...args: never[]) => unknown;
  * member it is.
  *
  * An artifact is reached in two shapes and both are covered: a module is an
- * object, and a factory is a FUNCTION carrying its module's members (the
+ * object, and a factory is a _function_ carrying its module's members (the
  * `Object.assign` in `builder/module.ts`). A function is replaced but never
  * descended into: its members are the builder's, not content.
  *
@@ -200,7 +201,7 @@ function replace(
   if (isArray) {
     flattened = replaceInElements(value, seen, onCopy, replaceOther);
   } else {
-    // The artifact's OWN method is what gets read and called, rather than the
+    // The artifact's _own_ method is what gets read and called, rather than the
     // serializer it delegates to: the method a copy carries is closed over the
     // artifact the copy was made from, and that original is what the
     // serialized form describes.
@@ -221,7 +222,7 @@ function replace(
  * Helper for `replace()`, which offers a value the walk does not descend into
  * to `replaceOther` and records whatever comes back.
  *
- * The replacement is NOT descended into: what the hook returns stands for the
+ * The replacement is _not_ descended into: what the hook returns stands for the
  * value itself -- a link, say -- and only a container gets descended into.
  */
 function replaced(
@@ -269,11 +270,11 @@ function replaceInElements(
   onCopy: OnCopy,
   replaceOther: ReplaceOther,
 ): readonly unknown[] {
-  // Read each element ONCE, and build any copy from what was read -- the
+  // Read each element _once_, and build any copy from what was read -- the
   // array counterpart of the entries `replaceInEntries` materializes, for the
   // same reason. Copying by re-reading (`slice()`, or an index-by-index pass
   // over the original) runs an accessor-backed element a second time and
-  // keeps THAT value, storing a value the array never held at any single
+  // keeps _that_ value, storing a value the array never held at any single
   // moment and which the walk never inspected.
   //
   // So the result is built as it goes rather than cloned at the first change:
@@ -305,7 +306,7 @@ function replaceInEntries(
   onCopy: OnCopy,
   replaceOther: ReplaceOther,
 ): Record<string, unknown> {
-  // Read each member ONCE, and build any copy from what was read: reading a
+  // Read each member _once_, and build any copy from what was read: reading a
   // second time to copy would run an accessor twice and keep the second
   // value, so a value whose members are accessor-backed would be recorded
   // as something it never was at any single moment.
@@ -335,7 +336,7 @@ function replaceInEntries(
 function ownEncodableFormMethod(
   value: object | ((...args: unknown[]) => unknown),
 ): (() => unknown) | undefined {
-  // OWN, not inherited: an inherited member is not the value's own serializer,
+  // _Own_, not inherited: an inherited member is not the value's own
   // and a single assignment to `Object.prototype.toEncodableForm` would
   // otherwise route every plain object in the process through here.
   if (!Object.hasOwn(value, "toEncodableForm")) return undefined;

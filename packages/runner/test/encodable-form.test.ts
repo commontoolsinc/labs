@@ -83,7 +83,7 @@ describe("encodable-form", () => {
         });
       });
 
-      it("replaces a FUNCTION-shaped artifact", () => {
+      it("replaces a _function_-shaped artifact", () => {
         // A factory is a function carrying its module's members, so an artifact
         // is reached in two shapes and both have to be covered. This is the
         // shape the live idiom produces: `tools: { x: { pattern: SomePattern } }`.
@@ -98,7 +98,7 @@ describe("encodable-form", () => {
         // time and keeps that second answer, storing a value the array never
         // held at any single moment and which the walk never inspected.
         //
-        // Order matters. The accessor sits BEFORE the artifact, so it has
+        // Order matters. The accessor sits _before_ the artifact, so it has
         // already been read by the time the artifact forces a copy -- which is
         // exactly the window a copy-by-re-reading reads it in again.
         let reads = 0;
@@ -154,7 +154,7 @@ describe("encodable-form", () => {
         expect(reads).toBe(1);
       });
 
-      it("reads an accessor-backed serializer on a FUNCTION once", () => {
+      it("reads an accessor-backed serializer on a _function_ once", () => {
         // The function branch classifies and invokes separately too, and a
         // factory is a function carrying its module's members.
         let reads = 0;
@@ -170,7 +170,7 @@ describe("encodable-form", () => {
         expect(reads).toBe(1);
       });
 
-      it("invokes a FUNCTION artifact's serializer once, on the artifact", () => {
+      it("invokes a _function_ artifact's serializer once, on the artifact", () => {
         // The object branch has the shared-artifact case below to pin its
         // invoke count, and the pre-existing receiver case under
         // `encodableFormOf()` pins the shared invoke. Neither reaches the
@@ -326,9 +326,9 @@ describe("encodable-form", () => {
     });
 
     describe("the `replaceOther` hook", () => {
-      // The hook is how a caller names what ELSE has no fabric representation.
-      // Nothing else in this file passes a non-identity one, so this is the only
-      // place the hook's replacement is exercised at all.
+      // The hook is how a caller names what _else_ has no fabric
+      // representation. Nothing else in this file passes a non-identity one, so
+      // this is the only place the hook's replacement is exercised at all.
       const viaHook = (value: unknown, replace: (v: object) => unknown) => {
         const seen: { copy: unknown; original: unknown }[] = [];
         const result = replaceArtifacts(
@@ -400,7 +400,7 @@ describe("encodable-form", () => {
         expect(announced!.copy).toBe(result);
       });
 
-      it("is NOT told about a value that came back unchanged", () => {
+      it("is _not_ told about a value that came back unchanged", () => {
         // Answered by identity, so there is no copy and nothing to carry.
         const { seen } = copies({ a: 1, b: { c: [1, 2, 3] } });
         expect(seen).toEqual([]);
@@ -433,7 +433,7 @@ describe("encodable-form", () => {
       expect(hasEncodableForm({ toJSON: () => ({}) })).toBe(false);
     });
 
-    it("returns true for an INHERITED member", () => {
+    it("returns true for an _inherited_ member", () => {
       // Deliberately broader than the walk's own test: callers here ask about
       // a specific value they hold, not about every object in a graph.
       class Serializable {
@@ -444,7 +444,7 @@ describe("encodable-form", () => {
       expect(hasEncodableForm(new Serializable())).toBe(true);
     });
 
-    it("returns true for a FUNCTION carrying the member", () => {
+    it("returns true for a _function_ carrying the member", () => {
       expect(hasEncodableForm(Object.assign(() => {}, {
         toEncodableForm: () => ({}),
       }))).toBe(true);
@@ -483,7 +483,7 @@ describe("encodable-form", () => {
     });
 
     it("returns the result of a member only `Reflect.apply` can call", () => {
-      // A method can arrive wrapped in a proxy that answers EVERY property
+      // A method can arrive wrapped in a proxy that answers _every_ property
       // read with something of its own, so nothing read off the method --
       // `.call` included -- is callable, while the method itself still is. So
       // the invoke has to reach a function's call behavior rather than read a
@@ -491,7 +491,7 @@ describe("encodable-form", () => {
       //
       // The live producer of that shape is the reactive proxy in `cell.ts`: a
       // `cellMethods` name comes back as a proxy over the bound method, and
-      // every read off THAT is data navigation.
+      // every read off _that_ is data navigation.
       const method = new Proxy(function () {
         return { invoked: true };
       }, { get: () => ({ notAFunction: true }) });
