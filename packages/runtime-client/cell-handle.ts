@@ -516,13 +516,15 @@ export class CellHandle<T = unknown> {
    *
    * `CellHandle.deserialize()` is the inverse.
    */
-  // TODO(danfuzz): this does not handle the whole of its stated input. A
-  // `FabricSpecialObject` is a `ClientCellValue`, and `isRecord()` reports one,
-  // so it reaches the record branch below and is rebuilt from its (empty)
-  // enumerable members -- `{}` in place of a `FabricBytes`. `WireCellValue`
-  // cannot represent one either, so the fix is a refusal here rather than a
-  // conversion, and belongs with the wire gap marked on that type.
   static serialize(value: ClientCellValue): WireCellValue {
+    // TODO(danfuzz): this does not handle the whole of its stated input. A
+    // `FabricSpecialObject` is a `ClientCellValue`, and `isRecord()` reports
+    // one, so it reaches the record branch below and is rebuilt from its
+    // (empty) enumerable members -- `{}` in place of a `FabricBytes`.
+    // `WireCellValue` cannot represent one either, so the fix is a refusal
+    // here rather than a conversion, and belongs with the wire gap marked on
+    // that type.
+
     if (isCellHandle(value)) return value.ref();
 
     if (Array.isArray(value)) {
