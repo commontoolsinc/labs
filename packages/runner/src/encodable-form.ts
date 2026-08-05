@@ -36,7 +36,7 @@ function encodableFormMethod(value: unknown): (() => unknown) | undefined {
 /**
  * Checks whether a value can produce an encodable form of itself.
  *
- * Deliberately BROADER than the walk's own test (`hasOwnEncodableForm`): this
+ * Deliberately BROADER than the walk's own test (`ownEncodableFormMethod`): this
  * accepts an inherited member, because its callers ask about a specific value
  * they already hold -- a pattern, a cell -- rather than sifting an arbitrary
  * graph. A cell satisfies this through an inherited member, that being where a
@@ -53,14 +53,21 @@ export function hasEncodableForm(value: unknown): boolean {
  */
 export function encodableFormOf(value: unknown): unknown {
   const method = encodableFormMethod(value);
-  if (method === undefined) return undefined;
+  return method === undefined ? undefined : encodableFormFrom(method, value);
+}
 
-  // `Reflect.apply`, and not the method's own `.call`. A proxy answers each
-  // property read however it likes, so a proxied function can report `typeof
-  // "function"` while what its `.call` yields is not callable at all.
-  // `Reflect.apply` reaches a function's call behavior directly rather than
-  // reading a property off it, which holds whether the method in hand arrived
-  // plain or through a proxy.
+/**
+ * Invokes an already-read `toEncodableForm` on the value it was read from. The
+ * one place either reader here calls what it found.
+ *
+ * `Reflect.apply`, and not the method's own `.call`. A proxy answers each
+ * property read however it likes, so a proxied function can report `typeof
+ * "function"` while what its `.call` yields is not callable at all.
+ * `Reflect.apply` reaches a function's call behavior directly rather than
+ * reading a property off it, which holds whether the method in hand arrived
+ * plain or through a proxy.
+ */
+function encodableFormFrom(method: () => unknown, value: unknown): unknown {
   return Reflect.apply(method, value, []);
 }
 
@@ -155,12 +162,13 @@ function replace(
   // the builder, and a function that is not an artifact has no fabric
   // representation for the conversion to find either way.
   if (isFunction) {
-    if (!hasOwnEncodableForm(value)) {
+    const method = ownEncodableFormMethod(value);
+    if (method === undefined) {
       return replaced(value, replaceOther, seen, onCopy);
     }
     seen.set(value, IN_PROGRESS);
     return copied(
-      replace(value.toEncodableForm(), seen, onCopy, replaceOther),
+      replace(encodableFormFrom(method, value), seen, onCopy, replaceOther),
       value,
       seen,
       onCopy,
@@ -185,15 +193,21 @@ function replace(
   }
 
   seen.set(value, IN_PROGRESS);
+  const method = isArray ? undefined : ownEncodableFormMethod(value);
   let flattened: unknown;
   if (isArray) {
     flattened = replaceInElements(value, seen, onCopy, replaceOther);
-  } else if (hasOwnEncodableForm(value)) {
+  } else if (method !== undefined) {
     // The artifact's OWN method is what gets called, rather than the
     // serializer it delegates to: the method a copy carries is closed over the
     // artifact the copy was made from, and that original is what the
     // serialized form describes.
-    flattened = replace(value.toEncodableForm(), seen, onCopy, replaceOther);
+    flattened = replace(
+      encodableFormFrom(method, value),
+      seen,
+      onCopy,
+      replaceOther,
+    );
   } else {
     flattened = replaceInEntries(
       value as Record<string, unknown>,
@@ -303,8 +317,16 @@ function replaceInEntries(
 }
 
 /**
- * Checks whether a value carries its own callable `toEncodableForm` method --
- * the walk's test for "this is a builder artifact".
+ * Reads a value's own callable `toEncodableForm` method, or `undefined` when it
+ * has none -- the walk's test for "this is a builder artifact", and the method
+ * it then invokes.
+ *
+ * Reading it ONCE is the point of returning it rather than reporting a boolean.
+ * The member may be accessor-backed, and asking a second time to invoke what the
+ * first answer only classified would run that accessor again and serialize
+ * whatever it produced the second time. The walk holds the rest of this module
+ * to reading each element and each member once; this is the same rule for the
+ * serializer itself.
  *
  * OWN, not inherited: an inherited member is not the value's own serializer, so
  * a single assignment to `Object.prototype.toEncodableForm` would otherwise
@@ -326,10 +348,10 @@ function replaceInEntries(
  * the JSON protocol's member, which is a question about user data, not about
  * builder artifacts.
  */
-function hasOwnEncodableForm(
+function ownEncodableFormMethod(
   value: object | ((...args: unknown[]) => unknown),
-): value is { toEncodableForm(): unknown } {
-  return Object.hasOwn(value, "toEncodableForm") &&
-    typeof (value as { toEncodableForm: unknown }).toEncodableForm ===
-      "function";
+): (() => unknown) | undefined {
+  if (!Object.hasOwn(value, "toEncodableForm")) return undefined;
+  const method = (value as { toEncodableForm: unknown }).toEncodableForm;
+  return typeof method === "function" ? method as () => unknown : undefined;
 }

@@ -136,6 +136,40 @@ describe("encodable-form", () => {
         expect(result.accessor).toBe(1);
       });
 
+      it("reads an accessor-backed serializer once", () => {
+        // The member itself can be accessor-backed, and the walk classifies a
+        // value by reading it before invoking it. Reading a second time to
+        // invoke would run the accessor again and serialize whatever the second
+        // read produced -- the same hazard as the element and member cases
+        // above, one level up, on the serializer rather than on the data.
+        let reads = 0;
+        const value = {
+          get toEncodableForm() {
+            reads++;
+            const nth = reads;
+            return () => ({ fromRead: nth });
+          },
+        };
+        expect(flatten(value)).toEqual({ fromRead: 1 });
+        expect(reads).toBe(1);
+      });
+
+      it("reads an accessor-backed serializer on a FUNCTION once", () => {
+        // The function branch classifies and invokes separately too, and a
+        // factory is a function carrying its module's members.
+        let reads = 0;
+        const value = Object.defineProperty(() => {}, "toEncodableForm", {
+          configurable: true,
+          get() {
+            reads++;
+            const nth = reads;
+            return () => ({ fromRead: nth });
+          },
+        });
+        expect(flatten(value)).toEqual({ fromRead: 1 });
+        expect(reads).toBe(1);
+      });
+
       it("descends into the serialized form", () => {
         const value = artifact({ inner: artifact({ deep: true }) });
         expect(flatten(value)).toEqual({ inner: { deep: true } });
