@@ -15,19 +15,23 @@ const TRANSPILE_OPTIONS: ts.CompilerOptions = {
 };
 
 /**
- * Whether a source file compiles to code that can run.
- *
- * A file holding only interfaces, type aliases, and other declarations compiles
- * to an empty module, so it has no statement any test could execute, and Deno's
- * coverage reports no line for it that a test could leave uncovered.
+ * Returns whether `content`, taken as the source of `filePath`, compiles to
+ * code that can run. A file holding only interfaces, type aliases, and other
+ * declarations compiles to an empty module, so it has no statement any test
+ * could execute, and Deno's coverage reports no line for it that a test could
+ * leave uncovered.
  *
  * The answer comes from compiling the file and reading what comes out. Which
  * constructs reach the output is the compiler's rule. An enum, a namespace
  * holding a value, and an import kept for its side effects all emit code. A
  * type-only import, a namespace holding only types, and a comment do not.
  *
- * The coverage gate is the caller; `docs/development/COVERAGE.md` describes what
- * it does with the answer.
+ * The answer is what the TypeScript compiler emits. What runs is what Deno
+ * emits, which is swc's work, so the two agreeing is a property held by test
+ * rather than one this function can enforce.
+ *
+ * `docs/development/COVERAGE.md` describes what the coverage gate does with the
+ * answer.
  */
 export function hasExecutableCode(content: string, filePath: string): boolean {
   const emitted = ts.transpileModule(content, {
@@ -46,9 +50,10 @@ export function hasExecutableCode(content: string, filePath: string): boolean {
 }
 
 /**
- * An `export {}` with nothing in it. The compiler emits this to keep a file
- * that emitted nothing else a module rather than a script. It declares no
- * binding and runs no code.
+ * Helper for `hasExecutableCode()`, which returns whether `statement` is an
+ * `export {}` with nothing in it. The compiler emits one to keep a file that
+ * emitted nothing else a module rather than a script. It declares no binding
+ * and runs no code.
  */
 function isEmptyExportMarker(statement: ts.Statement): boolean {
   return ts.isExportDeclaration(statement) &&

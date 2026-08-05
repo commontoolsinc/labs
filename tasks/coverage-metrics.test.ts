@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import { expect } from "@std/expect";
 import * as path from "@std/path";
 import {
   collectCoverageDebtMetricsFromLcov,
@@ -206,12 +207,11 @@ Deno.test("a file that compiles to nothing carries no debt", async () => {
       lcov: "",
     });
 
-    assertEquals(
+    expect(
       metrics.find((metric) =>
         metric.name === "coverage-debt: packages/example uncovered lines"
       )?.uncoveredLines,
-      3,
-    );
+    ).toBe(3);
   } finally {
     await Deno.remove(rootDir, { recursive: true });
   }
@@ -324,7 +324,7 @@ Deno.test("collectUncoveredLinesForFiles reports no lines for a file that compil
       files: ["packages/example/src/types.ts"],
     });
 
-    assertEquals(uncovered.size, 0);
+    expect(uncovered.size).toBe(0);
   } finally {
     await Deno.remove(rootDir, { recursive: true });
   }

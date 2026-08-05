@@ -114,8 +114,9 @@ export async function collectCoverageDebtMetricsFromLcov(
 }
 
 /**
- * The debt charged to a file the report has no record for. Two different things
- * produce a missing record, and they owe different amounts.
+ * Helper for `collectCoverageDebtMetricsFromLcov()`, which returns the debt
+ * charged to a file the report has no record for. Two different things produce
+ * a missing record, and they owe different amounts.
  *
  * A file no test ever loaded owes every tracked line: that is the case this
  * rule exists to catch.
