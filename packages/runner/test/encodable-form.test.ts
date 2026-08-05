@@ -274,6 +274,15 @@ describe("encodable-form", () => {
         expect(flatten(value)).toBe(value);
       });
 
+      it("leaves a plain object carrying a non-function `toEncodableForm` alone", () => {
+        // A query-result proxy reports an own property for any key its record
+        // holds, so the name alone does not make a value an artifact. A fabric
+        // record has no function-valued member, and that is what the walk keys
+        // on; without it this value would reach the invoke and throw.
+        const value = { toEncodableForm: 1 };
+        expect(flatten({ value }).value).toBe(value);
+      });
+
       it("leaves a plain object carrying an own `toJSON` alone", () => {
         // `toJSON` is not how a builder artifact spells its serializer, so an
         // object bearing one is ordinary data as far as this is concerned, and

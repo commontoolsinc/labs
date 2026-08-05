@@ -58,8 +58,9 @@ export function encodableFormOf(value: unknown): unknown {
 }
 
 /**
- * Helper for the two readers above, which returns what an already-read
- * `toEncodableForm` produces, invoked on the value it was read from.
+ * Helper for `encodableFormOf()` and `replace()`, which returns what an
+ * already-read `toEncodableForm` produces, invoked on the value it was read
+ * from.
  */
 function encodableFormFrom(method: () => unknown, value: unknown): unknown {
   // `Reflect.apply`, and not the method's own `.call`. A proxy answers each
@@ -330,16 +331,15 @@ function ownEncodableFormMethod(
   // otherwise route every plain object in the process through here.
   if (!Object.hasOwn(value, "toEncodableForm")) return undefined;
 
-  // Read once, and hand back what was read. `Object.hasOwn` runs no accessor,
+  // Read once, and hand back what was read. `Object.hasOwn()` runs no accessor,
   // so this is the only read; an accessor-backed member asked again at the
   // invoke would run a second time, and its second result is what would get
   // serialized.
   const method = (value as { toEncodableForm: unknown }).toEncodableForm;
 
   // The `typeof` gate is what settles a value carrying a user-data key of the
-  // name -- a query-result proxy answers `Object.hasOwn` for any key its record
-  // holds -- since a fabric record has no function-valued member to find. It
-  // also keeps this to `toEncodableForm` alone: the JSON protocol's member
-  // would widen the question from builder artifacts to user data.
+  // name -- a query-result proxy answers `Object.hasOwn()` for any key its
+  // record holds -- since a fabric record has no function-valued member to
+  // find.
   return typeof method === "function" ? method as () => unknown : undefined;
 }
