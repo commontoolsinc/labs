@@ -614,6 +614,30 @@ describe("cfc schema sanitization", () => {
     expect(validateSchemaDefinition(localOnlyDefinition)).toBeUndefined();
   });
 
+  it("validates fabric-primitive schema types by prototype", () => {
+    const bytes = new FabricBytes(new Uint8Array([1, 2]));
+
+    // The fabric-primitive names are legal schema definitions.
+    expect(validateSchemaDefinition({ type: "FabricBytes" })).toBeUndefined();
+    expect(validateSchemaDefinition({ type: ["FabricHash", "null"] }))
+      .toBeUndefined();
+
+    // A FabricBytes satisfies its own type, and "object" via the subtype
+    // rule (each fabric-primitive type is a subtype of "object").
+    expect(validateSchemaValue({ type: "FabricBytes" }, bytes))
+      .toBeUndefined();
+    expect(validateSchemaValue({ type: "object" }, bytes)).toBeUndefined();
+
+    // The specific types don't cross-match, and the subtype relation is
+    // one-way: a plain record is not a FabricBytes.
+    expect(validateSchemaValue({ type: "FabricHash" }, bytes))
+      .toContain("value does not match type FabricHash");
+    expect(validateSchemaValue({ type: "FabricBytes" }, { a: 1 }))
+      .toContain("value does not match type FabricBytes");
+    expect(validateSchemaValue({ type: "FabricBytes" }, "bytes-ish"))
+      .toContain("value does not match type FabricBytes");
+  });
+
   it("keeps referenced definition bodies in their child-local scope", () => {
     const schema: JSONSchema = {
       type: "object",

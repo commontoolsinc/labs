@@ -184,8 +184,7 @@ anything and will not be accessed.
 
 ### Non-standard `type` values
 
-Two deliberate extensions beyond the 2020-12 vocabulary appear in generated
-schemas:
+Deliberate extensions beyond the 2020-12 vocabulary:
 
 - `{ "type": "unknown" }` — emitted for TypeScript `unknown` and for
   unresolved/degraded generics. Distinct from `true` (which is what `any`
@@ -193,6 +192,16 @@ schemas:
   anything".
 - `{ "type": "undefined" }` — preserved as an explicit union member (e.g.
   `string | undefined`) so optionality survives schema round-trips.
+- Fabric-primitive types — `"FabricBytes"`, `"FabricEpochDays"`,
+  `"FabricEpochNsec"`, `"FabricHash"`, `"FabricRegExp"` — each naming a
+  concrete `FabricPrimitive` class from the data-model. A value matches by
+  prototype (`instanceof`), not by structure: these values are opaque leaves
+  with no enumerable properties, so structural keywords do not apply to them.
+  Each fabric-primitive type is a subtype of `"object"` (the way `"integer"`
+  is a subtype of `"number"`): a `FabricBytes` value satisfies both
+  `{ "type": "FabricBytes" }` and `{ "type": "object" }`, while a plain
+  object satisfies only the latter. The authoritative name list is
+  `FABRIC_PRIMITIVE_SCHEMA_TYPES` in `packages/api/index.ts`.
 
 Generated schemas also hoist named types into `$defs` and reference them via
 `#/$defs/...`. The full TypeScript→schema mapping is specified in the

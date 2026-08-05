@@ -129,6 +129,99 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
     expect(got.blob).toBeInstanceOf(FabricBytes);
   });
 
+  it("returns a FabricPrimitive intact under its specific fabric-primitive type", async () => {
+    const schema = {
+      type: "object",
+      properties: { blob: { type: "FabricBytes" } },
+    } as const satisfies JSONSchema;
+    const c = runtime.getCell<{ blob: Uint8Array }>(
+      space,
+      "typed-fabric-read",
+      schema,
+      tx,
+    );
+    c.set({ blob: new Uint8Array([1, 2, 3]) });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const got = c.withTx(tx).get() as Record<string, unknown>;
+    expect(got.blob).toBeInstanceOf(FabricBytes);
+    expect(
+      Array.from((got.blob as FabricBytes).slice()),
+    ).toEqual([1, 2, 3]);
+  });
+
+  it("rejects a FabricPrimitive under a different fabric-primitive type", async () => {
+    // A FabricBytes is not a FabricHash: the specific types don't cross-match
+    // even though both validate under "object".
+    const schema = {
+      type: "object",
+      properties: { blob: { type: "FabricHash" } },
+    } as const satisfies JSONSchema;
+    const c = runtime.getCell<{ blob: Uint8Array }>(
+      space,
+      "typed-fabric-cross-reject",
+      schema,
+      tx,
+    );
+    c.set({ blob: new Uint8Array([1, 2, 3]) });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const got = c.withTx(tx).get() as Record<string, unknown>;
+    // Same surfacing as other property type-gate failures: absent.
+    expect(got).not.toHaveProperty("blob");
+  });
+
+  it("rejects a plain record under a fabric-primitive type", async () => {
+    // The subtype relation is one-way: "object" accepts a FabricBytes, but
+    // "FabricBytes" does not accept a plain record.
+    const schema = {
+      type: "object",
+      properties: { blob: { type: "FabricBytes" } },
+    } as const satisfies JSONSchema;
+    const c = runtime.getCell<{ blob: { x: number } }>(
+      space,
+      "typed-fabric-record-reject",
+      schema,
+      tx,
+    );
+    c.set({ blob: { x: 1 } });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const got = c.withTx(tx).get() as Record<string, unknown>;
+    expect(got.blob).toBeUndefined();
+  });
+
+  it("matches the fabric-primitive branch of an anyOf", async () => {
+    const schema = {
+      type: "object",
+      properties: {
+        blob: { anyOf: [{ type: "FabricBytes" }, { type: "string" }] },
+      },
+    } as const satisfies JSONSchema;
+    const c = runtime.getCell<{ blob: Uint8Array | string }>(
+      space,
+      "typed-fabric-anyof",
+      schema,
+      tx,
+    );
+    c.set({ blob: new Uint8Array([4, 5]) });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const got = c.withTx(tx).get() as Record<string, unknown>;
+    expect(got.blob).toBeInstanceOf(FabricBytes);
+
+    // The string branch of the same anyOf still accepts a string.
+    c.withTx(tx).set({ blob: "hello" });
+    await tx.commit();
+    tx = runtime.edit();
+    const got2 = c.withTx(tx).get() as Record<string, unknown>;
+    expect(got2.blob).toBe("hello");
+  });
+
   it("returns a FabricPrimitive schema-default intact (typed-object property)", async () => {
     // Runtime reality (see #4529's cfc red): interned schemas can carry
     // FabricPrimitive defaults (a native Uint8Array default interns to

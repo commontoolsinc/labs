@@ -7,7 +7,11 @@ import {
   internSchemaAsTaggedHashString,
   isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
-import type { JSONSchemaObj, SchemaPathSelector } from "@commonfabric/api";
+import {
+  isFabricPrimitiveSchemaType,
+  type JSONSchemaObj,
+  type SchemaPathSelector,
+} from "@commonfabric/api";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
 import {
   FabricInstance,
@@ -15,6 +19,7 @@ import {
   FabricSpecialObject,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 // TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
@@ -2496,7 +2501,9 @@ function schemaTypesAreDisjoint(
     linkTypes.some((link) =>
       parent === link ||
       (parent === "number" && link === "integer") ||
-      (parent === "integer" && link === "number")
+      (parent === "integer" && link === "number") ||
+      (parent === "object" && isFabricPrimitiveSchemaType(link)) ||
+      (link === "object" && isFabricPrimitiveSchemaType(parent))
     )
   );
 }
@@ -2506,16 +2513,20 @@ function schemaTypeMatchesValueType(
   valueType: JSONSchemaTypes,
 ): boolean {
   // Integer is a subtype of number: an integer value satisfies either schema,
-  // while a fractional number only satisfies a number schema.
+  // while a fractional number only satisfies a number schema. Likewise, each
+  // fabric-primitive type is a subtype of "object": a `FabricBytes` value
+  // satisfies both `{type: "FabricBytes"}` and `{type: "object"}`, while a
+  // plain record only satisfies the latter.
   return schemaType === valueType ||
-    (schemaType === "number" && valueType === "integer");
+    (schemaType === "number" && valueType === "integer") ||
+    (schemaType === "object" && isFabricPrimitiveSchemaType(valueType));
 }
 
 function getJsonNumberType(value: number): "integer" | "number" {
   return Number.isInteger(value) ? "integer" : "number";
 }
 
-function narrowNumberIntegerIntersection(
+function narrowSubtypeIntersection(
   parentType: JSONSchemaObj["type"],
   linkType: JSONSchemaObj["type"],
 ): JSONSchemaObj["type"] | undefined {
@@ -2527,7 +2538,10 @@ function narrowNumberIntegerIntersection(
     return undefined;
   }
 
-  let narrowedNumber = false;
+  // The subtype pairs mirror schemaTypeMatchesValueType: integer under
+  // number, and each fabric-primitive type under "object". An intersection
+  // keeps the narrower member of the pair.
+  let narrowed = false;
   const intersection = new Set<JSONSchemaTypes>();
   for (const parent of parentTypes) {
     for (const link of linkTypes) {
@@ -2538,12 +2552,18 @@ function narrowNumberIntegerIntersection(
         (parent === "integer" && link === "number")
       ) {
         intersection.add("integer");
-        narrowedNumber = true;
+        narrowed = true;
+      } else if (parent === "object" && isFabricPrimitiveSchemaType(link)) {
+        intersection.add(link);
+        narrowed = true;
+      } else if (link === "object" && isFabricPrimitiveSchemaType(parent)) {
+        intersection.add(parent);
+        narrowed = true;
       }
     }
   }
 
-  if (!narrowedNumber) return undefined;
+  if (!narrowed) return undefined;
   const types = [...intersection].sort();
   return types.length === 1 ? types[0] : types;
 }
@@ -2564,7 +2584,7 @@ function _combineSchemaUncached(
     if (
       schemaTypesAreDisjoint(parentSchema.type, linkSchema.type)
     ) return false;
-    const narrowedType = narrowNumberIntegerIntersection(
+    const narrowedType = narrowSubtypeIntersection(
       parentSchema.type,
       linkSchema.type,
     );
@@ -3558,10 +3578,15 @@ export class SchemaObjectTraverser<V extends FabricValue>
     } else if (doc.value instanceof FabricPrimitive) {
       // An opaque leaf whose `typeof` is "object": this arm must precede the
       // record branch below, which would otherwise decompose it.
-      // Type-validate as "object" — the shape the schema-generator emits for
-      // these types today — but do not consult the schema's structural
-      // details: leaves are not property-walked.
-      return this.isValidType(schemaObj, "object") !== TypeValidity.False
+      // Type-validate against the primitive's specific type name (e.g.
+      // "FabricBytes"); a schema saying "object" also accepts it via
+      // schemaTypeMatchesValueType's subtype rule. Do not consult the
+      // schema's structural details: leaves are not property-walked.
+      return this.isValidType(
+          schemaObj,
+          schemaTypeOfFabricPrimitive(doc.value),
+        ) !==
+          TypeValidity.False
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
     } else if (doc.value instanceof FabricInstance) {
@@ -4664,6 +4689,11 @@ function getPlainJsonType(
   if (typeof value === "number") return "number";
   if (isBoolean(value)) return "boolean";
   if (Array.isArray(value)) return "array";
+  // A fabric primitive reports its specific type name; a schema saying
+  // `"object"` still accepts it via schemaTypeMatchesValueType's subtype rule.
+  if (value instanceof FabricPrimitive) {
+    return schemaTypeOfFabricPrimitive(value);
+  }
   if (isObject(value)) return "object";
   return null;
 }
