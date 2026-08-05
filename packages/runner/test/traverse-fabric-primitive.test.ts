@@ -170,7 +170,7 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
 
     const got = c.withTx(tx).get() as Record<string, unknown>;
     // Same surfacing as other property type-gate failures: absent.
-    expect(got.blob).toBeUndefined();
+    expect(got).not.toHaveProperty("blob");
   });
 
   it("rejects a plain record under a fabric-primitive type", async () => {
