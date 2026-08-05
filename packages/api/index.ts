@@ -47,6 +47,15 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  * `data-model/src/interface.ts` for why it is a well-known string key and not
  * a `unique symbol`. The two declarations must agree exactly.
  */
+/**
+ * The nominal brand key declared on `FabricSpecialObject`. It exists only in
+ * the type system — a runtime instance never carries the key; `instanceof
+ * FabricSpecialObject` is its runtime form. Schema `required` presence
+ * checks must therefore treat this key as satisfied by any fabric value
+ * rather than probing for it with `in`.
+ */
+export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
+
 export interface FabricSpecialObject {
   readonly "@commonfabric/FabricSpecialObject": true;
 }
