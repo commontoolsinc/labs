@@ -56,17 +56,18 @@ export function hasEncodableForm(value: unknown): boolean {
  * Produces the encodable form of a value that has one, or `undefined` for a
  * value that does not. Ask `hasEncodableForm()` to tell those apart from a
  * value whose encodable form is itself `undefined`.
- *
- * Invoked through `Reflect.apply`, not through the method's own `.call`. A
- * `Reactive` is a proxy over a cell that answers a method name with a proxy
- * over that method, and reading `.call` off THAT goes back through the proxy
- * and comes out as data navigation rather than as `Function.prototype.call`.
- * `Reflect.apply` reaches the function's own call behavior instead of reading
- * a property off it, so it holds for a proxied method as well as a plain one.
  */
 export function encodableFormOf(value: unknown): unknown {
   const method = encodableFormMethod(value);
-  return method === undefined ? undefined : Reflect.apply(method, value, []);
+  if (method === undefined) return undefined;
+
+  // `Reflect.apply`, and not the method's own `.call`. A proxy answers each
+  // property read however it likes, so a proxied function can report `typeof
+  // "function"` while what its `.call` yields is not callable at all.
+  // `Reflect.apply` reaches a function's call behavior directly rather than
+  // reading a property off it, which holds whether the method in hand arrived
+  // plain or through a proxy.
+  return Reflect.apply(method, value, []);
 }
 
 /**

@@ -443,13 +443,30 @@ describe("encodable-form", () => {
       expect(encodableFormOf(reactive)).toEqual(cell.toSigilLinkOrNull());
     });
 
-    it("derive one id, whichever of the two a graph holds", () => {
-      // An id is derived from a value's encodable form, and a `Reactive`
-      // answers its methods through a proxy -- so the two stand for one cell
-      // here exactly as they do at every other reader of that form.
+    it("derive the id their own link derives as plain data", () => {
+      // An id is derived from a value's encodable form, so the reference is the
+      // link itself written out as data -- a value that reaches `createRef`
+      // through none of the cell or proxy machinery. Comparing the two subjects
+      // only to each other would hold just as well if BOTH moved; comparing
+      // each to the link pins where they land, without naming a hash that a
+      // later change to link shape would have to come back and edit.
       const { cell, reactive } = subjects();
-      expect(createRef({ held: reactive }, "cause").toString())
-        .toBe(createRef({ held: cell }, "cause").toString());
+      const idOf = (held: unknown) => createRef({ held }, "cause").toString();
+      const link = idOf(cell.toSigilLinkOrNull());
+
+      expect(idOf(cell)).toBe(link);
+      expect(idOf(reactive)).toBe(link);
+
+      // And the comparison discriminates: a different cell's link is a
+      // different id, so the three above do not agree merely by being ids.
+      const other = runtime.getCell<{ value: number }>(
+        space,
+        "encodable-form-other-cell",
+        undefined,
+        tx,
+      );
+      other.set({ value: 42 });
+      expect(idOf(other.toSigilLinkOrNull())).not.toBe(link);
     });
 
     it("are left alone by the walk, being no builder's artifacts", () => {
