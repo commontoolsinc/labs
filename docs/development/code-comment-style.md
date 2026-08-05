@@ -140,15 +140,21 @@ give the eventual cleanup a `TODO` phrased as a condition on the world:
 
 // The legacy branch exists so that links written in the older form still
 // resolve.
-// TODO(danfuzz): Remove once every deployed server emits the codec form.
+// TODO(DonutFry99): Remove once every deployed server emits the codec form.
 export const acceptLegacyLinks = true;
 ```
 
 Note the shape of that `TODO`: it names the fix and names the blocker. Removing
 process residue is subtraction, and subtraction alone can leave a comment worse
-than it found it — a vague `TODO(danfuzz): Fix the problem.` is what remains
-when a tracker identifier is deleted and nothing takes its place. Say the thing,
-rather than only striking the part that cannot stay.
+than it found it — a vague `TODO(DonutFry99): Fix the problem.` is what
+remains when a tracker identifier is deleted and nothing takes its place. Say
+the thing, rather than only striking the part that cannot stay.
+
+Note the tag, too. Every `TODO` names whoever is on the hook for it, and a bare
+`TODO:` fails `deno lint`, which runs the `ban-untagged-todo` rule across the
+repository. That rule also accepts an issue reference in the tag position,
+which does not make one a good idea here: an issue number is exactly what this
+section says to leave out of a comment. Tag a person.
 
 ### The check that finds these
 
@@ -172,8 +178,8 @@ still there.
 
 - A `// frozen means terminal` premise on an `if (Object.isFrozen(value))`
   short-circuit goes when the short-circuit goes.
-- A `// TODO: this clone should not be necessary` on a `cloneIfNecessary(...)`
-  call goes when the call goes.
+- A `// TODO(DonutFry99): This clone should not be necessary.` on a
+  `cloneIfNecessary(...)` call goes when the call goes.
 - A comment describing the shallow-clone-mutate-refreeze cycle around them
   stays, because it describes behavior that remains.
 
