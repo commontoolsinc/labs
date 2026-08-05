@@ -87,17 +87,6 @@ export function setIframeTestHandler() {
     unsubscribe(element, context, receipt) {
       (context as ContextShim).unsubscribe(element, receipt as number);
     },
-    onLLMRequest(_element, _context, _payload) {
-      // Not implemented
-      return Promise.resolve({});
-    },
-    onReadWebpageRequest(_element, _context, _payload) {
-      // Not implemented
-      return Promise.resolve({});
-    },
-    async onPerform(_element, _context, _command) {
-      return await { error: new Error(`Not implemented`) };
-    },
   });
 }
 

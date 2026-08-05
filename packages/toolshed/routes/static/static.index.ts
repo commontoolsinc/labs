@@ -12,9 +12,8 @@ const cache = new StaticCacheFS();
 
 router.use(
   "*",
-  // Setup CORS so that modules imported from sandboxed null-origin iframe are rejected.
-  // Specifically we need this to be able to import iframe-bootstrap.js
-  // from sandboxed iframes
+  // These assets are the same for every caller and carry nothing about the
+  // user, so the route serves them to any origin.
   cors({
     origin: "*",
     allowMethods: ["GET", "OPTIONS"],
