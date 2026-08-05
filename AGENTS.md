@@ -104,6 +104,11 @@ If you are developing runtime code, start with:
   servers correctly (use `dev-local` for shell, not `dev`)
 - `docs/development/TESTING.md` - Running the test suites and the general unit
   and integration test structure; hub that links the other testing docs
+- `docs/development/unit-test-coding-style.md` - How a unit test file is shaped:
+  its location and name, the single top-level `describe()`, how an `it()`
+  description is worded, `expect()` over `assert*()`, and the matcher traps that
+  yield a test which cannot fail. Read it before writing a new test file; not
+  every file in the tree follows it, so a neighbor is not evidence of it
 - `docs/development/waiting-in-tests.md` - Waiting on a real event instead of
   polling: the primitives to reach for, and the specific cases where a bounded
   poll is the honest tool
