@@ -309,6 +309,19 @@ human or agent — to understand the intent without reading the implementation.
 Contracts go in the doc comment, not in inline exhortations. An inline comment
 explains local mechanics; the doc comment says what a caller can rely on.
 
+### When one is also data
+
+A doc comment on a type that reaches the schema generator does not stay
+documentation. It attaches to the generated schema as its `description`, and
+any `#hashtag` in that text is mirrored into a `tags` array, lowercased and
+deduped. Where two declarations of the same thing carry conflicting docs, the
+first wins and the conflict is recorded in `$comment`.
+
+On such a type, then, a doc comment is program output, and a `#hashtag` written
+as an aside becomes a tag whether or not one was meant. Which comment attaches
+where is settled by section 12 of
+[the type mapping spec](../specs/schema-generator/ts_to_json_schema_mapping.md).
+
 ### How one starts
 
 **Functions and methods** start with a subjectless third-person singular verb

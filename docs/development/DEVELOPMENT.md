@@ -46,7 +46,9 @@ about one aspect of the runtime, are indexed in
 
 ### Error Handling
 
-- Write descriptive error messages.
+- Write descriptive error messages, marked up as
+  [`code-comment-style.md`](code-comment-style.md#error-and-log-messages)
+  describes.
 - Propagate errors using async/await.
 - Document possible errors in JSDoc.
 
