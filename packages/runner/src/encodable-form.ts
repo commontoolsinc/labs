@@ -108,8 +108,7 @@ type AnyFunction = (...args: never[]) => unknown;
  * pattern author put it -- under a tool's `handler` key, in a result, inside a
  * node's `inputs` -- so finding one takes a walk.
  *
- * The `toEncodableForm` name is what bounds the subject to _builder
- * artifacts_.
+ * The `toEncodableForm` name is what bounds the subject to _builder artifacts_.
  * An artifact carries `toJSON` as well, delegating to the same serializer (see
  * `builder/json-member.ts`), but that name belongs to `JSON.stringify` and the
  * conversion gives it no standing: a plain object carrying a `toJSON` it
@@ -125,7 +124,7 @@ type AnyFunction = (...args: never[]) => unknown;
  * deep-frozen `FabricValue` eligible for the conversion's identity fast path
  * and keeps a twice-reachable object shared.
  *
- * A cycle is left for the conversion to reject. What it rejects it BY may be
+ * A cycle is left for the conversion to reject. What it rejects it _by_ may be
  * the cycle or an artifact still raw inside the partial result: an ancestor is
  * returned as itself, so a copy's cycle edge points at the original.
  */
@@ -338,8 +337,8 @@ function ownEncodableFormMethod(
   value: object | ((...args: unknown[]) => unknown),
 ): (() => unknown) | undefined {
   // _Own_, not inherited: an inherited member is not the value's own
-  // and a single assignment to `Object.prototype.toEncodableForm` would
-  // otherwise route every plain object in the process through here.
+  // serializer, and a single assignment to `Object.prototype.toEncodableForm`
+  // would otherwise route every plain object in the process through here.
   if (!Object.hasOwn(value, "toEncodableForm")) return undefined;
 
   // Read once, and hand back what was read. `Object.hasOwn()` runs no accessor,

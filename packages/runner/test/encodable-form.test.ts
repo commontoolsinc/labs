@@ -170,22 +170,25 @@ describe("encodable-form", () => {
         expect(reads).toBe(1);
       });
 
-      it("invokes a _function_ artifact's serializer once, on it", () => {
-        // The object branch has the shared-artifact case below to pin its
-        // invoke count, and the pre-existing receiver case under
-        // `encodableFormOf()` pins the shared invoke. Neither reaches the
-        // function branch, which reads and invokes on its own.
-        let calls = 0;
-        const value = Object.assign(() => {}, {
-          marker: "factory",
-          toEncodableForm(this: { marker?: string }) {
-            calls++;
-            return { saw: this?.marker, nth: calls };
-          },
-        });
-        expect(flatten(value)).toEqual({ saw: "factory", nth: 1 });
-        expect(calls).toBe(1);
-      });
+      it(
+        "invokes a _function_ artifact's serializer once, on the artifact",
+        () => {
+          // The object branch has the shared-artifact case below to pin its
+          // invoke count, and the pre-existing receiver case under
+          // `encodableFormOf()` pins the shared invoke. Neither reaches the
+          // function branch, which reads and invokes on its own.
+          let calls = 0;
+          const value = Object.assign(() => {}, {
+            marker: "factory",
+            toEncodableForm(this: { marker?: string }) {
+              calls++;
+              return { saw: this?.marker, nth: calls };
+            },
+          });
+          expect(flatten(value)).toEqual({ saw: "factory", nth: 1 });
+          expect(calls).toBe(1);
+        },
+      );
 
       it("invokes an object artifact's serializer on the artifact", () => {
         const value = {
@@ -471,7 +474,7 @@ describe("encodable-form", () => {
         .toEqual({ a: 1 });
     });
 
-    it("calls the member ON the value, so `this` is the receiver", () => {
+    it("calls the member _on_ the value, so `this` is the receiver", () => {
       const value = {
         marker: "self",
         toEncodableForm(this: { marker: string }) {
@@ -547,7 +550,7 @@ describe("encodable-form", () => {
       // An id is derived from a value's encodable form, so the reference is the
       // link itself written out as data -- a value that reaches `createRef`
       // through none of the cell or proxy machinery. Comparing the two subjects
-      // only to each other would hold just as well if BOTH moved; comparing
+      // only to each other would hold just as well if _both_ moved; comparing
       // each to the link pins where they land, without naming a hash that a
       // later change to link shape would have to come back and edit.
       const { cell, reactive } = subjects();
