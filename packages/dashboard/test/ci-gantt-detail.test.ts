@@ -121,11 +121,30 @@ describe("ci-gantt-detail", () => {
               "null",
               JSON.stringify({ version: 99, jobs: [] }),
               JSON.stringify({ version: 1, jobs: [{ name: "Check" }] }),
+              JSON.stringify({ version: 1, jobs: [null] }),
+              JSON.stringify({
+                version: 1,
+                jobs: [{ ...ganttJob("Check"), steps: [null] }],
+              }),
               JSON.stringify({ version: 1 }),
             ]
           ) {
             await Deno.writeFile(path, await gzipped(content));
             expect(await store.read(SOURCE, 11, 1)).toBeNull();
+          }
+        });
+
+        it("throws when the file cannot be opened for a reason of its own", async () => {
+          await store.write(SOURCE, 12, 1, [ganttJob("Check")]);
+          const reading = Deno.readFile;
+          try {
+            Deno.readFile = () =>
+              Promise.reject(new Deno.errors.PermissionDenied("nope"));
+            await expect(store.read(SOURCE, 12, 1)).rejects.toThrow(
+              Deno.errors.PermissionDenied,
+            );
+          } finally {
+            Deno.readFile = reading;
           }
         });
 
@@ -202,6 +221,22 @@ describe("ci-gantt-detail", () => {
           );
           await expect(absent.write(SOURCE, 30, 1, [ganttJob("Check")]))
             .rejects.toThrow(Deno.errors.NotFound);
+        });
+
+        it("raises the write failure even when the temporary file survives", async () => {
+          const originalRename = Deno.rename;
+          const originalRemove = Deno.remove;
+          try {
+            Deno.rename = () => Promise.reject(new Error("rename failed"));
+            Deno.remove = () => Promise.reject(new Error("remove failed"));
+            // The write failure is what the caller needs; a temporary left
+            // behind is swept by the next prune.
+            await expect(store.write(SOURCE, 42, 1, [ganttJob("Check")]))
+              .rejects.toThrow("rename failed");
+          } finally {
+            Deno.rename = originalRename;
+            Deno.remove = originalRemove;
+          }
         });
 
         it("removes its temporary file when the rename fails", async () => {
@@ -300,6 +335,67 @@ describe("ci-gantt-detail", () => {
         it("returns without error when the directory does not exist", async () => {
           const absent = new CiGanttDetailStore(`${directory}/absent`);
           await absent.prune(SOURCE, []);
+        });
+
+        it("throws when the directory cannot be listed for another reason", async () => {
+          await store.write(SOURCE, 70, 1, [ganttJob("Check")]);
+          const listing = Deno.readDir;
+          try {
+            Deno.readDir = () => {
+              throw new Deno.errors.PermissionDenied("nope");
+            };
+            await expect(store.prune(SOURCE, [])).rejects.toThrow(
+              Deno.errors.PermissionDenied,
+            );
+          } finally {
+            Deno.readDir = listing;
+          }
+        });
+
+        it("throws when a file cannot be removed for another reason", async () => {
+          await store.write(SOURCE, 71, 1, [ganttJob("Check")]);
+          const removing = Deno.remove;
+          try {
+            Deno.remove = () =>
+              Promise.reject(new Deno.errors.PermissionDenied("nope"));
+            await expect(store.prune(SOURCE, [])).rejects.toThrow(
+              Deno.errors.PermissionDenied,
+            );
+          } finally {
+            Deno.remove = removing;
+          }
+        });
+
+        it("leaves a directory in among the attempts alone", async () => {
+          await store.write(SOURCE, 73, 1, [ganttJob("Check")]);
+          await Deno.mkdir(`${directory}/detail/a-directory`);
+
+          await store.prune(SOURCE, []);
+
+          expect(await names()).toEqual(["a-directory"]);
+        });
+
+        it("leaves a name it cannot parse alone", async () => {
+          await store.write(SOURCE, 72, 1, [ganttJob("Check")]);
+          // Neither the five dot-separated parts a detail file has, nor the
+          // temporary suffix an interrupted write leaves.
+          for (
+            const name of [
+              "owner%2Frepo.ci%2Eyml.notanumber.1.json",
+              "owner%2Frepo.ci%2Eyml.72.json",
+              "unrelated.txt",
+            ]
+          ) {
+            await Deno.writeTextFile(`${directory}/detail/${name}`, "{}");
+          }
+
+          await store.prune(SOURCE, []);
+
+          expect(await names()).toEqual([
+            "owner%2Frepo.ci%2Eyml.72.json",
+            "owner%2Frepo.ci%2Eyml.notanumber.1.json",
+            "unrelated.txt",
+          ]);
         });
       });
     });

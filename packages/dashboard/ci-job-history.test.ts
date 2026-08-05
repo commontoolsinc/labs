@@ -1163,6 +1163,232 @@ Deno.test("CI duration history never loads the Gantt step detail", async () => {
   }
 });
 
+Deno.test("the Gantt renderer's input file holds every run of the chart", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-gantt-input-" });
+  const destination = `${directory}/input.json`;
+  const runs = [workflowRun(15_000, NOW), workflowRun(15_001, NOW - HOUR)];
+  const collector = new RateLimitedCiJobHistoryCollector(
+    new CiJobHistoryStore(`${directory}/history.json`),
+    <T>(path: string) => {
+      if (path.includes("/runs?")) {
+        return Promise.resolve({ workflow_runs: runs } as T);
+      }
+      const id = Number(path.match(/\/runs\/(\d+)\//)![1]);
+      return Promise.resolve({ jobs: [apiJob(`Check ${id}`, 30)] } as T);
+    },
+  );
+  try {
+    const selection = await collector.startGantt(
+      "token",
+      CI_HISTORY_SOURCES.labs,
+      { limit: 2, mainOnly: true },
+      NOW,
+    ).result;
+    const runCount = await collector.writeGanttInput(
+      CI_HISTORY_SOURCES.labs,
+      selection,
+      destination,
+    );
+
+    assertEquals(runCount, 2);
+    const written = JSON.parse(await Deno.readTextFile(destination));
+    assertEquals(
+      written.runs.map((entry: CiGanttInput["runs"][number]) =>
+        entry.run.databaseId
+      ),
+      [15_000, 15_001],
+    );
+    assertEquals(written.runs[0].jobs[0].name, "Check 15000");
+    // Written run by run, so the separators have to come out as valid JSON
+    // rather than a trailing or doubled comma.
+    assertEquals(
+      await collector.ganttRuns(CI_HISTORY_SOURCES.labs, selection),
+      written,
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("a selected run whose detail goes missing mid-chart is an error", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-gantt-vanish-" });
+  const file = `${directory}/history.json`;
+  const store = new CiJobHistoryStore(file);
+  const run = workflowRun(15_100, NOW, {
+    head_sha: HEAD_SHA,
+    path: `.github/workflows/${CI_WORKFLOW}`,
+  });
+  // Readable while the chart is settled, gone by the time it is handed over.
+  class VanishingDetailStore extends CiGanttDetailStore {
+    reads = 0;
+    override read(
+      ...args: Parameters<CiGanttDetailStore["read"]>
+    ): Promise<CachedCiGanttJob[] | null> {
+      return this.reads++ === 0 ? super.read(...args) : Promise.resolve(null);
+    }
+  }
+  const collector = new RateLimitedCiJobHistoryCollector(
+    store,
+    <T>() => Promise.resolve({ jobs: [apiJob("Check", 30)] } as T),
+    new VanishingDetailStore(ganttDetailDirectory(file)),
+  );
+  try {
+    await seedCachedRun(store, {
+      repo: REPO,
+      workflow: CI_WORKFLOW,
+      runId: run.id,
+      runAttempt: 1,
+      headSha: HEAD_SHA,
+      runUrl: run.html_url,
+      at: NOW,
+      overallSeconds: 30,
+      jobs: [{ name: "Check", seconds: 30 }],
+      gantt: {
+        status: run.status,
+        conclusion: run.conclusion,
+        event: run.event,
+        headBranch: run.head_branch ?? undefined,
+        startedAt: run.run_started_at,
+        workflowName: "CI",
+      },
+    }, [{
+      attempt: 1,
+      name: "Check",
+      status: "completed",
+      conclusion: "success",
+      started_at: new Date(NOW).toISOString(),
+      completed_at: new Date(NOW + 30_000).toISOString(),
+      steps: [],
+    }]);
+    await store.save(NOW);
+
+    // A chart of particular runs that silently omitted one would misrepresent
+    // the commit, so it fails instead.
+    await assertRejects(
+      () =>
+        collector.gantt("token", CI_HISTORY_SOURCES.labs, {
+          limit: 1,
+          mainOnly: true,
+          headSha: HEAD_SHA,
+          selectedRuns: [{ runId: run.id, runAttempt: 1 }],
+        }, NOW),
+      Error,
+      "Not every selected CI run has cached job timings",
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("a run whose detail goes missing mid-chart is left out of it", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-gantt-omit-" });
+  const file = `${directory}/history.json`;
+  const runs = [workflowRun(15_300, NOW), workflowRun(15_301, NOW - HOUR)];
+  // The first attempt handed over reads back; the second does not.
+  class HalfVanishingDetailStore extends CiGanttDetailStore {
+    handed = 0;
+    override read(
+      ...args: Parameters<CiGanttDetailStore["read"]>
+    ): Promise<CachedCiGanttJob[] | null> {
+      const settled = this.settled;
+      if (settled) this.handed++;
+      return settled && this.handed > 1
+        ? Promise.resolve(null)
+        : super.read(...args);
+    }
+    settled = false;
+  }
+  const detail = new HalfVanishingDetailStore(ganttDetailDirectory(file));
+  const collector = new RateLimitedCiJobHistoryCollector(
+    new CiJobHistoryStore(file),
+    <T>(path: string) =>
+      Promise.resolve(
+        path.includes("/runs?")
+          ? { workflow_runs: runs } as T
+          : { jobs: [apiJob("Check", 30)] } as T,
+      ),
+    detail,
+  );
+  try {
+    const selection = await collector.startGantt(
+      "token",
+      CI_HISTORY_SOURCES.labs,
+      { limit: 2, mainOnly: true },
+      NOW,
+    ).result;
+    assertEquals(selection.entries.length, 2);
+
+    // A chart that was not asked for particular runs draws what it still has
+    // rather than failing.
+    detail.settled = true;
+    const chart = await collector.ganttRuns(CI_HISTORY_SOURCES.labs, selection);
+    assertEquals(chart.runs.map((entry) => entry.run.databaseId), [15_300]);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("a chart is served even when its detail cannot be pruned", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-gantt-prune-fail-" });
+  const file = `${directory}/history.json`;
+  const run = workflowRun(15_200, NOW);
+  class UnprunableDetailStore extends CiGanttDetailStore {
+    override prune(): Promise<void> {
+      return Promise.reject(new Error("cannot prune"));
+    }
+  }
+  const collector = new RateLimitedCiJobHistoryCollector(
+    new CiJobHistoryStore(file),
+    <T>(path: string) =>
+      Promise.resolve(
+        path.includes("/runs?")
+          ? { workflow_runs: [run] } as T
+          : { jobs: [apiJob("Check", 30)] } as T,
+      ),
+    new UnprunableDetailStore(ganttDetailDirectory(file)),
+  );
+  const logged: string[] = [];
+  const originalError = console.error;
+  try {
+    console.error = (...parts: unknown[]) =>
+      void logged.push(parts.map(String).join(" "));
+    const chart = await collector.gantt(
+      "token",
+      CI_HISTORY_SOURCES.labs,
+      { limit: 1, mainOnly: true },
+      NOW,
+    );
+    // The chart is already settled by then, so the failure is reported and the
+    // request still answers.
+    assertEquals(chart.runs.length, 1);
+    assertStringIncludes(logged.join("\n"), "was not pruned: cannot prune");
+  } finally {
+    console.error = originalError;
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("a chart of no runs is still a readable input file", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-gantt-empty-" });
+  const destination = `${directory}/input.json`;
+  const collector = new RateLimitedCiJobHistoryCollector(
+    new CiJobHistoryStore(`${directory}/history.json`),
+  );
+  try {
+    const runCount = await collector.writeGanttInput(
+      CI_HISTORY_SOURCES.labs,
+      { entries: [], exactSelection: false },
+      destination,
+    );
+    assertEquals(runCount, 0);
+    assertEquals(JSON.parse(await Deno.readTextFile(destination)), {
+      runs: [],
+    });
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("CI Gantt collects an attempt whose detail cannot be read", async () => {
   const directory = await Deno.makeTempDir({ prefix: "ci-gantt-unreadable-" });
   const file = `${directory}/history.json`;
@@ -1379,6 +1605,78 @@ Deno.test("a slow run does not hold up the runs behind it", async () => {
     assertEquals(finished.length, runs.length);
   } finally {
     slowRequest.settle();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("a window still collecting keeps its snapshot through an eviction", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-snapshot-inflight-" });
+  const now = Date.now();
+  const runs = Array.from(
+    { length: 4 },
+    (_, index) => workflowRun(16_000 + index, now - index * HOUR),
+  );
+  const deferred = () => {
+    let settle: () => void = () => {};
+    const waited = new Promise<void>((resolve) => settle = resolve);
+    return { waited, settle };
+  };
+  const reachedSave = deferred();
+  const releaseSave = deferred();
+  // Holds a refresh open at the point it records its manifest, which is where
+  // it reads back the sampled runs an eviction would take.
+  class HeldSaveStore extends CiJobHistoryStore {
+    hold = false;
+    override async save(at = Date.now()): Promise<void> {
+      if (this.hold) {
+        this.hold = false;
+        reachedSave.settle();
+        await releaseSave.waited;
+      }
+      await super.save(at);
+    }
+  }
+  const store = new HeldSaveStore(`${directory}/history.json`);
+  const collector = new RateLimitedCiJobHistoryCollector(
+    store,
+    <T>(path: string) =>
+      Promise.resolve(
+        (path.includes("/runs?")
+          ? { total_count: runs.length, workflow_runs: runs }
+          : { jobs: [apiJob("Check", 30)] }) as T,
+      ),
+  );
+  let collecting: Promise<unknown> = Promise.resolve();
+  try {
+    await collector.startRefresh("token", CI_HISTORY_SOURCES.labs, 45).result;
+
+    store.hold = true;
+    collecting = collector.startRefresh(
+      "token",
+      CI_HISTORY_SOURCES.labs,
+      1,
+      buildCiJobHistory([]),
+    ).result;
+    await reachedSave.waited;
+    assert(collector.snapshot(CI_HISTORY_SOURCES.labs, 1));
+
+    // Enough other windows to push the cache past its bound.
+    for (let days = 2; days <= SNAPSHOT_CACHE_MAX + 4; days++) {
+      await collector.cached(CI_HISTORY_SOURCES.labs, days, now);
+    }
+
+    // The collecting window keeps its snapshot, so the manifest it records
+    // names the runs it actually sampled.
+    assert(collector.snapshot(CI_HISTORY_SOURCES.labs, 1));
+    releaseSave.settle();
+    await collecting;
+    assertEquals(
+      store.refresh(REPO, CI_WORKFLOW, 1)?.sampledRuns.length,
+      collector.snapshot(CI_HISTORY_SOURCES.labs, 1)?.runCount,
+    );
+  } finally {
+    releaseSave.settle();
+    await collecting.catch(() => {});
     await Deno.remove(directory, { recursive: true });
   }
 });
@@ -5730,6 +6028,38 @@ Deno.test("CI Gantt reports missing credentials and includes cached failed main 
       collector.progress(cachedRefresh.progress.id)?.warning,
       "Showing cached runs; set GH_TOKEN to check for newer attempts.",
     );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("the production CI Gantt wrapper writes the file it is given", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-gantt-wrapper-" });
+  const file = `${directory}/history.json`;
+  // The wrapper takes no clock of its own, so the run has to be recent.
+  const run = workflowRun(15_400, Date.now() - HOUR);
+  const collector = new RateLimitedCiJobHistoryCollector(
+    new CiJobHistoryStore(file),
+    <T>(path: string) =>
+      Promise.resolve(
+        path.includes("/runs?")
+          ? { workflow_runs: [run] } as T
+          : { jobs: [apiJob("Check", 30)] } as T,
+      ),
+  );
+  try {
+    const destination = `${directory}/input.json`;
+    const runCount = await collectCiGanttInput(
+      CI_HISTORY_SOURCES.labs,
+      { limit: 1, mainOnly: true },
+      destination,
+      "token",
+      collector,
+    );
+
+    assertEquals(runCount, 1);
+    const written = JSON.parse(await Deno.readTextFile(destination));
+    assertEquals(written.runs[0].run.databaseId, run.id);
   } finally {
     await Deno.remove(directory, { recursive: true });
   }

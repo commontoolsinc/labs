@@ -2332,12 +2332,11 @@ export class CiJobHistoryCollector {
     // Another collection can finish caching one of these while discovery runs,
     // so the detail is read again next to the decision to spend a request. One
     // attempt at a time, so a chart's worth of timings is never all in memory.
-    const detailAvailable = new Map<number, boolean>();
+    const detailAvailable = new Set<number>();
     for (const run of missing) {
-      detailAvailable.set(
-        run.id,
-        await this.#ganttDetailReadable(source, entryFor(run)),
-      );
+      if (await this.#ganttDetailReadable(source, entryFor(run))) {
+        detailAvailable.add(run.id);
+      }
     }
     const outcomes = await inFlight(
       missing,
@@ -2349,7 +2348,7 @@ export class CiJobHistoryCollector {
         const load = this.#jobsForRun(run, token, source, now, {
           exactAttempt: exactSelection,
           expectedHeadSha: normalized.headSha,
-          hasGanttDetail: detailAvailable.get(run.id) ?? false,
+          hasGanttDetail: detailAvailable.has(run.id),
         });
         if (progress) this.#startJobLoadProgress(progress, load.kind);
         try {
@@ -2754,7 +2753,7 @@ const commitGanttCollector = new CiJobHistoryCollector(
 // more than one run's timings. Concurrent requests for the same chart share the
 // collection; each writes its own file from the shared list of runs.
 async function writeGanttInput(
-  collector: CiJobHistoryCollector,
+  collector: CiGanttProvider,
   source: CiHistorySource,
   options: CiGanttOptions,
   destination: string,
@@ -2769,14 +2768,9 @@ export function collectCiGanttInput(
   options: CiGanttOptions,
   destination: string,
   token = Deno.env.get("GH_TOKEN") ?? Deno.env.get("GITHUB_TOKEN"),
+  collector: CiGanttProvider = productionCollector,
 ): Promise<number> {
-  return writeGanttInput(
-    productionCollector,
-    source,
-    options,
-    destination,
-    token,
-  );
+  return writeGanttInput(collector, source, options, destination, token);
 }
 
 export function collectCommitCiGanttInput(
@@ -2784,14 +2778,9 @@ export function collectCommitCiGanttInput(
   options: CiGanttOptions,
   destination: string,
   token = Deno.env.get("GH_TOKEN") ?? Deno.env.get("GITHUB_TOKEN"),
+  collector: CiGanttProvider = commitGanttCollector,
 ): Promise<number> {
-  return writeGanttInput(
-    commitGanttCollector,
-    source,
-    options,
-    destination,
-    token,
-  );
+  return writeGanttInput(collector, source, options, destination, token);
 }
 
 function formatDuration(seconds: number): string {
@@ -3600,6 +3589,12 @@ export function ciCommitGanttProgressResponse(
 ): Response {
   return ganttProgressResponse(request, url, collector, token);
 }
+
+// What the Gantt image routes need of a collector.
+type CiGanttProvider = Pick<
+  CiJobHistoryCollector,
+  "startGantt" | "writeGanttInput"
+>;
 
 type CiJobHistoryProvider =
   & Pick<

@@ -1,4 +1,9 @@
-import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 import {
   type CachedCiHistoryRefresh,
   type CachedCiRun,
@@ -82,6 +87,44 @@ Deno.test("CI job cache removes the layout that held step detail inline", async 
   } finally {
     await Deno.remove(directory, { recursive: true });
   }
+});
+
+Deno.test("CI job cache reports a superseded file it cannot reach", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-job-cache-" });
+  const file = `${directory}/fabric-wall-ci-run-index.json`;
+  const logged: string[] = [];
+  const originalError = console.error;
+  const originalRemove = Deno.remove;
+  const originalReadDir = Deno.readDir;
+  try {
+    await Deno.writeTextFile(
+      `${directory}/fabric-wall-ci-job-history.json`,
+      JSON.stringify({ version: 1 }),
+    );
+    console.error = (...parts: unknown[]) =>
+      void logged.push(parts.map(String).join(" "));
+    Deno.readDir = () => {
+      throw new Deno.errors.PermissionDenied("cannot list");
+    };
+    Deno.remove = () =>
+      Promise.reject(new Deno.errors.PermissionDenied("cannot remove"));
+
+    // The store still loads: a cache directory that cannot be swept is not a
+    // reason to lose the CI history.
+    await new CiJobHistoryStore(file).load();
+  } finally {
+    console.error = originalError;
+    Deno.remove = originalRemove;
+    Deno.readDir = originalReadDir;
+    await Deno.remove(directory, { recursive: true });
+  }
+
+  // These files are the largest in the cache directory, so a process that
+  // cannot reach them says so rather than leaving the volume full in silence.
+  assertEquals(logged.length, 3);
+  assertStringIncludes(logged[0], "could not list");
+  assertStringIncludes(logged[1], "fabric-wall-ci-job-history.json");
+  assertStringIncludes(logged[1], "cannot remove");
 });
 
 Deno.test("CI job cache never removes the file it was given", async () => {
