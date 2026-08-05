@@ -11,6 +11,10 @@ import {
 } from "./mod.ts";
 import { cellRefToKey } from "./shared/utils.ts";
 import { linkRefPayloadFromString } from "@commonfabric/runner/shared";
+import {
+  FabricBytes,
+  FabricEpochNsec,
+} from "@commonfabric/data-model/fabric-primitives";
 
 describe("CellHandle CFC label IPC", () => {
   it("queries the runtime for the label view behind a cell", async () => {
@@ -760,5 +764,45 @@ describe("CellHandle push (read-modify-write)", () => {
     expect(() => cell.push(1)).toThrow(
       "push() can only be used on array cells",
     );
+  });
+});
+
+describe("CellHandle special-object refusal", () => {
+  // A `FabricSpecialObject` is a `ClientCellValue` -- a cell holds one like any
+  // other value -- and `WireCellValue` has no representation for it. Serializing
+  // one used to rebuild it from its enumerable own properties, putting `{}` on
+  // the wire in place of the bytes.
+
+  it("throws for a `FabricBytes` rather than sending an empty record", () => {
+    expect(() =>
+      CellHandle.serialize(new FabricBytes(new Uint8Array([1, 2, 3])))
+    ).toThrow(
+      "Cannot yet handle `FabricBytes` (a `FabricSpecialObject`) on this " +
+        "connection.",
+    );
+  });
+
+  it("throws for a `FabricSpecialObject` nested in a record", () => {
+    // The branch it has to precede is the record one, so the nested position
+    // is the case that pins the ordering rather than merely the check.
+    expect(() => CellHandle.serialize({ a: { b: new FabricEpochNsec(1n) } }))
+      .toThrow(
+        "Cannot yet handle `FabricEpochNsec` (a `FabricSpecialObject`) on this " +
+          "connection.",
+      );
+  });
+
+  it("throws for a `FabricSpecialObject` nested in an array", () => {
+    expect(() => CellHandle.serialize([new FabricBytes(new Uint8Array([7]))]))
+      .toThrow(
+        "Cannot yet handle `FabricBytes` (a `FabricSpecialObject`) on this " +
+          "connection.",
+      );
+  });
+
+  it("serializes an ordinary record unchanged", () => {
+    // The refusal must not claim a plain record on its way past.
+    expect(CellHandle.serialize({ a: 1, b: [true, null], c: undefined }))
+      .toEqual({ a: 1, b: [true, null], c: undefined });
   });
 });

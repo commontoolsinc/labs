@@ -259,7 +259,8 @@ export interface CellGetRequest extends BaseRequest {
  * `postMessage` rather than JSON, so that is a gap rather than a limit.
  * `JsonEncodingContext` (`@commonfabric/data-model/codec-json`) is the
  * mechanism, already used for blob-upload bodies in
- * `backends/runtime-processor.ts`.
+ * `backends/runtime-processor.ts`. Until then `CellHandle.serialize()` refuses
+ * one, so what the gap costs is a throw rather than silent loss.
  */
 export type WireCellValue =
   | null

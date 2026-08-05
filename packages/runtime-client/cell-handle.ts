@@ -25,7 +25,10 @@ import {
   type WireCellValue,
 } from "./protocol/mod.ts";
 import { DID } from "@commonfabric/identity";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  FabricSpecialObject,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
 import { InitializedRuntimeConnection } from "./client/connection.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -514,21 +517,34 @@ export class CellHandle<T = unknown> {
    * Converts a value the client holds into the one the connection carries,
    * which is the same data with a `CellRef` wherever a `CellHandle` sat.
    *
+   * Refuses a `FabricSpecialObject`, which the connection cannot carry.
+   *
    * `CellHandle.deserialize()` is the inverse.
    */
   static serialize(value: ClientCellValue): WireCellValue {
-    // TODO(danfuzz): this does not handle the whole of its stated input. A
-    // `FabricSpecialObject` is a `ClientCellValue`, and `isRecord()` reports
-    // one, so it reaches the record branch below and is rebuilt from its
-    // (empty) enumerable members -- `{}` in place of a `FabricBytes`.
-    // `WireCellValue` cannot represent one either, so the fix is a refusal
-    // here rather than a conversion, and belongs with the wire gap marked on
-    // that type.
-
     if (isCellHandle(value)) return value.ref();
 
     if (Array.isArray(value)) {
       return value.map((element) => CellHandle.serialize(element));
+    }
+
+    // A `FabricSpecialObject` is a `ClientCellValue` -- a cell holds one like
+    // any other value -- but `WireCellValue` has no representation for it, so
+    // this refuses rather than converting. It goes BEFORE the record test:
+    // such a value is also a record, and that branch would otherwise rebuild
+    // it from enumerable own properties it is not supposed to have, putting
+    // `{}` on the wire in place of a `FabricBytes` and losing the bytes with
+    // nothing to show for it.
+    //
+    // TODO(danfuzz): carry the whole `FabricValue` domain across this
+    // connection, at which point this becomes a conversion rather than a
+    // refusal. `JsonEncodingContext` is the mechanism, and the gap it closes
+    // is the one marked on `WireCellValue` in `protocol/types.ts`.
+    if (value instanceof FabricSpecialObject) {
+      throw new Error(
+        `Cannot yet handle \`${value.constructor.name}\` (a ` +
+          "`FabricSpecialObject`) on this connection.",
+      );
     }
 
     if (isRecord(value)) {
