@@ -6,7 +6,17 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import type { FabricExecValue } from "@commonfabric/api";
+
 import { type Replacer, replacingWalk } from "../src/replacing-walk.ts";
+
+/**
+ * A value the walk accepts but the type cannot describe: a cycle is outside
+ * `FabricExecValue`, which is the point of the cases that use this.
+ */
+function asExecValue(value: unknown): FabricExecValue {
+  return value as FabricExecValue;
+}
 
 /** Replaces any string beginning with `@` with the rest of it, uppercased. */
 const AT_NAMES: Replacer = {
@@ -61,7 +71,7 @@ describe("replacing-walk", () => {
     it("returns the cycle stand-in for a value it is already inside", () => {
       const cyclic: Record<string, unknown> = { a: 1 };
       cyclic.self = cyclic;
-      expect(replacingWalk(cyclic, AT_NAMES)).toEqual({
+      expect(replacingWalk(asExecValue(cyclic), AT_NAMES)).toEqual({
         a: 1,
         self: { cycleAt: [] },
       });
@@ -70,11 +80,12 @@ describe("replacing-walk", () => {
     it("returns a cycle stand-in naming the path it points back to", () => {
       const inner: Record<string, unknown> = { name: "inner" };
       inner.back = inner;
-      expect(replacingWalk({ outer: { inner } }, AT_NAMES)).toEqual({
-        outer: {
-          inner: { name: "inner", back: { cycleAt: ["outer", "inner"] } },
-        },
-      });
+      expect(replacingWalk(asExecValue({ outer: { inner } }), AT_NAMES))
+        .toEqual({
+          outer: {
+            inner: { name: "inner", back: { cycleAt: ["outer", "inner"] } },
+          },
+        });
     });
 
     it("walks a twice-reachable value at both of its positions", () => {
@@ -115,7 +126,7 @@ describe("replacing-walk", () => {
     });
 
     it("clears the ancestor even when `enter` stops the descent", () => {
-      const shared: unknown[] = ["@a"];
+      const shared: FabricExecValue[] = ["@a"];
       const replacer: Replacer = {
         ...AT_NAMES,
         enter: (value) =>
