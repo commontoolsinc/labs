@@ -92,6 +92,23 @@ created as live documents and archived later. A plan you intend to execute
 starts in `docs/plans/` (a pending plan is live) and is archived when it is
 done.
 
+## Spelling
+
+Prose written here — comments, documents, error and log messages, test
+descriptions — uses American spellings: `behavior`, `color`, `center`,
+`serialize`, `analyze`, `gray`.
+
+This is standardization rather than a claim about which English is better: one
+spelling per word means a search for a word finds all of it, and this is the
+variety already in overwhelming use in these files.
+
+Two carve-outs. Material quoted from outside — a dependency's name, a message
+relayed from another system, a specification's wording, a data file's contents
+— keeps whatever spelling it arrived with. And an identifier vocabulary
+already established in the codebase, `cancelled` among them, is a rename
+rather than a spelling fix: match the surrounding code, and treat a change to
+it as the code change it is.
+
 ## Map of this tree
 
 - [`why.md`](why.md) — the short statement of what Common Fabric is for and

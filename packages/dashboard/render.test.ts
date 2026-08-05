@@ -78,7 +78,7 @@ Deno.test("renderTile: an absent value/sub/hint/aside renders nothing rather tha
   const html = renderTile(view());
   assertEquals(
     html,
-    `<div class="tile good"><p class="lbl"><span class="dot green"></span> labs ci<span class="spacer"></span></p></div>`,
+    `<div class="tile good"><div class="texture"></div><p class="lbl"><span class="dot green"></span> labs ci<span class="spacer"></span></p></div>`,
   );
 });
 
@@ -223,7 +223,7 @@ Deno.test("shell: the freshness age and the refresh interval reach both the text
   assertStringIncludes(html, `link.dataset.focusKey === focusedKey`);
 });
 
-Deno.test("shell: live data and runtime settings keep the Git commit version", () => {
+Deno.test("shell: live data and runtime settings keep the compatibility version", () => {
   const first = shell(
     `<div class="tile good">first</div>`,
     "",
@@ -290,6 +290,24 @@ Deno.test("shell: the browser runs the viewer-time formatter", () => {
     localizeUpdate < compareMarkup,
     "live updates are localized before their markup is compared",
   );
+});
+
+Deno.test("shell: the texture fades out towards the bottom of its own tile", () => {
+  const html = shell(renderTile(view({ status: "bad" }), "labs-ci"), "", 0, 30_000, TEST_VERSION, "bad");
+  assertStringIncludes(html, `<div class="texture"></div>`);
+  // Measured against the tile: whole for its top fifth, gone four fifths down.
+  assertStringIncludes(
+    html,
+    ".texture{position:absolute;inset:0;z-index:-1;overflow:hidden;mask-image:linear-gradient(to bottom,#000 20%,transparent 80%)}",
+  );
+  // Measured against the turned frame the texture is drawn in.
+  assertStringIncludes(
+    html,
+    ".texture::before{content:\"\";position:absolute;inset:-100%;transform:rotate(30deg)}",
+  );
+  for (const status of ["unknown", "warn", "bad"]) {
+    assertStringIncludes(html, `.tile.${status} .texture::before{`);
+  }
 });
 
 Deno.test("shell: server-measured red age changes the favicon after one hour", () => {

@@ -749,7 +749,9 @@ correctness comes from cancellation, not staging:
    Ownership of a commit-gated start begins when the start is scheduled, not
    when its post-commit callback installs it. Cancelling the parent or lineage
    before that commit tombstones the pending start, so the callback must not
-   install it. After installation, cancellation may stop only the exact local
+   install it; stopping the result key does the same, so a piece the user
+   stopped before the origin commit does not start afterwards. After
+   installation, cancellation may stop only the exact local
    registration installed by that attempt; if another attempt has replaced or
    won the same result key, its registration remains live. This prevents a
    receipt-losing duplicate from stopping the winner.
@@ -864,7 +866,12 @@ phase E).
 **Computation-launched children are outside I10.** Computations are
 idempotent and re-runnable; their children converge through deterministic
 ids and normal re-runs, and orphaned registrations are bounded by the same
-retry budget. (The exhausted-retry zombie is accepted as pre-existing; the
+retry budget. The runner is nonetheless stricter for the launches it can tie
+to a transaction: a child whose setup transaction does not become durable has
+its registration stopped rather than left for a re-run to converge over, since
+the bookkeeping a coordinator keeps would otherwise make that re-run skip the
+staging the child needs. [Runner child-run
+ownership](../runner-child-run-ownership.md) states the rules. (The exhausted-retry zombie is accepted as pre-existing; the
 implementation should leave a watch-this comment at the retry-exhaustion
 sites.)
 

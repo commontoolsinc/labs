@@ -7,6 +7,7 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { type AliasBinding } from "../sigil-types.ts";
 import {
+  type FabricExecPlainObject,
   type FabricExecValue,
   type FactoryInput,
   isPattern,
@@ -231,7 +232,7 @@ export function withAliasBindings(
   return value;
 }
 
-export function moduleToEncodableForm(module: Module) {
+export function moduleToEncodableForm(module: Module): FabricExecPlainObject {
   const frame = getTopFrame();
   // Destructure-and-drop the runtime-only members a module carries for the
   // builder's own use: its serializer under BOTH the names it answers to
@@ -390,7 +391,9 @@ export function serializePatternGraph(
   }
 }
 
-export function patternToEncodableForm(pattern: Pattern) {
+export function patternToEncodableForm(
+  pattern: Pattern,
+): FabricExecPlainObject {
   // Serialize only the STABLE program identity ({main, mainExport}), never the
   // authored `files`. The `files` array serializes non-canonically (two
   // encodings -> two content ids), so embedding it dragged a session-varying

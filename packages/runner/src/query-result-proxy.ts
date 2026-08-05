@@ -625,7 +625,25 @@ export function createQueryResultProxy<T>(
       }
       const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link, SHAPE_READ) as typeof value;
-      if ((isRecord(current) || Array.isArray(current)) && prop in current) {
+      // `Object.hasOwn`, not `in`: this trap answers about OWN properties, and
+      // `in` walks the prototype chain. Because the underlying value is an
+      // ordinary `Object.prototype`-rooted record, `in` reported every member of
+      // `Object.prototype` -- `toString`, `valueOf`, `constructor`, `__proto__`
+      // -- as an own property of the proxy, while `ownKeys` (which uses
+      // `Reflect.ownKeys`) listed none of them. Two traps describing the same
+      // value disagreed by construction, so every consumer that reasons about a
+      // read-back value's shape was being told it carries names it does not.
+      //
+      // That is not academic: `unsafeObjectKeyIn()` refuses a `FabricValue`
+      // carrying own `__proto__`/`constructor` and tests with `Object.hasOwn()`,
+      // so writing a read-back record back to a cell was rejected for a key the
+      // record never had, and every read-modify-write against a cell failed
+      // (loom CT-1949). The `has` trap below keeps `in` -- there it is correct,
+      // being the `in` operator's own trap.
+      if (
+        (isRecord(current) || Array.isArray(current)) &&
+        Object.hasOwn(current, prop)
+      ) {
         return {
           configurable: true,
           enumerable: true,
