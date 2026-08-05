@@ -188,6 +188,34 @@ describe("child run ownership", () => {
     expect(runtime.runner.cancels.has(key(result))).toBe(false);
   });
 
+  it("cancels a pending commit-gated start on release", async () => {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = runtime.edit();
+    tx.tx.immediate = true;
+    (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    const result = runtime.getCell<Record<string, unknown>>(
+      space,
+      "released before its deferred start",
+      undefined,
+      tx,
+    );
+    runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+
+    // The launch holds this result through the pending start alone: nothing is
+    // registered under its key until that start installs.
+    expect(runtime.runner.cancels.has(key(result))).toBe(false);
+
+    runtime.runner.releaseChild(result, undefined);
+    expect((await tx.commit()).error).toBeUndefined();
+    await runtime.idle();
+
+    expect(runtime.runner.cancels.has(key(result))).toBe(false);
+  });
+
   it("tombstones a pending commit-gated start when the runtime stops", async () => {
     const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
     const Piece = pattern<{ value: number }>(({ value }) => ({

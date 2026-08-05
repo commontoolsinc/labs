@@ -2220,9 +2220,10 @@ export class Runner {
     installedCancel: Cancel | undefined,
   ): void {
     const key = this.getDocKey(resultCell);
-    if (installedCancel !== undefined) {
-      if (this.cancels.get(key) !== installedCancel) return;
-    } else if (!this.cancels.has(key)) return;
+    const registration = this.cancels.get(key);
+    if (installedCancel !== undefined && registration !== installedCancel) {
+      return;
+    }
     if (this.independentlyStartedResults.has(key)) return;
     // A start still resolving may be about to give this result a lifetime of
     // its own, and it cannot say so until it finishes. Declining here keeps a
@@ -2231,6 +2232,16 @@ export class Runner {
     // which is the same bound the scheduler already accepts for a start that
     // exhausts its retries.
     if ((this.activeStartAttemptsByDoc.get(key)?.size ?? 0) > 0) return;
+    if (registration === undefined) {
+      // A commit-gated start installs nothing until its transaction commits,
+      // so a launch whose child is still gated holds that child through the
+      // pending start alone. Cancelling it is what keeps the child from
+      // starting after the pattern that launched it is gone. The width is the
+      // one the TODO in stopResult() describes: every pending start for the
+      // result goes, not only the one this launch scheduled.
+      this.cancelPendingDeferredStarts(key);
+      return;
+    }
     // A link start that has not yet followed its link is not indexed under
     // `key`, so the check above cannot see it. An explicit stop is
     // authoritative over such a start and tombstones it; a release is not, and

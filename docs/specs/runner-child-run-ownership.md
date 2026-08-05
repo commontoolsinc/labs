@@ -105,5 +105,8 @@ A start gated on a commit has no registration until its callback installs one.
 Ownership of it begins when the start is scheduled, so stopping the result
 before that commit tombstones the pending start and the callback does not
 install it. Without this a piece the user stopped starts anyway, moments
-later. Releasing the result's registration cancels the pending starts held
-for that result too, at the width the exception above describes.
+later. Releasing the child cancels the pending starts held for that result
+too, at the width the exception above describes. A launch whose child is
+still gated holds that child through the pending start and nothing else, so a
+release that passed it over would let the child start after the pattern that
+launched it is gone.
