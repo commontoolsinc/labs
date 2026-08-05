@@ -78,8 +78,16 @@ describe("create-ref-cell-routes", () => {
     // closed on a cell that can name itself perfectly well.
     const causable = createCell<{ v: number }>(runtime, { space, path: [] }, tx)
       .for("explicit-cause");
-    expect(idOf(causable)).toBe(idOf(causable));
-    expect(causable.entityId).not.toBe(undefined);
+    const first = idOf(causable);
+
+    // Idempotent: a second derivation answers what the first did, rather than
+    // one preimage before the link exists and another after.
+    expect(idOf(causable)).toBe(first);
+
+    // And what it derives from is the link, not the document's id -- checked
+    // against that link written out as plain data, which reaches `createRef`
+    // through none of the cell machinery.
+    expect(first).toBe(idOf(causable.toEncodableForm()));
   });
 
   it("derives one id for a cell and its own query result", () => {
