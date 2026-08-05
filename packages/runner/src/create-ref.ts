@@ -119,21 +119,24 @@ export function createRef(
     }
 
     if (isCell(obj)) {
-      // A cell reaches a preimage as the link naming it, path included -- the
-      // same form the encodable-form branch above gives a cell that arrives
-      // directly, so the two routes to a cell agree. The document's id alone
-      // would drop the path, and two cells of one document would then derive
-      // one id.
-      const link = encodableFormOf(obj);
-      if (link == null) {
-        // A Cell referenced from a derived id must name a link; otherwise the
-        // id would silently become non-deterministic (audit S14). Fail closed
-        // rather than mint a random substitute.
+      // Reading the entity id is what materializes a link from an explicit
+      // cause, so it comes first: the link read below is available only once
+      // this has happened.
+      const id = obj.entityId;
+      if (id == null) {
+        // A Cell referenced from a derived id must have an entityId; otherwise
+        // the id would silently become non-deterministic (audit S14). Fail
+        // closed rather than mint a random substitute.
         throw new Error(
           "[createRef] Cell has no entityId; cannot derive a stable id",
         );
       }
-      return traverse(link);
+
+      // The path is part of what names a cell, so a cell derives from the link
+      // naming it -- the same form the encodable-form branch above gives a cell
+      // that arrives directly, which is what keeps the two routes at one
+      // answer. Two cells of one document derive two ids.
+      return traverse(encodableFormOf(obj));
     } else if (Array.isArray(obj)) return obj.map(traverse);
     else if (isRecord(obj)) {
       return Object.fromEntries(

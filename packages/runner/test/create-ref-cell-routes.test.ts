@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { createRef } from "../src/create-ref.ts";
+import { createCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -63,11 +64,22 @@ describe("create-ref-cell-routes", () => {
   });
 
   it("derives different ids for the query results of those cells", () => {
-    // A query result stands for the cell it dereferences to, so it has to carry
-    // the same amount of identity. Deriving from the document alone loses the
-    // path, and two cells of one document then name each other.
+    // A query result stands for the cell it dereferences to, so it carries the
+    // same amount of identity: the path is part of what names a cell, and two
+    // cells of one document derive two ids.
     const { aResult, bResult } = siblings();
     expect(idOf(aResult)).not.toBe(idOf(bResult));
+  });
+
+  it("derives an id for a cell whose link an explicit cause materializes", () => {
+    // A cell can carry a space and a cause without a link having been built
+    // yet, and reading the entity id is what builds one. So the id is derivable,
+    // and a route that only asked whether a link were already there would fail
+    // closed on a cell that can name itself perfectly well.
+    const causable = createCell<{ v: number }>(runtime, { space, path: [] }, tx)
+      .for("explicit-cause");
+    expect(idOf(causable)).toBe(idOf(causable));
+    expect(causable.entityId).not.toBe(undefined);
   });
 
   it("derives one id for a cell and its own query result", () => {
