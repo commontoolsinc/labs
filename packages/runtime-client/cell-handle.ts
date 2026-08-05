@@ -25,6 +25,7 @@ import {
   type WireCellValue,
 } from "./protocol/mod.ts";
 import { DID } from "@commonfabric/identity";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
 import { InitializedRuntimeConnection } from "./client/connection.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -39,23 +40,22 @@ export const $onCellUpdate = Symbol("$onCellUpdate");
  * CellHandle provides a cell interface for cells living in a web worker.
  */
 /**
- * A cell's value as the CLIENT holds it: the data a cell carries, with a
- * `CellHandle` wherever a cell sits. This is the same substitution
- * `vnode-types.ts` makes for the render types -- `Cell` replaced by
+ * A cell's value as the CLIENT holds it: what a cell holds, with a
+ * `CellHandle` wherever a cell sits. That is the substitution
+ * `vnode-types.ts` already makes for the render types -- `Cell` replaced by
  * `CellHandle` -- applied to a cell's own value.
  *
- * What it does NOT admit is as much of the point as what it does. There is no
- * `FabricSpecialObject` here: a `FabricBytes` or a `FabricError` has no
- * representation on this connection (see `IPCCellValue` in `protocol/types.ts`),
- * and nothing on this side produces one, so a walk over this domain never has
- * to have an opinion about one.
+ * What a cell holds is a `FabricValue`, so that is an arm of this rather than
+ * something restated: a `FabricBytes` in a cell is a value the client holds
+ * like any other, and this stays true of whatever `FabricValue` comes to admit.
+ * The container arms are here too, since theirs hold `FabricValue` where these
+ * hold handles as well.
+ *
+ * That the connection cannot presently CARRY all of it is a fact about
+ * `WireCellValue`, not about this: see the note there.
  */
 export type ClientCellValue =
-  | null
-  | undefined
-  | boolean
-  | number
-  | string
+  | FabricValue
   | readonly ClientCellValue[]
   | { readonly [key: string]: ClientCellValue }
   | CellHandle<unknown>;
@@ -516,6 +516,12 @@ export class CellHandle<T = unknown> {
    *
    * `CellHandle.deserialize()` is the inverse.
    */
+  // TODO(danfuzz): this does not handle the whole of its stated input. A
+  // `FabricSpecialObject` is a `ClientCellValue`, and `isRecord()` reports one,
+  // so it reaches the record branch below and is rebuilt from its (empty)
+  // enumerable members -- `{}` in place of a `FabricBytes`. `WireCellValue`
+  // cannot represent one either, so the fix is a refusal here rather than a
+  // conversion, and belongs with the wire gap marked on that type.
   static serialize(value: ClientCellValue): WireCellValue {
     if (isCellHandle(value)) return value.ref();
 
