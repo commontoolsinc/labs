@@ -427,15 +427,29 @@ and `["cell"]` asserts a writable handle on a document nothing can be written
 through. Whether a receipt should say that, something narrower, or nothing about
 link positions, is open.
 
-**Should an invocation id be namespaced by its caller?** Nothing in a receipt's
-address identifies who called: a supplied id is hashed together with the stream
-link, so it is namespaced per verb binding but not by principal — no DID or
-session enters the hash. An invocation id is therefore a read key shared by
-everyone using that verb in that space. Two callers picking the same id read one
-receipt, and a guessed id reads someone else's result.
+**What an invocation id is scoped to.** Nothing in a receipt's address
+identifies who called: a supplied id is hashed together with the stream link, so
+it is namespaced per verb binding but not by caller. An invocation id is
+therefore a read key shared by everyone using that verb in that space. Two
+callers picking the same id read one receipt, and a guessed id reads someone
+else's result.
 
-Adding the caller's DID to that hash is mechanically cheap — identity into a
-hash that already exists. The cost is that it changes deduplication semantics
-and breaks deliberate id-sharing between agents, if that is worth keeping. The
-consequences and the three ways out are worked through in
-[Verb calls: working notes](verb-result-selection.md).
+The scope should be a **session**, not a principal. An identity separates
+nothing here — agents are directed to work under their human user's key rather
+than mint their own, so the collision that actually happens is two agents under
+one key. A session distinguishes them; a DID does not. A minted, unguessable
+session also closes the second half of the problem, which an identity cannot: a
+DID is public, so scoping by one would still leave an outcome's address
+computable by anyone who knows the piece, the verb, and a conventional id.
+
+Sharing an outcome deliberately is then done by passing its address, not by two
+callers deriving the same id from a convention — which is unambiguous, and
+removes the only reason the shared key looked useful.
+
+What remains open is the mechanism. Neither session identifier in the tree
+serves: the storage session is minted per process and re-minted on close, so
+scoping by it would break same-id replay, which is the property the id exists
+for. That points at a new, caller-supplied session identity — minted explicitly
+rather than managed implicitly, so a caller always knows which session an
+outcome belongs to — and at the question of what an absent one means, since
+unscoped preserves today's behavior and today's collision.

@@ -345,11 +345,24 @@ handler bodies run, so effects outside the transaction happen twice.
 piece + verb + id into an address, bounded only by CFC labels and cell scope,
 never by authorship.
 
-| Option | Effect | Cost |
-| --- | --- | --- |
-| Document the shared read key; require collision-resistant ids | Cheapest | Relies on compliance; guessed-id reads remain |
-| Namespace the event id by caller DID | Makes the read key per-caller | Changes dedup semantics; breaks deliberate cross-agent id sharing |
-| Keep the shared key, stop treating unguessability as privacy | Honest about what the address proves | Needs explicit authorization on receipt reads; does not address aliasing |
+The scope is a **session**, not a principal. A DID separates nothing: agents
+work under their human user's key rather than mint their own, so the collision
+that happens in practice is two agents under one key. A session distinguishes
+them, and because it is minted rather than derived it is also unguessable —
+which a DID is not, so identity scoping would have left an address computable
+from a piece, a verb, and a conventional id.
+
+Deliberate sharing then moves to passing the address rather than two callers
+deriving one id from a convention. That is unambiguous, and it removes the only
+thing the shared key was good for.
+
+What is unresolved is the mechanism, not the direction. Neither session
+identifier already in the tree serves: the storage session is minted per process
+and re-minted on close, so scoping by it would break the same-id replay the id
+exists for; `cf-harness`'s is durable but is harness state, and not every caller
+is that harness. A new caller-supplied session identity is wanted — minted
+explicitly, so a caller always knows which session an outcome belongs to —
+along with a decision about what an absent one means.
 
 Pre-existing (WS-D), but reading receipts deliberately makes it reachable. The exposure is entirely
 in caller-chosen ids — and the human-friendly convention
