@@ -111,8 +111,11 @@ SpaceServer outbox ──(e)──► network; results re-enter via (a)
   reconciling protocol.md §2b's "activates later" with this hook
   (trace finding T11.Q7).
 - **(c) ExecutorHost → engine tables**: lease acquire and renew by
-  direct table update — the direct-engine plane's ONLY traffic, and
-  a renewal is NEVER a commit (§2).
+  direct table update, and — since Phase 1 stage G — the outbox's
+  delivery-acked row retirement (§5's deleted-on-delivery-ack; the
+  rows were WRITTEN inside the wave's own plane-(a) transaction, so
+  only the delete rides here) — the direct-engine plane's ONLY
+  traffic, none of it ever a commit (§2).
 - **(d) memory server → runtime**: the space subscription delivers
   accepted commits from the activation scan's head (§3, §6); the
   loop's own derived commits return here too and are skipped by

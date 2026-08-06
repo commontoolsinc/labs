@@ -284,6 +284,60 @@ acceptances only — no rule counts move):
   key-vocabulary §5 acceptances", and the recorded-acceptance row
   above names both deltas.
 
+Delta 2026-08-06 — stage G lands (effect serving + the outbox; this
+PR):
+
+- serving-loop §4's memoization contract: impl-gate → COVERED. The
+  hit rule, in-flight dedupe, error-shaped results, and the
+  no-re-fire-on-recovery property are pinned end to end in
+  `packages/runner/test/executor-serving-loop.test.ts` (the effectful
+  node journey: one external call per key across park/re-activate;
+  the failure leg retries only on input change) and
+  `packages/runner/test/executor-outbox.test.ts` (dedupe + counters).
+  The builtins' own memo checks now REPORT hits (`effectMemoObserver`
+  — fetch*, generate*, sqliteQuery; fetchProgram and llmDialog count
+  misses via the outbox and report no hit events yet, recorded in
+  stats.ts).
+- serving-loop §4's completion-commit clarification (2026-08-05,
+  was DERIVABLE): now impl-covered — the completion commits as its
+  OWN derived-class commit (never through §3d's sealing), its
+  annotations sourced from the outbox carriage captured at the
+  original run's seal, pinned with a scoped write + acting identity
+  in `executor-serving-loop.test.ts` (T7.Q4's impl witness).
+- serving-loop §5's FP1 rows: impl-gate → COVERED. Durable rows
+  land INSIDE the wave's engine transaction (surviving contributions
+  only — a dependency-dropped contribution's appends are excluded, a
+  per-doc-superseded survivor's still ride, matching §3d's
+  drop-re-arms-nothing ruling), delivery admits at the target under
+  the delegated row with `firedAt` from the CARRIED actor (LT5's
+  service envelope), the row deletes on delivery-ack
+  (admit-before-delete), a re-sent duplicate dedupes at the eventId
+  horizon, and an LT4 deterministic rejection deletes without
+  retrying (`executor-outbox.test.ts`; the model's C2/FP1 closure
+  stays the oracle).
+- serving-loop §1 plane (c): CHANGED sentence — the direct-engine
+  plane now also carries the outbox's delivery-acked row retirement
+  (the rows are WRITTEN on plane (a) inside the wave transaction;
+  only the delete rides plane (c)). This row is its coverage; the
+  retirement behavior is pinned by the delivery tests above.
+- serving-loop §7's memo/outbox counters: structurally-zero note
+  retired — the counters are live and asserted by the stage-G tests
+  (stats.ts documents the exact semantics, including that
+  `outbox.failed` counts INFRASTRUCTURE failures while effect-level
+  failures commit error-shaped results per §4).
+- stage D's last documented bound (sqlite ops in wave batches):
+  DISCHARGED for HOME batches — the accumulator resolves each folded
+  op's db scope against its RUN's identity (M1), the sink attaches
+  through the memory server's `attachWaveCommitSqliteDbs` (same
+  validations as the transact path) and applies atomically inside
+  the wave transaction; hook-less sinks, key-less ops, and FOREIGN
+  batches with sqlite ops are refused loudly (`executor-outbox.
+  test.ts`). Foreign-batch sqlite lands with Phase 5's cross-space
+  design.
+- OW7 → LANDED as trace T14 (scenario-traces §3/§4) plus the
+  serving-loop failure-leg test above; the owed entry below is
+  flipped.
+
 ## 3. The owed register (every genuine orphan, with its trigger)
 
 Nothing here blocks Phase 1. Each item names the instrument
@@ -362,10 +416,13 @@ journey):**
   grant-scoped checks) — no later than the outbox/provisioning
   producers going live (Phase 3 events; Phase 5 cross-space).
 
-**Stage G pre-gate:**
+**Stage G pre-gate — LANDED with stage G (2026-08-06):**
 
-- OW7 — effect failure retries are input-driven, never
-  timer-driven (serving-loop §4); one failure-path trace question.
+- OW7 — LANDED as trace T14 (effect failure and retry: input-driven,
+  never timers — scenario-traces §3/§4) plus the impl witness in
+  `executor-serving-loop.test.ts` (the failure leg: an error-shaped
+  result commits with the key, no timer retry fires, and only an
+  input change re-fires).
 
 **Phase 6 (the contract is fixed now, the check lands with
 hardening):**

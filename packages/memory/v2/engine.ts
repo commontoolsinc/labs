@@ -14,6 +14,10 @@ import {
 } from "./path.ts";
 import { replaceSchedulerBasisRows } from "./scheduler-basis.ts";
 import {
+  insertExecutionOutboxRows,
+  type OutboxAppendRow,
+} from "./execution-outbox.ts";
+import {
   containsReservedSchemaRefSubstring,
   containsSyncSchemaRefString,
   findSyncSchemaRef,
@@ -277,6 +281,37 @@ CREATE TABLE IF NOT EXISTS scheduler_basis (
 -- full-table walk, the successor of idx_scheduler_read_index_lookup.
 CREATE INDEX IF NOT EXISTS idx_scheduler_basis_entity
   ON scheduler_basis (branch, entity_space, entity, entity_scope_key);
+
+-- Server-execution v2: the DURABLE half of the outbox
+-- (docs/specs/server-side-execution/serving-loop.md §5, FP1 RULED
+-- 2026-08-03) — pending cross-space event appends. Rows are written
+-- INSIDE the emitting wave's own store transaction (applyWaveCommit;
+-- the basis-row carriage pattern, protocol.md §7) and DELETED on
+-- delivery-ack: a queue that empties, never history. A row carries the
+-- event (payload bounded by the event, never graph-scaled) plus the
+-- ORIGINATING chain actor + capabilityRef the target's admission
+-- validates and stamps firedAt from (events.md §2; protocol.md §2's
+-- server-produced authored row). Never wire, never commit metadata,
+-- never read at admission. The EFFECT half of the outbox is
+-- process-local by design and has NO table (serving-loop.md §4's
+-- FORBIDDEN "pending effects" table — crash recovery re-misses effects
+-- from memo keys). References nothing; nothing references it. The
+-- writer/reader module is execution-outbox.ts.
+CREATE TABLE IF NOT EXISTS execution_outbox (
+  branch            TEXT    NOT NULL,
+  target_space      TEXT    NOT NULL,
+  target_stream     TEXT    NOT NULL, -- the target stream doc id
+  event_id          TEXT    NOT NULL, -- durable id; the target's dedupe
+                                      --   horizon keys on it (events §4)
+  payload           TEXT    NOT NULL, -- the event payload, JSON —
+                                      --   bounded by the event
+  acting_principal  TEXT,             -- the originating chain actor
+  acting_session    TEXT,             --   (absent for sessionless chains)
+  capability_ref    TEXT    NOT NULL, -- validated at the target
+  created_seq       INTEGER NOT NULL  -- the emitting wave's commit seq
+);
+CREATE INDEX IF NOT EXISTS idx_execution_outbox_branch
+  ON execution_outbox (branch);
 
 CREATE TABLE IF NOT EXISTS blob_store (
   hash          TEXT    NOT NULL PRIMARY KEY,
@@ -828,6 +863,13 @@ export type ApplyCommitOptions = {
    *  Server-internal like `commitClass`; rejected on any other class
    *  (protocol.md §7's closed list). */
   annotations?: readonly DerivedWriteAnnotation[];
+  /** Server-internal (the wave path only — applyWaveCommit sets it when
+   *  the wave carries outbound append rows): permit a commit with zero
+   *  operations. An appends-only wave MUST still commit — its durable
+   *  rows ride this very transaction (FP1, serving-loop.md §5), and a
+   *  refusal would lose the appends with nothing to re-emit them. Never
+   *  reachable from any session-facing path. */
+  allowEmptyOperations?: boolean;
   /** The eventIds whose handler consequences this `derived`-class commit
    *  carries (protocol.md §7 — `consequenceOf`, derived only; bounded by
    *  the wave's input, never graph-scaled). Stored on the commit row;
@@ -1744,11 +1786,26 @@ export const applyWaveCommit = (
       rebasedHeads: ReadonlyArray<{ doc: string; head: number }>;
     };
     basisInstances?: readonly WaveBasisInstance[];
+    /** The wave's outbound cross-space appends (serving-loop.md §5,
+     * FP1): durable rows written INSIDE this very transaction — the
+     * basis-row carriage pattern. Deleted later, on delivery-ack, by
+     * the serving loop's outbox (execution-outbox.ts). */
+    outboxAppends?: readonly OutboxAppendRow[];
   },
 ): AppliedCommit => {
   return engine.database.transaction(
     (txEngine: Engine, txOptions: typeof options) => {
-      const { waveBasis, basisInstances, ...applyOptions } = txOptions;
+      const { waveBasis, basisInstances, outboxAppends, ...restOptions } =
+        txOptions;
+      // An appends-only wave commits with zero operations: the durable
+      // rows ride this transaction (FP1), so the emptiness guard below
+      // must not refuse it.
+      const applyOptions = {
+        ...restOptions,
+        ...(outboxAppends !== undefined && outboxAppends.length > 0
+          ? { allowEmptyOperations: true }
+          : {}),
+      };
       const rebasedHeads = new Map(
         waveBasis.rebasedHeads.map(({ doc, head }) => [doc, head]),
       );
@@ -1851,6 +1908,17 @@ export const applyWaveCommit = (
           })),
         });
       }
+      // FP1 (serving-loop.md §5): the wave's outbound append rows land
+      // inside this same transaction — atomically with the wave commit,
+      // so a crash either has both (rows re-sent, deduped at the
+      // target's eventId horizon) or neither (the wave never happened).
+      if (outboxAppends !== undefined && outboxAppends.length > 0) {
+        insertExecutionOutboxRows(txEngine, {
+          branch,
+          createdSeq: applied.seq,
+          rows: outboxAppends,
+        });
+      }
       return applied;
     },
   ).immediate(engine, options);
@@ -1870,6 +1938,7 @@ const applyCommitTransaction = (
     consequenceOf,
     derivedThrough,
     delegated,
+    allowEmptyOperations,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
   // The derived-class admission rule (serving-loop.md §2, protocol.md §2's
@@ -2050,7 +2119,10 @@ const applyCommitTransaction = (
   }
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
   const hasPreconditions = (commit.preconditions?.length ?? 0) > 0;
-  if (commit.operations.length === 0 && !hasPreconditions) {
+  if (
+    commit.operations.length === 0 && !hasPreconditions &&
+    allowEmptyOperations !== true
+  ) {
     throw new Error("memory v2 commit requires at least one operation");
   }
 

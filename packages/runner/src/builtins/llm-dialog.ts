@@ -109,6 +109,7 @@ import { createTrustResolver } from "../cfc/trust.ts";
 import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { markEffectCompletion } from "../executor/effect-completion.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { internalVerifierRead } from "../storage/reactivity-log.ts";
 import type { RawBuiltinResult } from "../module.ts";
@@ -2415,6 +2416,7 @@ async function safelyPerformUpdate(
   action: (tx: IExtendedStorageTransaction) => void,
 ) {
   const { ok } = await runtime.editWithRetry((tx) => {
+    markEffectCompletion(tx, `llmDialog:${requestId}`);
     if (
       pending.withTx(tx).get() &&
       internal.withTx(tx).key("requestId").get() === requestId
@@ -3574,6 +3576,7 @@ async function startRequest(
 
   // Write to result cell using editWithRetry since we're outside handler tx
   await runtime.editWithRetry((tx) => {
+    markEffectCompletion(tx, `llmDialog:${requestId}`);
     result.withTx(tx).key("pinnedCells").set(mergedPinnedCells as any);
   });
 

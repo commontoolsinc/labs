@@ -36,6 +36,7 @@ import {
   type ScopeKey,
   type ScopeKeyIdentity,
 } from "@commonfabric/memory/v2";
+import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import type {
   CommitError,
   IExtendedStorageTransaction,
@@ -243,6 +244,20 @@ export interface WaveSpaceCommit {
     actingSession?: string;
     capabilityRef: string;
   };
+  /** Per-op resolved scope keys for the batch's folded `sqlite` ops
+   * (stage G, discharging the stage-D sqlite bound): the accumulator
+   * resolves each op's db scope against its RUN's identity (M1 — the
+   * wave envelope has no session to resolve scoped files from), and the
+   * sink attaches the matching cell-db file(s) before its store
+   * transaction. Ops whose db declares the space scope carry `"space"`
+   * explicitly — every sqlite op in the batch has an entry. */
+  sqliteScopeKeys?: ReadonlyArray<{ op: number; scopeKey: ScopeKey }>;
+  /** The wave's outbound cross-space event appends (serving-loop.md §5,
+   * FP1): durable rows the sink writes INSIDE the wave's own store
+   * transaction, from surviving contributions only — a withdrawn
+   * contribution's appends never ride (its event replays and re-emits).
+   * Home batch only. */
+  outboxAppends?: readonly OutboxAppendRow[];
 }
 
 /**
@@ -329,6 +344,12 @@ interface WaveContribution {
    * spaces) — over-dropping a derivation is sound, committing one
    * derived from withdrawn state is not (§3d). */
   readOnlyReadKeys: Set<string>;
+  /** Cross-space event appends this run emitted (serving-loop.md §5,
+   * FP1): folded into the home batch's durable rows iff the
+   * contribution survives — a withdrawn contribution's appends never
+   * ride (its event replays and re-emits, the model's committed-only
+   * `cascadesCross` fold). */
+  outboundAppends: OutboxAppendRow[];
 }
 
 interface SealedSpaceContribution {
@@ -408,6 +429,14 @@ export class WaveAccumulator
   #assembly: PendingAssembly | undefined;
   #closed = false;
   #derivedThrough: number | undefined;
+  /** Outbound appends staged per transaction before its seal
+   * (enqueueOutboundAppend); folded into the contribution at seal so
+   * only surviving contributions' appends ride the wave (FP1). */
+  readonly #pendingAppendsByTx = new WeakMap<object, OutboxAppendRow[]>();
+  /** Contribution index per sealed transaction — how the serving loop
+   * resolves a sealed tx's disposition (the stage-G effect handoff:
+   * flush post-commit effects only for landed contributions). */
+  readonly #contributionIndexByTx = new WeakMap<object, number>();
 
   constructor(options: {
     /** The home space this wave derives for. */
@@ -444,6 +473,14 @@ export class WaveAccumulator
 
   get contributionCount(): number {
     return this.#contributions.length;
+  }
+
+  /** Whether any contribution staged outbound appends — the serving
+   * loop's cheap gate on draining the durable outbox after this wave's
+   * commit (a pre-disposition upper bound: withdrawn contributions'
+   * appends never actually ride). */
+  get hasOutboundAppends(): boolean {
+    return this.#contributions.some((c) => c.outboundAppends.length > 0);
   }
 
   /**
@@ -539,16 +576,62 @@ export class WaveAccumulator
             "(serving-loop.md §3d, RULED 2026-08-05)",
         );
       }
+      this.#contributionIndexByTx.set(tx, this.#contributions.length);
       this.#contributions.push({
         index: this.#contributions.length,
         context,
         spaces: assembly.spaces,
         readOnlyReadKeys: assembly.readOnlyReadKeys,
+        outboundAppends: this.#pendingAppendsByTx.get(tx) ?? [],
       });
       return result;
     } finally {
       this.#assembly = undefined;
     }
+  }
+
+  /**
+   * Stage a cross-space event append for the run owning `tx`
+   * (serving-loop.md §5, FP1): the entry becomes a durable engine-table
+   * row written INSIDE the wave's own store transaction — iff the run's
+   * contribution survives the wave commit. Phase 3's handler cascades
+   * are the production producer; until then tests drive it (the
+   * machinery lands dark, like stage D's).
+   */
+  enqueueOutboundAppend(
+    tx: IExtendedStorageTransaction,
+    entry: OutboxAppendRow,
+  ): void {
+    if (this.#closed) {
+      throw new Error(
+        "wave already committed or abandoned; nothing may stage appends " +
+          "into it (serving-loop.md §3)",
+      );
+    }
+    let pending = this.#pendingAppendsByTx.get(tx);
+    if (pending === undefined) {
+      pending = [];
+      this.#pendingAppendsByTx.set(tx, pending);
+    }
+    pending.push(entry);
+  }
+
+  /**
+   * How the wave commit step disposed of the contribution `tx` sealed —
+   * the serving loop's effect handoff consumes this (stage G): sealed
+   * post-commit effects flush only for contributions that LANDED
+   * (committed or partially-dropped); a withdrawn contribution's
+   * effects are discarded (its action re-runs and re-enqueues —
+   * at-least-once, serving-loop.md §4). Undefined for a tx this wave
+   * never sealed.
+   */
+  dispositionOf(
+    tx: IExtendedStorageTransaction,
+    outcome: WaveCommitOutcome,
+  ): ContributionDisposition | undefined {
+    const index = this.#contributionIndexByTx.get(tx);
+    if (index === undefined) return undefined;
+    return outcome.dispositions[index];
   }
 
   /**
@@ -973,10 +1056,14 @@ export class WaveAccumulator
       // the store to see. A batch with preconditions still goes to the
       // sink even with zero ops: preconditions are commit GATES, and
       // short-circuiting them would resolve their contributions
-      // committed without the engine ever validating the gate.
+      // committed without the engine ever validating the gate. A batch
+      // with outbound appends goes too: the durable rows land inside
+      // the wave's own transaction (FP1) — short-circuiting would lose
+      // them.
       if (
         batch.operations.length === 0 && batch.consequenceOf.length === 0 &&
-        batch.preconditions.length === 0
+        batch.preconditions.length === 0 &&
+        (batch.outboxAppends?.length ?? 0) === 0
       ) {
         this.#settleVerdicts(
           outcome,
@@ -1266,6 +1353,8 @@ export class WaveAccumulator
     const preconditions: CommitPrecondition[] = [];
     const preconditionOwners: number[] = [];
     const consequenceOf: string[] = [];
+    const sqliteScopeKeys: Array<{ op: number; scopeKey: ScopeKey }> = [];
+    const outboxAppends: OutboxAppendRow[] = [];
     // §3b's overwrite unit: when one wave holds several runs of the same
     // (action, instance) — a later contribution re-ran the action against
     // earlier sealed writes — the LAST run's rows replace the earlier
@@ -1285,6 +1374,17 @@ export class WaveAccumulator
         }
         const opIndex = operations.length;
         operations.push(operation);
+        if (operation.op === "sqlite") {
+          // The sqlite bound's discharge (stage G): the db file a folded
+          // op targets is keyed per scope INSTANCE, resolved against the
+          // RUN's identity exactly like the run's scoped cell writes (M1
+          // — the wave envelope has no session to resolve it from). The
+          // sink attaches the matching file(s) before its transaction.
+          sqliteScopeKeys.push({
+            op: opIndex,
+            scopeKey: this.#scopeKeyFor(operation.db.scope, context),
+          });
+        }
         if (operation.op !== "sqlite") {
           const scoped = operation.scope !== undefined &&
             operation.scope !== "space";
@@ -1313,6 +1413,10 @@ export class WaveAccumulator
       if (context.kind === "event-handler" && context.eventId !== undefined) {
         consequenceOf.push(context.eventId);
       }
+      // FP1: only a SURVIVING contribution's cross-space appends become
+      // durable rows — a withdrawn contribution's event replays and
+      // re-emits them (the model's committed-only cascadesCross fold).
+      outboxAppends.push(...contribution.outboundAppends);
       // Every survivor lands its basis rows — including one whose writes
       // were dropped per-doc as superseded: its reads are true, and no
       // recompute-owed mark exists (§3d, RULED 2026-08-05).
@@ -1343,6 +1447,8 @@ export class WaveAccumulator
       ...(this.#derivedThrough === undefined
         ? {}
         : { derivedThrough: this.#derivedThrough }),
+      ...(sqliteScopeKeys.length === 0 ? {} : { sqliteScopeKeys }),
+      ...(outboxAppends.length === 0 ? {} : { outboxAppends }),
     };
   }
 

@@ -5,6 +5,7 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { markEffectCompletion } from "../executor/effect-completion.ts";
 
 /**
  * How long a claimed request mutex is believed before another replica may take
@@ -125,6 +126,11 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   snapshotInputs: (cell: Cell<T>) => T,
   expectedInputHash?: string,
   timeout: number = MUTEX_STALE_AFTER,
+  /** The served-effect id this claim belongs to (`${kind}:${hash}` —
+   * the memo/outbox key). Marks the write as an effect-completion-class
+   * transaction under the serving posture (server-execution v2 stage G,
+   * serving-loop.md §4); inert everywhere else. */
+  effectKey?: string,
 ): Promise<{
   claimed: boolean;
   inputs: T;
@@ -140,6 +146,7 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   await runtime.idle();
 
   await runtime.editWithRetry((tx) => {
+    if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
     const currentInternal = internal.withTx(tx).get();
     const isPending = pending.withTx(tx).get();
     const now = Date.now();
@@ -188,9 +195,12 @@ export async function tryWriteResult<T extends Record<string, any>>(
   expectedHash: string,
   action: (tx: IExtendedStorageTransaction) => void,
   snapshotInputs?: (cell: Cell<T>) => T,
+  /** See {@link tryClaimMutex}'s `effectKey`. */
+  effectKey?: string,
 ): Promise<boolean> {
   let success = false;
   await runtime.editWithRetry((tx) => {
+    if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
     const inputs = snapshotInputs
       ? snapshotInputs(inputsCell.withTx(tx))
       : inputsCell.getAsQueryResult([], tx);

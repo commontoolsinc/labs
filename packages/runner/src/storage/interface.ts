@@ -1037,6 +1037,24 @@ export interface ITransactionSealSink {
  */
 export interface TransactionSealDestination {
   seal(tx: IExtendedStorageTransaction): Promise<Result<Unit, CommitError>>;
+
+  /**
+   * Take ownership of a sealed transaction's post-commit effects
+   * (server-execution v2 stage G, serving-loop.md §3/§5): the loop hands
+   * external effects to the OUTBOX post-wave-commit — never at seal
+   * time, where "committed" only means accepted into a wave whose
+   * disposition is still open. A destination that returns `true` OWNS
+   * the effects: it flushes them only after the wave commit landed the
+   * contribution (and discards them when the contribution was withdrawn
+   * — the action re-runs and re-enqueues; at-least-once, serving-loop.md
+   * §4). When absent, or returning `false`, the transaction flushes
+   * inline at seal exactly as commit does today (bare wave accumulators
+   * in tests, and any destination predating the outbox).
+   */
+  deferSealedEffects?(
+    tx: IExtendedStorageTransaction,
+    effects: readonly PostCommitSideEffect[],
+  ): boolean;
 }
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {

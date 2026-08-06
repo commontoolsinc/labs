@@ -1964,6 +1964,23 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
     const result = await promise;
     if (result.ok && !readOnly) {
+      // The effect handoff (server-execution v2 stage G, serving-loop.md
+      // §3/§5): a SEALED transaction's "ok" means accepted into a wave,
+      // not durable — so a seal destination that owns an outbox takes
+      // the effects here and flushes them only after the wave commit
+      // landed the contribution. Everything else (the OFF arm's store
+      // commit, ON-arm client speculation, bare test accumulators)
+      // keeps today's inline flush.
+      const deferred = this.#sealDestination !== undefined &&
+        this.#cfcState.outbox.length > 0 &&
+        this.#sealDestination.deferSealedEffects?.(
+            this,
+            [...this.#cfcState.outbox],
+          ) === true;
+      if (deferred) {
+        this.clearPostCommitOutbox();
+        return result;
+      }
       for (const effect of this.#cfcState.outbox) {
         try {
           await effect.flush(this);

@@ -36,6 +36,7 @@ import type { CellScope } from "../builder/types.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
+import { markEffectCompletion } from "../executor/effect-completion.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
@@ -707,7 +708,12 @@ export function sqliteQuery(
     // Dedup against COMMITTED state: if the result cell already records this
     // request hash, the call was issued (and survives an abort+retry, unlike an
     // in-memory flag — see fetch.ts). Re-issue otherwise.
-    if (result.withTx(tx).get()?.requestHash === hash) return;
+    if (result.withTx(tx).get()?.requestHash === hash) {
+      // The §4 memo hit (server-execution v2): the committed result records
+      // this request hash — the stored result is the value, no re-issue.
+      runtime.effectMemoObserver?.({ kind: "hit", id: `sqliteQuery:${hash}` });
+      return;
+    }
     result.withTx(tx).set({ pending: true, requestHash: hash });
 
     const sql = inputs.sql;
@@ -720,6 +726,7 @@ export function sqliteQuery(
         // (different inputs -> different hash) that superseded it mid-flight.
         const failQuery = (error: string) =>
           runtime.editWithRetry((wtx) => {
+            markEffectCompletion(wtx, `sqliteQuery:${hash}`);
             if (result.withTx(wtx).get()?.requestHash !== hash) return;
             result.withTx(wtx).set({
               pending: false,
@@ -834,6 +841,7 @@ export function sqliteQuery(
             )
             : keptRows) as unknown[];
           const wrote = await runtime.editWithRetry((wtx) => {
+            markEffectCompletion(wtx, `sqliteQuery:${hash}`);
             // Stale-writeback guard: a newer query (different inputs -> different
             // hash) may have superseded this one while the RPC was in flight.
             // Only write back if the result cell still records THIS request.

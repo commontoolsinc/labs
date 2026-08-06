@@ -7,9 +7,19 @@
 // `derivedCommits / (authoredSeen − effectAcks)`.
 //
 // Stage boundaries, stated so zeros read as design rather than gaps:
-// `events.*` counts nothing until Phase 3 lands events-down, `memo.*`
-// and `outbox.*` nothing until stage G lands the effect channel, and
+// `events.*` counts nothing until Phase 3 lands events-down, and
 // `effectAcks` nothing until Phase 4's effect-channel acks exist.
+// `memo.*` and `outbox.*` are LIVE since stage G: memo.hits counts
+// builtin evaluations that resolved from the stored request hash
+// (serving-loop.md §4's hit rule; reported for the fetch*, generate*
+// and sqliteQuery families — fetchProgram and llmDialog count misses
+// via the outbox but report no hit events yet), memo.misses counts
+// effects admitted to the outbox, memo.inflight the live entries;
+// outbox.queued/completed track admissions and settled effect work,
+// and outbox.failed counts INFRASTRUCTURE failures (a flush throw, a
+// rejected work promise, an LT4 deterministic append rejection) —
+// effect-level failures commit error-shaped RESULTS per §4 and are
+// memo-visible, not outbox failures.
 
 export type ServingLoopStats = {
   activeSpaces: number;
