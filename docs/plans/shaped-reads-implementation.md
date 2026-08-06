@@ -42,10 +42,13 @@ it looks: without it, `piece call --select` still works — the selection is
 applied after materialization instead of bounding the fetch. The feature stands;
 the network win waits.
 
-**Invocation ids are namespaced by caller.** Assumed yes. This one is
-**address-changing**: adding a caller DID to the hash means a given id resolves
-to a different receipt than it did before. Sequencing it last is deliberate but
-not free, and the cost is recorded under Risks rather than hidden.
+**Invocation ids are scoped to a session.** Assumed yes, and scoped by
+*session* rather than by principal — an identity does not separate the callers
+that actually collide, since agents are told to work under their human's key
+rather than mint their own. This one is **address-changing**: a given id
+resolves to a different receipt than it did before. Sequencing it last is
+deliberate but not free, and the cost is recorded under Risks rather than
+hidden.
 
 If either resolves negatively, WS-D changes and WS-A through WS-C do not.
 
@@ -115,8 +118,41 @@ metadata at result-write time, in the same create-only transaction. Not the
 `getCell` schema argument, which seeds link scope and the in-memory cell only.
 Unlocks fetch narrowing on receipts.
 
-**D2. Invocation ids namespaced by caller.** The caller's DID joins the hash
-`scopeCallerEventId` already computes. Address-changing; see Risks.
+**D2. Invocation ids scoped to a caller session.** A session identity joins the
+hash `scopeCallerEventId` already computes, so `add-comment-1` chosen in one
+agent's session and in another's land on different receipts.
+
+*Why not a principal.* A DID separates nothing here: agents are directed to work
+under their human user's identity rather than mint their own, so the collision
+that actually happens is two agents under one key. A session distinguishes them;
+an identity does not.
+
+*Why not either session id that already exists.* The storage session
+(`packages/runner/src/storage/v2.ts`) is minted with `crypto.randomUUID()` and
+re-minted on close. It keys commit idempotency as `(sessionId, localSeq)`, and
+because every `cf` invocation is a separate process it is fresh each time.
+Scoping by it would destroy the property `--invocation` exists for: a same-id
+replay from a new process would compute a different address and never deduplicate
+against the original. `cf-harness`'s session store is durable but is harness
+state, and not every caller is that harness.
+
+*So this needs a new concept*: a caller session identity, supplied to the CLI
+and stable across the invocations that belong to one agent's working session.
+Three things it has to satisfy, and they pull against each other:
+
+- **Stable across invocations**, or same-id retry stops deduplicating — the
+  feature it is scoping.
+- **Distinct between concurrent callers**, or it does not solve the problem.
+- **Supplied, not derived.** Nothing in a `cf` process can infer which agent
+  session it belongs to; it arrives as a flag or environment variable, following
+  `CF_IDENTITY` and `CF_API_URL`.
+
+*The design question inside it* is what an absent session means. Treating it as
+unscoped preserves today's behavior and today's collision; refusing without one
+makes every caller opt in before they can name an invocation at all. This plan
+does not decide that.
+
+Address-changing; see Risks.
 
 ## Phases
 
@@ -153,13 +189,20 @@ a `piece call` result produce the same rendering under the same selection.
 
 ## Risks
 
-**Namespacing ids late is address-changing.** Once WS-C publishes `receipt`, a
+**Scoping ids late is address-changing.** Once WS-C publishes `receipt`, a
 caller can keep an address; when D2 lands, the same invocation id resolves
 somewhere else. Old receipts stay readable at their old addresses, but a replay
 spanning the change stops deduplicating and re-executes. The window is the
 deploy boundary and the exposure is same-id retries in flight across it. It
 lands in one deploy rather than gradually, and does not roll out behind a flag
 that could leave two addressing schemes live at once.
+
+**Session scoping puts one more thing in the caller's keeping.** After D2 an
+address depends on the session it was created under, so a caller who loses that
+session id cannot recompute where its outcome went. That is the recovery case
+already deferred in the design, now with a second input to retain alongside the
+piece, verb and id. It argues for the session identity being something a harness
+persists rather than something a human types.
 
 **A1 is a refactor over code with a live consumer.** `piece get`'s projection is
 recently changed and load-bearing for the topics workflow. The mitigation is
