@@ -284,11 +284,12 @@ export async function runMultiUserTestPattern(
             await participant.worker.call("awaitMarker", {
               announcedBy,
               marker: step.marker,
-            }).catch((error: Error) => {
+            }).catch((cause: Error) => {
               throw new Error(
                 `[${participant.spec.name}] waiting for marker ` +
                   `"${step.marker}" announced by ${announcedBy}: ` +
-                  error.message,
+                  cause.message,
+                { cause },
               );
             });
             participant.cursor++;
