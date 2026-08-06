@@ -170,10 +170,13 @@ Delta 2026-08-05 — stage F lands (the serving loop; this PR):
 - §3d's stage-F stamp-kind naming duty: impl-gate → COVERED. The
   sanctioned internal kind is named (`bookkeeping`, serving-loop.md
   §3d — a NEW binding sentence, this row is its coverage), stamped
-  at the three scheduler/runner choke points, with its conflict
-  disposition pinned in `packages/runner/test/executor-wave.test.ts`
-  (rebase-capable; drops whole on semantic conflict; nothing
-  requeues).
+  at the three scheduler/runner choke points, with BOTH conflict
+  dispositions pinned in
+  `packages/runner/test/executor-wave.test.ts`: a bookkeeping PATCH
+  racing a disjoint authored patch REBASES and commits (the live
+  rebase arm — the loop's steady-state watermark advance is a
+  key-path patch), and a semantic conflict (whole-doc authored
+  intrusion) DROPS the contribution whole with nothing requeued.
 - §2's read row (LD5): the admission half is now impl-covered —
   `packages/memory/test/v2-explicit-read-test.ts` pins
   holder-admitted / non-holder-refused / off-flag-refused on both
@@ -183,19 +186,38 @@ Delta 2026-08-05 — stage F lands (the serving loop; this PR):
   serving loop drives them for real; lease-loss and idle-park pinned
   end to end in `packages/runner/test/executor-serving-loop.test.ts`
   (C6/C7's impl witnesses at the loop level).
+- serving-loop §6 step 2's re-mark: PARTIAL by design in Phase 1 —
+  activation runs `selectStaleBasisInstances` and surfaces the stale
+  set (counted, logged), and recovery CORRECTNESS rides
+  recompute-on-demand over a fresh runtime (sound: an absent warm
+  graph means demanded pulls recompute regardless). The
+  skip-still-current warm-start VALUE of the index materializes when
+  a later stage carries a materialized graph across activation;
+  until then the scan is the recovery input, not yet an optimizer.
 - protocol §4's watermark: impl-gate rows land — the doc + metadata
   carriage (`derived_through`), same-transaction watermark write,
   W-advance-at-quiescence-only, and `waitForSettled` — pinned in the
   serving-loop tests.
-- scopes §2's eager via-user hop: impl-gate → COVERED
-  (`packages/runner/test/eager-via-user-hop.test.ts`: both hops
-  under the flag at all three write sites' shapes, one hop pinned in
-  the OFF arm).
+- scopes §2's eager via-user hop: impl-gate → PARTIALLY COVERED
+  (`packages/runner/test/eager-via-user-hop.test.ts`: both
+  `data-updating.ts` shapes — the declared-scope narrowing and the
+  eager omitted-property redirect — under the flag, one hop pinned
+  in the OFF arm). The DISCOVERED-narrowing site
+  (`pattern-binding.ts`'s `narrowestReadScope` branch) carries the
+  same gated chain but has no direct test yet — owed as OW12 below.
 - key-vocabulary §5's boundary re-keys (M4-coupled + serving-identity
   lists): dispositions moved to RE-KEYED in the same change, per §4's
   tripwire; the server-side partition equivalence is witnessed by the
   full memory suite (wire frames byte-identical via `toWireUpsert`)
-  and the client-side by the full runner suite.
+  and the client-side by the full runner suite. One RECORDED
+  OFF-arm acceptance rides this row (flagged in the stage-F PR): the
+  M4 re-key removes the cross-session SPURIOUS WAKE the name-keyed
+  form produced (principal A's scoped commit no longer re-evaluates
+  principal B's session), so under multi-principal scoped workloads
+  a later frame's `fromSeq` can differ from the old arm's — no
+  client consumes server-frame `fromSeq`, and the removed wake is
+  the M4 defect itself, but the byte-level delta is stated rather
+  than implied.
 - stage D's documented bounds: the delegated-admission bound and the
   read-only-read-set bound are DISCHARGED with tests
   (`executor-wave.test.ts`: carried-identity keying + partial-carriage
@@ -261,6 +283,13 @@ journey):**
   commit; parking policy and the testing §4 gate need the ruling
   before builtins §1 ships `wish` as "port cost: none". T13.Q8
   holds the trace cell open.
+- OW12 — a direct test of the eager via-user hop at the
+  DISCOVERED-narrowing site (`pattern-binding.ts`, scopes §2): the
+  gated chain is implemented there identically to the two tested
+  `data-updating.ts` shapes, but driving it needs a pattern run
+  whose output scope is DISCOVERED session-narrow — a
+  fixture the Phase 2 fan-out work builds anyway. Trigger: the
+  Phase 2 pre-gate.
 
 **Stage G pre-gate:**
 

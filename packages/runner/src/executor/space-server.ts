@@ -130,6 +130,7 @@ export class SpaceServer implements TransactionSealDestination {
   #active = false;
   #loopRunning = false;
   #parkRequested = false;
+  readonly #parked = Promise.withResolvers<void>();
   #idleSince: number | undefined;
   #demandedRoots = new Set<string>();
   /** Live readers per demanded root — DEMAND ITSELF (serving-loop.md
@@ -158,6 +159,13 @@ export class SpaceServer implements TransactionSealDestination {
 
   get watermark(): number {
     return this.#watermark;
+  }
+
+  /** Resolves when this SpaceServer has fully parked (lease released,
+   * runtime disposed). The host chains re-activation on it when a
+   * session-open or admission races a park in progress. */
+  get whenParked(): Promise<void> {
+    return this.#parked.promise;
   }
 
   /** Store head minus W — the per-space input to §7's watermarkLag. */
@@ -190,10 +198,22 @@ export class SpaceServer implements TransactionSealDestination {
     this.#lease = lease;
     this.#options.stats.lease.held += 1;
 
-    const { runtime, dispose } = await this.#options.createRuntime();
+    let runtime: Runtime;
+    let dispose: () => Promise<void>;
+    try {
+      ({ runtime, dispose } = await this.#options.createRuntime());
+    } catch (error) {
+      // A failed activation must not strand the acquired lease row for
+      // the TTL — a successor (or this host's retry) should be able to
+      // acquire immediately.
+      lease.release();
+      this.#lease = undefined;
+      throw error;
+    }
     if (runtime.experimental.serverExecution !== true) {
       await dispose();
       lease.release();
+      this.#lease = undefined;
       throw new Error(
         "SpaceServer runtime must run with serverExecution enabled " +
           "(serving-loop.md §3: flag ON, server posture)",
@@ -211,13 +231,15 @@ export class SpaceServer implements TransactionSealDestination {
     this.#watermark = readWatermarkSeq(engine);
 
     // Recovery/warm start are the same move (serving-loop.md §6 step 2):
-    // re-mark the dirty frontier from the basis index. Materialized
-    // actions pick the dirtiness up through their ordinary
-    // subscriptions; unmaterialized ones stay dirty-unmaterialized until
-    // demand pulls them — which composes with the scan because a
-    // demanded pull recomputes anyway on a fresh runtime. The scan's
-    // yield is counted; its skip-not-recompute value grows as warm
-    // starts carry materialized graphs.
+    // the activation scan computes the stale (action, instance) set
+    // from the basis index and SURFACES it (counted, logged). Phase-1
+    // truth, stated plainly: the scan does not yet seed scheduler
+    // dirtiness — a fresh runtime holds no materialized graph to mark,
+    // and recovery CORRECTNESS rides recompute-on-demand (a demanded
+    // pull recomputes regardless, which is what makes the fresh-start
+    // path sound). The index's skip-still-current warm-start VALUE
+    // materializes when a later stage carries a materialized graph
+    // across activation.
     const scanHead = Engine.serverSeq(engine);
     const { stale, foreignReadInstances } = selectStaleBasisInstances(
       engine,
@@ -438,6 +460,23 @@ export class SpaceServer implements TransactionSealDestination {
       // client demand.
       { excludePrincipal: this.#options.serviceIdentity },
     );
+    // Retire demand for roots no client watches anymore: the sink is
+    // the demand, so cancelling it returns the value to pull-based
+    // laziness (the materialized structure stays registered — structure
+    // is not a start/stop policy, serving-loop.md §1).
+    const currentKeys = new Set(
+      roots.map((root) => `${root.scope ?? "space"}\0${root.id}`),
+    );
+    for (const [key, cancel] of this.#demandSinks) {
+      if (currentKeys.has(key)) continue;
+      try {
+        cancel();
+      } catch {
+        // best-effort; the sink may already be torn down
+      }
+      this.#demandSinks.delete(key);
+      this.#demandedRoots.delete(key);
+    }
     for (const root of roots) {
       const key = `${root.scope ?? "space"}\0${root.id}`;
       if (this.#demandedRoots.has(key)) continue;
@@ -529,11 +568,29 @@ export class SpaceServer implements TransactionSealDestination {
         const step = await Promise.race([
           (async () => {
             await runtime.idle();
+            // Couple the settle to FRAME DELIVERY (W-soundness): the
+            // feed learns of a commit synchronously at admission, but
+            // the serving runtime's DIRTINESS arrives on the loopback
+            // session's sync frames, which the server flushes on a
+            // timer. Draining the co-hosted server's refresh queue here
+            // guarantees every frame for commits ≤ batchHead has been
+            // SENT before this pass can declare quiescence — without
+            // it, a wave could advance W past an authored commit whose
+            // demanded derivation never ran (the frame was still in
+            // the flush queue).
+            await this.#options.server.idle();
             // The INPUT barrier, not the durability barrier: sealed
             // commits settle at the wave commit BELOW, so the full
             // synced() would deadlock here (see
             // StorageManager.inputSynced).
             await runtime.storageManager.inputSynced?.();
+            // One macrotask yield: loopback frames are delivered
+            // synchronously on send, but their application schedules
+            // work; the yield lets it register dirtiness so the
+            // isIdle() probe below sees it. (An application parked
+            // behind one of our own sealed commits stays the
+            // documented inputSynced residual.)
+            await new Promise((resolve) => setTimeout(resolve, 0));
             return "settled" as const;
           })(),
           deadlinePromise,
@@ -566,7 +623,12 @@ export class SpaceServer implements TransactionSealDestination {
 
     if (!haveContributions && !shouldAdvance) {
       // Nothing sealed and no watermark movement: no commit (the
-      // zero-delta case — light cycles cost nothing).
+      // zero-delta case — light cycles cost nothing). An EXHAUSTED
+      // empty cycle is still counted: a wedged never-quiescing settle
+      // is exactly what §7's wavesBudgetExhausted exists to surface.
+      if (exhausted) {
+        this.#options.stats.wavesBudgetExhausted += 1;
+      }
       return;
     }
 
@@ -574,22 +636,32 @@ export class SpaceServer implements TransactionSealDestination {
     // kind): the watermark doc advances INSIDE the same wave commit —
     // never its own commit (protocol.md §4). An exhausted wave carries
     // no watermark movement (`derivedThrough` stays at the current W;
-    // serving-loop.md §3).
+    // serving-loop.md §3). Written as a key-path SET (a patch against an
+    // existing doc) so the bookkeeping conflict class's REBASE arm is
+    // live: a disjoint concurrent patch to the watermark doc commutes,
+    // while a whole-doc authored intrusion (forgery) still conflicts
+    // semantically and drops the advance — re-advanced next wave.
+    let advanceSealed = false;
     if (shouldAdvance) {
       const tx = runtime.edit();
       stampWaveRunContext(tx, {
         actionId: WATERMARK_ACTION_ID,
         kind: "bookkeeping",
       });
-      watermarkCell(runtime, this.#options.space).withTx(tx).set({
-        seq: advanceTo,
-      });
+      watermarkCell(runtime, this.#options.space).withTx(tx).key("seq").set(
+        advanceTo,
+      );
       const committed = await tx.commit();
       if (committed.error) {
+        // The advance did not enter the wave: W must not move either —
+        // the doc and the metadata advance together or not at all
+        // (protocol.md §4's same-transaction invariant).
         logger.warn("watermark-seal-failed", () => [
-          "watermark bookkeeping write failed to seal",
+          "watermark bookkeeping write failed to seal; W held",
           committed.error,
         ]);
+      } else {
+        advanceSealed = true;
       }
     }
 
@@ -598,10 +670,9 @@ export class SpaceServer implements TransactionSealDestination {
     this.#currentWave = undefined;
     await this.#sealChain;
 
-    const derivedThrough = exhausted ? this.#watermark : Math.max(
-      this.#watermark,
-      shouldAdvance ? advanceTo : this.#watermark,
-    );
+    const derivedThrough = !exhausted && advanceSealed
+      ? advanceTo
+      : this.#watermark;
     const outcome = await closing.commitWave(this.#sink!, { derivedThrough });
     await closing.settled();
 
@@ -617,7 +688,7 @@ export class SpaceServer implements TransactionSealDestination {
     }
     if (outcome.seq !== undefined) {
       stats.derivedCommits += 1;
-      if (!exhausted && shouldAdvance) {
+      if (!exhausted && advanceSealed) {
         this.#watermark = advanceTo;
       }
       // The wave commit entered the store on the co-hosted engine plane,
@@ -688,5 +759,6 @@ export class SpaceServer implements TransactionSealDestination {
       `space ${this.#options.space} parked (${reason})`,
     ]);
     this.#options.onParked?.(reason);
+    this.#parked.resolve();
   }
 }

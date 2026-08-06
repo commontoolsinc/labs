@@ -26,6 +26,7 @@ import {
 import {
   acquireExecutionLease,
   executionLeaseHolder,
+  releaseExecutionLease,
 } from "../v2/execution-lease.ts";
 
 const TEST_AUDIENCE = "did:key:z6Mk-explicit-read-audience";
@@ -217,6 +218,63 @@ Deno.test("explicit entity_scope_key reads: lease holder admitted, non-holder an
     }) as ResponseMessage<GraphQueryResult>;
     assertExists(bobOwn.ok);
     assertEquals(bobOwn.ok.entities[0]?.document ?? null, null);
+
+    // The watch.ADD path refuses identically (the third admission
+    // site).
+    const refusedWatchAdd = await server.watchAdd({
+      type: "session.watch.add",
+      requestId: nextRequestId("refused-watch-add"),
+      space: SPACE,
+      sessionId: bobSession,
+      watches: [{
+        id: "w2",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:profile",
+            scope: "user",
+            entityScopeKey: aliceKey,
+            selector: { path: [], schema: false },
+          }],
+        },
+      }],
+    });
+    assertEquals(refusedWatchAdd.error?.name, "ProtocolError");
+
+    // An EXPIRED lease matches nobody: the same holder session is
+    // refused once the row lapses (liveness judged by the server's own
+    // clock — serving-loop.md §2).
+    releaseExecutionLease(engine, { space: SPACE, holder });
+    assertEquals(
+      acquireExecutionLease(engine, {
+        space: SPACE,
+        holder,
+        now: Date.now() - 60_000,
+        ttlMs: 1,
+      }),
+      true,
+    );
+    const expired = await server.graphQuery({
+      type: "graph.query",
+      requestId: nextRequestId("expired"),
+      space: SPACE,
+      sessionId: serviceSession,
+      query: {
+        roots: [{
+          id: "of:profile",
+          scope: "user",
+          entityScopeKey: aliceKey,
+          selector: { path: [], schema: false },
+        }],
+      },
+    });
+    assertEquals(expired.error?.name, "ProtocolError");
+    assertEquals(
+      expired.error?.message.includes("does not hold a live execution_lease"),
+      true,
+    );
+    // Restore the live lease for the off-flag case below.
+    assertEquals(acquireExecutionLease(engine, { space: SPACE, holder }), true);
 
     // Off the flag the field is unclaimable, holder or not.
     resetServerExecutionConfig();

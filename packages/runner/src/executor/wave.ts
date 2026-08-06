@@ -73,13 +73,16 @@ const logger = getLogger("wave-accumulator", {
  *   when it installs the seal destination (serving-loop.md §3d, RULED
  *   2026-08-05: unstamped seals are refused, so the loop's own writes —
  *   the watermark-doc advance today; acked-effect retirement when
- *   stage G lands it — declare this kind). Conflict class: its writes
- *   are advances that commute (the loop writes them as patches), so
- *   they REBASE like other non-re-derivable writes; a rebase that
- *   conflicts semantically DROPS the contribution whole — there is no
- *   event to requeue, and the loop re-derives its bookkeeping (W is
- *   re-advanced by the next wave; watermark forgery is an accepted
- *   authored intrusion — protocol.md §1's threat model).
+ *   stage G lands it — declare this kind). Conflict class:
+ *   non-re-derivable, so a raced bookkeeping PATCH rebases when it
+ *   commutes with the concurrent commit (the loop's steady-state
+ *   watermark advance is a key-path patch); a write that cannot rebase
+ *   — a whole-doc set (the first-ever watermark write materializing
+ *   the doc), or a semantic conflict such as a whole-doc authored
+ *   intrusion — DROPS the contribution whole: there is no event to
+ *   requeue, and the loop re-derives its bookkeeping (W is re-advanced
+ *   by the next wave; watermark forgery is an accepted authored
+ *   intrusion — protocol.md §1's threat model).
  *
  * The remaining §3d non-re-derivable members — `eventWatermark` advances
  * and effect intents — are produced by Phase 3 events and the stage-G
@@ -921,6 +924,18 @@ export class WaveAccumulator
     // replayed consequence.
     const foreignSeqs = new Map<MemorySpace, number>();
     for (const batch of this.#buildForeignBatches(requeued, droppedWhole)) {
+      // Tenure re-check per sink call (defense-in-depth over the entry
+      // check): the entry check plus the engine's live-lease row cover
+      // today's synchronous sink, but an ASYNC sink would re-open the
+      // same-process C7b window between entry and this call.
+      if (
+        this.#lease !== undefined &&
+        !this.#lease.isCurrentTenure(this.#sealedTenure)
+      ) {
+        this.#abortAfterForeignFailure(outcome);
+        outcome.aborted = "lease-lost";
+        return outcome;
+      }
       const result = await sink.commitWave(batch);
       if (result.error) {
         logger.warn("wave-foreign-commit-failed", () => [
@@ -965,6 +980,27 @@ export class WaveAccumulator
         return outcome;
       }
 
+      // Tenure re-check before every home attempt (see the foreign-loop
+      // note): the resolve loop may have awaited the sink several times.
+      if (
+        this.#lease !== undefined &&
+        !this.#lease.isCurrentTenure(this.#sealedTenure)
+      ) {
+        for (const contribution of this.#contributions) {
+          this.#withdraw(
+            contribution,
+            "lease lost mid-wave; the in-flight wave aborts " +
+              "(serving-loop.md §2)",
+          );
+          outcome.dispositions[contribution.index] =
+            contribution.context.kind === "event-handler"
+              ? { kind: "requeued" }
+              : { kind: "dropped" };
+        }
+        this.#reportRequeuedEvents(outcome, () => true);
+        outcome.aborted = "lease-lost";
+        return outcome;
+      }
       const result = await sink.commitWave(batch);
       if (!result.error) {
         this.#settleVerdicts(

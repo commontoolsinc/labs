@@ -29,6 +29,7 @@ import {
   resolveScopeKey,
   type ResponseMessage,
   type ScopeKey,
+  scopeKeyApplicableTo,
   type ScopeKeyIdentity,
   type ServerMessage,
   type SessionAckRequest,
@@ -2904,6 +2905,16 @@ export class Server {
         cacheKeyForEntity(upsert.branch, upsert.id, scopeKey),
       );
       ids.push(toDirtyKey(upsert.id, scopeKey));
+      // A lease-holder session's explicit foreign instances mis-resolve
+      // to its own under this session-identity recovery (the wire frame
+      // carries scope NAMES): force the full re-evaluation, which
+      // re-diffs every instance from the graph's own instance keys.
+      if (
+        session.leaseHolderReads === true &&
+        upsert.scope !== undefined && upsert.scope !== "space"
+      ) {
+        session.forceFullResync = true;
+      }
     }
     for (const remove of sync.removes) {
       // The remove's cache entry died when the frame was built; re-insert a
@@ -3087,6 +3098,20 @@ export class Server {
             for (const [key, entry] of updates) {
               const previous = session.entities.get(key);
               if (!sameSnapshot(previous, entry)) {
+                // protocol.md §3's applicable-set filter, as
+                // defense-in-depth: a session's graph evaluates under
+                // its own identity, so an inapplicable instance here is
+                // structurally unreachable — unless the session is a
+                // lease holder with explicit-instance reads admitted
+                // (protocol.md §2's read row), which is exempt by
+                // design (the server legitimately receives every
+                // instance it serves).
+                if (
+                  session.leaseHolderReads !== true &&
+                  !scopeKeyApplicableTo(entry.scopeKey, identity)
+                ) {
+                  continue;
+                }
                 const dirtyKey = toDirtyKey(entry.id, entry.scopeKey);
                 const origin = dirtyOrigins?.get(dirtyKey);
                 if (

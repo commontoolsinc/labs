@@ -53,16 +53,18 @@ export class EngineWaveCommitSink implements WaveCommitSink {
    * the STORED result for a byte-identical replay and throwing "commit
    * replay mismatch" for a different one. The SpaceServer holds ONE
    * long-lived counter per (space, process) — `localSeqRef`, owned by
-   * the ExecutorHost, floored at the engine's stored maximum for the
-   * session (`selectMaxLocalSeq`) at first activation — and uses the
-   * DR1 HOLDER identity as the `sessionId`, which is simultaneously
-   * what the derived-envelope admission requires (protocol.md §2, RULED
+   * the ExecutorHost, starting at 0 — and uses the DR1 HOLDER identity
+   * as the `sessionId`, which is simultaneously what the
+   * derived-envelope admission requires (protocol.md §2, RULED
    * 2026-08-05: the producing session must BE the holder's own service
-   * session). A park/re-activate within one process reuses the counter
-   * (no collision); a new process mints a new holder (a new session —
-   * no collision). Tests that construct throwaway sinks may omit
-   * `localSeqRef` and get a private counter from 0 — sound for a fresh
-   * session id per test engine.
+   * session). Freshness is structural, not queried: the holder's
+   * process-instance component makes a new process a NEW engine
+   * session, so 0 never collides; a park/re-activate within one
+   * process reuses the counter. (`selectMaxLocalSeq` remains the
+   * flooring belt for a holder scheme WITHOUT a process component —
+   * nothing in production uses one.) Tests that construct throwaway
+   * sinks may omit `localSeqRef` and get a private counter from 0 —
+   * sound for a fresh session id per test engine.
    */
   constructor(options: {
     /** The co-hosted engine per space (memory server's own engines). */

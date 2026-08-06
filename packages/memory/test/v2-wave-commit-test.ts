@@ -252,6 +252,105 @@ Deno.test("wave carriage: derivedThrough is stored on derived commits and refuse
   }
 });
 
+Deno.test("delegated admission: the engine refuses delegated carriage on derived and system classes, and partial carriage on authored (protocol.md §2's delegated row)", async () => {
+  const { engine, path } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = withLiveLease(engine);
+    const delegated = {
+      actingPrincipal: "did:key:alice",
+      actingSession: "sess-1",
+      capabilityRef: "cap:grant",
+    };
+    // Delegated carriage on a DERIVED commit: refused — a derived
+    // commit's identity rides its per-write annotations.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: holder,
+          space: SPACE,
+          commit: setCommit(1, [{ id: "of:delegated-derived" }]),
+          commitClass: "derived",
+          holder,
+          delegated,
+        }),
+      ProtocolError,
+      "server-produced AUTHORED admission only",
+    );
+    // Delegated carriage on a SYSTEM commit: refused (authored-only).
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:direct",
+          space: SPACE,
+          commit: setCommit(1, [{ id: "of:delegated-system" }]),
+          commitClass: "system",
+          delegated,
+        }),
+      ProtocolError,
+      "authored-class admission only",
+    );
+    // Partial carriage (a grant with no actor, an actor with no grant):
+    // refused loudly, never defaulted.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:outbox",
+          space: SPACE,
+          commit: setCommit(1, [{ id: "of:delegated-partial" }]),
+          delegated: {
+            actingPrincipal: "",
+            capabilityRef: "cap:grant",
+          },
+        }),
+      ProtocolError,
+      "partial carriage is refused",
+    );
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:outbox",
+          space: SPACE,
+          commit: setCommit(1, [{ id: "of:delegated-partial-2" }]),
+          delegated: {
+            actingPrincipal: "did:key:alice",
+            capabilityRef: "",
+          },
+        }),
+      ProtocolError,
+      "partial carriage is refused",
+    );
+    // Full carriage on authored: admitted; scoped writes key from the
+    // CARRIED identity, and the trio is stored on the commit row.
+    const applied = applyCommit(engine, {
+      sessionId: "server:outbox",
+      space: SPACE,
+      commit: setCommit(1, [{ id: "of:delegated-scoped", scope: "user" }]),
+      delegated,
+    });
+    assertEquals(
+      revisionScopeKeys(path, "of:delegated-scoped"),
+      ["user:did%3Akey%3Aalice"],
+    );
+    const db = new Database(path, { readonly: true });
+    try {
+      const row = db.prepare(
+        `SELECT class, acting_principal, acting_session, capability_ref
+         FROM "commit" WHERE seq = :seq`,
+      ).get({ seq: applied.seq }) as Record<string, string>;
+      assertEquals(row.class, "authored");
+      assertEquals(row.acting_principal, "did:key:alice");
+      assertEquals(row.acting_session, "sess-1");
+      assertEquals(row.capability_ref, "cap:grant");
+    } finally {
+      db.close();
+    }
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
 Deno.test("wave carriage: a scoped write with no explicit scope_key is rejected, never defaulted (the silent-empty-instance trap)", async () => {
   const { engine } = await createEngine();
   setServerExecutionConfig(true);

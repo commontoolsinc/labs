@@ -116,8 +116,14 @@ export class ExecutorHost {
       // Active OR still activating: the record must reach the feed
       // either way — an admission racing a mid-flight activation is the
       // window a dropped record would open (the activation's scan covers
-      // only commits before its head).
+      // only commits before its head). A PARKING server (registered,
+      // no longer active, no activation in flight) is the third case:
+      // chain a fresh activation behind the park so a space with live
+      // demand is never left unserved by the race.
       existing.enqueueCommit(notice);
+      if (!existing.active && !this.#activating.has(notice.space)) {
+        this.#reactivateAfterPark(existing, notice.space as MemorySpace);
+      }
       return;
     }
     const activating = this.#activating.get(notice.space);
@@ -157,8 +163,32 @@ export class ExecutorHost {
       existing.noteDemandChanged();
       return;
     }
+    if (existing !== undefined && !this.#activating.has(space)) {
+      // A park in progress: re-activate once it completes (M5 — a
+      // session opening against a mid-park space must not be stranded
+      // until the next trigger).
+      this.#reactivateAfterPark(existing, space as MemorySpace);
+      return;
+    }
     // Activation on session open (serving-loop.md §1).
     void this.#activate(space as MemorySpace, []);
+  }
+
+  /** Chain a fresh activation behind a park in progress. Gated on the
+   * ACTIVE criteria again at fire time — the park may have been the
+   * last session leaving. */
+  #reactivateAfterPark(parking: SpaceServer, space: MemorySpace): void {
+    void parking.whenParked.then(() => {
+      if (this.#closed || this.#spaces.get(space)?.active) return;
+      if (
+        !this.#options.server.hasLiveSessionsForSpace(space, {
+          excludePrincipal: this.#options.serviceIdentity,
+        })
+      ) {
+        return;
+      }
+      void this.#activate(space, []);
+    });
   }
 
   #activate(
@@ -206,10 +236,15 @@ export class ExecutorHost {
         stats: this.#stats,
         policy: this.#options.policy,
         onParked: () => {
-          this.#spaces.delete(space);
-          // A parked space's runtime dispose resets the ambient flag
-          // (its construction enabled it explicitly); the process still
-          // serves other spaces, so the host re-asserts it until close.
+          // Delete by IDENTITY: a successor activation may already have
+          // registered over this entry (the M5 park race), and the
+          // dying server must not evict it.
+          if (this.#spaces.get(space) === server) {
+            this.#spaces.delete(space);
+          }
+          // Belt over the refcounted ambient lifecycle (Runtime.dispose
+          // resets only when the LAST explicit enabler goes): the
+          // process still serves, so re-assert until close.
           if (!this.#closed) setServerExecutionConfig(true);
         },
       });

@@ -314,10 +314,21 @@ describe("stage F serving loop", () => {
     await waitForSettled(clientRuntime, space, authored2, {
       timeoutMs: 10_000,
     });
-    await waitUntil(
-      () => clientResult.key("total").get() === 100,
-      "client to observe the second derived value",
-    );
+    // W-soundness, bound STRICTLY (protocol.md §4): with the
+    // subscriptions established, "settled" must mean the demanded
+    // derivation is ALREADY current — the derived value and the
+    // watermark ride one wave commit and one push frame, so the read
+    // here is synchronous, no waiting. (This is the assertion that
+    // catches a loop advancing W before the derivation ran.)
+    expect(clientResult.key("total").get()).toBe(100);
+    // And the store agrees at the same instant: the derivation is
+    // durably committed at-or-below the settled watermark.
+    const settledDerived = engine.database.prepare(
+      `SELECT COUNT(*) AS n FROM revision r
+       JOIN "commit" c ON c.seq = r.commit_seq
+       WHERE r.id LIKE 'computed:%' AND c.class = 'derived'`,
+    ).get() as { n: number };
+    expect(settledDerived.n).toBeGreaterThanOrEqual(1);
 
     // The recompute's write is DERIVED-class — the computed's doc's
     // latest revision rides a derived commit, not an authored one.

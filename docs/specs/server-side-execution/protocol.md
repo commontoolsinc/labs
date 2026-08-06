@@ -324,7 +324,13 @@ their foreign instance instead of silently resolving
 `user:<serviceDID>`. Anticipated hardening, OUT OF v2 SCOPE and
 named without design: grant-scoped foreign reads — admissibility
 derived from the piece's granted read authority rather than lease
-identity — alongside remote attestation.
+identity — alongside remote attestation. (Phase-1 implementation
+bound, stage F: the landed check consults the READ space's own live
+lease — sufficient for every Phase-1 producer, which reads only its
+own space. FP2's widened acceptance — a home holder naming a FOREIGN
+space's instances under its own space's lease — has no producer
+until Phase 5's cross-space serving and lands with it, alongside the
+cross-engine lease lookup it needs.)
 
 **Run identity for a derivation (S1).** A derivation runs PER
 DEMANDED INSTANCE and the DEMAND supplies the identity — a

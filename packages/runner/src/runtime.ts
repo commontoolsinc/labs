@@ -724,9 +724,16 @@ export class Runtime {
     | ((tx: IExtendedStorageTransaction, info: ServerRunInfo) => void)
     | undefined;
   // Whether THIS runtime explicitly set the serverExecution flag at
-  // construction (the only case its dispose may reset the process-global
-  // ambient value — see the constructor's propagation note).
+  // construction (the only case its dispose participates in the
+  // process-global ambient lifecycle — see the constructor's propagation
+  // note).
   #explicitServerExecution: boolean | undefined;
+  // Live runtimes that explicitly ENABLED serverExecution, process-wide.
+  // Dispose resets the ambient flag only when the LAST of them goes: a
+  // serving process runs one runtime per active space, and a parked
+  // space's dispose must not un-claim `derived` for every other space's
+  // in-flight wave commit (the admission plane reads the ambient value).
+  static #liveServerExecutionEnablers = 0;
   readonly userIdentityDID: DID;
 
   /**
@@ -1069,6 +1076,9 @@ export class Runtime {
     // already false, so the OFF arm is unchanged.
     if (this.experimental.serverExecution !== undefined) {
       this.#explicitServerExecution = this.experimental.serverExecution;
+      if (this.experimental.serverExecution === true) {
+        Runtime.#liveServerExecutionEnablers += 1;
+      }
       setServerExecutionConfig(this.experimental.serverExecution);
     }
     this.experimental.serverExecution = getServerExecutionConfig();
@@ -1497,16 +1507,24 @@ export class Runtime {
     this.harness.dispose();
 
     // Reset experimental config to defaults. serverExecution resets only
-    // when THIS runtime explicitly enabled it (stage F): disposing a
-    // flag-less runtime in a co-hosted serving process must not clear
-    // the ambient flag other runtimes and the memory server's admission
-    // still depend on. (Serving runtimes are per-space and park/rebuild
-    // while the process serves on; the ExecutorHost's bootstrap owns the
-    // process-level flag lifecycle.)
+    // when THIS runtime explicitly enabled it AND it is the LAST live
+    // enabler (stage F): disposing a flag-less runtime — or parking one
+    // serving runtime of several — must not clear the ambient flag other
+    // runtimes and the memory server's admission still depend on
+    // (mid-wave `derived` commits would be refused as unclaimable). A
+    // single-runtime test keeps its stage-A cleanup contract: the last
+    // enabler's dispose resets.
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
     if (this.#explicitServerExecution === true) {
-      resetServerExecutionConfig();
+      this.#explicitServerExecution = undefined; // dispose() may re-enter
+      Runtime.#liveServerExecutionEnablers = Math.max(
+        0,
+        Runtime.#liveServerExecutionEnablers - 1,
+      );
+      if (Runtime.#liveServerExecutionEnablers === 0) {
+        resetServerExecutionConfig();
+      }
     }
 
     // Clear the current runtime reference

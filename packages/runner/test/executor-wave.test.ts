@@ -1665,6 +1665,18 @@ describe("stage D seal-into-wave", () => {
 
   it("stage F: M1 — a run's per-run scopeKeyIdentity keys its scoped writes and basis rows (the demand-supplied instance)", async () => {
     const lease = liveLease();
+
+    // Seed a doc the run READS, so its basis rows have content to pin.
+    const seed = runtime.getCell<{ value: number }>(
+      space,
+      "wave-m1-seed",
+      undefined,
+    );
+    const seedTx = runtime.edit();
+    seed.withTx(seedTx).set({ value: 2 });
+    expect((await seedTx.commit()).error).toBeUndefined();
+    const seedSeq = Engine.serverSeq(engine);
+
     const wave = newWave({ lease });
     runtime.installSealDestination(wave);
 
@@ -1685,7 +1697,8 @@ describe("stage D seal-into-wave", () => {
       scopeKeyIdentity: { principal: "did:key:bob", sessionId: "bob-s1" },
       actionScopeKey: "user:did%3Akey%3Abob",
     });
-    scoped.withTx(tx).set({ value: 3 });
+    const base = seed.withTx(tx).get();
+    scoped.withTx(tx).set({ value: (base?.value ?? 0) + 1 });
     expect((await tx.commit()).error).toBeUndefined();
 
     runtime.clearSealDestination();
@@ -1698,11 +1711,77 @@ describe("stage D seal-into-wave", () => {
       `SELECT scope_key FROM revision WHERE id = :id`,
     ).all({ id: link.id }) as { scope_key: string }[];
     expect(rows.map((r) => r.scope_key)).toEqual(["user:did%3Akey%3Abob"]);
+    // The basis rows land UNDER BOB'S instance key (never the wave-level
+    // identity's), and carry the run's actual read.
     const basis = selectSchedulerBasisRows(engine, {
       branch: "",
       action: "derive-for-bob",
       actionScopeKey: "user:did%3Akey%3Abob",
     });
-    expect(basis.length).toBeGreaterThanOrEqual(0);
+    const seedLink = seed.getAsNormalizedFullLink();
+    const seedRow = basis.find((row) => row.entity === seedLink.id);
+    expect(seedRow).toEqual({
+      entitySpace: space,
+      entity: seedLink.id,
+      entityScopeKey: "space",
+      seq: seedSeq,
+    });
+    // And NOT under the wave-level identity.
+    const misKeyed = selectSchedulerBasisRows(engine, {
+      branch: "",
+      action: "derive-for-bob",
+      actionScopeKey: "space",
+    });
+    expect(misKeyed).toEqual([]);
+  });
+
+  it("stage F: a bookkeeping PATCH racing a DISJOINT authored patch REBASES and commits (the live rebase arm)", async () => {
+    const lease = liveLease();
+
+    // Materialize the doc first so later writes are patches.
+    const doc = runtime.getCell<{ seq: number; other?: number }>(
+      space,
+      "wave-bookkeeping-rebase",
+      undefined,
+    );
+    const seedTx = runtime.edit();
+    doc.withTx(seedTx).set({ seq: 1, other: 0 });
+    expect((await seedTx.commit()).error).toBeUndefined();
+
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, {
+      actionId: "serving-loop/watermark",
+      kind: "bookkeeping",
+    });
+    doc.withTx(tx).key("seq").set(9);
+    expect((await tx.commit()).error).toBeUndefined();
+
+    // A concurrent authored PATCH to a DISJOINT field: commutes, so the
+    // bookkeeping advance rebases instead of dropping.
+    const link = doc.getAsNormalizedFullLink();
+    Engine.applyCommit(engine, {
+      sessionId: "rival-session",
+      principal: "user:rival",
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: link.id,
+          patches: [{ op: "replace", path: "/value/other", value: 7 }],
+        }],
+      },
+    });
+
+    runtime.clearSealDestination();
+    const outcome = await wave.commitWave(newSink());
+    await wave.settled();
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.dispositions[0]).toEqual({ kind: "committed" });
+    // Both survive: the concurrent field AND the rebased advance.
+    const stored = Engine.readState(engine, { id: link.id });
+    expect(stored?.document).toEqual({ value: { seq: 9, other: 7 } });
   });
 });
