@@ -16,8 +16,11 @@
  * let every call of that run share it: one run is exactly the span over which
  * repeating an id should mean repeating a call.
  *
- * The session travels with the call today; the address a handling's receipt
- * lands at is derived from the invocation id alone and does not join it yet.
+ * The session is joined to the address a handling's receipt lands at, so it
+ * decides what a replay finds: the same id under two sessions reaches two
+ * outcomes, and holding an id without the session it was chosen in reaches
+ * nothing. That also makes the address unguessable, where a piece, a verb and
+ * a word like `add-comment-1` are not.
  */
 export function newSessionId(): string {
   return crypto.randomUUID();

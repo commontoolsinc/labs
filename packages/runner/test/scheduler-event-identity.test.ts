@@ -62,11 +62,20 @@ describe("scheduler event identity", () => {
   it("scopes a caller id deterministically, so a retry re-derives it", () => {
     // A retry may come from a fresh CLI process; same inputs must give the
     // same durable id or the receipt collision never happens.
-    expect(scopeCallerEventId("inv-1", eventLink)).toBe(
-      scopeCallerEventId("inv-1", eventLink),
+    expect(scopeCallerEventId("inv-1", "ses-a", eventLink)).toBe(
+      scopeCallerEventId("inv-1", "ses-a", eventLink),
     );
-    expect(scopeCallerEventId("inv-1", eventLink)).not.toBe(
-      scopeCallerEventId("inv-2", eventLink),
+    expect(scopeCallerEventId("inv-1", "ses-a", eventLink)).not.toBe(
+      scopeCallerEventId("inv-2", "ses-a", eventLink),
+    );
+  });
+
+  it("separates one caller id chosen in two different sessions", () => {
+    // An invocation id is the caller's own word, and `add-comment-1` is the
+    // word two agents both reach for. Sharing an address, the second would
+    // read the first's receipt and be told its call had settled.
+    expect(scopeCallerEventId("add-comment-1", "ses-a", eventLink)).not.toBe(
+      scopeCallerEventId("add-comment-1", "ses-b", eventLink),
     );
   });
 
@@ -75,8 +84,8 @@ describe("scheduler event identity", () => {
     // verbs of a piece must not make the second collide on the first's
     // receipt and report as an already-settled success.
     const other: NormalizedFullLink = { ...eventLink, id: "of:other-stream" };
-    expect(scopeCallerEventId("inv-1", eventLink)).not.toBe(
-      scopeCallerEventId("inv-1", other),
+    expect(scopeCallerEventId("inv-1", "ses-a", eventLink)).not.toBe(
+      scopeCallerEventId("inv-1", "ses-a", other),
     );
   });
 
@@ -85,27 +94,32 @@ describe("scheduler event identity", () => {
     // path and space keeps the helper from depending on that quietly.
     const atA: NormalizedFullLink = { ...eventLink, path: ["a"] };
     const atB: NormalizedFullLink = { ...eventLink, path: ["b"] };
-    expect(scopeCallerEventId("inv-1", atA)).not.toBe(
-      scopeCallerEventId("inv-1", atB),
+    expect(scopeCallerEventId("inv-1", "ses-a", atA)).not.toBe(
+      scopeCallerEventId("inv-1", "ses-a", atB),
     );
     const elsewhere: NormalizedFullLink = {
       ...eventLink,
       space: "did:key:z6MkOtherEventIdentity" as MemorySpace,
     };
-    expect(scopeCallerEventId("inv-1", eventLink)).not.toBe(
-      scopeCallerEventId("inv-1", elsewhere),
+    expect(scopeCallerEventId("inv-1", "ses-a", eventLink)).not.toBe(
+      scopeCallerEventId("inv-1", "ses-a", elsewhere),
     );
   });
 
   it("cannot be confused by a caller id that mimics a delimiter", () => {
-    // The caller's half is opaque and caller-chosen. Under delimited
+    // The caller's halves are opaque and caller-chosen. Under delimited
     // concatenation these pairs render identically; hashing keeps them apart.
     // A link id is a URI, so it always carries a colon of its own — the
     // separator is not distinguishable from the payload by inspection.
     const ofYZ: NormalizedFullLink = { ...eventLink, id: "of:y:z" };
     const yZ: NormalizedFullLink = { ...eventLink, id: "y:z" };
-    expect(scopeCallerEventId("x", ofYZ)).not.toBe(
-      scopeCallerEventId("x:of", yZ),
+    expect(scopeCallerEventId("x", "s", ofYZ)).not.toBe(
+      scopeCallerEventId("x:of", "s", yZ),
+    );
+    // The same ambiguity across the id/session boundary: a caller chooses
+    // both halves, and can choose where a delimiter would appear to sit.
+    expect(scopeCallerEventId("inv", "1:ses", eventLink)).not.toBe(
+      scopeCallerEventId("inv:1", "ses", eventLink),
     );
   });
 

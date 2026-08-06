@@ -282,16 +282,16 @@ export const recordRelevantSchemaWritePolicyInput = (
  * Internal-only stream-send options.
  *
  * `eventId` is a caller-supplied durable event id (verb contract WS-D): a
- * same-id retry collides on the handling's create-only receipt.
+ * retry naming the same id and session collides on the handling's create-only
+ * receipt.
  *
- * `session` names the caller that chose that `eventId`. An ingress caller's id
- * is its own word — an agent picks `add-comment-1` — and two agents can pick
- * the same word for two different calls on one verb, so the id alone does not
- * say whose invocation it is; the session does. It is accepted here so an
- * ingress caller can carry the session it is acting within all the way to the
- * point the durable id is derived. The derived id is
- * {@link scopeCallerEventId}'s, over the caller's id and the stream, and does
- * not take the session as an input.
+ * `session` names the caller that chose that `eventId`, and is REQUIRED
+ * alongside it — a send naming an id without one is refused. An ingress
+ * caller's id is its own word — an agent picks `add-comment-1` — and two
+ * agents can pick the same word for two different calls on one verb, so the
+ * id alone does not say whose invocation it is; the session does. Both are
+ * inputs to {@link scopeCallerEventId}, so the pair, and not the id, is what
+ * decides where a handling's receipt lands.
  *
  * `runtimeInjectedEventKeys` names payload keys the RUNTIME itself merged
  * into this send's event value (the LLM tool-call path injects a `result`
@@ -302,14 +302,14 @@ export const recordRelevantSchemaWritePolicyInput = (
  * in-process options argument, never the event value, so no remote or CLI
  * caller can express it — payloads are plain data, and the CLI's invocation
  * engine (`executeResolvedCallable`, packages/cli/lib/callable.ts) builds the
- * send options itself and puts only `eventId` in them. In-process callers are
- * gated too: the value must be an
- * array MINTED by {@link markRuntimeInjectedEventKeys} — the stream-send
- * path drops any other value — and the mint lives in runner internals no
- * pattern compartment can import, so sandboxed pattern code holding a real
- * stream cell still cannot smuggle an undeclared key past closed-world by
- * passing a plain array here. Adding any data-expressible way to set it
- * would reopen the accepted-and-ignored hole C5 closes.
+ * send options itself and puts only the caller's id and session in them.
+ * In-process callers are gated too: the value must be an array MINTED by
+ * {@link markRuntimeInjectedEventKeys} — the stream-send path drops any other
+ * value — and the mint lives in runner internals no pattern compartment can
+ * import, so sandboxed pattern code holding a real stream cell still cannot
+ * smuggle an undeclared key past closed-world by passing a plain array here.
+ * Adding any data-expressible way to set it would reopen the
+ * accepted-and-ignored hole C5 closes.
  */
 export type StreamSendOptions = {
   eventId?: string;
@@ -1415,9 +1415,9 @@ export class CellImpl<T extends FabricValue>
     /**
      * Internal-only stream-send options (see {@link StreamSendOptions}).
      * `eventId` supplies the durable event id (spec §7.5) instead of minting
-     * one: an ingress caller that owns a delivery id passes it through so a
-     * retry of the same id collides on the handling's create-only receipt
-     * (verb contract WS-D,
+     * one: an ingress caller that owns a delivery id passes it, with the
+     * `session` it chose that id within, so a retry of the same pair collides
+     * on the handling's create-only receipt (verb contract WS-D,
      * docs/history/plans/pattern-verb-contract-implementation.md). The receipt
      * is a COMMIT witness, not an execution witness — the redelivered event
      * still runs the handler body and then loses the race, so effects outside
@@ -1458,6 +1458,33 @@ export class CellImpl<T extends FabricValue>
       ) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 
+      // The caller's key is opaque and unscoped; queueEvent expects a durable
+      // delivery id. Binding it to the session that chose it and to this
+      // stream is what keeps one caller's id from addressing another caller's
+      // receipt, and two verbs that share input bindings from colliding on
+      // one receipt.
+      const callerEventId = sendOptions?.eventId;
+      let deliveryEventId: string | undefined;
+      if (callerEventId !== undefined) {
+        const session = sendOptions?.session;
+        if (session === undefined) {
+          // Refused rather than derived without one: an unscoped address is
+          // reachable by anyone who guesses the id, and the guarantee the id
+          // is passed for — a retry settling on the original outcome — would
+          // then be extended to a caller who made no such call.
+          throw new Error(
+            "A caller-supplied `eventId` requires the `session` it was " +
+              "chosen within: an invocation id is the caller's own word, " +
+              "and the pair is what names one invocation.",
+          );
+        }
+        deliveryEventId = scopeCallerEventId(
+          callerEventId,
+          session,
+          resolvedToValueLink,
+        );
+      }
+
       // Trigger on fully resolved link
       this.runtime.scheduler.queueEvent(
         resolvedToValueLink,
@@ -1466,12 +1493,7 @@ export class CellImpl<T extends FabricValue>
         onCommit,
         false,
         {
-          // The caller's key is opaque and unscoped; queueEvent expects a
-          // durable delivery id. Binding it to this stream is what keeps two
-          // verbs that share input bindings from colliding on one receipt.
-          eventId: sendOptions?.eventId === undefined
-            ? undefined
-            : scopeCallerEventId(sendOptions.eventId, resolvedToValueLink),
+          eventId: deliveryEventId,
           originTx: this.tx ?? undefined,
           // Forward injection provenance only when it carries the mint (see
           // markRuntimeInjectedEventKeys): a plain array here — the shape any
@@ -1588,10 +1610,11 @@ export class CellImpl<T extends FabricValue>
         /**
          * Internal-only stream-send options (see {@link StreamSendOptions}):
          * `eventId` passes a caller-supplied durable event id through to the
-         * scheduler, so a same-id retry collides on the handling's
-         * create-only receipt and cannot commit twice — though the body does
-         * re-run (verb contract WS-D). `runtimeInjectedEventKeys` carries
-         * runtime-injection provenance for the closed-world gate.
+         * scheduler, and `session` the caller that chose it, so a retry of
+         * that pair collides on the handling's create-only receipt and cannot
+         * commit twice — though the body does re-run (verb contract WS-D).
+         * `runtimeInjectedEventKeys` carries runtime-injection provenance for
+         * the closed-world gate.
          */
         StreamSendOptions,
       ]
