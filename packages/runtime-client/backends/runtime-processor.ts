@@ -43,6 +43,7 @@ import {
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
 import { linkRefPayload } from "@commonfabric/runner/shared";
+import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 import {
   cfcLabelViewForCell,
   createRenderConfidentialityResolver,
@@ -179,24 +180,6 @@ const cfcLabelLogger = getLogger("runtime-client.cfc-label", {
   enabled: true,
   level: "error",
 });
-
-/**
- * PageId intake: accepts both the bare tagged hash (`fid1:<hash>`, the
- * routing form `PageHandle.id()` emits) and the `of:`-schemed URI
- * (`CellHandle.id()` emits the full schemed id). Without the strip, a
- * schemed pageId would silently parse as a hash whose TAG is `of:fid1`
- * and address the nonexistent entity `of:of:fid1:<hash>` — no error,
- * just a page that never resolves. `computed:` ids are deliberately NOT
- * accepted: pages are pieces (result cells, always `of:`-schemed), and
- * the scheme is part of the identity, so stripping `computed:` would
- * silently alias a different entity.
- */
-function pageIdForRouting(pageId: string): string {
-  if (pageId.startsWith("computed:")) {
-    throw new Error("Computed ids are not valid page ids.");
-  }
-  return pageId.startsWith("of:") ? pageId.slice("of:".length) : pageId;
-}
 
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   const spaceBaseUrl = new URL(`/${space}/`, apiUrl);
@@ -1236,10 +1219,9 @@ export class RuntimeProcessor {
     request: PageGetRequest,
   ): Promise<PageResponse> {
     const cc = this.getSpaceCtx(request.space);
-    const pageId = pageIdForRouting(request.pageId);
     const requestedCell = this.runtime.getCellFromEntityId(
       cc.getSpace(),
-      entityIdFrom(pageId),
+      entityIdFrom(request.pageId),
     );
     await requestedCell.sync();
     const redirect = parseLink(
@@ -1276,7 +1258,7 @@ export class RuntimeProcessor {
     }
 
     const cell = await cc.getPieceCell(
-      pageId,
+      request.pageId,
       request.runIt ?? false,
     );
 
@@ -1291,7 +1273,7 @@ export class RuntimeProcessor {
     const pieces = this.getSpaceCtx(request.space);
     const cell = this.runtime.getCellFromEntityId(
       pieces.getSpace(),
-      entityIdFrom(pageIdForRouting(request.pageId)),
+      entityIdFrom(request.pageId),
     );
     await cell.sync();
     const slug = cell.getMetaRaw("slug");
@@ -1345,7 +1327,7 @@ export class RuntimeProcessor {
     // The reader syncs the piece itself, as its first step.
     const cell = this.runtime.getCellFromEntityId(
       pieces.getSpace(),
-      entityIdFrom(pageIdForRouting(request.pieceId)),
+      entityIdFrom(request.pieceId),
     );
     const state = await readPieceSourceState(this.runtime, cell);
     return { source: { ...state, space: state.space as DID } };
@@ -1362,8 +1344,11 @@ export class RuntimeProcessor {
       throw new Error("confirmationToken must be a non-empty string");
     }
     const pieces = this.getSpaceCtx(request.space);
+    // Keyed on the piece's bare hash rather than the request's spelling of it:
+    // a caller may prepare a change under one accepted address form and
+    // confirm it under the other, and both must reach the one pending entry.
     const confirmationKey = `${request.space}\u0000${
-      pageIdForRouting(request.pieceId)
+      hashStringForEntityAddress(request.pieceId)
     }`;
     let confirmedChange: PreparedPieceSourceChange | undefined;
     if (request.confirmationToken === undefined) {
@@ -1383,7 +1368,7 @@ export class RuntimeProcessor {
     }
     const cell = this.runtime.getCellFromEntityId(
       pieces.getSpace(),
-      entityIdFrom(pageIdForRouting(request.pieceId)),
+      entityIdFrom(request.pieceId),
     );
     const controller = new PieceController(pieces, cell);
     const result = await controller.changeSource(request.action, {
