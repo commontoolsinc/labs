@@ -26,10 +26,11 @@ Authoritative implementation sources:
 If this document conflicts with code or passing tests, code/tests win.
 
 Package exports (`deno.jsonc`): `.` → `src/index.ts` (no `mod.ts`), plus
-six subpaths — `./interface`, `./cell-brand`, `./wrapper-names`,
-`./type-traversal`, `./property-optionality`, `./property-name`.
-`src/index.ts` exports the `SchemaGenerator` class, the `ISchemaGenerator`
-type, and re-exports `MutableJSONSchemaObj`.
+five subpaths — `./cell-brand`, `./wrapper-names`, `./property-optionality`,
+`./property-name`, `./numeric-expression`.
+`src/index.ts` exports the `SchemaGenerator` class, the
+`SchemaGenerationOptions` and `WriterSourceIdentity` types, and re-exports
+`MutableJSONSchemaObj`.
 
 Consumers, as of this writing (verified by import grep): the only external
 consumer package is `@commonfabric/ts-transformers`, along two axes:
