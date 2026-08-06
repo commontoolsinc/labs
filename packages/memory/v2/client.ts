@@ -37,7 +37,10 @@ import {
 import type { Server } from "./server.ts";
 import type { AppliedCommit } from "./engine.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { expandServerMessageSchemas } from "./sync-schema-table.ts";
+import {
+  expandServerMessageSchemas,
+  type SchemaCache,
+} from "./sync-schema-table.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 
 export type Transport = {
@@ -162,6 +165,26 @@ export class Client {
   // it terminates only that session (see SpaceSession.restore), leaving sessions
   // for other spaces on this client alive.
   #fatalError: Error | null = null;
+  // Schema bodies delivered under the connection-scoped encoding, by tagged
+  // hash. Every entry was verified against the hash naming it, so holding one
+  // the server no longer counts as delivered costs bytes, never correctness.
+  //
+  // Deliberately NOT cleared on reconnect: the server tracks delivery per
+  // Connection, so a reconnect makes the SERVER forget while this map
+  // remembers, and it re-sends bodies already held here. The reverse — this
+  // map behind what the server counts as delivered — is what strands a
+  // connection, and the two ways to reach it are both closed: the map dies
+  // only with the Client, whose replacement means a new Connection, and a
+  // frame that fails to populate it discards the connection
+  // (`discardConnectionIfSchemaCas`).
+  #schemaCache: SchemaCache = new Map();
+  // Whether the last handshake negotiated the connection-scoped schema
+  // encoding, mirroring the server's own negotiation. Frames on such a
+  // connection are not self-describing, which changes what a frame this client
+  // fails to process costs — see `discardConnectionIfSchemaCas`.
+  #schemaCasNegotiated = false;
+  // The flags the in-flight or most recent `hello` advertised. See hello().
+  #advertisedFlags: MemoryProtocolFlags | null = null;
 
   private constructor(
     private readonly transport: Transport,
@@ -330,18 +353,34 @@ export class Client {
   private async hello(): Promise<void> {
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
+    // Read the ambient flags ONCE and keep what this handshake advertised.
+    // The server negotiates against the flags it received, so a decision that
+    // must match the server's — which encoding this connection speaks — has
+    // to be made against these, not against a second read that a config
+    // change between send and `hello.ok` could answer differently.
+    const advertised = getMemoryProtocolFlags();
+    this.#advertisedFlags = advertised;
     try {
       await Promise.all([
         this.transport.send(encodeMemoryBoundary({
           type: "hello",
           protocol: MEMORY_PROTOCOL,
-          flags: getMemoryProtocolFlags(),
+          flags: advertised,
         })),
         ack.promise,
       ]);
       this.#connected = true;
     } finally {
-      this.#helloPending = null;
+      // Only retire the handshake this call installed. A failed handshake can
+      // have a REPLACEMENT already in flight by the time it unwinds — closing
+      // the transport drives `onClose`, which a transport may report
+      // synchronously, and the reconnect that follows installs its own
+      // pending. Clearing unconditionally would retire that one, leaving its
+      // `hello.ok` unrecognized and its handshake awaiting an ack nothing
+      // will ever resolve.
+      if (this.#helloPending === ack) {
+        this.#helloPending = null;
+      }
     }
   }
 
@@ -354,7 +393,7 @@ export class Client {
       // on encodeMemoryBoundary), so the expansion walk over its upserts is
       // skipped entirely.
       if (containsReservedSchemaRefSubstring(payload)) {
-        message = expandServerMessageSchemas(message);
+        message = expandServerMessageSchemas(message, this.#schemaCache);
       }
     } catch (cause) {
       const error = new Error("Unable to parse memory server message", {
@@ -363,8 +402,17 @@ export class Client {
       error.name = "InvalidMessageError";
       if (this.#helloPending !== null) {
         this.#helloPending.reject(error);
+        // A frame arriving in the handshake window that this client cannot
+        // read leaves the server's connection having already answered a
+        // `hello`, so the reconnect loop's next attempt on this transport is
+        // refused as a repeat and no retry can ever succeed on it. Drop the
+        // transport so that attempt opens a fresh one. Deliberately not the
+        // cas discard: nothing is connected yet, and this hazard belongs to
+        // the handshake rather than to either schema encoding.
+        void this.transport.close().catch(() => undefined);
       } else {
         this.rejectPending(error);
+        this.discardConnectionIfSchemaCas(error);
       }
       return;
     }
@@ -391,6 +439,8 @@ export class Client {
         // consumers (e.g. the runner's sqlite write-gate relaxation) read
         // these; absent-on-old-server keys parse to false — fail closed.
         this.#serverFlags = helloOk.flags;
+        this.#schemaCasNegotiated = helloOk.flags.syncSchemaCasV1 === true &&
+          this.#advertisedFlags?.syncSchemaCasV1 === true;
         try {
           this.#sessionOpenAuthContext = requireSessionOpenAuthMetadata(
             helloOk.sessionOpen,
@@ -477,15 +527,62 @@ export class Client {
     }
   }
 
-  private onClose(error?: Error): void {
-    if (this.#closed) {
+  /**
+   * Drops the transport so later frames arrive on a fresh connection, when
+   * this one carries schema bodies across frames.
+   *
+   * A frame this client fails to process may have carried schema bodies the
+   * server has already recorded as delivered. Under the frame-local encoding
+   * that costs exactly one frame: the next one describes itself and the
+   * connection heals. Under the connection-scoped encoding it is terminal —
+   * every later reference to those bodies is unresolvable, and there is no
+   * protocol request for a schema by hash, so the connection would keep
+   * failing frames while looking healthy. A new connection starts the server's
+   * delivered set empty, which re-teaches the bodies.
+   */
+  private discardConnectionIfSchemaCas(error: Error): void {
+    if (!this.#schemaCasNegotiated || this.#closed || !this.#connected) {
       return;
     }
+    // Leave the connected state SYNCHRONOUSLY, before yielding to the close.
+    // A transport's close can take arbitrarily long — a half-open socket is
+    // exactly where a frame gets mangled — and anything that observed a
+    // connected client meanwhile would send on a transport already on its way
+    // out: `ensureConnected` would skip the handshake, and the transport would
+    // open a fresh socket that never receives a `hello`. Clearing the flag
+    // here also makes this single-flight, so the further frames a desynced
+    // connection is expected to fail start no second discard.
+    this.markDisconnected(error);
+    void this.transport.close()
+      .catch(() => undefined)
+      .then(() => this.#closed ? undefined : this.reconnect())
+      .catch(() => undefined);
+  }
+
+  /** The state half of a disconnect: stop reporting connected, tell the
+   *  sessions, and settle everything in flight. Split out of {@link onClose}
+   *  so a discard can take it synchronously and leave the reconnect to its
+   *  own sequencing. */
+  private markDisconnected(error?: Error): void {
     this.#connected = false;
     for (const session of this.#spaces) {
       session.handleDisconnect();
     }
     this.rejectPending(toConnectionError(error));
+  }
+
+  private onClose(error?: Error): void {
+    if (this.#closed) {
+      return;
+    }
+    // Runs on the close a discard initiated as well as on an unsolicited one.
+    // Both halves tolerate the repeat: `handleDisconnect` only clears a flag,
+    // `rejectPending` finds the map already drained, and `reconnect` is
+    // single-flighted, so the second caller joins the first attempt rather
+    // than starting a competing one. This must NOT be skipped while
+    // disconnected — a close arriving mid-handshake is what settles the
+    // pending hello and lets the reconnect loop take its next attempt.
+    this.markDisconnected(error);
     void this.reconnect().catch(() => undefined);
   }
 
@@ -495,6 +592,16 @@ export class Client {
     }
     if (this.#fatalError) {
       throw this.#fatalError;
+    }
+    // Never handshake a connection that is already up. A server connection
+    // accepts one `hello` and refuses the next as a repeat — an error no
+    // retry can clear and nothing marks permanent — so a redundant attempt
+    // spins forever while every request waits on it. Callers that observed a
+    // disconnect clear the flag before arriving; this guards the caller whose
+    // observation went STALE, which a deferred reconnect becomes whenever its
+    // transport close outlives a reconnect somebody else completed meanwhile.
+    if (this.#connected) {
+      return;
     }
     if (this.#reconnecting) {
       return await this.#reconnecting;
@@ -1632,21 +1739,38 @@ export const connect = Client.connect;
 
 export const loopback = (server: Server): Transport => {
   let receiver = (_payload: string) => {};
-  const connection = server.connect((message) => {
-    receiver(encodeMemoryBoundary(message));
-  });
+  let closeReceiver = (_error?: Error) => {};
+  let connection: ReturnType<Server["connect"]> | null = null;
+  // Opened on demand rather than once, so a client that closes this transport
+  // can reconnect through it — a closed Connection refuses every message, and
+  // binding one for the transport's lifetime would strand the client mid
+  // handshake. Mirrors WebSocketTransport, which opens a fresh socket whenever
+  // it has none.
+  const open = () => {
+    connection ??= server.connect((message) => {
+      receiver(encodeMemoryBoundary(message));
+    });
+    return connection;
+  };
   return {
     async send(payload: string) {
-      await connection.receive(payload);
+      await open().receive(payload);
     },
     close() {
-      connection.close();
+      const current = connection;
+      connection = null;
+      current?.close();
+      if (current !== null) {
+        closeReceiver();
+      }
       return Promise.resolve();
     },
     setReceiver(next) {
       receiver = next;
     },
-    setCloseReceiver() {},
+    setCloseReceiver(next) {
+      closeReceiver = next;
+    },
   };
 };
 

@@ -364,6 +364,34 @@ class Connection {
   #ready = false;
   #closed = false;
   #syncSchemaTable = false;
+  // Negotiated syncSchemaCasV1: schema bodies are scoped to this connection
+  // instead of to each frame. Exclusive with #syncSchemaTable — a peer must
+  // know from the handshake whether a frame is self-describing.
+  #syncSchemaCas = false;
+  // Tagged hashes of the schema bodies handed to this connection's transport.
+  // A hash enters only after its carrying frame was accepted: send() is the
+  // commit point for sync state (see the rollback in flushDirty), and a body
+  // recorded but never sent would strand every later reference naming it, with
+  // no way for the peer to ask for it.
+  //
+  // Acceptance is weaker than arrival, and the gap is closed on both sides
+  // rather than here. A transport that discards instead of throwing does so
+  // because its socket is no longer open, and a socket that cannot carry this
+  // frame carries no later one either — the stranded reference is never sent,
+  // and this set dies with the connection. A peer that receives a frame but
+  // fails to process it discards the connection for the same reason
+  // (`discardConnectionIfSchemaCas` in v2/client.ts).
+  //
+  // Scoped to the CONNECTION, deliberately unlike the session's `entities`
+  // cache next to it, which answers the same "what does the peer already
+  // hold" question for documents and survives a resume. The matching
+  // lifetime for schema bodies is the connection's, because the peer's half
+  // of this ledger is the `Client`'s `#schemaCache` and a Client holds one
+  // connection at a time. A session is the wrong axis in both directions: it
+  // outlives the connection, and it can be resumed by a DIFFERENT client
+  // whose cache is empty — inheriting "already delivered" there would send
+  // that client references it could never resolve.
+  #deliveredSchemas = new Set<string>();
   // Negotiated persistentSchedulerState: when both sides carry the flag,
   // subscription sync pushes to this connection include the scheduler
   // observation rows of the sync window, so its runtimes can ADOPT other
@@ -383,9 +411,21 @@ class Connection {
   ) {}
 
   private send(message: ServerMessage): void {
-    this.sendRaw(
-      this.#syncSchemaTable ? compressServerMessageSchemas(message) : message,
+    if (!this.#syncSchemaTable && !this.#syncSchemaCas) {
+      this.sendRaw(message);
+      return;
+    }
+    const { message: compressed, staged } = compressServerMessageSchemas(
+      message,
+      this.#syncSchemaCas ? this.#deliveredSchemas : undefined,
     );
+    // A throw propagates before the staged hashes are recorded, so the peer's
+    // known set and the sync delivery state roll back together: the frame is
+    // recomputed from durable state and re-carries the bodies.
+    this.sendRaw(compressed);
+    for (const hash of staged) {
+      this.#deliveredSchemas.add(hash);
+    }
   }
 
   hasSession(space: string, sessionId: string): boolean {
@@ -614,7 +654,10 @@ class Connection {
       }
       const clientFlags = parseMemoryProtocolFlags(parsed.flags);
       const serverFlags = parseMemoryProtocolFlags(response.flags);
-      this.#syncSchemaTable = clientFlags?.syncSchemaTableV2 === true &&
+      this.#syncSchemaCas = clientFlags?.syncSchemaCasV1 === true &&
+        serverFlags?.syncSchemaCasV1 === true;
+      this.#syncSchemaTable = !this.#syncSchemaCas &&
+        clientFlags?.syncSchemaTableV2 === true &&
         serverFlags?.syncSchemaTableV2 === true;
       this.#persistentSchedulerState =
         clientFlags?.persistentSchedulerState === true &&
@@ -2982,11 +3025,14 @@ export class Server {
    * evaluation cannot elide them as already-snapshotted), re-stage its
    * marker obligation, and re-dirty its ids origin-less so a pass is
    * scheduled and the docs fan out authoritatively. Rollback rather than
-   * buffering: only a locally-throwing send is visible in-process, and a
-   * dying socket loses "successfully sent" frames just the same — the
-   * durable repair for that is resume-time catch-up, not a server-side
-   * buffer. A doc REMOVED by the lost frame is the accepted residue: its
-   * cache entry is already gone and cannot be re-diffed; the client keeps
+   * buffering: only a locally-throwing send is visible in-process, so this is
+   * the whole repair, and it reaches only the losses it is told about. A frame
+   * a dying socket accepted and dropped, or one the peer received and failed
+   * to process, already advanced this cache at build time; resume-time
+   * catch-up diffs against that advanced cache and so does not re-send it.
+   * Those frames' contents are lost to that client until a full
+   * re-evaluation. A doc REMOVED by the lost frame is the accepted residue:
+   * its cache entry is already gone and cannot be re-diffed; the client keeps
    * it until a full re-evaluation or reconnect (watch-shrink removes are
    * advisory today). */
   rollbackUndeliveredSync(

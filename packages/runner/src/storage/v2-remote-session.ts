@@ -180,13 +180,19 @@ export class WebSocketTransport implements MemoryClient.Transport {
         }
       });
       socket.addEventListener("close", () => {
-        if (this.#socket === socket) {
+        const current = this.#socket === socket;
+        if (current) {
           this.#socket = null;
         }
         if (this.#opening === opening) {
           this.#opening = null;
         }
-        this.#closeReceiver();
+        // Only the socket this transport is still using may report a close.
+        // A socket already replaced — closed explicitly, then superseded by
+        // the next open() — would otherwise tear down its live successor.
+        if (current) {
+          this.#closeReceiver();
+        }
         if (!opened) {
           reject(new Error("memory websocket transport closed before opening"));
         }

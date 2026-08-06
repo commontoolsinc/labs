@@ -316,10 +316,12 @@ describe("runtimePresets conformance (CT-1814)", () => {
       const env: Record<string, string> = {
         EXPERIMENTAL_MODERN_CELL_REP: "true",
         EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "false",
+        EXPERIMENTAL_SYNC_SCHEMA_CAS: "true",
       };
       expect(experimentalOptionsFromEnv((name) => env[name])).toEqual({
         modernCellRep: true,
         persistentSchedulerState: false,
+        syncSchemaCasV1: true,
       });
       expect(experimentalOptionsFromEnv(() => undefined)).toEqual({});
     });
