@@ -189,6 +189,29 @@ Deno.test("markdown: a diff's nav tree steps through the headings it shows", () 
   }
 });
 
+Deno.test("markdown: a decoded BOM stays outside a diff heading anchor", () => {
+  const bom = "\uFEFF";
+  const diff = `diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1,2 +1,2 @@
+ ${bom}# Title
+-old
++body
+`;
+  const ws: DiffWorkspace = {
+    resolve: () => "/README.md",
+    read: () => "# Title\nbody\n",
+    hasUtf8Bom: () => true,
+  };
+  const { doc } = buildDiffDocument(diff, parseDiff(diff)!, ws);
+  const heading = doc.flatStructure.find((node) => node.label === "# Title");
+
+  assert(heading);
+  assertEquals(heading.startCol, 2);
+  assertEquals(heading.startOffset, diff.indexOf("# Title"));
+});
+
 Deno.test("markdown: a deeper-then-shallower diff window keeps a navigable depth tree", () => {
   const root = Deno.makeTempDirSync();
   try {

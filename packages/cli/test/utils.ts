@@ -59,7 +59,7 @@ function parseCliCommand(command: string): string[] {
 async function spawnCli(
   executable: string,
   args: string[],
-  stdin?: string,
+  stdin?: string | Uint8Array,
 ): Promise<CliResult> {
   const child = new Deno.Command(executable, {
     cwd: join(import.meta.dirname!, ".."),
@@ -73,7 +73,7 @@ async function spawnCli(
 
   if (stdin !== undefined) {
     const writer = child.stdin.getWriter();
-    await writer.write(encode(stdin));
+    await writer.write(typeof stdin === "string" ? encode(stdin) : stdin);
     await writer.close();
   }
 
@@ -88,7 +88,7 @@ async function spawnCli(
 async function runCliTask(
   task: "cli-no-pwd-override",
   command: string,
-  stdin?: string,
+  stdin?: string | Uint8Array,
 ): Promise<CliResult> {
   return await spawnCli(
     Deno.execPath(),
@@ -111,7 +111,7 @@ async function runCliTask(
 // Pass `stdin` to feed the command's standard input.
 export async function cf(
   command: string,
-  stdin?: string,
+  stdin?: string | Uint8Array,
 ): Promise<CliResult> {
   return await runCliTask("cli-no-pwd-override", command, stdin);
 }
@@ -148,7 +148,7 @@ function cfBinaryAvailable(): Promise<boolean> {
 // CF_CLI_INTEGRATION_USE_LOCAL=1 to force the source-tree CLI.
 export async function integrationCf(
   command: string,
-  stdin?: string,
+  stdin?: string | Uint8Array,
 ): Promise<CliResult> {
   if (await cfBinaryAvailable()) {
     return await spawnCli("cf", parseCliCommand(command), stdin);

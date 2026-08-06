@@ -12,6 +12,7 @@ import {
   distinctLanguages,
   indexLanguagesByName,
   languageForFile,
+  languageForInput,
   languageForName,
   languageForSource,
   languageForTransformedOutput,
@@ -26,6 +27,7 @@ import { markdownLanguage } from "../lib/view/languages/markdown/language.ts";
 import { jsonLanguage } from "../lib/view/languages/json/language.ts";
 import { yamlLanguage } from "../lib/view/languages/yaml/language.ts";
 import { pythonLanguage } from "../lib/view/languages/python/language.ts";
+import { binaryLanguage } from "../lib/view/languages/binary/language.ts";
 import { plainTextLanguage } from "../lib/view/languages/plain-text/language.ts";
 import {
   buildDiffDocument,
@@ -46,6 +48,8 @@ Deno.test("languageForFile: named files resolve and missing names use plain text
   assertEquals(languageForFile("deno.jsonc").id, "json");
   assertEquals(languageForFile("workflow.yml").id, "yaml");
   assertEquals(languageForFile("script.py").id, "python");
+  assertEquals(languageForFile("asset.png").id, "binary");
+  assertEquals(languageForFile("payload.bin").id, "binary");
   assertEquals(languageForFile("notes.xyz").id, "plain-text");
   assertEquals(languageForFile("LICENSE").id, "plain-text");
   assertEquals(languageForFile(undefined).id, "plain-text");
@@ -88,6 +92,8 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
   assertEquals(languageForName("yml"), yamlLanguage);
   assertEquals(languageForName("python"), pythonLanguage);
   assertEquals(languageForName("py"), pythonLanguage);
+  assertEquals(languageForName("binary"), binaryLanguage);
+  assertEquals(languageForName("bytes"), binaryLanguage);
   assertEquals(languageForName("plain-text"), plainTextLanguage);
   assertEquals(languageForName("plaintext"), plainTextLanguage);
   assertEquals(languageForName("TypeScript"), undefined);
@@ -98,6 +104,7 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
     "json",
     "yaml",
     "python",
+    "binary",
     "plain-text",
   ]);
   assertEquals(languageNames(), [
@@ -113,10 +120,40 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
     "yml",
     "python",
     "py",
+    "binary",
+    "bytes",
     "plain-text",
     "text",
     "plaintext",
   ]);
+});
+
+Deno.test("languageForInput: binary bytes precede implicit text selection", () => {
+  const encode = (text: string) => new TextEncoder().encode(text);
+
+  assertEquals(
+    languageForInput("asset.png", encode("printable")),
+    binaryLanguage,
+  );
+  assertEquals(
+    languageForInput("source.ts", new Uint8Array([0x61, 0x00, 0x62])),
+    binaryLanguage,
+  );
+  assertEquals(
+    languageForInput("notes.txt", new Uint8Array([0xff, 0xfe])),
+    binaryLanguage,
+  );
+  assertEquals(
+    languageForInput("source.ts", encode("const x = 1;")),
+    typeScriptLanguage,
+  );
+  assertEquals(
+    languageForInput(
+      undefined,
+      encode("#!/usr/bin/env python3\nprint('ok')\n"),
+    ),
+    pythonLanguage,
+  );
 });
 
 Deno.test("language names reject ambiguous identifiers and aliases", () => {
@@ -366,12 +403,21 @@ Deno.test("distinctLanguages: dedupes in first-seen order", () => {
     "d.json",
     "e.yaml",
     "f.py",
+    "image.png",
     "LICENSE",
     undefined,
   ]);
   assertEquals(
     languages.map((l) => l.id),
-    ["typescript", "markdown", "json", "yaml", "python", "plain-text"],
+    [
+      "typescript",
+      "markdown",
+      "json",
+      "yaml",
+      "python",
+      "binary",
+      "plain-text",
+    ],
   );
 });
 

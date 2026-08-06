@@ -18,7 +18,12 @@ import {
   type DiffWorkspace,
   type WorkspaceCache,
 } from "./diffdoc.ts";
-import { type DiffHunk, type DiffModel, parseDiff } from "./diff.ts";
+import {
+  decodedDiffBodyLine,
+  type DiffHunk,
+  type DiffModel,
+  parseDiff,
+} from "./diff.ts";
 import {
   type CommitHeader,
   type CommitMessage,
@@ -366,7 +371,7 @@ export function diffSource(
       try {
         for (const write of writes) {
           attempted.push(write);
-          Deno.writeTextFileSync(write.path, write.contents);
+          writeWorkspaceFile(ws, write.path, write.contents);
         }
 
         let amended: string | null = null;
@@ -402,7 +407,7 @@ export function diffSource(
               );
               continue;
             }
-            Deno.writeTextFileSync(write.path, write.before);
+            writeWorkspaceFile(ws, write.path, write.before);
           } catch (rollbackError) {
             rollbackErrors.push(String(rollbackError));
           }
@@ -1632,8 +1637,19 @@ function reparse(
       const edited = statefulEdits.get(path);
       return edited === undefined ? ws.read(path) : edited;
     },
+    ...(ws.hasUtf8Bom
+      ? { hasUtf8Bom: (path: string) => ws.hasUtf8Bom!(path) }
+      : {}),
+    ...(ws.write
+      ? { write: (path: string, text: string) => ws.write!(path, text) }
+      : {}),
     ...(ws.readBlob
       ? { readBlob: (object: string) => ws.readBlob!(object) }
+      : {}),
+    ...(ws.blobHasUtf8Bom
+      ? {
+        blobHasUtf8Bom: (object: string) => ws.blobHasUtf8Bom!(object),
+      }
       : {}),
     ...(ws.readBlobs
       ? {
@@ -1650,6 +1666,18 @@ function reparse(
     editedCache,
     viewMode,
   ).doc;
+}
+
+function writeWorkspaceFile(
+  ws: DiffWorkspace,
+  path: string,
+  text: string,
+): void {
+  if (ws.write) {
+    ws.write(path, text);
+  } else {
+    Deno.writeTextFileSync(path, text);
+  }
 }
 
 function changedStatefulFileOutputs(
@@ -1845,7 +1873,8 @@ function collectFileOutputs(
         // empty). The no-newline marker applies to the new file only after its
         // final new-side line.
         if (kind === "ctx" || kind === "add") {
-          newSide.push(rawLines[i].slice(1));
+          const body = rawLines[i].slice(1);
+          newSide.push(decodedDiffBodyLine(body, model!.lines[i]?.newLine));
         }
         if (
           kind === "meta" && i - 1 === finalNewSideLine &&

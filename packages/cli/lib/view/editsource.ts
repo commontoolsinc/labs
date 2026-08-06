@@ -8,9 +8,18 @@
  * be a rendered projection. The diff source (in `diffedit.ts`) maps the single
  * editable text back onto the files it touches.
  */
-import type { Document, Line } from "./model.ts";
-import type { Highlighter, Language } from "./languages/language.ts";
-import { languageForFile, renderedLinesFor } from "./languages/language.ts";
+import type { Document, Line, ViewMode } from "./model.ts";
+import type {
+  Highlighter,
+  Language,
+  RenderInputExtent,
+} from "./languages/language.ts";
+import {
+  decoderFor,
+  languageForFile,
+  readOnlyReasonFor,
+  renderedLinesFor,
+} from "./languages/language.ts";
 
 /** How much a revert restores: the cursor's hunk, the cursor's file, the commit
  * message the cursor is in, or all. */
@@ -73,12 +82,19 @@ export interface EditableSource {
    * cursor move is attempted on a non-editable view. */
   readonly editable: boolean;
   readonly reason?: string;
+  /** Representation used when the caller did not choose one explicitly. */
+  readonly defaultViewMode?: ViewMode;
+  /** Whether rendered rows retain the source document's line layout. */
+  readonly renderLineTopology?: "source" | "independent";
+  /** Whether an empty decoded input is a complete view. */
+  readonly allowsEmptyInput?: boolean;
   /** Re-parse edited text into a Document — lines, structure and definitions. */
   parse(text: string): Document;
   /**
    * Build the alternate rendered representation. Rendered documents retain the
-   * source text and one display line per source line. Absent when the source's
-   * languages offer no rendered view.
+   * source text. Most renderers keep one display line per source line;
+   * whole-file renderers may own an independent layout. Absent when the
+   * source's languages offer no rendered view.
    */
   render?(source: Document): Document;
   /** Re-highlight the edited text into rendered lines only (no structure tree),
@@ -197,17 +213,31 @@ export interface EditPolicy {
   readonly messageIndent: string;
 }
 
+export interface FileSourceOptions {
+  /** Encoder paired with the bytes read when the source was opened. */
+  readonly encode?: (text: string) => Uint8Array;
+  /** Full byte size information for a bounded rendered preview. */
+  readonly renderExtent?: RenderInputExtent;
+}
+
 /** An on-disk file: the document text is the file, edits write straight back. */
 export function fileSource(
   path: string,
   language: Language = languageForFile(path),
+  options: FileSourceOptions = {},
 ): EditableSource {
   // The language is chosen once, and every edit-time operation dispatches
   // through it.
-  const render = sourceRenderer(language, path);
+  const render = sourceRenderer(language, path, options.renderExtent);
+  const readOnlyReason = readOnlyReasonFor(language);
+  const encode = options.encode ?? decoderFor(language).encode;
   return {
     label: shortName(path),
-    editable: true,
+    editable: readOnlyReason === undefined,
+    reason: readOnlyReason,
+    defaultViewMode: language.defaultViewMode ?? "source",
+    renderLineTopology: language.renderLineTopology ?? "source",
+    allowsEmptyInput: language.allowsEmptyInput,
     path,
     parse: (text) => language.parseDocument(text, path),
     ...render,
@@ -222,7 +252,8 @@ export function fileSource(
         cursorLine: Math.min(cursorLine, original.split("\n").length - 1),
       },
     save: (text) => {
-      Deno.writeTextFileSync(path, text);
+      if (readOnlyReason !== undefined) return readOnlyReason;
+      Deno.writeFileSync(path, encode(text));
       return "Saved 1 file";
     },
   };
@@ -233,12 +264,16 @@ export function readonlySource(
   reason: string,
   language: Language = languageForFile(undefined),
   fileName?: string,
+  renderExtent?: RenderInputExtent,
 ): EditableSource {
-  const render = sourceRenderer(language, fileName);
+  const render = sourceRenderer(language, fileName, renderExtent);
   return {
     label: null,
     editable: false,
     reason,
+    defaultViewMode: language.defaultViewMode ?? "source",
+    renderLineTopology: language.renderLineTopology ?? "source",
+    allowsEmptyInput: language.allowsEmptyInput,
     parse: (text) => language.parseDocument(text, fileName),
     ...render,
     save: () => reason,
@@ -248,13 +283,14 @@ export function readonlySource(
 function sourceRenderer(
   language: Language,
   fileName?: string,
+  extent?: RenderInputExtent,
 ): Partial<Pick<EditableSource, "render">> {
-  if (!language.renderLines) return {};
+  if (language.input.kind !== "bytes" && !language.renderLines) return {};
   return {
     render: (source: Document): Document => {
       return {
         ...source,
-        lines: renderedLinesFor(language, source.text, fileName)!,
+        lines: renderedLinesFor(language, source.text, fileName, extent)!,
       };
     },
   };
