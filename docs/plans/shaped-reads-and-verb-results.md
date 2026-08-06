@@ -160,6 +160,35 @@ link is not asking for the contents.
 place to `{"user": {"$link": true}}` — an annotation on the position, not a
 structural change.
 
+#### What a rendered address contains
+
+The runtime's own link encoding is dispatched on an experimental option and
+mid-migration, so a caller reading it builds on something replaceable. A rendered
+address is therefore a **declared** shape, and the moment callers are told to
+`jq` a result, that shape is a public contract — the only choice is whether it is
+one we declared or one that leaked. The spelling follows `state-inspector`'s
+`annotate()`, which already projects stored values to `{ $link }` / `{ $ref }` /
+`"$stream"` for the same reason, though only its key name: that projection drops
+empty and absent fields where this one fills them.
+
+| Field | | Why |
+| --- | --- | --- |
+| `id` | always, **scheme included** | The scheme is the kind, and `of:` and `computed:` over one hash are different entities. Dropping it is a silent retarget |
+| `space` | always, filled in | Measured: the runtime emits it on some links and not others, so a consumer cannot rely on it. Filling it means no fallbacks in `jq`, and an address stays meaningful when copied out of context |
+| `scope` | always, defaulting `"space"` | Absence silently meaning `"space"` is a trap |
+| `path` | always, `[]` when empty | One shape, no optional-key branching |
+| `overwrite` | **dropped** | A write-redirect marker with no caller meaning. Measured on references and aliases alike, so it discriminates nothing |
+| `schema` | **omitted** | A rendered address has no use for one, and a single measured link carried an entire schema with its `$defs` — inlining would make a bounded result unbounded, which is the defect this exists to prevent |
+
+Every optional field becomes required with a filled default. That costs a few
+bytes per address and buys a shape callers index without defensive branching.
+The cost is worth naming: on a marked collection those bytes repeat per element,
+which is the case this design otherwise calls cheap. If that becomes the
+constraint, it is the windowing trigger already recorded under Deferred work.
+
+`cf inspect` remains the route to the raw stored form. A second output contract
+would undo the stability the first one exists to provide.
+
 #### Why the marker sits at the position
 
 The link is physically stored in the *parent* document, on the edge — which is
