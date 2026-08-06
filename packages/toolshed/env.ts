@@ -88,14 +88,9 @@ export const EnvSchema = z.object({
   CFTS_AI_LLM_ANTHROPIC_API_KEY: z.string().default(""),
   CFTS_AI_LLM_GROQ_API_KEY: z.string().default(""),
   CFTS_AI_LLM_OPENAI_API_KEY: z.string().default(""),
-  CFTS_AI_LLM_CEREBRAS_API_KEY: z.string().default(""),
-  CFTS_AI_LLM_PERPLEXITY_API_KEY: z.string().default(""),
-  CFTS_AI_LLM_AWS_ACCESS_KEY_ID: z.string().default(""),
-  CFTS_AI_LLM_AWS_SECRET_ACCESS_KEY: z.string().default(""),
   CFTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS: z.string().default(""),
   CFTS_AI_LLM_GOOGLE_VERTEX_PROJECT: z.string().default(""),
   CFTS_AI_LLM_GOOGLE_VERTEX_LOCATION: z.string().default(""),
-  CFTS_AI_LLM_XAI_API_KEY: z.string().default(""),
   // The gateway is reachable only on Tailscale; toolshed falls back cleanly
   // when the URL is unreachable (see `loadGatewayModels` in routes/ai/llm/models.ts).
   CFTS_AI_GATEWAY_URL: z.string().default("https://llm.stage.commontools.dev"),
@@ -117,10 +112,9 @@ export const EnvSchema = z.object({
   // ===========================================================================
   //
   // ===========================================================================
-  // Discord Webhook URL
-  //   * /routes/integration/discord
+  // Alerting webhook
+  //   * /routes/health
   // ===========================================================================
-  DISCORD_WEBHOOK_URL: z.string().default(""),
   LLM_HEALTH_DISCORD_WEBHOOK: z.string().default(""),
   HOSTNAME: z.string().default(""),
   // ===========================================================================
