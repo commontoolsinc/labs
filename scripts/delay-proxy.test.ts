@@ -44,6 +44,10 @@ describe("delay-proxy", () => {
       );
       expect(scheduler.queuedBytes).toBe(0);
       expect(counter.n).toBeGreaterThanOrEqual(1);
+      // The failure must also stop the pump from consuming the producer: a
+      // pump that read all five chunks kept pulling after the destination
+      // was gone.
+      expect(counter.n).toBeLessThan(5);
     });
   });
 
