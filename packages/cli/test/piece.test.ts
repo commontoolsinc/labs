@@ -45,7 +45,6 @@ import {
   localPatternEntry,
   normalizeApiUrl,
   parseLink,
-  parsePieceGetTransformOptions,
   parsePieceOptions,
   parseSpaceOptions,
   piece,
@@ -53,10 +52,11 @@ import {
 } from "../commands/piece.ts";
 import { safeStringify } from "../lib/render.ts";
 import {
-  parsePieceGetFilter,
-  parsePieceGetProjection,
-  PieceGetTransformError,
-} from "../lib/piece-get-transform.ts";
+  CellSelectionError,
+  parseCellSelectionOptions,
+  parseSelectionFilter,
+  parseSelectionProjection,
+} from "../lib/cell-selection.ts";
 
 const API_URL = "https://cf.dev";
 const SPACE = "common-knowledge";
@@ -557,22 +557,22 @@ describe("cli piece parsing", () => {
     expect(getFlags).toContain("--schema");
   });
 
-  it("parses piece get transform options", async () => {
-    expect(await parsePieceGetTransformOptions({})).toBeUndefined();
+  it("parses the --filter and --schema options into a selection", async () => {
+    expect(await parseCellSelectionOptions({})).toBeUndefined();
 
-    const filterOnly = await parsePieceGetTransformOptions({
+    const filterOnly = await parseCellSelectionOptions({
       filter: ".active",
     });
     expect(filterOnly?.filter?.source).toBe(".active");
     expect(filterOnly?.projection).toBeUndefined();
 
-    const schemaOnly = await parsePieceGetTransformOptions({
+    const schemaOnly = await parseCellSelectionOptions({
       schema: "id,name",
     });
     expect(schemaOnly?.filter).toBeUndefined();
     expect(schemaOnly?.projection?.source).toBe("id,name");
 
-    const both = await parsePieceGetTransformOptions({
+    const both = await parseCellSelectionOptions({
       filter: ".active",
       schema: "id",
     });
@@ -580,7 +580,7 @@ describe("cli piece parsing", () => {
     expect(both?.projection?.source).toBe("id");
   });
 
-  it("passes parsed transforms through the piece get command action", async () => {
+  it("passes a parsed selection through the piece get command action", async () => {
     const { code, stderr } = await cf(
       "piece get " +
         "--identity ./definitely-missing-piece-get-review.key " +
@@ -593,7 +593,7 @@ describe("cli piece parsing", () => {
     );
   });
 
-  it("applies get transforms to the selected path cell", async () => {
+  it("applies a selection to the cell at the read path", async () => {
     const targetCell = { marker: "selected-path-cell" };
     const rootCell = {
       key: (...path: Array<string | number>) => {
@@ -607,7 +607,7 @@ describe("cli piece parsing", () => {
           input: { get: () => Promise.resolve(undefined) },
           result: {
             get: () => {
-              throw new Error("transform reads must not materialize result");
+              throw new Error("selection reads must not materialize result");
             },
             getCell: () => Promise.resolve(rootCell),
           },
@@ -615,20 +615,20 @@ describe("cli piece parsing", () => {
       runtime: { marker: "runtime" },
       getSpace: () => "did:key:test-space",
     };
-    const filter = parsePieceGetFilter(".id == 2");
+    const filter = parseSelectionFilter(".id == 2");
 
     const value = await getCellValue(
       { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
       ["items"],
-      { transform: { filter } },
+      { selection: { filter } },
       {
         loadPieces: () => Promise.resolve(controller as any),
         resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
-        derivePieceGetValue: (runtime, space, source, transform) => {
+        deriveSelectedValue: (runtime, space, source, selection) => {
           expect(runtime).toBe(controller.runtime as any);
           expect(space).toBe("did:key:test-space");
           expect(source).toBe(targetCell as any);
-          expect(transform.filter).toBe(filter);
+          expect(selection.filter).toBe(filter);
           return Promise.resolve([{ id: 2 }]);
         },
       },
@@ -637,8 +637,8 @@ describe("cli piece parsing", () => {
     expect(value).toEqual([{ id: 2 }]);
   });
 
-  it("preserves transform errors that are not result projection failures", async () => {
-    const transformError = new PieceGetTransformError("invalid transform");
+  it("preserves selection errors that are not result projection failures", async () => {
+    const selectionError = new CellSelectionError("invalid selection");
     const targetCell = {};
     const rootCell = { key: () => targetCell };
     const controller = {
@@ -653,16 +653,16 @@ describe("cli piece parsing", () => {
     await expect(getCellValue(
       { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
       [],
-      { transform: { filter: parsePieceGetFilter(".active") } },
+      { selection: { filter: parseSelectionFilter(".active") } },
       {
         loadPieces: () => Promise.resolve(controller as any),
         resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
-        derivePieceGetValue: () => Promise.reject(transformError),
+        deriveSelectedValue: () => Promise.reject(selectionError),
       },
-    )).rejects.toBe(transformError);
+    )).rejects.toBe(selectionError);
   });
 
-  it("reports projection failures encountered during transformed reads", async () => {
+  it("reports projection failures encountered during a selection read", async () => {
     const targetCell = {
       schema: { type: "number" },
       getRaw: () => ({ "/": "missing-session-count" }),
@@ -688,7 +688,7 @@ describe("cli piece parsing", () => {
       resolvePieceAddress: (_pieces: any, id: string) => Promise.resolve(id),
     };
     const options = {
-      transform: { filter: parsePieceGetFilter(".active") },
+      selection: { filter: parseSelectionFilter(".active") },
     };
 
     await expect(getCellValue(
@@ -697,7 +697,7 @@ describe("cli piece parsing", () => {
       options,
       {
         ...deps,
-        derivePieceGetValue: () =>
+        deriveSelectedValue: () =>
           Promise.reject(
             new Error('Cannot access path "count" - property not found'),
           ),
@@ -710,12 +710,12 @@ describe("cli piece parsing", () => {
       options,
       {
         ...deps,
-        derivePieceGetValue: () => Promise.resolve(undefined),
+        deriveSelectedValue: () => Promise.resolve(undefined),
       },
     )).rejects.toThrow(PieceResultProjectionError);
   });
 
-  it("distinguishes failed transforms, JSON null, and absent sources", async () => {
+  it("distinguishes failed selections, JSON null, and absent sources", async () => {
     let sourceRaw: unknown;
     const targetCell = {
       schema: { type: ["object", "null"] },
@@ -733,7 +733,7 @@ describe("cli piece parsing", () => {
 
     const options = {
       input: true,
-      transform: { projection: await parsePieceGetProjection("id") },
+      selection: { projection: await parseSelectionProjection("id") },
     };
     const deps = {
       loadPieces: () => Promise.resolve(controller as any),
@@ -746,7 +746,7 @@ describe("cli piece parsing", () => {
       options,
       {
         ...deps,
-        derivePieceGetValue: () => {
+        deriveSelectedValue: () => {
           sourceRaw = { id: "loaded-during-transform" };
           return Promise.resolve(undefined);
         },
@@ -760,7 +760,7 @@ describe("cli piece parsing", () => {
       options,
       {
         ...deps,
-        derivePieceGetValue: () => Promise.resolve(null),
+        deriveSelectedValue: () => Promise.resolve(null),
       },
     )).resolves.toBeNull();
 
@@ -771,7 +771,7 @@ describe("cli piece parsing", () => {
       options,
       {
         ...deps,
-        derivePieceGetValue: () => Promise.resolve(undefined),
+        deriveSelectedValue: () => Promise.resolve(undefined),
       },
     )).resolves.toBeUndefined();
   });
@@ -1255,8 +1255,8 @@ describe("cli piece parsing", () => {
       expect((error as Error).message).not.toContain("--step");
     });
 
-    it("refuses a verb read through a transform, not a projection error", async () => {
-      // The transform path has its own projection-failure exits, so a verb
+    it("refuses a verb read through a selection, not a projection error", async () => {
+      // The selection path has its own projection-failure exits, so a verb
       // read through --filter/--schema must reach the same refusal: asking a
       // stream to project is the same mistake whichever route it takes.
       const verbCell = {
@@ -1280,13 +1280,15 @@ describe("cli piece parsing", () => {
         },
       };
       const deps = guardDeps(piece);
-      const options = { transform: { filter: parsePieceGetFilter(".active") } };
+      const options = {
+        selection: { filter: parseSelectionFilter(".active") },
+      };
 
-      // The transform throws the "Cannot access path" shape a real projection
+      // The selection throws the "Cannot access path" shape a real projection
       // failure raises.
       const thrown = await getCellValue(config, ["addTopic"], options, {
         ...deps,
-        derivePieceGetValue: () =>
+        deriveSelectedValue: () =>
           Promise.reject(
             new Error('Cannot access path "addTopic" - property not found'),
           ),
@@ -1294,10 +1296,10 @@ describe("cli piece parsing", () => {
       expect(thrown).toBeInstanceOf(PieceVerbReadError);
       expect((thrown as Error).message).toContain("cf piece call");
 
-      // And the same when the transform simply yields nothing.
+      // And the same when the selection simply yields nothing.
       const empty = await getCellValue(config, ["addTopic"], options, {
         ...deps,
-        derivePieceGetValue: () => Promise.resolve(undefined),
+        deriveSelectedValue: () => Promise.resolve(undefined),
       }).catch((error) => error);
       expect(empty).toBeInstanceOf(PieceVerbReadError);
     });
