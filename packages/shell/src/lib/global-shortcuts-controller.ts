@@ -1,6 +1,6 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import type { BaseView } from "../views/BaseView.ts";
-import { navigate } from "../../shared/navigate.ts";
+import { navigate, type NavigationCommand } from "../../shared/navigate.ts";
 import type { AppState } from "../../shared/mod.ts";
 
 // Reactive controller host is XAppView, define some interfaces
@@ -61,13 +61,19 @@ export class GlobalShortcutsController implements ReactiveController {
       e.code === "KeyW" && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey
     ) {
       e.preventDefault();
-      const app = this.host.app;
-      const spaceName = app && "spaceName" in app.view
-        ? app.view.spaceName
-        : "common-knowledge";
-      navigate({ spaceName });
+      navigate(spaceOf(this.host.app));
     }
   };
+}
+
+// The root of the space the view addresses, whether it addresses that space by
+// name or by DID. A view that names no space at all is the built-in home view,
+// which falls back to the common knowledge space.
+function spaceOf(app: AppState | undefined): NavigationCommand {
+  const view = app?.view;
+  if (view && "spaceName" in view) return { spaceName: view.spaceName };
+  if (view && "spaceDid" in view) return { spaceDid: view.spaceDid };
+  return { spaceName: "common-knowledge" };
 }
 
 // Whether the key event is aimed at somewhere the user is entering text. The

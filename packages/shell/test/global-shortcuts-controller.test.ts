@@ -267,11 +267,18 @@ describe("GlobalShortcutsController", () => {
     });
   });
 
-  it("falls back to the common knowledge space when the view names none", () => {
+  it("navigates to the space DID when the view addresses one", () => {
+    withStubbedEnv(MAC, ({ dispatch, navigations }) => {
+      dispatch({ code: "KeyW", altKey: true });
+      expect(navigations).toEqual([{ spaceDid: "did:key:zSpaceX" }]);
+    }, { spaceDid: "did:key:zSpaceX", pieceId: "fid1:pieceX" });
+  });
+
+  it("falls back to the common knowledge space from the home view", () => {
     withStubbedEnv(MAC, ({ dispatch, navigations }) => {
       dispatch({ code: "KeyW", altKey: true });
       expect(navigations).toEqual([{ spaceName: "common-knowledge" }]);
-    }, { spaceDid: "did:key:zSpaceX" });
+    }, { builtin: "home" });
   });
 
   it("stops listening once the host disconnects", () => {
