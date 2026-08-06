@@ -570,12 +570,21 @@ export class CellHandle<T = unknown> {
       return value;
     }
 
-    // Unreachable by the type, and kept for callers that reach this untyped:
-    // `CellHandle<T>` does not constrain `T`, so `set()` and `send()` cast on
-    // the way in. `String()` rather than interpolation, a symbol throwing on
-    // implicit conversion and replacing this refusal with a `TypeError` naming
-    // nothing.
-    throw new Error(`Unknown type: ${String(value)}`);
+    // Reachable two ways. A `bigint` and a `symbol` are `FabricValue` arms, so
+    // a cell holds either and `ClientCellValue` admits either, while
+    // `WireCellValue` has neither -- the same gap the refusal above covers,
+    // for the two arms that are not objects. And `CellHandle<T>` does not
+    // constrain `T`, so `set()` and `send()` cast on the way in and a caller
+    // can arrive here with anything at all.
+    //
+    // `typeof` names the kind, since the value's own text rarely explains the
+    // refusal: a `1n` prints as `1`, which reads like a number that was
+    // rejected for no reason. `String()` rather than interpolation, a symbol
+    // throwing on implicit conversion and replacing this refusal with a
+    // `TypeError` naming nothing.
+    throw new Error(
+      `Cannot send a \`${typeof value}\` on this connection: ${String(value)}`,
+    );
   }
 }
 

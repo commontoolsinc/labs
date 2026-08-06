@@ -802,12 +802,18 @@ describe("CellHandle special-object refusal", () => {
 
   it("serializes an ordinary record unchanged", () => {
     // The refusal must not claim a plain record on its way past.
+    //
+    // `toStrictEqual`, because `toEqual` ignores an `undefined`-valued key in
+    // both directions -- so it would pass just as well if `c` were dropped
+    // entirely. Carrying a PRESENT `undefined` is one of the two properties
+    // `WireCellValue` exists to have over `JSONValue`, which makes it the half
+    // of this fixture most worth actually asserting.
     expect(CellHandle.serialize({ a: 1, b: [true, null], c: undefined }))
-      .toEqual({ a: 1, b: [true, null], c: undefined });
+      .toStrictEqual({ a: 1, b: [true, null], c: undefined });
   });
 });
 
-describe("CellHandle refused write leaves no local trace", () => {
+describe("CellHandle refused writes", () => {
   const ref: CellRef = {
     id: "of:refused-cell" as CellRef["id"],
     space: "did:key:test" as CellRef["space"],
@@ -834,8 +840,7 @@ describe("CellHandle refused write leaves no local trace", () => {
   // subscriber -- that would show state that does not exist anywhere.
 
   it("keeps the prior value after a refused set", async () => {
-    const requests: unknown[] = [];
-    const cell = new CellHandle<unknown>(runtimeCapturing(requests), ref);
+    const cell = new CellHandle<unknown>(runtimeCapturing([]), ref);
     cell[$onCellUpdate]("before");
 
     await expect(cell.set(new FabricBytes(new Uint8Array([1])))).rejects
@@ -845,8 +850,7 @@ describe("CellHandle refused write leaves no local trace", () => {
   });
 
   it("notifies no subscriber of a refused set", async () => {
-    const requests: unknown[] = [];
-    const cell = new CellHandle<unknown>(runtimeCapturing(requests), ref);
+    const cell = new CellHandle<unknown>(runtimeCapturing([]), ref);
     cell[$onCellUpdate]("before");
     const seen: unknown[] = [];
     cell.subscribe((value) => {
@@ -868,5 +872,67 @@ describe("CellHandle refused write leaves no local trace", () => {
       .toThrow("Cannot yet handle `FabricBytes`");
 
     expect(requests).toEqual([]);
+  });
+});
+
+describe("CellHandle refusal reaches every write path", () => {
+  const ref: CellRef = {
+    id: "of:paths-cell" as CellRef["id"],
+    space: "did:key:test" as CellRef["space"],
+    scope: "space",
+    path: [],
+  };
+
+  const runtimeCapturing = (requests: unknown[]): RuntimeClient =>
+    ({
+      [$conn]: () => ({
+        request: (request: unknown) => {
+          requests.push(request);
+          return Promise.resolve({});
+        },
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+        signal: { aborted: false },
+      }),
+    }) as unknown as RuntimeClient;
+
+  // Three methods serialize, and each refuses through a different caller
+  // contract: `set()` rejects, `send()` rejects, and `push()` throws
+  // synchronously out of a `void` return. Pinning all three is what keeps a
+  // later refactor from moving the check somewhere only `set()` reaches.
+
+  it("throws synchronously out of `push()`, which returns void", () => {
+    const requests: unknown[] = [];
+    const cell = new CellHandle<unknown[]>(runtimeCapturing(requests), ref);
+    cell[$onCellUpdate]([1, 2]);
+
+    expect(() => cell.push(new FabricBytes(new Uint8Array([1])))).toThrow(
+      "Cannot yet handle `FabricBytes`",
+    );
+    expect(requests).toEqual([]);
+    // The read-modify-write left the cached array alone.
+    expect(cell.get()).toEqual([1, 2]);
+  });
+
+  it("rejects from `send()` without reaching the connection", async () => {
+    const requests: unknown[] = [];
+    const cell = new CellHandle<unknown>(runtimeCapturing(requests), ref);
+
+    await expect(cell.send(new FabricBytes(new Uint8Array([1])))).rejects
+      .toThrow("Cannot yet handle `FabricBytes`");
+    expect(requests).toEqual([]);
+  });
+
+  it("rejects a `bigint`, which no arm of the wire type carries", async () => {
+    // Not an object, so the `FabricSpecialObject` check cannot catch it. It is
+    // a `FabricValue` arm all the same, so a cell holds one and
+    // `ClientCellValue` admits one -- the same gap, for an arm that is not an
+    // object. The message names the kind, since `1n` prints as `1` and would
+    // otherwise read as a number refused for no reason.
+    const cell = new CellHandle<unknown>(runtimeCapturing([]), ref);
+
+    await expect(cell.set(1n)).rejects.toThrow(
+      "Cannot send a `bigint` on this connection",
+    );
   });
 });
