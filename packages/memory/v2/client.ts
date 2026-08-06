@@ -40,6 +40,15 @@ import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 
+/**
+ * `CF_WS_SIZE_LOG=1` logs every outbound protocol message as
+ * `[ws-out] <type> <bytes>` on stderr — the per-message composition behind a
+ * connection's transfer volume. Deno-only: the guard keeps this client loadable
+ * in browser workers, where no environment exists and the log stays off.
+ */
+const WS_SIZE_LOG = typeof Deno !== "undefined" &&
+  Deno.env.get("CF_WS_SIZE_LOG") === "1";
+
 export type Transport = {
   send(payload: string): Promise<void>;
   close(): Promise<void>;
@@ -266,7 +275,11 @@ export class Client {
     const requestId = message.requestId as string;
     const pending = Promise.withResolvers<unknown>();
     this.#pending.set(requestId, pending);
-    await this.transport.send(encodeMemoryBoundary(message));
+    const encoded = encodeMemoryBoundary(message);
+    if (WS_SIZE_LOG) {
+      console.error(`[ws-out] ${String(message.type)} ${encoded.length}`);
+    }
+    await this.transport.send(encoded);
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
