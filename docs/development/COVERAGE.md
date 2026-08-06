@@ -110,7 +110,7 @@ file's first record both covers real lines and drops the never-named lines out o
 the count.
 
 The gate absorbs that safely, because it is a ratchet: it fails a pull request
-only when a group's uncovered count *rises* above the latest `main` baseline.
+only when a group's uncovered count *rises* above its `main` baseline.
 Gaining a record can only *lower* a file's count, since the record names a subset
 of the file's lines and the rest stop being counted, so it settles at a lower —
 and therefore stricter — bar rather than failing anything. The instrumented
@@ -257,9 +257,10 @@ Each run writes a per-run baseline artifact recording its coverage-debt metrics
 and its compile cache states. It is named `perf-metrics` for historical reasons
 — it once also carried CI timing metrics for the removed performance gate — and
 keeps that name so the ratchet needs no migration; a run from before the gate
-was removed reads as a valid baseline unchanged. A later PR run reads the most
-recent `main` run's `perf-metrics` artifact as its ratchet baseline; there is no
-separate history store. The workflow downloads the current run's
+was removed reads as a valid baseline unchanged. A later PR run reads its ratchet
+baseline from the `perf-metrics` artifact of the `main` run for the base-branch
+commit it merged, or of the nearest ancestor of that commit which has one; there
+is no separate history store. The workflow downloads the current run's
 `coverage-profile-*` artifacts before starting `tasks/coverage-check.ts`.
 `COVERAGE_ARTIFACTS_DIR` points the script at one subdirectory per artifact. The
 download step checks the artifact digests. The script separately checks the
@@ -290,8 +291,9 @@ any of its shards had a full cache miss, detected as the cache file being absent
 after the restore step (the combined `actions/cache` action does not expose the
 matched key). A partial hit through a restore key counts as warm: both key forms
 start with the fingerprint hash, so any restore means the compiled bytes are
-current. The ratchet then uses the latest non-cold `main` sample, so a cold
-`main` run cannot lower the baseline that warm PRs are held to.
+current. The ratchet skips a cold sample when choosing among the
+base-branch commit and its ancestors, so a cold `main` run cannot lower the
+baseline that warm PRs are held to.
 
 A run without a recorded cache state — an artifact carrying no stamp, or a run
 whose cache-state artifact failed to upload — is retro-classified from the

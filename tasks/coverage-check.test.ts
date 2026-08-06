@@ -18,6 +18,7 @@ import {
   addCoverageBaselineFromArtifacts,
   type BaselineRunContext,
   buildBaselineRunContexts,
+  buildCoverageRows,
   collectCurrentCacheStates,
   copyCoverageArtifactFiles,
   currentWorkflowRunFromEvent,
@@ -49,10 +50,15 @@ import {
   parseMergedBaselineOverrides,
   printMetricTable,
   readBaseBranchSha,
+  readHeadCommitObject,
   reportBaselineContextResults,
+  reportBaselineDistance,
   reportBaselineRunAvailability,
   reportPRLookupResults,
+  reportUngatedGroups,
+  resolveMetricBaselines,
   type Row,
+  selectBaselines,
   selectMergedPRForCommit,
   summarizeBaselinePRLookups,
   validateBaselineRunsForMainHead,
@@ -1665,17 +1671,530 @@ Deno.test("fetchGroupsChangedOnBase compares nothing against the base itself", a
   assertEquals(groups.size, 0);
 });
 
+const RUNNER_METRIC = "coverage-debt: packages/runner uncovered lines";
+const MEMORY_METRIC = "coverage-debt: packages/memory uncovered lines";
+
 Deno.test("isComparableBaseline withholds only the groups the base branch moved", () => {
   const sample = makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 5740);
-  const runner = "coverage-debt: packages/runner uncovered lines";
-  const memory = "coverage-debt: packages/memory uncovered lines";
-  const moved = new Set(["packages/runner"]);
+  const moved = new Map([[SHA_A, new Set(["packages/runner"])]]);
+  const at = (metric: string, sha: string | null = SHA_C) =>
+    isComparableBaseline({
+      sample,
+      metric,
+      baseSha: sha,
+      groupsChangedByBaseline: moved,
+      isPullRequest: true,
+    });
 
-  assertEquals(isComparableBaseline(sample, runner, moved, true), false);
-  assertEquals(isComparableBaseline(sample, memory, moved, true), true);
-  assertEquals(isComparableBaseline(sample, runner, new Set(), true), true);
-  assertEquals(isComparableBaseline(undefined, memory, new Set(), true), false);
+  assertEquals(at(RUNNER_METRIC), false);
+  assertEquals(at(MEMORY_METRIC), true);
+
+  // No base-branch commit means no ancestry, so the baseline is whatever ran
+  // last and nothing may be gated against it.
+  assertEquals(at(MEMORY_METRIC, null), false);
+
+  assertEquals(
+    isComparableBaseline({
+      sample: undefined,
+      metric: MEMORY_METRIC,
+      baseSha: SHA_C,
+      groupsChangedByBaseline: moved,
+      isPullRequest: true,
+    }),
+    false,
+  );
 
   // A main push run has no base-branch commit and only reports.
-  assertEquals(isComparableBaseline(sample, runner, moved, false), true);
+  assertEquals(
+    isComparableBaseline({
+      sample,
+      metric: RUNNER_METRIC,
+      baseSha: null,
+      groupsChangedByBaseline: moved,
+      isPullRequest: false,
+    }),
+    true,
+  );
+});
+
+Deno.test("isComparableBaseline reads the moved groups of its own baseline", () => {
+  const atBase = makeBaselineSample(2, SHA_C, "2026-08-04T10:40:00Z", 5746);
+  const older = makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 5740);
+  // The base branch moved packages/runner since SHA_A but not since SHA_C, so
+  // a metric baselined at SHA_C stays gated.
+  const moved = new Map([
+    [SHA_A, new Set(["packages/runner"])],
+    [SHA_C, new Set<string>()],
+  ]);
+  const at = (sample: TimingSample) =>
+    isComparableBaseline({
+      sample,
+      metric: RUNNER_METRIC,
+      baseSha: SHA_C,
+      groupsChangedByBaseline: moved,
+      isPullRequest: true,
+    });
+
+  assertEquals(at(atBase), true);
+  assertEquals(at(older), false);
+});
+
+Deno.test("resolveMetricBaselines picks a baseline and its gating for each metric", () => {
+  const timelines = new Map([
+    [RUNNER_METRIC, {
+      name: RUNNER_METRIC,
+      samples: [
+        makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 5740),
+        makeBaselineSample(3, SHA_C, "2026-08-04T10:40:00Z", 5746),
+      ],
+    }],
+    // Only an older run measured this metric, and the base branch moved its
+    // group since, so it is reported and not gated.
+    [MEMORY_METRIC, {
+      name: MEMORY_METRIC,
+      samples: [makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 400)],
+    }],
+  ]);
+
+  const resolved = resolveMetricBaselines({
+    metrics: [
+      RUNNER_METRIC,
+      MEMORY_METRIC,
+      "coverage-debt: gone uncovered lines",
+    ],
+    timelines,
+    isRunCold: NEVER_COLD,
+    ancestorRank: RANKS,
+    groupsChangedByBaseline: new Map([
+      [SHA_A, new Set(["packages/memory"])],
+      [SHA_C, new Set<string>()],
+    ]),
+    baseSha: SHA_C,
+    isPullRequest: true,
+  });
+
+  assertEquals(resolved.get(RUNNER_METRIC)?.sample?.durationSeconds, 5746);
+  assertEquals(resolved.get(RUNNER_METRIC)?.comparable, true);
+  assertEquals(resolved.get(MEMORY_METRIC)?.sample?.durationSeconds, 400);
+  assertEquals(resolved.get(MEMORY_METRIC)?.comparable, false);
+
+  // A metric with no timeline at all has nothing to be gated against.
+  const missing = resolved.get("coverage-debt: gone uncovered lines");
+  assertEquals(missing?.sample, undefined);
+  assertEquals(missing?.comparable, false);
+});
+
+Deno.test("reportBaselineDistance names each baseline and its distance", () => {
+  const captured = captureConsole(() =>
+    reportBaselineDistance(
+      new Set([SHA_C, SHA_A]),
+      SHA_C,
+      RANKS,
+      (message) => console.log(message),
+    )
+  );
+
+  const logs = captured.logs.join("\n");
+  assertStringIncludes(
+    logs,
+    `measured at the base-branch commit: ${SHA_C.slice(0, 8)}`,
+  );
+  assertStringIncludes(
+    logs,
+    `measured 2 commits before the base-branch commit: ${SHA_A.slice(0, 8)}`,
+  );
+});
+
+Deno.test("reportBaselineDistance reports an ancestry it could not read", () => {
+  const unknown = captureConsole(() =>
+    reportBaselineDistance(new Set([SHA_A]), SHA_C, null, (m) => console.log(m))
+  );
+  assertStringIncludes(
+    unknown.logs.join("\n"),
+    "at an unknown distance from the base-branch commit",
+  );
+
+  const none = captureConsole(() =>
+    reportBaselineDistance(new Set(), SHA_C, RANKS, (m) => console.log(m))
+  );
+  assertStringIncludes(
+    none.logs.join("\n"),
+    `No \`main\` run has measured base-branch commit ${SHA_C.slice(0, 8)}`,
+  );
+});
+
+function timelineOf(metric: string, samples: TimingSample[]) {
+  return { name: metric, samples };
+}
+
+Deno.test("selectBaselines chooses each metric's baseline against the base commit", async () => {
+  const timelines = new Map([
+    [
+      RUNNER_METRIC,
+      timelineOf(RUNNER_METRIC, [
+        makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 5740),
+        makeBaselineSample(3, SHA_C, "2026-08-04T10:40:00Z", 5746),
+      ]),
+    ],
+  ]);
+  const compared: string[] = [];
+
+  const captured = await captureConsoleAsync(() =>
+    selectBaselines({
+      metrics: [RUNNER_METRIC],
+      timelines,
+      isRunCold: NEVER_COLD,
+      isPullRequest: true,
+      readBaseSha: () => Promise.resolve(SHA_C),
+      fetchRanks: (baseSha) => {
+        assertEquals(baseSha, SHA_C);
+        return Promise.resolve(RANKS);
+      },
+      fetchChangedGroups: (baselineSha, baseSha) => {
+        compared.push(`${baselineSha}...${baseSha}`);
+        return Promise.resolve(new Set<string>());
+      },
+    })
+  );
+
+  assertEquals(
+    captured.result.get(RUNNER_METRIC)?.sample?.durationSeconds,
+    5746,
+  );
+  assertEquals(captured.result.get(RUNNER_METRIC)?.comparable, true);
+  // Only the baseline actually chosen is compared against the base commit.
+  assertEquals(compared, [`${SHA_C}...${SHA_C}`]);
+  assertStringIncludes(
+    captured.logs.join("\n"),
+    `merges the pull request into base-branch commit ${SHA_C.slice(0, 8)}`,
+  );
+});
+
+Deno.test("selectBaselines gates nothing when the base commit cannot be read", async () => {
+  const timelines = new Map([
+    [
+      RUNNER_METRIC,
+      timelineOf(RUNNER_METRIC, [
+        makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 5740),
+      ]),
+    ],
+  ]);
+
+  const captured = await captureConsoleAsync(() =>
+    selectBaselines({
+      metrics: [RUNNER_METRIC],
+      timelines,
+      isRunCold: NEVER_COLD,
+      isPullRequest: true,
+      readBaseSha: () => Promise.resolve(null),
+      fetchRanks: () => {
+        throw new Error("must not rank an ancestry it has no base for");
+      },
+      fetchChangedGroups: () => {
+        throw new Error("must not compare without a base commit");
+      },
+    })
+  );
+
+  // The fallback still names a sample, but nothing may be failed against it.
+  assertEquals(
+    captured.result.get(RUNNER_METRIC)?.sample?.durationSeconds,
+    5740,
+  );
+  assertEquals(captured.result.get(RUNNER_METRIC)?.comparable, false);
+  assertStringIncludes(
+    captured.warnings.join("\n"),
+    "could not read the base-branch commit",
+  );
+});
+
+Deno.test("selectBaselines reports against whatever it has for a push run", async () => {
+  const timelines = new Map([
+    [
+      RUNNER_METRIC,
+      timelineOf(RUNNER_METRIC, [
+        makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 5740),
+      ]),
+    ],
+  ]);
+
+  const resolved = await selectBaselines({
+    metrics: [RUNNER_METRIC],
+    timelines,
+    isRunCold: NEVER_COLD,
+    isPullRequest: false,
+    readBaseSha: () => {
+      throw new Error("a push run has no base-branch commit to read");
+    },
+    log: () => {},
+    warn: () => {},
+  });
+
+  assertEquals(resolved.get(RUNNER_METRIC)?.comparable, true);
+});
+
+Deno.test("reportUngatedGroups names the groups it withheld", () => {
+  const captured = captureConsole(() =>
+    reportUngatedGroups(
+      new Set(["packages/runner", "packages/memory"]),
+      (message) => console.log(message),
+    )
+  );
+  assertStringIncludes(
+    captured.logs.join("\n"),
+    "packages/memory, packages/runner",
+  );
+
+  const quiet = captureConsole(() =>
+    reportUngatedGroups(new Set(), (message) => console.log(message))
+  );
+  assertEquals(quiet.logs, []);
+});
+
+Deno.test("readHeadCommitObject returns the commit object of a checkout", async () => {
+  const commit = await readHeadCommitObject();
+  assert(commit !== null);
+  assertStringIncludes(commit, "tree ");
+});
+
+Deno.test("readHeadCommitObject returns null outside a checkout", async () => {
+  const outside = await Deno.makeTempDir({ prefix: "coverage-no-repo-" });
+  try {
+    const captured = await captureConsoleAsync(() =>
+      readHeadCommitObject(outside)
+    );
+    assertEquals(captured.result, null);
+    assertStringIncludes(
+      captured.warnings.join("\n"),
+      "could not read the `HEAD` commit object",
+    );
+  } finally {
+    await Deno.remove(outside, { recursive: true });
+  }
+});
+
+Deno.test("fetchGroupsChangedOnBase warns when the compare response is capped", async () => {
+  const files = Array.from({ length: 300 }, (_, index) => ({
+    filename: `packages/runner/src/file-${index}.ts`,
+  }));
+  const warnings: string[] = [];
+
+  const groups = await withMockFetch(
+    () => new Response(JSON.stringify({ files })),
+    () =>
+      fetchGroupsChangedOnBase(SHA_A, SHA_C, (message) => {
+        warnings.push(message);
+      }),
+  );
+
+  assertEquals([...groups], ["packages/runner"]);
+  assertStringIncludes(warnings.join("\n"), "300-file response cap");
+});
+
+Deno.test("isComparableBaseline gates a metric that names no coverage group", () => {
+  assertEquals(
+    isComparableBaseline({
+      sample: makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", 1),
+      metric: "some-other-metric",
+      baseSha: SHA_C,
+      groupsChangedByBaseline: new Map(),
+      isPullRequest: true,
+    }),
+    true,
+  );
+});
+
+Deno.test("readHeadCommitObject returns null when git cannot be run", async () => {
+  const captured = await captureConsoleAsync(() =>
+    readHeadCommitObject("/coverage-check-no-such-directory")
+  );
+
+  assertEquals(captured.result, null);
+  assertStringIncludes(
+    captured.warnings.join("\n"),
+    "could not run `git` to read the `HEAD` commit object",
+  );
+});
+
+Deno.test("selectBaselines routes its GitHub calls through the guard", async () => {
+  const guarded: string[] = [];
+
+  await selectBaselines({
+    metrics: [RUNNER_METRIC],
+    timelines: new Map([
+      [
+        RUNNER_METRIC,
+        timelineOf(RUNNER_METRIC, [
+          makeBaselineSample(1, SHA_C, "2026-08-04T10:40:00Z", 5746),
+        ]),
+      ],
+    ]),
+    isRunCold: NEVER_COLD,
+    isPullRequest: true,
+    readBaseSha: () => Promise.resolve(SHA_C),
+    fetchRanks: () => Promise.resolve(RANKS),
+    fetchChangedGroups: () => Promise.resolve(new Set<string>()),
+    guard: (description, operation) => {
+      guarded.push(description);
+      return operation();
+    },
+    log: () => {},
+  });
+
+  assertEquals(guarded, [
+    "listing the base-branch commit's ancestry",
+    "comparing the baseline commit against the base-branch commit",
+  ]);
+});
+
+const NO_OVERRIDES = { metrics: new Map(), coverageBaselineReset: false };
+
+function rowsFor(
+  metrics: Record<string, number>,
+  baselines: Record<string, { value?: number; comparable: boolean }>,
+  extra: Partial<Parameters<typeof buildCoverageRows>[0]> = {},
+) {
+  const currentMetrics = new Map(
+    Object.entries(metrics).map(([metric, value]) => [
+      metric,
+      makeBaselineSample(9, SHA_C, "2026-08-04T11:00:00Z", value),
+    ]),
+  );
+  const baselineByMetric = new Map(
+    Object.entries(baselines).map(([metric, spec]) => [metric, {
+      sample: spec.value === undefined
+        ? undefined
+        : makeBaselineSample(1, SHA_A, "2026-08-04T10:00:00Z", spec.value),
+      comparable: spec.comparable,
+    }]),
+  );
+  return buildCoverageRows({
+    currentMetrics,
+    timelines: new Map(),
+    baselineByMetric,
+    overrides: NO_OVERRIDES,
+    changedCoverageGroups: new Set(["packages/runner", "packages/memory"]),
+    ...extra,
+  });
+}
+
+Deno.test("buildCoverageRows fails a gated group above its baseline", () => {
+  const { rows, failures } = rowsFor(
+    { [RUNNER_METRIC]: 5747 },
+    { [RUNNER_METRIC]: { value: 5746, comparable: true } },
+  );
+
+  assertEquals(rows[0].status, "OVER");
+  assertEquals(rows[0].median, 5746);
+  assertEquals(rows[0].baselineSha, SHA_A);
+  assertEquals(failures.length, 1);
+});
+
+Deno.test("buildCoverageRows passes a gated group at its baseline", () => {
+  const { rows, failures } = rowsFor(
+    { [RUNNER_METRIC]: 5746 },
+    { [RUNNER_METRIC]: { value: 5746, comparable: true } },
+  );
+
+  assertEquals(rows[0].status, "OK");
+  assertEquals(failures, []);
+});
+
+Deno.test("buildCoverageRows reports an incomparable baseline without failing it", () => {
+  const { rows, failures, ungatedGroups } = rowsFor(
+    { [RUNNER_METRIC]: 9999 },
+    { [RUNNER_METRIC]: { value: 5746, comparable: false } },
+  );
+
+  assertEquals(rows[0].status, "excl");
+  assertEquals(rows[0].median, 5746);
+  assertEquals(failures, []);
+  assertEquals([...ungatedGroups], ["packages/runner"]);
+});
+
+Deno.test("buildCoverageRows leaves a group the PR did not change alone", () => {
+  const other = "coverage-debt: packages/toolshed uncovered lines";
+  const { rows, failures, ungatedGroups } = rowsFor(
+    { [other]: 9999 },
+    { [other]: { value: 10, comparable: true } },
+  );
+
+  assertEquals(rows[0].status, "excl");
+  assertEquals(failures, []);
+  // Comparable, so nothing is withheld for want of a baseline.
+  assertEquals([...ungatedGroups], []);
+});
+
+Deno.test("buildCoverageRows honors a per-metric acceptance and a reset", () => {
+  const accepted = rowsFor(
+    { [RUNNER_METRIC]: 5800 },
+    { [RUNNER_METRIC]: { value: 5746, comparable: true } },
+    {
+      overrides: {
+        metrics: new Map([[RUNNER_METRIC, 5800]]),
+        coverageBaselineReset: false,
+      },
+    },
+  );
+  assertEquals(accepted.rows[0].status, "ovrd");
+  assertEquals(accepted.failures, []);
+
+  const reset = rowsFor(
+    { [RUNNER_METRIC]: 5800 },
+    { [RUNNER_METRIC]: { value: 5746, comparable: true } },
+    {
+      overrides: { metrics: new Map(), coverageBaselineReset: true },
+    },
+  );
+  assertEquals(reset.rows[0].status, "ovrd");
+  assertEquals(reset.failures, []);
+});
+
+Deno.test("buildCoverageRows bootstraps a metric with no baseline", () => {
+  const fresh = rowsFor(
+    { [RUNNER_METRIC]: 12 },
+    { [RUNNER_METRIC]: { comparable: true } },
+  );
+  assertEquals(fresh.rows[0].status, "OVER");
+  assertEquals(fresh.rows[0].median, 0);
+  assertEquals(fresh.failures.length, 1);
+
+  const empty = rowsFor(
+    { [RUNNER_METRIC]: 0 },
+    { [RUNNER_METRIC]: { comparable: true } },
+  );
+  assertEquals(empty.rows[0].status, "n/a");
+  assertEquals(empty.failures, []);
+
+  // With no baseline and nothing gating it, the metric is only reported.
+  const ungated = rowsFor(
+    { [RUNNER_METRIC]: 12 },
+    { [RUNNER_METRIC]: { comparable: false } },
+  );
+  assertEquals(ungated.rows[0].status, "excl");
+  assertEquals(ungated.failures, []);
+
+  // A reset accepts a metric that has no baseline yet.
+  const reset = rowsFor(
+    { [RUNNER_METRIC]: 12 },
+    { [RUNNER_METRIC]: { comparable: true } },
+    { overrides: { metrics: new Map(), coverageBaselineReset: true } },
+  );
+  assertEquals(reset.rows[0].status, "ovrd");
+});
+
+Deno.test("buildCoverageRows reports a rise from a zero baseline as complete", () => {
+  const { rows } = rowsFor(
+    { [RUNNER_METRIC]: 4 },
+    { [RUNNER_METRIC]: { value: 0, comparable: true } },
+  );
+  assertEquals(rows[0].status, "OVER");
+  assertEquals(rows[0].pctIncrease, 100);
+
+  const held = rowsFor(
+    { [RUNNER_METRIC]: 0 },
+    { [RUNNER_METRIC]: { value: 0, comparable: true } },
+  );
+  assertEquals(held.rows[0].status, "OK");
+  assertEquals(held.rows[0].pctIncrease, 0);
 });

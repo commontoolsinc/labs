@@ -278,10 +278,13 @@ interface GitHubCompareResponse {
   ahead_by?: unknown;
 }
 
-async function readHeadCommitObject(): Promise<string | null> {
+export async function readHeadCommitObject(
+  cwd?: string,
+): Promise<string | null> {
   try {
     const result = await new Deno.Command("git", {
       args: ["cat-file", "commit", "HEAD"],
+      cwd,
       stdout: "piped",
       stderr: "piped",
     }).output();
@@ -458,30 +461,195 @@ export async function fetchGroupsChangedOnBase(
  * Returns whether a metric's baseline can be held against this run.
  *
  * The two numbers must count the same base-branch code, or the difference
- * between them is not the pull request's. A group the base branch changed
- * between the baseline commit and the base-branch commit fails that, and so
- * does a metric with no baseline at all; both are reported and not gated.
+ * between them is not the pull request's. Three things break that, and each
+ * leaves the metric reported and not gated:
+ *
+ * - No base-branch commit. Without one there is no ancestry to select against,
+ *   so the baseline is whatever ran most recently and counts unrelated code.
+ * - No baseline at all for the metric.
+ * - A group the base branch changed between this metric's own baseline commit
+ *   and the base-branch commit. The lookup is keyed by that commit, so a metric
+ *   whose baseline is the base-branch commit itself stays gated even when
+ *   another metric fell back to an older one.
  *
  * A `main` push run has no base-branch commit and is informational, so it
  * reports against whatever baseline it has.
  */
 export function isComparableBaseline(
-  sample: TimingSample | undefined,
-  metric: string,
-  groupsChangedOnBase: Set<string>,
-  isPullRequest: boolean,
+  options: {
+    sample: TimingSample | undefined;
+    metric: string;
+    baseSha: string | null;
+    groupsChangedByBaseline: Map<string, Set<string>>;
+    isPullRequest: boolean;
+  },
 ): boolean {
-  if (!isPullRequest) return true;
-  if (sample === undefined) return false;
+  if (!options.isPullRequest) return true;
+  if (options.baseSha === null || options.sample === undefined) return false;
 
-  const group = coverageMetricGroupName(metric);
-  return group === null || !groupsChangedOnBase.has(group);
+  const group = coverageMetricGroupName(options.metric);
+  if (group === null) return true;
+
+  const moved = options.groupsChangedByBaseline.get(options.sample.sha);
+  return !moved?.has(group);
+}
+
+export interface MetricBaseline {
+  sample?: TimingSample;
+  /** Whether the ratchet may fail this metric against that sample. */
+  comparable: boolean;
+}
+
+export interface ResolveMetricBaselinesOptions {
+  metrics: Iterable<string>;
+  timelines: Map<string, MetricTimeline>;
+  isRunCold: (runId: number) => boolean;
+  ancestorRank: Map<string, number> | null;
+  groupsChangedByBaseline: Map<string, Set<string>>;
+  baseSha: string | null;
+  isPullRequest: boolean;
+}
+
+export interface SelectBaselinesOptions {
+  metrics: Iterable<string>;
+  timelines: Map<string, MetricTimeline>;
+  isRunCold: (runId: number) => boolean;
+  isPullRequest: boolean;
+  readBaseSha?: () => Promise<string | null>;
+  fetchRanks?: (baseSha: string) => Promise<Map<string, number>>;
+  fetchChangedGroups?: (
+    baselineSha: string,
+    baseSha: string,
+  ) => Promise<Set<string>>;
+  /** Wraps each GitHub call so a rate limit skips the check (see main). */
+  guard?: <T>(description: string, operation: () => Promise<T>) => Promise<T>;
+  log?: (message: string) => void;
+  warn?: (message: string) => void;
+}
+
+/**
+ * Chooses every metric's ratchet baseline against the base-branch commit this
+ * run merged, and reports what it chose.
+ *
+ * Reads the base-branch commit, ranks its ancestry, asks which coverage groups
+ * the base branch moved since each baseline the metrics would take, and hands
+ * the answers to `resolveMetricBaselines()`.
+ */
+export async function selectBaselines(
+  options: SelectBaselinesOptions,
+): Promise<Map<string, MetricBaseline>> {
+  const log = options.log ?? console.log;
+  const warn = options.warn ?? console.warn;
+  const readBaseSha = options.readBaseSha ?? readBaseBranchSha;
+  const fetchRanks = options.fetchRanks ?? fetchAncestorRanks;
+  const fetchChangedGroups = options.fetchChangedGroups ??
+    fetchGroupsChangedOnBase;
+  const guard = options.guard ?? ((_description, operation) => operation());
+
+  const baseSha = options.isPullRequest ? await readBaseSha() : null;
+  if (options.isPullRequest && baseSha === null) {
+    warn(
+      "  Warning: could not read the base-branch commit this run merges " +
+        "into; coverage debt metrics will be reported but not gated.",
+    );
+  } else if (baseSha !== null) {
+    log(
+      `This run merges the pull request into base-branch commit ${
+        baseSha.slice(0, 8)
+      }.`,
+    );
+  }
+
+  const ancestorRank = baseSha === null ? null : await guard(
+    "listing the base-branch commit's ancestry",
+    () => fetchRanks(baseSha),
+  );
+
+  // Which baseline each metric would take, before asking what moved since.
+  const candidateShas = new Set<string>();
+  for (const metric of options.metrics) {
+    const timeline = options.timelines.get(metric);
+    const sample = timeline
+      ? nearestUsableBaseline(timeline.samples, options.isRunCold, ancestorRank)
+      : undefined;
+    if (sample) candidateShas.add(sample.sha);
+  }
+
+  const groupsChangedByBaseline = new Map<string, Set<string>>();
+  if (baseSha !== null) {
+    for (const sha of candidateShas) {
+      groupsChangedByBaseline.set(
+        sha,
+        await guard(
+          "comparing the baseline commit against the base-branch commit",
+          () => fetchChangedGroups(sha, baseSha),
+        ),
+      );
+    }
+    reportBaselineDistance(candidateShas, baseSha, ancestorRank, log);
+  }
+
+  return resolveMetricBaselines({
+    metrics: options.metrics,
+    timelines: options.timelines,
+    isRunCold: options.isRunCold,
+    ancestorRank,
+    groupsChangedByBaseline,
+    baseSha,
+    isPullRequest: options.isPullRequest,
+  });
+}
+
+/** Picks each metric's baseline and says whether the ratchet may act on it. */
+export function resolveMetricBaselines(
+  options: ResolveMetricBaselinesOptions,
+): Map<string, MetricBaseline> {
+  const resolved = new Map<string, MetricBaseline>();
+
+  for (const metric of options.metrics) {
+    const timeline = options.timelines.get(metric);
+    const sample = timeline
+      ? nearestUsableBaseline(
+        timeline.samples,
+        options.isRunCold,
+        options.ancestorRank,
+      )
+      : undefined;
+
+    resolved.set(metric, {
+      sample,
+      comparable: isComparableBaseline({
+        sample,
+        metric,
+        baseSha: options.baseSha,
+        groupsChangedByBaseline: options.groupsChangedByBaseline,
+        isPullRequest: options.isPullRequest,
+      }),
+    });
+  }
+
+  return resolved;
 }
 
 /**
  * Reports which commit each baseline was measured at, and how far back from the
  * base-branch commit that sits.
  */
+/** Names the groups no baseline could speak to, and why they are not gated. */
+export function reportUngatedGroups(
+  groups: Set<string>,
+  log: (message: string) => void = console.log,
+): void {
+  if (groups.size === 0) return;
+
+  log(
+    "\nNot gated, because no baseline counts the same base-branch code as " +
+      `this run does: ${[...groups].sort().join(", ")}. A later run of this ` +
+      "pull request gates them, once a `main` run has measured the commit it " +
+      "merges.",
+  );
+}
+
 export function reportBaselineDistance(
   baselineShas: Set<string>,
   baseSha: string,
@@ -1106,6 +1274,114 @@ export function metricTableRows(
   });
 }
 
+export interface BuildCoverageRowsOptions {
+  currentMetrics: Map<string, TimingSample>;
+  timelines: Map<string, MetricTimeline>;
+  baselineByMetric: Map<string, MetricBaseline>;
+  overrides: BaselineOverrides;
+  /** Undefined when the PR's changed files could not be read. */
+  changedCoverageGroups: Set<string> | undefined;
+}
+
+export interface CoverageRows {
+  rows: Row[];
+  /** The subset of `rows` that fails the gate. */
+  failures: Row[];
+  /** Groups whose baseline could not be held against this run. */
+  ungatedGroups: Set<string>;
+}
+
+/**
+ * Scores every metric against its baseline and says which ones fail.
+ *
+ * A metric is failed only when it is gated and its count rose above the
+ * baseline. It is not gated when the pull request left its group alone, when
+ * the description accepts its level, or when no baseline counts the same
+ * base-branch code as this run.
+ */
+export function buildCoverageRows(
+  options: BuildCoverageRowsOptions,
+): CoverageRows {
+  const rows: Row[] = [];
+  const failures: Row[] = [];
+  const ungatedGroups = new Set<string>();
+
+  for (const [metric, currentSample] of options.currentMetrics) {
+    const current = currentSample.durationSeconds;
+    const n = options.timelines.get(metric)?.samples.length ?? 0;
+    const resolvedBaseline = options.baselineByMetric.get(metric);
+    const baselineSample = resolvedBaseline?.sample;
+    const latestBaseline = baselineSample?.durationSeconds;
+    const override = options.overrides.metrics.get(metric);
+    const coverageReset = options.overrides.coverageBaselineReset;
+    const comparable = resolvedBaseline?.comparable ?? false;
+    if (!comparable) {
+      const group = coverageMetricGroupName(metric);
+      if (group !== null) ungatedGroups.add(group);
+    }
+    const shouldGateCoverage = comparable &&
+      shouldGateCoverageDebtMetric(metric, options.changedCoverageGroups);
+
+    if (latestBaseline === undefined) {
+      if (
+        coverageReset || (override !== undefined && current <= override)
+      ) {
+        rows.push({ metric, status: "ovrd", current, n });
+      } else if (!shouldGateCoverage) {
+        rows.push({ metric, status: "excl", current, n });
+      } else if (current > 0) {
+        const row: Row = {
+          metric,
+          status: "OVER",
+          current,
+          median: 0,
+          n,
+          pctIncrease: 100,
+        };
+        rows.push(row);
+        failures.push(row);
+      } else {
+        rows.push({ metric, status: "n/a", current, n });
+      }
+      continue;
+    }
+
+    const pctIncrease = latestBaseline === 0
+      ? current > 0 ? 100 : 0
+      : ((current - latestBaseline) / latestBaseline) * 100;
+    const stats = {
+      median: latestBaseline,
+      baselineSha: baselineSample?.sha,
+      pctIncrease,
+    };
+
+    if (coverageReset) {
+      rows.push({ metric, status: "ovrd", current, n, ...stats });
+      continue;
+    }
+
+    if (override !== undefined && current <= override) {
+      rows.push({ metric, status: "ovrd", current, n, ...stats });
+      continue;
+    }
+
+    if (!shouldGateCoverage) {
+      rows.push({ metric, status: "excl", current, n, ...stats });
+      continue;
+    }
+
+    if (current > latestBaseline) {
+      const row: Row = { metric, status: "OVER", current, n, ...stats };
+      rows.push(row);
+      failures.push(row);
+    } else {
+      rows.push({ metric, status: "OK", current, n, ...stats });
+    }
+  }
+
+  return { rows, failures, ungatedGroups };
+}
+
 export function printMetricTable(rows: Row[], includeStatus = false): void {
   const headers = includeStatus
     ? ["Status", "Baseline", "Current", "Change", "Task", "Metric"]
@@ -1670,156 +1946,24 @@ export async function main() {
 
   // 5. Compare the current run's coverage debt against the ratchet baseline.
 
-  // The base-branch commit this run's tree merges the pull request into. Its
-  // ancestry decides which main run is the baseline, so that the baseline and
-  // this run count the same base-branch code.
-  const baseSha = prNumber ? await readBaseBranchSha() : null;
-  if (prNumber && baseSha === null) {
-    console.warn(
-      "  Warning: could not read the base-branch commit this run merges " +
-        "into; coverage debt metrics will be reported but not gated.",
-    );
-  } else if (baseSha !== null) {
-    console.log(
-      `This run merges the pull request into base-branch commit ${
-        baseSha.slice(0, 8)
-      }.`,
-    );
-  }
+  const baselineByMetric = await selectBaselines({
+    metrics: currentMetrics.keys(),
+    timelines,
+    isRunCold,
+    isPullRequest: prNumber !== null,
+    guard: (description, operation) =>
+      githubApiOrSkip(description, operation, currentMetrics),
+  });
 
-  let ancestorRank: Map<string, number> | null = null;
-  if (baseSha !== null) {
-    ancestorRank = await githubApiOrSkip(
-      "listing the base-branch commit's ancestry",
-      () => fetchAncestorRanks(baseSha),
-      currentMetrics,
-    );
-  }
+  const { rows, failures, ungatedGroups } = buildCoverageRows({
+    currentMetrics,
+    timelines,
+    baselineByMetric,
+    overrides: prOverrides,
+    changedCoverageGroups,
+  });
 
-  const baselineByMetric = new Map<string, TimingSample | undefined>();
-  for (const metric of currentMetrics.keys()) {
-    const timeline = timelines.get(metric);
-    baselineByMetric.set(
-      metric,
-      timeline
-        ? nearestUsableBaseline(timeline.samples, isRunCold, ancestorRank)
-        : undefined,
-    );
-  }
-
-  // Groups the base branch changed between a chosen baseline and the
-  // base-branch commit. Their totals count different code on the two sides, so
-  // they are reported and not gated; every other group still is.
-  const groupsChangedOnBase = new Set<string>();
-  if (baseSha !== null) {
-    const baselineShas = new Set(
-      [...baselineByMetric.values()].map((sample) => sample?.sha).filter((
-        sha,
-      ): sha is string => sha !== undefined),
-    );
-    for (const sha of baselineShas) {
-      for (
-        const group of await githubApiOrSkip(
-          "comparing the baseline commit against the base-branch commit",
-          () => fetchGroupsChangedOnBase(sha, baseSha),
-          currentMetrics,
-        )
-      ) {
-        groupsChangedOnBase.add(group);
-      }
-    }
-    reportBaselineDistance(baselineShas, baseSha, ancestorRank);
-  }
-
-  const rows: Row[] = [];
-  const failures: Row[] = [];
-  const ungatedGroups = new Set<string>();
-
-  for (const [metric, currentSample] of currentMetrics) {
-    const current = currentSample.durationSeconds;
-    const n = timelines.get(metric)?.samples.length ?? 0;
-    const baselineSample = baselineByMetric.get(metric);
-    const latestBaseline = baselineSample?.durationSeconds;
-    const override = prOverrides.metrics.get(metric);
-    const coverageReset = prOverrides.coverageBaselineReset;
-    const comparable = isComparableBaseline(
-      baselineSample,
-      metric,
-      groupsChangedOnBase,
-      prNumber !== null,
-    );
-    if (!comparable) {
-      const group = coverageMetricGroupName(metric);
-      if (group !== null) ungatedGroups.add(group);
-    }
-    const shouldGateCoverage = comparable &&
-      shouldGateCoverageDebtMetric(metric, changedCoverageGroups);
-
-    if (latestBaseline === undefined) {
-      if (
-        coverageReset || (override !== undefined && current <= override)
-      ) {
-        rows.push({ metric, status: "ovrd", current, n });
-      } else if (!shouldGateCoverage) {
-        rows.push({ metric, status: "excl", current, n });
-      } else if (current > 0) {
-        const row: Row = {
-          metric,
-          status: "OVER",
-          current,
-          median: 0,
-          n,
-          pctIncrease: 100,
-        };
-        rows.push(row);
-        failures.push(row);
-      } else {
-        rows.push({ metric, status: "n/a", current, n });
-      }
-      continue;
-    }
-
-    const pctIncrease = latestBaseline === 0
-      ? current > 0 ? 100 : 0
-      : ((current - latestBaseline) / latestBaseline) * 100;
-    const stats = {
-      median: latestBaseline,
-      baselineSha: baselineSample?.sha,
-      pctIncrease,
-    };
-
-    if (coverageReset) {
-      rows.push({ metric, status: "ovrd", current, n, ...stats });
-      continue;
-    }
-
-    if (override !== undefined && current <= override) {
-      rows.push({ metric, status: "ovrd", current, n, ...stats });
-      continue;
-    }
-
-    if (!shouldGateCoverage) {
-      rows.push({ metric, status: "excl", current, n, ...stats });
-      continue;
-    }
-
-    if (current > latestBaseline) {
-      const row: Row = { metric, status: "OVER", current, n, ...stats };
-      rows.push(row);
-      failures.push(row);
-    } else {
-      rows.push({ metric, status: "OK", current, n, ...stats });
-    }
-  }
-
-  if (ungatedGroups.size > 0) {
-    console.log(
-      `\nNot gated, because no baseline counts the same base-branch code as ` +
-        `this run does: ${[...ungatedGroups].sort().join(", ")}. A later run ` +
-        "of this pull request gates them, once a `main` run has measured the " +
-        "commit it merges.",
-    );
-  }
+  reportUngatedGroups(ungatedGroups);
 
   // 6. Report results
 
@@ -1834,7 +1978,7 @@ export async function main() {
 
   // 6b. Cold compile cache note. A cold run covers cold-compile-only branches,
   // so it is recorded cold and a later PR's coverage ratchet skips it as a
-  // baseline in favour of the latest warm main run.
+  // baseline in favour of the nearest warm ancestor of its base-branch commit.
   const coldFamilies = COMPILE_CACHE_FAMILIES.filter(
     (family) => currentCacheStates[family] === "cold",
   );
@@ -1847,7 +1991,7 @@ export async function main() {
       "This run is recorded cold. A cold run covers cold-compile-only branches,",
     );
     console.log(
-      "so a later PR's coverage ratchet skips it and uses the latest warm main run",
+      "so a later PR's coverage ratchet skips it for the nearest warm ancestor",
     );
     console.log(
       "instead — otherwise warm PRs would be held to a stricter, unreachable bar.",
@@ -1858,7 +2002,8 @@ export async function main() {
   console.log(
     "\n::group::All coverage debt metrics:\n" +
       "Ratchet: for a source group the PR changed, uncovered lines must not rise\n" +
-      "above the latest non-cold main run's count.\n" +
+      "above the count from the main run for the base-branch commit this run\n" +
+      "merged, or the nearest ancestor of it that has one.\n" +
       "Status key: OVER = above baseline (fails); OK = at or below baseline;\n" +
       "  ovrd = accepted by a PR override/reset; excl = not gated for this PR;\n" +
       "  n/a = no baseline yet and no new uncovered lines.",
