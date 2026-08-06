@@ -702,9 +702,36 @@ Notes:
     are represented by SHA-256 hashes in that file. Only `/bench` collection
     reserves capacity or can be stopped by the ledger. Other dashboard GitHub
     requests do not read or update it and proceed normally.
-  - Completed workflow-attempt run, job, and step timings are written
-    atomically to the fixed `fabric-wall-ci-job-history.json` file in the
-    dashboard cache directory.
+  - Completed workflow-attempt timings are written atomically to two places in
+    the dashboard cache directory, split by how much of each attempt a view
+    needs. The fixed `fabric-wall-ci-run-index.json` file holds one entry per
+    attempt: its run metadata and the duration of each job. That is everything
+    the CI duration charts read, and it is small enough to hold in memory for
+    the whole retention window. The `fabric-wall-ci-gantt` directory beside it
+    holds one gzipped file per attempt carrying every job's steps, which is
+    around forty times larger per attempt before compression and is what the
+    Gantt views draw. Steps repeat the same few names and the same timestamp
+    prefixes over and over, so an attempt compresses to roughly a twentieth of
+    its size, and every attempt the run index keeps can afford to keep its
+    detail. An attempt loses its detail only when it leaves the index
+    altogether, so nothing GitHub would have to serve again is discarded early.
+    A Gantt request reads only the attempt files for the runs on its chart, at
+    most the 150 the range slider allows, and a duration refresh reads none of
+    them. The runs on a chart are read and handed to the renderer one at a time,
+    so serving a chart never holds all of its timings at once.
+    An attempt whose file is missing, or holds a layout this version cannot
+    read, is collected from GitHub again, so a chart never draws a run with no
+    timings and a damaged file repairs itself.
+    A `fabric-wall-ci-job-history.json` file in the cache directory holds a
+    layout the dashboard does not read, and reaches hundreds of megabytes. A
+    process that finds one deletes it, along with its lock and any temporary
+    file left beside it, without parsing it, and collects the current window
+    from GitHub instead.
+    A workflow run is kept as the fields the dashboard reads rather than as
+    GitHub returns it. A run in a query result carries its repository, head
+    repository, whole head commit, and both actors, which is around fifty times
+    the size of the fields any view uses, and a discovery window is thousands of
+    runs held for the length of the freshness window.
     CI history and the detailed `/bench?view=gantt` view use the same entries.
     The three performance views share one selector and preserve the applicable
     repository, range, sort, and runtime statistic while moving between them.

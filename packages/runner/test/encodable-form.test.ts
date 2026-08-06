@@ -501,8 +501,66 @@ describe("encodable-form", () => {
         .toEqual({ invoked: true });
     });
 
-    it("returns `undefined` for a value carrying no such member", () => {
-      expect(encodableFormOf({ a: 1 })).toBe(undefined);
+    it("returns the value itself when it carries no such member", () => {
+      const value = { a: 1 };
+      expect(encodableFormOf(value)).toBe(value);
+    });
+
+    it("returns the form, not the value, when the member is there", () => {
+      // Including when the form is itself nullish, which the value-fallback
+      // must not swallow: a caller telling those apart asks
+      // `hasEncodableForm()`.
+      expect(encodableFormOf({ toEncodableForm: () => null })).toBe(null);
+      expect(encodableFormOf({ toEncodableForm: () => undefined }))
+        .toBe(undefined);
+    });
+
+    it("returns `ifNone` instead of the value when given one", () => {
+      const value = { a: 1 };
+      expect(encodableFormOf(value, "none")).toBe("none");
+    });
+
+    it("tells an explicit `undefined` `ifNone` from an omitted one", () => {
+      // The distinction is what lets a caller stand a computed fallback behind
+      // a `??`: omitting it answers the value, which is never nullish for an
+      // object, so a `??` would never reach the fallback.
+      const value = { a: 1 };
+      expect(encodableFormOf(value)).toBe(value);
+      expect(encodableFormOf(value, undefined)).toBe(undefined);
+    });
+
+    it("returns the form, not `ifNone`, when the member is there", () => {
+      expect(encodableFormOf({ toEncodableForm: () => ({ a: 1 }) }, "none"))
+        .toEqual({ a: 1 });
+    });
+
+    it("reads the member once when given an `ifNone`", () => {
+      let reads = 0;
+      const value = {
+        get toEncodableForm() {
+          reads++;
+          const nth = reads;
+          return () => ({ fromRead: nth });
+        },
+      };
+      expect(encodableFormOf(value, undefined)).toEqual({ fromRead: 1 });
+      expect(reads).toBe(1);
+    });
+
+    it("reads the member once", () => {
+      // One question instead of two. Asking `hasEncodableForm()` first and then
+      // calling this reads an accessor-backed member twice, and the second read
+      // is what would get serialized.
+      let reads = 0;
+      const value = {
+        get toEncodableForm() {
+          reads++;
+          const nth = reads;
+          return () => ({ fromRead: nth });
+        },
+      };
+      expect(encodableFormOf(value)).toEqual({ fromRead: 1 });
+      expect(reads).toBe(1);
     });
   });
 

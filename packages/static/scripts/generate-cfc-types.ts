@@ -291,7 +291,11 @@ export function flatten(
 }
 
 export async function formatTypeScript(text: string): Promise<string> {
-  const command = new Deno.Command("deno", {
+  // Formatting goes through the Deno running this script rather than the
+  // program named `deno`, which would be whichever copy comes first on `PATH`.
+  // Different Deno versions format differently, and the repository-wide
+  // `deno fmt --check` runs under the pinned one.
+  const command = new Deno.Command(Deno.execPath(), {
     args: ["fmt", "--ext", "ts", "-"],
     stdin: "piped",
     stdout: "piped",

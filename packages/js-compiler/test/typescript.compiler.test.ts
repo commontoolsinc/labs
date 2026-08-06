@@ -8,7 +8,7 @@ import {
   TypeScriptCompiler,
   TypeScriptCompilerOptions,
 } from "../mod.ts";
-import { StaticCacheFS } from "@commonfabric/static";
+import { StaticCache } from "@commonfabric/static";
 
 type TestDef =
   & { name: string; source: string; expectedError?: string }
@@ -110,7 +110,7 @@ const TESTS: TestDef[] = [
   },
 ];
 
-const staticCache = new StaticCacheFS();
+const staticCache = StaticCache.fromFileSystem();
 const types = await getTypeScriptEnvironmentTypes(staticCache);
 types["commonfabric.d.ts"] = await staticCache.getText(
   "types/commonfabric.d.ts",

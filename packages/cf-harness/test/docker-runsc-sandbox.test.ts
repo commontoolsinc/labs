@@ -64,7 +64,6 @@ Deno.test("resolveDockerRunscSandboxConfig fills the expected defaults", () => {
   const config = resolveDockerRunscSandboxConfig({
     workspaceHostPath: "/host/project",
   });
-  assertEquals(config.kind, "docker-runsc-cfc");
   assertEquals(config.dockerBinary, "docker");
   assertEquals(config.runtimeName, "runsc-cfc");
   assertEquals(
@@ -77,7 +76,7 @@ Deno.test("resolveDockerRunscSandboxConfig fills the expected defaults", () => {
   assertEquals(config.additionalMounts, []);
   assertEquals(config.extraDockerArgs, []);
   assertEquals(config.cfcResultDir, undefined);
-  assertEquals(config.cfcInvocationContextTransport, undefined);
+  assertEquals(config.cfcInvocationContextDir, undefined);
 });
 
 Deno.test("resolveDefaultContainerUser omits default --user on macOS", () => {
@@ -182,6 +181,31 @@ Deno.test("DockerRunscSandboxRuntime describe preserves custom CFC runtime alias
   assertEquals(description.cfc.image, "sandbox:deno2");
 });
 
+// The description is persisted into the CFC policy snapshot that the ops
+// dashboard reads, so the wording of these two tags is part of that output.
+Deno.test("DockerRunscSandboxRuntime describe names the sandbox kind and the sidecar transport", () => {
+  const description = new DockerRunscSandboxRuntime(
+    resolveDockerRunscSandboxConfig({
+      workspaceHostPath: "/host/project",
+      cfcInvocationContextDir: "/tmp/cfc-invocations",
+    }),
+  ).describe();
+
+  assertEquals(description.kind, "docker-runsc-cfc");
+  assertEquals(description.cfc?.invocationContextTransport, "sidecar");
+});
+
+Deno.test("DockerRunscSandboxRuntime describe omits the transport when no invocation context dir is configured", () => {
+  const description = new DockerRunscSandboxRuntime({
+    // Written out rather than resolved, so that a host with the invocation
+    // context environment variable set still exercises the absent case.
+    ...resolveDockerRunscSandboxConfig({ workspaceHostPath: "/host/project" }),
+    cfcInvocationContextDir: undefined,
+  }).describe();
+
+  assertEquals(description.cfc?.invocationContextTransport, undefined);
+});
+
 Deno.test("resolveDockerRunscSandboxConfig normalizes a Fabric FUSE mount", () => {
   const config = resolveDockerRunscSandboxConfig({
     workspaceHostPath: "/host/project",
@@ -258,10 +282,7 @@ Deno.test("resolveDockerRunscSandboxConfig resolves invocation context sidecar t
     cfcInvocationContextDir: "/tmp/cfc-invocations",
   });
 
-  assertEquals(config.cfcInvocationContextTransport, {
-    kind: "sidecar",
-    dir: "/tmp/cfc-invocations",
-  });
+  assertEquals(config.cfcInvocationContextDir, "/tmp/cfc-invocations");
 });
 
 Deno.test("resolveDockerRunscSandboxConfig rejects relative invocation context sidecar dirs", () => {
@@ -726,7 +747,7 @@ Deno.test("assertDockerRunscCfcTransportForMode rejects enforce modes without tr
     assertThrows(
       () =>
         assertDockerRunscCfcTransportForMode(mode, {
-          cfcInvocationContextTransport: { kind: "sidecar", dir: "/host/ctx" },
+          cfcInvocationContextDir: "/host/ctx",
         }),
       Error,
       "result transport",
@@ -746,7 +767,7 @@ Deno.test("assertDockerRunscCfcTransportForMode allows enforce modes with both t
   for (const mode of ["enforce-explicit", "enforce-strict"] as const) {
     assertDockerRunscCfcTransportForMode(mode, {
       cfcResultDir: "/host/results",
-      cfcInvocationContextTransport: { kind: "sidecar", dir: "/host/ctx" },
+      cfcInvocationContextDir: "/host/ctx",
     });
   }
 });

@@ -441,19 +441,18 @@ export type FabricErrorState = {
  * by `toNativeValue()`.
  *
  * Like all `FabricInstance`s, a `FabricError` is wholeheartedly mutable
- * until frozen and immutable thereafter. The fixed-schema slots are plain
- * writable own properties: assigning to one throws once the instance is
- * `Object.freeze`'d. The extras bag mirrors this by gating `setExtra` /
- * `deleteExtra` on the frozen state. The serialization layer handles
- * `FabricError` via its static `[CODEC]`, which is the source of truth
- * for the encoded form.
+ * until frozen and immutable thereafter. Every mutator -- the slot setters
+ * along with `setExtra` / `deleteExtra` -- throws once the instance is
+ * `Object.freeze`'d. The serialization layer handles `FabricError` via its
+ * static `[CODEC]`, which is the source of truth for the encoded form.
  */
 export class FabricError extends FabricNativeWrapper<Error> {
-  type: string;
-  name: string;       // always a concrete string on instances
-  message: string;
-  stack: string | undefined;
-  cause: FabricValue | undefined;
+  // Fixed-schema slots, each a getter/setter pair over a private field.
+  get type(): string;                      // and `set type(value: string)`
+  get name(): string;                      // always a concrete string
+  get message(): string;
+  get stack(): string | undefined;
+  get cause(): FabricValue | undefined;
 
   /** Hidden bag of custom enumerable properties. */
   readonly #extras: Map<string, FabricValue>;
@@ -1408,6 +1407,14 @@ class-side `[CODEC]` (Section 2.4).
  * class directly; `BaseFabricInstance` is where shared template-method
  * scaffolding (such as `shallowClone()`) lives.
  *
+ * An instance holds all of its state privately and makes it reachable only
+ * through members, so it has no own properties at all. A structural view
+ * of one — a spread, `Object.keys()`, a naive walk — therefore sees
+ * nothing. Mutable state is exposed as an accessor pair over a private
+ * field, whose setter is responsible for honoring the instance's frozen
+ * state: `Object.freeze()` bears only on own properties and so cannot
+ * enforce that on its own.
+ *
  * Subclasses must implement:
  * - `[DEEP_FREEZE](subFreeze)` -- deeply freezes this instance in place.
  * - `[IS_DEEP_FROZEN](subIsDeepFrozen)` -- side-effect-free deep-frozen
@@ -1761,7 +1768,7 @@ serialization system can round-trip it back to a real `Temperature` instance.
 
 import {
   type FabricValue,
-} from '@commonfabric/data-model/interface';
+} from '@commonfabric/data-model/fabric-value';
 import {
   CODEC,
   BaseFabricCodec,

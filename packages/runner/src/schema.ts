@@ -751,7 +751,11 @@ export function processDefaultValue(
               resolvedSchema,
             )
             : rawPropSchema;
-        if (key in defaultValue) {
+        // `Object.hasOwn`, not `in`: `key` is a schema-declared property NAME,
+        // and `defaultValue` is data. `in` walks the prototype chain, so a
+        // schema property called `toString` or `valueOf` matched every object
+        // and read back `Object.prototype`'s function instead of the default.
+        if (Object.hasOwn(defaultValue, key)) {
           result[key] = processDefaultValue(
             runtime,
             tx,

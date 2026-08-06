@@ -10,7 +10,7 @@ import type {
   HarnessSkillScriptExecutionTarget,
 } from "./contracts/skill.ts";
 import type { HarnessBrowserAccessLease } from "./contracts/browser-access.ts";
-import type { HarnessSandboxConfig } from "./sandbox/types.ts";
+import type { DockerRunscSandboxConfig } from "./sandbox/types.ts";
 
 export const DEFAULT_GATEWAY_BASE_URL = "https://llm.stage.commontools.dev/";
 export const DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE =
@@ -33,7 +33,7 @@ interface HarnessCommonConfig {
   cfcEnforcementMode: CfcEnforcementMode;
   cfcEnforcementModeSource: HarnessCfcEnforcementModeSource;
   trustSnapshot?: TrustSnapshot;
-  sandbox?: HarnessSandboxConfig;
+  sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
 }
@@ -83,7 +83,7 @@ export interface ResolveHarnessConfigOptions {
   inheritedCfcEnforcementMode?: CfcEnforcementMode;
   cfcEnforcementModeOverride?: string | CfcEnforcementMode;
   trustSnapshot?: TrustSnapshot;
-  sandbox?: HarnessSandboxConfig;
+  sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
 }
