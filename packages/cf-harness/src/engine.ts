@@ -9,30 +9,15 @@ import {
   type HarnessArtifactStore,
 } from "./artifacts.ts";
 import {
-  appendHarnessCfcInvocationContext,
   appendHarnessCfcModelContextObservations,
   appendHarnessFailureRecord,
-  appendHarnessPolicyDecision,
-  appendHarnessPolicyEvent,
-  appendHarnessToolOutput,
+  appendToHarnessRunState,
   createHarnessRunState,
   type HarnessRunState,
   type HarnessRunTerminalReason,
-  setHarnessCapabilitySnapshot,
-  setHarnessCfcPolicySnapshot,
-  setHarnessPolicyTrace,
-  setHarnessPromptSlotBinding,
-  setHarnessRunCurrentDir,
-  setHarnessRunManifestPath,
-  setHarnessRunModel,
-  setHarnessRunReportPath,
+  patchHarnessRunState,
   setHarnessRunStatus,
-  setHarnessSkillActivations,
-  setHarnessSkillRegistry,
-  setHarnessSkillResourceReads,
-  setHarnessSkillScriptExecutions,
   setHarnessSubagentRun,
-  setHarnessTranscriptPath,
 } from "./run-state.ts";
 import type { HarnessCfcModelContextObservationInput } from "./contracts/cfc-model-context.ts";
 import {
@@ -488,7 +473,11 @@ export class CfHarnessEngine {
       );
     }
     if (recordedModel !== model) {
-      this.#runState = setHarnessRunModel(this.#runState, model, this.#now());
+      this.#runState = patchHarnessRunState(
+        this.#runState,
+        { model },
+        this.#now(),
+      );
     }
     this.#runModelBound = true;
     return this.getRunState();
@@ -531,9 +520,9 @@ export class CfHarnessEngine {
   setPromptSlotBinding(
     promptSlotBinding: PromptSlotBinding,
   ): HarnessRunState {
-    this.#runState = setHarnessPromptSlotBinding(
+    this.#runState = patchHarnessRunState(
       this.#runState,
-      promptSlotBinding,
+      { promptSlotBinding },
       this.#now(),
     );
     return this.getRunState();
@@ -544,8 +533,9 @@ export class CfHarnessEngine {
   ): Promise<HarnessRunState> {
     const now = this.#now();
     const policyEvent = createHarnessPolicyEvent({ ...event, at: now });
-    this.#runState = appendHarnessPolicyEvent(
+    this.#runState = appendToHarnessRunState(
       this.#runState,
+      "policyEvents",
       policyEvent,
       now,
     );
@@ -570,8 +560,9 @@ export class CfHarnessEngine {
       sequence: (this.#runState.policyDecisions ?? []).length + 1,
       at: now,
     });
-    this.#runState = appendHarnessPolicyDecision(
+    this.#runState = appendToHarnessRunState(
       this.#runState,
+      "policyDecisions",
       policyDecision,
       now,
     );
@@ -603,9 +594,9 @@ export class CfHarnessEngine {
       this.#runState.runManifest,
     );
     if (manifestPath !== undefined) {
-      this.#runState = setHarnessRunManifestPath(
+      this.#runState = patchHarnessRunState(
         this.#runState,
-        manifestPath,
+        { runManifestPath: manifestPath },
         this.#now(),
       );
       await this.persistRunState();
@@ -618,10 +609,9 @@ export class CfHarnessEngine {
   ): Promise<string | undefined> {
     const skillRegistryPath = await this.artifactStore
       ?.persistSkillRegistry?.(registry);
-    this.#runState = setHarnessSkillRegistry(
+    this.#runState = patchHarnessRunState(
       this.#runState,
-      registry,
-      skillRegistryPath,
+      { skillRegistry: registry, skillRegistryPath },
       this.#now(),
     );
     await this.persistRunState();
@@ -633,10 +623,9 @@ export class CfHarnessEngine {
   ): Promise<string | undefined> {
     const skillActivationsPath = await this.artifactStore
       ?.persistSkillActivations?.(activations);
-    this.#runState = setHarnessSkillActivations(
+    this.#runState = patchHarnessRunState(
       this.#runState,
-      activations,
-      skillActivationsPath,
+      { skillActivations: activations, skillActivationsPath },
       this.#now(),
     );
     await this.persistRunState();
@@ -655,10 +644,9 @@ export class CfHarnessEngine {
     };
     const skillResourceReadsPath = await this.artifactStore
       ?.persistSkillResourceReads?.(skillResourceReads);
-    this.#runState = setHarnessSkillResourceReads(
+    this.#runState = patchHarnessRunState(
       this.#runState,
-      skillResourceReads,
-      skillResourceReadsPath,
+      { skillResourceReads, skillResourceReadsPath },
       generatedAt,
     );
     await this.persistRunState();
@@ -680,10 +668,9 @@ export class CfHarnessEngine {
     };
     const skillScriptExecutionsPath = await this.artifactStore
       ?.persistSkillScriptExecutions?.(skillScriptExecutions);
-    this.#runState = setHarnessSkillScriptExecutions(
+    this.#runState = patchHarnessRunState(
       this.#runState,
-      skillScriptExecutions,
-      skillScriptExecutionsPath,
+      { skillScriptExecutions, skillScriptExecutionsPath },
       generatedAt,
     );
     await this.persistRunState();
@@ -746,9 +733,9 @@ export class CfHarnessEngine {
       transcript,
     );
     if (transcriptPath !== undefined) {
-      this.#runState = setHarnessTranscriptPath(
+      this.#runState = patchHarnessRunState(
         this.#runState,
-        transcriptPath,
+        { transcriptPath },
         this.#now(),
       );
       await this.persistRunState();
@@ -761,9 +748,9 @@ export class CfHarnessEngine {
   ): Promise<string | undefined> {
     const runReportPath = await this.artifactStore?.persistRunReport(report);
     if (runReportPath !== undefined) {
-      this.#runState = setHarnessRunReportPath(
+      this.#runState = patchHarnessRunState(
         this.#runState,
-        runReportPath,
+        { runReportPath },
         this.#now(),
       );
       await this.persistRunState();
@@ -791,10 +778,9 @@ export class CfHarnessEngine {
         now,
       );
     }
-    this.#runState = setHarnessCfcPolicySnapshot(
+    this.#runState = patchHarnessRunState(
       this.#runState,
-      snapshot,
-      cfcPolicySnapshotPath,
+      { cfcPolicySnapshot: snapshot, cfcPolicySnapshotPath },
       this.#now(),
     );
     await this.persistRunState();
@@ -818,10 +804,9 @@ export class CfHarnessEngine {
         now,
       );
     }
-    this.#runState = setHarnessPolicyTrace(
+    this.#runState = patchHarnessRunState(
       this.#runState,
-      trace,
-      policyTracePath,
+      { policyTrace: trace, policyTracePath },
       this.#now(),
     );
     await this.persistRunState();
@@ -885,10 +870,9 @@ export class CfHarnessEngine {
           this.#now(),
         );
       }
-      this.#runState = setHarnessCapabilitySnapshot(
+      this.#runState = patchHarnessRunState(
         this.#runState,
-        capabilitySnapshot,
-        capabilitiesPath,
+        { capabilitySnapshot, capabilitiesPath },
         this.#now(),
       );
     } catch (error) {
@@ -967,13 +951,14 @@ export class CfHarnessEngine {
       artifactPath,
     );
     const completionTime = this.#now();
-    this.#runState = appendHarnessToolOutput(
+    this.#runState = appendToHarnessRunState(
       setHarnessRunStatus(
         this.#runState,
         "completed",
         completionTime,
         "tool_completed",
       ),
+      "toolOutputs",
       resultRef,
       completionTime,
     );
@@ -1253,8 +1238,9 @@ export class CfHarnessEngine {
         ? { cfcModelContext: this.#runState.cfcModelContext }
         : {}),
     });
-    this.#runState = appendHarnessCfcInvocationContext(
+    this.#runState = appendToHarnessRunState(
       this.#runState,
+      "cfcInvocationContexts",
       invocation,
       now,
     );
@@ -1298,9 +1284,9 @@ export class CfHarnessEngine {
           path,
           this.#runState.currentDir,
         );
-        this.#runState = setHarnessRunCurrentDir(
+        this.#runState = patchHarnessRunState(
           this.#runState,
-          resolved,
+          { currentDir: resolved },
           this.#now(),
         );
       },
