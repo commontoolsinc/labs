@@ -39,15 +39,6 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
 // declaration here (interface + constructor + declare-const with `new`).
 
 /**
- * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
- * single `instanceof` check for any fabric-system value type.
- *
- * The `@commonfabric/FabricSpecialObject` member is a nominal brand with no
- * runtime existence — see the canonical declaration in
- * `data-model/src/interface.ts` for why it is a well-known string key and not
- * a `unique symbol`. The two declarations must agree exactly.
- */
-/**
  * The nominal brand key declared on `FabricSpecialObject`. It exists only in
  * the type system — a runtime instance never carries the key; `instanceof
  * FabricSpecialObject` is its runtime form. Schema `required` presence
@@ -56,6 +47,15 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  */
 export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
 
+/**
+ * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
+ * single `instanceof` check for any fabric-system value type.
+ *
+ * The `@commonfabric/FabricSpecialObject` member is a nominal brand with no
+ * runtime existence — see the canonical declaration in
+ * `data-model/src/interface.ts` for why it is a well-known string key and not
+ * a `unique symbol`. The two declarations must agree exactly.
+ */
 export interface FabricSpecialObject {
   readonly "@commonfabric/FabricSpecialObject": true;
 }
