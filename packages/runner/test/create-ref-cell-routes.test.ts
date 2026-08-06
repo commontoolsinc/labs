@@ -94,6 +94,32 @@ describe("create-ref-cell-routes", () => {
     expect(first).toBe(idOf(causable.toEncodableForm()));
   });
 
+  it("throws for a cell's method, which is not a value", () => {
+    // For a name in `cellMethods`, a `Reactive` returns a proxy that is callable
+    // _and_ a projection of the cell at that name, so a method and a same-named
+    // data key are one object with one encodable form -- a derived id cannot say
+    // which was meant. It fails closed like the other inputs that cannot resolve
+    // (audit S14).
+    const { a } = siblings();
+    const reactive = a.getAsReactiveProxy() as unknown as Record<
+      string,
+      unknown
+    >;
+    const method = reactive.get;
+    expect(typeof method).toBe("function");
+    expect(() => idOf(method)).toThrow(/Cell method is not a value/);
+  });
+
+  it("derives from a builder artifact that is a function", () => {
+    // A factory is a function carrying `toEncodableForm` too, and is not
+    // reactive, which is what separates it from a method proxy: it derives from
+    // its serialized form.
+    const factory = Object.assign(() => {}, {
+      toEncodableForm: () => ({ serialized: true }),
+    });
+    expect(idOf(factory)).toBe(idOf({ serialized: true }));
+  });
+
   it("derives one id for a cell and its own query result", () => {
     const { a, aResult } = siblings();
     expect(idOf(aResult)).toBe(idOf(a));

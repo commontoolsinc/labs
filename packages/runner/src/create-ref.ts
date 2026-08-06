@@ -43,9 +43,10 @@ export function entityIdFrom(hash: string | FabricHash): EntityId {
 /**
  * Generates an entity ID.
  *
- * Derivation inputs must resolve: a Cell with no entityId or a Reactive with
- * no value throws rather than minting a random substitute, so a derived id never
- * silently becomes non-deterministic (audit S14). A missing `cause`, by
+ * Derivation inputs must resolve: a Cell with no entityId, a Reactive with no
+ * value, and a cell's method -- which names no value of its own -- each throw
+ * rather than minting a substitute, so a derived id never silently becomes
+ * non-deterministic or unresolvable (audit S14). A missing `cause`, by
  * contrast, deliberately mints a fresh random id.
  *
  * @param source - The source object.
@@ -98,6 +99,23 @@ export function createRef(
     // site will need attention once FabricInstances see real use.
     if (obj instanceof BaseFabricPrimitive) return obj;
     if (isSigilLink(obj) || isEntityRef(obj)) return obj;
+
+    // A cell's _method_ is not a value. For a name in `cellMethods`, a
+    // `Reactive` returns a proxy that is callable and is also a projection of
+    // the cell at that name, so one object serves both the method and a data
+    // key of the same name, and its encodable form is the same link either
+    // way. A derived id therefore cannot express which of the two was meant.
+    // Failing closed says so, rather than minting an id off the ambiguity
+    // (audit S14) -- and where no data lives at the name, that id would rest on
+    // a link to a path holding nothing.
+    //
+    // A builder artifact is a function carrying the member too, and is not
+    // reactive, which is what separates the two here.
+    if (typeof obj === "function" && isReactive(obj)) {
+      throw new Error(
+        "[createRef] Cell method is not a value; cannot derive a stable id",
+      );
+    }
 
     // A builder artifact is replaced by its encodable form, then descended
     // into: what the ref is derived from is the form that gets written.
