@@ -16,10 +16,15 @@ runtime and gives a user a way to move around their spaces. Entry point is
   exports. A change there is a change to two packages.
 - A component never writes application state. It calls `this.command(...)` from
   `BaseView`, which dispatches a composed, bubbling `shell-command` event that
-  `RootView` catches and applies. `Command` is a closed union in
-  `shared/app/commands.ts`, and `isCommand` rejects anything outside it at the
-  boundary, so a new kind of state change means extending that union rather than
-  reaching past it.
+  `RootView` catches and routes to a method on `XRootView`. `Command` is a
+  closed union in `src/views/BaseView.ts`, so a new kind of state change means a
+  new arm on that union and a new method on `XRootView`, not reaching past
+  either.
+- `XRootView` owns every write to `AppState`, through `setView`, `setIdentity`
+  and `setConfig`. `shared/app/state.ts` names the part of that surface a caller
+  outside the element sees as `ShellApp`: the shell's `Navigation` takes one,
+  and `src/index.ts` publishes the root element on `globalThis.app` under that
+  type, which is how integration tests drive the page.
 - Embed mode is a property of the route, not of a component. The `.embed` path
   prefix (`shared/app/view.ts`) strips shell-owned chrome, and every navigation
   has to preserve it — including one issued by a rendered pattern. A navigation
@@ -36,8 +41,8 @@ runtime and gives a user a way to move around their spaces. Entry point is
 | Question                       | Read                                                                                                         |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
 | The state shape                | `shared/app/state.ts`                                                                                        |
-| What commands exist            | `shared/app/commands.ts`                                                                                     |
-| How a command is applied       | `processCommand` in `src/views/RootView.ts`                                                                  |
+| What commands exist            | `Command` in `src/views/BaseView.ts`                                                                         |
+| How a command is applied       | `onCommand` and the state setters in `src/views/RootView.ts`                                                 |
 | How the runtime is mounted     | `src/lib/runtime.ts`                                                                                         |
 | Coding style and test commands | [`DEVELOPMENT.md`](../../docs/development/DEVELOPMENT.md), [`TESTING.md`](../../docs/development/TESTING.md) |
 | Writing a `cf-` component      | the `lit-component` skill                                                                                    |
