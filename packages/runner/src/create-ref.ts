@@ -145,11 +145,12 @@ export function createRef(
       return Object.fromEntries(
         Object.entries(obj).map(([key, value]) => [key, traverse(value)]),
       );
-    }
-
-    // A function is all that is left: the walk answered every primitive at the
-    // top, and `isRecord()` admits every other non-null object.
-    return obj.toString();
+    } else if (typeof obj === "function") return obj.toString();
+    // A primitive reaches here only as an encodable FORM, the reassignment above
+    // having replaced the value it came from -- a primitive INPUT is answered at
+    // the top of the walk. A form is its own preimage, and stringifying one
+    // would make the form `7` and the form `"7"` name a single document.
+    else return obj;
   }
 
   // The entity kind deliberately does NOT enter the preimage: a computed
