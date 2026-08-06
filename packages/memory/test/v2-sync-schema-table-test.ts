@@ -1032,6 +1032,248 @@ type LostFrameOutcome = {
   later: EntityDocument | null;
 };
 
+/**
+ * A loopback shaped like `WebSocketTransport` rather than like `loopback()`.
+ *
+ * The two differ in exactly the places a client's connection state machine is
+ * fragile, so exercising only `loopback()` leaves those paths untested:
+ * `WebSocketTransport.close()` detaches its socket first and then AWAITS the
+ * close handshake — arbitrarily long on the half-open socket that mangles a
+ * frame in the first place — and its close listener stays silent for a socket
+ * it has already replaced. A send re-opens.
+ */
+const slowCloseLoopback = (server: Server, rewrite: (p: string) => string) => {
+  let receiver = (_payload: string) => {};
+  let closeReceiver = (_error?: Error) => {};
+  let connection: ReturnType<Server["connect"]> | null = null;
+  let releaseClose: (() => void) | null = null;
+  // While held, a close detaches at once but does not settle, standing in for
+  // the close handshake a real socket waits through.
+  const state = { closes: 0, hellos: 0, holdClose: false };
+  const open = () => {
+    connection ??= server.connect((message) => {
+      receiver(rewrite(encodeMemoryBoundary(message)));
+    });
+    return connection;
+  };
+  const transport: Transport = {
+    async send(payload) {
+      if (payload.includes('"hello"')) state.hellos += 1;
+      await open().receive(payload);
+    },
+    close() {
+      state.closes += 1;
+      const current = connection;
+      connection = null;
+      current?.close();
+      // Deliberately no close callback — the real transport suppresses it for
+      // a socket it has already replaced.
+      if (!state.holdClose) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        releaseClose = resolve;
+      });
+    },
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver(next) {
+      closeReceiver = next;
+    },
+  };
+  return {
+    transport,
+    state,
+    /** Kills the current connection the way a socket dying does: the peer is
+     *  gone and the client is told, so its reconnect loop takes over. */
+    dropConnection: () => {
+      connection?.close();
+      connection = null;
+      closeReceiver(new Error("socket died"));
+    },
+    /** Lets the pending close finish, as a real socket's close event does,
+     *  and stops holding later ones. */
+    settleClose: () => {
+      state.holdClose = false;
+      releaseClose?.();
+      releaseClose = null;
+    },
+  };
+};
+
+Deno.test("a reconnect completed during a discard's close is not handshaken twice", async () => {
+  // The discard closes the transport and reconnects once the close settles.
+  // A real close is slow, and anything routine — a transact, a request —
+  // reconnects inside that window. The deferred reconnect must then notice
+  // the connection is already up: a server connection refuses a second
+  // `hello` with an error no retry can clear, so handshaking again spins the
+  // reconnect loop forever with every request waiting behind it.
+  setSyncSchemaCasConfig(true);
+  const space = "did:key:z6Mk-sync-schema-double-hello";
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://sync-schema-double-hello"),
+    subscriptionRefreshDelayMs: 60_000,
+  });
+  let corruptNextEffect = false;
+  const { transport, state, settleClose } = slowCloseLoopback(
+    server,
+    (payload) => {
+      if (corruptNextEffect && payload.includes("session/effect")) {
+        corruptNextEffect = false;
+        return `${payload}!corrupt`;
+      }
+      return payload;
+    },
+  );
+
+  const client = await connect({ transport });
+  try {
+    const session = await client.mount(space, {}, testSessionOpenAuthFactory);
+    await session.watchAdd([{
+      id: "w",
+      kind: "graph",
+      query: {
+        roots: [{ id: "of:double", selector: { path: [], schema: false } }],
+      },
+    }]);
+    assertEquals(state.hellos, 1);
+
+    // Fail a frame: the discard detaches the transport and parks on the close.
+    state.holdClose = true;
+    corruptNextEffect = true;
+    await server.writeDocument(space, "of:double", {
+      ref: linkRefFrom({ id: "of:target", path: [], schema: largeSchema() }),
+    });
+    await server.flushSessions([space]);
+
+    // Someone else reconnects while that close is still pending. This is the
+    // ordinary path — `transact` does it whenever the client reads as
+    // disconnected — and it succeeds on a fresh connection.
+    await client.restoreConnection();
+    assertEquals(state.hellos, 2);
+    assertEquals(client.isConnected(), true);
+
+    // Now the close settles and the deferred reconnect runs. It must be a
+    // no-op; a second handshake here is refused and never recovers.
+    settleClose();
+    await client.restoreConnection();
+    assertEquals(
+      state.hellos,
+      2,
+      "the deferred reconnect must not handshake a live connection",
+    );
+    assertEquals(client.isConnected(), true);
+  } finally {
+    settleClose();
+    await client.close();
+    await server.close();
+    resetSyncSchemaCasConfig();
+  }
+});
+
+Deno.test("the client's encoding follows what its handshake advertised", async () => {
+  // The server negotiates from the flags it RECEIVED. A client that re-read
+  // the ambient config when `hello.ok` landed could answer differently, and
+  // the two ends would then disagree about whether frames describe
+  // themselves — the one thing this encoding cannot tolerate. Flipping the
+  // config in flight forces exactly that divergence.
+  setSyncSchemaCasConfig(true);
+  const space = "did:key:z6Mk-sync-schema-advertised";
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://sync-schema-advertised"),
+    subscriptionRefreshDelayMs: 60_000,
+  });
+  let corruptNextEffect = false;
+  const { transport, state } = slowCloseLoopback(server, (payload) => {
+    if (payload.includes("hello.ok")) {
+      // The handshake is committed on both sides; only a later ambient read
+      // can still be misled.
+      setSyncSchemaCasConfig(false);
+    }
+    if (corruptNextEffect && payload.includes("session/effect")) {
+      corruptNextEffect = false;
+      return `${payload}!corrupt`;
+    }
+    return payload;
+  });
+
+  const client = await connect({ transport });
+  try {
+    const session = await client.mount(space, {}, testSessionOpenAuthFactory);
+    await session.watchAdd([{
+      id: "w",
+      kind: "graph",
+      query: {
+        roots: [{ id: "of:advertised", selector: { path: [], schema: false } }],
+      },
+    }]);
+    assertEquals(state.closes, 0);
+
+    corruptNextEffect = true;
+    await server.writeDocument(space, "of:advertised", {
+      ref: linkRefFrom({ id: "of:target", path: [], schema: largeSchema() }),
+    });
+    await server.flushSessions([space]);
+
+    // This connection speaks cas — both ends advertised it — so a frame the
+    // client cannot process must discard it. A client that concluded
+    // otherwise from the flipped config would stay on a connection whose
+    // later references it can no longer resolve.
+    assert(
+      state.closes > 0,
+      "the connection negotiated cas, so a lost frame must discard it",
+    );
+  } finally {
+    await client.close();
+    await server.close();
+    resetSyncSchemaCasConfig();
+  }
+});
+
+Deno.test("a reconnect whose handshake frame is unreadable still recovers", async () => {
+  // The server connection has already answered a `hello` by the time it sends
+  // a frame the client cannot read, so the reconnect loop's next attempt on
+  // that same transport is refused as a repeat — an error nothing marks
+  // permanent, so the loop can never succeed on it. Dropping the transport is
+  // what lets the following attempt reach a fresh connection.
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://sync-schema-handshake-drop"),
+    subscriptionRefreshDelayMs: 60_000,
+  });
+  let corruptNextHelloOk = false;
+  const { transport, state, dropConnection } = slowCloseLoopback(
+    server,
+    (payload) => {
+      if (corruptNextHelloOk && payload.includes("hello.ok")) {
+        corruptNextHelloOk = false;
+        return `${payload}!corrupt`;
+      }
+      return payload;
+    },
+  );
+
+  const client = await connect({ transport });
+  try {
+    assertEquals(state.hellos, 1);
+
+    // The socket dies, and the reconnect's own handshake frame is the one
+    // that arrives unreadable.
+    corruptNextHelloOk = true;
+    dropConnection();
+
+    // Joins the reconnect loop and resolves once it succeeds. Without the
+    // transport drop it never does: every further attempt reuses a connection
+    // that has already handshaken.
+    await client.restoreConnection();
+    assertEquals(client.isConnected(), true);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 Deno.test("a failed handshake settles rather than stranding its replacement", async () => {
   // Closing the transport on an unreadable handshake frame can drive
   // `onClose` synchronously, so the reconnect it triggers installs its own

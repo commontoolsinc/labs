@@ -3032,8 +3032,7 @@ export class Server {
    * catch-up diffs against that advanced cache and so does not re-send it.
    * Those frames' contents are lost to that client until a full
    * re-evaluation. A doc REMOVED by the lost frame is the accepted residue:
-   * its
-   * cache entry is already gone and cannot be re-diffed; the client keeps
+   * its cache entry is already gone and cannot be re-diffed; the client keeps
    * it until a full re-evaluation or reconnect (watch-shrink removes are
    * advisory today). */
   rollbackUndeliveredSync(

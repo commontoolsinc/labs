@@ -593,6 +593,16 @@ export class Client {
     if (this.#fatalError) {
       throw this.#fatalError;
     }
+    // Never handshake a connection that is already up. A server connection
+    // accepts one `hello` and refuses the next as a repeat — an error no
+    // retry can clear and nothing marks permanent — so a redundant attempt
+    // spins forever while every request waits on it. Callers that observed a
+    // disconnect clear the flag before arriving; this guards the caller whose
+    // observation went STALE, which a deferred reconnect becomes whenever its
+    // transport close outlives a reconnect somebody else completed meanwhile.
+    if (this.#connected) {
+      return;
+    }
     if (this.#reconnecting) {
       return await this.#reconnecting;
     }
