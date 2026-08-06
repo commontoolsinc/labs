@@ -1,7 +1,6 @@
 import {
   type CfcEnforcementMode,
   isCfcEnforcementMode,
-  type TrustSnapshot,
 } from "@commonfabric/runner/cfc";
 import type { HarnessCfcEnforcementModeSource } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessRunManifest } from "./contracts/run-manifest.ts";
@@ -24,7 +23,6 @@ export type HarnessModelAuthSource = "api-key" | "none" | "owner-bound-oauth";
 interface HarnessCommonConfig {
   cwd?: string;
   model?: string;
-  vmTarget?: string;
   skillsRoot?: string;
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
@@ -32,7 +30,6 @@ interface HarnessCommonConfig {
   artifactRoot?: string;
   cfcEnforcementMode: CfcEnforcementMode;
   cfcEnforcementModeSource: HarnessCfcEnforcementModeSource;
-  trustSnapshot?: TrustSnapshot;
   sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -73,7 +70,6 @@ export interface ResolveHarnessConfigOptions {
   gatewayAuthModeOverride?: string | HarnessGatewayAuthMode;
   cwd?: string;
   model?: string;
-  vmTarget?: string;
   skillsRoot?: string;
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget?: HarnessSkillScriptExecutionTarget;
@@ -82,7 +78,6 @@ export interface ResolveHarnessConfigOptions {
   cfcEnforcementMode?: CfcEnforcementMode;
   inheritedCfcEnforcementMode?: CfcEnforcementMode;
   cfcEnforcementModeOverride?: string | CfcEnforcementMode;
-  trustSnapshot?: TrustSnapshot;
   sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -197,7 +192,6 @@ export const resolveHarnessConfig = (
   const common: HarnessCommonConfig = {
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
     ...(options.model !== undefined ? { model: options.model } : {}),
-    ...(options.vmTarget !== undefined ? { vmTarget: options.vmTarget } : {}),
     ...(options.skillsRoot !== undefined
       ? { skillsRoot: options.skillsRoot }
       : {}),
@@ -210,9 +204,6 @@ export const resolveHarnessConfig = (
       : {}),
     ...(options.artifactRoot !== undefined
       ? { artifactRoot: options.artifactRoot }
-      : {}),
-    ...(options.trustSnapshot !== undefined
-      ? { trustSnapshot: options.trustSnapshot }
       : {}),
     ...(options.sandbox !== undefined ? { sandbox: options.sandbox } : {}),
     ...(options.runManifest !== undefined
