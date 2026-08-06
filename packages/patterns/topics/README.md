@@ -58,7 +58,20 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   passes its own topics list at creation; the topic derives its Connections
   read-side from it (SELF + equals to find its own row). Requires the
   path-scoped wildcard fix (#4714) — the derive combines a resolveAsCell chain
-  with an equals-only SELF capture in one computed.
+  with an equals-only SELF capture in one lift.
+- **A declared schema is the only thing that bounds a read.** Every derivation
+  over the board — the board's own `crossrefRows`, each topic's
+  `topicCrossrefView` — is a module-scope `lift` whose parameter type is
+  `TopicScan`, the narrowest projection the crossref join needs. That is not
+  style: the transformer shrinks an inferred input schema to the paths it can
+  see a body reach, and it cannot see through a helper call. These bodies call
+  `topicCorpus` and `crossrefJoin`, so an inferred schema falls back to reading
+  every element whole — and through a link to the board, "whole" is every
+  topic's thread, verbs, and rendered UI, which is how one derived value ends up
+  reading the entire space. `TopicScan` is non-recursive for the same reason: it
+  is what stops a list read from expanding, per topic, every sibling that topic
+  references. Prefer a scalar reduction (`topics.get().length`) over anything
+  that hands the array to a helper.
 - **Authoring: cf-code-editor in the Edit→Save draft flow.** The editor binds
   the session-local `bodyDraft` (never live to the shared string — whole-value
   conflict semantics hold) with `@`-mention autocomplete over `mentionable`;
@@ -100,7 +113,13 @@ cf piece call --piece <topic> addLink \
 reference plus scalar summaries (`title`, `createdAt`, `createdBy`,
 `commentCount`, `lastActivityAt`) and the prose reference edges as sibling
 references — every reference declared through a title-only schema, so the read
-cannot expand a topic's body, thread, or verbs no matter how it is projected:
+cannot expand a topic's body, thread, or verbs no matter how it is projected.
+
+`index` and `crossrefs` are the same rows published under two declared types:
+`index` declares every reference title-only, `crossrefs` declares them as
+`TopicScan` (prose and counts, no verbs and no nested graph) and adds the
+`fid`/`title` navigation snapshots the cards render. Read `index` to survey and
+`crossrefs` when a row's prose is what you are after; neither expands a topic.
 
 ```bash
 cf piece get --piece <board> index --step
