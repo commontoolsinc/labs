@@ -63,6 +63,16 @@ describe(
       expect(results[0].results[0].error).toContain(`"from alice"`);
     });
 
+    it("reports a false assertion that recorded no operands", async () => {
+      const { passed, failed, results } = await runTests(
+        fixture("false-computed.test.tsx"),
+        { root: FIXTURES },
+      );
+      expect(passed).toBe(0);
+      expect(failed).toBe(1);
+      expect(results[0].results[0].error).toContain("Expected true, got false");
+    });
+
     it("reports a marker nobody announces as a deadlock", async () => {
       const { failed, results } = await runTests(
         fixture("unannounced-marker.test.tsx"),
