@@ -43,10 +43,11 @@ export function entityIdFrom(hash: string | FabricHash): EntityId {
 /**
  * Generates an entity ID.
  *
- * Derivation inputs must resolve: a Cell with no entityId or a Reactive with
- * no value throws rather than minting a random substitute, so a derived id never
- * silently becomes non-deterministic (audit S14). A missing `cause`, by
- * contrast, deliberately mints a fresh random id.
+ * Derivation inputs must resolve: a Cell with no entityId, a Reactive with no
+ * value, and a cell's method -- which names no value of its own -- each throw
+ * rather than minting a substitute, so a derived id never silently becomes
+ * non-deterministic or unresolvable (audit S14). A missing `cause`, by contrast,
+ * deliberately mints a fresh random id.
  *
  * @param source - The source object.
  * @param cause - Optional causal source. If omitted, a random id is minted.
@@ -99,11 +100,13 @@ export function createRef(
     if (obj instanceof BaseFabricPrimitive) return obj;
     if (isSigilLink(obj) || isEntityRef(obj)) return obj;
 
-    // A cell's METHOD is not a value. A `Reactive` answers a method name with a
-    // proxy that is callable and is also a projection of the cell at that name,
-    // so the encodable form of one is a link to a path holding nothing. Deriving
-    // from it would name a document after a path that does not exist, so it
-    // fails closed rather than mint an id nobody can resolve (audit S14).
+    // A cell's _method_ is not a value. A `Reactive` answers a name in
+    // `cellMethods` with a proxy that is callable and is also a projection of
+    // the cell at that name, so the encodable form of one is a link to a path
+    // that need not hold anything -- and a method name and a same-named data key
+    // are the same object here, so which of the two a caller meant cannot be
+    // recovered. Neither reading names a document reliably, so this fails closed
+    // rather than mint an id off the ambiguity (audit S14).
     //
     // A builder artifact is a function carrying the member too, and is not
     // reactive, which is what separates the two here.

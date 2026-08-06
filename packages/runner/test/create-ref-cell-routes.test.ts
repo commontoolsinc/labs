@@ -95,11 +95,10 @@ describe("create-ref-cell-routes", () => {
   });
 
   it("throws for a cell's method, which is not a value", () => {
-    // A `Reactive` answers a method name with a proxy that is callable AND a
-    // projection of the cell at that name, so a bare method carries a link to a
-    // path holding nothing. Deriving an id from one names a document after a
-    // path that does not exist, so it fails closed like the other inputs that
-    // cannot resolve (audit S14).
+    // A `Reactive` answers a name in `cellMethods` with a proxy that is callable
+    // _and_ a projection of the cell at that name, so a method and a same-named
+    // data key are one object and neither reading names a document reliably. It
+    // fails closed like the other inputs that cannot resolve (audit S14).
     const { a } = siblings();
     const reactive = a.getAsReactiveProxy() as unknown as Record<
       string,
@@ -107,12 +106,13 @@ describe("create-ref-cell-routes", () => {
     >;
     const method = reactive.get;
     expect(typeof method).toBe("function");
-    expect(() => idOf(method)).toThrow(/cannot derive a stable id/);
+    expect(() => idOf(method)).toThrow(/Cell method is not a value/);
   });
 
-  it("still derives from a builder artifact that is a function", () => {
+  it("derives from a builder artifact that is a function", () => {
     // A factory is a function carrying `toEncodableForm` too, and is not
-    // reactive, so it keeps deriving from its serialized form.
+    // reactive, which is what separates it from a method proxy: it derives from
+    // its serialized form.
     const factory = Object.assign(() => {}, {
       toEncodableForm: () => ({ serialized: true }),
     });
