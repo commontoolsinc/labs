@@ -109,7 +109,11 @@ describe("list element rollback", () => {
     const elementRuns = new Map<string, ElementRun>();
     const rollback = trackListSetupRollback(tx, runtime, elementRuns);
 
-    const entry: ElementRun = { resultCell: elementCell("a"), lastIndex: 0 };
+    const entry: ElementRun = {
+      resultCell: elementCell("a"),
+      lastIndex: 0,
+      needsSetup: false,
+    };
     elementRuns.set("a", entry);
     rollback.created("a", entry);
 
@@ -125,7 +129,11 @@ describe("list element rollback", () => {
     const elementRuns = new Map<string, ElementRun>();
     const rollback = trackListSetupRollback(tx, runtime, elementRuns);
 
-    const entry: ElementRun = { resultCell: elementCell("a"), lastIndex: 0 };
+    const entry: ElementRun = {
+      resultCell: elementCell("a"),
+      lastIndex: 0,
+      needsSetup: false,
+    };
     elementRuns.set("a", entry);
     rollback.created("a", entry);
 
@@ -147,7 +155,11 @@ describe("list element rollback", () => {
       const elementRuns = new Map<string, ElementRun>();
       const rollback = trackListSetupRollback(tx, runtime, elementRuns);
 
-      const entry: ElementRun = { resultCell: elementCell("a"), lastIndex: 2 };
+      const entry: ElementRun = {
+        resultCell: elementCell("a"),
+        lastIndex: 2,
+        needsSetup: false,
+      };
       elementRuns.set("a", entry);
       rollback.created("a", entry);
       entry.lastIndex = 5;
@@ -160,13 +172,60 @@ describe("list element rollback", () => {
       tx.settle(outcome);
 
       // The re-run reuses this bookkeeping; discarding it would make each
-      // attempt rebuild what the last one threw away.
+      // attempt rebuild what the last one threw away. The setup writes are the
+      // exception: they went with the transaction, so the re-run issues them.
       expect(elementRuns.get("a")).toBe(entry);
       expect(entry.lastIndex).toBe(5);
+      expect(entry.needsSetup).toBe(true);
       expect(stopped).toEqual([]);
       expect(restored).toBe(false);
     });
   }
+
+  it("marks a surviving entry as needing setup again when the setup fails", () => {
+    const tx = createSettleableTx();
+    const elementRuns = new Map<string, ElementRun>();
+    const rollback = trackListSetupRollback(
+      tx,
+      createStoppingRuntime().runtime,
+      elementRuns,
+    );
+
+    const entry: ElementRun = {
+      resultCell: elementCell("a"),
+      lastIndex: 0,
+      needsSetup: true,
+    };
+    elementRuns.set("a", entry);
+    rollback.setupIssued(entry);
+    expect(entry.needsSetup).toBe(false);
+
+    tx.settle(aborted);
+
+    expect(entry.needsSetup).toBe(true);
+  });
+
+  it("leaves a committed entry set up", () => {
+    const tx = createSettleableTx();
+    const elementRuns = new Map<string, ElementRun>();
+    const rollback = trackListSetupRollback(
+      tx,
+      createStoppingRuntime().runtime,
+      elementRuns,
+    );
+
+    const entry: ElementRun = {
+      resultCell: elementCell("a"),
+      lastIndex: 0,
+      needsSetup: true,
+    };
+    elementRuns.set("a", entry);
+    rollback.setupIssued(entry);
+
+    tx.settle(committed);
+
+    expect(entry.needsSetup).toBe(false);
+  });
 
   it("leaves an entry a later reconcile replaced", () => {
     const tx = createSettleableTx();
@@ -174,13 +233,18 @@ describe("list element rollback", () => {
     const elementRuns = new Map<string, ElementRun>();
     const rollback = trackListSetupRollback(tx, runtime, elementRuns);
 
-    const entry: ElementRun = { resultCell: elementCell("a"), lastIndex: 0 };
+    const entry: ElementRun = {
+      resultCell: elementCell("a"),
+      lastIndex: 0,
+      needsSetup: false,
+    };
     elementRuns.set("a", entry);
     rollback.created("a", entry);
 
     const replacement: ElementRun = {
       resultCell: elementCell("a-replacement"),
       lastIndex: 0,
+      needsSetup: false,
     };
     elementRuns.set("a", replacement);
 
@@ -199,7 +263,11 @@ describe("list element rollback", () => {
       elementRuns,
     );
 
-    const entry: ElementRun = { resultCell: elementCell("a"), lastIndex: 1 };
+    const entry: ElementRun = {
+      resultCell: elementCell("a"),
+      lastIndex: 1,
+      needsSetup: false,
+    };
     elementRuns.set("a", entry);
     entry.lastIndex = 4;
     rollback.indexChanged(entry, 1);
@@ -218,7 +286,11 @@ describe("list element rollback", () => {
       elementRuns,
     );
 
-    const entry: ElementRun = { resultCell: elementCell("a"), lastIndex: 1 };
+    const entry: ElementRun = {
+      resultCell: elementCell("a"),
+      lastIndex: 1,
+      needsSetup: false,
+    };
     elementRuns.set("a", entry);
     entry.lastIndex = 4;
     rollback.indexChanged(entry, 1);
@@ -239,7 +311,11 @@ describe("list element rollback", () => {
       elementRuns,
     );
 
-    const entry: ElementRun = { resultCell: elementCell("a"), lastIndex: 1 };
+    const entry: ElementRun = {
+      resultCell: elementCell("a"),
+      lastIndex: 1,
+      needsSetup: false,
+    };
     elementRuns.set("a", entry);
     entry.lastIndex = 4;
     rollback.indexChanged(entry, 1);
@@ -277,7 +353,11 @@ describe("list element rollback", () => {
     const elementRuns = new Map<string, ElementRun>();
     const rollback = trackListSetupRollback(tx, runtime, elementRuns);
 
-    const entry: ElementRun = { resultCell: elementCell("a"), lastIndex: 3 };
+    const entry: ElementRun = {
+      resultCell: elementCell("a"),
+      lastIndex: 3,
+      needsSetup: false,
+    };
     elementRuns.set("a", entry);
     rollback.created("a", entry);
     entry.lastIndex = 6;
@@ -297,7 +377,11 @@ describe("list element rollback", () => {
     const elementRuns = new Map<string, ElementRun>();
     const rollback = trackListSetupRollback(tx, runtime, elementRuns);
 
-    const entry: ElementRun = { resultCell: elementCell("a"), lastIndex: 0 };
+    const entry: ElementRun = {
+      resultCell: elementCell("a"),
+      lastIndex: 0,
+      needsSetup: false,
+    };
     elementRuns.set("a", entry);
     rollback.created("a", entry);
     const failure = new Error("stop failed");
@@ -329,7 +413,11 @@ describe("list element rollback", () => {
     const elementRuns = new Map<string, ElementRun>();
     const rollback = trackListSetupRollback(tx, runtime, elementRuns);
 
-    const entry: ElementRun = { resultCell: elementCell("a"), lastIndex: 0 };
+    const entry: ElementRun = {
+      resultCell: elementCell("a"),
+      lastIndex: 0,
+      needsSetup: false,
+    };
     elementRuns.set("a", entry);
     rollback.created("a", entry);
     rollback.resultReplaced(() => {
@@ -352,8 +440,16 @@ describe("list element rollback", () => {
     const elementRuns = new Map<string, ElementRun>();
     const rollback = trackListSetupRollback(tx, runtime, elementRuns);
 
-    const first: ElementRun = { resultCell: elementCell("a"), lastIndex: 0 };
-    const second: ElementRun = { resultCell: elementCell("b"), lastIndex: 1 };
+    const first: ElementRun = {
+      resultCell: elementCell("a"),
+      lastIndex: 0,
+      needsSetup: false,
+    };
+    const second: ElementRun = {
+      resultCell: elementCell("b"),
+      lastIndex: 1,
+      needsSetup: false,
+    };
     elementRuns.set("a", first);
     elementRuns.set("b", second);
     rollback.created("a", first);

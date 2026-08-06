@@ -132,11 +132,10 @@ stream is passed to other spaces, which then append intents to it.
 - `stream-data`: disabled under the flag (owner, 2026-08-02 — unused;
   low-latency UI wants a different mechanism). A pattern using it under
   the flag gets a clear runtime error naming this section.
-- `resume-recover`, `resume-republish`: re-evaluate under v2 recovery —
-  they are currently LOAD-BEARING on main in `filter.ts`/`flatmap.ts`
-  (#4367, #4438), so "do not port" is not on the table; decide their
-  end state against serving-loop.md §6 when Phase 1 lands the list
-  coordinators.
+- `resume-republish`: re-evaluate under v2 recovery — it is currently
+  LOAD-BEARING on main in `filter.ts`/`flatmap.ts` (#4367, #4438), so
+  "do not port" is not on the table; decide its end state against
+  serving-loop.md §6 when Phase 1 lands the list coordinators.
 
 ## 6. Adding a new built-in under v2 (checklist for future work)
 
