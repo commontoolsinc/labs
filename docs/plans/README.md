@@ -61,4 +61,6 @@ a record: archive it to `docs/history/plans/` following the procedure in
 - [Verb calls: working notes](verb-result-selection.md) holds the call-specific
   investigation those documents do not carry: what produces a receipt and what
   its existence proves, how a receipt's address is derived, and the error and
-  exit-status conventions. Sketches to draw from, not a settled contract.
+  exit-status conventions. Sketches to draw from, not a settled contract.- [Shaped reads and verb results — implementation plan](shaped-reads-implementation.md)
+  sequences the read layer and the calls layered on it, holding the two
+  undecided questions to a final workstream so the rest can proceed.
