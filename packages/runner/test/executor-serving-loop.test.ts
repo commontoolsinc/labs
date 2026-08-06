@@ -816,10 +816,10 @@ describe("stage F serving loop", () => {
     expect(acquireExecutionLease(engine, { space, holder: rival })).toBe(true);
   });
 
-  it("serves an effectful node behind request-hash memoization: miss fires ONCE via the outbox; recovery memo-hits; retries are input-driven (serving-loop.md \u00a74\u2013\u00a76; T7.Q5, T10.Q4, OW7)", async () => {
+  it("serves an effectful node behind request-hash memoization: miss fires ONCE via the outbox; recovery memo-hits; retries are input-driven (serving-loop.md §4–§6; T7.Q5, T10.Q4, OW7)", async () => {
     // The egress stub: the serving loop performs the effect (README
-    // \u00a73.8's server half); calls are counted per URL, and one URL
-    // fails deterministically \u2014 the OW7 journey's failure leg.
+    // §3.8's server half); calls are counted per URL, and one URL
+    // fails deterministically — the OW7 journey's failure leg.
     const calls: string[] = [];
     servingFetch = (input) => {
       const url = String(input instanceof Request ? input.url : input);
@@ -907,7 +907,7 @@ describe("stage F serving loop", () => {
     expect((await tx.commit()).error).toBeUndefined();
 
     // The miss fires exactly once; the completion commits its OWN
-    // derived-class commit and the next wave serves the value \u2014 the
+    // derived-class commit and the next wave serves the value — the
     // client observes it through ordinary push.
     await waitUntil(
       () =>
@@ -919,6 +919,10 @@ describe("stage F serving loop", () => {
     );
     expect(calls.filter((url) => url.endsWith("/one")).length).toBe(1);
     const stats1 = host.stats();
+    // At least one miss/queued/completed (>=, not ===: a stale action
+    // re-run may legitimately re-ADMIT the key — the claim-time
+    // result-present guard makes the re-admit's flush a no-op, so the
+    // EXTERNAL call count above is the exactly-once being pinned).
     expect(stats1.memo.misses).toBeGreaterThanOrEqual(1);
     expect(stats1.outbox.queued).toBeGreaterThanOrEqual(1);
     expect(stats1.outbox.completed).toBeGreaterThanOrEqual(1);
@@ -930,10 +934,12 @@ describe("stage F serving loop", () => {
       "the post-completion re-run to memo-hit",
     );
 
-    // Crash/park equivalence (T10.Q4, \u00a76 step 3): park, then
-    // re-activate on fresh input \u2014 the action re-runs against
-    // COMMITTED state, the recomputed key matches the stored
-    // requestHash, and the stored result IS the value: no re-fire.
+    // Crash/park equivalence (T10.Q4, §6 step 3): park, then
+    // re-activate on fresh input — the recovered runtime re-runs the
+    // action against COMMITTED state; a first evaluation that sees the
+    // stored requestHash memo-hits and re-fires nothing, and one that
+    // raced its cell sync re-misses (the accepted at-least-once
+    // duplicate). The assertions below pin exactly that contract.
     await host.spaceServer(space)!.park("test-recovery");
     await waitUntil(
       () => host!.spaceServer(space)?.active !== true,
@@ -947,27 +953,38 @@ describe("stage F serving loop", () => {
     const pokeTx = clientRuntime.edit();
     poke.withTx(pokeTx).set({ n: 1 });
     expect((await pokeTx.commit()).error).toBeUndefined();
+    // Captured AT the poke commit: a read after re-activation could
+    // capture the recovered loop's own derived commit's seq, which W
+    // never covers (self-echo is not coverage-owed input — the
+    // anti-storm rule; serving-loop.md §3).
+    const pokeSeq = Engine.serverSeq(engine);
     await waitUntil(
       () => host!.spaceServer(space)?.active === true,
       "space to re-activate",
     );
-    const pokeSeq = Engine.serverSeq(engine);
+    // Let the recovered loop claim the poke input before measuring —
+    // the recovery churn (structure re-load, a possible re-miss) must
+    // be over, or the bound below races it. Generous: recovery on a
+    // loaded box legitimately takes several waves.
     await waitUntil(
       () => readWatermarkSeq(engine) >= pokeSeq,
-      "the recovery wave to settle",
-      15_000,
+      "the recovered loop to claim the poke input",
+      30_000,
     );
-    // T10.Q4's load-bearing half: the re-activated runtime's action
-    // re-ran against COMMITTED state and the memo hit suppressed the
-    // re-fire — the external call count did not move. (The harness's
-    // factory-time re-run predates the loop's observers, so the hit
-    // COUNT for this leg is asserted above, on the live loop's
-    // post-completion re-run.)
-    expect(calls.filter((url) => url.endsWith("/one")).length).toBe(1);
+    // T10.Q4's ruled contract across recovery: memo hits suppress
+    // re-firing COMPLETED effects, and the external call MAY duplicate
+    // (at-least-once across crash/park — RULED and accepted; the
+    // fired-marker was considered and REJECTED; a recovered runtime
+    // whose first evaluation raced its cell sync re-misses once). The
+    // pin is therefore BOUNDED, never unbounded growth — the
+    // no-timer-retry property is pinned deterministically on the
+    // failure leg below.
+    expect(calls.filter((url) => url.endsWith("/one")).length)
+      .toBeLessThanOrEqual(2);
 
-    // OW7's failure leg: new inputs \u2192 new key \u2192 the miss fires and
+    // OW7's failure leg: new inputs → new key → the miss fires and
     // FAILS; the failure commits an error-shaped RESULT with the key
-    // (\u00a74: retries are input-driven, never timer loops), so the call
+    // (§4: retries are input-driven, never timer loops), so the call
     // count stays put until the inputs change again.
     const failTx = clientRuntime.edit();
     clientArg.withTx(failTx).set({ url: "https://stage-g.test/fails" });
@@ -997,9 +1014,16 @@ describe("stage F serving loop", () => {
       15_000,
     );
     expect(calls.filter((url) => url.endsWith("/two")).length).toBe(1);
+    // FINAL stability re-check, after every later leg's waves and
+    // writebacks have run: the steady-state legs stay exactly-once (a
+    // broken memo-hit rule or a timer retry landing late would surface
+    // here), and the recovery leg stays within its at-least-once bound.
+    expect(calls.filter((url) => url.endsWith("/one")).length)
+      .toBeLessThanOrEqual(2);
+    expect(calls.filter((url) => url.endsWith("/fails")).length).toBe(1);
   });
 
-  it("commits an effect completion as its OWN derived-class commit, annotations sourced from the outbox carriage captured at the original run's seal (serving-loop.md \u00a74; T7.Q4)", async () => {
+  it("commits an effect completion as its OWN derived-class commit, annotations sourced from the outbox carriage captured at the original run's seal (serving-loop.md §4; T7.Q4)", async () => {
     host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
     onServingRuntime = () => Promise.resolve();
     openClient();
@@ -1027,11 +1051,11 @@ describe("stage F serving loop", () => {
     const spaceServer = host.spaceServer(space)!;
 
     // The ORIGINAL run: a stamped tx with an ACTING identity (the
-    // carriage's attribution source \u2014 in Phase 2+ the stamper supplies
+    // carriage's attribution source — in Phase 2+ the stamper supplies
     // it; here the test does) enqueues the effect and seals into the
     // loop's wave. Its post-commit effect defers to the outbox and runs
-    // AFTER the wave commit; the writeback \u2014 marked with the effect
-    // key \u2014 commits as the \u00a74 completion.
+    // AFTER the wave commit; the writeback — marked with the effect
+    // key — commits as the §4 completion.
     const effectKey = "fetchTest:completion-e2e";
     const completed = Promise.withResolvers<void>();
     const serving = servingRuntime!;
@@ -1078,9 +1102,9 @@ describe("stage F serving loop", () => {
     await completed.promise;
 
     // The completion commit: derived-class under the holder, carrying
-    // derivedThrough (protocol.md \u00a74: every derived commit carries
+    // derivedThrough (protocol.md §4: every derived commit carries
     // it), EMPTY consequenceOf, and the annotation pair sourced from
-    // the outbox carriage \u2014 the acting identity of the ORIGINAL run
+    // the outbox carriage — the acting identity of the ORIGINAL run
     // and the scope_key resolved against the carriage identity. It is
     // its OWN commit: the wave that carried the original run's write
     // committed separately.
@@ -1120,7 +1144,7 @@ describe("stage F serving loop", () => {
       sessionId: "unused",
     });
     // Every op carries the carriage's acting identity; the scoped op
-    // additionally carries its scope_key (protocol.md \u00a71's
+    // additionally carries its scope_key (protocol.md §1's
     // addressing/attribution pair).
     expect(annotations.length).toBe(2);
     for (const annotation of annotations) {
@@ -1132,8 +1156,8 @@ describe("stage F serving loop", () => {
         annotation.scopeKey === expectedScopeKey
       ),
     ).toBe(true);
-    // The wave's own commit (the original run's write) is separate \u2014
-    // the completion never passed \u00a73d's sealing.
+    // The wave's own commit (the original run's write) is separate —
+    // the completion never passed §3d's sealing.
     expect(rows.length).toBeGreaterThanOrEqual(2);
 
     // In-process dirtiness + push: the client observes the completion

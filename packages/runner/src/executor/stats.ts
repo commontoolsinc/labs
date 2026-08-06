@@ -14,7 +14,9 @@
 // (serving-loop.md §4's hit rule; reported for the fetch*, generate*
 // and sqliteQuery families — fetchProgram and llmDialog count misses
 // via the outbox but report no hit events yet), memo.misses counts
-// effects admitted to the outbox, memo.inflight the live entries;
+// effects admitted to the outbox (every deferred post-commit effect —
+// the serving posture's only producers today are the effectful
+// builtins' requests), memo.inflight the live entries;
 // outbox.queued/completed track admissions and settled effect work,
 // and outbox.failed counts INFRASTRUCTURE failures (a flush throw, a
 // rejected work promise, an LT4 deterministic append rejection) —

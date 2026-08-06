@@ -162,6 +162,9 @@ export class SpaceServer implements TransactionSealDestination {
   readonly #demandSinks = new Map<string, () => void>();
   /** The stage-G effect channel (serving-loop.md §4–§5). */
   #outbox: SpaceOutbox | undefined;
+  /** A drain left undelivered rows behind (transport-class failure):
+   * the next wave cycle re-drains even without fresh appends. */
+  #outboxDrainOwed = false;
   /** Post-commit effects of sealed transactions, deferred per wave
    * (serving-loop.md §3: effects hand to the outbox POST-commit, never
    * at seal). Admitted to the outbox after the wave's commit step;
@@ -480,6 +483,13 @@ export class SpaceServer implements TransactionSealDestination {
    * re-reads the request inputs (the hash guard), so the CFC ladder
    * derives the completion write's labels from the request basis
    * through the same per-transaction machinery as the OFF arm.
+   *
+   * A completion transaction that itself enqueues a post-commit effect
+   * would flush INLINE at this seal (deferSealedEffects keys off the
+   * wave a tx sealed into, and completions seal into none): no such
+   * producer exists — the builtins' completions only write — and one
+   * appearing should route through the outbox deliberately, not by
+   * accident of this note going stale.
    */
   async #commitEffectCompletion(
     tx: IExtendedStorageTransaction,
@@ -1004,6 +1014,22 @@ export class SpaceServer implements TransactionSealDestination {
     stats.waves += 1;
     if (exhausted) stats.wavesBudgetExhausted += 1;
     stats.supersededWrites += outcome.supersededWrites;
+    // Stage G, post-commit: hand the wave's sealed effects to the
+    // outbox BEFORE anything below can throw (a failed commit-record
+    // fetch must not leak effects with the runtime still alive) — but
+    // never on the lease-lost arm, whose park below discards them with
+    // the dying runtime (the crash-equivalent path memo re-miss
+    // covers). Fired for every other outcome — a withdrawn
+    // contribution's action re-runs and re-enqueues (deduped in
+    // flight), and completion writes are hash-guarded against current
+    // inputs, so a superseded request's writeback is inert
+    // (at-least-once, serving-loop.md §4).
+    if (
+      outcome.aborted !== "lease-lost" &&
+      pendingEffects !== undefined && pendingEffects.length > 0
+    ) {
+      this.#outbox?.admitSealedEffects(pendingEffects);
+    }
     if (outcome.aborted === "lease-lost") {
       // PARK, never continue (W-soundness): the abort WITHDREW the
       // wave's sealed derivations, nothing re-arms their producers in
@@ -1049,23 +1075,20 @@ export class SpaceServer implements TransactionSealDestination {
       }
     }
 
-    // Stage G, post-commit: hand the wave's sealed effects to the
-    // outbox (serving-loop.md §3's "hand external effects to the outbox
-    // (post-commit)"). Fired for every non-parking outcome — a
-    // withdrawn contribution's action re-runs and re-enqueues (deduped
-    // in flight), and completion writes are hash-guarded against
-    // current inputs, so a superseded request's writeback is inert
-    // (at-least-once, §4). The lease-lost branch above returned into a
-    // park, so its batches were dropped with the dying runtime.
-    if (pendingEffects !== undefined && pendingEffects.length > 0) {
-      this.#outbox?.admitSealedEffects(pendingEffects);
-    }
-    // Drain the durable append rows this wave landed (FP1): co-hosted
-    // delivery is an engine commit, not a network await.
-    if (closing.hasOutboundAppends && outcome.seq !== undefined) {
+    // Drain the durable append rows (FP1): after a wave that landed
+    // appends, and after any earlier drain left rows behind (a
+    // transport-failed delivery on a long-lived active space must not
+    // wait for the next appends-carrying wave or a re-activation).
+    // Co-hosted delivery is an engine commit, not a network await.
+    if (
+      (closing.hasOutboundAppends && outcome.seq !== undefined) ||
+      this.#outboxDrainOwed
+    ) {
       try {
-        await this.#outbox?.deliverPendingAppends();
+        const drained = await this.#outbox?.deliverPendingAppends();
+        this.#outboxDrainOwed = (drained?.remaining ?? 0) > 0;
       } catch (error) {
+        this.#outboxDrainOwed = true;
         logger.warn("append-drain-failed", () => [
           "post-wave outbox drain failed; rows kept for re-send",
           error,

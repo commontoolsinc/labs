@@ -1792,6 +1792,12 @@ export class Server {
    * stage writes carry no `seq` (Phase 3 owns entry-seq semantics when
    * event processing lands); a seq-less entry counts as above-horizon —
    * conservative exactly where every stream's watermark is still 0.
+   * PHASE-3 OBLIGATION, stated so it cannot rot silently: when event
+   * processing stamps entry seqs and advances `eventWatermark`, this
+   * check must honor the horizon for seq-BEARING entries (it already
+   * does) AND the seq-less arm must retire with the last seq-less
+   * entries — otherwise stage-G-era entries would dedupe forever, a
+   * stronger permanent dedupe than events.md §4 permits.
    *
    * Deterministic admission rejections THROW `Engine.ProtocolError`
    * (LT4: the outbox does not retry those); the caller deletes the row
@@ -1810,9 +1816,11 @@ export class Server {
     sessionId: string;
     /** From the delivering host's process-lifetime counter (the same
      * replay-keying discipline as the wave sink — engine-wave-sink.ts):
-     * unique per (sessionId, localSeq) on the target engine, so a
-     * replayed byte-identical delivery dedupes at the engine's commit
-     * replay check. */
+     * unique per (sessionId, localSeq) on the target engine. NOTE: a
+     * RE-SENT row arrives under a FRESH localSeq (the outbox bumps the
+     * shared counter per delivery attempt), so the engine's commit
+     * replay check never dedupes re-sends — the eventId horizon below
+     * is the one and only re-send dedupe. */
     localSeq: number;
   }): Promise<{ seq?: number; deduped: boolean }> {
     const engine = await this.openEngine(entry.targetSpace);

@@ -430,13 +430,12 @@ export class WaveAccumulator
   #closed = false;
   #derivedThrough: number | undefined;
   /** Outbound appends staged per transaction before its seal
-   * (enqueueOutboundAppend); folded into the contribution at seal so
-   * only surviving contributions' appends ride the wave (FP1). */
+   * (enqueueOutboundAppend); folded (by copy) into the contribution at
+   * seal so only surviving contributions' appends ride the wave (FP1).
+   * A post-seal enqueue on the same tx is refused — it could no longer
+   * ride this wave's transaction. */
   readonly #pendingAppendsByTx = new WeakMap<object, OutboxAppendRow[]>();
-  /** Contribution index per sealed transaction — how the serving loop
-   * resolves a sealed tx's disposition (the stage-G effect handoff:
-   * flush post-commit effects only for landed contributions). */
-  readonly #contributionIndexByTx = new WeakMap<object, number>();
+  readonly #sealedTxs = new WeakSet<object>();
 
   constructor(options: {
     /** The home space this wave derives for. */
@@ -576,13 +575,15 @@ export class WaveAccumulator
             "(serving-loop.md §3d, RULED 2026-08-05)",
         );
       }
-      this.#contributionIndexByTx.set(tx, this.#contributions.length);
+      this.#sealedTxs.add(tx);
       this.#contributions.push({
         index: this.#contributions.length,
         context,
         spaces: assembly.spaces,
         readOnlyReadKeys: assembly.readOnlyReadKeys,
-        outboundAppends: this.#pendingAppendsByTx.get(tx) ?? [],
+        // Copied: a (refused) post-seal enqueue must not be able to
+        // mutate the sealed contribution through the shared array.
+        outboundAppends: [...(this.#pendingAppendsByTx.get(tx) ?? [])],
       });
       return result;
     } finally {
@@ -608,30 +609,37 @@ export class WaveAccumulator
           "into it (serving-loop.md §3)",
       );
     }
+    if (this.#sealedTxs.has(tx)) {
+      throw new Error(
+        "transaction already sealed; its appends rode (or were refused " +
+          "with) its contribution — stage appends before the seal " +
+          "(serving-loop.md §5)",
+      );
+    }
+    // Fail-closed at the SOURCE (the delegated admission floor,
+    // protocol.md §2, refuses partial carriage at the target): a
+    // userless or grantless entry would be deterministically DESTROYED
+    // at delivery (the LT4 arm), so it must never become a durable row.
+    // events.md §2's userless space-scope emissions are a legal Phase-3
+    // producer whose delegated-floor treatment is an OPEN question —
+    // flagged in the stage-G PR; until it is ruled, staging one is a
+    // loud error here, never a silent loss there.
+    if (
+      entry.actingPrincipal === undefined || entry.actingPrincipal === "" ||
+      entry.capabilityRef === ""
+    ) {
+      throw new Error(
+        "outbound append refused: the delegated admission floor requires " +
+          "the acting principal AND the capability grant (protocol.md §2); " +
+          "userless emissions await the Phase-3 floor ruling",
+      );
+    }
     let pending = this.#pendingAppendsByTx.get(tx);
     if (pending === undefined) {
       pending = [];
       this.#pendingAppendsByTx.set(tx, pending);
     }
     pending.push(entry);
-  }
-
-  /**
-   * How the wave commit step disposed of the contribution `tx` sealed —
-   * the serving loop's effect handoff consumes this (stage G): sealed
-   * post-commit effects flush only for contributions that LANDED
-   * (committed or partially-dropped); a withdrawn contribution's
-   * effects are discarded (its action re-runs and re-enqueues —
-   * at-least-once, serving-loop.md §4). Undefined for a tx this wave
-   * never sealed.
-   */
-  dispositionOf(
-    tx: IExtendedStorageTransaction,
-    outcome: WaveCommitOutcome,
-  ): ContributionDisposition | undefined {
-    const index = this.#contributionIndexByTx.get(tx);
-    if (index === undefined) return undefined;
-    return outcome.dispositions[index];
   }
 
   /**

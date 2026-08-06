@@ -225,10 +225,11 @@ export class SpaceOutbox {
    * entries to annotate yet. Transport-class failures keep the row for
    * the next drain (at-least-once, no timers).
    */
-  async deliverPendingAppends(): Promise<void> {
+  async deliverPendingAppends(): Promise<{ remaining: number }> {
     const rows = selectPendingExecutionOutboxRows(this.#engine, {
       branch: "",
     });
+    let remaining = 0;
     for (const row of rows) {
       try {
         await this.#server.commitDelegatedAppend({
@@ -253,7 +254,17 @@ export class SpaceOutbox {
         if (error instanceof ProtocolError) {
           // LT4: a deterministic admission rejection does not retry.
           this.#stats.outbox.failed += 1;
-          deleteExecutionOutboxRow(this.#engine, row.rowId);
+          try {
+            deleteExecutionOutboxRow(this.#engine, row.rowId);
+          } catch (deleteError) {
+            // A failed retirement must not abort the drain; the row
+            // re-sends and hits the same deterministic rejection.
+            remaining += 1;
+            logger.warn("append-retire-failed", () => [
+              `retiring rejected append ${row.eventId} failed; row kept`,
+              deleteError,
+            ]);
+          }
           logger.warn("append-rejected", () => [
             `outbox append ${row.eventId} → ${row.targetSpace} rejected ` +
             "deterministically; not retried (LT4). The source-side " +
@@ -264,6 +275,7 @@ export class SpaceOutbox {
         }
         // Transport-class failure: keep the row; the next drain (or the
         // next activation's §6 step 5) re-sends. No timers.
+        remaining += 1;
         logger.warn("append-delivery-failed", () => [
           `outbox append ${row.eventId} → ${row.targetSpace} failed; ` +
           "row kept for re-send",
@@ -271,5 +283,6 @@ export class SpaceOutbox {
         ]);
       }
     }
+    return { remaining };
   }
 }

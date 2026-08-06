@@ -35,6 +35,7 @@ import {
   executionLeaseHolder,
 } from "@commonfabric/memory/v2/execution-lease";
 import {
+  insertExecutionOutboxRows,
   selectPendingExecutionOutboxRows,
 } from "@commonfabric/memory/v2/execution-outbox";
 import { table } from "@commonfabric/memory/sqlite/schema";
@@ -55,6 +56,7 @@ import {
 } from "../src/executor/wave.ts";
 import { EngineWaveCommitSink } from "../src/executor/engine-wave-sink.ts";
 import { SpaceOutbox } from "../src/executor/outbox.ts";
+import { sqliteQueryMemoDecision } from "../src/builtins/sqlite-builtins.ts";
 import { emptyServingLoopStats } from "../src/executor/stats.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
@@ -518,30 +520,61 @@ describe("stage G outbox + sqlite discharge", () => {
     lease2.release();
   });
 
-  it("does not retry an LT4 deterministic admission rejection: the row is deleted and counted failed (a userless row trips the delegated completeness floor)", async () => {
+  it("refuses a userless (or grantless) append at the SOURCE — fail-closed ahead of the delegated floor that would destroy it at delivery", async () => {
     const lease = liveLease();
     const wave = newWave({ lease });
     runtime.installSealDestination(wave);
-    const x = runtime.getCell<{ value: number }>(space, "lt4-x", undefined);
+    const x = runtime.getCell<{ value: number }>(space, "guard-x", undefined);
     const tx1 = runtime.edit();
     stampWaveRunContext(tx1, { actionId: "derive-x", kind: "derivation" });
     x.withTx(tx1).set({ value: 1 });
-    // No actingPrincipal: the engine's delegated admission floor
-    // requires actor + grant (protocol.md §2), so delivery rejects
-    // DETERMINISTICALLY. (Space-scope derivation emissions are a
-    // Phase 3+ producer; their delegated-floor treatment is flagged in
-    // the stage-G PR.)
-    wave.enqueueOutboundAppend(tx1, {
-      targetSpace,
-      targetStream: "of:lt4-stream",
-      eventId: "evt-lt4",
-      payload: {},
-      capabilityRef: "cap-x",
-    });
+    // events.md §2's userless space-scope emissions are a legal Phase-3
+    // producer whose delegated-floor treatment is an OPEN question
+    // (flagged in the stage-G PR): until it is ruled, staging one is a
+    // LOUD error here — never a durable row that delivery silently
+    // destroys.
+    expect(() =>
+      wave.enqueueOutboundAppend(tx1, {
+        targetSpace,
+        targetStream: "of:guard-stream",
+        eventId: "evt-guard",
+        payload: {},
+        capabilityRef: "cap-x",
+      })
+    ).toThrow("acting principal");
+    expect(() =>
+      wave.enqueueOutboundAppend(tx1, {
+        targetSpace,
+        targetStream: "of:guard-stream",
+        eventId: "evt-guard-2",
+        payload: {},
+        actingPrincipal: "user:alice",
+        capabilityRef: "",
+      })
+    ).toThrow("capability grant");
     expect((await tx1.commit()).error).toBeUndefined();
     runtime.clearSealDestination();
-    expect((await wave.commitWave(newSink())).seq).toBeDefined();
-    await wave.settled();
+    wave.abandon("test over");
+    lease.release();
+  });
+
+  it("does not retry an LT4 deterministic admission rejection: the row is deleted and counted failed", async () => {
+    // The accumulator refuses userless entries at the source (above),
+    // so a floor-tripping row can only exist as a directly-inserted
+    // one — a Phase-3-era or corrupted row. Delivery must retire it
+    // (LT4: deterministic rejections are not retried), never loop on
+    // it.
+    insertExecutionOutboxRows(engine, {
+      branch: "",
+      createdSeq: 1,
+      rows: [{
+        targetSpace,
+        targetStream: "of:lt4-stream",
+        eventId: "evt-lt4",
+        payload: {},
+        capabilityRef: "cap-x",
+      }],
+    });
 
     const { outbox, stats } = newOutbox();
     await outbox.deliverPendingAppends();
@@ -552,7 +585,119 @@ describe("stage G outbox + sqlite discharge", () => {
     expect(stats.outbox.failed).toBe(1);
     const targetEngine = await server.engineForSpace(targetSpace);
     expect(Engine.read(targetEngine, { id: "of:lt4-stream" })).toBeNull();
-    lease.release();
+  });
+
+  it("keeps the row on a transport-class delivery failure (admit-before-delete): the next drain delivers exactly one entry", async () => {
+    insertExecutionOutboxRows(engine, {
+      branch: "",
+      createdSeq: 1,
+      rows: [{
+        targetSpace,
+        targetStream: "of:transport-stream",
+        eventId: "evt-tr1",
+        payload: { n: 3 },
+        actingPrincipal: "user:alice",
+        actingSession: "sess-1",
+        capabilityRef: "cap-t",
+      }],
+    });
+
+    // A transport-failing server: commitDelegatedAppend rejects with a
+    // NON-deterministic (non-ProtocolError) failure — the row MUST
+    // survive (delete-before-admit would pass the happy-path tests but
+    // lose the append here).
+    const failing = new Proxy(server, {
+      get(target, prop, receiver) {
+        if (prop === "commitDelegatedAppend") {
+          return () => Promise.reject(new Error("transport down"));
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const stats = emptyServingLoopStats();
+    const flaky = new SpaceOutbox({
+      stats,
+      server: failing as typeof server,
+      engine,
+      sessionId: holder,
+      localSeqRef,
+    });
+    const { remaining } = await flaky.deliverPendingAppends();
+    expect(remaining).toBe(1);
+    expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
+      .toBe(1);
+    // Transport failures are not LT4 failures: nothing counted failed.
+    expect(stats.outbox.failed).toBe(0);
+
+    // The next drain (a real server) delivers exactly ONE entry and
+    // retires the row.
+    const { outbox } = newOutbox();
+    await outbox.deliverPendingAppends();
+    const targetEngine = await server.engineForSpace(targetSpace);
+    const doc = Engine.read(targetEngine, { id: "of:transport-stream" });
+    const entries = (doc?.value as { entries?: Array<unknown> })?.entries ?? [];
+    expect(entries.length).toBe(1);
+    expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
+      .toBe(0);
+  });
+
+  // ---- the sqliteQuery memo decision (B1's fix, serving-loop.md §4/§6) ----
+
+  it("sqliteQuery memo decision: a settled result is a hit, a bare claim never is; an orphaned claim re-issues ONLY under the serving posture", () => {
+    // No stored key: issue (the ordinary miss).
+    expect(sqliteQueryMemoDecision({
+      stored: undefined,
+      hash: "h1",
+      inFlightHere: false,
+      servedRun: true,
+    })).toBe("issue");
+    // Settled (result or error landed): the §4 hit — both arms.
+    expect(sqliteQueryMemoDecision({
+      stored: { pending: false, requestHash: "h1" },
+      hash: "h1",
+      inFlightHere: false,
+      servedRun: true,
+    })).toBe("hit");
+    expect(sqliteQueryMemoDecision({
+      stored: { pending: false, requestHash: "h1" },
+      hash: "h1",
+      inFlightHere: false,
+      servedRun: false,
+    })).toBe("hit");
+    // A pending claim with the RPC in flight HERE: dedupe (§4's one
+    // outstanding effect per key).
+    expect(sqliteQueryMemoDecision({
+      stored: { pending: true, requestHash: "h1" },
+      hash: "h1",
+      inFlightHere: true,
+      servedRun: true,
+    })).toBe("dedupe");
+    // An ORPHANED claim (pending, nothing in flight here): under the
+    // serving posture the effect was dropped after its wave committed
+    // (park/crash/discard) and nothing else will ever re-issue —
+    // re-issue heals the wedge (§6 step 3's re-miss, restored for the
+    // one builtin whose key commits ahead of its result). The OFF arm
+    // keeps today's committed-state dedupe byte for byte.
+    expect(sqliteQueryMemoDecision({
+      stored: { pending: true, requestHash: "h1" },
+      hash: "h1",
+      inFlightHere: false,
+      servedRun: true,
+    })).toBe("issue");
+    expect(sqliteQueryMemoDecision({
+      stored: { pending: true, requestHash: "h1" },
+      hash: "h1",
+      inFlightHere: false,
+      servedRun: false,
+    })).toBe("dedupe");
+    // A different stored key always re-issues (input-driven retry).
+    expect(sqliteQueryMemoDecision({
+      stored: { pending: false, requestHash: "old" },
+      hash: "h1",
+      inFlightHere: false,
+      servedRun: false,
+    })).toBe("issue");
   });
 
   // ---- the sqlite bound's discharge ----

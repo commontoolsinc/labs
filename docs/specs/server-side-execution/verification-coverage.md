@@ -337,6 +337,25 @@ PR):
 - OW7 → LANDED as trace T14 (scenario-traces §3/§4) plus the
   serving-loop failure-leg test above; the owed entry below is
   flipped.
+- The stage-G adversarial review's fix batch (2026-08-06), coverage
+  where it added binding behavior: (i) the deferred-flush window the
+  serving posture opens — a stale action re-run re-admitting a key
+  whose first effect already completed and retired — is closed at the
+  builtins' claim step (`tryClaimMutex` skips the claim when the
+  stored hash matches and a result/error landed; the E2E's
+  exactly-once external-call pins it); (ii) the sqliteQuery memo
+  decision distinguishes a SETTLED result (a hit) from a bare claim
+  marker — an orphaned claim re-issues under the serving posture
+  only (`sqliteQueryMemoDecision`, unit-pinned), restoring §6 step
+  3's re-miss premise for the one builtin whose key commits ahead of
+  its result; (iii) userless/grantless outbound appends are refused
+  at the SOURCE (`enqueueOutboundAppend`), fail-closed ahead of the
+  delegated floor that would deterministically destroy them at
+  delivery — events §2's userless space-scope emissions await their
+  Phase-3 floor ruling (the stage-G PR's Flags carry the question);
+  (iv) admit-before-delete is now pinned by a transport-failure test
+  (the row survives a non-deterministic delivery failure; the next
+  drain delivers exactly one entry).
 
 ## 3. The owed register (every genuine orphan, with its trigger)
 
