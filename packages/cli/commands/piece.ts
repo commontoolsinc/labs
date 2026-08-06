@@ -437,6 +437,33 @@ export function resolveInvocationId(
 }
 
 /**
+ * Resolve the session a handler call's invocation id was chosen within: the
+ * caller's own session (`--session`, or `CF_SESSION`), or none.
+ *
+ * Nothing is minted for a caller that named no session. A session only means
+ * something if the SAME one accompanies every call of a run, and a per-call
+ * mint would be a fresh one each time — a value that looks like a session and
+ * relates no two calls. So an absent session stays absent, and travels as
+ * `undefined`.
+ *
+ * A blank session is rejected for the reason a blank invocation id is: it
+ * would read as "the caller named one" while naming nobody.
+ *
+ * The resolved session is carried beside the invocation id (see
+ * `newSessionId`, packages/cli/lib/session.ts); the event address the id
+ * derives is not scoped by it.
+ */
+export function resolveInvocationSession(
+  raw: string | undefined,
+): string | undefined {
+  if (raw === undefined) return undefined;
+  if (!raw.trim()) {
+    throw new ValidationError("--session requires a non-blank id");
+  }
+  return raw;
+}
+
+/**
  * Build the phase observer for a handler invocation. Its whole job is to put
  * the invocation id on stderr at the moment the event is about to dispatch —
  * BEFORE any network work — so a caller whose process dies past that line
@@ -1576,6 +1603,17 @@ after --. Handlers interpret piped input when no input argument is present.`,
       "outcome — but the handler body does re-run, so effects outside the " +
       "transaction repeat. Minted automatically when omitted.",
   )
+  .env("CF_SESSION=<id:string>", "Session that invocation ids belong to.", {
+    prefix: "CF_",
+  })
+  .option(
+    "--session <id:string>",
+    "Session this call's invocation id was chosen within (before the " +
+      "callable name): the caller that chose it, since an invocation id is " +
+      "the caller's own word and another caller can pick the same one. Mint " +
+      "a session per agent run with `cf session new`, and pass that one " +
+      "session with every call of the run.",
+  )
   .option(
     "--verbose",
     "Print per-phase wall-clock timings to stderr (before the callable " +
@@ -1618,6 +1656,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
     const invocationId = resolveInvocationId(options.invocation);
+    const session = resolveInvocationSession(options.session);
     const waitControl = resolveWaitControl(options);
     let phase: InvocationPhase = "initial_sync";
     const observer = pieceCallPhaseObserver(
@@ -1641,6 +1680,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
           invocation.rawArgs,
           {
             invocationId,
+            session,
             skipReadback: waitControl.mode === "commit",
             showLinks: !!options.showLinks,
             onPhase: invocationPhaseReporter(

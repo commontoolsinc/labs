@@ -34,6 +34,7 @@ import {
   renderPieceCallOutcome,
   reportVerbInputErrorOrRethrow,
   resolveInvocationId,
+  resolveInvocationSession,
   resolveWaitControl,
   verbInputErrorReport,
   WaitBoundExpired,
@@ -951,6 +952,87 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.syncedCalls).toBe(0);
   });
 
+  it("carries the caller's session beside the invocation id to send", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptValue: { commentId: "c-1" },
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-123",
+        session: "ses-abc",
+      },
+    );
+
+    // An invocation id is the caller's own word, so the session that chose it
+    // travels with it: they reach the send together or the id says nothing
+    // about whose invocation it is.
+    expect(harness.tracker.sendOptions).toEqual([
+      { eventId: "inv-123", session: "ses-abc" },
+    ]);
+    // Session or no session, the outcome a caller reads is the same one.
+    expect(result.invocation).toEqual({
+      id: "inv-123",
+      status: "settled",
+      result: { commentId: "c-1" },
+    });
+  });
+
+  it("sends an undefined session for a caller that named none", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptValue: { commentId: "c-1" },
+    });
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-123",
+      },
+    );
+
+    // Absent, not substituted: nothing downstream is handed a stand-in
+    // session it would have to tell apart from a real one.
+    expect(harness.tracker.sendOptions.length).toBe(1);
+    expect(harness.tracker.sendOptions[0]?.session).toBeUndefined();
+  });
+
   it("reclassifies a receipt-exists collision as the original settled outcome", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -1082,7 +1164,9 @@ function createPieceCallableHarness(options: {
       path: (string | number)[] | undefined;
       value: unknown;
     }>,
-    sendOptions: [] as Array<{ eventId?: string } | undefined>,
+    sendOptions: [] as Array<
+      { eventId?: string; session?: string } | undefined
+    >,
     receiptLinkRequested: undefined as { id?: string } | undefined,
     idleCalls: 0,
     syncedCalls: 0,
@@ -1128,7 +1212,7 @@ function createPieceCallableHarness(options: {
                 handlingReceiptLink?: NormalizedFullLink;
               },
             ) => void,
-            sendOptions?: { eventId?: string },
+            sendOptions?: { eventId?: string; session?: string },
           ) => {
             tracker.handlerWrites.push({
               cellProp: "result",
@@ -1532,6 +1616,18 @@ describe("piece call stdin payloads", () => {
     // not be safe.
     expect(() => resolveInvocationId("")).toThrow(/non-blank id/);
     expect(() => resolveInvocationId("   ")).toThrow(/non-blank id/);
+  });
+
+  it("carries a named session and mints nothing for a caller without one", () => {
+    expect(resolveInvocationSession("ses-7")).toBe("ses-7");
+    // Deliberately not minted: a per-call mint would hand back a fresh
+    // session every call, relating no two of them — a value shaped like a
+    // session that is none. An absent session travels as absent.
+    expect(resolveInvocationSession(undefined)).toBeUndefined();
+    // Blank is refused for the reason a blank invocation id is: it reads as
+    // "the caller named one" while naming nobody.
+    expect(() => resolveInvocationSession("")).toThrow(/non-blank id/);
+    expect(() => resolveInvocationSession("   ")).toThrow(/non-blank id/);
   });
 
   it("announces the invocation id once, at dispatch", () => {
