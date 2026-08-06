@@ -156,17 +156,36 @@ declines it. A test that needs a control enabled before clicking says so with
 `waitForDisabled(page, selector, false)`.
 
 A control has to be rendered when the predicate tags it, but that alone does
-not make the click that follows safe. The trusted click measures the control's
-box a few protocol round trips after the tag, and in that window the surface the
-control sits in can still be settling: a join card's profile surface toggles
-display through its entrance, or a re-render relays out the region. The box can
-therefore move or vanish, and `DOM.getBoxModel` returns nothing for an element
-with no box, which the click reports as "Unable to get stable box model to click
-on". So after tagging, `clickMarked` holds until the tagged control's bounding
-box is unchanged across two consecutive animation frames before it dispatches.
-That wait is frame-driven and drops its baseline whenever the box disappears, so
-a control hidden partway through is picked up once it returns rather than clicked
-mid-shift; the stuck-condition net bounds a box that never settles.
+not make the click that follows safe. The page keeps running between the tag and
+the click, and the surface the control sits in can still be settling: a join
+card's profile surface toggles display through its entrance, a re-render relays
+out the region, or a piece re-render replaces the control with an equivalent one.
+So `clickMarked` settles the control and works out where to click it in a single
+page turn, and dispatches immediately afterwards. That one turn holds until the
+tagged control's bounding box is unchanged across two consecutive animation
+frames, then scrolls it into view and measures the point, all without handing
+control back to the test process in between. The hold is frame-driven and drops
+its baseline whenever the box disappears, so a control hidden partway through is
+picked up once it returns rather than clicked mid-shift; the stuck-condition net
+bounds a box that never settles.
+
+Deciding and measuring in one turn is the point of the design, not an
+optimization. Split across protocol round trips, the measurement describes a
+different moment from the decision, and a control the page dropped in between
+measures as nothing at all — which is what "Unable to get stable box model to
+click on" means. A helper that tags a control by name also passes its tagging
+predicate to `clickMarked`, so a control the page rebuilt is tagged again on
+whatever took its place, under that helper's own readiness rules, rather than
+reported as gone.
+
+That error message covers more than a missing layout box: the underlying
+`DOM.getBoxModel` reports a node the browser's DOM agent no longer knows about
+the same way it reports a node with no box, and the agent forgets every
+outstanding node the moment anything queries the document afresh. Any diagnosis
+that reads the message as "the element had no layout box" is therefore reading
+in more than it says. `Page`'s own click measures through the element rather
+than through a node handle, and names the condition it found — detached from
+the document, no layout box, or a handle that no longer resolves.
 
 Waiting for a click's effect carries the same requirement, for the same reason.
 Nothing in an integration test holds a UI subscription, so between one check and
