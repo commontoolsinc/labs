@@ -768,10 +768,10 @@ describe("CellHandle push (read-modify-write)", () => {
 });
 
 describe("CellHandle special-object refusal", () => {
-  // A `FabricSpecialObject` is a `ClientCellValue` -- a cell holds one like any
-  // other value -- and `WireCellValue` has no representation for it. Serializing
-  // one used to rebuild it from its enumerable own properties, putting `{}` on
-  // the wire in place of the bytes.
+  // A `FabricSpecialObject` is a `ClientCellValue` -- a cell holds one like
+  // any other value -- and `WireCellValue` has no representation for it.
+  // Without the refusal, serializing one rebuilds it from its enumerable own
+  // properties, putting `{}` on the wire in place of the bytes.
 
   it("throws for a `FabricBytes` rather than sending an empty record", () => {
     expect(() =>
@@ -805,7 +805,7 @@ describe("CellHandle special-object refusal", () => {
     //
     // `toStrictEqual`, because `toEqual` ignores an `undefined`-valued key in
     // both directions -- so it would pass just as well if `c` were dropped
-    // entirely. Carrying a PRESENT `undefined` is one of the two properties
+    // entirely. Carrying a _present_ `undefined` is one of the two properties
     // `WireCellValue` exists to have over `JSONValue`, which makes it the half
     // of this fixture most worth actually asserting.
     expect(CellHandle.serialize({ a: 1, b: [true, null], c: undefined }))
@@ -834,10 +834,10 @@ describe("CellHandle refused writes", () => {
       }),
     }) as unknown as RuntimeClient;
 
-  // The local update is optimistic about the WRITE landing, not about whether
-  // the value can be sent at all. A value the connection refuses is one the
-  // runtime will never hold, so it must not become the cached value or reach a
-  // subscriber -- that would show state that does not exist anywhere.
+  // The local update is optimistic about the _write_ landing, not about
+  // whether the value can be sent at all. A value the connection refuses is
+  // one the runtime will never hold, so it must not become the cached value or
+  // reach a subscriber -- that would show state that does not exist anywhere.
 
   it("keeps the prior value after a refused set", async () => {
     const cell = new CellHandle<unknown>(runtimeCapturing([]), ref);

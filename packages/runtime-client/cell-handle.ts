@@ -40,10 +40,10 @@ const logger = getLogger("cell-handle", { enabled: false });
 export const $onCellUpdate = Symbol("$onCellUpdate");
 
 /**
- * A cell's value as the CLIENT holds it: what a cell holds, with a
- * `CellHandle` wherever a cell sits. That is the substitution
- * `vnode-types.ts` already makes for the render types -- `Cell` replaced by
- * `CellHandle` -- applied to a cell's own value.
+ * A cell's value as the _client_ holds it: what a cell holds, with a
+ * `CellHandle` wherever a cell sits. That is the substitution `vnode-types.ts`
+ * already makes for the render types -- `Cell` replaced by `CellHandle` --
+ * applied to a cell's own value.
  *
  * What a cell holds is a `FabricValue`, so that is an arm of this rather than
  * something restated: a `FabricBytes` in a cell is a value the client holds
@@ -51,7 +51,7 @@ export const $onCellUpdate = Symbol("$onCellUpdate");
  * The container arms are here too, since theirs hold `FabricValue` where these
  * hold handles as well.
  *
- * That the connection cannot presently CARRY all of it is a fact about
+ * That the connection cannot presently _carry_ all of it is a fact about
  * `WireCellValue`, not about this: see the note there.
  */
 export type ClientCellValue =
@@ -150,18 +150,19 @@ export class CellHandle<T = unknown> {
   }
 
   // Optimistic local update (mirrors the old set()) plus the remote write. The
-  // request TYPE encodes the intent: CellSet is a blind overwrite, CellPush is a
-  // read-modify-write append that the runtime keeps as compare-and-set.
+  // request _type_ encodes the intent: CellSet is a blind overwrite, CellPush
+  // is a read-modify-write append that the runtime keeps as compare-and-set.
   #applyLocalAndSend(
     value: T,
     type: RequestType.CellSet | RequestType.CellPush,
   ): Promise<void> {
-    // Serialized FIRST, because it can refuse. The local update below is
-    // optimistic about the WRITE -- it assumes a value the connection accepts
-    // will land -- and not about whether the value can be sent at all. Were the
-    // refusal to come after, a value the runtime is never going to see would
-    // already be this handle's cached value and would already have reached
-    // every subscriber, leaving the display showing state that does not exist.
+    // Serialized _first_, because it can refuse. The local update below is
+    // optimistic about the _write_ -- it assumes a value the connection
+    // accepts will land -- and not about whether the value can be sent at all.
+    // Were the refusal to come after, a value the runtime is never going to
+    // see would already be this handle's cached value and would already have
+    // reached every subscriber, leaving the display showing state that does
+    // not exist.
     //
     // `T` is unconstrained, so this says what the write path requires rather
     // than what the class guarantees. Constraining `T` to `ClientCellValue` is
@@ -538,13 +539,13 @@ export class CellHandle<T = unknown> {
 
     // A `FabricSpecialObject` is a `ClientCellValue` -- a cell holds one like
     // any other value -- but `WireCellValue` has no representation for it, so
-    // this refuses rather than converting. It goes BEFORE the record test:
+    // this refuses rather than converting. It goes _before_ the record test:
     // such a value is also a record, and that branch would otherwise rebuild
     // it from enumerable own properties it is not supposed to have, putting
     // `{}` on the wire in place of a `FabricBytes` and losing the bytes with
     // nothing to show for it.
     //
-    // A DE-FACTO tripwire, in the sense of "Flag-gated tripwires" in
+    // A _de facto_ tripwire, in the sense of "Flag-gated tripwires" in
     // `docs/development/EXPERIMENTAL_OPTIONS.md`: no flag gates this, and a
     // `FabricBytes` is an ordinary shipped value, so what makes the refusal
     // safe is that nothing writes one from the client today. The first thing
