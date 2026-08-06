@@ -48,11 +48,31 @@ never reaches a receipt and no permanence obligation attaches.
 separates nothing when agents work under their human user's key, and a minted
 session is unguessable where a DID is public.
 
-One detail inside the second is still open: what an absent session means.
-Treating it as unscoped preserves today's behavior and today's collision;
-refusing without one makes every caller opt in before naming an invocation at
-all. With minting explicit, unscoped-with-a-documented-gap is the reasonable
-default, and S2 decides it.
+**An invocation id without a session is an error.** Naming an invocation is
+asking for an outcome to be addressable and replayable; without a session that
+address is shared with everyone using the same verb, so the request cannot be
+honored as asked. Refusing is louder than scoping to a per-request session
+nobody can reach, and both beat leaving an unscoped path that callers would
+learn to rely on precisely because it lets them share receipts.
+
+## Backlog
+
+**Emit a verb's declared result schema onto `module.resultSchema`.** The field
+exists, `lift()` already populates it, and the runner already consumes it; what
+is missing is the transformer emitting one for `handler()` and the runtime
+signature accepting it. It would give discovery — a caller could learn a result's
+shape before calling — and turn C1's description into a declaration.
+
+The permanence objection that withdrew result-schema emission in July does not
+reach it: that put a `result` keyword *inside* a schema, sibling to `asCell`,
+landing in `Pattern.resultSchema`, which the compatibility gate compares across
+versions and would then refuse to let go. `module.resultSchema` is a separate
+field on a node, and `assertPatternSchemasBackwardCompatible` only ever compares
+a pattern's two top-level schemas. Baselines would gain content, which the
+append-only gate permits — it forbids deleting baselines, not enriching new ones.
+
+Worth its own conversation with the owner who made that call, since it is
+adjacent work even though the objection misses.
 
 ## Non-goals
 
@@ -75,9 +95,20 @@ its own flag surface. It returns the structured value, leaving rendering to the
 caller. The existing transform in `packages/cli/lib/piece-get-transform.ts` is
 the body of it; this is an extraction, not a rewrite.
 
+Three decisions inside F1. The `PieceGetTransform` type is renamed — it is the
+caller's **selection**, and its current name asserts a piece where none is
+required, which is the misnaming the CLI surface document objects to elsewhere.
+`runtime` and `space` stay explicit parameters rather than being derived from
+the cell: `runtime` is not on the public `Cell` interface, and the caller's
+space is not always the cell's, so deriving would silently relocate where the
+transform pattern runs. And the verb-read refusal stays with `piece get` rather
+than moving into the shared step, which keeps the step free of policy and leaves
+open whether call results should inherit it.
+
 **F2. `--select` for the concise syntax.** *(S)* The concise path list moves to
 its own flag; `--schema` keeps full schemas and `@file`. Concise input on
-`--schema` continues to work as a deprecated alias — this stage removes nothing.
+`--schema` continues to work, without a warning — there is no removal date yet,
+and warning on every invocation would be noise in the skills that teach it.
 
 *Exit:* `piece get` reads through the factored step, both flags work, and
 `packages/cli/test/piece-get-transform.test.ts` passes **unchanged**. A moved
@@ -97,7 +128,9 @@ rather than one per element.
 
 **A3. `@` in `--select`.** *(S)* The suffix desugars to `{"$link": true}` at the
 leaf, in place. `topic@,topic.title` unions into a marker plus a projection and
-renders as one result carrying both.
+renders as one result carrying both. `@` is special only as the final character
+of a path segment, and `\@` escapes it, so a field genuinely named `user@home`
+stays reachable.
 
 **A4. `--piece` accepts the entity URI.** *(S)* `entityIdFrom` takes an `of:`
 scheme and refuses `computed:` rather than stripping it. Independent of
@@ -112,15 +145,24 @@ command without reshaping, and a marked collection is measurably one document.
 Ahead of anything that publishes a receipt address, so no caller holds one that
 later moves.
 
-**S1. Mint and plumb a session.** *(M)* `cf session new` emits a random opaque
-string on stdout; `--session` and `CF_SESSION` carry it, following `CF_IDENTITY`
-and `CF_API_URL`. Accepted and threaded through, but **not yet joined to the
+**S1. Mint and plumb a session.** *(M)* `cf session new` emits a bare random
+string on stdout — no file format, since unlike `cf id new` there is no key
+material and a keyfile shape would only be cargo-culted. `--session` and
+`CF_SESSION` carry it, following `CF_IDENTITY` and `CF_API_URL`. Accepted and threaded through, but **not yet joined to the
 hash** — nothing observable changes, and the mechanism can be exercised before
 it matters.
 
 **S2. Join the session to the hash.** *(S)* The session enters the hash
 `scopeCallerEventId` computes, so an id chosen in one agent's session and in
-another's land on different receipts. Decides what an absent session means.
+another's land on different receipts. `--invocation` without a session becomes
+an error.
+
+*What that breaks, measured.* Nothing relies on unscoped matching incidentally;
+what relies on it is the tests of the property itself.
+`packages/cli/integration/verbs-over-the-cli.sh` replays one id to assert
+deduplication, and `packages/cli/integration/integration.sh` has four retry
+scenarios doing the same across separate processes. All of them pass a session
+after this, which is the change rather than a casualty of it.
 
 This is the one address-changing commit in the plan. It carries nothing else,
 lands in a single deploy, and does not roll out behind a flag that would leave
@@ -131,11 +173,22 @@ to different receipts; one session replaying an id resolves to the same one.
 
 ## Stage 4 — calls
 
-**C1. Receipt cells carry a descriptive schema.** *(M)* Written to the durable
-schema metadata at result-write time, in the same create-only transaction. Not
-the `getCell` schema argument, which seeds link scope and the in-memory cell
-only. Lands before C2 so a selection over a receipt is bounded from the first
+**C1. Receipt cells carry a descriptive schema.** *(M)* Derived from the value
+the runtime has just written and stored in the durable schema metadata, in the
+same create-only transaction. Not the `getCell` schema argument, which seeds
+link scope and the in-memory cell only. Structural — root container kind and
+property names — since that is what narrowing needs, and recording link
+positions would mean writing `asCell` onto a document nothing can be written
+through. Lands before C2 so a selection over a receipt is bounded from the first
 call that can express one.
+
+*Why descriptive rather than declared.* A verb's declared result type does not
+survive compilation: `handler()` takes an event schema and a state schema, its
+`R` is type-level only, and the transformer emits nothing for it. The field it
+would travel on — `module.resultSchema` — exists and is already populated by
+`lift()`, so filling it for handlers is the better end state, and the receipt's
+schema slot would then take a better-sourced value rather than a migration. That
+work is on the backlog below, not here.
 
 **C2. `piece call` gains the selection flags.** *(S)* `--select`, `--schema`,
 `--filter`, all routed through F1. No second output path.
