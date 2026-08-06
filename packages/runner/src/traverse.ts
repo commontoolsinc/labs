@@ -2936,6 +2936,48 @@ export function createSchemaMemo(): SchemaMemo {
   return new Map();
 }
 
+// The single-identity tripwire on shared schema memos (key-vocabulary.md
+// §5's identity-bound invariant, OW10): `schemaMemoAddressKey` has no
+// identity component, so ONE memo instance may only ever be traversed
+// under ONE identity — schema narrowing memoized under one principal's
+// traversal would otherwise leak into another's (value-bleed). Every
+// sharing scope today is single-identity by construction
+// (`TrackedGraphState.memo` is bound to its manager; the query path's
+// sharedMemo instances are per call); this guard is what keeps a future
+// sharing change from silently becoming value-bleed rather than a loud
+// error. Bindings live in a side table so the memo type stays a plain
+// Map.
+const schemaMemoIdentityBindings = new WeakMap<SchemaMemo, string>();
+
+const schemaMemoIdentityKey = (identity: ScopeKeyIdentity): string =>
+  `${identity.principal ?? ""}\0${identity.sessionId ?? ""}`;
+
+/**
+ * Bind a shared schema memo to the traversing identity, or throw if it
+ * was already bound to a DIFFERENT one. Called at the one choke point
+ * where a shared memo meets a traversal (the SchemaObjectTraverser
+ * constructor), so no cross-identity sharing path can exist without
+ * tripping it.
+ */
+export function assertSchemaMemoIdentity(
+  memo: SchemaMemo,
+  identity: ScopeKeyIdentity,
+): void {
+  const key = schemaMemoIdentityKey(identity);
+  const bound = schemaMemoIdentityBindings.get(memo);
+  if (bound === undefined) {
+    schemaMemoIdentityBindings.set(memo, key);
+    return;
+  }
+  if (bound !== key) {
+    throw new Error(
+      "shared schema memo traversed under a second identity — sharing " +
+        "one memo across identities is FORBIDDEN (value-bleed; " +
+        "key-vocabulary.md §5's identity-bound invariant)",
+    );
+  }
+}
+
 export class SchemaObjectTraverser<V extends FabricValue>
   extends BaseObjectTraverser {
   private sharedSchemaMemo?: SchemaMemo;
@@ -2948,6 +2990,12 @@ export class SchemaObjectTraverser<V extends FabricValue>
     sharedSchemaMemo?: SchemaMemo,
   ) {
     super(tx, selector, context, objectCreator);
+    if (sharedSchemaMemo !== undefined) {
+      // OW10: a shared memo binds to its first traversal's identity and
+      // refuses any other (value-bleed tripwire — see
+      // assertSchemaMemoIdentity).
+      assertSchemaMemoIdentity(sharedSchemaMemo, context.scopeKeyIdentity);
+    }
     this.sharedSchemaMemo = sharedSchemaMemo;
   }
 

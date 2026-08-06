@@ -354,6 +354,39 @@ into (the watermark doc too).
   handler): what class of problem is this, and how does it
   resolve?
 
+### T13 — Activation, demand, park, and the server-side hot-swap (stage F; OW5/OW6)
+
+Purpose: the SpaceServer lifecycle end to end — what activation
+loads (and does NOT), what demand means mechanically, when a space
+parks, and who performs a pattern update under the flag.
+Setup: space A parked (no SpaceServer). S1 connects and subscribes
+to a piece's result doc; U1 later writes the piece's argument; an
+updater (any authorized session) writes the piece's
+pattern-pointer; finally S1 disconnects and the space idles.
+
+- T13.Q1 — S1's `session.open` arrives: what notifies the host, and
+  what makes the space ACTIVE? What would a `system`-class direct
+  write alone have done?
+- T13.Q2 — What does activation LOAD for S1's subscription — and
+  what is deliberately NOT a step of it? Where does the piece's
+  handler registration ride?
+- T13.Q3 — What IS the demand, mechanically, once structure is
+  loaded? What keeps an undemanded derivation from running?
+- T13.Q4 — U1's authored write arrives while the space is active:
+  walk the wave — input, settle, commit contents, watermark — and
+  name what the loop's own commit does NOT do when it returns on
+  the subscription.
+- T13.Q5 — The updater writes the pattern-pointer: what class is
+  that write, who reacts, and what does the reaction do? What stamp
+  does the swap's setup write carry?
+- T13.Q6 — S1 disconnects. What must ALL be true before the space
+  parks, and what does parking do? A commit races the park — what
+  heals it?
+- T13.Q7 — A gate wake (debounce timer) is armed at the would-be
+  park moment: park or wait? Under which mapping row's rule?
+- T13.Q8 — Wish `#now` interval timers: what does this trace NOT
+  answer about them, and why?
+
 ## 4. Reference answers
 
 **Run 2026-08-03** — six Sonnet trace runners (two traces each),
@@ -647,6 +680,66 @@ these.
   deferral — future work. [protocol §1; README §1]
 - Q6: ordinary speculation divergence; silent value replacement on
   reconciliation. [README §3.6; speculation §3, §4]
+
+### T13 (COMPLETE, 1 GAP carried deliberately — authored with stage F, 2026-08-05)
+- Q1: the memory server's admission-side observer notifies the host
+  on session open and on any AUTHORED admission into a space with no
+  live SpaceServer — an admission-side hook, never a poll; ACTIVE =
+  ≥1 live client session (the serving loop's own loopback session
+  never counts) or undelivered events (no instances until Phase 3).
+  A `system` direct write alone activates nothing — a provisioning
+  write into a lease-less space stays parked until its first session
+  or event. [serving-loop §1 planes (b)/(d); T11.Q7]
+- Q2: activation acquires the lease (else parks), builds the serving
+  runtime (flag ON, §3e posture), reads W, re-marks the dirty
+  frontier from the basis index, and subscribes from the head the
+  index scan ran against; graph structure loads PER DEMANDED ROOT
+  through the auto-load prior art (`ensurePieceRunning` — result-
+  metadata chain to the owning result cell, pattern loaded by
+  identity, `runtime.start`). There is NO piece-start step, no root
+  bootstrap, no auto-start-on-event; handler registration rides the
+  structure load for demanded roots. [serving-loop §1, §3, §6;
+  runtime-mapping N22/N31]
+- Q3: demand is a LIVE READER per demanded root — the loop holds a
+  deep-walking sink over each (id, scope) the space's client
+  sessions watch, and the read through the query proxies is what
+  pulls a computed's link. Pull-based laziness is untouched:
+  undemanded derivations stay dirty-unmaterialized indefinitely —
+  `idle()` already excludes them. [serving-loop §1, §3b]
+- Q4: the commit's record enters the loop's feed (class + holder +
+  written instances); dirtiness travels the scheduler's EXISTING
+  path (the loopback session's frames); the loop settles to
+  quiescence under the T_flush race, then commits ONE derived
+  transaction: the wave's surviving writes, `consequenceOf` (empty
+  until Phase 3), the watermark DOC write as a stamped
+  `bookkeeping` contribution, and `derivedThrough = W`. W advances
+  to the input batch's non-echo head at TRUE quiescence only. The
+  loop's own commit returns on the feed and is SKIPPED by class +
+  holder (self-echo) — it never re-arms a wave, and the watermark
+  never chases its own commits. [serving-loop §2, §3, §3d;
+  protocol §4]
+- Q5: the pointer write is an ordinary AUTHORED input under the
+  updater's principal; the SpaceServer's watcher (the
+  `patternIdentity` meta sink, installed with the piece) reacts —
+  teardown + reinstantiation server-side, the swapped derivation
+  lands in the next wave's derived commit, and no client runs
+  anything. The swap's setup write stamps the `bookkeeping` kind
+  (§3d's sanctioned internal stamp kinds). [serving-loop §3d, §3e;
+  runtime-mapping N40/N41]
+- Q6: park requires ALL of: no live client sessions, no feed input,
+  no open wave contributions, idle past IDLE_PARK_MS, and no armed
+  gate wake. Parking releases the lease row, cancels the demand
+  sinks, disposes the runtime. A racing commit self-heals: the
+  admission hook re-fires on the next admission and the host
+  re-activates. [serving-loop §1, §2]
+- Q7: WAIT — a pending gate wake is "not idle"; parking would lose
+  trailing debounce flushes. [runtime-mapping N9's recommended
+  default, adopted by the stage-F parking policy]
+- Q8: GAP, deliberate: wish `#now` interval timers carry their own
+  owner ruling first (N50 — a space with an interval `#now` never
+  quiesces, and every tick is a derived commit against the
+  amplification budget's spirit). This trace does not answer it;
+  the owed register carries the ruling. [runtime-mapping N50]
 
 ## 5. Findings routing
 

@@ -8,28 +8,21 @@
 // itself. Stage F's SpaceServer wires this sink under the serving loop;
 // until then tests drive it.
 //
-// Three deliberate stage-D bounds, all assigned elsewhere in the plan:
-// - foreign provisioning batches apply authored-class WITHOUT the acting
-//   identity + capabilityRef admission row (protocol.md §2's
-//   server-produced authored row) — that admission lands with the
-//   provisioning relocation (stage F); the accumulator already carries
-//   the annotations so the wiring is a sink change, not a re-plumb.
-//   SCOPED ops in a foreign batch are REFUSED outright (commitWave
-//   below): this plain applyCommit path drops the batch's annotations,
-//   so a scoped foreign write would silently key from the sink's own
-//   principal — the empty-instance trap, cross-space edition — and no
-//   stage-D producer emits one (`.inSpace` provisioning is
-//   space-scoped);
-// - sqlite ops in wave batches need cell-db attachments the effect
-//   channel owns (stage G); this sink passes none;
-// - the accumulator's withdrawn-read closure sees only reads RECORDED
-//   in sealed commits, and a tx seals only the spaces it WROTE (or
-//   gated): a read in a space the run wrote nothing to — e.g. a
-//   foreign read feeding a home-only write — never reaches the
-//   accumulator, so a withdrawn writer in that space cannot fold the
-//   reader in. Stage F's serving loop MUST NOT lean on read-only
-//   cross-space layered reads folding into withdrawals until the seal
-//   handoff carries read-only spaces' read sets.
+// Of stage D's three documented bounds, stage F discharged two and one
+// remains:
+// - DISCHARGED (stage F): foreign provisioning batches now apply WITH
+//   protocol.md §2's delegated-identity admission row — the batch's
+//   `delegated` carriage (originating chain actor + capabilityRef) rides
+//   the commit metadata, admission validates completeness, and scoped
+//   foreign writes key from the CARRIED identity. A foreign batch with
+//   scoped ops and NO delegated carriage is still refused (commitWave
+//   below) — that path would silently key from the sink's own principal,
+//   the empty-instance trap, cross-space edition.
+// - DISCHARGED (stage F): the seal handoff carries read-only spaces'
+//   read sets (ITransactionSealSink.sealSpaceReads), and the
+//   accumulator's withdrawn-read closure folds them by doc identity.
+// - REMAINING (stage G): sqlite ops in wave batches need cell-db
+//   attachments the effect channel owns; this sink passes none.
 
 import type { Engine } from "@commonfabric/memory/v2/engine";
 import {
@@ -52,32 +45,43 @@ export class EngineWaveCommitSink implements WaveCommitSink {
   readonly #engineFor: (space: MemorySpace) => Engine;
   readonly #sessionId: string;
   readonly #principal: string | undefined;
-  #localSeq = 0;
+  readonly #localSeq: { value: number };
 
   /**
-   * Replay keying, a caller obligation: the engine dedupes commits by
-   * UNIQUE (session_id, local_seq) — returning the STORED result for a
-   * byte-identical replay and throwing "commit replay mismatch" for a
-   * different one — while `#localSeq` restarts at 0 per sink INSTANCE.
-   * Reusing one `sessionId` across sink instances whose commits reach
-   * the same engine therefore collides the second instance's early
-   * localSeqs with the first's: an identical batch silently returns the
-   * OLD commit's seq (stale, nothing applied), a different one throws.
-   * Give every instance a distinct `sessionId` (e.g. suffix a
-   * wave/process nonce) or hold ONE long-lived instance per service
-   * session — stage F's SpaceServer owns that choice.
+   * Replay keying — the stage-F choice, made and enforced here: the
+   * engine dedupes commits by UNIQUE (session_id, local_seq), returning
+   * the STORED result for a byte-identical replay and throwing "commit
+   * replay mismatch" for a different one. The SpaceServer holds ONE
+   * long-lived counter per (space, process) — `localSeqRef`, owned by
+   * the ExecutorHost, starting at 0 — and uses the DR1 HOLDER identity
+   * as the `sessionId`, which is simultaneously what the
+   * derived-envelope admission requires (protocol.md §2, RULED
+   * 2026-08-05: the producing session must BE the holder's own service
+   * session). Freshness is structural, not queried: the holder's
+   * process-instance component makes a new process a NEW engine
+   * session, so 0 never collides; a park/re-activate within one
+   * process reuses the counter. (A holder scheme WITHOUT a process
+   * component would need a stored-max floor instead; no such scheme
+   * exists.) Tests that construct throwaway
+   * sinks may omit `localSeqRef` and get a private counter from 0 —
+   * sound for a fresh session id per test engine.
    */
   constructor(options: {
     /** The co-hosted engine per space (memory server's own engines). */
     engineFor: (space: MemorySpace) => Engine;
     /** The service session framing the wave's commits are recorded
-     * under (replay detection keys on it — see the constructor doc). */
+     * under (replay detection keys on it — see the constructor doc).
+     * The SpaceServer passes the DR1 holder identity. */
     sessionId: string;
     principal?: string;
+    /** The shared, process-lifetime localSeq counter (see the
+     * constructor doc). Mutated in place. */
+    localSeqRef?: { value: number };
   }) {
     this.#engineFor = options.engineFor;
     this.#sessionId = options.sessionId;
     this.#principal = options.principal;
+    this.#localSeq = options.localSeqRef ?? { value: 0 };
   }
 
   currentHeads(
@@ -112,7 +116,7 @@ export class EngineWaveCommitSink implements WaveCommitSink {
   ): Promise<Result<{ seq: number }, WaveCommitRejection>> {
     const engine = this.#engineFor(batch.space);
     const commit = {
-      localSeq: ++this.#localSeq,
+      localSeq: ++this.#localSeq.value,
       reads: { confirmed: [], pending: [] },
       operations: [...batch.operations],
       ...(batch.preconditions.length > 0
@@ -121,43 +125,46 @@ export class EngineWaveCommitSink implements WaveCommitSink {
     };
     try {
       if (!batch.home) {
-        // Foreign provisioning commit (protocol.md §2b): authored-class,
-        // idempotent by deterministic destination ids — no wave-basis
-        // re-verification and no basis rows.
+        // Foreign provisioning commit (protocol.md §2b): authored-class
+        // under the DELEGATED admission row — the batch's carried acting
+        // identity + capabilityRef ride the commit metadata, admission
+        // validates completeness, and scoped writes key from the CARRIED
+        // identity. Idempotent by deterministic destination ids — no
+        // wave-basis re-verification and no basis rows.
         //
-        // Scoped writes are REFUSED here, not silently mis-keyed: this
-        // plain applyCommit path drops the batch's annotations, so a
-        // scoped op would key from the sink's own principal/session —
-        // the empty-instance trap, cross-space edition (protocol.md §1,
-        // §2). No stage-D producer emits scoped foreign writes
-        // (`.inSpace` provisioning is space-scoped); admitting one takes
-        // the acting-identity + capabilityRef delegated-admission row,
-        // which lands with stages F/G.
-        for (const op of batch.operations) {
-          if (
-            op.op === "sqlite" || op.scope === undefined ||
-            op.scope === "space"
-          ) {
-            continue;
+        // A scoped write with NO delegated carriage is still REFUSED,
+        // not silently mis-keyed: the plain path would key it from the
+        // sink's own principal — the empty-instance trap, cross-space
+        // edition (protocol.md §1, §2).
+        if (batch.delegated === undefined) {
+          for (const op of batch.operations) {
+            if (
+              op.op === "sqlite" || op.scope === undefined ||
+              op.scope === "space"
+            ) {
+              continue;
+            }
+            return Promise.resolve({
+              error: {
+                name: "WaveCommitRejected",
+                message: "scoped write in a foreign wave batch refused " +
+                  `(op ${op.id}, scope "${op.scope}"): without delegated ` +
+                  "carriage the row would silently key from the sink's " +
+                  "own principal; scoped foreign admission requires the " +
+                  "acting-identity + capabilityRef delegated row " +
+                  "(protocol.md §2, §2b)",
+              },
+            });
           }
-          return Promise.resolve({
-            error: {
-              name: "WaveCommitRejected",
-              message: "scoped write in a foreign wave batch refused " +
-                `(op ${op.id}, scope "${op.scope}"): the stage-D sink ` +
-                "applies foreign batches without identity annotations, " +
-                "so the row would silently key from the sink's own " +
-                "principal; foreign scoped admission needs the " +
-                "stage-F/G delegated-admission carriage (protocol.md " +
-                "§2, §2b)",
-            },
-          });
         }
         const applied = applyCommit(engine, {
           sessionId: this.#sessionId,
           space: batch.space,
           principal: this.#principal,
           commit,
+          ...(batch.delegated === undefined
+            ? {}
+            : { delegated: batch.delegated }),
         });
         return Promise.resolve({ ok: { seq: applied.seq } });
       }
@@ -170,6 +177,9 @@ export class EngineWaveCommitSink implements WaveCommitSink {
         holder: batch.holder,
         annotations: batch.annotations,
         consequenceOf: batch.consequenceOf,
+        ...(batch.derivedThrough === undefined
+          ? {}
+          : { derivedThrough: batch.derivedThrough }),
         waveBasis: {
           basisSeq: batch.basisSeq,
           rebasedHeads: batch.rebasedHeads,

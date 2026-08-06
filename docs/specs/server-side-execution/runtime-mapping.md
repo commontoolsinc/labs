@@ -95,8 +95,8 @@ Status legend:
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
-| 40 | `systemPatternAutoUpdate`: post-instantiation background source check; pre-bootstrap default-root reconcile; schema-compat gate; pointer write | `pattern-updater.ts:70-531` (`80-122`, `442-465`, `476-511`), hook `runner.ts:2133-2146`; flag `docs/development/EXPERIMENTAL_OPTIONS.md` §systemPatternAutoUpdate | none | GAP |
-| 41 | `patternIdentity` watcher: live hot-swap of running pieces on pointer change (setup, teardown, reinstantiate); unloadable-pointer roll-forward (CT-1923) | `runner.ts:2158-2341` (`2202`, `2168-2200`, `2259-2317`) | none | GAP |
+| 40 | `systemPatternAutoUpdate`: post-instantiation background source check; pre-bootstrap default-root reconcile; schema-compat gate; pointer write | `pattern-updater.ts:70-531` (`80-122`, `442-465`, `476-511`), hook `runner.ts:2306-2318`; flag `docs/development/EXPERIMENTAL_OPTIONS.md` §systemPatternAutoUpdate | serving-loop.md §3e | COVERED (stage F: the serving-runtime factory enables the flag server-side; the check half's source probe against a fully-local store is the flagged stage-F residual) |
+| 41 | `patternIdentity` watcher: live hot-swap of running pieces on pointer change (setup, teardown, reinstantiate); unloadable-pointer roll-forward (CT-1923) | `runner.ts:2331-2513` (`2375-2512`, `2340-2379`, `2418-2490`) | serving-loop.md §3e | COVERED (stage F: the swap runs in the SpaceServer — a pointer write is ordinary authored input; the swap's setup write stamps the `bookkeeping` kind; end-to-end test in `executor-serving-loop.test.ts`) |
 | 42 | Piece source lifecycle records (revisions, transitions, provenance) | `runner.ts:623-748`, `6578-6903` | none (authored data; rides along) | COVERED |
 
 ### 1g. Built-ins

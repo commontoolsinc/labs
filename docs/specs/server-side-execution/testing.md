@@ -31,7 +31,9 @@ implemented as the gates below. Method inherited from the v1 learning run
 
 From the first PR with testable behavior: the integration suites run
 twice — `EXPERIMENTAL_SERVER_EXECUTION` OFF (must be byte-identical
-to today; any OFF-arm diff is a Phase-gate failure by itself) and
+to today up to the recorded key-vocabulary §5 acceptances (RULED
+2026-08-05); any other OFF-arm diff is a Phase-gate failure by
+itself) and
 ON. The ON arm is allowed to skip
 not-yet-implemented phases via explicit skip lists per phase, never via
 silent filtering. (v1's terminal failure mode: the flags-on branch never

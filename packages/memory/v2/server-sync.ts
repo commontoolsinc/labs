@@ -3,21 +3,34 @@ import {
   type CellScope,
   type EntitySnapshot,
   type GraphQuery,
+  resolveScopeKey,
+  type ScopeKey,
+  type ScopeKeyIdentity,
   type SessionSync,
   type SessionSyncUpsert,
   type WatchSpec,
 } from "../v2.ts";
 import { toDirtyKey } from "./query.ts";
 
-export type SessionCacheEntry = SessionSyncUpsert & { scope: CellScope };
+/**
+ * A session's cached snapshot of one tracked doc INSTANCE. `scopeKey` is
+ * server-internal (the wire upsert keeps the scope NAME — a client's
+ * instances resolve from its session, protocol.md §1): it keys the cache
+ * and the tracked-id set per instance (scopes.md §7 M4, stage F), so two
+ * principals' instances of one doc never collapse to one entry.
+ */
+export type SessionCacheEntry = SessionSyncUpsert & {
+  scope: CellScope;
+  scopeKey: ScopeKey;
+};
 
 const DEFAULT_SCOPE: CellScope = "space";
 
 export const cacheKeyForEntity = (
   branch: string,
   id: string,
-  scope: CellScope = DEFAULT_SCOPE,
-): string => `${branch}\0${scope}\0${id}`;
+  scopeKey: ScopeKey = "space",
+): string => `${branch}\0${scopeKey}\0${id}`;
 
 export const sameSnapshot = (
   left: SessionCacheEntry | undefined,
@@ -28,7 +41,7 @@ export const sameSnapshot = (
   }
   return left.branch === right.branch &&
     left.id === right.id &&
-    left.scope === right.scope &&
+    left.scopeKey === right.scopeKey &&
     left.seq === right.seq &&
     left.deleted === right.deleted;
 };
@@ -36,14 +49,26 @@ export const sameSnapshot = (
 export const isEmptySync = (sync: SessionSync): boolean =>
   sync.upserts.length === 0 && sync.removes.length === 0;
 
+/**
+ * Build a session cache entry for one tracked instance. The instance key
+ * is the TRACKED one — passed by callers that walked a graph state's
+ * instance-keyed entries — falling back to the session identity's own
+ * resolution for the entity's declared scope (the two agree everywhere a
+ * root did not name an explicit foreign instance).
+ */
 export const toCacheEntry = (
   entity: EntitySnapshot,
+  identity: ScopeKeyIdentity,
+  scopeKey?: ScopeKey,
 ): SessionCacheEntry => {
+  const scope = entity.scope ?? DEFAULT_SCOPE;
+  const instanceKey = scopeKey ?? resolveScopeKey(scope, identity);
   if (entity.document === null) {
     return {
       branch: entity.branch,
       id: entity.id,
-      scope: entity.scope ?? DEFAULT_SCOPE,
+      scope,
+      scopeKey: instanceKey,
       seq: entity.seq,
       deleted: true,
     };
@@ -51,7 +76,8 @@ export const toCacheEntry = (
   return {
     branch: entity.branch,
     id: entity.id,
-    scope: entity.scope ?? DEFAULT_SCOPE,
+    scope,
+    scopeKey: instanceKey,
     seq: entity.seq,
     doc: entity.document,
   };
@@ -62,9 +88,41 @@ export const trackedIdsFromEntries = (
 ): Set<string> => {
   const ids = new Set<string>();
   for (const entry of entries) {
-    ids.add(toDirtyKey(entry.id, entry.scope));
+    ids.add(toDirtyKey(entry.id, entry.scopeKey));
   }
   return ids;
+};
+
+/**
+ * The wire form of a cache entry: the server-internal `scopeKey` is
+ * STRIPPED — the wire carries scope NAMES, and a client's instances
+ * resolve from its authenticated session (protocol.md §1; clients never
+ * receive keys). Every path that puts cache entries into a `SessionSync`
+ * frame goes through this, so the instance keying stays server-internal
+ * and the OFF-arm wire is byte-identical.
+ */
+export const toWireUpsert = (
+  entry: SessionCacheEntry,
+): SessionSyncUpsert => {
+  // Field order matches the pre-instance-keying cache entry exactly
+  // (branch, id, scope, seq, then deleted|doc), so serialized frames are
+  // byte-identical to before the re-key.
+  if (entry.deleted === true) {
+    return {
+      branch: entry.branch,
+      id: entry.id,
+      scope: entry.scope,
+      seq: entry.seq,
+      deleted: true,
+    };
+  }
+  return {
+    branch: entry.branch,
+    id: entry.id,
+    scope: entry.scope,
+    seq: entry.seq,
+    ...(entry.doc === undefined ? {} : { doc: entry.doc }),
+  };
 };
 
 const compareSyncAddress = (
@@ -140,7 +198,7 @@ export const buildFullSync = (
   const removes = [...previous.values()]
     .filter((entry) =>
       !next.has(
-        cacheKeyForEntity(entry.branch, entry.id, entry.scope),
+        cacheKeyForEntity(entry.branch, entry.id, entry.scopeKey),
       )
     )
     .map((entry) => ({
@@ -149,7 +207,8 @@ export const buildFullSync = (
       scope: entry.scope,
     }))
     .sort(compareSyncAddress);
-  const upserts = [...next.values()].sort(compareSyncAddress);
+  const upserts = [...next.values()].sort(compareSyncAddress)
+    .map(toWireUpsert);
   return {
     type: "sync",
     fromSeq,
@@ -183,7 +242,7 @@ export const buildDiffSync = (
     type: "sync",
     fromSeq,
     toSeq,
-    upserts: upserts.toSorted(compareSyncAddress),
+    upserts: upserts.toSorted(compareSyncAddress).map(toWireUpsert),
     removes,
   };
 };

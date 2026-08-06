@@ -158,37 +158,48 @@ inventory, not observation: §4's first tripwire covers it — a new
 entry, or a change to a listed one that does not update this
 section, fires it.
 
-**M4-coupled** — the wire still carries scope NAMES, so these re-key
-WITH stage F's M4 push re-key, not before:
+**M4-coupled — RE-KEYED at stage F** (with the M4 push re-key, as
+this section's disposition required; each site now constructs
+instance keys via the shared vocabulary from an explicitly supplied
+identity, partition-unchanged at cardinality 1 per §2's argument):
 
-- `storage/selector-tracker.ts:13-14` — `toKey`,
-  `${scope-name}\0${id}` over the subscription selector set. Failure
-  at cardinality > 1: A's watch dedupes B's, so B never subscribes.
-- `storage/v2.ts:843` — `#docPullKicks` (keys built in
-  `shouldPullDoc`, `:1310-1327`, via `docKey`, `:2043-2044`).
-  Failure: A's kick suppresses B's pull, and B's doc never loads.
+- `storage/selector-tracker.ts` — `toKey` is now an instance method
+  over the tracker's BOUND identity (constructor-injected thunk):
+  `${scope_key}\0${id}`. The failure it closed: A's watch deduped
+  B's, so B never subscribed.
+- `storage/v2.ts` — `#docPullKicks` keys build in `#pullKickKey`
+  via the manager's own identity. The failure it closed: A's kick
+  suppressed B's pull, and B's doc never loaded.
 - the server's wake/sync dirty keys — `toDirtyKey` =
-  `${scope-name}\0${id}` (`packages/memory/v2/query.ts:773-776`;
-  marked at `server.ts:2092-2098`, dirty sets at `server.ts:845-847`;
-  the per-session sync cache derives its tracked ids through the
-  same call, `server-sync.ts:65`, and keys its entity cache
-  `${branch}\0${scope-name}\0${id}`, `server-sync.ts:16-20`). This
-  is scopes.md §7 M4 itself: sound while each session re-evaluates
-  only its own instance; cross-instance dirty collapse once one
-  server hosts every instance.
+  `${scope_key}\0${id}` (`packages/memory/v2/query.ts`), marked at
+  admission from the COMMITTING session's resolved instance; the
+  per-session sync cache carries `scopeKey` on its entries and keys
+  `${branch}\0${scope_key}\0${id}` (`server-sync.ts`), with the
+  wire upserts STRIPPED back to scope names (`toWireUpsert`) so
+  frames stay byte-identical. This was scopes.md §7 M4 itself:
+  dirtiness AND delivery now key by instance, and one principal's
+  commit touches only sessions tracking THAT instance.
 
-**Stage-F serving hazards** — per-instance run identity (scopes.md
-§7 M1) territory; re-key in the stage-F serving work:
+**Stage-F serving-identity sites — RE-KEYED at stage F** (M1
+territory; keys construct from the runtime's identity today and take
+per-run identities where run contexts carry them):
 
-- `runtime.ts:1597` — `missingDocLoadKicks` (key at `:1619`,
-  `${space}\0${scope-name}\0${id}`). Failure: A's kick suppresses
-  B's load, so B's absent read never heals.
-- `scheduler/wake-shaping.ts:340-347` — `linkKey`
-  (`space|scope-name|id|path`), plus the pieceId buckets
-  `${scope-name}:${id}` (`runner.ts:3396`, `:5433`). Failure: shaper
-  groups and rate caps collapse across principals — cross-principal
-  budget consumption, and a timing channel that correlates one
-  principal's activity with another's wakes.
+- `runtime.ts` — `missingDocLoadKicks` keys
+  `${space}\0${scope_key}\0${id}` via the runtime's identity. The
+  failure it closed: A's kick suppressed B's load, so B's absent
+  read never healed.
+- `scheduler/wake-shaping.ts` — `linkKey`
+  (`space|scope_key|id|path`, identity-parameterized), plus the
+  pieceId buckets `${scope_key}:${id}` (`runner.ts`
+  `schedulerObservationIdentity` and the handler tagging twin). The
+  failure they closed: shaper groups and rate caps collapsed across
+  principals — cross-principal budget consumption, and a timing
+  channel correlating one principal's activity with another's wakes.
+  (The re-key also normalized the observation-identity constructor's
+  raw `undefined:` prefix into `space:` — the same instance by
+  definition; the two constructors now agree. The OFF-arm shaper-merge
+  delta this produces is a recorded acceptance, ratified 2026-08-05 —
+  verification-coverage.md's stage-F recorded-acceptance row.)
 
 **Recorded sound-per-session:**
 
@@ -199,18 +210,20 @@ WITH stage F's M4 push re-key, not before:
   holds was read as that identity. Re-key only if the manager
   sharing model ever changes.
 
-**Identity-bound invariant** (guard owed at stage F):
+**Identity-bound invariant — GUARD LANDED at stage F (OW10):**
 
 - the shared schema memo — `schemaMemoAddressKey`
-  (`traverse.ts:190-196`) has no identity component, and every
-  sharing scope is single-identity today: `TrackedGraphState.memo`
-  is bound to its manager (`packages/memory/v2/query.ts:54`), and
-  the query path's `sharedMemo` instances are per-call
-  (`query.ts:347`, `:557`). Sharing one memo across identities is
-  FORBIDDEN — schema narrowing memoized under one principal's
-  traversal would leak into another's (value-bleed). An explicit
-  guard or assertion is owed at stage F before any cross-run memo
-  sharing lands.
+  (`traverse.ts`) has no identity component, and every sharing scope
+  is single-identity today: `TrackedGraphState.memo` is bound to its
+  manager (`packages/memory/v2/query.ts`), and the query path's
+  `sharedMemo` instances are per-call. Sharing one memo across
+  identities is FORBIDDEN — schema narrowing memoized under one
+  principal's traversal would leak into another's (value-bleed). The
+  guard: `assertSchemaMemoIdentity` (`traverse.ts`) binds a shared
+  memo to its FIRST traversal's identity at the one choke point
+  where a shared memo meets a traversal (the SchemaObjectTraverser
+  constructor) and throws on any other identity — a future sharing
+  change becomes a loud error, never silent value-bleed.
 
 **Instance-safe transients** (why each is fine as-is):
 

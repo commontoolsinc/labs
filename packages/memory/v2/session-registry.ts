@@ -20,6 +20,11 @@ export type SessionState = {
    * removes, so the next sync must run a FULL watch evaluation to re-diff
    * them out (CT-1927 review, round 7). Self-clearing. */
   forceFullResync: boolean;
+  /** Set once this session was admitted an explicit `entity_scope_key`
+   * read (protocol.md §2's read row — lease holders only): the push
+   * path's applicable-set filter (protocol.md §3) exempts it, since the
+   * lease holder legitimately reads and receives every instance. */
+  leaseHolderReads?: boolean;
   expiresAt: number | null;
   ownerConnectionId: string | null;
   principal?: string;
@@ -113,6 +118,9 @@ export class SessionRegistry {
       caughtUpLocalSeq: existing?.caughtUpLocalSeq ?? 0,
       pendingCaughtUpLocalSeq: existing?.pendingCaughtUpLocalSeq ?? 0,
       forceFullResync: existing?.forceFullResync ?? false,
+      ...(existing?.leaseHolderReads === true
+        ? { leaseHolderReads: true }
+        : {}),
       expiresAt: null,
       ownerConnectionId,
       principal: existing?.principal ?? principal,

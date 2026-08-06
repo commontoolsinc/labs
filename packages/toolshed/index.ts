@@ -13,7 +13,11 @@ import { identity } from "@/lib/identity.ts";
 import type { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createToolshedRuntime } from "@/runtime-options.ts";
-import { memory } from "@/routes/storage/memory.ts";
+import { memory, memoryServer } from "@/routes/storage/memory.ts";
+import {
+  startServerExecutionHost,
+  stopServerExecutionHost,
+} from "@/lib/server-execution.ts";
 import { shutdownOpenTelemetry } from "@/lib/otel.ts";
 
 // Create a global runtime instance for the server
@@ -77,6 +81,7 @@ const handleShutdown = async () => {
         ac.abort();
 
         console.log("Closing memory system...");
+        await stopServerExecutionHost();
         const result = await memory.close();
         if ("error" in result) {
           console.error("Error closing memory:", result.error);
@@ -105,6 +110,14 @@ function startServer(onListening?: () => void) {
   // log distinguishes it from production. Announce it before anything else.
   announceCloneIfServed({ memoryDir: env.MEMORY_DIR, dbPath: env.DB_PATH });
   initializeRuntime();
+  // Server-execution v2 (stage F): under EXPERIMENTAL_SERVER_EXECUTION
+  // this process hosts the serving loop; OFF (the default) this is a
+  // no-op and toolshed is byte-identical to today.
+  startServerExecutionHost({
+    server: memoryServer,
+    identity,
+    apiUrl: new URL(env.API_URL),
+  });
 
   const serverOptions = {
     hostname: env.HOST,

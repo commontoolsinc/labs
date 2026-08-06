@@ -57,10 +57,11 @@ machinery marks the cites that resolve only against main.
 - **Dirtiness**: the server's query/watch tracking and the client
   dependency graph are keyed per scope INSTANCE via the shared
   vocabulary (`entityKey`, `scheduler/keys.ts:26-33`;
-  `packages/memory/v2/query.ts`'s `toDocKey` — stage E, §7 M2). The
-  per-session wake path still keys dirtiness by `(id, scope-name)`
-  (M4 — stage F re-keys push). The full inventory of instance-keyed
-  construction sites is [key-vocabulary.md](key-vocabulary.md).
+  `packages/memory/v2/query.ts`'s `toDocKey` — stage E, §7 M2), and
+  since stage F the wake/sync path keys dirtiness AND delivery per
+  instance too (`toDirtyKey` = `${scope_key}\0${id}` — §7 M4,
+  landed). The full inventory of instance-keyed construction sites
+  is [key-vocabulary.md](key-vocabulary.md).
 
 ## 1. North star
 
@@ -359,18 +360,22 @@ kept because the assumption they document is main's.
   only. Admission for derived stays the lease equality check,
   unchanged — no per-principal admission, no delegated-capability
   extension to scoped derived writes.
-- **M4 — Wake/sync dirties by scope NAME.** Storage-side reader
-  matching is exact-scope_key (main
-  `packages/memory/v2/engine.ts:3024-3066`,
+- **M4 — Wake/sync dirtied by scope NAME — RESOLVED (stage F,
+  landed dark).** Storage-side reader matching is exact-scope_key
+  (main `packages/memory/v2/engine.ts:3024-3066`,
   `findSchedulerReadersForWrite` — deleted on this branch with the
   observation reduction; the branch's query/watch tracking is
-  scope_key-keyed, M2), but the wake/sync path keys dirtiness by
-  `(id, scope-name)` (`toDirtyKey`,
-  `packages/memory/v2/query.ts:773-776`; marked at
-  `server.ts:2092-2098`, dirty sets `server.ts:845-847`;
-  key-vocabulary.md §5's M4-coupled list) — fine while each session
-  re-evaluates only itself, quadratic waste once one server hosts
-  every instance. → v2: the push path must key by scope_key.
+  scope_key-keyed, M2), and the wake/sync path now keys dirtiness
+  AND delivery by scope INSTANCE (`toDirtyKey` =
+  `${scope_key}\0${id}`, `packages/memory/v2/query.ts`; the session
+  cache and tracked-id sets carry instance keys, and the wire frames
+  are stripped back to scope names — key-vocabulary.md §5's
+  re-keyed list). The name-keyed form was fine while each session
+  re-evaluated only itself and collapsed instances once one server
+  hosts them all; with the re-key, one principal's commit touches
+  only the sessions tracking THAT instance (protocol.md §3's
+  applicable set falls out structurally, since a session's graph
+  evaluates under its own identity).
 - **M5 — Retention assumes instances are cheap to re-derive per
   owner.** Session EXECUTION CONTEXTS are capped at 32 per action
   (main `packages/memory/v2/engine.ts:55`,

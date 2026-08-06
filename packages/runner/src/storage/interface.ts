@@ -176,6 +176,11 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
+  /** INBOUND settlement only (server-execution v2 stage F): watch
+   * refreshes + update processing, excluding commit settlement — the
+   * serving loop's wave-settle barrier (a sealed commit settles at the
+   * wave commit itself, so the full synced() would deadlock there). */
+  inputSynced?(): Promise<void>;
 
   /**
    * A throwable `AuthorizationError` when `space` is under a permanent
@@ -354,6 +359,11 @@ export interface IStorageProvider {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
+  /** INBOUND settlement only (server-execution v2 stage F): watch
+   * refreshes + update processing, excluding commit settlement — the
+   * serving loop's wave-settle barrier (a sealed commit settles at the
+   * wave commit itself, so the full synced() would deadlock there). */
+  inputSynced?(): Promise<void>;
 
   /**
    * Destroy the storage provider. Used for tests only.
@@ -1001,6 +1011,20 @@ export interface ITransactionSealSink {
     native: NativeStorageCommit,
     source: IStorageTransaction,
   ): Promise<Result<Unit, CommitError>>;
+  /**
+   * The read set of a space this transaction READ but wrote nothing to
+   * (stage F, discharging a stage-D bound): a tx seals only spaces it
+   * wrote (or gated), so without this handoff a read in a read-only
+   * space never reaches the accumulator and a withdrawn writer there
+   * cannot fold the reader into the withdrawal (serving-loop.md §3d: no
+   * blind derived writes). Called once per read-only space, inside the
+   * same `sealInto` call as the space commits. Optional: sinks that
+   * predate the handoff simply keep the documented bound.
+   */
+  sealSpaceReads?(
+    space: MemorySpace,
+    reads: readonly IMemorySpaceAddress[],
+  ): void;
 }
 
 /**

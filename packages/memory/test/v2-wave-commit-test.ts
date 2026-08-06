@@ -114,7 +114,7 @@ Deno.test("wave carriage: a derived commit stores annotations and consequenceOf;
   try {
     const holder = withLiveLease(engine);
     const applied = applyWaveCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: holder,
       space: SPACE,
       commit: setCommit(1, [
         { id: "of:plain" },
@@ -156,6 +156,242 @@ Deno.test("wave carriage: a derived commit stores annotations and consequenceOf;
   }
 });
 
+Deno.test("wave admission: a derived commit under a session other than the holder's own service session is refused (protocol.md §2, RULED 2026-08-05)", async () => {
+  const { engine } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = withLiveLease(engine);
+    // The commit names the RIGHT holder — the lease equality alone would
+    // pass — but its producing session is a user session. The
+    // derived-envelope defense-in-depth refuses it: the engine-side
+    // mapping is `resolveCommitSessionKey(sessionId, principal) ===
+    // holder`, i.e. the holder's own service session is the engine
+    // session whose key equals the holder identity (mirrors the model's
+    // admitDerived envelope comparison).
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "user-session-1",
+          principal: "did:key:alice",
+          space: SPACE,
+          commit: setCommit(1, [{ id: "of:doc" }]),
+          commitClass: "derived",
+          holder,
+        }),
+      ProtocolError,
+      "producing session is not the lease holder's own service session",
+    );
+    // A principal-less internal session that is not the holder's is
+    // refused the same way — the gap this closes is exactly "any honest
+    // internal caller naming the right holder".
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:some-other-writer",
+          space: SPACE,
+          commit: setCommit(1, [{ id: "of:doc" }]),
+          commitClass: "derived",
+          holder,
+        }),
+      ProtocolError,
+      "producing session is not the lease holder's own service session",
+    );
+    // The holder's own service session is admitted.
+    const applied = applyCommit(engine, {
+      sessionId: holder,
+      space: SPACE,
+      commit: setCommit(1, [{ id: "of:doc" }]),
+      commitClass: "derived",
+      holder,
+    });
+    assertEquals(applied.seq, 1);
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
+Deno.test("wave carriage: derivedThrough is stored on derived commits and refused on other classes (protocol.md §4, §7)", async () => {
+  const { engine, path } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = withLiveLease(engine);
+    const applied = applyCommit(engine, {
+      sessionId: holder,
+      space: SPACE,
+      commit: setCommit(1, [{ id: "of:doc" }]),
+      commitClass: "derived",
+      holder,
+      derivedThrough: 7,
+    });
+    const db = new Database(path, { readonly: true });
+    try {
+      const row = db.prepare(
+        `SELECT derived_through FROM "commit" WHERE seq = :seq`,
+      ).get({ seq: applied.seq }) as { derived_through: number | null };
+      assertEquals(row.derived_through, 7);
+    } finally {
+      db.close();
+    }
+    // Closed metadata list: derivedThrough is derived-only carriage.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "client-session",
+          principal: "did:key:alice",
+          space: SPACE,
+          commit: setCommit(1, [{ id: "of:other" }]),
+          derivedThrough: 9,
+        }),
+      ProtocolError,
+      "derived-commit carriage only",
+    );
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
+Deno.test("delegated admission: the engine refuses delegated carriage on derived and system classes, and partial carriage on authored (protocol.md §2's delegated row)", async () => {
+  const { engine, path } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = withLiveLease(engine);
+    const delegated = {
+      actingPrincipal: "did:key:alice",
+      actingSession: "sess-1",
+      capabilityRef: "cap:grant",
+    };
+    // Delegated carriage on a DERIVED commit: refused — a derived
+    // commit's identity rides its per-write annotations.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: holder,
+          space: SPACE,
+          commit: setCommit(1, [{ id: "of:delegated-derived" }]),
+          commitClass: "derived",
+          holder,
+          delegated,
+        }),
+      ProtocolError,
+      "server-produced AUTHORED admission only",
+    );
+    // Delegated carriage on a SYSTEM commit: refused (authored-only).
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:direct",
+          space: SPACE,
+          commit: setCommit(1, [{ id: "of:delegated-system" }]),
+          commitClass: "system",
+          delegated,
+        }),
+      ProtocolError,
+      "authored-class admission only",
+    );
+    // Partial carriage (a grant with no actor, an actor with no grant):
+    // refused loudly, never defaulted.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:outbox",
+          space: SPACE,
+          commit: setCommit(1, [{ id: "of:delegated-partial" }]),
+          delegated: {
+            actingPrincipal: "",
+            capabilityRef: "cap:grant",
+          },
+        }),
+      ProtocolError,
+      "partial carriage is refused",
+    );
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:outbox",
+          space: SPACE,
+          commit: setCommit(1, [{ id: "of:delegated-partial-2" }]),
+          delegated: {
+            actingPrincipal: "did:key:alice",
+            capabilityRef: "",
+          },
+        }),
+      ProtocolError,
+      "partial carriage is refused",
+    );
+    // Full carriage on authored: admitted; scoped writes key from the
+    // CARRIED identity, and the trio is stored on the commit row.
+    const applied = applyCommit(engine, {
+      sessionId: "server:outbox",
+      space: SPACE,
+      commit: setCommit(1, [{ id: "of:delegated-scoped", scope: "user" }]),
+      delegated,
+    });
+    assertEquals(
+      revisionScopeKeys(path, "of:delegated-scoped"),
+      ["user:did%3Akey%3Aalice"],
+    );
+    const db = new Database(path, { readonly: true });
+    try {
+      const row = db.prepare(
+        `SELECT class, acting_principal, acting_session, capability_ref
+         FROM "commit" WHERE seq = :seq`,
+      ).get({ seq: applied.seq }) as Record<string, string>;
+      assertEquals(row.class, "authored");
+      assertEquals(row.acting_principal, "did:key:alice");
+      assertEquals(row.acting_session, "sess-1");
+      assertEquals(row.capability_ref, "cap:grant");
+    } finally {
+      db.close();
+    }
+    // A SESSIONLESS delegated batch (no actingSession) carrying a
+    // SESSION-scoped op: refused at admission — a sessionless actor has
+    // no session instance (scopes.md §5), and falling through would key
+    // the row `session:<actingPrincipal>:<delegating envelope session>`,
+    // a chimera instance no party ever acted as.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:outbox",
+          space: SPACE,
+          commit: setCommit(2, [{
+            id: "of:delegated-sessionless",
+            scope: "session",
+          }]),
+          delegated: {
+            actingPrincipal: "did:key:alice",
+            capabilityRef: "cap:grant",
+          },
+        }),
+      ProtocolError,
+      "sessionless delegated",
+    );
+    // The same sessionless carriage with only USER- and space-scoped
+    // ops admits: no session component enters those keys, so the
+    // absent actingSession is legitimate (a derivation-emitted chain).
+    applyCommit(engine, {
+      sessionId: "server:outbox",
+      space: SPACE,
+      commit: setCommit(3, [
+        { id: "of:delegated-sessionless-user", scope: "user" },
+        { id: "of:delegated-sessionless-space" },
+      ]),
+      delegated: {
+        actingPrincipal: "did:key:alice",
+        capabilityRef: "cap:grant",
+      },
+    });
+    assertEquals(
+      revisionScopeKeys(path, "of:delegated-sessionless-user"),
+      ["user:did%3Akey%3Aalice"],
+    );
+  } finally {
+    resetServerExecutionConfig();
+    close(engine);
+  }
+});
+
 Deno.test("wave carriage: a scoped write with no explicit scope_key is rejected, never defaulted (the silent-empty-instance trap)", async () => {
   const { engine } = await createEngine();
   setServerExecutionConfig(true);
@@ -164,7 +400,7 @@ Deno.test("wave carriage: a scoped write with no explicit scope_key is rejected,
     assertThrows(
       () =>
         applyCommit(engine, {
-          sessionId: "server:executor",
+          sessionId: holder,
           space: SPACE,
           commit: setCommit(1, [{ id: "of:scoped", scope: "user" }]),
           commitClass: "derived",
@@ -188,7 +424,7 @@ Deno.test("wave carriage: an annotated scope_key must match the write's declared
     assertThrows(
       () =>
         applyCommit(engine, {
-          sessionId: "server:executor",
+          sessionId: holder,
           space: SPACE,
           commit: setCommit(1, [{ id: "of:scoped", scope: "session" }]),
           commitClass: "derived",
@@ -217,7 +453,7 @@ Deno.test("wave carriage: a scope_key annotation targeting a space-scoped write 
     assertThrows(
       () =>
         applyCommit(engine, {
-          sessionId: "server:executor",
+          sessionId: holder,
           space: SPACE,
           commit: setCommit(1, [{ id: "of:plain" }]),
           commitClass: "derived",
@@ -232,7 +468,7 @@ Deno.test("wave carriage: a scope_key annotation targeting a space-scoped write 
     assertThrows(
       () =>
         applyWaveCommit(engine, {
-          sessionId: "server:executor",
+          sessionId: holder,
           space: SPACE,
           commit: setCommit(2, [{ id: "of:plain" }]),
           commitClass: "derived",
@@ -297,7 +533,7 @@ Deno.test("wave commit: re-verification throws NAMING docs whose head passed the
     const error = assertThrows(
       () =>
         applyWaveCommit(engine, {
-          sessionId: "server:executor",
+          sessionId: holder,
           space: SPACE,
           commit: setCommit(1, [{ id: "of:x" }, { id: "of:y" }]),
           commitClass: "derived",
@@ -338,7 +574,7 @@ Deno.test("wave commit: a rebased doc re-verifies against the exact head its mer
     // The wave rebased its write to of:x against head 1: the batch still
     // writes it, and re-verification requires the head to EQUAL 1.
     const applied = applyWaveCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: holder,
       space: SPACE,
       commit: setCommit(1, [{ id: "of:x" }, { id: "of:y" }]),
       commitClass: "derived",
@@ -361,7 +597,7 @@ Deno.test("wave commit: a rebased doc re-verifies against the exact head its mer
     const error = assertThrows(
       () =>
         applyWaveCommit(engine, {
-          sessionId: "server:executor",
+          sessionId: holder,
           space: SPACE,
           commit: setCommit(3, [{ id: "of:x" }]),
           commitClass: "derived",
@@ -395,7 +631,7 @@ Deno.test("wave commit: precondition failures are named BY INDEX, and nothing is
     const error = assertThrows(
       () =>
         applyWaveCommit(engine, {
-          sessionId: "server:executor",
+          sessionId: holder,
           space: SPACE,
           commit: {
             ...setCommit(1, [{ id: "of:out" }]),
@@ -424,7 +660,7 @@ Deno.test("wave commit: basis rows land in the same transaction; in-wave reads s
   try {
     const holder = withLiveLease(engine);
     const applied = applyWaveCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: holder,
       space: SPACE,
       commit: setCommit(1, [{ id: "of:out" }]),
       commitClass: "derived",

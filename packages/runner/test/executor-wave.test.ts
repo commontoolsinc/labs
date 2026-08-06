@@ -119,7 +119,11 @@ describe("stage D seal-into-wave", () => {
   const newSink = (): EngineWaveCommitSink =>
     new EngineWaveCommitSink({
       engineFor: () => engine,
-      sessionId: "wave-test-service",
+      // The derived-envelope admission (protocol.md §2, RULED 2026-08-05)
+      // requires the producing session to BE the lease holder's own
+      // service session, so the sink commits under the holder identity —
+      // exactly the stage-F SpaceServer posture.
+      sessionId: executionLeaseHolder(`service:${space}`),
     });
 
   const liveLease = (): ExecutionLeaseCycle => {
@@ -560,7 +564,7 @@ describe("stage D seal-into-wave", () => {
       const { wave, order } = await runProvisioningWave(1);
       const inner = new EngineWaveCommitSink({
         engineFor: (s) => engines.get(s)!,
-        sessionId: "wave-test-service",
+        sessionId: executionLeaseHolder(`service:${space}`),
       });
       const recordingSink: WaveCommitSink = {
         currentHeads: (s, docs) => inner.currentHeads(s, docs),
@@ -590,7 +594,7 @@ describe("stage D seal-into-wave", () => {
       const { wave } = await runProvisioningWave(10);
       const inner = new EngineWaveCommitSink({
         engineFor: (s) => engines.get(s)!,
-        sessionId: "wave-test-service-2",
+        sessionId: executionLeaseHolder(`service:${space}`),
       });
       const failingSink: WaveCommitSink = {
         currentHeads: (s, docs) => inner.currentHeads(s, docs),
@@ -1399,5 +1403,385 @@ describe("stage D seal-into-wave", () => {
     expect(
       Engine.selectDocHead(engine, { id: droppedLink.id, scopeKey: "space" }),
     ).toBe(0);
+  });
+
+  it("stage F: delegated foreign scoped writes key from the CARRIED acting identity; missing or partial carriage is refused (protocol.md §2's delegated row)", async () => {
+    const foreignSigner = await Identity.fromPassphrase(
+      "wave delegated foreign space",
+    );
+    const foreign = foreignSigner.did() as MemorySpace;
+    const foreignEngine = await server.engineForSpace(foreign);
+    const lease = liveLease();
+    const engines = new Map<MemorySpace, Engine.Engine>([
+      [space, engine],
+      [foreign, foreignEngine],
+    ]);
+
+    const provision = async (
+      context: Parameters<typeof stampWaveRunContext>[1],
+      value: number,
+    ): Promise<WaveAccumulator> => {
+      const wave = newWave({ lease });
+      runtime.installSealDestination(wave);
+      const foreignScoped = runtime.getCell<{ value: number }>(
+        foreign,
+        "wave-delegated-scoped",
+        undefined,
+        undefined,
+        "user",
+      );
+      const home = runtime.getCell<{ value: number }>(
+        space,
+        "wave-delegated-home",
+        undefined,
+      );
+      const tx = runtime.edit();
+      stampWaveRunContext(tx, context);
+      tx.enableMultiSpaceWrites?.([foreign, space]);
+      foreignScoped.withTx(tx).set({ value });
+      home.withTx(tx).set({ value: value + 1 });
+      expect((await tx.commit()).error).toBeUndefined();
+      runtime.clearSealDestination();
+      return wave;
+    };
+
+    // WITH full delegated carriage: admitted; the foreign scoped row is
+    // keyed by the ACTING principal's instance — never the sink's own.
+    const acting = { user: "did:key:alice", session: "sess-1" };
+    const okWave = await provision({
+      actionId: "provision-scoped",
+      kind: "event-handler",
+      eventId: "e-delegated",
+      acting,
+      scopeKeyIdentity: { principal: acting.user, sessionId: acting.session },
+      capabilityRef: "cap:test-grant",
+    }, 7);
+    const sink = new EngineWaveCommitSink({
+      engineFor: (s) => engines.get(s)!,
+      sessionId: executionLeaseHolder(`service:${space}`),
+    });
+    const outcome = await okWave.commitWave(sink);
+    await okWave.settled();
+    expect(outcome.aborted).toBeUndefined();
+
+    const foreignRows = foreignEngine.database.prepare(
+      `SELECT scope_key FROM revision WHERE id = :id`,
+    ).all({
+      id: runtime.getCell<{ value: number }>(
+        foreign,
+        "wave-delegated-scoped",
+        undefined,
+        undefined,
+        "user",
+      ).getAsNormalizedFullLink().id,
+    }) as { scope_key: string }[];
+    expect(foreignRows.map((r) => r.scope_key)).toEqual([
+      "user:did%3Akey%3Aalice",
+    ]);
+    const meta = foreignEngine.database.prepare(
+      `SELECT class, acting_principal, acting_session, capability_ref
+       FROM "commit" ORDER BY seq DESC LIMIT 1`,
+    ).get() as Record<string, string>;
+    expect(meta.class).toBe("authored");
+    expect(meta.acting_principal).toBe("did:key:alice");
+    expect(meta.acting_session).toBe("sess-1");
+    expect(meta.capability_ref).toBe("cap:test-grant");
+
+    // WITHOUT the capabilityRef (partial carriage): the foreign batch has
+    // no delegated identity, so the scoped write is refused — never
+    // silently keyed from the sink's own principal.
+    const partialWave = await provision({
+      actionId: "provision-scoped-2",
+      kind: "event-handler",
+      eventId: "e-partial",
+      acting,
+      scopeKeyIdentity: { principal: acting.user, sessionId: acting.session },
+      // no capabilityRef
+    }, 21);
+    const outcome2 = await partialWave.commitWave(sink);
+    await partialWave.settled();
+    expect(outcome2.aborted).toBe("foreign-commit-failed");
+  });
+
+  it("stage F: a read in a space the run wrote nothing to folds the reader into a withdrawal (the discharged stage-D bound)", async () => {
+    const foreignSigner = await Identity.fromPassphrase(
+      "wave read-only space",
+    );
+    const foreign = foreignSigner.did() as MemorySpace;
+    const foreignEngine = await server.engineForSpace(foreign);
+    const lease = liveLease();
+    const engines = new Map<MemorySpace, Engine.Engine>([
+      [space, engine],
+      [foreign, foreignEngine],
+    ]);
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+
+    const foreignDoc = runtime.getCell<{ value: number }>(
+      foreign,
+      "wave-foreign-input",
+      undefined,
+    );
+    const homeIn = runtime.getCell<{ value: number }>(
+      space,
+      "wave-ro-home-in",
+      undefined,
+    );
+    const homeOut = runtime.getCell<{ value: number }>(
+      space,
+      "wave-ro-home-out",
+      undefined,
+    );
+
+    // Contribution 0: an event handler WRITES the foreign doc (multi-space
+    // seal) and a home doc.
+    const tx1 = runtime.edit();
+    stampWaveRunContext(tx1, {
+      actionId: "write-foreign",
+      kind: "event-handler",
+      eventId: "e-fw",
+      acting: { user: "did:key:alice", session: "sess-1" },
+      capabilityRef: "cap:test-grant",
+    });
+    tx1.enableMultiSpaceWrites?.([foreign, space]);
+    foreignDoc.withTx(tx1).set({ value: 5 });
+    homeIn.withTx(tx1).set({ value: 5 });
+    expect((await tx1.commit()).error).toBeUndefined();
+
+    // Contribution 1: a derivation READS the foreign doc (read-only in
+    // that space — the tx seals only the home space) and writes home.
+    const tx2 = runtime.edit();
+    stampWaveRunContext(tx2, {
+      actionId: "derive-from-foreign",
+      kind: "derivation",
+    });
+    const seen = foreignDoc.withTx(tx2).get();
+    homeOut.withTx(tx2).set({ value: (seen?.value ?? 0) + 1 });
+    expect((await tx2.commit()).error).toBeUndefined();
+
+    // A rival authored commit moves homeIn's head past the basis, which
+    // REQUEUES contribution 0 (whole-doc set never commutes) — its
+    // foreign write withdraws with it. Contribution 1 read that
+    // withdrawn foreign write in a space it wrote nothing to: without
+    // the sealSpaceReads handoff it would commit blind; with it, it
+    // folds into the withdrawal.
+    const homeInLink = homeIn.getAsNormalizedFullLink();
+    Engine.applyCommit(engine, {
+      sessionId: "rival-session",
+      principal: "user:rival",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: homeInLink.id,
+          value: { value: { value: 99 } },
+        }],
+      },
+    });
+
+    runtime.clearSealDestination();
+    const sink = new EngineWaveCommitSink({
+      engineFor: (s) => engines.get(s)!,
+      sessionId: executionLeaseHolder(`service:${space}`),
+    });
+    const outcome = await wave.commitWave(sink);
+    await wave.settled();
+
+    expect(outcome.requeuedEventIds).toEqual(["e-fw"]);
+    expect(outcome.dispositions[0]).toEqual({ kind: "requeued" });
+    // The reader of the withdrawn foreign write dropped with it — nothing
+    // derived from withdrawn state commits (serving-loop.md §3d).
+    expect(outcome.dispositions[1]).toEqual({ kind: "dropped" });
+    const outLink = homeOut.getAsNormalizedFullLink();
+    expect(
+      Engine.selectDocHead(engine, { id: outLink.id, scopeKey: "space" }),
+    ).toBe(0);
+  });
+
+  it("stage F: a bookkeeping contribution rebases commuting patches and carries derivedThrough; a semantic conflict drops it whole (Q4's sanctioned internal stamp kind)", async () => {
+    const lease = liveLease();
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+
+    const watermark = runtime.getCell<{ seq: number }>(
+      space,
+      "wave-watermark-doc",
+      undefined,
+    );
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, {
+      actionId: "serving-loop/watermark",
+      kind: "bookkeeping",
+    });
+    watermark.withTx(tx).set({ seq: 41 });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    runtime.clearSealDestination();
+    const outcome = await wave.commitWave(newSink(), { derivedThrough: 41 });
+    await wave.settled();
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.dispositions).toEqual([{ kind: "committed" }]);
+    const meta = engine.database.prepare(
+      `SELECT class, derived_through FROM "commit" WHERE seq = :seq`,
+    ).get({ seq: outcome.seq }) as { class: string; derived_through: number };
+    expect(meta.class).toBe("derived");
+    expect(meta.derived_through).toBe(41);
+
+    // A raced bookkeeping write whose op does not commute DROPS whole —
+    // no event exists to requeue; the loop re-derives its bookkeeping.
+    const wave2 = newWave({ lease });
+    runtime.installSealDestination(wave2);
+    const tx2 = runtime.edit();
+    stampWaveRunContext(tx2, {
+      actionId: "serving-loop/watermark",
+      kind: "bookkeeping",
+    });
+    watermark.withTx(tx2).set({ seq: 42 });
+    expect((await tx2.commit()).error).toBeUndefined();
+    const wmLink = watermark.getAsNormalizedFullLink();
+    Engine.applyCommit(engine, {
+      sessionId: "rival-session",
+      principal: "user:rival",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: wmLink.id,
+          value: { value: { seq: 999 } },
+        }],
+      },
+    });
+    runtime.clearSealDestination();
+    const outcome2 = await wave2.commitWave(newSink(), { derivedThrough: 42 });
+    await wave2.settled();
+    expect(outcome2.dispositions[0]).toEqual({ kind: "dropped" });
+    expect(outcome2.requeuedEventIds).toEqual([]);
+    // The forged/raced authored value stands (accepted threat model).
+    const stored = Engine.readState(engine, { id: wmLink.id });
+    expect(stored?.document).toEqual({ value: { seq: 999 } });
+  });
+
+  it("stage F: M1 — a run's per-run scopeKeyIdentity keys its scoped writes and basis rows (the demand-supplied instance)", async () => {
+    const lease = liveLease();
+
+    // Seed a doc the run READS, so its basis rows have content to pin.
+    const seed = runtime.getCell<{ value: number }>(
+      space,
+      "wave-m1-seed",
+      undefined,
+    );
+    const seedTx = runtime.edit();
+    seed.withTx(seedTx).set({ value: 2 });
+    expect((await seedTx.commit()).error).toBeUndefined();
+    const seedSeq = Engine.serverSeq(engine);
+
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+
+    const scoped = runtime.getCell<{ value: number }>(
+      space,
+      "wave-m1-scoped",
+      undefined,
+      undefined,
+      "user",
+    );
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, {
+      actionId: "derive-for-bob",
+      kind: "derivation",
+      // The demand supplied bob's instance identity (scopes.md §5): the
+      // run reads and writes AS that instance, not as the wave-level
+      // (service/session) identity.
+      scopeKeyIdentity: { principal: "did:key:bob", sessionId: "bob-s1" },
+      actionScopeKey: "user:did%3Akey%3Abob",
+    });
+    const base = seed.withTx(tx).get();
+    scoped.withTx(tx).set({ value: (base?.value ?? 0) + 1 });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    runtime.clearSealDestination();
+    const outcome = await wave.commitWave(newSink());
+    await wave.settled();
+    expect(outcome.aborted).toBeUndefined();
+
+    const link = scoped.getAsNormalizedFullLink();
+    const rows = engine.database.prepare(
+      `SELECT scope_key FROM revision WHERE id = :id`,
+    ).all({ id: link.id }) as { scope_key: string }[];
+    expect(rows.map((r) => r.scope_key)).toEqual(["user:did%3Akey%3Abob"]);
+    // The basis rows land UNDER BOB'S instance key (never the wave-level
+    // identity's), and carry the run's actual read.
+    const basis = selectSchedulerBasisRows(engine, {
+      branch: "",
+      action: "derive-for-bob",
+      actionScopeKey: "user:did%3Akey%3Abob",
+    });
+    const seedLink = seed.getAsNormalizedFullLink();
+    const seedRow = basis.find((row) => row.entity === seedLink.id);
+    expect(seedRow).toEqual({
+      entitySpace: space,
+      entity: seedLink.id,
+      entityScopeKey: "space",
+      seq: seedSeq,
+    });
+    // And NOT under the wave-level identity.
+    const misKeyed = selectSchedulerBasisRows(engine, {
+      branch: "",
+      action: "derive-for-bob",
+      actionScopeKey: "space",
+    });
+    expect(misKeyed).toEqual([]);
+  });
+
+  it("stage F: a bookkeeping PATCH racing a DISJOINT authored patch REBASES and commits (the live rebase arm)", async () => {
+    const lease = liveLease();
+
+    // Materialize the doc first so later writes are patches.
+    const doc = runtime.getCell<{ seq: number; other?: number }>(
+      space,
+      "wave-bookkeeping-rebase",
+      undefined,
+    );
+    const seedTx = runtime.edit();
+    doc.withTx(seedTx).set({ seq: 1, other: 0 });
+    expect((await seedTx.commit()).error).toBeUndefined();
+
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+    const tx = runtime.edit();
+    stampWaveRunContext(tx, {
+      actionId: "serving-loop/watermark",
+      kind: "bookkeeping",
+    });
+    doc.withTx(tx).key("seq").set(9);
+    expect((await tx.commit()).error).toBeUndefined();
+
+    // A concurrent authored PATCH to a DISJOINT field: commutes, so the
+    // bookkeeping advance rebases instead of dropping.
+    const link = doc.getAsNormalizedFullLink();
+    Engine.applyCommit(engine, {
+      sessionId: "rival-session",
+      principal: "user:rival",
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: link.id,
+          patches: [{ op: "replace", path: "/value/other", value: 7 }],
+        }],
+      },
+    });
+
+    runtime.clearSealDestination();
+    const outcome = await wave.commitWave(newSink());
+    await wave.settled();
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.dispositions[0]).toEqual({ kind: "committed" });
+    // Both survive: the concurrent field AND the rebased advance.
+    const stored = Engine.readState(engine, { id: link.id });
+    expect(stored?.document).toEqual({ value: { seq: 9, other: 7 } });
   });
 });

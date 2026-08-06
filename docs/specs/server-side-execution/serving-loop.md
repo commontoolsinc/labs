@@ -617,13 +617,29 @@ gap.
 unstamped transaction under the flag is REFUSED with a loud error —
 never an anonymous fallback: every server-side commit path MUST
 declare its run context (the run's kind and durable action identity)
-before it seals, and stage F names the sanctioned internal stamp
-kinds (e.g. a bookkeeping kind) when it installs the seal
-destination. The refusal lives at the seal destination and only
+before it seals. The refusal lives at the seal destination and only
 there — with no destination installed (the OFF arm, and ON-arm
 client speculation) seal == commit as today, and nothing is checked.
 (The completion-commit path never seals at all; §4 clarifies why it
-opens no unstamped gap.)
+opens no unstamped gap.) A transaction that sealed NOTHING (a
+read-only probe — piece structure loads, pattern-identity reads)
+contributes nothing and needs no context: the refusal guards writes
+entering the wave.
+
+**The sanctioned internal stamp kinds (stage F, discharging the
+ruling's naming duty): exactly one — `bookkeeping`.** It marks the
+serving loop's OWN writes — the watermark-doc advance today, the
+pattern-swap setup write (§3e), and acked-effect retirement when
+stage G lands it — declared at the three stamping choke points the
+scheduler and runner own (the reactive-action run, the event
+dispatch, the pattern swap). Its conflict class: bookkeeping writes
+are advances that commute, so they REBASE like other
+non-re-derivable writes; a rebase that conflicts semantically DROPS
+the contribution whole — there is no event to requeue, and the loop
+re-derives its bookkeeping next wave (a raced watermark advance is
+re-advanced; watermark forgery is an accepted authored intrusion —
+protocol.md §1's threat model). A fourth kind is a spec edit here
+first.
 
 - The accumulator is a layered view: store snapshot at the wave's input
   seq + previously sealed writes. Actions run serially per space, so a

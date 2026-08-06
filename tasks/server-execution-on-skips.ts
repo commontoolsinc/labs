@@ -47,17 +47,29 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
 };
 
 /**
- * The lists themselves. Empty on purpose as of Phase 1 stage A: every stage
- * of Phase 1 lands dark, so the ON arm's only behavioral delta is the
- * `stream-data` disable (builtins.md §5), which no integration test
- * exercises. Later phases add entries here — one per test, with phase and
- * reason — instead of filtering anywhere else.
+ * The lists themselves. Kept to what stage F's live ON-arm runs actually
+ * surfaced: with the serving loop landed the ON arm genuinely SERVES, and
+ * the plan's documented two-deriver interim (server and clients both
+ * deriving until Phase 2 removes the client path) is a real posture, not
+ * a hypothesis. Entries name their unskipping phase — never silent
+ * filtering anywhere else.
  */
 export const SERVER_EXECUTION_ON_SKIPS: Record<
   ServerExecutionSuite,
   ServerExecutionOnSkip[]
 > = {
-  patterns: [],
+  patterns: [
+    {
+      file: "integration/cfc-group-chat-demo-two-browsers.test.ts",
+      phase: "phase-2",
+      reason: "two-deriver interim: two real browser shells boot against " +
+        "a toolshed whose serving loop also derives, and the trusted-" +
+        "profile UI never becomes fillable under the CAS storming the " +
+        "plan documents as expected until Phase 2 removes the client " +
+        "derivation-commit path (this exact test is a named Phase 2 " +
+        "gate). The single-browser and multi-runtime variants pass ON.",
+    },
+  ],
   runner: [],
   "runtime-client": [],
   shell: [],

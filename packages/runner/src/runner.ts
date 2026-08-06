@@ -2344,6 +2344,14 @@ export class Runner {
       ) => {
         const pattern = this.resolveToPattern(loaded as Pattern);
         const setupTx = this.runtime.edit();
+        // Server-execution v2 stage F (serving-loop.md §3d): under an
+        // installed seal destination every commit path declares its run
+        // context; the swap's setup write is runtime-internal
+        // bookkeeping. A no-op everywhere else.
+        this.runtime.stampServerRun(setupTx, {
+          actionId: `pattern-swap/${newRef.identity}#${newRef.symbol}`,
+          kind: "bookkeeping",
+        });
         try {
           this.applySetupState(
             setupTx,
@@ -3391,9 +3399,21 @@ export class Runner {
   // group and rate-cap a pattern's wakes; without it, cell-flip shaping (plan B)
   // silently does not apply to the piece. It is derived purely from the result
   // cell, so it is available even when scheduler state is not rehydrated.
+  // The pieceId bucket is per scope INSTANCE (key-vocabulary.md §5's
+  // stage-F serving-hazard list): name-keyed buckets collapse shaper
+  // groups and rate caps across principals — cross-principal budget
+  // consumption, and a timing channel correlating one principal's
+  // activity with another's wakes. Resolved against the runtime's own
+  // identity; partition-unchanged at cardinality 1 (key-vocabulary.md
+  // §2 — the resolver also normalizes the raw `undefined:` form the
+  // previous string interpolation produced for scope-less links, which
+  // merges with `space:`, the same instance by definition).
   private schedulerObservationIdentity(resultCell: Cell<any>) {
     const { space, id, scope } = resultCell.getAsNormalizedFullLink();
-    return { pieceId: `${scope}:${id}`, ownerSpace: space };
+    return {
+      pieceId: `${resolveScopeKey(scope, this.runtime.scopeKeyIdentity)}:${id}`,
+      ownerSpace: space,
+    };
   }
 
   private schedulerRehydrationOptions(
@@ -5430,7 +5450,11 @@ export class Runner {
       module,
       pattern,
       schedulerObservationIdentity: {
-        pieceId: `${instanceLink.scope ?? "space"}:${instanceLink.id}`,
+        // Per scope INSTANCE, matching schedulerObservationIdentity above
+        // (key-vocabulary.md §5's stage-F list).
+        pieceId: `${
+          resolveScopeKey(instanceLink.scope, this.runtime.scopeKeyIdentity)
+        }:${instanceLink.id}`,
         ownerSpace: instanceLink.space,
       },
       ...(presyncInputs !== undefined && { presyncInputs }),

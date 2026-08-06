@@ -162,6 +162,25 @@ export const scopeOfScopeKey = (scopeKey: string): CellScope => {
   return "space";
 };
 
+/**
+ * Whether a scope key is in the APPLICABLE SET of the given identity
+ * (protocol.md §3): `space`, `user:<me>`, `session:<me>:<sid>`. Push is
+ * filtered per recipient by this predicate — a subscriber receives only
+ * rows whose scope_key is applicable to it; the remaining rows are
+ * absent, not redacted. The lease-holder exemption (the SpaceServer
+ * legitimately reads and receives every instance — protocol.md §2's read
+ * row) is decided by the CALLER, not here.
+ */
+export const scopeKeyApplicableTo = (
+  scopeKey: string,
+  identity: ScopeKeyIdentity,
+): boolean => {
+  const scope = scopeOfScopeKey(scopeKey);
+  if (scope === "space") return true;
+  if (!canResolveScopeKey(scope, identity)) return false;
+  return resolveScopeKey(scope, identity) === scopeKey;
+};
+
 /** Whether a string is a well-formed {@link ScopeKey}. */
 export const isScopeKey = (value: string): value is ScopeKey => {
   if (value === "space") return true;
@@ -213,6 +232,22 @@ export const COMMIT_CLASSES: readonly CommitClass[] = [
   "derived",
   "system",
 ];
+
+/**
+ * The well-known watermark doc, one per space (protocol.md §4): "derived
+ * state is current through commit seq N." A SPACE-scoped instance
+ * (`scope_key = "space"`), updated inside the same transaction as derived
+ * commits — never its own commit. Protocol vocabulary: clients read it for
+ * settledness (`waitForSettled`, testing.md §3) and sync indicators, the
+ * serving loop writes it, so the id is defined once here. The document
+ * value is {@link WatermarkDocValue}.
+ */
+export const SERVER_EXECUTION_WATERMARK_DOC_ID =
+  "of:server-execution-watermark";
+
+/** The watermark doc's value shape (protocol.md §4): W is ONE integer per
+ * space — not per doc, not per piece, never vectorized. */
+export type WatermarkDocValue = { seq: number };
 /**
  * The identity annotation on one write WITHIN a derived-class commit's body
  * (protocol.md §1's transaction identity model, §7's closed metadata list).
@@ -582,6 +617,18 @@ export type SessionOpenRequest = {
 export type GraphQueryRoot = {
   id: EntityId;
   scope?: CellScope;
+  /**
+   * The explicit scope INSTANCE this read names (protocol.md §2's read
+   * row; the read half of §1's transaction identity model, ledger LD5).
+   * The ONE read-side addition to the wire: admissible only for a live
+   * lease holder on the co-hosted memory server — a non-holder naming one
+   * is REJECTED — and a read naming none resolves from the authenticated
+   * session as today (the shared `resolveScopeKey`). Exists because a
+   * SpaceServer reading under its service envelope would otherwise
+   * silently resolve `user:<serviceDID>` — an empty instance, not an
+   * error (the silent-empty-instance trap).
+   */
+  entityScopeKey?: ScopeKey;
   selector: SchemaPathSelector;
 };
 

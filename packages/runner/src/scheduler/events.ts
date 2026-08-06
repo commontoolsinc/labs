@@ -971,6 +971,15 @@ export async function dispatchQueuedEvent(state: {
   tx.dispatchedRuntimeInjectedEventKeys = queuedEvent.runtimeInjectedEventKeys;
   tx.tx.immediate = true;
   tx.tx.sourceAction = action;
+  // Server-execution v2 stage F (serving-loop.md §3d): the event-dispatch
+  // choke point — a serving runtime's installed stamper attaches the wave
+  // run context (kind event-handler, the durable event id) before the
+  // handler runs. A no-op everywhere else.
+  state.runtime.stampServerRun(tx, {
+    actionId: state.getActionId(action),
+    kind: "event-handler",
+    eventId: queuedEvent.id,
+  });
   if (queuedEvent.originTx !== undefined) {
     const originLocalSeq = state.getOriginLocalSeq(
       queuedEvent.originTx,

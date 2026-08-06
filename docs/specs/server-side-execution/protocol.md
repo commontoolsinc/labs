@@ -225,7 +225,7 @@ load-bearing enforcement; commit-level identity is not load-bearing
 | --- | --- |
 | `authored` doc write | session authenticated → write authority on doc/path (existing ACL) → CAS on base revision |
 | `authored` event append | session authenticated → append authority on stream doc → `eventId` unique among stream entries above the stream's `eventWatermark` (CAS — the dedupe horizon, events.md §4) → the memory server STAMPS `firedAt` from the commit envelope (authenticated principal + session); a client-supplied `firedAt` that disagrees is REJECTED, never corrected |
-| `authored`, server-produced (outbox event append, `.inSpace` provisioning) | commit metadata carries the acting identity (`actingPrincipal` + `actingSession` — the ORIGINATING chain actor, events.md §2) + `capabilityRef` → admission validates that capability grant against the target doc/stream (a delegated-capability check, NEVER session-identity impersonation) → for event appends, `firedAt` stamps from the validated acting identity (the stamping paragraph below) → CAS |
+| `authored`, server-produced (outbox event append, `.inSpace` provisioning) | commit metadata carries the acting identity (`actingPrincipal` + `actingSession` — the ORIGINATING chain actor, events.md §2) + `capabilityRef` → admission validates that capability grant against the target doc/stream (a delegated-capability check, NEVER session-identity impersonation) → for event appends, `firedAt` stamps from the validated acting identity (the stamping paragraph below) → CAS. *(Phase-1 bound, stage D/F: the landed validation is carriage PRESENCE + COMPLETENESS — authored class only, non-empty `actingPrincipal` + `capabilityRef`, a sessionless batch refused for session-scoped writes (scopes.md §5) — with scoped writes keyed from the carried identity; RESOLVING the grant against the target doc/stream awaits per-doc grants, which today's ACL model does not hold, and is the named owed hardening — verification-coverage.md OW13.)* |
 | `derived` | producer holds the live `execution_lease` for the space (one equality check) → CAS |
 | `system` | unchanged from today |
 | READ naming an explicit `entity_scope_key` (not a commit — the read side of R-Q6b; S1; widened by FP2, RULED 2026-08-03) | requester holds A live `execution_lease` on the co-hosted memory server — its OWN space's lease, not necessarily the read space's (the read-side twin of §2's inter-server trust ruling: a home SpaceServer reads FOREIGN scoped instances for cross-space derivations, closing the silent-empty-instance trap cross-space) → the named instance is read. A non-lease-holder naming a `scope_key` is REJECTED (today the wire cannot even express one); a request naming none resolves from the authenticated session as today (the shared `resolveScopeKey`, `packages/memory/v2.ts:120-147`) |
@@ -238,17 +238,22 @@ happened elsewhere. If an admission question cannot be answered by
 (target, principal, lease, CAS), the design is drifting — stop.
 
 **Derived-envelope defense-in-depth (RULED 2026-08-05; the engine
-check lands with Phase 1 stage F).** At admission, a `derived`
+check LANDED with Phase 1 stage F).** At admission, a `derived`
 commit's producing SESSION must be the lease holder's own service
 session: a derived commit arriving under a user session — or any
 session other than the declared holder's — is REFUSED. This mirrors
 the executable model's `admitDerived`, which compares the envelope
 principal to `holderId`, and closes the "single honest internal
 caller" gap before stage F multiplies the callers of the co-hosted
-engine plane. Implementation is explicitly stage F work and the
-plan's stage F bullet carries the task: the operand shape — how the
-engine-side session identity maps to the holder identity — is
-stage F design, not stage D's.
+engine plane. The operand mapping (stage F design, landed): the
+holder's own service session IS the engine session whose resolved
+commit session key equals the DR1 holder identity — the wave sink
+commits with `sessionId == holder` and no principal
+(`applyCommitTransaction`, `packages/memory/v2/engine.ts`; the
+sink's replay keying doc records the same choice), so the check is
+one equality, `resolveCommitSessionKey(sessionId, principal) ==
+holder`, and "the envelope principal IS the lease holder" (§1) reads
+literally in the stored session column too.
 
 **`firedAt` is SERVER-STAMPED, never client-minted (T1 + S6).** It
 carries BOTH the acting user and the session —
@@ -319,7 +324,13 @@ their foreign instance instead of silently resolving
 `user:<serviceDID>`. Anticipated hardening, OUT OF v2 SCOPE and
 named without design: grant-scoped foreign reads — admissibility
 derived from the piece's granted read authority rather than lease
-identity — alongside remote attestation.
+identity — alongside remote attestation. (Phase-1 implementation
+bound, stage F: the landed check consults the READ space's own live
+lease — sufficient for every Phase-1 producer, which reads only its
+own space. FP2's widened acceptance — a home holder naming a FOREIGN
+space's instances under its own space's lease — has no producer
+until Phase 5's cross-space serving and lands with it, alongside the
+cross-engine lease lookup it needs.)
 
 **Run identity for a derivation (S1).** A derivation runs PER
 DEMANDED INSTANCE and the DEMAND supplies the identity — a
@@ -472,7 +483,14 @@ the target's `eventWatermark` makes processing exactly-once.
   dirty-unmaterialized without holding W back).
 - Carried: in every `derived` commit's metadata (`derivedThrough: W`) and
   in one well-known doc per space (updated in the same transaction; never
-  its own commit). The watermark doc is a SPACE-scoped instance —
+  its own commit). *(RULED 2026-08-05: "never its own commit" is the
+  bookkeeping-off-the-commit-stream / push-priority rule — the advance
+  rides whatever the wave commits, never a separate commit alongside
+  it. It is NOT a ban on advance-only waves: an input batch that
+  demanded nothing commits the watermark advance as that batch's ONE
+  derived commit — serving-loop.md §3's per-batch commit, with the
+  advance as its only content.)* The watermark doc is a SPACE-scoped
+  instance —
   `scope_key = "space"` — stated explicitly so no one infers it.
 - Client use: "settled" for a client = `W ≥ seq(my last authored
   commit)`. Integration tests MUST wait on this instead of text-polling

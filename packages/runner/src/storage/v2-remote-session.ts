@@ -211,6 +211,50 @@ export class WebSocketTransport implements MemoryClient.Transport {
   }
 }
 
+/**
+ * Build the signed `session.open` auth for a space session — the ONE
+ * signing shape every session-open path shares. Extracted from
+ * {@link RemoteSessionFactory} so the server-execution loopback plane
+ * (serving-loop.md §1 plane (a)) opens its sessions under the SAME
+ * production verification as remote clients, rather than a parallel
+ * auth scheme.
+ */
+export async function createSignedSessionOpenAuth(
+  signer: Signer,
+  space: MemorySpace,
+  session: MemoryClient.MountOptions,
+  context: MemoryClient.SessionOpenAuthContext,
+): Promise<MemoryClient.SessionOpenAuth> {
+  const iat = Math.floor(Date.now() / 1000);
+  const invocation = {
+    iss: signer.did(),
+    cmd: "session.open",
+    sub: space,
+    aud: context.audience,
+    args: {
+      protocol: MEMORY_PROTOCOL,
+      session,
+    },
+    challenge: context.challenge.value,
+    iat,
+    exp: iat + SESSION_OPEN_TTL_SECONDS,
+  };
+  const signature = await signer.sign(hashOf(invocation).bytes);
+  if (signature.error) {
+    throw signature.error;
+  }
+  return {
+    invocation,
+    authorization: {
+      // The signature travels as a `FabricBytes` -- the proper fabric form
+      // for a byte sequence, which serializes to a compact `/Bytes@1` wire
+      // form and round-trips faithfully. The server's `toByteArray` accepts
+      // it.
+      signature: new FabricBytes(signature.ok),
+    },
+  };
+}
+
 export class RemoteSessionFactory implements SessionFactory {
   readonly supportsAclBootstrap = true;
 
@@ -219,40 +263,13 @@ export class RemoteSessionFactory implements SessionFactory {
     private readonly defaultSigner: Signer,
   ) {}
 
-  async #createSessionOpenAuth(
+  #createSessionOpenAuth(
     signer: Signer,
     space: MemorySpace,
     session: MemoryClient.MountOptions,
     context: MemoryClient.SessionOpenAuthContext,
   ): Promise<MemoryClient.SessionOpenAuth> {
-    const iat = Math.floor(Date.now() / 1000);
-    const invocation = {
-      iss: signer.did(),
-      cmd: "session.open",
-      sub: space,
-      aud: context.audience,
-      args: {
-        protocol: MEMORY_PROTOCOL,
-        session,
-      },
-      challenge: context.challenge.value,
-      iat,
-      exp: iat + SESSION_OPEN_TTL_SECONDS,
-    };
-    const signature = await signer.sign(hashOf(invocation).bytes);
-    if (signature.error) {
-      throw signature.error;
-    }
-    return {
-      invocation,
-      authorization: {
-        // The signature travels as a `FabricBytes` -- the proper fabric form
-        // for a byte sequence, which serializes to a compact `/Bytes@1` wire
-        // form and round-trips faithfully. The server's `toByteArray` accepts
-        // it.
-        signature: new FabricBytes(signature.ok),
-      },
-    };
+    return createSignedSessionOpenAuth(signer, space, session, context);
   }
 
   async create(

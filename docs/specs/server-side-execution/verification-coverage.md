@@ -157,6 +157,133 @@ key-vocabulary §5) is an implementation gate on the PR that flips
 it. The schema-memo single-identity invariant (cross-identity memo
 sharing FORBIDDEN) is OWED an explicit guard — OW10.
 
+Delta 2026-08-05 — stage F lands (the serving loop; this PR):
+
+- §2's derived-envelope defense-in-depth row: impl-gate → COVERED.
+  The operand mapping landed (`resolveCommitSessionKey(sessionId,
+  principal) == holder` — the sink commits under the holder's own
+  service session) with negative tests
+  (`packages/memory/test/v2-wave-commit-test.ts`: a user session and
+  a non-holder internal session naming the right holder are both
+  refused; the holder's own session admits). protocol.md §2 records
+  the landed mapping — a CHANGED sentence, same row.
+- §3d's stage-F stamp-kind naming duty: impl-gate → COVERED. The
+  sanctioned internal kind is named (`bookkeeping`, serving-loop.md
+  §3d — a NEW binding sentence, this row is its coverage), stamped
+  at the three scheduler/runner choke points, with BOTH conflict
+  dispositions pinned in
+  `packages/runner/test/executor-wave.test.ts`: a bookkeeping PATCH
+  racing a disjoint authored patch REBASES and commits (the live
+  rebase arm — the loop's steady-state watermark advance is a
+  key-path patch), and a semantic conflict (whole-doc authored
+  intrusion) DROPS the contribution whole with nothing requeued.
+  The drop arm's recorded acceptance, stated truthfully
+  (2026-08-05): the wave's commit metadata (`derivedThrough`) and
+  the loop's in-memory W still advance when the DOC write drops —
+  the doc lags until the next INPUT-driven advance (a quiet space
+  stays lagged), which is conservative for clients because
+  `waitForSettled` reads the doc. Accepted under protocol §1's
+  authored-intrusion threat model; the code comments at the
+  bookkeeping write and the WaveRunKind doc state the same.
+- §2's read row (LD5): the admission half is now impl-covered —
+  `packages/memory/test/v2-explicit-read-test.ts` pins
+  holder-admitted / non-holder-refused / off-flag-refused on both
+  the query and watch paths. The trace/model coverage stands
+  unchanged. One recorded Phase-1 acceptance rides this row
+  (2026-08-05): the landed operand check compares the
+  SERVICE-IDENTITY component of the live holder, not the full
+  per-process DR1 holder, so a second process sharing the service
+  DID would pass on the first process's lease row — no instances
+  exist co-hosted in Phase 1 (one serving process per memory
+  server); the per-process sharpening lands with Phase 5's
+  cross-engine lease lookup design, alongside FP2's widening.
+- serving-loop §2's renew cadence + stop-committing MUST: the
+  serving loop drives them for real; lease-loss and idle-park pinned
+  end to end in `packages/runner/test/executor-serving-loop.test.ts`
+  (C6/C7's impl witnesses at the loop level) — including the
+  renew-blip arm (2026-08-05): when the reacquire SUCCEEDS but a
+  wave sealed under the lapsed tenure aborts at its commit step, the
+  space PARKS rather than continuing (a continued loop would mint a
+  watermark-only advance over the withdrawn derivations;
+  re-activation's fresh-runtime recompute-on-demand is the only
+  post-abort arm), pinned with a deterministic mid-wave interleave.
+- serving-loop §6 step 2's re-mark: PARTIAL by design in Phase 1 —
+  activation runs `selectStaleBasisInstances` and surfaces the stale
+  set (counted, logged), and recovery CORRECTNESS rides
+  recompute-on-demand over a fresh runtime (sound: an absent warm
+  graph means demanded pulls recompute regardless). The
+  skip-still-current warm-start VALUE of the index materializes when
+  a later stage carries a materialized graph across activation;
+  until then the scan is the recovery input, not yet an optimizer.
+- protocol §4's watermark: impl-gate rows land — the doc + metadata
+  carriage (`derived_through`), same-transaction watermark write,
+  W-advance-at-quiescence-only, and `waitForSettled` — pinned in the
+  serving-loop tests.
+- scopes §2's eager via-user hop: impl-gate → PARTIALLY COVERED
+  (`packages/runner/test/eager-via-user-hop.test.ts`: both
+  `data-updating.ts` shapes — the declared-scope narrowing and the
+  eager omitted-property redirect — under the flag, one hop pinned
+  in the OFF arm). The DISCOVERED-narrowing site
+  (`pattern-binding.ts`'s `narrowestReadScope` branch) carries the
+  same gated chain but has no direct test yet — owed as OW12 below.
+- key-vocabulary §5's boundary re-keys (M4-coupled + serving-identity
+  lists): dispositions moved to RE-KEYED in the same change, per §4's
+  tripwire; the server-side partition equivalence is witnessed by the
+  full memory suite (wire frames byte-identical via `toWireUpsert`)
+  and the client-side by the full runner suite. TWO RECORDED
+  OFF-arm acceptances ride this row, both RATIFIED (owner,
+  2026-08-05; testing §2's byte-identity gate now carries the
+  matching "up to the recorded key-vocabulary §5 acceptances"
+  clause):
+  - the `fromSeq` resume-marker delta — the M4 re-key removes the
+    cross-session SPURIOUS WAKE the name-keyed form produced
+    (principal A's scoped commit no longer re-evaluates principal
+    B's session), so under multi-principal scoped workloads a later
+    frame's `fromSeq` can differ from the old arm's. No client
+    consumes server-frame `fromSeq` (an unconsumed integer); the
+    observable residue is a marker-latency shift of roughly the
+    refresh cadence (~5 ms) in the staged-ack race window, and the
+    removed wake is the M4 defect itself.
+  - the shaper-bucket merge — the `${scope}:${id}` normalization
+    merges the two buckets that previously DISAGREED about one
+    piece's identity (`packages/runner/src/runner.ts:3399–3417,
+    5450–5456`; key-vocabulary §5's parenthetical carries the same
+    ratification stamp).
+- stage D's documented bounds: the delegated-admission bound is
+  DISCHARGED for its LANDED half only — carriage presence +
+  completeness (authored class, non-empty actor + grant, the
+  sessionless session-scope refusal) and carried-identity keying,
+  pinned in `executor-wave.test.ts` and
+  `packages/memory/test/v2-wave-commit-test.ts` — while grant
+  RESOLUTION against the target doc/stream remains OWED hardening
+  (OW13 below; protocol §2's delegated row carries the same
+  Phase-1-bound parenthetical). The read-only-read-set bound is
+  DISCHARGED with tests (read-only reads folding into withdrawals).
+  The sqlite bound stays stage G.
+
+Delta 2026-08-05 — the stage-F independent review's ruling batch
+(three flags RULED by the owner; changed sentences and recorded
+acceptances only — no rule counts move):
+
+- Flag 1 (the `inputSynced` input-barrier residual — a frame parked
+  on the loop's own sealed commit vs foreign novelty): ACCEPTED for
+  Phase 1, revisit trigger Phase 2. The two named revisit items —
+  the parked-on-own-seal distinction (or excluding unapplied frames'
+  seqs from `batchHead`) and the pattern-updater CHECK-half
+  verification in the `sx2-serving-loop` integration surface — are
+  carried in the plan's Phase 2 section so its gates cannot rely on
+  W before they resolve.
+- Flag 2 (watermark-only derived commits): CONFIRMED — protocol §4's
+  "never its own commit" now carries the ruled parenthetical: an
+  advance-only wave commits the advance as the batch's ONE derived
+  commit; the phrase bans bookkeeping-as-its-own-commit (the
+  push-priority rule), not advance-only waves. CHANGED sentence,
+  same row.
+- Flag 3 (OFF-arm byte-identity deltas): RATIFIED — testing §2's
+  gate sentence now reads byte-identical "up to the recorded
+  key-vocabulary §5 acceptances", and the recorded-acceptance row
+  above names both deltas.
+
 ## 3. The owed register (every genuine orphan, with its trigger)
 
 Nothing here blocks Phase 1. Each item names the instrument
@@ -189,22 +316,51 @@ journey):**
   pending; input-origin overlay retirement (ack + W ≥ seq); overlay
   never serialized to any server (speculation §2/§4/§6).
 
-**Stage F pre-gate (SpaceServer behaviors — one activation-journey
-trace, T13 candidate):**
+**Stage F pre-gate — LANDED with stage F (2026-08-05):**
 
-- OW5 — activation loads demand + queued events, never a
-  piece-start step (serving-loop §1; runtime-mapping N22/N31);
-  event-to-parked-space auto-activation; parking vs pending
-  gate-wakes (N9); wish `#now` timers vs quiescence (N50 — carries
-  its own owner ruling first).
-- OW6 — pattern-pointer hot-swap runs server-side (serving-loop
-  §3e; N40/41).
-- OW10 — the schema-memo single-identity guard (key-vocabulary §5):
-  an explicit tripwire or assertion that no memo instance is shared
-  across identities, landed BEFORE any cross-run memo sharing.
-  Today every sharing scope is single-identity by construction;
-  the guard is what keeps a future sharing change from silently
-  becoming value-bleed.
+- OW5 — LANDED as trace T13 (scenario-traces §3/§4) plus the
+  serving-loop tests: activation loads demand + queued events, never
+  a piece-start step; auto-activation on authored admission /
+  session open; parking honors pending gate wakes (N9's default,
+  adopted). One residue stays owed, carried DELIBERATELY as T13.Q8's
+  GAP: wish `#now` timers vs quiescence needs its own owner ruling
+  first (N50) — see OW11 below.
+- OW6 — LANDED: trace T13.Q5 + the end-to-end server-side hot-swap
+  test (`executor-serving-loop.test.ts`): the pointer write is
+  authored input, the SpaceServer swaps, the swapped derivation
+  serves as a derived commit.
+- OW10 — LANDED: `assertSchemaMemoIdentity`
+  (`packages/runner/src/traverse.ts`) binds a shared memo to its
+  first traversal's identity at the SchemaObjectTraverser choke
+  point and throws on any other — the future-sharing change now
+  trips loudly instead of silently value-bleeding.
+
+**Still owed from the stage-F bucket:**
+
+- OW11 — the N50 owner ruling (wish `#now` timers vs quiescence and
+  the amplification budget), carried out of OW5: a space with an
+  interval `#now` never quiesces and every tick is a derived
+  commit; parking policy and the testing §4 gate need the ruling
+  before builtins §1 ships `wish` as "port cost: none". T13.Q8
+  holds the trace cell open.
+- OW12 — a direct test of the eager via-user hop at the
+  DISCOVERED-narrowing site (`pattern-binding.ts`, scopes §2): the
+  gated chain is implemented there identically to the two tested
+  `data-updating.ts` shapes, but driving it needs a pattern run
+  whose output scope is DISCOVERED session-narrow — a
+  fixture the Phase 2 fan-out work builds anyway. Trigger: the
+  Phase 2 pre-gate.
+- OW13 — delegated-grant RESOLUTION (protocol §2's delegated row,
+  carved out 2026-08-05): admission today validates carriage
+  PRESENCE + COMPLETENESS (class, non-empty actor + grant, the
+  sessionless session-scope refusal) and keys scoped writes from the
+  carried identity; it does NOT resolve `capabilityRef` against the
+  target doc/stream — today's ACL model holds no per-doc grants to
+  resolve against. Owed: the grant-resolution check and its negative
+  tests when a per-doc grant store lands. Trigger: the first
+  producer of grant-scoped capabilities (protocol §2's anticipated
+  grant-scoped checks) — no later than the outbox/provisioning
+  producers going live (Phase 3 events; Phase 5 cross-space).
 
 **Stage G pre-gate:**
 

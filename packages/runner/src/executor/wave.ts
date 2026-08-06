@@ -68,14 +68,33 @@ const logger = getLogger("wave-accumulator", {
  *   (serving-loop.md §3d, RULED 2026-08-05);
  * - `event-handler` writes are NON-RE-DERIVABLE consequences — rebased and
  *   retried on conflict, and REQUEUED (rolled back to unconsequenced,
- *   never lost) when the rebase conflicts semantically.
+ *   never lost) when the rebase conflicts semantically;
+ * - `bookkeeping` is the SANCTIONED INTERNAL STAMP KIND stage F names
+ *   when it installs the seal destination (serving-loop.md §3d, RULED
+ *   2026-08-05: unstamped seals are refused, so the loop's own writes —
+ *   the watermark-doc advance today; acked-effect retirement when
+ *   stage G lands it — declare this kind). Conflict class:
+ *   non-re-derivable, so a raced bookkeeping PATCH rebases when it
+ *   commutes with the concurrent commit (the loop's steady-state
+ *   watermark advance is a key-path patch); a write that cannot rebase
+ *   — a whole-doc set (the first-ever watermark write materializing
+ *   the doc), or a semantic conflict such as a whole-doc authored
+ *   intrusion — DROPS the contribution whole: there is no event to
+ *   requeue, and no re-advance is scheduled by the drop itself. The
+ *   loop's watermark advance is INPUT-driven, so the dropped doc write
+ *   is re-landed only by the next input batch's advance — on a quiet
+ *   space the doc simply lags (while the wave's commit metadata and
+ *   the loop's in-memory W, decided before the drop, already carry the
+ *   advance — see space-server.ts's bookkeeping-write comment).
+ *   Watermark forgery is an accepted authored intrusion — protocol.md
+ *   §1's threat model.
  *
- * The other non-re-derivable class members §3d names — `eventWatermark`
- * advances and effect intents — are produced by the serving loop (stage F)
- * and the effect channel (stage G); they seal as contributions of this
- * same class when their producers exist.
+ * The remaining §3d non-re-derivable members — `eventWatermark` advances
+ * and effect intents — are produced by Phase 3 events and the stage-G
+ * effect channel; they seal as `event-handler`-class contributions when
+ * their producers exist.
  */
-export type WaveRunKind = "derivation" | "event-handler";
+export type WaveRunKind = "derivation" | "event-handler" | "bookkeeping";
 
 /**
  * The run identity a seal attaches to its writes (protocol.md §1's
@@ -106,6 +125,19 @@ export interface WaveRunContext {
    * pre-narrowing instance; stage F's serving loop supplies per-run
    * demanded instances. */
   actionScopeKey?: ScopeKey;
+  /** M1 — the PER-RUN identity this run's scoped reads and writes
+   * resolve their instance keys against (scopes.md §5, §7 M1): the
+   * demand-supplied instance identity for a derivation, the event's
+   * server-stamped `firedAt` pair for a handler. When absent the
+   * accumulator falls back to its wave-level identity (the OFF-arm
+   * cardinality-1 posture, and pre-narrowing space-scope runs, which
+   * resolve no scoped addresses at all). */
+  scopeKeyIdentity?: ScopeKeyIdentity;
+  /** The capability grant a provisioning run's FOREIGN writes are
+   * admitted under (protocol.md §2's server-produced authored row, §2b):
+   * carried with the acting identity into the foreign commit's metadata
+   * for the target's delegated-capability admission. */
+  capabilityRef?: string;
 }
 
 const waveRunContexts = new WeakMap<object, WaveRunContext>();
@@ -197,6 +229,20 @@ export interface WaveSpaceCommit {
   basisInstances: WaveBasisInstanceRows[];
   /** The DR1 lease holder identity the derived-class admission checks. */
   holder: string | undefined;
+  /** The watermark this home commit is current through (protocol.md §4);
+   * every split of one wave repeats the same value. Absent for waves
+   * driven outside a serving loop (no watermark exists to carry) and on
+   * foreign batches. */
+  derivedThrough?: number;
+  /** Foreign provisioning batches only (protocol.md §2's server-produced
+   * authored row, §2b): the ORIGINATING chain actor + the capability
+   * grant the target's admission validates — delegation, never
+   * session-identity impersonation. */
+  delegated?: {
+    actingPrincipal: string;
+    actingSession?: string;
+    capabilityRef: string;
+  };
 }
 
 /**
@@ -274,6 +320,15 @@ interface WaveContribution {
   /** Per-space sealed commits, in the tx's commit order (children first,
    * home last — protocol.md §2b). */
   spaces: SealedSpaceContribution[];
+  /** Doc-instance keys read in spaces this run WROTE NOTHING to (the
+   * sealSpaceReads handoff — stage F, discharging the stage-D bound):
+   * `${space}\0${docInstanceKey}`, folded into the withdrawn-read
+   * closure by DOC IDENTITY. Conservative by design: a reader of a doc
+   * some withdrawn contribution wrote folds in even when it read the
+   * pre-seal state (layer provenance is replica-internal for unsealed
+   * spaces) — over-dropping a derivation is sound, committing one
+   * derived from withdrawn state is not (§3d). */
+  readOnlyReadKeys: Set<string>;
 }
 
 interface SealedSpaceContribution {
@@ -324,8 +379,11 @@ const docInstanceKey = (id: string, scopeKey: string): string =>
   `${id} ${scopeKey}`;
 
 interface PendingAssembly {
-  context: WaveRunContext;
+  /** Undefined until the post-seal emptiness check: a tx with writes and
+   * no context is refused; an empty tx needs none. */
+  context: WaveRunContext | undefined;
   spaces: SealedSpaceContribution[];
+  readOnlyReadKeys: Set<string>;
 }
 
 /**
@@ -349,6 +407,7 @@ export class WaveAccumulator
   #contributions: WaveContribution[] = [];
   #assembly: PendingAssembly | undefined;
   #closed = false;
+  #derivedThrough: number | undefined;
 
   constructor(options: {
     /** The home space this wave derives for. */
@@ -418,21 +477,6 @@ export class WaveAccumulator
       };
     }
     const context = waveRunContextOf(tx);
-    if (context === undefined) {
-      // No anonymous fallback (serving-loop.md §3d, RULED 2026-08-05):
-      // an unstamped seal is a wave-host bug — every server-side commit
-      // path stamps its run context before sealing, and stage F names
-      // the sanctioned internal stamp kinds when it installs the seal
-      // destination. Unreachable from the OFF arm: without a
-      // destination installed, seal == commit and this class never
-      // runs.
-      throw new Error(
-        "unstamped transaction sealed into a wave: stamp the run " +
-          "context (stampWaveRunContext) before sealing — every " +
-          "server-side commit path declares its run context " +
-          "(serving-loop.md §3d, RULED 2026-08-05)",
-      );
-    }
     // seal() runs one tx at a time: sealInto hands spaces back through
     // sealSpaceCommit below, and actions run serially per space
     // (serving-loop.md §3d), so a live assembly means interleaved seals —
@@ -446,6 +490,7 @@ export class WaveAccumulator
     this.#assembly = {
       context,
       spaces: [],
+      readOnlyReadKeys: new Set(),
     };
     try {
       const result = await inner.sealInto(this);
@@ -462,14 +507,44 @@ export class WaveAccumulator
       }
       // A transaction with nothing to seal (read-only, or all-no-op)
       // contributes nothing — same as commit's empty-transaction fast
-      // path.
-      if (assembly.spaces.length > 0) {
-        this.#contributions.push({
-          index: this.#contributions.length,
-          context: assembly.context,
-          spaces: assembly.spaces,
-        });
+      // path — and needs no run context: the §3d refusal below guards
+      // WRITES entering the wave, and a serving runtime's read probes
+      // (piece structure loads, pattern-identity reads) commit nothing.
+      if (assembly.spaces.length === 0) {
+        return result;
       }
+      if (context === undefined) {
+        // No anonymous fallback (serving-loop.md §3d, RULED 2026-08-05):
+        // an unstamped seal WITH WRITES is a wave-host bug — every
+        // server-side commit path stamps its run context before sealing,
+        // and stage F names the sanctioned internal stamp kinds
+        // ("bookkeeping", for the loop's own writes) when it installs
+        // the seal destination. The already-sealed overlay writes are
+        // withdrawn before the throw, so nothing anonymous survives in
+        // the wave OR the overlay. Unreachable from the OFF arm: without
+        // a destination installed, seal == commit and this class never
+        // runs.
+        for (const space of assembly.spaces) {
+          space.resolveVerdict({
+            withdrawn: {
+              message: "unstamped transaction refused at the seal " +
+                "destination (serving-loop.md §3d)",
+            },
+          });
+        }
+        throw new Error(
+          "unstamped transaction sealed into a wave: stamp the run " +
+            "context (stampWaveRunContext) before sealing — every " +
+            "server-side commit path declares its run context " +
+            "(serving-loop.md §3d, RULED 2026-08-05)",
+        );
+      }
+      this.#contributions.push({
+        index: this.#contributions.length,
+        context,
+        spaces: assembly.spaces,
+        readOnlyReadKeys: assembly.readOnlyReadKeys,
+      });
       return result;
     } finally {
       this.#assembly = undefined;
@@ -536,6 +611,31 @@ export class WaveAccumulator
   }
 
   /**
+   * ITransactionSealSink (optional half): the read set of a space the
+   * currently-sealing tx read but wrote nothing to. Recorded per
+   * contribution and folded into the withdrawn-read closure by doc
+   * identity (see WaveContribution.readOnlyReadKeys — the stage-D
+   * bound's discharge).
+   */
+  sealSpaceReads(
+    space: MemorySpace,
+    reads: readonly { space: MemorySpace; id: string; scope?: CellScope }[],
+  ): void {
+    const assembly = this.#assembly;
+    if (assembly === undefined) return;
+    for (const read of reads) {
+      assembly.readOnlyReadKeys.add(
+        `${space}\0${
+          docInstanceKey(
+            read.id,
+            this.#scopeKeyFor(read.scope, assembly.context ?? undefined),
+          )
+        }`,
+      );
+    }
+  }
+
+  /**
    * Abandon the wave: every sealed commit's local overlay rolls back, and
    * nothing reaches the store. The caller MUST abandon (or commit) before
    * any replica reset — a reset's local rejections would otherwise race
@@ -566,11 +666,21 @@ export class WaveAccumulator
    * batch is handed to the sink, and the sink re-verifies the remainder
    * inside its store transaction.
    */
-  async commitWave(sink: WaveCommitSink): Promise<WaveCommitOutcome> {
+  async commitWave(
+    sink: WaveCommitSink,
+    options: {
+      /** The watermark the home commit carries (protocol.md §4's
+       * `derivedThrough`). The serving loop passes the post-wave W —
+       * unchanged from the current W on a budget-exhausted flush
+       * (serving-loop.md §3). Absent for waves driven outside a loop. */
+      derivedThrough?: number;
+    } = {},
+  ): Promise<WaveCommitOutcome> {
     if (this.#closed) {
       throw new Error("wave already committed or abandoned");
     }
     this.#closed = true;
+    this.#derivedThrough = options.derivedThrough;
     const outcome: WaveCommitOutcome = {
       supersededWrites: 0,
       dependencyDroppedWrites: 0,
@@ -580,8 +690,13 @@ export class WaveAccumulator
     };
 
     // The lease check (serving-loop.md §2's stop-committing MUST): work
-    // sealed under a lapsed tenure never commits — recovery under the
-    // next tenure re-marks and re-runs from the basis index instead.
+    // sealed under a lapsed tenure never commits. Recovery: the serving
+    // loop PARKS the space on this abort, and re-activation's
+    // fresh-runtime recompute-on-demand is the ONLY post-abort arm —
+    // the withdrawal below re-arms nothing in place (no revert
+    // consumer; inputs unchanged), so a loop that continued after the
+    // abort would advance W over derivations that never re-ran
+    // (space-server.ts's lease-lost-abort park).
     if (
       this.#lease !== undefined &&
       !this.#lease.isCurrentTenure(this.#sealedTenure)
@@ -686,9 +801,13 @@ export class WaveAccumulator
               doc,
             );
           } else {
-            // Non-re-derivable consequence: rebase against the new head —
+            // Non-re-derivable consequence (event-handler and the loop's
+            // bookkeeping alike): rebase against the new head —
             // field-level merge for writes that commute with the
-            // concurrent commit; a semantic conflict requeues the event.
+            // concurrent commit. A semantic conflict requeues an EVENT
+            // contribution whole; a bookkeeping contribution has no
+            // event to requeue and DROPS whole instead — the loop
+            // re-derives its bookkeeping next wave (WaveRunKind doc).
             const concurrent = await sink.concurrentWritePaths(
               this.#space,
               doc,
@@ -697,8 +816,14 @@ export class WaveAccumulator
             if (this.#rebases(contribution, doc, concurrent)) {
               rebasedDocs[contribution.index].add(key);
               rebasedHeads.set(key, heads.get(key) ?? 0);
-            } else {
+            } else if (contribution.context.kind === "event-handler") {
               requeued.add(contribution.index);
+              break;
+            } else {
+              droppedWhole.add(contribution.index);
+              outcome.dependencyDroppedWrites += this.#homeOpCount(
+                contribution,
+              );
               break;
             }
           }
@@ -720,6 +845,53 @@ export class WaveAccumulator
       ): boolean =>
         requeued.has(ownerIndex) || droppedWhole.has(ownerIndex) ||
         (readSpace === this.#space && droppedDocs[ownerIndex].has(readDocKey));
+      // Sealed writers per `${space}\0${docInstanceKey}` — the doc-identity
+      // index the read-only-space closure folds through (a read handed
+      // over by sealSpaceReads carries no layer provenance, so the fold
+      // is by doc identity — conservative and sound; see
+      // WaveContribution.readOnlyReadKeys).
+      const sealedWriters = new Map<string, Set<number>>();
+      for (const contribution of this.#contributions) {
+        for (const sealed of contribution.spaces) {
+          for (const operation of sealed.sealed.commit.operations) {
+            if (operation.op === "sqlite") continue;
+            const key = `${sealed.space}\0${
+              docInstanceKey(
+                operation.id,
+                this.#scopeKeyFor(operation.scope, contribution.context),
+              )
+            }`;
+            let owners = sealedWriters.get(key);
+            if (owners === undefined) {
+              owners = new Set();
+              sealedWriters.set(key, owners);
+            }
+            owners.add(contribution.index);
+          }
+        }
+      }
+      const readOnlyReadSawWithdrawal = (
+        contribution: WaveContribution,
+      ): boolean => {
+        for (const readKey of contribution.readOnlyReadKeys) {
+          const owners = sealedWriters.get(readKey);
+          if (owners === undefined) continue;
+          const docKey = readKey.slice(readKey.indexOf("\0") + 1);
+          const readSpace = readKey.slice(
+            0,
+            readKey.indexOf("\0"),
+          ) as MemorySpace;
+          for (const owner of owners) {
+            if (
+              owner !== contribution.index &&
+              readSawWithdrawnWrite(owner, docKey, readSpace)
+            ) {
+              return true;
+            }
+          }
+        }
+        return false;
+      };
       let grew = true;
       while (grew) {
         grew = false;
@@ -735,7 +907,7 @@ export class WaveAccumulator
             contribution,
             byLocalSeq,
             readSawWithdrawnWrite,
-          );
+          ) || readOnlyReadSawWithdrawal(contribution);
           if (!parentRequeued && !readWithdrawn) continue;
           if (contribution.context.kind === "event-handler") {
             requeued.add(idx);
@@ -762,6 +934,18 @@ export class WaveAccumulator
     // replayed consequence.
     const foreignSeqs = new Map<MemorySpace, number>();
     for (const batch of this.#buildForeignBatches(requeued, droppedWhole)) {
+      // Tenure re-check per sink call (defense-in-depth over the entry
+      // check): the entry check plus the engine's live-lease row cover
+      // today's synchronous sink, but an ASYNC sink would re-open the
+      // same-process C7b window between entry and this call.
+      if (
+        this.#lease !== undefined &&
+        !this.#lease.isCurrentTenure(this.#sealedTenure)
+      ) {
+        this.#abortAfterForeignFailure(outcome);
+        outcome.aborted = "lease-lost";
+        return outcome;
+      }
       const result = await sink.commitWave(batch);
       if (result.error) {
         logger.warn("wave-foreign-commit-failed", () => [
@@ -806,6 +990,27 @@ export class WaveAccumulator
         return outcome;
       }
 
+      // Tenure re-check before every home attempt (see the foreign-loop
+      // note): the resolve loop may have awaited the sink several times.
+      if (
+        this.#lease !== undefined &&
+        !this.#lease.isCurrentTenure(this.#sealedTenure)
+      ) {
+        for (const contribution of this.#contributions) {
+          this.#withdraw(
+            contribution,
+            "lease lost mid-wave; the in-flight wave aborts " +
+              "(serving-loop.md §2)",
+          );
+          outcome.dispositions[contribution.index] =
+            contribution.context.kind === "event-handler"
+              ? { kind: "requeued" }
+              : { kind: "dropped" };
+        }
+        this.#reportRequeuedEvents(outcome, () => true);
+        outcome.aborted = "lease-lost";
+        return outcome;
+      }
       const result = await sink.commitWave(batch);
       if (!result.error) {
         this.#settleVerdicts(
@@ -922,7 +1127,7 @@ export class WaveAccumulator
     if (home === undefined) return docs;
     for (const operation of home.sealed.commit.operations) {
       if (operation.op === "sqlite") continue;
-      const scopeKey = this.#scopeKeyFor(operation.scope);
+      const scopeKey = this.#scopeKeyFor(operation.scope, contribution.context);
       docs.set(docInstanceKey(operation.id, scopeKey), {
         id: operation.id,
         scope: operation.scope,
@@ -932,8 +1137,19 @@ export class WaveAccumulator
     return docs;
   }
 
-  #scopeKeyFor(scope: CellScope | undefined): ScopeKey {
-    return resolveScopeKey(scope, this.#scopeKeyIdentity);
+  /** M1 (scopes.md §5, §7): a run's scoped addresses resolve against the
+   * PER-RUN identity its context carries — the demand's instance identity
+   * for derivations, the stamped `firedAt` pair for handlers — falling
+   * back to the wave-level identity (OFF-arm cardinality 1, and runs
+   * with no scoped addresses). */
+  #scopeKeyFor(
+    scope: CellScope | undefined,
+    context?: WaveRunContext,
+  ): ScopeKey {
+    return resolveScopeKey(
+      scope,
+      context?.scopeKeyIdentity ?? this.#scopeKeyIdentity,
+    );
   }
 
   #homeOpCount(contribution: WaveContribution): number {
@@ -951,7 +1167,7 @@ export class WaveAccumulator
     if (home === undefined) return 0;
     return home.sealed.commit.operations.filter((op) =>
       op.op !== "sqlite" && op.id === doc.id &&
-      this.#scopeKeyFor(op.scope) === doc.scopeKey
+      this.#scopeKeyFor(op.scope, contribution.context) === doc.scopeKey
     ).length;
   }
 
@@ -970,7 +1186,8 @@ export class WaveAccumulator
       if (operation.op === "sqlite") continue;
       if (
         operation.id !== doc.id ||
-        this.#scopeKeyFor(operation.scope) !== doc.scopeKey
+        this.#scopeKeyFor(operation.scope, contribution.context) !==
+          doc.scopeKey
       ) {
         continue;
       }
@@ -1013,7 +1230,7 @@ export class WaveAccumulator
           : [read.localSeq];
         const readDocKey = docInstanceKey(
           read.id,
-          this.#scopeKeyFor(read.scope),
+          this.#scopeKeyFor(read.scope, contribution.context),
         );
         for (const layer of layers) {
           const owner = perSpace.get(layer);
@@ -1062,7 +1279,7 @@ export class WaveAccumulator
         if (operation.op !== "sqlite") {
           const key = docInstanceKey(
             operation.id,
-            this.#scopeKeyFor(operation.scope),
+            this.#scopeKeyFor(operation.scope, context),
           );
           if (droppedDocs[contribution.index].has(key)) continue;
         }
@@ -1075,7 +1292,7 @@ export class WaveAccumulator
             annotations.push({
               op: opIndex,
               ...(scoped
-                ? { scopeKey: this.#scopeKeyFor(operation.scope) }
+                ? { scopeKey: this.#scopeKeyFor(operation.scope, context) }
                 : {}),
               ...(context.acting !== undefined
                 ? {
@@ -1123,6 +1340,9 @@ export class WaveAccumulator
       consequenceOf,
       basisInstances: [...basisInstances.values()],
       holder: this.#lease?.holder,
+      ...(this.#derivedThrough === undefined
+        ? {}
+        : { derivedThrough: this.#derivedThrough }),
     };
   }
 
@@ -1130,10 +1350,29 @@ export class WaveAccumulator
     requeued: ReadonlySet<number>,
     droppedWhole: ReadonlySet<number>,
   ): WaveSpaceCommit[] {
-    const batches = new Map<MemorySpace, WaveSpaceCommit>();
+    // One batch per (space, acting identity, capability grant): a foreign
+    // provisioning commit carries ONE originating chain actor + ONE
+    // grant in its metadata (protocol.md §2's server-produced authored
+    // row, §2b), so contributions acting as different principals never
+    // share a commit.
+    const batches = new Map<string, WaveSpaceCommit>();
     for (const contribution of this.#survivors(requeued, droppedWhole)) {
       for (const sealed of this.#foreignSealed(contribution)) {
-        let batch = batches.get(sealed.space);
+        const context = contribution.context;
+        const delegated = context.acting !== undefined &&
+            context.capabilityRef !== undefined
+          ? {
+            actingPrincipal: context.acting.user,
+            ...(context.acting.session !== undefined
+              ? { actingSession: context.acting.session }
+              : {}),
+            capabilityRef: context.capabilityRef,
+          }
+          : undefined;
+        const batchKey = `${sealed.space}\0${
+          delegated === undefined ? "" : JSON.stringify(delegated)
+        }`;
+        let batch = batches.get(batchKey);
         if (batch === undefined) {
           batch = {
             space: sealed.space,
@@ -1146,22 +1385,19 @@ export class WaveAccumulator
             consequenceOf: [],
             basisInstances: [],
             holder: this.#lease?.holder,
+            ...(delegated === undefined ? {} : { delegated }),
           };
-          batches.set(sealed.space, batch);
+          batches.set(batchKey, batch);
         }
-        const context = contribution.context;
+        // No per-op annotations on a foreign batch: the annotation pair
+        // is DERIVED-only carriage (protocol.md §7's closed list). The
+        // delegated identity rides ONCE in the batch's commit metadata,
+        // and the engine's delegated admission keys scoped writes from
+        // that validated CARRIED identity (scopes.md §5: consequences
+        // land in the actor's instances) — which is why batches group
+        // per (space, actor, grant) above.
         for (const operation of sealed.sealed.commit.operations) {
-          const opIndex = batch.operations.length;
           batch.operations.push(operation);
-          if (context.acting !== undefined && operation.op !== "sqlite") {
-            batch.annotations.push({
-              op: opIndex,
-              actingUser: context.acting.user,
-              ...(context.acting.session !== undefined
-                ? { actingSession: context.acting.session }
-                : {}),
-            });
-          }
         }
         batch.preconditions.push(...sealed.sealed.commit.preconditions ?? []);
       }
@@ -1180,7 +1416,10 @@ export class WaveAccumulator
     for (const spaceContribution of contribution.spaces) {
       const reads = spaceContribution.sealed.commit.reads;
       for (const read of reads.confirmed) {
-        const entityScopeKey = this.#scopeKeyFor(read.scope);
+        const entityScopeKey = this.#scopeKeyFor(
+          read.scope,
+          contribution.context,
+        );
         rows.set(`${spaceContribution.space} ${read.id} ${entityScopeKey}`, {
           action: context.actionId,
           actionScopeKey,
@@ -1191,7 +1430,10 @@ export class WaveAccumulator
         });
       }
       for (const read of reads.pending) {
-        const entityScopeKey = this.#scopeKeyFor(read.scope);
+        const entityScopeKey = this.#scopeKeyFor(
+          read.scope,
+          contribution.context,
+        );
         rows.set(`${spaceContribution.space} ${read.id} ${entityScopeKey}`, {
           action: context.actionId,
           actionScopeKey,

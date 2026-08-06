@@ -11,6 +11,7 @@ import type {
 } from "./health.routes.ts";
 import { checkLLMHealth } from "./llm-health.service.ts";
 import { getSlowQueries } from "@commonfabric/memory/v2/server";
+import { getServingLoopStats } from "@commonfabric/runner/executor/stats";
 import {
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
@@ -67,12 +68,18 @@ export const index: AppRouteHandler<IndexRoute> = (c) => {
 const serverStartTimestamp = Date.now();
 
 export const stats: AppRouteHandler<StatsRoute> = (c) => {
+  // The serving loop's §7 counters
+  // (docs/specs/server-side-execution/serving-loop.md §7): present only
+  // when an ExecutorHost runs in this process (the ON arm); the OFF-arm
+  // response is byte-identical to today.
+  const servingLoop = getServingLoopStats();
   return c.json({
     timestamp: Date.now(),
     serverStart: serverStartTimestamp,
     logCounts: getLoggerCountsBreakdown(),
     timingStats: getTimingStatsBreakdown(),
     slowQueries: [...getSlowQueries()],
+    ...(servingLoop === undefined ? {} : { servingLoop }),
   }, HttpStatusCodes.OK);
 };
 

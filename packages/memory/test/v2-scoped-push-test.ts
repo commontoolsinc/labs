@@ -1,0 +1,218 @@
+// M4's admission re-key, pinned MEMORY-SIDE (scopes.md §7 M4;
+// protocol.md §3): an authored commit's scoped writes are marked dirty
+// PER SCOPE INSTANCE — resolved from the COMMITTING session's identity,
+// the same resolution admission keyed the rows with — and refresh
+// delivery matches those instance keys against each session's tracked
+// instances. Two halves, both load-bearing:
+//
+// - per-instance dirty MARKING: a watcher of the WRITTEN instance
+//   (same principal, different session) receives the refresh frame —
+//   a name-keyed marking (dropping the scope key) matches no tracked
+//   instance and delivers nothing;
+// - per-instance DELIVERY: a watcher of a DIFFERENT instance of the
+//   same doc NAME receives nothing — name-granular fan-out would be
+//   the cross-session spurious wake M4 removed.
+//
+// Why this file exists (stage-F review, F9): the name-keyed-marking
+// mutation at the admission site previously survived the ENTIRE memory
+// suite and was caught only cross-package by the full runner suite.
+// This test localizes that failure to the memory package.
+
+import { assert, assertEquals, assertExists } from "@std/assert";
+import { Server } from "../v2/server.ts";
+import {
+  encodeMemoryBoundary,
+  getMemoryProtocolFlags,
+  type HelloOkMessage,
+  MEMORY_PROTOCOL,
+  type ResponseMessage,
+  type ServerMessage,
+  type SessionOpenAuthMetadata,
+  type WatchSetResult,
+} from "../v2.ts";
+
+const TEST_AUDIENCE = "did:key:z6Mk-scoped-push-audience";
+const SPACE = "did:key:z6Mk-scoped-push-space";
+const ALICE = "did:key:z6Mk-scoped-push-alice";
+const BOB = "did:key:z6Mk-scoped-push-bob";
+const DOC = "of:scoped-push";
+
+const HELLO = {
+  type: "hello",
+  protocol: MEMORY_PROTOCOL,
+  flags: getMemoryProtocolFlags(),
+} as const;
+
+type Harness = {
+  messages: ServerMessage[];
+  connection: ReturnType<Server["connect"]>;
+  sessionOpen: SessionOpenAuthMetadata;
+};
+
+const shiftMessage = (messages: ServerMessage[]): ServerMessage => {
+  const message = messages.shift();
+  assertExists(message, "expected a server message");
+  return message;
+};
+
+const connect = async (server: Server): Promise<Harness> => {
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  await connection.receive(encodeMemoryBoundary(HELLO));
+  const hello = shiftMessage(messages) as HelloOkMessage;
+  assertEquals(hello.type, "hello.ok");
+  assertExists(hello.sessionOpen);
+  return { messages, connection, sessionOpen: hello.sessionOpen! };
+};
+
+let requestCounter = 0;
+const nextRequestId = (label: string): string => `${label}-${++requestCounter}`;
+
+const openSession = async (
+  harness: Harness,
+  principal: string,
+): Promise<string> => {
+  await harness.connection.receive(encodeMemoryBoundary({
+    type: "session.open",
+    requestId: nextRequestId("open"),
+    space: SPACE,
+    session: {},
+    invocation: {
+      iss: principal,
+      aud: harness.sessionOpen.audience,
+      challenge: harness.sessionOpen.challenge.value,
+    },
+  }));
+  const response = shiftMessage(harness.messages) as ResponseMessage<
+    { sessionId: string; sessionOpen: SessionOpenAuthMetadata }
+  >;
+  assertExists(response.ok, JSON.stringify(response.error));
+  harness.sessionOpen = response.ok.sessionOpen;
+  return response.ok.sessionId;
+};
+
+/** Doc-ids upserted by the session/effect frames at or past `from`. */
+const effectUpsertIds = (
+  messages: ServerMessage[],
+  from: number,
+): string[] => {
+  const ids: string[] = [];
+  for (const message of messages.slice(from)) {
+    if ((message as { type?: string }).type !== "session/effect") continue;
+    const effect = (message as {
+      effect?: { upserts?: Array<{ id: string }> };
+    }).effect;
+    for (const upsert of effect?.upserts ?? []) ids.push(upsert.id);
+  }
+  return ids;
+};
+
+Deno.test("scoped push is per-instance: a user-scoped commit refreshes the SAME instance's watcher in another session, and no other instance (M4)", async () => {
+  const server = new Server({
+    store: new URL("memory://scoped-push"),
+    subscriptionRefreshDelayMs: 0,
+    authorizeSessionOpen: (message) => {
+      const iss = message.invocation?.iss;
+      return typeof iss === "string" ? iss : undefined;
+    },
+    sessionOpenAuth: { audience: TEST_AUDIENCE },
+  });
+  try {
+    // Three sessions: alice WATCHES her user instance on one
+    // connection, alice WRITES it from a second connection (a
+    // different session — so delivery cannot ride echo suppression or
+    // same-session verdicts), and bob watches HIS user instance of the
+    // same doc name on a third.
+    const aliceWatcher = await connect(server);
+    const aliceWatcherSession = await openSession(aliceWatcher, ALICE);
+    const bobWatcher = await connect(server);
+    const bobWatcherSession = await openSession(bobWatcher, BOB);
+    const aliceWriter = await connect(server);
+    const aliceWriterSession = await openSession(aliceWriter, ALICE);
+
+    const watchFor = (sessionId: string) => ({
+      type: "session.watch.set" as const,
+      requestId: nextRequestId("watch"),
+      space: SPACE,
+      sessionId,
+      watches: [{
+        id: "w-scoped",
+        kind: "graph" as const,
+        query: {
+          roots: [{
+            id: DOC,
+            scope: "user" as const,
+            selector: { path: [], schema: false as const },
+          }],
+        },
+      }],
+    });
+    const aliceWatch = await server.watchSet(
+      watchFor(aliceWatcherSession),
+    ) as ResponseMessage<WatchSetResult>;
+    assertExists(aliceWatch.ok, JSON.stringify(aliceWatch.error));
+    const bobWatch = await server.watchSet(
+      watchFor(bobWatcherSession),
+    ) as ResponseMessage<WatchSetResult>;
+    assertExists(bobWatch.ok, JSON.stringify(bobWatch.error));
+
+    // Snapshot the message cursors AFTER the watches are established:
+    // only frames caused by the write below count.
+    const aliceFrom = aliceWatcher.messages.length;
+    const bobFrom = bobWatcher.messages.length;
+
+    // Alice's OTHER session commits the user-scoped write. Admission
+    // resolves the instance from the COMMITTING session's identity
+    // (user:<alice>) and must mark dirty under exactly that key.
+    const write = await server.transact({
+      type: "transact",
+      requestId: nextRequestId("write"),
+      space: SPACE,
+      sessionId: aliceWriterSession,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: DOC,
+          scope: "user",
+          value: { value: { n: 7 } },
+        }],
+      },
+    });
+    assertExists(write.ok, JSON.stringify(write.error));
+
+    // Drain the scheduled refresh, then poll briefly: delivery rides
+    // the batched refresh pass, which may requeue once internally.
+    const deadline = Date.now() + 5_000;
+    while (
+      !effectUpsertIds(aliceWatcher.messages, aliceFrom).includes(DOC) &&
+      Date.now() < deadline
+    ) {
+      await server.idle();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    // Half 1 — per-instance MARKING: the written instance's watcher
+    // (alice's other session) received the doc's refresh frame.
+    assert(
+      effectUpsertIds(aliceWatcher.messages, aliceFrom).includes(DOC),
+      "alice's watcher session must receive the scoped-push refresh " +
+        "frame for her user instance",
+    );
+
+    // Half 2 — per-instance DELIVERY: bob's watcher (his OWN user
+    // instance of the same doc name) received nothing for it.
+    assertEquals(
+      effectUpsertIds(bobWatcher.messages, bobFrom).filter((id) => id === DOC),
+      [],
+      "bob's watcher must not receive another instance's refresh",
+    );
+
+    aliceWatcher.connection.close();
+    bobWatcher.connection.close();
+    aliceWriter.connection.close();
+  } finally {
+    await server.close();
+  }
+});

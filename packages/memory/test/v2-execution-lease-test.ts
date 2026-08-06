@@ -268,7 +268,7 @@ Deno.test("admission: under the flag, the live holder's derived commit is admitt
       now: LIVE_NOW(),
     }));
     applyCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: holder,
       space: SPACE,
       commit: setCommit(1, "of:doc-1"),
       commitClass: "derived",
@@ -470,7 +470,7 @@ Deno.test("discipline (C7a): a probe sealed before an expiry never commits — r
     // Delivery of the stale probe: the discipline aborts it in-process.
     if (cycle.isCurrentTenure(sealedTenure)) {
       applyCommit(engine, {
-        sessionId: "server:executor",
+        sessionId: cycle.holder,
         space: SPACE,
         commit: setCommit(1, "of:doc-1"),
         commitClass: "derived",
@@ -483,7 +483,7 @@ Deno.test("discipline (C7a): a probe sealed before an expiry never commits — r
     // not vacuous (C7a's "live probes still flow").
     if (cycle.isCurrentTenure(cycle.tenure)) {
       applyCommit(engine, {
-        sessionId: "server:executor",
+        sessionId: cycle.holder,
         space: SPACE,
         commit: setCommit(1, "of:doc-1"),
         commitClass: "derived",
@@ -520,7 +520,7 @@ Deno.test("discipline (C7b): without the in-process check the same-process stale
     // abort-before-reacquire MUST is load-bearing, and why it is an
     // in-process obligation rather than wire machinery.
     applyCommit(engine, {
-      sessionId: "server:executor",
+      sessionId: cycle.holder,
       space: SPACE,
       commit: setCommit(1, "of:doc-1"),
       commitClass: "derived",

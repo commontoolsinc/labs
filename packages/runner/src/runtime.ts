@@ -26,6 +26,7 @@ import {
   getServerExecutionConfig,
   resetCommitPreconditionsConfig,
   resetServerExecutionConfig,
+  resolveScopeKey,
   type ScopeKeyIdentity,
   setCommitPreconditionsConfig,
   setServerExecutionConfig,
@@ -327,6 +328,26 @@ export interface PatternInstantiation {
 export type PatternInstantiationObserver = (
   instantiation: PatternInstantiation,
 ) => void;
+
+/**
+ * What the scheduler knows about a run when it mints the run's
+ * transaction (server-execution v2 stage F): the durable action identity
+ * (restart-stable — `implementationHash:instanceKey`, the basis index's
+ * `action` column) and the run's kind. The serving loop's stamper
+ * enriches this with per-run identity (M1) and attaches the wave run
+ * context (serving-loop.md §3d).
+ */
+export type ServerRunInfo = {
+  actionId: string;
+  /** `bookkeeping` is the sanctioned internal stamp kind
+   * (serving-loop.md §3d, RULED 2026-08-05) for runtime-internal commit
+   * paths that are neither derivations nor handler runs — the
+   * pattern-swap setup write today; the loop's own watermark write uses
+   * it directly. */
+  kind: "derivation" | "event-handler" | "bookkeeping";
+  /** The dispatched event's durable id (event-handler runs). */
+  eventId?: string;
+};
 
 export interface RuntimeOptions {
   apiUrl: URL;
@@ -696,6 +717,23 @@ export class Runtime {
   // into it instead of committing to the store. Never installed on a
   // client or in the OFF arm — installSealDestination throws off the flag.
   #transactionSealDestination: TransactionSealDestination | undefined;
+  // The serving loop's run stamper (installed WITH the destination): the
+  // scheduler hands it each run's durable action id + kind, and it
+  // attaches the wave run context before the tx seals.
+  #serverRunStamper:
+    | ((tx: IExtendedStorageTransaction, info: ServerRunInfo) => void)
+    | undefined;
+  // Whether THIS runtime explicitly set the serverExecution flag at
+  // construction (the only case its dispose participates in the
+  // process-global ambient lifecycle — see the constructor's propagation
+  // note).
+  #explicitServerExecution: boolean | undefined;
+  // Live runtimes that explicitly ENABLED serverExecution, process-wide.
+  // Dispose resets the ambient flag only when the LAST of them goes: a
+  // serving process runs one runtime per active space, and a parked
+  // space's dispose must not un-claim `derived` for every other space's
+  // in-flight wave commit (the admission plane reads the ambient value).
+  static #liveServerExecutionEnablers = 0;
   readonly userIdentityDID: DID;
 
   /**
@@ -1028,7 +1066,21 @@ export class Runtime {
     this.experimental.modernCellRep = getModernCellRepConfig();
     setCommitPreconditionsConfig(this.experimental.commitPreconditions);
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
-    setServerExecutionConfig(this.experimental.serverExecution);
+    // Like eagerSourceAnnotation below, propagate only when EXPLICITLY
+    // set (stage F): a co-hosted serving process (toolshed under the ON
+    // arm) constructs runtimes for many purposes, and an unconditional
+    // `undefined -> false` write from any flag-less construction would
+    // stomp the process-global ambient flag the memory server's derived
+    // admission reads — silently un-claiming `derived` mid-serve. In a
+    // process where nothing enables the flag the ambient default is
+    // already false, so the OFF arm is unchanged.
+    if (this.experimental.serverExecution !== undefined) {
+      this.#explicitServerExecution = this.experimental.serverExecution;
+      if (this.experimental.serverExecution === true) {
+        Runtime.#liveServerExecutionEnablers += 1;
+      }
+      setServerExecutionConfig(this.experimental.serverExecution);
+    }
     this.experimental.serverExecution = getServerExecutionConfig();
     // Unlike the flags above, only propagate when EXPLICITLY set: the ambient
     // flag is also a test seam (tests toggle `setEagerSourceAnnotation`
@@ -1454,10 +1506,26 @@ export class Runtime {
     // Dispose the Engine (clears compiler/runtime state and the console hook)
     this.harness.dispose();
 
-    // Reset experimental config to defaults.
+    // Reset experimental config to defaults. serverExecution resets only
+    // when THIS runtime explicitly enabled it AND it is the LAST live
+    // enabler (stage F): disposing a flag-less runtime — or parking one
+    // serving runtime of several — must not clear the ambient flag other
+    // runtimes and the memory server's admission still depend on
+    // (mid-wave `derived` commits would be refused as unclaimable). A
+    // single-runtime test keeps its stage-A cleanup contract: the last
+    // enabler's dispose resets.
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
-    resetServerExecutionConfig();
+    if (this.#explicitServerExecution === true) {
+      this.#explicitServerExecution = undefined; // dispose() may re-enter
+      Runtime.#liveServerExecutionEnablers = Math.max(
+        0,
+        Runtime.#liveServerExecutionEnablers - 1,
+      );
+      if (Runtime.#liveServerExecutionEnablers === 0) {
+        resetServerExecutionConfig();
+      }
+    }
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
@@ -1567,7 +1635,22 @@ export class Runtime {
    * wave; waves are serial per space, so a second install while one is
    * live is a bug, not a hand-over.
    */
-  installSealDestination(destination: TransactionSealDestination): void {
+  installSealDestination(
+    destination: TransactionSealDestination,
+    options: {
+      /** The serving loop's run stamper (serving-loop.md §3d, RULED
+       * 2026-08-05: every server-side commit path declares its run
+       * context before it seals). The scheduler calls
+       * {@link stampServerRun} at its two dispatch choke points with
+       * what IT knows — the durable action id and the run's kind — and
+       * the stamper (the SpaceServer) enriches with per-run identity
+       * and attaches the wave run context. */
+      runStamper?: (
+        tx: IExtendedStorageTransaction,
+        info: ServerRunInfo,
+      ) => void;
+    } = {},
+  ): void {
     if (this.experimental.serverExecution !== true) {
       throw new Error(
         "A transaction seal destination requires EXPERIMENTAL_SERVER_EXECUTION " +
@@ -1582,11 +1665,30 @@ export class Runtime {
       );
     }
     this.#transactionSealDestination = destination;
+    this.#serverRunStamper = options.runStamper;
   }
 
   /** Remove the installed seal destination (the wave closed or aborted). */
   clearSealDestination(): void {
     this.#transactionSealDestination = undefined;
+    this.#serverRunStamper = undefined;
+  }
+
+  /**
+   * Stamp a scheduler-driven run's wave context (serving-loop.md §3d).
+   * A no-op with no destination installed — the OFF arm, and ON-arm
+   * client speculation, pay one undefined check. The scheduler calls
+   * this at exactly its two transaction-minting choke points (the
+   * reactive-action run and the event dispatch), so an installed
+   * destination sees every scheduler run stamped and the seal-time
+   * unstamped refusal is reserved for genuinely undeclared commit
+   * paths.
+   */
+  stampServerRun(
+    tx: IExtendedStorageTransaction,
+    info: ServerRunInfo,
+  ): void {
+    this.#serverRunStamper?.(tx, info);
   }
 
   // (space, scope, id) triples for which a missing-link-target load has been
@@ -1616,7 +1718,16 @@ export class Runtime {
     sourceSpace?: MemorySpace,
   ): void {
     const { space, id, scope } = link;
-    const key = `${space}\0${normalizeCellScope(scope)}\0${id}`;
+    // Kick keys are per scope INSTANCE (key-vocabulary.md §5's stage-F
+    // serving-hazard list): name-keyed, A's kick suppressed B's load and
+    // B's absent read never healed at cardinality > 1. Resolved against
+    // the runtime's own identity — the OFF arm's one identity, so the
+    // partition is unchanged at cardinality 1 (key-vocabulary.md §2);
+    // served per-run reads arrive with stage F's run contexts and pull
+    // through the demand path, not this dedup set.
+    const key = `${space}\0${
+      resolveScopeKey(scope, this.scopeKeyIdentity)
+    }\0${id}`;
     if (this.missingDocLoadKicks.has(key)) return;
     // A same-space target the replica already has state for (or a manager
     // without lazy replication) needs no fetch.

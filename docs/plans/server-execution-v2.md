@@ -283,7 +283,7 @@ Stages, one PR each except C, which is a three-PR train (below):
       accumulator takes a `ScopeKeyIdentity` and constructs through
       the shared definition, so basis-index instance VALUES flow
       through the engine-side writer as specced.
-- [ ] **F — host + SpaceServer + watermark + gates**: executor host,
+- [x] **F — host + SpaceServer + watermark + gates**: executor host,
       per-space activation/park with demand-driven value pull — no
       per-piece start/stop (serving-loop.md §1, §3); pure structural
       built-ins served (spec §3.5 row 1); **M1 — per-instance run
@@ -307,7 +307,25 @@ Stages, one PR each except C, which is a three-PR train (below):
       the §7 counters; engine-side derived-envelope admission check —
       a derived commit's producing session must be the holder's own
       service session (defense-in-depth, RULED 2026-08-05;
-      protocol.md §2).
+      protocol.md §2). LANDED 2026-08-05: ExecutorHost + SpaceServer
+      (activation on session open / authored admission via the
+      admission-side observer, lease renewed on stage B's cadence,
+      waves through stage D's machinery with per-run stamping at the
+      scheduler's choke points, demand = live readers over the watch
+      registry's roots, idle park honoring gate wakes), the
+      `bookkeeping` stamp kind named (serving-loop §3d), the
+      derived-envelope mapping `sessionKey == holder`, the read row
+      (`GraphQueryRoot.entityScopeKey`, lease-holder-only), M4
+      instance-keyed dirtiness/delivery with wire frames unchanged,
+      the M1-cluster re-keys, the eager via-user hop (flag-gated),
+      derivedThrough + the watermark doc + `waitForSettled`, the §7
+      `servingLoop` health block, the schema-memo identity guard
+      (OW10), both dischargeable stage-D bounds discharged (delegated
+      foreign admission; read-only-space read sets folding into
+      withdrawals), and toolshed wiring so the ON CI arm actually
+      serves. Server-side hot-swap verified end to end; the updater's
+      network CHECK half against a fully-local store is the flagged
+      residual.
 - [ ] **G — effectful + outbox**: serve `fetch*`, `generate*`,
       `sqlite*` behind request-hash memoization; the outbox; egress
       performed only here (effect authority per README §3.8; quota
@@ -362,6 +380,24 @@ Tasks:
       overlay-locally, converging by cause-derived identity
       (speculation.md §2, owner 2026-08-02).
 - [ ] UI bindings untouched: authored writes under existing ACL + CAS.
+
+Carried-in revisits (stage-F residual, accepted for Phase 1 — owner,
+2026-08-05; both must be resolved before this phase's gates rely on
+W):
+
+- [ ] The settle input-barrier distinction: `inputSynced` cannot tell
+      a frame parked on the loop's OWN sealed commit from foreign
+      novelty, so a foreign authored frame in that position can be
+      claimed by W one wave early (self-healing next wave — the
+      documented residual at `packages/runner/src/storage/v2.ts`,
+      `inputSynced`). Either distinguish parked-on-own-seal frames
+      from foreign novelty, or exclude unapplied frames' seqs from
+      the wave's `batchHead`.
+- [ ] The pattern-updater CHECK-half bring-up verification (the
+      network source-check the unit fixture cannot serve — the
+      stage-F flagged residual in `executor-serving-loop.test.ts`):
+      verify it in the integration environment's `sx2-serving-loop`
+      surface, not a unit fixture.
 
 Success criteria (the old Phase-1 ON gates land here, merged):
 
