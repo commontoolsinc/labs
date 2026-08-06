@@ -181,7 +181,7 @@ export class Client {
   // Whether the last handshake negotiated the connection-scoped schema
   // encoding, mirroring the server's own negotiation. Frames on such a
   // connection are not self-describing, which changes what a frame this client
-  // fails to process costs — see #discardConnection.
+  // fails to process costs — see `discardConnectionIfSchemaCas`.
   #schemaCasNegotiated = false;
 
   private constructor(
