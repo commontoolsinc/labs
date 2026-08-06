@@ -48,12 +48,25 @@ never reaches a receipt and no permanence obligation attaches.
 separates nothing when agents work under their human user's key, and a minted
 session is unguessable where a DID is public.
 
-**An invocation id without a session is an error.** Naming an invocation is
-asking for an outcome to be addressable and replayable; without a session that
-address is shared with everyone using the same verb, so the request cannot be
-honored as asked. Refusing is louder than scoping to a per-request session
-nobody can reach, and both beat leaving an unscoped path that callers would
-learn to rely on precisely because it lets them share receipts.
+**An id you chose needs a session you kept.** Three cases:
+
+| Supplied | Result |
+| --- | --- |
+| neither | both are minted — a random id, and a one-time session for this request |
+| `--invocation` only | error |
+| both | replayable, and scoped to that session |
+
+Naming an invocation asks for an outcome to be addressable and replayable, and a
+session minted per request guarantees the id will not mean the same receipt next
+time — so the request cannot be honored as asked, and saying so is better than
+appearing to work while a later replay quietly re-executes.
+
+Minting both when neither is given costs nothing and buys uniformity. An
+auto-minted id is already random, so it cannot collide and cannot be guessed;
+scoping it to a session it will never reuse changes no behavior. What it avoids
+is a second derivation shape — the address is always
+`hash{id, session, stream link}`, so nothing downstream carries a branch for
+whether a session was involved.
 
 ## Backlog
 
