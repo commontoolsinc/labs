@@ -1,6 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-run
 import * as path from "@std/path";
-import { isTrackedSourcePath } from "./coverage-metrics.ts";
 
 // Taken from this file's own location rather than the working directory, which
 // the conversion inherits from its caller.
@@ -104,10 +103,44 @@ export function parseFilesWithNoSource(stderr: string): string[] {
   return parseDroppedFiles(stderr, /^Source not found for "([^"]*)"/gm);
 }
 
+// Which files the coverage-debt metric charges for, stated here rather than
+// imported from `coverage-metrics.ts` so this script's module graph stays at
+// `@std/path` alone: it runs in every test job under a permission envelope of
+// `--allow-read --allow-write --allow-run`, and a wider graph has to keep
+// within that. `write-coverage-lcov.test.ts` fails if these stop agreeing with
+// `isTrackedSourcePath`, which is the metric's own answer to the same question.
+const TRACKED_SOURCE_ROOTS = ["packages", "tasks"];
+const TRACKED_SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
+const UNTRACKED_PATH_PARTS = new Set([
+  ".cache",
+  "build",
+  "coverage",
+  "dist",
+  "fixtures",
+  "integration",
+  "node_modules",
+  "test",
+  "tests",
+]);
+const UNTRACKED_FILE_SUFFIXES = [
+  ".bench.ts",
+  ".bench.tsx",
+  ".d.ts",
+  ".spec.ts",
+  ".spec.tsx",
+  ".test.ts",
+  ".test.tsx",
+];
+const UNTRACKED_RELATIVE_PREFIXES = [
+  "packages/generated-patterns/integration/",
+  "packages/patterns/factory-outputs/",
+  "packages/patterns-saves-backup/",
+  "packages/static/assets/",
+];
+
 /**
  * Whether a dropped file costs anything downstream, which is to say whether the
- * coverage-debt metric charges for it. The metric's own predicate decides, so
- * the two cannot drift apart.
+ * coverage-debt metric charges for it.
  *
  * Anything else is dropped without cost. A file the metric does not track is not
  * part of the measurement at all, and a file outside the repository has an
@@ -126,7 +159,24 @@ export function isTrackedFile(url: string, repositoryRoot: string): boolean {
     return false;
   }
   if (!filePath.startsWith(`${repositoryRoot}${path.SEPARATOR}`)) return false;
-  return isTrackedSourcePath(path.relative(repositoryRoot, filePath));
+
+  const relativePath = path.relative(repositoryRoot, filePath)
+    .split(path.SEPARATOR).join("/");
+  if (
+    !TRACKED_SOURCE_ROOTS.some((root) => relativePath.startsWith(`${root}/`))
+  ) {
+    return false;
+  }
+  if (!TRACKED_SOURCE_EXTENSIONS.has(path.extname(relativePath))) return false;
+  if (UNTRACKED_FILE_SUFFIXES.some((s) => relativePath.endsWith(s))) {
+    return false;
+  }
+  if (UNTRACKED_RELATIVE_PREFIXES.some((p) => relativePath.startsWith(p))) {
+    return false;
+  }
+  return !relativePath.split("/").some((part) =>
+    UNTRACKED_PATH_PARTS.has(part)
+  );
 }
 
 async function removeEmptyCoverageProfiles(files: string[]): Promise<number> {

@@ -8,6 +8,7 @@ import {
   parseFilesMissingTranspiledSource,
   parseFilesWithNoSource,
 } from "./write-coverage-lcov.ts";
+import { isTrackedSourcePath } from "./coverage-metrics.ts";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 const SCRIPT = join(REPO_ROOT, "tasks/write-coverage-lcov.ts");
@@ -385,8 +386,50 @@ Deno.test("write-coverage-lcov succeeds when the file left out is outside the re
   }
 });
 
-// The conversion fails only for a file the coverage-debt metric charges for, so
-// this answers the same question the metric does.
+// The conversion answers "does the metric charge for this file?" itself, so its
+// own module graph stays small enough for the permissions the CI step grants.
+// That leaves two answers to the same question, and this is what stops them
+// drifting: every path below goes to both, and they must agree.
+Deno.test("isTrackedFile gives the same answer as the coverage metric", () => {
+  const paths = [
+    "packages/a/mod.ts",
+    "packages/a/mod.tsx",
+    "packages/a/mod.js",
+    "packages/a/mod.jsx",
+    "tasks/a.ts",
+    "tasks/nested/deep/a.ts",
+    "docs/x.ts",
+    "scripts/x.ts",
+    "packages/a/mod.test.ts",
+    "packages/a/mod.test.tsx",
+    "packages/a/mod.spec.ts",
+    "packages/a/mod.bench.ts",
+    "packages/a/mod.d.ts",
+    "packages/a/README.md",
+    "packages/a/mod.json",
+    "packages/a/test/helper.ts",
+    "packages/a/tests/helper.ts",
+    "packages/a/fixtures/x.ts",
+    "packages/a/integration/x.ts",
+    "packages/a/dist/x.ts",
+    "packages/a/build/x.ts",
+    "packages/a/coverage/x.ts",
+    "packages/a/.cache/x.ts",
+    "packages/a/node_modules/x/index.js",
+    "packages/generated-patterns/integration/x.ts",
+    "packages/patterns/factory-outputs/x.ts",
+    "packages/patterns-saves-backup/x.ts",
+    "packages/static/assets/x.ts",
+  ];
+  for (const relativePath of paths) {
+    assertEquals(
+      isTrackedFile(toFileUrl(join(REPO_ROOT, relativePath)).href, REPO_ROOT),
+      isTrackedSourcePath(relativePath),
+      `disagreed about ${relativePath}`,
+    );
+  }
+});
+
 Deno.test("isTrackedFile agrees with what the coverage metric charges for", () => {
   assert(isTrackedFile("file:///repo/packages/a/mod.ts", "/repo"));
   assert(isTrackedFile("file:///repo/tasks/a.ts", "/repo"));
