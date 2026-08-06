@@ -5,7 +5,10 @@ import type { OpaqueCell } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { Cell } from "../src/cell.ts";
-import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import {
+  createTrustedBuilder,
+  trustExecutable,
+} from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 
 // The four guarantees a child run carries beyond "whoever created it stops it".
@@ -185,6 +188,34 @@ describe("child run ownership", () => {
     expect(runtime.runner.cancels.has(key(result))).toBe(false);
   });
 
+  it("cancels a pending commit-gated start on release", async () => {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = runtime.edit();
+    tx.tx.immediate = true;
+    (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    const result = runtime.getCell<Record<string, unknown>>(
+      space,
+      "released before its deferred start",
+      undefined,
+      tx,
+    );
+    runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+
+    // The launch holds this result through the pending start alone: nothing is
+    // registered under its key until that start installs.
+    expect(runtime.runner.cancels.has(key(result))).toBe(false);
+
+    runtime.runner.releaseChild(result, undefined);
+    expect((await tx.commit()).error).toBeUndefined();
+    await runtime.idle();
+
+    expect(runtime.runner.cancels.has(key(result))).toBe(false);
+  });
+
   it("tombstones a pending commit-gated start when the runtime stops", async () => {
     const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
     const Piece = pattern<{ value: number }>(({ value }) => ({
@@ -335,6 +366,81 @@ describe("child run ownership", () => {
     expect(runtime.runner.cancels.has(key(result))).toBe(true);
     expect(pending.size).toBe(0);
     runtime.runner.stop(result);
+  });
+
+  it("stops tracking a commit-gated start when its transaction fails", async () => {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    const tx = runtime.edit();
+    tx.tx.immediate = true;
+    (tx.tx as { deferRunnerStartUntilCommit?: boolean })
+      .deferRunnerStartUntilCommit = true;
+    const result = runtime.getCell<Record<string, unknown>>(
+      space,
+      "deferred start whose transaction fails",
+      undefined,
+      tx,
+    );
+    runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
+
+    const pending = (runtime.runner as unknown as {
+      pendingDeferredStarts: Map<string, Set<unknown>>;
+    }).pendingDeferredStarts;
+    expect(pending.size).toBe(1);
+
+    expect(tx.abort("setup rejected").error).toBeUndefined();
+    await runtime.idle();
+
+    // The start will never install, so it settles as cancelled and leaves
+    // nothing behind for the result's key.
+    expect(runtime.runner.cancels.has(key(result))).toBe(false);
+    expect(pending.size).toBe(0);
+  });
+
+  it("stops tracking a commit-gated pattern run when its transaction fails", async () => {
+    const { lift, pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Piece = pattern<{ value: number }>(({ value }) => ({
+      doubled: lift((input: number) => input * 2)(value),
+    }));
+    // The commit-gated run a navigateTo handler schedules goes through its own
+    // entry point, reached here directly: driving it through a handler would
+    // mean failing whichever storage transaction the dispatch happened to
+    // land on.
+    const harness = runtime.runner as unknown as {
+      runPatternAfterSuccessfulCommit(
+        tx: unknown,
+        resultCell: unknown,
+        pattern: unknown,
+        inputs: unknown,
+        pullOnceAfterStart?: boolean,
+        markCreateOnlyResult?: boolean,
+      ): () => void;
+      pendingDeferredStarts: Map<string, Set<unknown>>;
+    };
+    const tx = runtime.edit();
+    const receipt = runtime.getCell<Record<string, unknown>>(
+      space,
+      "deferred pattern run whose transaction fails",
+      undefined,
+      tx,
+    );
+    harness.runPatternAfterSuccessfulCommit(
+      tx,
+      receipt,
+      trustExecutable(runtime, Piece),
+      { value: 3 },
+      true,
+      true,
+    );
+    expect(harness.pendingDeferredStarts.size).toBe(1);
+
+    expect(tx.abort("handler rejected").error).toBeUndefined();
+    await runtime.idle();
+
+    expect(harness.pendingDeferredStarts.size).toBe(0);
+    expect(runtime.runner.cancels.has(key(receipt))).toBe(false);
   });
 
   it("declines to release a result that has no registration", () => {

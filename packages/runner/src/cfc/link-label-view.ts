@@ -76,6 +76,19 @@ export function stripSigilCfcLabelViews(value: unknown): unknown {
   });
 }
 
+/**
+ * Helper for the two transforms above, which rebuilds a value with each sigil
+ * link's `cfcLabelView` payload rewritten.
+ *
+ * It terminates only because what it is given is `convertCellsToLinks` output,
+ * where a cycle has already become a back-link. That is a coupling between two
+ * files and nothing enforces it.
+ *
+ * TODO(danfuzz): track ancestors here, so this stands on its own rather than on
+ * what its callers happen to pass. A `FabricInstance` is flattened by this walk
+ * too, the same gap marked at the sibling walks -- see
+ * `convertCellsToLinks` in `cell.ts`.
+ */
 function transformSigilCfcLabelViews(
   value: unknown,
   transformPayload: (

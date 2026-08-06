@@ -51,6 +51,7 @@ import {
   piece,
   setPieceSourceFromCommand,
 } from "../commands/piece.ts";
+import { safeStringify } from "../lib/render.ts";
 import {
   parsePieceGetFilter,
   parsePieceGetProjection,
@@ -1374,6 +1375,58 @@ describe("cli piece parsing", () => {
       await expect(getCellValue(config, [], {}, deps)).resolves.toEqual(
         RESULT_VALUE,
       );
+    });
+
+    it("renders an unshaped parent read without stream runtime internals", async () => {
+      const signer = await Identity.fromPassphrase("piece-get-live-stream");
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+      });
+
+      try {
+        const tx = runtime.edit();
+        const cell = runtime.getCell<{
+          name: string;
+          submit: { $stream: boolean };
+        }>(signer.did(), "piece-get-live-stream", undefined, tx);
+        cell.set({ name: "Ada", submit: { $stream: true } });
+        const schema = {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            submit: { type: "object", asCell: ["stream"] },
+          },
+        } as const satisfies JSONSchema;
+        await tx.commit();
+        await runtime.idle();
+        const value = cell.asSchema(schema).get();
+        const submit = value.submit;
+        expect(isCell(submit)).toBe(true);
+        const expectedLink = (submit as unknown as { toJSON(): unknown })
+          .toJSON();
+
+        const read = await getCellValue(
+          config,
+          [],
+          {},
+          guardDeps({ result: { get: () => Promise.resolve(value) } }),
+        );
+        const json = safeStringify(read);
+
+        expect(json.length).toBeLessThan(2000);
+        expect(json).not.toContain("scheduler");
+        expect(json).not.toContain("circular reference");
+        expect(json).not.toContain('"runtime"');
+        expect(JSON.parse(json)).toEqual({
+          name: "Ada",
+          submit: expectedLink,
+        });
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
     });
   });
 

@@ -155,7 +155,6 @@ cell means none confirmed — check the component source before assuming.
 | `cf-message-beads` | Compact bead visualization of a message history | `$messages` |
 | `cf-message-input` | Input + send button combo for chat-style item entry; emits a synthetic (untrusted) `cf-send` event, so use `cf-submit-input` when the submit must authorize an owner-protected write | |
 | `cf-modal` | Accessible modal dialog with bottom-sheet presentation mode | `$open` |
-| `cf-modal-provider` | Modal stack manager | |
 | `cf-oauth` | Generic OAuth authentication | `$auth` |
 | `cf-picker` | Carousel selection over cells with `[UI]` | `$items`, `$selectedIndex` |
 | `cf-piece` | Provides piece context to child components | |

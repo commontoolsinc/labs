@@ -49,9 +49,6 @@ export class CommonIframeSandboxElement extends LitElement {
   // Static id for this component for its lifetime.
   private frameId: number = ++FRAME_IDS;
   #src = "";
-  // An incrementing id for each new page load to disambiguate
-  // requests between inner page loads.
-  private instanceId: number = 0;
   private iframeRef: Ref<HTMLIFrameElement> = createRef();
   private initialized: boolean = false;
   private subscriptions: Map<string, Receipt> = new Map();
@@ -113,7 +110,7 @@ export class CommonIframeSandboxElement extends LitElement {
   };
 
   // Message from the inner frame.
-  private async onGuestMessage(message: IPC.GuestMessage) {
+  private onGuestMessage(message: IPC.GuestMessage) {
     const IframeHandler = getIframeContextHandler();
     if (IframeHandler == null) {
       console.error("common-iframe-sandbox: No iframe handler defined.");
@@ -214,96 +211,6 @@ export class CommonIframeSandboxElement extends LitElement {
         }
         return;
       }
-
-      case IPC.GuestMessageType.LLMRequest: {
-        const payload = message.data;
-        const promise = IframeHandler.onLLMRequest(this, this.context, payload);
-        const instanceId = this.instanceId;
-        promise.then((result: object) => {
-          if (!this.ensureSameDocument(instanceId)) {
-            return;
-          }
-          this.toGuest({
-            id: this.frameId,
-            type: IPC.IPCHostMessageType.Passthrough,
-            data: {
-              type: IPC.HostMessageType.LLMResponse,
-              request: payload,
-              data: result,
-              error: undefined,
-            },
-          });
-        }, (error: unknown) => {
-          if (!this.ensureSameDocument(instanceId)) {
-            return;
-          }
-          this.toGuest({
-            id: this.frameId,
-            type: IPC.IPCHostMessageType.Passthrough,
-            data: {
-              type: IPC.HostMessageType.LLMResponse,
-              request: payload,
-              data: null,
-              error,
-            },
-          });
-        });
-        return;
-      }
-
-      case IPC.GuestMessageType.WebpageRequest: {
-        const payload = message.data;
-        const instanceId = this.instanceId;
-
-        let result, error;
-        try {
-          result = await IframeHandler.onReadWebpageRequest(
-            this,
-            this.context,
-            payload,
-          );
-        } catch (e) {
-          error = e;
-        }
-
-        if (!this.ensureSameDocument(instanceId)) {
-          return;
-        }
-
-        this.toGuest({
-          id: this.frameId,
-          type: IPC.IPCHostMessageType.Passthrough,
-          data: {
-            type: IPC.HostMessageType.ReadWebpageResponse,
-            request: payload,
-            data: result || null,
-            error,
-          },
-        });
-        return;
-      }
-
-      case IPC.GuestMessageType.Perform: {
-        const instanceId = this.instanceId;
-        IframeHandler.onPerform(this, this.context, message.data).then(
-          (result) => {
-            if (!this.ensureSameDocument(instanceId)) {
-              return;
-            }
-
-            this.toGuest({
-              id: this.frameId,
-              type: IPC.IPCHostMessageType.Passthrough,
-              data: {
-                type: IPC.HostMessageType.Effect,
-                id: message.data.id,
-                result,
-              },
-            });
-          },
-        );
-        return;
-      }
     }
   }
 
@@ -319,20 +226,11 @@ export class CommonIframeSandboxElement extends LitElement {
       this.subscriptions.clear();
     }
 
-    ++this.instanceId;
-
     this.toGuest({
       id: this.frameId,
       type: IPC.IPCHostMessageType.LoadDocument,
       data: this.src,
     });
-  }
-
-  // This is to be called with the `instanceId` of a request
-  // after an async boundary to ensure the inner frame
-  // was not reloaded.
-  private ensureSameDocument(instanceId: number): boolean {
-    return this.instanceId === instanceId;
   }
 
   private notifySubscribers(key: string, value: unknown) {

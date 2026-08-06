@@ -1,8 +1,4 @@
-import {
-  StaticCache,
-  StaticCacheFS,
-  StaticCacheHTTP,
-} from "@commonfabric/static";
+import { StaticCache } from "@commonfabric/static";
 import { RuntimeTelemetry } from "@commonfabric/runner";
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
@@ -1047,8 +1043,8 @@ export class Runtime {
     this.fetch = options.fetch ??
       ((input, init) => globalThis.fetch(input, init));
     this.staticCache = isDeno()
-      ? new StaticCacheFS()
-      : new StaticCacheHTTP(new URL("/static", this.apiUrl));
+      ? StaticCache.fromFileSystem()
+      : new StaticCache(new URL("/static", this.apiUrl));
 
     this.telemetry = options.telemetry ?? new RuntimeTelemetry();
 

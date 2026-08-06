@@ -261,6 +261,13 @@ describe("cf wish headless read (resolveWish)", () => {
     expect(projected.right.setName).toBe("[stream:setName]");
 
     const json = safeStringify(projected);
+    expect(json).toBe(`{
+  "left": {
+    "label": "shared",
+    "setName": "[stream:setName]"
+  },
+  "right": "<circular reference>"
+}`);
     expect(json).not.toContain("scheduler");
     expect(json).not.toContain("runtime");
   });

@@ -1,7 +1,13 @@
-// Completed CI run, job, and step timings persisted across dashboard restarts.
-// Timings are stable for one workflow attempt and are retained for the widest
-// history window the dashboard can display.
+// An index of completed CI runs, persisted across dashboard restarts. Timings
+// are stable for one workflow attempt and are retained for the widest history
+// window the dashboard can display.
+//
+// The index holds each run's per-job durations, which is what the CI duration
+// history charts. The far larger per-step detail the Gantt views draw lives one
+// file per attempt in ci-gantt-detail.ts, so the index stays small enough to
+// keep in memory for the whole retention window.
 
+import { basename, dirname, join } from "@std/path";
 import { dashboardCacheFile } from "./history-files.ts";
 
 export const CI_JOB_CACHE_DAYS = 60;
@@ -40,7 +46,49 @@ export interface CachedCiGanttRun {
   headBranch?: string;
   startedAt: string;
   workflowName?: string;
-  jobs: CachedCiGanttJob[];
+  // Two answers about the attempt's jobs, recorded when the jobs are fetched:
+  // whether any of them can be drawn on a chart, and whether every one of them
+  // records the attempt it ran in. Both let the index decide whether an attempt
+  // is usable without reading its detail file.
+  drawable: boolean;
+  attemptTagged: boolean;
+}
+
+// The run-level part of a Gantt entry, before the two answers about its jobs
+// are worked out.
+export type CachedCiGanttRunFields = Omit<
+  CachedCiGanttRun,
+  "drawable" | "attemptTagged"
+>;
+
+// The fields that decide whether a job can be drawn, shared by the GitHub API
+// shape and the cached shape.
+export interface CiGanttJobTiming {
+  conclusion: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+}
+
+export function hasGanttJobTiming(job: CiGanttJobTiming): boolean {
+  if (!job.started_at || !job.completed_at) return false;
+  const start = Date.parse(job.started_at);
+  const end = Date.parse(job.completed_at);
+  return Number.isFinite(start) && Number.isFinite(end) && end > start;
+}
+
+export function isDrawableGanttJob(job: CiGanttJobTiming): boolean {
+  return job.conclusion !== "skipped" && hasGanttJobTiming(job);
+}
+
+export function ganttRunSummary(
+  run: CachedCiGanttRunFields,
+  jobs: CachedCiGanttJob[],
+): CachedCiGanttRun {
+  return {
+    ...run,
+    drawable: jobs.some(isDrawableGanttJob),
+    attemptTagged: jobs.every((job) => job.attempt !== undefined),
+  };
 }
 
 export interface CachedCiRun {
@@ -88,8 +136,17 @@ interface StoredCiJobHistory {
   runs: CachedCiRun[];
 }
 
-const defaultFile = (): string =>
-  dashboardCacheFile("fabric-wall-ci-job-history.json");
+const CACHE_BASENAME = "fabric-wall-ci-run-index.json";
+
+// Names in the cache directory that this store does not read. Each holds a
+// layout of its own that reached hundreds of megabytes, so a process that finds
+// one deletes it: parsing it would cost more memory than the whole index.
+const SUPERSEDED_BASENAMES = ["fabric-wall-ci-job-history.json"];
+
+const defaultFile = (): string => dashboardCacheFile(CACHE_BASENAME);
+
+const describeError = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
 
 const runKey = (
   repo: string,
@@ -121,11 +178,11 @@ const isCachedGanttStep = (value: unknown): value is CachedCiGanttStep => {
     isNullableString(step.completed_at);
 };
 
-const isCachedGanttJob = (value: unknown): value is CachedCiGanttJob => {
+export const isCachedGanttJob = (value: unknown): value is CachedCiGanttJob => {
   if (typeof value !== "object" || value === null) return false;
   const job = value as CachedCiGanttJob;
   return (job.attempt === undefined ||
-      Number.isInteger(job.attempt) && job.attempt > 0) &&
+    Number.isInteger(job.attempt) && job.attempt > 0) &&
     typeof job.name === "string" && typeof job.status === "string" &&
     isNullableString(job.conclusion) && isNullableString(job.started_at) &&
     isNullableString(job.completed_at) && Array.isArray(job.steps) &&
@@ -140,7 +197,8 @@ const isCachedGanttRun = (value: unknown): value is CachedCiGanttRun => {
     (run.headBranch === undefined || typeof run.headBranch === "string") &&
     typeof run.startedAt === "string" &&
     (run.workflowName === undefined || typeof run.workflowName === "string") &&
-    Array.isArray(run.jobs) && run.jobs.every(isCachedGanttJob);
+    typeof run.drawable === "boolean" &&
+    typeof run.attemptTagged === "boolean";
 };
 
 const isCachedRun = (value: unknown): value is CachedCiRun => {
@@ -193,6 +251,25 @@ const isCachedInvalidation = (
     Number.isFinite(invalidation.invalidatedAt) &&
     invalidation.invalidatedAt >= 0;
 };
+
+// Every run repeats the same repository, workflow, and job names, and parsing
+// gives each occurrence its own string. Pointing them at one string per
+// distinct value costs a map over the runs and saves several megabytes across a
+// full retention window.
+function shareRepeatedStrings(runs: CachedCiRun[]): void {
+  const pool = new Map<string, string>();
+  const share = (value: string): string => {
+    const shared = pool.get(value);
+    if (shared !== undefined) return shared;
+    pool.set(value, value);
+    return value;
+  };
+  for (const run of runs) {
+    run.repo = share(run.repo);
+    run.workflow = share(run.workflow);
+    for (const job of run.jobs) job.name = share(job.name);
+  }
+}
 
 interface CiJobHistoryContents {
   refreshes: CachedCiHistoryRefresh[];
@@ -296,6 +373,7 @@ export class CiJobHistoryStore {
       }
     }
     const runs = value.runs.filter(isCachedRun);
+    shareRepeatedStrings(runs);
     const available = new Set(
       runs.map((run) =>
         `${run.repo}:${run.workflow}:${run.runId}:${run.runAttempt}`
@@ -442,10 +520,50 @@ export class CiJobHistoryStore {
   load(): Promise<void> {
     if (!this.#loadRequest) {
       this.#loadRequest = (async () => {
+        await this.#removeSupersededFiles();
         this.#merge(await this.#read());
       })();
     }
     return this.#loadRequest;
+  }
+
+  async #removeSupersededFiles(): Promise<void> {
+    const directory = dirname(this.file);
+    const current = basename(this.file);
+    const superseded = SUPERSEDED_BASENAMES.filter((name) => name !== current);
+    if (!superseded.length) return;
+    const paths = superseded.flatMap((name) => [name, `${name}.lock`]);
+    // An interrupted save leaves a temporary file as large as the one it was
+    // replacing, so these are swept too.
+    try {
+      for await (const entry of Deno.readDir(directory)) {
+        if (
+          entry.isFile && entry.name.endsWith(".tmp") &&
+          superseded.some((name) => entry.name.startsWith(`${name}.`))
+        ) paths.push(entry.name);
+      }
+    } catch (error) {
+      // A directory that is not there yet has nothing in it to remove. Any
+      // other reason it cannot be listed is reported: these files are the
+      // largest thing in the cache directory, and a process that cannot reach
+      // them leaves the volume full.
+      if (!(error instanceof Deno.errors.NotFound)) {
+        console.error(
+          `CI run index could not list ${directory}: ${describeError(error)}`,
+        );
+      }
+    }
+    for (const path of paths) {
+      try {
+        await Deno.remove(join(directory, path));
+      } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound)) {
+          console.error(
+            `CI run index could not remove ${path}: ${describeError(error)}`,
+          );
+        }
+      }
+    }
   }
 
   get(
@@ -552,7 +670,9 @@ export class CiJobHistoryStore {
       samplingVersion !== null &&
       (!Number.isInteger(samplingVersion) || samplingVersion <= 0)
     ) {
-      throw new Error("CI job history refresh has an invalid sampling version.");
+      throw new Error(
+        "CI job history refresh has an invalid sampling version.",
+      );
     }
     const key = refreshKey(repo, workflow, days);
     const current = this.#refreshes.get(key);
@@ -686,6 +806,32 @@ export class CiJobHistoryStore {
     this.#revision++;
     this.#bumpSource(run.repo, run.workflow);
     return this.latest(run.repo, run.workflow, run.runId) ?? run;
+  }
+
+  // Every retained attempt of one source, newest first by the time its run
+  // started. Unlike `list`, a run that was attempted more than once contributes
+  // each of its attempts, because each attempt has its own Gantt detail.
+  attempts(
+    repo: string,
+    workflow: string,
+    limit = Infinity,
+  ): CachedCiRunReference[] {
+    const attempts: { runId: number; runAttempt: number; at: number }[] = [];
+    for (const run of this.#runs.values()) {
+      if (run.repo !== repo || run.workflow !== workflow) continue;
+      attempts.push({
+        runId: run.runId,
+        runAttempt: run.runAttempt,
+        at: run.at,
+      });
+    }
+    attempts.sort((a, b) =>
+      b.at - a.at || b.runId - a.runId || b.runAttempt - a.runAttempt
+    );
+    return attempts.slice(0, limit).map(({ runId, runAttempt }) => ({
+      runId,
+      runAttempt,
+    }));
   }
 
   list(repo: string, workflow: string, cutoff = -Infinity): CachedCiRun[] {
