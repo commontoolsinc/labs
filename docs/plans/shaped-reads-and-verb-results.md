@@ -290,12 +290,14 @@ What genuinely belongs to the call, and to nothing else:
 Everything inside `result` is the read layer. A call should gain `--schema` and
 `--filter` by reusing the shared implementation, not by growing a second one.
 
-### The receipt is an ordinary cell created without a schema
+### Receipts carry a descriptive schema
 
-Receipts are created with no schema argument (`handleJavaScriptHandlerResult`,
-`packages/runner/src/runner.ts`), so the stored document carries an empty
-`schema` field. Two consequences follow, and both are the read layer's mechanisms
-failing to engage rather than anything special about receipts:
+A receipt is an ordinary cell, and like any other it should say what it holds.
+Today it does not: receipts are created with no schema argument
+(`handleJavaScriptHandlerResult`, `packages/runner/src/runner.ts`), so the
+stored document carries an empty `schema` field. Two consequences follow, and
+both are the read layer's mechanisms failing to engage rather than anything
+special about receipts:
 
 - The fetch narrowing above cannot engage, so a shape is applied after
   everything has been loaded.
