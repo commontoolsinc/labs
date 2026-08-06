@@ -100,7 +100,7 @@ operation comes along as a raw internal pointer:
             "append": { "/": { "link@1": { "id": "of:fid1:…", … } } } } }
 ```
 
-Neither behaviour was designed. Each command grew its own output handling and
+Neither behavior was designed. Each command grew its own output handling and
 they drifted.
 
 ## What the model settles

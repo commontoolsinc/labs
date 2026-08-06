@@ -399,7 +399,7 @@ not have, and only the third is unserved:
 - *Dispatched detached.* `--no-wait` returns the invocation id on stderr before
   any network work, and once migration step 2 lands it returns the receipt
   address too. Keeping that address is the answer — but this bullet is
-  conditional on step 2, not on today's behaviour.
+  conditional on step 2, not on today's behavior.
 - *Lost the response, verb has no effects outside its transaction.* Replaying
   with the same invocation id returns the original outcome. The body re-runs and
   loses the create-only race, so the commit is refused and nothing is duplicated.

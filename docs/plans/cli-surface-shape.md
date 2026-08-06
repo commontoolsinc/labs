@@ -81,7 +81,7 @@ The **concise** form is a different thing wearing the same flag:
 ```
 
 The concise form is a shorthand, and it exists because full schemas are verbose
-enough that nobody writes one to select two fields. It is modelled on
+enough that nobody writes one to select two fields. It is modeled on
 [`llm`'s schemas](https://llm.datasette.io/en/stable/schemas.html), which is
 worth recording so the next reader does not have to re-derive why it looks the
 way it does.
@@ -189,7 +189,7 @@ a caller depends on — steps 1–5 only add.
    map` against `inspect graph`, and `apply` against `set`.
 
 Steps 1–5 are mechanical. Step 7 needs real decisions and belongs last, because
-each pair is two working commands whose merge changes behaviour rather than
+each pair is two working commands whose merge changes behavior rather than
 spelling.
 
 **Each step carries its own documentation.** `--input`, `--piece`, and

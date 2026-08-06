@@ -121,7 +121,7 @@ definition elsewhere in the document, and the combinators express "matches any
 of these." Source schemas use them constantly: every named interface becomes a
 `$ref` into `$defs`, and the projection resolves those while selecting. What a
 caller cannot do is introduce its own. A disjunction has no single answer to
-"return this subtree," so honouring one would mean picking a branch on the
+"return this subtree," so honoring one would mean picking a branch on the
 caller's behalf.
 
 ### Saying which positions are addresses
@@ -258,7 +258,7 @@ This is why a cell's declared schema matters beyond type-checking: it is what
 lets a caller's shape become a fetch instruction instead of a filter applied
 after the fact.
 
-A caller's selection states the root kind too, so honouring it would let
+A caller's selection states the root kind too, so honoring it would let
 ambiguous-root sources narrow as well — but no case has been shown that needs
 it, and the source most likely to have wanted it is the receipt, which now
 carries its own schema.
