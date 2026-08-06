@@ -183,6 +183,8 @@ export class Client {
   // connection are not self-describing, which changes what a frame this client
   // fails to process costs — see `discardConnectionIfSchemaCas`.
   #schemaCasNegotiated = false;
+  // The flags the in-flight or most recent `hello` advertised. See hello().
+  #advertisedFlags: MemoryProtocolFlags | null = null;
 
   private constructor(
     private readonly transport: Transport,
@@ -351,12 +353,19 @@ export class Client {
   private async hello(): Promise<void> {
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
+    // Read the ambient flags ONCE and keep what this handshake advertised.
+    // The server negotiates against the flags it received, so a decision that
+    // must match the server's — which encoding this connection speaks — has
+    // to be made against these, not against a second read that a config
+    // change between send and `hello.ok` could answer differently.
+    const advertised = getMemoryProtocolFlags();
+    this.#advertisedFlags = advertised;
     try {
       await Promise.all([
         this.transport.send(encodeMemoryBoundary({
           type: "hello",
           protocol: MEMORY_PROTOCOL,
-          flags: getMemoryProtocolFlags(),
+          flags: advertised,
         })),
         ack.promise,
       ]);
@@ -414,7 +423,7 @@ export class Client {
         // these; absent-on-old-server keys parse to false — fail closed.
         this.#serverFlags = helloOk.flags;
         this.#schemaCasNegotiated = helloOk.flags.syncSchemaCasV1 === true &&
-          expectedFlags.syncSchemaCasV1 === true;
+          this.#advertisedFlags?.syncSchemaCasV1 === true;
         try {
           this.#sessionOpenAuthContext = requireSessionOpenAuthMetadata(
             helloOk.sessionOpen,
