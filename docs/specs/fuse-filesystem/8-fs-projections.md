@@ -50,7 +50,7 @@ type FsProjection =
       type: "application/json";
       content: Record<string, unknown>;
     }
-  | Record<string, unknown>; // plain object → default JSON projection
+  | { type?: undefined; [key: string]: unknown }; // plain object → default JSON projection
 ```
 
 `pattern()` types `[FS]` at its return position as a `FactoryInput<FsProjection>`,
