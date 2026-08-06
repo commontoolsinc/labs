@@ -263,20 +263,23 @@ ambiguous-root sources narrow as well — but no case has been shown that needs
 it, and the source most likely to have wanted it is the receipt, which now
 carries its own schema.
 
-### Defect: an unshaped read serializes live handles
+### An unshaped read emits the internal encoding
 
-A read with no shape loads the value and serializes whatever objects it finds.
-Some of those objects are live runtime handles rather than data — a verb is
-represented by a stream handle that holds a reference back to the runtime. So an
-unshaped read of any cell containing a verb emits the scheduler: event queues,
-handler tables, and a circular reference back to the runtime, around 16–17 KB
-for an otherwise two-field result.
+A read with no selection returns whatever the value serializes to, and a verb
+position serializes to the runtime's own link envelope:
 
-This affects cells that *do* declare their schema, not only ones that do not:
-declaring a position as a stream does not prevent it, because the source schema
-governs what is read rather than what is printed. It is independent of
-everything else here and worth fixing on its own — a verb's rendered form should
-be a marker, not its implementation.
+```json
+{ "createNote": { "/": { "link@1": { "id": "of:fid1:…",
+                                     "space": "did:key:…",
+                                     "path": [], "scope": "space" } } } }
+```
+
+That is faithful — a verb is a channel, and a link is the only thing about it
+that crosses a process boundary — but it is not a contract. The envelope is the
+runtime's internal form, still selected by an experimental option
+(`modernCellRep`), so a caller reading it builds on an encoding that can be
+replaced underneath them. A declared shape is what turns the same information
+into something a caller may depend on, which is why a rendered address has one.
 
 ## Calls, layered on the read layer
 
@@ -399,6 +402,12 @@ unless noted.
   pieces.
 - Of the shipped patterns, four verbs declare a result type and one returns a
   reference.
+
+**Rendering**
+
+- An unshaped read renders a verb position as the runtime's link envelope,
+  `{"/": {"link@1": …}}` — faithful, but the internal form rather than a
+  declared one.
 
 ## Open questions
 
