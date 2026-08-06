@@ -16,10 +16,11 @@ runtime and gives a user a way to move around their spaces. Entry point is
   exports. A change there is a change to two packages.
 - A component never writes application state. It calls `this.command(...)` from
   `BaseView`, which dispatches a composed, bubbling `shell-command` event that
-  `RootView` catches and routes to a method on `XRootView`. `Command` is a
+  `XRootView` catches and routes to one of its own methods. `Command` is a
   closed union in `src/views/BaseView.ts`, so a new kind of state change means a
   new arm on that union and a new method on `XRootView`, not reaching past
-  either.
+  either. That event carries an unchecked `detail` across the DOM, so
+  `setConfig` re-checks the config key it is handed.
 - `XRootView` owns every write to `AppState`, through `setView`, `setIdentity`
   and `setConfig`. `shared/app/state.ts` names the part of that surface a caller
   outside the element sees as `ShellApp`: the shell's `Navigation` takes one,

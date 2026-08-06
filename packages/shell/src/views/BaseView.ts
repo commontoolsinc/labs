@@ -15,10 +15,9 @@ const DEBUG_RENDERER = false;
 
 export const SHELL_COMMAND = "shell-command";
 
-// The closed set of application-state changes a view may ask for. `RootView`
-// listens for `SHELL_COMMAND` and routes each arm to the matching method on
-// `XRootView`, so a new kind of state change means a new arm here and a new
-// method there.
+// The closed set of application-state changes a view may ask for. `XRootView`
+// listens for `SHELL_COMMAND` and routes each arm to its matching method, so a
+// new kind of state change means a new arm here and a new method there.
 export type Command =
   | { type: "set-view"; view: AppView }
   | { type: "set-identity"; identity: Identity | undefined }
