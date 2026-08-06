@@ -70,11 +70,17 @@ wrapper classes (Section 1.4).
 > lives in `codec-common/` (Section 2), and the conversion functions in
 > `native-conversion.ts` (Section 8).
 >
-> **Where a thing is declared is not where it is imported from.** The package
-> exports one surface for all of the above, `fabric-value`, which re-exports
-> them; the modules named here are internal and not reachable as subpaths.
-> Cite them to say where something is defined, and import from
-> `@commonfabric/data-model/fabric-value`.
+> **Where a thing is declared is not where it is imported from**, and the
+> modules named here divide on that point. `interface.ts` and
+> `native-conversion.ts` are internal: they are not exported subpaths, and
+> their contents are reached through `@commonfabric/data-model/fabric-value`,
+> which re-exports them. `codec-common/` and `fabric-instances/` are exported
+> subpaths in their own right and are imported directly under those names;
+> `fabric-value` does *not* re-export the codec vocabulary, so
+> `ReconstructionContext` and its siblings come from
+> `@commonfabric/data-model/codec-common`. Cite a module to say where
+> something is defined; consult the package's `exports` map to know where to
+> import it from.
 >
 > Type declarations visible to patterns are in `packages/api/index.ts`
 > (inline `interface` + `declare const` pattern), and must agree with the
@@ -120,6 +126,13 @@ type FabricValue =
   | readonly FabricValue[]
   | { readonly [key: string]: FabricValue };
 ```
+
+Arms (b) and (c) are a deliberate expansion, not a divergence. The
+implementation writes a single `FabricSpecialObject` arm; `FabricPrimitive` and
+`FabricInstance` are its only two subclasses, so naming them separately — and
+naming the `FabricPrimitive` subclasses individually — describes exactly the
+same set while saying more about it. Read the split as this document's
+elaboration of one implementation arm.
 
 > **Fabric values are deeply read-only, with one intentional hole.** The
 > container arms are read-only, and because their element and property types
