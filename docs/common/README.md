@@ -40,6 +40,7 @@ on the Common Fabric runtime.
 - [concepts/pattern.md](concepts/pattern.md) — what a pattern is; inputs, outputs, `[UI]`, `[NAME]`
 - [concepts/reactivity.md](concepts/reactivity.md) — the cell system, read/write access, reactive mental model
 - [concepts/computed/computed.md](concepts/computed/computed.md) — `computed()`, `lift()`, derived values
+- [concepts/computed/read-bounds.md](concepts/computed/read-bounds.md) — what a derivation actually reads: the generated input schema, what narrows it, what widens it to the whole space
 - [concepts/action.md](concepts/action.md) — handling events with `action()`
 - [concepts/handler.md](concepts/handler.md) — reusable parameterized handlers with `handler()`
 - [concepts/identity.md](concepts/identity.md) — object identity, `equals()`, why `===` fails across cells

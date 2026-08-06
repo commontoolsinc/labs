@@ -11,6 +11,18 @@ reads are tracked as dependencies (in computed/lift). Derive data with
 [computed()](./computed/computed.md) and gate UI with plain ternaries
 ([Conditional Rendering](../patterns/conditional.md)).
 
+`.get()` is not confined to those bodies. At pattern scope the transformer
+auto-lifts any expression built on a `.get()` — `rows.get().length`,
+`rows.get()[0]`, `rows.get().length > 0`, `` `Rows: ${rows.get().length}` `` —
+into a derivation, so those spellings need no wrapper either. What it cannot
+lift is a bare `rows.get()` (there is no expression around it to derive) or a
+**method call** on the result: `rows.get().join(", ")`, `name.get().trim()`,
+`rows.get().filter(…)`. Those report *"Calling .get() on a cell is not allowed
+in reactive context"* and belong inside a `computed()`.
+
+Which spelling you pick also decides how much the derivation reads — see
+[What a Derivation Reads](./computed/read-bounds.md).
+
 ## Core Principle: Writable<> is About Write Access, Not Reactivity
 
 **The most important thing to understand:** Everything in Common Fabric is reactive by default. The `Writable<>` wrapper in type signatures doesn't enable reactivity—it indicates **write intent**.
@@ -19,6 +31,12 @@ reads are tracked as dependencies (in computed/lift). Derive data with
 
 - **Use `Writable<T>`** in signatures ONLY when you need write access (`.set()`, `.update()`, `.push()`, `.key()`)
 - **Omit `Writable<>`** for read-only access - the framework automatically provides reactive values
+
+Omitting it is not only a statement of intent. A `Writable<>` input is handed
+to every derivation that touches it at its full declared type, while a plain
+one is narrowed to the paths the body actually reaches — so on a list of pieces
+a stray `Writable<>` is the difference between reading a field and reading the
+space. See [What a Derivation Reads](./computed/read-bounds.md).
 
 ```tsx
 // Shown for illustration only.
