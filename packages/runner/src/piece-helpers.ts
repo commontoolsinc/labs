@@ -68,8 +68,13 @@ export function resolveCellPath<T>(
 
   const resolvedValue = currentCell.get();
   const segment = path[path.length - 1];
+  // `Object.hasOwn`, not `in`: `segment` names data. `in` walks the prototype
+  // chain, so a segment called `toString` looked present on every record and
+  // this returned `undefined` instead of raising the documented "property not
+  // found" error. The `availableKeys` hint below already uses `Object.keys` —
+  // own-only — so the two disagreed about what the record actually carries.
   const keyMissing = parentValue != null && typeof parentValue === "object"
-    ? !(segment in (parentValue as object))
+    ? !Object.hasOwn(parentValue as object, segment as string)
     : resolvedValue === undefined;
   if (path.length > 0 && keyMissing) {
     const availableKeys = parentValue != null && typeof parentValue === "object"
