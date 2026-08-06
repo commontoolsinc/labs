@@ -23,7 +23,7 @@
  *     --allow-write=/tmp,/var/folders test/frozen-reads-cache.bench.ts
  */
 
-import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model/interface";
+import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 

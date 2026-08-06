@@ -108,6 +108,15 @@ import {
   OpenAICodexResponsesClient,
 } from "./model/openai-codex-responses.ts";
 import type { HarnessModelClient, HarnessModelUsage } from "./model/client.ts";
+import {
+  currentProvenance,
+  type HarnessProvenance,
+  provenanceEntries,
+  provenanceUserAgent,
+  recordProvenanceRunManifest,
+  setCurrentProvenance,
+  setProvenanceCommand,
+} from "./provenance.ts";
 
 const DEFAULT_MODEL = "gpt-5.6-terra";
 const DEFAULT_MAX_MODEL_TURNS = 8;
@@ -280,6 +289,11 @@ export type CfHarnessCliSignalHandler = (
 export interface RunCfHarnessCliDependencies {
   cwd?: string;
   env?: Record<string, string | undefined>;
+  /**
+   * What caused this run, reported on every gateway request it makes.
+   * Resolved from the process when absent.
+   */
+  provenance?: HarnessProvenance;
   io?: CfHarnessCliIO;
   readTextFile?: (path: string) => Promise<string>;
   writeTextFile?: (path: string, text: string) => Promise<void>;
@@ -379,6 +393,8 @@ Options:
   auth status openai-codex      Show local connection status without secrets
   auth logout openai-codex      Remove only cf-harness local credentials
   models openai-codex           List models advertised for this subscription
+  whoami [--json]               Show the provenance this host reports to the gateway,
+                                including the principal that identifies its requests
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
@@ -1637,6 +1653,41 @@ const runCfHarnessModelsCommand = async (
   return 0;
 };
 
+/**
+ * Prints the provenance this host attaches to gateway requests, principal
+ * first.
+ */
+const runCfHarnessWhoamiCommand = (
+  argv: readonly string[],
+  _deps: RunCfHarnessCliDependencies,
+  io: CfHarnessCliIO,
+): number | undefined => {
+  const normalized = argv[0] === "--" ? argv.slice(1) : argv;
+  if (normalized[0] !== "whoami") return undefined;
+  const json = normalized[1] === "--json";
+  if (normalized.length > 2 || (normalized.length === 2 && !json)) {
+    throw new Error("usage: whoami [--json]");
+  }
+  const provenance = currentProvenance();
+  const entries = provenanceEntries(provenance);
+  const fields = Object.fromEntries(entries);
+  if (json) {
+    io.stdout(`${JSON.stringify(fields, null, 2)}\n`);
+    return 0;
+  }
+  const lines = [
+    ...entries.map(([name, value]) => `${name.padEnd(10)} ${value}`),
+    "",
+    "The principal is a random label drawn once for this machine and kept in",
+    "the harness home. It is what the LLM gateway records for requests from",
+    `here, so when a run is traced to a principal, ${fields.principal} is yours.`,
+    "",
+    `user agent  ${provenanceUserAgent(provenance)}`,
+  ];
+  io.stdout(`${lines.join("\n")}\n`);
+  return 0;
+};
+
 const createAdditionalMountConfigs = (
   config: Pick<CfHarnessCliConfig, "fabricMount" | "hostMounts">,
 ): readonly DockerRunscAdditionalMountConfig[] => [
@@ -2259,10 +2310,23 @@ const runCfHarnessAuthCommand = async (
   return 0;
 };
 
+/**
+ * Which subcommand is running, drawn from a closed set. Anything unrecognized
+ * reports "prompt", keeping the command line out of the reported provenance.
+ */
+export const cfHarnessCliCommandName = (argv: readonly string[]): string => {
+  const first = argv[0] === "--" ? argv[1] : argv[0];
+  return first === "auth" || first === "models" || first === "whoami"
+    ? first
+    : "prompt";
+};
+
 export const runCfHarnessCli = async (
   argv: readonly string[],
   deps: RunCfHarnessCliDependencies = {},
 ): Promise<number> => {
+  setCurrentProvenance(deps.provenance);
+  setProvenanceCommand(cfHarnessCliCommandName(argv));
   const io = deps.io ?? defaultCliIo();
   let activeEngine: CfHarnessEngine | undefined;
   let signalCleanup: (() => void) | undefined;
@@ -2278,6 +2342,8 @@ export const runCfHarnessCli = async (
     if (authResult !== undefined) return authResult;
     const modelsResult = await runCfHarnessModelsCommand(argv, deps, io);
     if (modelsResult !== undefined) return modelsResult;
+    const whoamiResult = runCfHarnessWhoamiCommand(argv, deps, io);
+    if (whoamiResult !== undefined) return whoamiResult;
     const controlArgs = parseCfHarnessCliControlArgs(argv);
     if (controlArgs.help) {
       io.stdout(formatCfHarnessCliUsage());
@@ -2404,6 +2470,7 @@ export const runCfHarnessCli = async (
       }
       const credentialOwnerKey = credentialOwner.ownerKey;
       const effectiveRunManifest = recordedRunManifest ?? runManifest;
+      recordProvenanceRunManifest(effectiveRunManifest);
       const loom = effectiveRunManifest?.source === "loom";
       if (
         modelProvider === "openai-codex" && loom &&
@@ -2551,6 +2618,7 @@ export const runCfHarnessCli = async (
       const credentialOwner = runManifest?.credentialOwner ??
         localCredentialOwner();
       const credentialOwnerKey = credentialOwner.ownerKey;
+      recordProvenanceRunManifest(runManifest);
       if (
         modelProvider === "openai-codex" && runManifest?.source === "loom" &&
         runManifest.credentialOwner === undefined

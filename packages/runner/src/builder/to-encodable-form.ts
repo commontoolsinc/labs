@@ -383,9 +383,11 @@ export function serializePatternGraph(
   const previous = internalGraphSerialization;
   internalGraphSerialization = true;
   try {
-    return (hasEncodableForm(pattern)
-      ? encodableFormOf(pattern)
-      : patternToEncodableForm(pattern)) as Record<string, unknown>;
+    // `undefined` as the no-form answer is what stands the fallback behind the
+    // `??`, and one read gets there. A pattern's form is a record by
+    // construction, so nothing nullish can arrive from the other side.
+    return (encodableFormOf(pattern, undefined) ??
+      patternToEncodableForm(pattern)) as Record<string, unknown>;
   } finally {
     internalGraphSerialization = previous;
   }
