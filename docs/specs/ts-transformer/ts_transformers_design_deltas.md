@@ -108,13 +108,19 @@ Language deltas found by adversarial verification of the target-language
 matrix (implementation vs normative spec). Resolution status is recorded on
 each finding:
 
-- **Top-level eager-read carve-out (#3725, 2026-05-28).** Validation accepts
-  computation-feeding top-level `.get()` reads and auto-wraps the containing
-  expression lift-applied; terminal reads still reject. Golden-pinned
-  (`cell-get-binding-autowrap`, `with-reactive`;
+- **Top-level eager-read carve-out (#3725, 2026-05-28).** Validation accepts a
+  top-level `.get()` read on a `Cell`/`Writable`/`Stream` wherever the read has
+  a lowerable expression site to carry it, and auto-wraps that site
+  lift-applied. The line is the site, not the shape of the read: a binding, a
+  return, an object property, an array element, an argument, and a call whose
+  receiver chain reaches the read are all accepted, terminal or not; a read
+  with no such site — statement position, or inside a reactive array-method
+  callback — still rejects, as does a read on a value that is not a cell.
+  Golden-pinned (`cell-get-binding-autowrap`,
+  `cell-get-terminal-binding-autowrap`, `with-reactive`;
   `test/validation.test.ts:3179`). Matrix row still says Unsupported
-  unconditionally. Decision open: ratify a terminal-vs-computation-feeding
-  split in the matrix, or revert (breaks two goldens + one test).
+  unconditionally. Decision open: ratify a has-a-lowerable-site split in the
+  matrix, or revert (breaks three goldens + several tests).
 - **Optional-call accepted in JSX and compute callbacks — resolved 2026-07-23
   by making optionality orthogonal to call support.** The earlier location
   split was an implementation leak, and the proposed blanket rejection would
