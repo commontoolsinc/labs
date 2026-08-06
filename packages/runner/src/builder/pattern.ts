@@ -918,6 +918,13 @@ function assignComputedCellKinds(
       }
       return;
     }
+    // TODO(danfuzz): `isRecord` admits a `FabricInstance`, whose
+    // `Object.entries` are empty, so it takes this branch and collects
+    // nothing instead of falling to the fail-safe `collectAll()` below. A
+    // cell root reachable only through the instance's codec contents is
+    // then never disqualified from the `computed` tag — the ack-and-drop
+    // this function exists to prevent. (A `FabricPrimitive` passes the same
+    // gate, harmlessly: it holds no cell roots.)
     if (isRecord(target) && !isReactive(target)) {
       const properties =
         isRecord(schema.properties) && !Array.isArray(schema.properties)

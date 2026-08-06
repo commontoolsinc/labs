@@ -921,6 +921,15 @@ export function mergeDefaults(
   const base = isNontrivialSchema(schema) ? schema : {};
 
   // TODO(seefeld): What's the right thing to do for arrays?
+  //
+  // TODO(danfuzz): `isReadonlyRecord` admits a `FabricSpecialObject` on
+  // either side, and the spread copies zero properties from one, so a
+  // fabric-valued default here merges to `{}` (or silently drops the other
+  // side's contribution). Reachable: the schema generator emits
+  // `{ type: "object" }` for the fabric-backed natives (`Date`, `RegExp`,
+  // `Uint8Array`), so a `Cell` of one of those with an object default in its
+  // schema takes the spread arm. Wants a `FabricSpecialObject` test choosing
+  // the `defaultValue` arm.
   const mergedDefault = base.type === "object" &&
       isReadonlyRecord(base.default) && isReadonlyRecord(defaultValue)
     ? { ...base.default, ...defaultValue } as JSONValue
@@ -1433,6 +1442,16 @@ class TransformObjectCreator
       }
       // If we're an object, we may be missing some properties that have a
       // default.
+      //
+      // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, so a fabric
+      // value under a schema that also declares `properties` with defaults
+      // enters this block: for a `FabricPrimitive`, `cloneIfNecessary`
+      // returns the frozen value by identity and the property assignment
+      // below throws a `TypeError`; for a `FabricInstance`, the assignments
+      // graft own data properties onto the (cloned) instance that its codec
+      // never reads. The `FabricPrimitive`/`FabricInstance` arms in
+      // `annotateWithBackToCellSymbols` run only after this block, so they do
+      // not guard it.
       if (
         isRecord(value) && !Array.isArray(value) &&
         schema.properties !== undefined

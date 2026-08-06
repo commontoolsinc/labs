@@ -297,6 +297,13 @@ export function shouldShapeDelivery(event: unknown): boolean {
 
 const CLOCK_FIELD_NAMES = new Set(["timestamp", "timeStamp"]);
 
+// TODO(danfuzz): Latent — both walks below gate on `isRecord`, which admits
+// a `FabricSpecialObject` with zero enumerable entries: the detector cannot
+// see a clock field nested in a `FabricInstance`'s codec contents (the
+// scrub's whole purpose), and once any clock field triggers a scrub, the
+// rebuild renders every fabric value elsewhere in the payload as `{}`. Today
+// a shaped payload cannot carry one — a renderer event's `detail` arrives
+// through a JSON round-trip — so this arms when that changes.
 function hasClockFieldDeep(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasClockFieldDeep);
   if (isRecord(value)) {

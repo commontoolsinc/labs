@@ -721,6 +721,12 @@ const isSubsumedByTailSplice = (
     Number(childSegment) >= spliceCandidate.tailSpliceStartIndex;
 };
 
+// TODO(danfuzz): `isRecord` admits a `FabricSpecialObject` on both sides, so
+// two special objects — or one against a plain `{}` — compare by their empty
+// key sets and report "unchanged" without ever reaching the fabric-aware
+// `valueEqual` fallback. An in-place fabric change at an ancestor prefix then
+// emits no reactivity path. `differential.ts` guards its sibling walk with an
+// explicit `FabricSpecialObject` test for exactly this reason.
 const shallowStructureChanged = (
   before: FabricValue | undefined,
   after: FabricValue | undefined,

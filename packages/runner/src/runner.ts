@@ -419,6 +419,10 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
     return;
   }
 
+  // TODO(danfuzz): same gap as `recordOutputSchemaPolicyInputs()` above:
+  // `isRecord` admits a `FabricSpecialObject`, whose empty entries end the
+  // descent, so a link inside a `FabricInstance`'s codec contents records no
+  // policy input. Fails closed, as there.
   if (isRecord(outputBinding) && !isCellLink(outputBinding)) {
     for (const child of Object.values(outputBinding)) {
       recordRawBuiltinBindingSchemaPolicyInputs(
@@ -540,6 +544,11 @@ export function firstResolvedOutputRedirect(
     }
     return undefined;
   }
+  // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, whose empty
+  // entries end the descent, so a write-redirect link inside a
+  // `FabricInstance`'s codec contents is invisible here. The caller then
+  // sees no redirect and silently skips the sub-pattern's owned-cell
+  // pre-sync keyed off it.
   if (isRecord(binding) && !isCellLink(binding)) {
     for (const child of Object.values(binding)) {
       const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
@@ -3853,6 +3862,10 @@ export class Runner {
       if (link) {
         promises.add(this.runtime.getCellFromLink(link).sync());
       } else if (isRecord(value)) {
+        // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, and
+        // `for..in` sees none of its state, so a link nested in a
+        // `FabricInstance`'s codec contents is never synced here — the cold
+        // target this pre-sync exists to warm.
         for (const key in value) syncAllMentionedCells(value[key]);
       }
     };
@@ -4050,6 +4063,11 @@ export class Runner {
               ),
           );
         } else if (isRecord(value)) {
+          // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, and
+          // `for..in` sees none of its state, so a link inside a
+          // `FabricInstance` held in a raw argument value is never pre-synced
+          // — a cold target can then enter the commit basis, the exact
+          // failure this walk exists to prevent.
           for (const key in value) collectLinkTargets(value[key], base);
         }
       };
@@ -5852,6 +5870,14 @@ export class Runner {
           // is an ambient local read (it may kick off, but never await, a
           // sync); guard each access so one lazy read failing doesn't abort
           // the rest of the presync.
+          //
+          // TODO(danfuzz): Latent — `isRecord` admits a
+          // `FabricSpecialObject`, whose `Object.keys` are empty, so a
+          // `Cell` inside a `FabricInstance` would be skipped here and the
+          // handler body would race the storage response for it. Today the
+          // materialization this walks cannot deliver one (back-to-cell
+          // annotation throws on a `FabricInstance` first); the gap arms
+          // when that throw becomes a walk.
           if (!isRecord(value)) return;
           if (seen.has(value)) return;
           seen.add(value);
