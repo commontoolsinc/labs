@@ -44,6 +44,7 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237); `hold` removed CT-1925 (#5110) | keep `preempt` as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
+| [`syncSchemaCasV1`](#syncschemacasv1) | `setSyncSchemaCasConfig()` (negotiated per connection) | off | Bernhard Seefeld | measure distinct schemas per connection, then default on and retire `syncSchemaTableV2` | implemented, off by default |
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off | Ben Follington (#4937; shell toggle #4974) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default, not yet measured over real latency |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
@@ -658,6 +659,33 @@ the per-epic implementation notes).
 - **Path to removal.** Confirm no peer still needs the expanded payload, then
   delete the negotiation and the expanded-form encoder and always send the
   compact form.
+
+### `syncSchemaCasV1`
+
+- **Toggle via.** `setSyncSchemaCasConfig()` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts). Advertised as a
+  capability in the memory `hello` handshake and negotiated per connection, so a
+  peer only receives the connection-scoped form if it advertises support.
+- **Added by.** Bernhard Seefeld.
+- **Purpose.** A wire-size optimization: it scopes the hash-keyed schema table
+  to the CONNECTION rather than to each frame, so a schema body travels on the
+  first frame that names it and later frames carry the `schema-cas@1:` reference
+  alone. `syncSchemaTableV2` re-sends every body on every frame that references
+  it; this removes that repetition for long-lived connections. It changes only
+  when a body travels, never what a peer ends up holding.
+- **Interaction with `syncSchemaTableV2`.** The two encodings are exclusive per
+  connection, and this one wins when both are negotiated. A peer must know from
+  the handshake alone whether a frame is self-describing, so a connection never
+  mixes them.
+- **Current default and planned end state.** Off by default while the
+  distinct-schema count per connection is measured — the delivered set grows
+  monotonically for a connection's lifetime, and that measurement decides
+  whether it needs a cap with an inline fallback. The end state is on by
+  default, then retiring `syncSchemaTableV2` and its negotiation.
+- **Status on 2026-08-05.** Implemented, off by default, unmeasured in the
+  field.
+- **Path to removal.** Default it on, confirm no peer still needs the
+  frame-local form, then delete both negotiations and the frame-local encoder.
 
 > Two neighbours in the same handshake are related but are not runtime-toggleable
 > experimental flags:

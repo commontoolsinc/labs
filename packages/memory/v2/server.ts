@@ -364,6 +364,16 @@ class Connection {
   #ready = false;
   #closed = false;
   #syncSchemaTable = false;
+  // Negotiated syncSchemaCasV1: schema bodies are scoped to this connection
+  // instead of to each frame. Exclusive with #syncSchemaTable — a peer must
+  // know from the handshake whether a frame is self-describing.
+  #syncSchemaCas = false;
+  // Tagged hashes of the schema bodies this connection has DELIVERED. A hash
+  // enters only after its carrying frame reached the transport: send() is the
+  // commit point for sync state (see the rollback in flushDirty), and a body
+  // recorded but never delivered would strand every later reference naming
+  // it, with no way for the peer to ask for it.
+  #deliveredSchemas = new Set<string>();
   // Negotiated persistentSchedulerState: when both sides carry the flag,
   // subscription sync pushes to this connection include the scheduler
   // observation rows of the sync window, so its runtimes can ADOPT other
@@ -383,9 +393,21 @@ class Connection {
   ) {}
 
   private send(message: ServerMessage): void {
-    this.sendRaw(
-      this.#syncSchemaTable ? compressServerMessageSchemas(message) : message,
+    if (!this.#syncSchemaTable && !this.#syncSchemaCas) {
+      this.sendRaw(message);
+      return;
+    }
+    const { message: compressed, staged } = compressServerMessageSchemas(
+      message,
+      this.#syncSchemaCas ? this.#deliveredSchemas : undefined,
     );
+    // A throw propagates before the staged hashes are recorded, so the peer's
+    // known set and the sync delivery state roll back together: the frame is
+    // recomputed from durable state and re-carries the bodies.
+    this.sendRaw(compressed);
+    for (const hash of staged) {
+      this.#deliveredSchemas.add(hash);
+    }
   }
 
   hasSession(space: string, sessionId: string): boolean {
@@ -614,7 +636,10 @@ class Connection {
       }
       const clientFlags = parseMemoryProtocolFlags(parsed.flags);
       const serverFlags = parseMemoryProtocolFlags(response.flags);
-      this.#syncSchemaTable = clientFlags?.syncSchemaTableV2 === true &&
+      this.#syncSchemaCas = clientFlags?.syncSchemaCasV1 === true &&
+        serverFlags?.syncSchemaCasV1 === true;
+      this.#syncSchemaTable = !this.#syncSchemaCas &&
+        clientFlags?.syncSchemaTableV2 === true &&
         serverFlags?.syncSchemaTableV2 === true;
       this.#persistentSchedulerState =
         clientFlags?.persistentSchedulerState === true &&

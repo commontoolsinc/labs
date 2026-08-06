@@ -277,6 +277,14 @@ export type MemoryProtocolFlags = {
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
   /**
+   * Hash-keyed CONNECTION-scoped schema table: a schema body travels on the
+   * first frame of the connection that names it, and later frames carry the
+   * `schema-cas@1:` reference alone. Supersedes `syncSchemaTableV2` when both
+   * peers advertise it. The two are exclusive per connection — a peer must
+   * know from the negotiation whether a frame is self-describing.
+   */
+  syncSchemaCasV1: boolean;
+  /**
    * Server capability (CFC Phase 3.c): commit-folded `sqlite` writes to
    * rule-bearing tables are re-derived through the shared row-label evaluator
    * against the committed rows, rolling back on violation (see
@@ -330,6 +338,7 @@ export type WireMemoryProtocolFlags = {
   persistentSchedulerState?: boolean;
   commitPreconditions?: boolean;
   syncSchemaTableV2?: boolean;
+  syncSchemaCasV1?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   pendingReadStacks?: boolean;
   verdictCatchUpMarkers?: boolean;
@@ -865,6 +874,7 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 let persistentSchedulerStateEnabled = false;
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
+let syncSchemaCasEnabled = false;
 
 /**
  * Ambient runtime flag for persistent scheduler observations and rehydration.
@@ -917,6 +927,25 @@ export function resetSyncSchemaTableConfig(): void {
   syncSchemaTableEnabled = true;
 }
 
+/**
+ * Ambient protocol capability for connection-scoped schema tables: a schema
+ * body travels on the first frame of a connection that names it, and later
+ * frames carry the reference alone. Supersedes the frame-local table when both
+ * peers advertise it. Also a wire-size optimization only — it changes when a
+ * body travels, never what a peer ends up holding.
+ */
+export function setSyncSchemaCasConfig(enabled?: boolean): void {
+  syncSchemaCasEnabled = enabled ?? true;
+}
+
+export function getSyncSchemaCasConfig(): boolean {
+  return syncSchemaCasEnabled;
+}
+
+export function resetSyncSchemaCasConfig(): void {
+  syncSchemaCasEnabled = false;
+}
+
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
@@ -940,6 +969,7 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   entityIdPagination: true,
   entityIdLookup: true,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
+  syncSchemaCasV1: getSyncSchemaCasConfig(),
 });
 
 /**
@@ -992,6 +1022,14 @@ export const parseMemoryProtocolFlags = (
   if (
     syncSchemaTableV2 !== undefined &&
     typeof syncSchemaTableV2 !== "boolean"
+  ) {
+    return null;
+  }
+
+  const syncSchemaCasV1 = value.syncSchemaCasV1;
+  if (
+    syncSchemaCasV1 !== undefined &&
+    typeof syncSchemaCasV1 !== "boolean"
   ) {
     return null;
   }
@@ -1049,6 +1087,9 @@ export const parseMemoryProtocolFlags = (
     persistentSchedulerState: persistentSchedulerState === true,
     commitPreconditions: commitPreconditions === true,
     syncSchemaTableV2: syncSchemaTableV2 === true,
+    // Absent (a peer that speaks only the frame-local table) parses to false,
+    // which keeps that peer on self-describing frames.
+    syncSchemaCasV1: syncSchemaCasV1 === true,
     // Absent (an older peer) parses to false: the capability must be
     // POSITIVELY advertised for the runner to relax its write gate.
     sqliteCommitRowLabelEval: sqliteCommitRowLabelEval === true,
@@ -1075,6 +1116,7 @@ export const wireMemoryProtocolFlags = (
   persistentSchedulerState: flags.persistentSchedulerState,
   commitPreconditions: flags.commitPreconditions,
   syncSchemaTableV2: flags.syncSchemaTableV2,
+  syncSchemaCasV1: flags.syncSchemaCasV1,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   pendingReadStacks: flags.pendingReadStacks,
   verdictCatchUpMarkers: flags.verdictCatchUpMarkers,

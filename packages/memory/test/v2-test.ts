@@ -18,9 +18,11 @@ import {
   parseMemoryProtocolFlags,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
+  resetSyncSchemaCasConfig,
   resetSyncSchemaTableConfig,
   setCommitPreconditionsConfig,
   setPersistentSchedulerStateConfig,
+  setSyncSchemaCasConfig,
   setSyncSchemaTableConfig,
   toDocumentPath,
   toDocumentSelector,
@@ -131,6 +133,7 @@ describe("memory v2 flags", () => {
     resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
     resetSyncSchemaTableConfig();
+    resetSyncSchemaCasConfig();
     setModernCellRepConfig(false);
     setPersistentSchedulerStateConfig(false);
     setCommitPreconditionsConfig(false);
@@ -148,12 +151,14 @@ describe("memory v2 flags", () => {
       entityIdPagination: true,
       entityIdLookup: true,
       syncSchemaTableV2: false,
+      syncSchemaCasV1: false,
     });
 
     setModernCellRepConfig(true);
     setPersistentSchedulerStateConfig(true);
     setCommitPreconditionsConfig(true);
     setSyncSchemaTableConfig(true);
+    setSyncSchemaCasConfig(true);
 
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: true,
@@ -166,12 +171,14 @@ describe("memory v2 flags", () => {
       entityIdPagination: true,
       entityIdLookup: true,
       syncSchemaTableV2: true,
+      syncSchemaCasV1: true,
     });
 
     resetModernCellRepConfig();
     resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
     resetSyncSchemaTableConfig();
+    resetSyncSchemaCasConfig();
   });
 
   it("treats non-wire-shape flags as optional capabilities", () => {
@@ -181,6 +188,7 @@ describe("memory v2 flags", () => {
         persistentSchedulerState: true,
         commitPreconditions: true,
         syncSchemaTableV2: true,
+        syncSchemaCasV1: false,
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: true,
         verdictCatchUpMarkers: false,
@@ -193,6 +201,7 @@ describe("memory v2 flags", () => {
         persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
+        syncSchemaCasV1: false,
         // A peer without commit-time sqlite row-label evaluation stays
         // compatible — the capability only gates the runner's write-gate
         // relaxation, never the connection.
@@ -214,6 +223,7 @@ describe("parseMemoryProtocolFlags", () => {
       persistentSchedulerState: false,
       commitPreconditions: false,
       syncSchemaTableV2: false,
+      syncSchemaCasV1: false,
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
       verdictCatchUpMarkers: false,
@@ -226,6 +236,7 @@ describe("parseMemoryProtocolFlags", () => {
       persistentSchedulerState: false,
       commitPreconditions: false,
       syncSchemaTableV2: false,
+      syncSchemaCasV1: false,
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
       verdictCatchUpMarkers: false,
@@ -245,6 +256,7 @@ describe("parseMemoryProtocolFlags", () => {
         persistentSchedulerState: true,
         commitPreconditions: false,
         syncSchemaTableV2: false,
+        syncSchemaCasV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
@@ -265,6 +277,7 @@ describe("parseMemoryProtocolFlags", () => {
         persistentSchedulerState: false,
         commitPreconditions: true,
         syncSchemaTableV2: false,
+        syncSchemaCasV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
@@ -279,12 +292,14 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(
       parseMemoryProtocolFlags({
         syncSchemaTableV2: true,
+        syncSchemaCasV1: false,
       }),
       {
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: true,
+        syncSchemaCasV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
@@ -305,6 +320,7 @@ describe("parseMemoryProtocolFlags", () => {
         persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
+        syncSchemaCasV1: false,
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
@@ -333,6 +349,7 @@ describe("parseMemoryProtocolFlags", () => {
         persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
+        syncSchemaCasV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: true,
@@ -354,6 +371,7 @@ describe("parseMemoryProtocolFlags", () => {
         persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
+        syncSchemaCasV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: true,
         verdictCatchUpMarkers: false,
@@ -372,6 +390,7 @@ describe("parseMemoryProtocolFlags", () => {
         persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
+        syncSchemaCasV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
@@ -393,6 +412,7 @@ describe("parseMemoryProtocolFlags", () => {
         persistentSchedulerState: false,
         commitPreconditions: false,
         syncSchemaTableV2: false,
+        syncSchemaCasV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,

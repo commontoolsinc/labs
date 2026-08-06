@@ -1,7 +1,13 @@
 import { isLinkRef, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { isPlainObject } from "@commonfabric/utils/types";
-import { REQUEST_SCHEMA_CAS_REF_PREFIX } from "./schema-table-links.ts";
+import { SCHEMA_CAS_REF_PREFIX } from "./schema-table-links.ts";
 
+/**
+ * Frame-local schema reference — `schema-ref@2:` followed by a tagged schema
+ * hash, resolved against the `schemaTable` of the same frame. Contrast
+ * {@link SCHEMA_CAS_REF_PREFIX}, which resolves against everything the
+ * connection has delivered.
+ */
 export const SYNC_SCHEMA_REF_PREFIX = "schema-ref@2:";
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
@@ -9,7 +15,7 @@ const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isReservedSchemaRef = (value: string): boolean =>
   value.startsWith(SYNC_SCHEMA_REF_PREFIX) ||
-  value.startsWith(REQUEST_SCHEMA_CAS_REF_PREFIX);
+  value.startsWith(SCHEMA_CAS_REF_PREFIX);
 
 /**
  * Whether serialized text contains a reserved reference prefix anywhere.
@@ -21,7 +27,7 @@ const isReservedSchemaRef = (value: string): boolean =>
  */
 export const containsReservedSchemaRefSubstring = (value: string): boolean =>
   value.includes(SYNC_SCHEMA_REF_PREFIX) ||
-  value.includes(REQUEST_SCHEMA_CAS_REF_PREFIX);
+  value.includes(SCHEMA_CAS_REF_PREFIX);
 
 const payloadSchemaRef = (
   payload: Record<string, unknown>,

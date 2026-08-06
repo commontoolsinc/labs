@@ -25,12 +25,15 @@ import {
   getMemoryProtocolFlags,
   type HelloOkMessage,
   MEMORY_PROTOCOL,
+  type MemoryProtocolFlags,
+  resetSyncSchemaCasConfig,
   type ResponseMessage,
   type ServerMessage,
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
   type SessionOpenResult,
   type SessionSync,
+  setSyncSchemaCasConfig,
   type WatchAddResult,
 } from "../v2.ts";
 import { Server } from "../v2/server.ts";
@@ -183,7 +186,7 @@ Deno.test("sync schema table experiment captures repeated schema savings", () =>
   const bytes = encodedBytes(message);
   const schemaMarkerCount =
     encodeMemoryBoundary(message).split("$defs").length - 1;
-  const compressed = compressServerMessageSchemas(message);
+  const { message: compressed } = compressServerMessageSchemas(message);
   const compressedBytes = encodedBytes(compressed);
   const compressedSchemaMarkerCount = encodeMemoryBoundary(compressed)
     .split("$defs").length - 1;
@@ -204,14 +207,15 @@ Deno.test("sync schema table experiment captures repeated schema savings", () =>
   );
 });
 
-Deno.test("sync schema table reports each repeated schema once", () => {
-  const observed: JSONSchema[] = [];
+Deno.test("sync schema table carries each repeated schema once", () => {
+  const compressed = compressSessionSyncSchemas(
+    repeatedSchemaSync(2),
+  ) as SchemaTableSessionSync;
+  const hash = internSchema(largeSchema(), true).taggedHashString;
 
-  compressSessionSyncSchemas(repeatedSchemaSync(2), (schema) => {
-    observed.push(schema);
-  });
-
-  assertEquals(observed, [internSchema(largeSchema(), true).schema]);
+  assertExists(compressed.schemaTable);
+  assertEquals(Object.keys(compressed.schemaTable), [hash]);
+  assertEquals(compressed.schemaTable[hash], largeSchema());
 });
 
 Deno.test("sync schema table preserves own __proto__ fields", () => {
@@ -337,16 +341,7 @@ Deno.test("sync schema table leaves legacy alias schemas inline", () => {
     `schema-ref@2:${nestedHash}`,
   );
 
-  const expandedSchemas: JSONSchema[] = [];
-  assertEquals(
-    expandSessionSyncSchemas(compressed, (expanded) => {
-      expandedSchemas.push(expanded);
-    }),
-    sync,
-  );
-  assertEquals(expandedSchemas, [
-    internSchema(nestedLinkSchema, true).schema,
-  ]);
+  assertEquals(expandSessionSyncSchemas(compressed), sync);
 });
 
 Deno.test("sync schema table survives malformed link envelope payloads", () => {
@@ -772,19 +767,18 @@ Deno.test("server schema table helpers ignore non-sync messages", () => {
     ok: { sync: { type: "not-sync" } },
   } satisfies ServerMessage;
 
-  assertStrictEquals(compressServerMessageSchemas(hello), hello);
-  assertStrictEquals(
-    compressServerMessageSchemas(responseWithoutOk),
-    responseWithoutOk,
-  );
-  assertStrictEquals(
-    compressServerMessageSchemas(responseWithPrimitiveOk),
-    responseWithPrimitiveOk,
-  );
-  assertStrictEquals(
-    compressServerMessageSchemas(responseWithNonSyncOk),
-    responseWithNonSyncOk,
-  );
+  for (
+    const untouched of [
+      hello,
+      responseWithoutOk,
+      responseWithPrimitiveOk,
+      responseWithNonSyncOk,
+    ]
+  ) {
+    const compressed = compressServerMessageSchemas(untouched);
+    assertStrictEquals(compressed.message, untouched);
+    assertEquals(compressed.staged.size, 0);
+  }
 
   assertStrictEquals(
     expandServerMessageSchemas("not-an-object"),
@@ -908,6 +902,330 @@ Deno.test("memory server negotiates schema-table v2 sync frames per connection",
   assertExists(await run("v2"));
   assertEquals(await run("legacy"), undefined);
   assertEquals(await run("off"), undefined);
+});
+
+/** Opens a cas-negotiated session and returns the pieces a test drives it
+ *  with. The caller owns closing the connection and the server. */
+const openCasSession = async (
+  server: Server,
+  space: string,
+  clientFlags: MemoryProtocolFlags,
+) => {
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  await connection.receive(encodeMemoryBoundary({
+    type: "hello",
+    protocol: MEMORY_PROTOCOL,
+    flags: clientFlags,
+  }));
+  const sessionOpen = expectHelloOk(messages);
+  await connection.receive(encodeMemoryBoundary({
+    type: "session.open",
+    requestId: "open",
+    space,
+    session: {},
+    invocation: authInvocation(sessionOpen),
+  }));
+  const opened = nextResponse<SessionOpenResult>(messages);
+  assertExists(opened.ok);
+  return { connection, messages, sessionId: opened.ok.sessionId };
+};
+
+const watchAdd = async (
+  connection: { receive(payload: string): Promise<void> },
+  space: string,
+  sessionId: string,
+  requestId: string,
+  id: string,
+) =>
+  await connection.receive(encodeMemoryBoundary({
+    type: "session.watch.add",
+    requestId,
+    space,
+    sessionId,
+    watches: [{
+      id: requestId,
+      kind: "graph",
+      query: { roots: [{ id, selector: { path: [], schema: false } }] },
+    }],
+  }));
+
+Deno.test("connection-scoped schema bodies span a connection, not a frame", async () => {
+  setSyncSchemaCasConfig(true);
+  const space = "did:key:z6Mk-sync-schema-cas-connection";
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://sync-schema-cas-connection"),
+  });
+  const schema = largeSchema();
+  const hash = internSchema(schema, true).taggedHashString;
+  const docValue = (target: string) => ({
+    ref: linkRefFrom({ id: target, path: [], schema }),
+  });
+
+  try {
+    await server.writeDocument(space, "of:cas-a", docValue("of:target-a"));
+    await server.writeDocument(space, "of:cas-b", docValue("of:target-b"));
+
+    const first = await openCasSession(server, space, getMemoryProtocolFlags());
+    try {
+      await watchAdd(first.connection, space, first.sessionId, "a", "of:cas-a");
+      const watchedA = nextResponse<WatchAddResult>(first.messages);
+      const syncA = watchedA.ok?.sync as SchemaTableSessionSync;
+      assertExists(syncA.schemaTable);
+      assertEquals(Object.keys(syncA.schemaTable), [hash]);
+
+      // Same schema, same connection, different document: the body has
+      // already been delivered, so only the reference travels.
+      await watchAdd(first.connection, space, first.sessionId, "b", "of:cas-b");
+      const watchedB = nextResponse<WatchAddResult>(first.messages);
+      const syncB = watchedB.ok?.sync as SchemaTableSessionSync;
+      assertEquals(syncB.schemaTable, undefined);
+      assertEquals(
+        findSyncSchemaRef(syncB.upserts[0].doc),
+        `schema-cas@1:${hash}`,
+      );
+    } finally {
+      first.connection.close();
+    }
+
+    // A FRESH connection has delivered nothing, so it is taught the body
+    // again. This is the direction a reconnect drifts in — the server
+    // forgets while the client remembers — and it costs bytes, not
+    // correctness.
+    const second = await openCasSession(
+      server,
+      space,
+      getMemoryProtocolFlags(),
+    );
+    try {
+      await watchAdd(
+        second.connection,
+        space,
+        second.sessionId,
+        "b",
+        "of:cas-b",
+      );
+      const watched = nextResponse<WatchAddResult>(second.messages);
+      const sync = watched.ok?.sync as SchemaTableSessionSync;
+      assertExists(sync.schemaTable);
+      assertEquals(Object.keys(sync.schemaTable), [hash]);
+    } finally {
+      second.connection.close();
+    }
+  } finally {
+    await server.close();
+    resetSyncSchemaCasConfig();
+  }
+});
+
+Deno.test("both peers must advertise cas before a frame stops describing itself", async () => {
+  const schema = largeSchema();
+  const hash = internSchema(schema, true).taggedHashString;
+
+  const refUnder = async (
+    label: string,
+    serverCas: boolean,
+    clientCas: boolean,
+  ) => {
+    setSyncSchemaCasConfig(serverCas);
+    const space = `did:key:z6Mk-sync-schema-cas-${label}`;
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL(`memory://sync-schema-cas-negotiation-${label}`),
+    });
+    try {
+      await server.writeDocument(space, "of:cas-negotiated", {
+        ref: linkRefFrom({ id: "of:target", path: [], schema }),
+      });
+      const { connection, messages, sessionId } = await openCasSession(
+        server,
+        space,
+        { ...getMemoryProtocolFlags(), syncSchemaCasV1: clientCas },
+      );
+      try {
+        await watchAdd(connection, space, sessionId, "w", "of:cas-negotiated");
+        const watched = nextResponse<WatchAddResult>(messages);
+        return findSyncSchemaRef(
+          (watched.ok?.sync as SchemaTableSessionSync).upserts[0].doc,
+        );
+      } finally {
+        connection.close();
+      }
+    } finally {
+      await server.close();
+      resetSyncSchemaCasConfig();
+    }
+  };
+
+  assertEquals(await refUnder("both", true, true), `schema-cas@1:${hash}`);
+  // Either peer withholding the capability keeps the connection on
+  // self-describing frames — the encodings are exclusive, so a peer must
+  // never have to guess which one a frame uses.
+  assertEquals(
+    await refUnder("client-only", false, true),
+    `schema-ref@2:${hash}`,
+  );
+  assertEquals(
+    await refUnder("server-only", true, false),
+    `schema-ref@2:${hash}`,
+  );
+});
+
+Deno.test("a schema body is remembered only once its frame reaches the transport", async () => {
+  setSyncSchemaCasConfig(true);
+  const space = "did:key:z6Mk-sync-schema-cas-rollback";
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://sync-schema-cas-rollback"),
+    subscriptionRefreshDelayMs: 60_000,
+  });
+  const schema = largeSchema();
+  const hash = internSchema(schema, true).taggedHashString;
+
+  try {
+    const { connection, messages, sessionId } = await openCasSession(
+      server,
+      space,
+      getMemoryProtocolFlags(),
+    );
+    try {
+      // Watch an absent document: nothing to carry yet, so the body is
+      // still undelivered when the write below makes it due.
+      await watchAdd(connection, space, sessionId, "w", "of:cas-late");
+      assertExists(nextResponse<WatchAddResult>(messages).ok);
+
+      const originalPush = messages.push.bind(messages);
+      let failNextEffect = true;
+      messages.push = ((message: ServerMessage) => {
+        if (failNextEffect && message.type === "session/effect") {
+          failNextEffect = false;
+          throw new Error("synthetic send failure");
+        }
+        return originalPush(message);
+      }) as typeof messages.push;
+
+      await server.writeDocument(space, "of:cas-late", {
+        ref: linkRefFrom({ id: "of:target-late", path: [], schema }),
+      });
+      await server.flushSessions([space]);
+      assertEquals(messages.length, 0, "the effect never reached the wire");
+
+      // The staged body went down with the frame. Recomputation must carry
+      // it again — a connection that recorded it here would emit a bare
+      // reference the peer can never resolve.
+      await server.flushSessions([space]);
+      const effect = shiftMessage(messages) as SessionEffectMessage;
+      assertEquals(effect.type, "session/effect");
+      const sync = effect.effect as SchemaTableSessionSync;
+      assertExists(
+        sync.schemaTable,
+        "the redelivered frame re-carries the undelivered body",
+      );
+      assertEquals(Object.keys(sync.schemaTable), [hash]);
+    } finally {
+      connection.close();
+    }
+  } finally {
+    await server.close();
+    resetSyncSchemaCasConfig();
+  }
+});
+
+Deno.test("connection-scoped compression carries a body once, then references it", () => {
+  const sync = repeatedSchemaSync(2);
+  const hash = internSchema(largeSchema(), true).taggedHashString;
+  const delivered = new Set<string>();
+
+  const first = compressSessionSyncSchemas(
+    sync,
+    delivered,
+  ) as SchemaTableSessionSync;
+  assertExists(first.schemaTable);
+  assertEquals(Object.keys(first.schemaTable), [hash]);
+  assertEquals(
+    (first.upserts[0].doc?.value as Record<string, unknown>).primary,
+    linkRefFrom({
+      id: "of:target-0",
+      path: [],
+      schema: `schema-cas@1:${hash}`,
+    }),
+  );
+
+  for (const staged of Object.keys(first.schemaTable)) delivered.add(staged);
+
+  const second = compressSessionSyncSchemas(
+    sync,
+    delivered,
+  ) as SchemaTableSessionSync;
+  assertEquals(
+    second.schemaTable,
+    undefined,
+    "a steady-state frame carries no table at all",
+  );
+  assertEquals(
+    findSyncSchemaRef(second.upserts[0].doc),
+    `schema-cas@1:${hash}`,
+  );
+
+  // A receiver that took delivery of the first frame resolves the second.
+  const cache = new Map<string, JSONSchema>();
+  assertEquals(expandSessionSyncSchemas(first, cache), sync);
+  assertEquals(cache.size, 1);
+  assertEquals(expandSessionSyncSchemas(second, cache), sync);
+});
+
+Deno.test("connection-scoped references need a table or a delivered body", () => {
+  const hash = internSchema(largeSchema(), true).taggedHashString;
+  const orphaned = compressSessionSyncSchemas(
+    repeatedSchemaSync(1),
+    new Set([hash]),
+  );
+
+  // The body was never delivered to THIS receiver: an empty cache cannot
+  // satisfy the reference, and silently dropping it would hand the session
+  // cache a ref string as data.
+  assertThrows(
+    () => expandSessionSyncSchemas(orphaned, new Map()),
+    Error,
+    "Invalid sync schema table reference",
+  );
+});
+
+Deno.test("a frame-local reference never resolves from the connection cache", () => {
+  // schema-ref@2: promises the body travels on the same frame. A missing
+  // table entry is a sender defect, and must be reported as one rather than
+  // satisfied by an unrelated body the cache happens to hold.
+  const schema: JSONSchema = { type: "string" };
+  const hash = internSchema(schema, true).taggedHashString;
+  const cache = new Map<string, JSONSchema>([[hash, schema]]);
+  const sync: SessionSync = {
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:frame-local-ref",
+      scope: "space",
+      seq: 1,
+      doc: {
+        value: {
+          ref: linkRefFrom({
+            id: "of:target",
+            path: [],
+            schema: `schema-ref@2:${hash}`,
+          }),
+        },
+      },
+    }],
+    removes: [],
+  };
+
+  assertThrows(
+    () => expandSessionSyncSchemas(sync, cache),
+    Error,
+    "Invalid sync schema table reference",
+  );
 });
 
 Deno.test("findSyncSchemaRef ignores inherited object properties", () => {

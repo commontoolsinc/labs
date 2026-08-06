@@ -53,6 +53,7 @@ The client MUST declare its protocol version in the first WebSocket message:
     "modernCellRep": true,
     "persistentSchedulerState": true,
     "syncSchemaTableV2": true,
+    "syncSchemaCasV1": false,
     "verdictCatchUpMarkers": true,
     "entityIdListing": true,
     "entityIdPagination": true,
@@ -71,6 +72,7 @@ If the server accepts the protocol, it returns:
     "modernCellRep": true,
     "persistentSchedulerState": true,
     "syncSchemaTableV2": true,
+    "syncSchemaCasV1": false,
     "verdictCatchUpMarkers": true,
     "entityIdListing": true,
     "entityIdPagination": true,
@@ -144,6 +146,13 @@ in [Session Sync Payload](#423-session-sync-payload). It defaults to `false`
 when absent. The server sends compact sync payloads only when both peers
 advertise the capability; otherwise it sends the historical fully expanded
 shape.
+
+`syncSchemaCasV1` advertises support for the connection-scoped schema table
+described in [Session Sync Payload](#423-session-sync-payload). It defaults to
+`false` when absent. When both peers advertise it, it supersedes
+`syncSchemaTableV2` for that connection: the two encodings are exclusive,
+because a peer must know from the handshake alone whether a frame is
+self-describing.
 
 `entityIdListing` advertises support for `entity-id.list`. It defaults to
 `false` when absent. A client must not send the request unless the server
@@ -283,6 +292,7 @@ interface HelloMessage {
     modernCellRep: boolean;
     persistentSchedulerState?: boolean;
     syncSchemaTableV2?: boolean;
+    syncSchemaCasV1?: boolean;
     entityIdListing?: boolean;
     entityIdPagination?: boolean;
     entityIdLookup?: boolean;
@@ -437,15 +447,43 @@ For example, the compact wire form can contain:
 }
 ```
 
-The table is scoped to one sync payload, not to a connection or logical
-session. A client MUST resolve every `schema-ref@2:` before exposing the sync to
-the session cache. It MUST reject a reference when the table is missing the key
-or when hashing the referenced table value does not reproduce the key. It MUST
-also reject a sync whose documents still carry a reserved reference at a
-recognized schema position after expansion — a reference the client does not
-interpret must fail the frame rather than reach the session cache as data.
-After expansion, downstream consumers observe the historical `SessionSync`
-shape with inline schemas and no `schemaTable` field.
+This table is scoped to one sync payload, not to a connection or logical
+session. A client MUST resolve every `schema-ref@2:` against the table of the
+frame that carried it, and MUST NOT satisfy one from a body delivered on any
+other frame: the encoding's guarantee is that each frame describes itself, so a
+missing key is a sender defect and must be reported as one. A client MUST
+reject a reference when the table is missing the key or when hashing the
+referenced table value does not reproduce the key. It MUST also reject a sync
+whose documents still carry a reserved reference at a recognized schema
+position after expansion — a reference the client does not interpret must fail
+the frame rather than reach the session cache as data. After expansion,
+downstream consumers observe the historical `SessionSync` shape with inline
+schemas and no `schemaTable` field.
+
+#### Connection-scoped schema-table encoding
+
+When both peers advertise `syncSchemaCasV1`, the schema table is scoped to the
+connection instead of the frame, and that encoding replaces the frame-local one
+for the connection's lifetime. References are minted under the `schema-cas@1:`
+prefix, and a schema body is written to `schemaTable` only on the first frame
+of the connection that names its hash. A frame naming only bodies the peer
+already holds carries no `schemaTable` field at all.
+
+A client MUST resolve a `schema-cas@1:` reference against the frame's table
+first, then against the bodies delivered on earlier frames of the same
+connection, and MUST reject the frame when neither satisfies it. Bodies are
+verified on arrival under the same hash rule as the frame-local encoding, so a
+body resolved from an earlier frame has already been checked.
+
+A server MUST NOT record a body as delivered until the frame carrying it has
+reached the transport. A frame that fails to send is recomputed from durable
+state, and the recomputed frame carries the body again; recording it earlier
+would emit later references that the peer has no way to resolve and no way to
+request. Because the delivered set is per connection, a reconnect resets the
+server's side while a client may retain bodies from the previous connection.
+That direction is safe — the server re-sends a body the client already holds —
+and it is the only direction that can occur, since a client that forgets has by
+construction established a new connection.
 
 Earlier revisions of this encoding also interned the `schema` field of
 `$alias` records. Those records are Pattern-binding vocabulary, not links —
@@ -454,14 +492,15 @@ carry them, so current servers leave alias schemas inline. Clients deployed
 against the earlier revision continue to expand references at alias schema
 positions, so those positions remain covered by the reservation rule below.
 
-The `schema-ref@2:` prefix is reserved in the `schema` field of `link@1` and
-legacy `$alias` payloads. Link recognition follows the canonical cell-rep
-form — in the legacy representation, the single-key `{ "/": { "link@1": … } }`
-envelope — so an envelope carrying sibling keys is not a link and its contents
-are ordinary data. Memory servers MUST reject set or patch operations
-whose resulting stored document uses that prefix as an opaque schema string in
-a recognized schema position; ordinary strings in other document positions are
-unaffected.
+The `schema-ref@2:` and `schema-cas@1:` prefixes are reserved in the `schema`
+field of `link@1` and legacy `$alias` payloads. Link recognition follows the
+canonical cell-rep form — in the legacy representation, the single-key
+`{ "/": { "link@1": … } }` envelope — so an envelope carrying sibling keys is
+not a link and its contents are ordinary data. Memory servers MUST reject set
+or patch operations whose resulting stored document uses either prefix as an
+opaque schema string in a recognized schema position; ordinary strings in other
+document positions are unaffected. A reference can therefore only be minted by
+a server compressing a frame, never replayed out of stored data.
 
 ### 4.2.4 Batching
 

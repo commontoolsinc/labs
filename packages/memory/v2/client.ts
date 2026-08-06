@@ -37,7 +37,10 @@ import {
 import type { Server } from "./server.ts";
 import type { AppliedCommit } from "./engine.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { expandServerMessageSchemas } from "./sync-schema-table.ts";
+import {
+  expandServerMessageSchemas,
+  type SchemaCache,
+} from "./sync-schema-table.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 
 export type Transport = {
@@ -162,6 +165,14 @@ export class Client {
   // it terminates only that session (see SpaceSession.restore), leaving sessions
   // for other spaces on this client alive.
   #fatalError: Error | null = null;
+  // Schema bodies delivered under the connection-scoped encoding, by tagged
+  // hash. Deliberately NOT cleared on reconnect: the server tracks what it has
+  // delivered per Connection, so a reconnect makes the SERVER forget while
+  // this client remembers, and it re-sends bodies already held here — wasteful
+  // and correct. The unsafe drift is the reverse, and it cannot happen: this
+  // map dies only with the Client, and a new Client means a new socket, hence
+  // a new Connection with an empty delivered set.
+  #schemaCache: SchemaCache = new Map();
 
   private constructor(
     private readonly transport: Transport,
@@ -354,7 +365,7 @@ export class Client {
       // on encodeMemoryBoundary), so the expansion walk over its upserts is
       // skipped entirely.
       if (containsReservedSchemaRefSubstring(payload)) {
-        message = expandServerMessageSchemas(message);
+        message = expandServerMessageSchemas(message, this.#schemaCache);
       }
     } catch (cause) {
       const error = new Error("Unable to parse memory server message", {

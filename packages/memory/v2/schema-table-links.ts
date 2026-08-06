@@ -7,7 +7,18 @@ import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model/fabric-value";
 import { isPlainObject } from "@commonfabric/utils/types";
 
-export const REQUEST_SCHEMA_CAS_REF_PREFIX = "schema-cas@1:";
+/**
+ * Connection-scoped schema reference — `schema-cas@1:` followed by a tagged
+ * schema hash. The body rides in the `schemaTable` of the frame that first
+ * names it on a connection; every later frame on that connection carries the
+ * reference alone, and the peer resolves it from what it has already been
+ * delivered. Contrast {@link SYNC_SCHEMA_REF_PREFIX}, whose table is
+ * frame-local, so each frame is self-describing.
+ *
+ * Reserved: the engine refuses to persist a document with either prefix in a
+ * schema position, so a reference can only ever be minted by the compressor.
+ */
+export const SCHEMA_CAS_REF_PREFIX = "schema-cas@1:";
 
 /** Optional request-local accounting for recursive schema-bearing values. */
 export type LinkSchemaTraversal = {
