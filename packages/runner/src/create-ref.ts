@@ -46,8 +46,8 @@ export function entityIdFrom(hash: string | FabricHash): EntityId {
  * Derivation inputs must resolve: a Cell with no entityId, a Reactive with no
  * value, and a cell's method -- which names no value of its own -- each throw
  * rather than minting a substitute, so a derived id never silently becomes
- * non-deterministic or unresolvable (audit S14). A missing `cause`, by contrast,
- * deliberately mints a fresh random id.
+ * non-deterministic or unresolvable (audit S14). A missing `cause`, by
+ * contrast, deliberately mints a fresh random id.
  *
  * @param source - The source object.
  * @param cause - Optional causal source. If omitted, a random id is minted.
@@ -100,13 +100,14 @@ export function createRef(
     if (obj instanceof BaseFabricPrimitive) return obj;
     if (isSigilLink(obj) || isEntityRef(obj)) return obj;
 
-    // A cell's _method_ is not a value. A `Reactive` answers a name in
-    // `cellMethods` with a proxy that is callable and is also a projection of
-    // the cell at that name, so the encodable form of one is a link to a path
-    // that need not hold anything -- and a method name and a same-named data key
-    // are the same object here, so which of the two a caller meant cannot be
-    // recovered. Neither reading names a document reliably, so this fails closed
-    // rather than mint an id off the ambiguity (audit S14).
+    // A cell's _method_ is not a value. For a name in `cellMethods`, a
+    // `Reactive` returns a proxy that is callable and is also a projection of
+    // the cell at that name, so one object serves both the method and a data
+    // key of the same name, and its encodable form is the same link either
+    // way. A derived id therefore cannot express which of the two was meant.
+    // Failing closed says so, rather than minting an id off the ambiguity
+    // (audit S14) -- and where no data lives at the name, that id would rest on
+    // a link to a path holding nothing.
     //
     // A builder artifact is a function carrying the member too, and is not
     // reactive, which is what separates the two here.

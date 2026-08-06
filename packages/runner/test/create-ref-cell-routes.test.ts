@@ -95,10 +95,11 @@ describe("create-ref-cell-routes", () => {
   });
 
   it("throws for a cell's method, which is not a value", () => {
-    // A `Reactive` answers a name in `cellMethods` with a proxy that is callable
+    // For a name in `cellMethods`, a `Reactive` returns a proxy that is callable
     // _and_ a projection of the cell at that name, so a method and a same-named
-    // data key are one object and neither reading names a document reliably. It
-    // fails closed like the other inputs that cannot resolve (audit S14).
+    // data key are one object with one encodable form -- a derived id cannot say
+    // which was meant. It fails closed like the other inputs that cannot resolve
+    // (audit S14).
     const { a } = siblings();
     const reactive = a.getAsReactiveProxy() as unknown as Record<
       string,
