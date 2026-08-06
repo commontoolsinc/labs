@@ -62,16 +62,22 @@ unsupported. Both restrictions hold whichever syntax the reader writes in.
 
 ### What a shape can say today
 
-`--schema` accepts three forms (`packages/cli/README.md`, "Output Conventions"):
+There are two syntaxes, and today both ride `--schema`
+(`packages/cli/README.md`, "Output Conventions"):
 
 ```bash
---schema 'title,createdBy.name'                       # concise: a list of paths
+--select 'title,createdBy.name'                       # concise: a list of paths
 --schema '{"properties":{"topic":{"properties":{"title":true}}}}'   # full form
 --schema @shape.json                                  # the full form, from a file
 ```
 
 The concise form is sugar for the flat case; the full form is a JSON Schema
 object and is what expresses nested structure.
+[CLI surface shape](cli-surface-shape.md) proposes giving them separate flags —
+`--select` for the concise syntax, `--schema` for full schemas — and this
+document writes them that way throughout. The measured facts at the end use
+`--schema` for both, because that is the flag the measurements were taken
+against.
 
 **`--filter` is the other axis.** A shape names paths; it cannot say "only the
 elements where `status == "open"`". That is `--filter`, a predicate over array
@@ -79,7 +85,7 @@ elements. The two do not collapse into one, because **filtering runs before
 projection** — a predicate can inspect a field the result omits:
 
 ```bash
-cf piece get ... topics --filter '.status == "open"' --shape 'title,id'
+cf piece get ... topics --filter '.status == "open"' --select 'title,id'
 ```
 
 `status` decides membership and never appears in the output. A single mechanism
@@ -150,7 +156,7 @@ nothing else. Address-plus-summary is spelled as two paths — `topic@,topic.tit
 both. One rule, no special case: you get what you asked for, and asking for the
 link is not asking for the contents.
 
-**The shorthand desugars one-to-one.** `createdBy.user@` rewrites the leaf in
+**The concise syntax desugars one-to-one.** `createdBy.user@` rewrites the leaf in
 place to `{"user": {"$link": true}}` — an annotation on the position, not a
 structural change.
 
@@ -287,8 +293,9 @@ What genuinely belongs to the call, and to nothing else:
   verb, and an invocation id the caller chose in advance, for when the response
   was lost.
 
-Everything inside `result` is the read layer. A call should gain `--schema` and
-`--filter` by reusing the shared implementation, not by growing a second one.
+Everything inside `result` is the read layer. A call should gain `--select`,
+`--schema` and `--filter` by reusing the shared implementation, not by growing a
+second one.
 
 ### Receipts carry a descriptive schema
 

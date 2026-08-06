@@ -94,15 +94,20 @@ needing a justification as a schema dialect. A reader who sees
 `--schema title,createdBy.name@` and asks "how is that a schema?" is right, and
 will get righter.
 
-**Give the shorthand its own flag and leave `--schema` for full schemas.** That
-resolves the ambiguity rather than papering over it, and it leaves room for the
+**Give the concise syntax `--select` and leave `--schema` for full schemas.**
+That resolves the ambiguity rather than papering over it, and it leaves room for
+the
 shorthand to grow notation a schema does not need — a suffix meaning "give me
 the link at this path rather than its contents" is the obvious candidate, since
 that is the common case and spelling it in full is painful.
 
+`--select` is the name because it says what the syntax does, reads naturally
+with the address suffix (`--select 'topic@,topic.title'`), and leaves "shape"
+free as the word for what a caller asks for — covering both spellings rather
+than competing with one of them.
+
 Timing argues for doing it now: `piece call` does not have either form yet, so
-splitting them costs one deprecation on a flag that is still young. Naming the
-shorthand flag is open.
+splitting them costs one deprecation on a flag that is still young.
 
 **What a reader may not supply, in either syntax.** `asCell`, `default`,
 `scope`, and `ifc` stay the source's — they decide how a value is treated, not
@@ -123,7 +128,7 @@ Reading is one operation reached from several starting points, so the surface
 wants one read command and distinct commands for the distinct ways of arriving:
 
 ```
-# <read opts> = selection (--schema, or its shorthand) + --filter — identical everywhere
+# <read opts> = [--select S | --schema S] [--filter P] — identical everywhere
 
 cf get   <addr> [path]           <read opts>
 cf call  <addr> <verb> <payload> <read opts>
@@ -161,7 +166,7 @@ writing cells are not piece operations and stop presenting themselves as ones.
 they belong under `space`, and moving them is part of step 7 rather than
 something this shape decides.
 
-The same selection flags everywhere, split per the reasons above.
+`--select` and `--schema` everywhere, split per the reasons above.
 
 ## How to get there
 
@@ -170,8 +175,8 @@ a caller depends on — steps 1–5 only add.
 
 1. **Factor out the shared read step** so a single implementation turns a cell
    and a shape into structured output.
-2. **Give every arrival access to it** — `piece call` gains the selection and
-   filter flags, `wish` gains them, and an address renders identically from each.
+2. **Give every arrival access to it** — `piece call` gains `--select`,
+   `--schema` and `--filter`, `wish` gains them, and an address renders identically from each.
 3. **`--piece` accepts the `of:` address form**, so an emitted address composes
    into the next command. This is where addressing stops being piece-flavoured
    in practice.

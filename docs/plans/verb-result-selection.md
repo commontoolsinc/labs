@@ -377,8 +377,9 @@ layer's call, not this half's.
    receipt exists.
 3. **Receipt cells created with a schema**, so a shape over a receipt matches a
    declaration and can be pushed into the read.
-4. **`piece call` gains the read options** — selection and filter — by reusing
-   the shared read implementation rather than growing a second output path.
+4. **`piece call` gains the read options** — `--select`, `--schema`, `--filter`
+   — by reusing the shared read implementation rather than growing a second
+   output path.
 
 Reading a receipt directly needs no step of its own: it is an ordinary cell
 read, reachable once step 1 lands. Step 4 depends on the read layer having a
