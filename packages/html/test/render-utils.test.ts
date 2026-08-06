@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { setPropDefault, stringifyText } from "../src/render-utils.ts";
+import { setPropDefault, styleObjectToCssString } from "../src/render-utils.ts";
 
 describe("setPropDefault", () => {
   it("does not re-assign an unchanged NaN property", () => {
@@ -29,27 +29,93 @@ describe("setPropDefault", () => {
   });
 });
 
-describe("stringifyText", () => {
-  function captureWarn(): { calls: unknown[][]; restore(): void } {
-    const calls: unknown[][] = [];
-    const original = console.warn;
-    console.warn = (...args: unknown[]) => calls.push(args);
-    return { calls, restore: () => (console.warn = original) };
-  }
+describe("styleObjectToCssString", () => {
+  it("converts camelCase property names to kebab-case", () => {
+    expect(
+      styleObjectToCssString({
+        backgroundColor: "red",
+        fontSize: "16px",
+        marginTop: "10px",
+      }),
+    ).toBe("background-color: red; font-size: 16px; margin-top: 10px");
+  });
 
-  it("JSON-renders a $alias-shaped record with a warning, not empty text", () => {
-    // `$alias` records are Pattern-binding vocabulary; in data they are inert
-    // plain values. The old unresolved-alias special case rendered them as
-    // empty text; now they warn and JSON-render like any unexpected object.
-    const aliasRecord = { $alias: { path: ["x"] } };
-    const spy = captureWarn();
-    let text: string;
-    try {
-      text = stringifyText(aliasRecord);
-    } finally {
-      spy.restore();
-    }
-    expect(text).toBe(JSON.stringify(aliasRecord));
-    expect(spy.calls.length).toBe(1);
+  it("adds px to numeric values", () => {
+    expect(styleObjectToCssString({ width: 100, marginTop: 10 })).toBe(
+      "width: 100px; margin-top: 10px",
+    );
+  });
+
+  it("leaves unitless properties without px", () => {
+    expect(
+      styleObjectToCssString({
+        opacity: 0.5,
+        zIndex: 10,
+        fontWeight: 700,
+        lineHeight: 1.5,
+        flexGrow: 2,
+      }),
+    ).toBe(
+      "opacity: 0.5; z-index: 10; font-weight: 700; line-height: 1.5; " +
+        "flex-grow: 2",
+    );
+  });
+
+  it("writes zero without a unit", () => {
+    expect(styleObjectToCssString({ margin: 0, padding: 0, width: 0 })).toBe(
+      "margin: 0; padding: 0; width: 0",
+    );
+  });
+
+  it("expands vendor prefixes into leading-dash form", () => {
+    expect(
+      styleObjectToCssString({
+        WebkitTransform: "rotate(45deg)",
+        webkitBoxShadow: "0 0 5px black",
+        mozAppearance: "none",
+      }),
+    ).toBe(
+      "-webkit-transform: rotate(45deg); -webkit-box-shadow: 0 0 5px black; " +
+        "-moz-appearance: none",
+    );
+  });
+
+  it("drops null and undefined values", () => {
+    expect(
+      styleObjectToCssString({
+        color: "red",
+        backgroundColor: null,
+        fontSize: undefined,
+        margin: "10px",
+      }),
+    ).toBe("color: red; margin: 10px");
+  });
+
+  it("leaves custom properties uppercased and unitless", () => {
+    expect(
+      styleObjectToCssString({
+        "--myColor": "blue",
+        "--spacing": 16,
+        "--Custom-Prop": "value",
+      }),
+    ).toBe("--myColor: blue; --spacing: 16; --Custom-Prop: value");
+  });
+
+  it("passes complex values through unchanged", () => {
+    expect(
+      styleObjectToCssString({
+        background: "linear-gradient(to right, red, blue)",
+        transform: "translateX(10px) rotate(45deg)",
+        gridTemplateColumns: "repeat(3, 1fr)",
+      }),
+    ).toBe(
+      "background: linear-gradient(to right, red, blue); " +
+        "transform: translateX(10px) rotate(45deg); " +
+        "grid-template-columns: repeat(3, 1fr)",
+    );
+  });
+
+  it("produces the empty string for an empty object", () => {
+    expect(styleObjectToCssString({})).toBe("");
   });
 });

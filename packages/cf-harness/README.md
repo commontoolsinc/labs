@@ -73,8 +73,8 @@ What works today:
 - persisted run state, transcript, run reports, Loom run manifests, capability
   snapshots, and tool outputs, plus explicit skill registry and activation
   artifacts
-- provider-neutral run-report model-attempt diagnostics; the compatibility
-  gateway retains its existing gateway-attempt records
+- provider-neutral run-report model-attempt diagnostics, one record per attempt,
+  naming the provider and the API operation that served it
 - provider-reported per-turn token usage in run reports, with aggregate input,
   cached-input, cache-write, output, reasoning, and total tokens surfaced in
   operator and batch results

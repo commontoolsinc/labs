@@ -100,6 +100,15 @@ export interface OpenAIResponsesRequest {
   store?: boolean;
   stream?: boolean;
   include?: readonly string[];
+  /**
+   * Server-side compaction. When rendered tokens cross `compact_threshold`,
+   * the provider folds prior context into an encrypted compaction item and
+   * prunes before continuing inference.
+   */
+  context_management?: readonly {
+    type: "compaction";
+    compact_threshold: number;
+  }[];
   prompt_cache_key?: string;
   prompt_cache_options?: {
     mode: "implicit" | "explicit";

@@ -12,6 +12,7 @@ import type {
 } from "../ci-job-history.ts";
 import {
   ciCommitGanttPage,
+  type CiGanttDataProvider,
   ciGanttPage,
   labsCiDuration,
   loomCiDuration,
@@ -24,6 +25,21 @@ import { PERFORMANCE_VIEW_STYLES } from "../performance-views.ts";
 const SVG = new TextEncoder().encode(
   '<svg xmlns="http://www.w3.org/2000/svg"><text>chart</text></svg>',
 );
+
+// Stands in for the collector, which writes the renderer's input file itself
+// rather than handing back a chart to be serialized.
+function provideGantt(
+  chart: (
+    source: CiHistorySource,
+    options: CiGanttOptions,
+  ) => CiGanttInput["runs"],
+): CiGanttDataProvider {
+  return async (source, options, destination) => {
+    const runs = chart(source, options);
+    await Deno.writeTextFile(destination, JSON.stringify({ runs }));
+    return runs.length;
+  };
+}
 
 function ctx(runs: Run[]): Ctx {
   return {
@@ -145,27 +161,25 @@ async function gantt(
     const url = new URL(`http://d/bench/gantt.svg${query}`);
     const res = await renderGantt(
       url.searchParams,
-      (source, options) => {
+      provideGantt((source, options) => {
         requested = { source, options };
-        return Promise.resolve({
-          runs: Array.from(
-            { length: Math.min(options.limit, 60) },
-            (_, index) => ({
-              run: {
-                attempt: 1,
-                databaseId: index + 1,
-                status: "completed",
-                conclusion: "success",
-                event: "push",
-                headBranch: "main",
-                startedAt: "2026-06-20T18:00:00Z",
-                workflowName: source.workflow,
-              },
-              jobs: [],
-            }),
-          ),
-        });
-      },
+        return Array.from(
+          { length: Math.min(options.limit, 60) },
+          (_, index) => ({
+            run: {
+              attempt: 1,
+              databaseId: index + 1,
+              status: "completed",
+              conclusion: "success",
+              event: "push",
+              headBranch: "main",
+              startedAt: "2026-06-20T18:00:00Z",
+              workflowName: source.workflow,
+            },
+            jobs: [],
+          }),
+        );
+      }),
       signal,
     );
     return {
@@ -435,16 +449,16 @@ Deno.test("/bench/gantt.svg: a successful render returns SVG uncached", async ()
   assertEquals(opt(args, "--repo"), REPO);
   assertEquals(opt(args, "--workflow"), CI_WORKFLOW);
   assertEquals(opt(args, "--limit"), "30");
-  assertEquals(opt(args, "--out"), "/fake-tmp/ci-gantt-1.svg"); // the bytes come from where it was told to write
-  assertEquals(opt(args, "--input"), "/fake-tmp/ci-gantt-input-2.json");
+  assertEquals(opt(args, "--out"), "/fake-tmp/ci-gantt-2.svg"); // the bytes come from where it was told to write
+  assertEquals(opt(args, "--input"), "/fake-tmp/ci-gantt-input-1.json");
   assert(!args.includes("--allow-net"));
   assert(!args.includes("--allow-env"));
-  assert(args.includes("--allow-read=/fake-tmp/ci-gantt-input-2.json"));
+  assert(args.includes("--allow-read=/fake-tmp/ci-gantt-input-1.json"));
   assert(!args.includes("--allow-read"));
   assert(!args.includes("--allow-write"));
   assert(!args.includes("--allow-ffi"));
   assert(!args.includes("--allow-sys=cpus,networkInterfaces,hostname"));
-  assert(args.includes("--allow-write=/fake-tmp/ci-gantt-1.svg"));
+  assert(args.includes("--allow-write=/fake-tmp/ci-gantt-2.svg"));
   assertEquals(opt(args, "--scale"), undefined);
   assertEquals(input.runs.length, 30);
   assertEquals(requested.source.key, "labs");
@@ -459,35 +473,34 @@ Deno.test("/bench/gantt.svg: a successful render returns SVG uncached", async ()
 Deno.test("/bench/gantt.svg includes chart labels without server fonts", async () => {
   const response = await renderGantt(
     new URLSearchParams("limit=1&mainOnly=1"),
-    () =>
-      Promise.resolve({
-        runs: [{
-          run: {
-            attempt: 1,
-            databaseId: 123,
-            status: "completed",
+    provideGantt(() => [
+      {
+        run: {
+          attempt: 1,
+          databaseId: 123,
+          status: "completed",
+          conclusion: "success",
+          event: "push",
+          headBranch: "main",
+          startedAt: "2026-07-28T18:00:00Z",
+          workflowName: CI_WORKFLOW,
+        },
+        jobs: [{
+          name: "Check dashboard labels",
+          status: "completed",
+          conclusion: "success",
+          started_at: "2026-07-28T18:00:05Z",
+          completed_at: "2026-07-28T18:01:05Z",
+          steps: [{
+            name: "🔎 Check",
+            number: 1,
             conclusion: "success",
-            event: "push",
-            headBranch: "main",
-            startedAt: "2026-07-28T18:00:00Z",
-            workflowName: CI_WORKFLOW,
-          },
-          jobs: [{
-            name: "Check dashboard labels",
-            status: "completed",
-            conclusion: "success",
-            started_at: "2026-07-28T18:00:05Z",
-            completed_at: "2026-07-28T18:01:05Z",
-            steps: [{
-              name: "🔎 Check",
-              number: 1,
-              conclusion: "success",
-              started_at: "2026-07-28T18:00:10Z",
-              completed_at: "2026-07-28T18:01:00Z",
-            }],
+            started_at: "2026-07-28T18:00:10Z",
+            completed_at: "2026-07-28T18:01:00Z",
           }],
         }],
-      }),
+      },
+    ]),
   );
 
   assertEquals(response.status, 200);
@@ -506,20 +519,39 @@ Deno.test("/bench/gantt.svg finishes collection but skips an abandoned render", 
   });
   const url = new URL(request.url);
   const originalTemp = Deno.makeTempFile;
+  const originalRemove = Deno.remove;
   let collected = false;
+  const created: string[] = [];
+  const removed: string[] = [];
   try {
-    Deno.makeTempFile = () => {
-      throw new Error("abandoned render created a temporary file");
+    Deno.makeTempFile = (opts?: Deno.MakeTempOptions) => {
+      const path = `/fake-tmp/${opts?.prefix ?? ""}${opts?.suffix ?? ""}`;
+      created.push(path);
+      return Promise.resolve(path);
     };
-    const response = await renderGanttRoute(request, url, () => {
+    Deno.remove = (path: string | URL) => {
+      removed.push(String(path));
+      return Promise.resolve();
+    };
+    const response = await renderGanttRoute(request, url, (
+      _source,
+      _options,
+      destination,
+    ) => {
       collected = true;
-      return Promise.resolve({ runs: [] });
+      assertEquals(destination, "/fake-tmp/ci-gantt-input-.json");
+      return Promise.resolve(0);
     });
     assert(collected);
+    // The collection writes into a temporary file, so that one exists; the
+    // chart image is never started, so no file is made for its output.
+    assertEquals(created, ["/fake-tmp/ci-gantt-input-.json"]);
+    assertEquals(removed, ["/fake-tmp/ci-gantt-input-.json"]);
     assertEquals(response.status, 204);
     assertEquals(response.headers.get("cache-control"), "no-store");
   } finally {
     Deno.makeTempFile = originalTemp;
+    Deno.remove = originalRemove;
   }
 });
 

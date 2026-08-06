@@ -1,4 +1,3 @@
-import { TaskPerform } from "./ipc.ts";
 import { CommonIframeSandboxElement } from "./common-iframe-sandbox.ts";
 
 // This is typically an `Action` (possibly a new or old implementation),
@@ -34,25 +33,6 @@ export interface IframeContextHandler {
     context: Context,
     receipt: Receipt,
   ): void;
-  onLLMRequest(
-    element: CommonIframeSandboxElement,
-    context: Context,
-    payload: string,
-  ): Promise<object>;
-  onReadWebpageRequest(
-    element: CommonIframeSandboxElement,
-    context: Context,
-    payload: string,
-  ): Promise<object>;
-
-  /**
-   * Guest may send a command it wishes system to perform.
-   */
-  onPerform(
-    element: CommonIframeSandboxElement,
-    context: unknown,
-    command: TaskPerform,
-  ): Promise<{ ok: object; error?: void } | { ok?: void; error: Error }>;
 }
 
 let IframeHandler: IframeContextHandler | null = null;

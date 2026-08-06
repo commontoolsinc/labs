@@ -185,13 +185,17 @@ describe(
       const coverageDir = await Deno.makeTempDir();
       try {
         await withEnv("CF_TEST_CONTINUOUS_UI", "1", async () => {
-          const { code, stderr } = await cf(
-            `test "${
-              fixture("continuous-ui.test.tsx")
-            }" --root "${FIXTURES}" --pattern-coverage-dir "${coverageDir}"`,
-          );
-          expect(code).toBe(0);
-          checkStderr(stderr);
+          // Wall-clock performance diagnostics can fire under CI contention;
+          // keep this environment-contract test strict about errors instead.
+          await withEnv("CF_LOG_LEVEL", "error", async () => {
+            const { code, stderr } = await cf(
+              `test "${
+                fixture("continuous-ui.test.tsx")
+              }" --root "${FIXTURES}" --pattern-coverage-dir "${coverageDir}"`,
+            );
+            expect(code).toBe(0);
+            checkStderr(stderr);
+          });
         });
 
         const files: string[] = [];

@@ -22,8 +22,10 @@ import {
   type CfcLabelView,
   JSONValue,
   RequestType,
+  type WireCellValue,
 } from "./protocol/mod.ts";
 import { DID } from "@commonfabric/identity";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
 import { InitializedRuntimeConnection } from "./client/connection.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -33,6 +35,27 @@ import { getLogger } from "@commonfabric/utils/logger";
 const logger = getLogger("cell-handle", { enabled: false });
 
 export const $onCellUpdate = Symbol("$onCellUpdate");
+
+/**
+ * A cell's value as the CLIENT holds it: what a cell holds, with a
+ * `CellHandle` wherever a cell sits. That is the substitution
+ * `vnode-types.ts` already makes for the render types -- `Cell` replaced by
+ * `CellHandle` -- applied to a cell's own value.
+ *
+ * What a cell holds is a `FabricValue`, so that is an arm of this rather than
+ * something restated: a `FabricBytes` in a cell is a value the client holds
+ * like any other, and this stays true of whatever `FabricValue` comes to admit.
+ * The container arms are here too, since theirs hold `FabricValue` where these
+ * hold handles as well.
+ *
+ * That the connection cannot presently CARRY all of it is a fact about
+ * `WireCellValue`, not about this: see the note there.
+ */
+export type ClientCellValue =
+  | FabricValue
+  | readonly ClientCellValue[]
+  | { readonly [key: string]: ClientCellValue }
+  | CellHandle<unknown>;
 
 /**
  * CellHandle provides a cell interface for cells living in a web worker.
@@ -142,7 +165,15 @@ export class CellHandle<T = unknown> {
     }
 
     const cell = this.ref();
-    const serialized = CellHandle.serialize(value);
+    // `T` is unconstrained, so this says what the write path requires rather
+    // than what the class guarantees. Constraining `T` to `ClientCellValue` is
+    // the honest fix and is not a small one: the schema-derived types
+    // (`ObjectFromProperties<...>`) and the looser `Props` of `vnode-types.ts`
+    // do not satisfy it, an interface having no implicit index signature where
+    // an identical type alias does.
+    //
+    // TODO(danfuzz): constrain `T`, once those types are assignable.
+    const serialized = CellHandle.serialize(value as ClientCellValue);
     const request = type === RequestType.CellPush
       ? this.#conn.request<RequestType.CellPush>({
         type: RequestType.CellPush,
@@ -165,7 +196,7 @@ export class CellHandle<T = unknown> {
     await this.#conn.request<RequestType.CellSend>({
       type: RequestType.CellSend,
       cell: this.ref(),
-      event: CellHandle.serialize(event),
+      event: CellHandle.serialize(event as ClientCellValue),
     }).catch((error) => {
       if (!this.#conn.signal.aborted) {
         console.error("[CellHandle] Send failed:", error);
@@ -480,33 +511,47 @@ export class CellHandle<T = unknown> {
   }
 
   /**
-   * Recursively converts any CellHandle references in the object into CellRefs.
-   * This is a CellHandle compatible form of `convertCellsToLinks`.
+   * Converts a value the client holds into the one the connection carries,
+   * which is the same data with a `CellRef` wherever a `CellHandle` sat.
+   *
+   * `CellHandle.deserialize()` is the inverse.
    */
-  static serialize(
-    value: readonly any[] | Record<string, any> | any,
-  ): any {
-    if (isCellHandle(value)) {
-      value = value.ref();
-    } else if (isRecord(value)) {
-      if (Array.isArray(value)) {
-        value = value.map((value) => CellHandle.serialize(value));
-      } else {
-        value = Object.fromEntries(
-          Object.entries(value).map(([key, value]) => [
-            key,
-            CellHandle.serialize(value),
-          ]),
-        );
-      }
-    } else if (
-      !(typeof value === "string" || typeof value === "number" ||
-        typeof value === "boolean" || value === undefined || value === null)
-    ) {
-      throw new Error(`Unknown type: ${value}`);
+  static serialize(value: ClientCellValue): WireCellValue {
+    // TODO(danfuzz): this does not handle the whole of its stated input. A
+    // `FabricSpecialObject` is a `ClientCellValue`, and `isRecord()` reports
+    // one, so it reaches the record branch below and is rebuilt from its
+    // (empty) enumerable members -- `{}` in place of a `FabricBytes`.
+    // `WireCellValue` cannot represent one either, so the fix is a refusal
+    // here rather than a conversion, and belongs with the wire gap marked on
+    // that type.
+
+    if (isCellHandle(value)) return value.ref();
+
+    if (Array.isArray(value)) {
+      return value.map((element) => CellHandle.serialize(element));
     }
 
-    return value;
+    if (isRecord(value)) {
+      return Object.fromEntries(
+        Object.entries(value).map((
+          [key, member],
+        ) => [key, CellHandle.serialize(member)]),
+      );
+    }
+
+    if (
+      typeof value === "string" || typeof value === "number" ||
+      typeof value === "boolean" || value === undefined || value === null
+    ) {
+      return value;
+    }
+
+    // Unreachable by the type, and kept for callers that reach this untyped:
+    // `CellHandle<T>` does not constrain `T`, so `set()` and `send()` cast on
+    // the way in. `String()` rather than interpolation, a symbol throwing on
+    // implicit conversion and replacing this refusal with a `TypeError` naming
+    // nothing.
+    throw new Error(`Unknown type: ${String(value)}`);
   }
 }
 

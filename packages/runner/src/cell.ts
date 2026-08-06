@@ -7,9 +7,12 @@ import {
 import {
   cloneIfNecessary,
   fabricFromNativeValue,
+  FabricInstance,
+  type FabricOrConvertibleNativeValue,
   FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
+  type FabricValueLayer,
   shallowCleanArray,
   shallowCleanPlainObject,
   shallowFabricFromNativeValue,
@@ -1434,7 +1437,14 @@ export class CellImpl<T extends FabricValue>
         );
       }
 
-      const event = convertCellsToLinks(newValue) as AnyCellWrapping<T>;
+      // `T` is unconstrained, so this says what the conversion requires rather
+      // than what the class guarantees, the same way `CellHandle<T>` does on
+      // the client side.
+      //
+      // TODO(danfuzz): constrain `T`, so that neither cast is needed.
+      const event = convertCellsToLinks(
+        newValue as CellLinkInput,
+      ) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 
       // Trigger on fully resolved link
@@ -3188,17 +3198,6 @@ function maybeConvertArrayPathToDataURILink(
 }
 
 /**
- * Validates that a value contains only static data (no cells or cell-like objects)
- * and has no circular references. Used by Cell.of() to ensure only serializable
- * static data is passed.
- *
- * Note: Shared references (same object at multiple paths) are allowed.
- * Only true cycles (object referencing an ancestor) are rejected.
- *
- * @param value - The value to validate
- * @throws Error if value contains cells or has circular references
- */
-/**
  * Whether `value` contains a reference cycle through plain containers.
  * Cells, links, and other non-plain objects are treated as leaves -- a cycle
  * through those resolves at read time and is not a structural cycle of the
@@ -3231,6 +3230,17 @@ function containsCycle(value: unknown): boolean {
   return walk(value);
 }
 
+/**
+ * Validates that a value contains only static data (no cells or cell-like objects)
+ * and has no circular references. Used by Cell.of() to ensure only serializable
+ * static data is passed.
+ *
+ * Note: Shared references (same object at multiple paths) are allowed.
+ * Only true cycles (object referencing an ancestor) are rejected.
+ *
+ * @param value - The value to validate
+ * @throws Error if value contains cells or has circular references
+ */
 function validateStaticData(value: unknown): void {
   // Track ancestors in current path (for cycle detection)
   // Shared references are fine - only cycles back to ancestors are errors
@@ -3309,7 +3319,51 @@ export function frameAnchorIds(
 }
 
 /**
- * Converts cells and objects that can be turned to cells to links.
+ * What `convertCellsToLinks()` is handed: what a pattern produced. That is a
+ * fabric value or a native convertible to one, and on top of that the `Cell`s
+ * the conversion exists to replace. None of it is durable until it has been
+ * through there.
+ *
+ * `FabricOrConvertibleNativeValue` is an arm rather than something restated, so
+ * this stays true of whatever that comes to admit. The container arms are here
+ * as well, and they are not redundant with it: theirs hold only what is already
+ * fabric or convertible, where a cell may sit at any depth in what a pattern
+ * produced. Replacing a nested one is the whole of what this conversion is for.
+ */
+export type CellLinkInput =
+  | FabricOrConvertibleNativeValue
+  | readonly CellLinkInput[]
+  | { readonly [key: string]: CellLinkInput }
+  | Cell<any>;
+
+/** The options by which a cell becomes the link that reaches it. */
+type CellLinkOptions = {
+  includeSchema?: boolean;
+  doNotConvertCellResults?: boolean;
+  includeCfcLabelView?: boolean;
+  keepAsCell?: KeepAsCell;
+};
+
+/**
+ * Helper for `convertCellsToLinks()`, which returns the link that reaches a
+ * cell, carrying the cell's CFC label view onto it when asked.
+ */
+function linkToCell(cell: Cell<any>, options: CellLinkOptions): SigilLink {
+  const link = cell.getAsLink(options);
+
+  if (options.includeCfcLabelView) {
+    const cfcLabelView = getCarriedCfcLabelView(cell);
+    if (cfcLabelView) {
+      setLinkCfcLabelView(link, cfcLabelView);
+    }
+  }
+
+  return link;
+}
+
+/**
+ * Converts cells and objects that can be turned to cells to links. What comes
+ * back is a `FabricValue` with a link wherever a cell sat.
  *
  * `ancestors` holds the ancestors of the value being converted, so what it
  * recognizes is a cycle. A value reachable twice by different paths is not one:
@@ -3323,49 +3377,30 @@ export function frameAnchorIds(
  * @returns The converted value.
  */
 export function convertCellsToLinks(
-  value: readonly any[] | Record<string, any> | any,
-  options: {
-    includeSchema?: boolean;
-    doNotConvertCellResults?: boolean;
-    includeCfcLabelView?: boolean;
-    keepAsCell?: KeepAsCell;
-  } = {},
-  path: string[] = [],
-  ancestors: Map<any, string[]> = new Map(),
-): any {
-  if (ancestors.has(value)) {
+  value: CellLinkInput,
+  options: CellLinkOptions = {},
+  path: readonly string[] = [],
+  ancestors: Map<object, readonly string[]> = new Map(),
+): FabricValue {
+  if (isRecord(value) && ancestors.has(value)) {
     return linkRefFrom({ path: ancestors.get(value) });
   }
 
   // Early-return cases
   if (!options.doNotConvertCellResults && isCellResultForDereferencing(value)) {
-    const cell = getCellOrThrow(value);
-    const link = cell.getAsLink(options);
-    if (options.includeCfcLabelView) {
-      const cfcLabelView = getCarriedCfcLabelView(cell);
-      if (cfcLabelView) {
-        setLinkCfcLabelView(link, cfcLabelView);
-      }
-    }
-    return link;
+    return linkToCell(getCellOrThrow(value), options);
   } else if (isCell(value)) {
-    const link = value.getAsLink(options);
-    if (options.includeCfcLabelView) {
-      const cfcLabelView = getCarriedCfcLabelView(value);
-      if (cfcLabelView) {
-        setLinkCfcLabelView(link, cfcLabelView);
-      }
-    }
-    return link;
+    return linkToCell(value, options);
   } else if (!(isRecord(value) || isFunction(value))) {
-    return value;
+    return value as FabricValue;
   }
 
   // At this point `value` is a non-`null` object(ish) thing.
 
   // Held before the conversions below reassign `value`, since what `ancestors` is
   // keyed on -- and cleared of on the way back out -- is the object as given.
-  const original = value;
+  const original = value as object;
+  let converted: FabricValueLayer;
   ancestors.set(original, path); // ...which needs to be tracked for circularity.
 
   // Everything past the line above runs inside this `try`, so that EVERY way
@@ -3384,25 +3419,30 @@ export function convertCellsToLinks(
       // What these produce is a valid `FabricValueLayer` already, so it wants
       // no further conversion. Objects need this as much as arrays do -- the
       // annotation goes on either (see `schema.ts`).
-      value = Array.isArray(value)
+      converted = Array.isArray(value)
         ? shallowCleanArray(value, false)
-        : shallowCleanPlainObject(value, false);
+        : shallowCleanPlainObject(value as object, false);
     } else {
       // Convert the (top level of) the value to fabric form (a valid
       // `FabricValue`) if it isn't already, or throw if it's neither already
       // valid nor convertible.
-      value = shallowFabricFromNativeValue(value);
+      converted = shallowFabricFromNativeValue(value);
     }
 
     // Recursively process arrays and objects, if we ended up with one of those.
     //
     // TODO(danfuzz): Both container branches below build a fresh container,
     // throwing away the copy just made above. One copy could serve both.
-    if (!isRecord(value)) {
+    if (!isRecord(converted)) {
       // `shallowFabricFromNativeValue()` converted this into a primitive value
       // of some sort.
-      return value;
-    } else if (value instanceof FabricPrimitive) {
+      //
+      // `FabricValueLayer` is looser than `FabricValue` -- its containers hold
+      // `unknown`, being unconverted until the recursion reaches them -- and
+      // `isRecord()` does not narrow an array out of the union. The cast is
+      // that gap, not a claim about the value.
+      return converted as FabricValue;
+    } else if (converted instanceof FabricPrimitive) {
       // An opaque scalar whose state lives in private fields, so it has zero
       // enumerable own properties and the object branch below would rebuild it
       // from its (empty) entries as a bare `{}`. It leaves whole instead.
@@ -3410,24 +3450,47 @@ export function convertCellsToLinks(
       // This catches both forms that arrive here: one the caller already built,
       // and one `shallowFabricFromNativeValue()` just minted from a native (a
       // `Uint8Array`, a `Date`) immediately above.
+      return converted;
+    } else if (converted instanceof FabricInstance) {
+      // A `FabricInstance` is NOT a leaf. It is a container reached by its
+      // codec contents rather than by property name, which this walk cannot do,
+      // so the object branch below would rebuild it from enumerable own
+      // properties it is not supposed to have -- and a cell nested in its state
+      // would go unconverted, which is the whole of what this walk is for. It
+      // refuses instead of doing that quietly.
       //
-      // TODO(danfuzz): Latent — a `FabricInstance` is NOT a leaf. It is a
-      // container reached by its codec contents rather than by property name,
-      // so it still falls to the object branch and is rebuilt from zero
-      // enumerable own properties. Same marker as the sibling walk in
-      // `builder/to-encodable-form.ts`.
-      return value;
+      // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at
+      // which point this becomes a walk rather than a refusal. See "Flag-gated
+      // tripwires" in `docs/development/EXPERIMENTAL_OPTIONS.md`.
+      throw new Error(
+        `Cannot yet handle \`${converted.constructor.name}\` (a ` +
+          "`FabricInstance`) when converting cells to links.",
+      );
     }
 
-    if (Array.isArray(value)) {
-      return value.map((value, index) =>
-        convertCellsToLinks(value, options, [...path, String(index)], ancestors)
+    // A member arrives here `unknown`: the shallow conversion above converted
+    // only the top level, so what a container holds is unconverted until the
+    // recursion reaches it. That makes each one a `CellLinkInput` -- the very
+    // domain this walk takes -- rather than anything narrower.
+    if (Array.isArray(converted)) {
+      return converted.map((element: unknown, index: number) =>
+        convertCellsToLinks(
+          element as CellLinkInput,
+          options,
+          [...path, String(index)],
+          ancestors,
+        )
       );
     }
     return Object.fromEntries(
-      Object.entries(value).map(([key, value]) => [
+      Object.entries(converted).map(([key, member]) => [
         key,
-        convertCellsToLinks(value, options, [...path, String(key)], ancestors),
+        convertCellsToLinks(
+          member as CellLinkInput,
+          options,
+          [...path, key],
+          ancestors,
+        ),
       ]),
     );
   } finally {

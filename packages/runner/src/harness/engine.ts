@@ -35,7 +35,7 @@ import {
 } from "./compile-interleave.ts";
 import { type MemorySpace, Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { StaticCache } from "@commonfabric/static";
+import type { StaticCache } from "@commonfabric/static";
 import {
   pretransformProgramForModules,
   transformInjectHelperModule,

@@ -302,6 +302,15 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         "openai-codex does not support provider-native tools in this release",
       );
     }
+    // Accepting this silently would make a user-supplied control look
+    // effective while nothing sends `context_management` on this path.
+    if (
+      request.compactThreshold !== undefined && request.compactThreshold > 0
+    ) {
+      throw new Error(
+        "openai-codex does not support server-side compaction in this release",
+      );
+    }
     if (request.signal?.aborted) throw abortReason(request.signal);
     const converted = await toResponsesInput(
       request.transcript,

@@ -32,6 +32,17 @@ describe("FabricError", () => {
     expect(se instanceof FabricNativeWrapper).toBe(true);
   });
 
+  it("has no own properties", () => {
+    // The `FabricInstance` contract, checked on the state-heaviest of the
+    // concrete classes: an own property here would leak into any structural
+    // view of the instance (spread, `Object.keys()`, a debug rendering).
+    const se = FabricError.fromNativeError(new Error("test"));
+    se.setExtra("extra", 1);
+    expect(Object.getOwnPropertyNames(se)).toEqual([]);
+    expect(Object.getOwnPropertySymbols(se)).toEqual([]);
+    expect({ ...se }).toEqual({});
+  });
+
   describe("constructor()", () => {
     it("wraps the `Error`'s `FabricValue`-shaped state", () => {
       const err = new TypeError("bad");
@@ -40,33 +51,51 @@ describe("FabricError", () => {
       expect(se.name).toBe("TypeError");
       expect(se.message).toBe("bad");
     });
-
-    it("has mutable fixed-schema slots while unfrozen", () => {
-      const se = FabricError.fromNativeError(new Error("orig"));
-      se.message = "changed";
-      se.name = "Renamed";
-      se.cause = { detail: 1 };
-      expect(se.message).toBe("changed");
-      expect(se.name).toBe("Renamed");
-      expect(se.cause).toEqual({ detail: 1 });
-      // The native projection reflects the mutated state (no stale cache).
-      expect(se.toNativeValue(true).message).toBe("changed");
-    });
-
-    it("throws on fixed-schema slot assignment once frozen", () => {
-      const se = FabricError.fromNativeError(new Error("orig"));
-      Object.freeze(se);
-      expect(() => {
-        se.message = "nope";
-      }).toThrow();
-      expect(() => {
-        (se as { name: string }).name = "nope";
-      }).toThrow();
-      expect(se.message).toBe("orig");
-    });
   });
 
   describe("instance members", () => {
+    describe("fixed-schema slots", () => {
+      it("reads back each value assigned while unfrozen", () => {
+        const se = FabricError.fromNativeError(new Error("orig"));
+        se.type = "RangeError";
+        se.name = "Renamed";
+        se.message = "changed";
+        se.stack = "at nowhere";
+        se.cause = { detail: 1 };
+        expect(se.type).toBe("RangeError");
+        expect(se.name).toBe("Renamed");
+        expect(se.message).toBe("changed");
+        expect(se.stack).toBe("at nowhere");
+        expect(se.cause).toEqual({ detail: 1 });
+        // The native projection reflects the mutated state (no stale cache).
+        expect(se.toNativeValue(true).message).toBe("changed");
+      });
+
+      it("throws on assignment to any slot once frozen", () => {
+        const se = FabricError.fromNativeError(new Error("orig"));
+        se.stack = "at nowhere";
+        se.cause = { detail: 1 };
+        Object.freeze(se);
+
+        const assignments: Array<() => void> = [
+          () => se.type = "nope",
+          () => se.name = "nope",
+          () => se.message = "nope",
+          () => se.stack = "nope",
+          () => se.cause = "nope",
+        ];
+        for (const assign of assignments) {
+          expect(assign).toThrow("Cannot modify frozen FabricError");
+        }
+
+        expect(se.type).toBe("Error");
+        expect(se.name).toBe("Error");
+        expect(se.message).toBe("orig");
+        expect(se.stack).toBe("at nowhere");
+        expect(se.cause).toEqual({ detail: 1 });
+      });
+    });
+
     describe("`[CODEC]` `encode()` state", () => {
       it("returns `type`, `name=null` (common case), `message`, `stack`", () => {
         const se = FabricError.fromNativeError(new Error("hello"));
