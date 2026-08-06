@@ -58,6 +58,12 @@ export interface CallableExecutionDeps {
    * outside its transaction (an LLM call, a fetch) repeats those effects on
    * retry even though nothing commits twice. */
   invocationId?: string;
+  /** The caller's session: who chose `invocationId` (`newSessionId`,
+   * ./session.ts). The id is the caller's own word, so the id alone does not
+   * say whose invocation it is. Rides the send options beside the id; the
+   * event address the id derives is not scoped by it. A caller that named no
+   * session travels without one. */
+  session?: string;
   /** Phase observer for early-exit reporting. */
   onPhase?: (phase: InvocationPhase) => void;
   /** `--no-wait`: await this handling's transaction-local commit
@@ -585,6 +591,10 @@ export async function executeResolvedCallable(
           if (invocationId !== undefined) {
             resolved.callableCell.send(dispatchInput, resolve, {
               eventId: invocationId,
+              // The id and the session that chose it travel together: an id
+              // is the caller's own word, and only the pair names one
+              // invocation. A caller that named no session sends none.
+              session: deps.session,
             });
           } else {
             resolved.callableCell.send(dispatchInput, resolve);
