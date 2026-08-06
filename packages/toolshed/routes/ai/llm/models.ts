@@ -3,7 +3,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createGroq, groq } from "@ai-sdk/groq";
 import { openai } from "@ai-sdk/openai";
 import { createVertex, vertex } from "@ai-sdk/google-vertex";
-import type { LanguageModel } from "ai";
+import type { JSONValue, LanguageModel } from "ai";
 import {
   GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
   isLLMNativeModelToolId,
@@ -51,11 +51,18 @@ type GatewayModelsResponse = {
   data: GatewayModel[];
 };
 
+/**
+ * Per-provider request options applied to every call made with the model,
+ * in the AI SDK's namespaced shape, e.g. `{ openai: { store: false } }`.
+ */
+export type ModelProviderOptions = Record<string, Record<string, JSONValue>>;
+
 export type ModelConfig = {
   model: LanguageModel;
   name: string;
   capabilities: Capabilities;
   aliases: string[];
+  providerOptions?: ModelProviderOptions;
   nativeModelToolFactories?: Partial<Record<LLMNativeModelToolId, () => any>>;
 };
 
@@ -90,7 +97,7 @@ const addModel = ({
   name,
   aliases,
   capabilities,
-  providerOptions: _,
+  providerOptions,
   nativeModelToolFactories,
 }: {
   provider:
@@ -101,7 +108,7 @@ const addModel = ({
   name: string;
   aliases: string[];
   capabilities: Capabilities;
-  providerOptions?: Record<string, unknown>;
+  providerOptions?: ModelProviderOptions;
   nativeModelToolFactories?: Partial<Record<LLMNativeModelToolId, () => any>>;
 }) => {
   let modelName = name.includes(":")
@@ -124,6 +131,7 @@ const addModel = ({
     name,
     capabilities,
     aliases,
+    ...(providerOptions !== undefined ? { providerOptions } : {}),
     ...(nativeModelToolFactories !== undefined
       ? { nativeModelToolFactories }
       : {}),
@@ -353,6 +361,15 @@ if (env.CFTS_AI_LLM_GROQ_API_KEY) {
   });
 }
 
+// The org runs OpenAI under Zero Data Retention, so the Responses API cannot
+// persist state between turns. Reasoning must come back encrypted and travel
+// with the messages instead; without this, the second turn of a tool loop
+// fails with "Item with id 'rs_...' not found".
+const OPENAI_ZDR_OPTIONS = {
+  store: false,
+  include: ["reasoning.encrypted_content"],
+} satisfies Record<string, JSONValue>;
+
 if (env.CFTS_AI_LLM_OPENAI_API_KEY) {
   const openAIProvider = createOpenAI({
     apiKey: env.CFTS_AI_LLM_OPENAI_API_KEY,
@@ -372,6 +389,9 @@ if (env.CFTS_AI_LLM_OPENAI_API_KEY) {
       streaming: true,
       reasoning: false,
     },
+    providerOptions: {
+      openai: { ...OPENAI_ZDR_OPTIONS },
+    },
   });
 
   addModel({
@@ -389,42 +409,70 @@ if (env.CFTS_AI_LLM_OPENAI_API_KEY) {
       reasoning: true,
     },
     providerOptions: {
-      reasoningEffort: "high",
+      // Namespaced under `openai` — the AI SDK ignores un-namespaced keys,
+      // which is why the previous `{ reasoningEffort }` shape never worked.
+      openai: { ...OPENAI_ZDR_OPTIONS, reasoningEffort: "high" },
     },
   });
 
+  // GPT-5.6 is codename-tiered rather than mini/nano: sol (flagship), terra
+  // (balanced), luna (fast). All three reason by default, which is why
+  // function tools must go through the Responses API rather than Chat
+  // Completions. Context is 1,050,000 total (922,000 in + 128,000 out).
   addModel({
     provider: openAIProvider,
-    name: "openai:gpt-5-mini",
-    aliases: ["openai:gpt-5-mini-latest", "gpt-5-mini"],
+    name: "openai:gpt-5.6-sol",
+    aliases: ["openai:gpt-5.6-sol-latest", "gpt-5.6-sol", "gpt-5.6"],
     capabilities: {
-      contextWindow: 400_000,
+      contextWindow: 1_050_000,
       maxOutputTokens: 128_000,
       images: true,
       prefill: false,
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
-      reasoning: false,
+      reasoning: true,
+    },
+    providerOptions: {
+      openai: { ...OPENAI_ZDR_OPTIONS },
     },
   });
 
   addModel({
     provider: openAIProvider,
-    name: "openai:gpt-5-mini-thinking",
-    aliases: ["openai:gpt-5-mini-thinking-latest", "gpt-5-mini-thinking"],
+    name: "openai:gpt-5.6-terra",
+    aliases: ["openai:gpt-5.6-terra-latest", "gpt-5.6-terra"],
     capabilities: {
-      contextWindow: 400_000,
+      contextWindow: 1_050_000,
       maxOutputTokens: 128_000,
       images: true,
       prefill: false,
-      systemPrompt: false,
-      stopSequences: false,
+      systemPrompt: true,
+      stopSequences: true,
       streaming: true,
       reasoning: true,
     },
     providerOptions: {
-      reasoningEffort: "high",
+      openai: { ...OPENAI_ZDR_OPTIONS },
+    },
+  });
+
+  addModel({
+    provider: openAIProvider,
+    name: "openai:gpt-5.6-luna",
+    aliases: ["openai:gpt-5.6-luna-latest", "gpt-5.6-luna"],
+    capabilities: {
+      contextWindow: 1_050_000,
+      maxOutputTokens: 128_000,
+      images: true,
+      prefill: false,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: true,
+    },
+    providerOptions: {
+      openai: { ...OPENAI_ZDR_OPTIONS },
     },
   });
 }
