@@ -359,9 +359,8 @@ export function map(
     // The resume batch has now been observed; later reconciles are post-resume.
     if (list.length > 0) resumeBatchAwaitSync = false;
 
-    // Identify the elements before touching any of them, so a child whose
-    // element the list no longer holds is released rather than left running for
-    // as long as the coordinator lives.
+    // The whole current key set has to exist before any element is touched:
+    // it is what says which children the list has stopped holding.
     const elementKeys = listElementKeys(list);
     releaseRemovedElements(
       runtime,

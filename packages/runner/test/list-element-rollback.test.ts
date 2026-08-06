@@ -227,6 +227,58 @@ describe("list element rollback", () => {
     expect(entry.needsSetup).toBe(false);
   });
 
+  it("leaves an element set up when a later reconcile issued it durably", () => {
+    const older = createSettleableTx();
+    const newer = createSettleableTx();
+    const elementRuns = new Map<string, ElementRun>();
+    const { runtime } = createStoppingRuntime();
+    const olderRollback = trackListSetupRollback(older, runtime, elementRuns);
+    const newerRollback = trackListSetupRollback(newer, runtime, elementRuns);
+
+    const entry: ElementRun = {
+      resultCell: elementCell("a"),
+      lastIndex: 0,
+      needsSetup: true,
+    };
+    elementRuns.set("a", entry);
+
+    // Two reconciles overlap: the older one is still awaiting its commit when
+    // the newer one issues setup for the same element and lands.
+    olderRollback.setupIssued(entry);
+    newerRollback.setupIssued(entry);
+    newer.settle(committed);
+    older.settle(aborted);
+
+    // The newer setup is durable, so nothing is owed. Owing it anyway costs
+    // the next reconcile a re-issue against documents that are already right.
+    expect(entry.needsSetup).toBe(false);
+  });
+
+  it("owes an element its setup when the reconcile that issued it last fails", () => {
+    const older = createSettleableTx();
+    const newer = createSettleableTx();
+    const elementRuns = new Map<string, ElementRun>();
+    const { runtime } = createStoppingRuntime();
+    const olderRollback = trackListSetupRollback(older, runtime, elementRuns);
+    const newerRollback = trackListSetupRollback(newer, runtime, elementRuns);
+
+    const entry: ElementRun = {
+      resultCell: elementCell("a"),
+      lastIndex: 0,
+      needsSetup: true,
+    };
+    elementRuns.set("a", entry);
+
+    olderRollback.setupIssued(entry);
+    newerRollback.setupIssued(entry);
+    older.settle(committed);
+    newer.settle(aborted);
+
+    // The durable setup is the older one, which the newer reconcile's writes
+    // were meant to replace, so the element still owes its setup.
+    expect(entry.needsSetup).toBe(true);
+  });
+
   it("leaves an entry a later reconcile replaced", () => {
     const tx = createSettleableTx();
     const { runtime, stopped } = createStoppingRuntime();

@@ -59,13 +59,18 @@ export interface ListSetupRollback {
  * reconcile installed. An overlapping reconcile that has already moved the same
  * entry owns it, and its bookkeeping matches durable writes of its own.
  */
+// The setup issuance each element run is currently on. It identifies one
+// issuance rather than counting them, so only its equality is meaningful.
+const latestSetupIssuance = new WeakMap<ElementRun, number>();
+let nextSetupIssuance = 1;
+
 export function trackListSetupRollback(
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
   elementRuns: Map<string, ElementRun>,
 ): ListSetupRollback {
   const created = new Map<string, ElementRun>();
-  const setUp = new Set<ElementRun>();
+  const setUp = new Map<ElementRun, number>();
   const indexChanges = new Map<
     ElementRun,
     { from: number; to: number }
@@ -73,12 +78,27 @@ export function trackListSetupRollback(
   const resultRestores: Array<() => void> = [];
   let registered = false;
 
+  // Stamp this reconcile's setup as the element's latest. Two reconciles for
+  // one coordinator overlap whenever the first is still awaiting its commit,
+  // and the debt belongs to whichever of them issued the setup last: a
+  // transaction that failed after a later one made the same element durable
+  // has nothing to restore.
+  const markSetupIssued = (entry: ElementRun): void => {
+    const issuance = nextSetupIssuance++;
+    latestSetupIssuance.set(entry, issuance);
+    setUp.set(entry, issuance);
+    entry.needsSetup = false;
+  };
+
   const registerRollback = (): void => {
     if (registered) return;
     registered = true;
     tx.addCommitCallback((_settledTx, result) => {
       if (!result.error) return;
-      for (const entry of setUp) entry.needsSetup = true;
+      for (const [entry, issuance] of setUp) {
+        if (latestSetupIssuance.get(entry) !== issuance) continue;
+        entry.needsSetup = true;
+      }
       if (
         isConflictRejection(result.error) ||
         isStorageTransactionInconsistent(result.error)
@@ -119,13 +139,11 @@ export function trackListSetupRollback(
   return {
     created(elementKey, entry) {
       created.set(elementKey, entry);
-      setUp.add(entry);
-      entry.needsSetup = false;
+      markSetupIssued(entry);
       registerRollback();
     },
     setupIssued(entry) {
-      setUp.add(entry);
-      entry.needsSetup = false;
+      markSetupIssued(entry);
       registerRollback();
     },
     indexChanged(entry, previousIndex) {

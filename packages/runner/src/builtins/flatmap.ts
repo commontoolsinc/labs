@@ -366,10 +366,10 @@ export function flatMap(
       throw new Error("flatMap currently only supports arrays");
     }
 
-    // Identify the elements before touching any of them. An op whose element
-    // the list no longer holds is released here, so its result — which now
-    // never arrives — cannot hold the aggregate below, and its child does not
-    // run for as long as the coordinator lives.
+    // The whole current key set has to exist before any element is touched:
+    // it is what says which ops the list has stopped holding. A released op's
+    // result never arrives, so releasing it also keeps it out of the hold
+    // below.
     const elementKeys = listElementKeys(list);
     releaseRemovedElements(
       runtime,

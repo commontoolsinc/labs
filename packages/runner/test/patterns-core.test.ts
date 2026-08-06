@@ -240,8 +240,13 @@ describe("Pattern Runner - Core", () => {
     expect(result.key("output").get()).toEqual(
       expected(expandedValues.slice(0, 5)),
     );
-    // Every element the list dropped released its child, so the count falls by
-    // exactly the fifteen that left rather than by some of them.
+    // A released child leaves no trace on the pattern's own surface — its
+    // element is gone from the list and its result document keeps its last
+    // value — so the runner's registration map is where the release shows.
+    // The count falls by exactly the fifteen elements that left, which one
+    // release out of fifteen would not satisfy. Only this runtime registers
+    // into that map, and the two readings bracket a single edit, so the
+    // difference is the coordinator's alone.
     expect(runtime.runner.cancels.size).toBe(expandedRunnerCount - 15);
 
     tx = runtime.edit();

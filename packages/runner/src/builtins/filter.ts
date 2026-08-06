@@ -360,10 +360,10 @@ export function filter(
       throw new Error("filter currently only supports arrays");
     }
 
-    // Identify the elements before touching any of them. A predicate whose
-    // element the list no longer holds is released here, so its result — which
-    // now never arrives — cannot hold the aggregate below, and its child does
-    // not run for as long as the coordinator lives.
+    // The whole current key set has to exist before any element is touched:
+    // it is what says which predicates the list has stopped holding. A
+    // released predicate's result never arrives, so releasing it also keeps it
+    // out of the hold below.
     const elementKeys = listElementKeys(list);
     releaseRemovedElements(
       runtime,
