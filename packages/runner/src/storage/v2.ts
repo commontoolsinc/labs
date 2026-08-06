@@ -888,8 +888,15 @@ export class StorageManager implements IStorageManager {
   #seedHosts: Record<string, string>;
   /** Late-bound host hints; see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
-  /** WebSocket storage endpoint used by an unseeded, unhinted space. */
+  /** Base URL the default storage route is resolved from, held as text so a
+   *  caller mutating their URL object cannot move the route. */
+  #memoryHost: string;
+  /** WebSocket storage endpoint used by an unseeded, unhinted space; read it
+   *  through #resolveDefaultStorageRoute(). */
   #defaultStorageRoute?: string;
+  /** Whether #defaultStorageRoute holds the result of a resolution attempt.
+   *  Separate from the value, which is undefined when resolution failed. */
+  #defaultStorageRouteResolved = false;
   /** Late-bound marker sink (the Runtime's telemetry bus); see setTelemetry. */
   #telemetry?: TelemetrySink;
 
@@ -936,14 +943,31 @@ export class StorageManager implements IStorageManager {
     // open(), so refusal logic must see the same fixed facts — a
     // caller mutating their map object must not desynchronize them.
     this.#seedHosts = Object.freeze({ ...(options.spaceHostMap ?? {}) });
-    try {
-      const resolveDefault = createStorageAddressResolver(options.memoryHost);
-      this.#defaultStorageRoute = toWebSocketAddress(
-        resolveDefault("did:key:route-comparison" as MemorySpace),
-      ).toString();
-    } catch {
-      // A custom session factory may use a non-network memoryHost placeholder.
+    this.#memoryHost = String(options.memoryHost);
+  }
+
+  /**
+   * The WebSocket storage endpoint an unseeded, unhinted space opens against,
+   * resolved from the memory host on the first read and kept from then on.
+   * registerSpaceHost() is its only reader. A failed resolution is kept as
+   * well: a custom session factory may use a non-network memoryHost
+   * placeholder, and such a manager has no default route.
+   */
+  #resolveDefaultStorageRoute(): string | undefined {
+    if (!this.#defaultStorageRouteResolved) {
+      this.#defaultStorageRouteResolved = true;
+      try {
+        const resolveDefault = createStorageAddressResolver(
+          new URL(this.#memoryHost),
+        );
+        this.#defaultStorageRoute = toWebSocketAddress(
+          resolveDefault("did:key:route-comparison" as MemorySpace),
+        ).toString();
+      } catch {
+        // The route stays undefined; the flag above stops the retry.
+      }
     }
+    return this.#defaultStorageRoute;
   }
 
   /**
@@ -983,7 +1007,7 @@ export class StorageManager implements IStorageManager {
     }
     const provider = this.#providers.get(space);
     const replacesDefaultRoute = provider !== undefined &&
-      this.#defaultStorageRoute !==
+      this.#resolveDefaultStorageRoute() !==
         toWebSocketAddress(storageAddressForHost(normalized)).toString();
     if (replacesDefaultRoute && !provider.canReplaceProvisionalReplica()) {
       return false;

@@ -90,6 +90,9 @@ One line per archived document; each document's header carries the fuller
 - [estuary-source-migration-2026-08-04.md](packages/patterns/lunch-poll/estuary-source-migration-2026-08-04.md)
   — rehearsal and live `setsrc` moving the Estuary lunch poll onto the mainline
   pattern, August 2026.
+- [two-toolchain-vintage-rehearsal.md](two-toolchain-vintage-rehearsal.md)
+  — first old-toolchain vintage capture (2026-06-18 `home.tsx`): procedure,
+  capture script, and measurements, August 2026.
 - [cf-view-language-coverage-2026-07.md](packages/cli/cf-view-language-coverage-2026-07.md)
   — active-repository syntax inventory and `cf view` support snapshot, July
   2026.
@@ -121,6 +124,10 @@ One line per archived document; each document's header carries the fuller
 - [2026-07-28-completed-transaction-retention.md](packages/runner/2026-07-28-completed-transaction-retention.md)
   — a completed transaction kept the activity of everything it read, and the
   unbounded document cache that still exhausts a browser tab, July 2026.
+- [2026-08-04-coverage-gate-base-branch-drift.md](development/2026-08-04-coverage-gate-base-branch-drift.md)
+  — why Coverage Check failed `packages/runner` at random: the ratchet graded a
+  pull request merged with a newer `main` against an older `main` baseline,
+  August 2026.
 - [pattern-update-open-argument-investigation.md](plans/pattern-update-open-argument-investigation.md)
   — why the open-argument update class went unvalidated on the repair path, and
   the correction of an earlier measurement that named the wrong mechanism,
@@ -224,6 +231,10 @@ One line per archived document; each document's header carries the fuller
   — transformer design records.
 - [MIGRATION_SUMMARY.md](packages/ui/src/v2/MIGRATION_SUMMARY.md) — the ui v2
   migration.
+- [CELL_CONTROLLER_DESIGN.md](packages/ui/src/v2/core/CELL_CONTROLLER_DESIGN.md)
+  — the pitch for the ui v2 CellController, July 2025. The controller shipped;
+  the transaction strategies, change grouping, batching, validation and
+  undo/redo it proposes did not.
 - [unified-storage-stack.md](future-tasks/unified-storage-stack.md) —
   DocImpl-era storage-unification plan, superseded by the v2 stack.
 - [hierarchical-params-spec.md](packages/ts-transformers/docs/hierarchical-params-spec.md)

@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import { applyPatch } from "../v2/patch.ts";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
-import { FabricInstance } from "@commonfabric/data-model/interface";
+import { FabricInstance } from "@commonfabric/data-model/fabric-value";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 

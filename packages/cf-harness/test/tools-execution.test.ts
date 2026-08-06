@@ -45,6 +45,7 @@ import type {
   SandboxCommandRequest,
   SandboxCommandResult,
   SandboxRuntime,
+  SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
 
@@ -115,7 +116,6 @@ const installMockDenoConnect = (
 };
 
 class FakeSandboxRuntime implements SandboxRuntime {
-  readonly kind = "docker-runsc-cfc" as const;
   readonly calls: Array<
     | { type: "run"; request: SandboxCommandRequest }
     | { type: "runShell"; request: SandboxShellRequest }
@@ -129,12 +129,24 @@ class FakeSandboxRuntime implements SandboxRuntime {
     }],
   ) {}
 
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: this.defaultWorkingDirectory(),
+      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+    };
+  }
+
   resolvePath(path: string, cwd = this.defaultWorkingDirectory()): string {
     return normalize(path.startsWith("/") ? path : `${cwd}/${path}`);
   }
 
   isPathWithinWorkspace(path: string): boolean {
     return path === "/workspace" || path.startsWith("/workspace/");
+  }
+
+  isPathWithinAllowedRoots(path: string): boolean {
+    return this.isPathWithinWorkspace(path);
   }
 
   defaultWorkingDirectory(): string {
@@ -167,7 +179,7 @@ class StrictFakeSandboxRuntime extends FakeSandboxRuntime {
 }
 
 class MultiRootFakeSandboxRuntime extends FakeSandboxRuntime {
-  isPathWithinAllowedRoots(path: string): boolean {
+  override isPathWithinAllowedRoots(path: string): boolean {
     return this.isPathWithinWorkspace(path) ||
       path === "/fabric" ||
       path.startsWith("/fabric/");

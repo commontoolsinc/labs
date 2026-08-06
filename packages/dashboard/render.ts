@@ -4,6 +4,7 @@ import type { TileView } from "./types.ts";
 import { durationTag, escapeHtml, STATUS_DOT } from "./lib.ts";
 import { faviconHref, faviconLink, type FaviconStatus } from "./favicon.ts";
 import { paintStatusFavicon } from "./favicon-client.ts";
+import { liveUpdateStream } from "./stream-client.ts";
 
 const FAVICON_PNG_HREFS = JSON.stringify({
   good: faviconHref("good"),
@@ -12,8 +13,52 @@ const FAVICON_PNG_HREFS = JSON.stringify({
   "bad-crying": faviconHref("bad-crying"),
 });
 const PAINT_STATUS_FAVICON = paintStatusFavicon.toString();
+const LIVE_UPDATE_STREAM = liveUpdateStream.toString();
+
+// How long past the refresh interval the freshness indicator stays orange before
+// it turns red. The page treats the same span of silence from the server as a
+// stream that has stopped delivering, and reconnects.
+const STALE_GRACE_MS = 10_000;
 
 export const FAVICON_CRY_AFTER_MS = 60 * 60 * 1000;
+
+/**
+ * A tiling background image of one stroked path, for the texture that sits
+ * behind a tile's flat colour wash. The tile is 48 by 24 CSS pixels and the
+ * path is drawn in that coordinate space.
+ */
+function strokeTexture(path: string, stroke: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" ` +
+    `width="48" height="24" viewBox="0 0 48 24">` +
+    `<path d="${path}" fill="none" stroke="${stroke}" stroke-width="1"/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
+const WAVE_TEXTURE = strokeTexture(
+  "M0 12q6-8 12 0t12 0t12 0t12 0",
+  "rgba(224,168,82,.13)",
+);
+const ZIGZAG_TEXTURE = strokeTexture(
+  "M0 18l12-12 12 12 12-12 12 12",
+  "rgba(226,80,74,.13)",
+);
+// Two copies of the same dot grid make a triangular lattice, where each dot has
+// six neighbours at one distance rather than a square lattice's four near ones
+// and four far ones. The copies are one dot spacing apart across, one spacing
+// times the square root of three apart down, and the second copy is shifted by
+// half of each. That puts its dots above the midpoint of the gap between two
+// dots of the first copy, one spacing away from both, and the same distance
+// again from the two below.
+const DOT_SPACING_PX = 16;
+const DOT_ROW_PX = DOT_SPACING_PX * Math.sqrt(3);
+const DOT_TEXTURE = [
+  `background-image:radial-gradient(rgba(124,130,140,.15) 1px,transparent 1px),`,
+  `radial-gradient(rgba(124,130,140,.15) 1px,transparent 1px);`,
+  `background-position:0 0,${DOT_SPACING_PX / 2}px ${
+    (DOT_ROW_PX / 2).toFixed(2)
+  }px;`,
+  `background-size:${DOT_SPACING_PX}px ${DOT_ROW_PX.toFixed(2)}px`,
+].join("");
 
 type ViewerTimeElement = Pick<HTMLTimeElement, "dateTime" | "textContent">;
 
@@ -62,7 +107,11 @@ export function renderTile(v: TileView, id?: string, wide = false): string {
       durationTag(v.duration)
     }</div>`
     : (v.extra ?? "");
-  const inner = `${header}${big}${sub}${body}`;
+  // The status texture is painted by this empty layer rather than by the tile,
+  // because the texture is turned on an angle and drawn past every edge, while
+  // the fade that thins it towards the bottom is measured against the tile.
+  // Those are two frames of reference, so they need two boxes.
+  const inner = `<div class="texture"></div>${header}${big}${sub}${body}`;
   if (!v.href) return `<div class="${cls}"${key}>${inner}</div>`;
   const tgt = /^https?:/.test(v.href) ? ` target="_blank" rel="noopener"` : "";
   return `<a class="${cls}"${key} href="${
@@ -89,12 +138,27 @@ ${faviconLink(status)}
   .badge{font-size:11px;color:#62d18d;border:1px solid rgba(67,197,116,.4);border-radius:6px;padding:2px 8px;margin-left:8px}
   .live{font-size:12px;color:#9aa0ab}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:12px}
-  .tile{background:#16181d;border:1px solid #23262d;border-radius:12px;padding:14px 16px}
+  .tile{background:#16181d;border:1px solid #23262d;border-radius:12px;padding:14px 16px;position:relative;isolation:isolate;overflow:hidden}
   .tile.wide{margin-bottom:12px}
   .tile.good,.tile.wide.good{border-color:rgba(67,197,116,.34);background:rgba(67,197,116,.08)}
   .tile.warn,.tile.wide.warn{border-color:rgba(224,168,82,.42);background:rgba(224,168,82,.09)}
   .tile.bad,.tile.wide.bad{border-color:rgba(226,80,74,.5);background:rgba(226,80,74,.11)}
   .tile.unknown,.tile.wide.unknown{border-color:#2f333c}
+  /* Each status carries a texture as well as a colour, so the wall reads at a
+     glance and without relying on colour alone: dots for gray, waves for
+     amber, zig-zags for red. The waves run across the zig-zags, a quarter turn
+     from the angle the others take. The texture layer covers the tile and sits
+     above the colour wash and below the content. It carries the fade: whole
+     for the top fifth of the tile, thinning from there, and gone four fifths
+     of the way down. Inside it the texture is turned on an angle and drawn
+     past all four edges, so the turned corners still reach the tile's. The
+     fade is measured against the tile and the texture is drawn in the turned
+     frame, which is why they are two boxes rather than one. */
+  .texture{position:absolute;inset:0;z-index:-1;overflow:hidden;mask-image:linear-gradient(to bottom,#000 20%,transparent 80%)}
+  .texture::before{content:"";position:absolute;inset:-100%;transform:rotate(30deg)}
+  .tile.unknown .texture::before{${DOT_TEXTURE}}
+  .tile.warn .texture::before{background-image:${WAVE_TEXTURE};background-size:48px 24px;transform:rotate(120deg)}
+  .tile.bad .texture::before{background-image:${ZIGZAG_TEXTURE};background-size:48px 24px}
   .lbl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#878d97;margin:0 0 7px;display:flex;align-items:center;gap:7px}
   .lbl .spacer{flex:1}
   .drill{font-size:10px;color:#6f757f;letter-spacing:0;text-transform:none}
@@ -136,11 +200,13 @@ ${faviconLink(status)}
   <div id="dashboard-wide">${wideHtml}</div>
 <script>
   const REFRESH = ${refreshMs};
+  const RED_AFTER = REFRESH + ${STALE_GRACE_MS};
   const SHELL_VERSION = ${JSON.stringify(shellVersion)};
   const COL = { green: '#43c574', amber: '#e0a852', red: '#e2504a' };
   const FAVICONS = ${FAVICON_PNG_HREFS};
   const FAVICON_CRY_AFTER_MS = ${FAVICON_CRY_AFTER_MS};
   const paintStatusFavicon = ${PAINT_STATUS_FAVICON};
+  const liveUpdateStream = ${LIVE_UPDATE_STREAM};
   const badge = document.getElementById('livebadge');
   const dot = document.getElementById('freshdot');
   const agotext = document.getElementById('agotext');
@@ -154,12 +220,16 @@ ${faviconLink(status)}
   let faviconServerRedAgeMs = ${serverRedAgeMs};
   let faviconStartedAt = performance.now();
   function paint() {
-    const ago = base + Math.floor((Date.now() - t0) / 1000);
+    const now = Date.now();
+    const ago = base + Math.floor((now - t0) / 1000);
     agotext.textContent = 'updated ' + ago + 's ago';
     // Fresh up to the refresh interval, then orange for 10s, then red.
-    const state = ago * 1000 <= REFRESH ? 'green' : ago * 1000 <= REFRESH + 10000 ? 'amber' : 'red';
+    const state = ago * 1000 <= REFRESH ? 'green' : ago * 1000 <= RED_AFTER ? 'amber' : 'red';
     dot.className = 'dot ' + state;
     agotext.style.color = COL[state];
+    // The badge says which of the two the stale data means: the server is there
+    // and has nothing new, or the page cannot hear it.
+    badge.textContent = updates.check(now) ? '● LIVE' : '● OFFLINE';
     // LIVE badge: green only when fresh AND no tile is gray; gray if a tile is gray;
     // when stale, the border takes the orange/red and the contents go gray.
     const anyGray = document.querySelector('.tile.unknown') !== null;
@@ -211,22 +281,36 @@ ${faviconLink(status)}
       if (atIndex !== tile) container.insertBefore(tile, atIndex ?? null);
     });
   }
-  const es = new EventSource('/events');
-  es.onmessage = (e) => { if (e.data === 'reload') location.reload(); };
-  es.addEventListener('update', (e) => {
-    const update = JSON.parse(e.data);
-    if (update.shellVersion !== SHELL_VERSION) { location.reload(); return; }
-    reconcileTiles(grid, update.gridHtml);
-    reconcileTiles(wide, update.wideHtml);
-    base = update.ageSeconds;
-    t0 = Date.now();
-    faviconServerRedSince = update.faviconRedSince;
-    faviconServerRedAgeMs = update.faviconRedAgeMs;
-    faviconStartedAt = performance.now();
-    paint();
+  const updates = liveUpdateStream(RED_AFTER, () => {
+    const es = new EventSource('/events');
+    // The connection's own events repaint, so the badge follows the connection
+    // as it changes.
+    const alive = () => { updates.heard(Date.now()); paint(); };
+    es.addEventListener('open', alive);
+    es.addEventListener('ping', alive);
+    es.addEventListener('error', () => { updates.lost(); paint(); });
+    es.addEventListener('update', (e) => {
+      updates.heard(Date.now());
+      const update = JSON.parse(e.data);
+      if (update.shellVersion !== SHELL_VERSION) { location.reload(); return; }
+      reconcileTiles(grid, update.gridHtml);
+      reconcileTiles(wide, update.wideHtml);
+      base = update.ageSeconds;
+      t0 = Date.now();
+      faviconServerRedSince = update.faviconRedSince;
+      faviconServerRedAgeMs = update.faviconRedAgeMs;
+      faviconStartedAt = performance.now();
+      paint();
+    });
+    return es;
   });
   paint();
   setInterval(paint, 1000);
+  // A background tab's timers are throttled to about one a minute, and a
+  // sleeping machine's stop altogether. These two events fire as the page comes
+  // back into use, which is when someone is there to read it.
+  document.addEventListener('visibilitychange', paint);
+  addEventListener('online', paint);
 </script></body></html>`;
 }
 

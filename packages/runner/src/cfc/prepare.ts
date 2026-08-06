@@ -9,7 +9,12 @@ import {
   internSchemaAsTaggedHashString,
 } from "@commonfabric/data-model/schema-hash";
 import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
-import { isFabricObjectOrArray } from "@commonfabric/data-model/fabric-value";
+import {
+  FabricPrimitive,
+  isFabricObjectOrArray,
+} from "@commonfabric/data-model/fabric-value";
+import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
+import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
 import {
   cloneForMutation,
   type CloneForMutationResult,
@@ -2880,6 +2885,13 @@ const schemaTypeMatchesValue = (
       case "string":
         return typeof value === "string";
       default:
+        if (
+          typeof candidate === "string" &&
+          isFabricPrimitiveSchemaType(candidate)
+        ) {
+          return value instanceof FabricPrimitive &&
+            schemaTypeOfFabricPrimitive(value) === candidate;
+        }
         return true;
     }
   });

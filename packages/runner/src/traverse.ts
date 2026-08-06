@@ -7,7 +7,11 @@ import {
   internSchemaAsTaggedHashString,
   isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
-import type { JSONSchemaObj, SchemaPathSelector } from "@commonfabric/api";
+import {
+  isFabricPrimitiveSchemaType,
+  type JSONSchemaObj,
+  type SchemaPathSelector,
+} from "@commonfabric/api";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
 import {
   FabricInstance,
@@ -15,6 +19,7 @@ import {
   FabricSpecialObject,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 // TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
@@ -2496,7 +2501,9 @@ function schemaTypesAreDisjoint(
     linkTypes.some((link) =>
       parent === link ||
       (parent === "number" && link === "integer") ||
-      (parent === "integer" && link === "number")
+      (parent === "integer" && link === "number") ||
+      (parent === "object" && isFabricPrimitiveSchemaType(link)) ||
+      (link === "object" && isFabricPrimitiveSchemaType(parent))
     )
   );
 }
@@ -2506,16 +2513,20 @@ function schemaTypeMatchesValueType(
   valueType: JSONSchemaTypes,
 ): boolean {
   // Integer is a subtype of number: an integer value satisfies either schema,
-  // while a fractional number only satisfies a number schema.
+  // while a fractional number only satisfies a number schema. Likewise, each
+  // fabric-primitive type is a subtype of "object": a `FabricBytes` value
+  // satisfies both `{type: "FabricBytes"}` and `{type: "object"}`, while a
+  // plain record only satisfies the latter.
   return schemaType === valueType ||
-    (schemaType === "number" && valueType === "integer");
+    (schemaType === "number" && valueType === "integer") ||
+    (schemaType === "object" && isFabricPrimitiveSchemaType(valueType));
 }
 
 function getJsonNumberType(value: number): "integer" | "number" {
   return Number.isInteger(value) ? "integer" : "number";
 }
 
-function narrowNumberIntegerIntersection(
+function narrowSubtypeIntersection(
   parentType: JSONSchemaObj["type"],
   linkType: JSONSchemaObj["type"],
 ): JSONSchemaObj["type"] | undefined {
@@ -2527,7 +2538,10 @@ function narrowNumberIntegerIntersection(
     return undefined;
   }
 
-  let narrowedNumber = false;
+  // The subtype pairs mirror schemaTypeMatchesValueType: integer under
+  // number, and each fabric-primitive type under "object". An intersection
+  // keeps the narrower member of the pair.
+  let narrowed = false;
   const intersection = new Set<JSONSchemaTypes>();
   for (const parent of parentTypes) {
     for (const link of linkTypes) {
@@ -2538,12 +2552,18 @@ function narrowNumberIntegerIntersection(
         (parent === "integer" && link === "number")
       ) {
         intersection.add("integer");
-        narrowedNumber = true;
+        narrowed = true;
+      } else if (parent === "object" && isFabricPrimitiveSchemaType(link)) {
+        intersection.add(link);
+        narrowed = true;
+      } else if (link === "object" && isFabricPrimitiveSchemaType(parent)) {
+        intersection.add(parent);
+        narrowed = true;
       }
     }
   }
 
-  if (!narrowedNumber) return undefined;
+  if (!narrowed) return undefined;
   const types = [...intersection].sort();
   return types.length === 1 ? types[0] : types;
 }
@@ -2564,7 +2584,7 @@ function _combineSchemaUncached(
     if (
       schemaTypesAreDisjoint(parentSchema.type, linkSchema.type)
     ) return false;
-    const narrowedType = narrowNumberIntegerIntersection(
+    const narrowedType = narrowSubtypeIntersection(
       parentSchema.type,
       linkSchema.type,
     );
@@ -3295,7 +3315,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
           } else if (branch.required !== undefined && valueIsRecord) {
             match = true;
             for (const req of branch.required) {
-              if (!(req in (doc.value as Record<string, unknown>))) {
+              // `Object.hasOwn`, not `in`: `req` is a schema-declared property
+              // NAME and the value is data. `in` walks the prototype chain, so
+              // a required property called `toString` was satisfied by every
+              // record whether or not it carried one.
+              if (
+                !Object.hasOwn(doc.value as Record<string, unknown>, req)
+              ) {
                 match = false;
                 break;
               }
@@ -3558,10 +3584,15 @@ export class SchemaObjectTraverser<V extends FabricValue>
     } else if (doc.value instanceof FabricPrimitive) {
       // An opaque leaf whose `typeof` is "object": this arm must precede the
       // record branch below, which would otherwise decompose it.
-      // Type-validate as "object" — the shape the schema-generator emits for
-      // these types today — but do not consult the schema's structural
-      // details: leaves are not property-walked.
-      return this.isValidType(schemaObj, "object") !== TypeValidity.False
+      // Type-validate against the primitive's specific type name (e.g.
+      // "FabricBytes"); a schema saying "object" also accepts it via
+      // schemaTypeMatchesValueType's subtype rule. Do not consult the
+      // schema's structural details: leaves are not property-walked.
+      return this.isValidType(
+          schemaObj,
+          schemaTypeOfFabricPrimitive(doc.value),
+        ) !==
+          TypeValidity.False
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
     } else if (doc.value instanceof FabricInstance) {
@@ -4294,7 +4325,12 @@ export class SchemaObjectTraverser<V extends FabricValue>
     // Apply defaults from our schema
     if (isRecord(schema) && schema.properties) {
       for (const propKey of Object.keys(schema.properties)) {
-        if (propKey in filteredObj) {
+        // `Object.hasOwn`, not `in`: `propKey` is a schema-declared property
+        // NAME and `filteredObj` is data. `in` walks the prototype chain, so a
+        // schema property called `toString` or `valueOf` looked already-present
+        // on every object, its default was never applied, and the caller got
+        // `Object.prototype`'s function where the schema promised a value.
+        if (Object.hasOwn(filteredObj, propKey)) {
           continue;
         }
         const subSchema = ContextualFlowControl.getSchemaAtPath(schema, [
@@ -4345,7 +4381,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
       const required = schema["required"] as string[];
       if (Array.isArray(required)) {
         for (const requiredProperty of required) {
-          if (!(requiredProperty in filteredObj)) {
+          // `Object.hasOwn`, not `in` — see the sibling check above: a required
+          // name matching an `Object.prototype` member read as present on every
+          // object, so the value was accepted instead of rejected.
+          if (!Object.hasOwn(filteredObj, requiredProperty)) {
             logger.info("traverse", () => [
               "Missing required property",
               requiredProperty,
@@ -4641,7 +4680,9 @@ export function canBranchMatch(
       (Array.isArray(resolved.type) && resolved.type.includes("object"));
     if (typeIncludesObject && Array.isArray(resolved.required)) {
       for (const req of resolved.required) {
-        if (!(req as string in value)) return false;
+        // `Object.hasOwn`, not `in`: same own-presence question as the other
+        // two required-property checks in this file.
+        if (!Object.hasOwn(value, req as string)) return false;
       }
     }
   }
@@ -4664,6 +4705,11 @@ function getPlainJsonType(
   if (typeof value === "number") return "number";
   if (isBoolean(value)) return "boolean";
   if (Array.isArray(value)) return "array";
+  // A fabric primitive reports its specific type name; a schema saying
+  // `"object"` still accepts it via schemaTypeMatchesValueType's subtype rule.
+  if (value instanceof FabricPrimitive) {
+    return schemaTypeOfFabricPrimitive(value);
+  }
   if (isObject(value)) return "object";
   return null;
 }

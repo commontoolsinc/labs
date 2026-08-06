@@ -329,7 +329,10 @@ export function sparkline(
     const tail = pts.slice(vals.length - highlight.count);
     lines.push(`<polyline points="${tail.join(" ")}" fill="none" stroke="${highlight.color}" stroke-width="2"/>`);
   }
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="24" preserveAspectRatio="none" style="margin-top:9px">${defs}${lines.join("")}</svg>`;
+  // The svg is a block, so the chart's box is the height it draws: an inline svg
+  // sits on a text baseline, and the line box around it reserves descender space
+  // underneath.
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="24" preserveAspectRatio="none" style="display:block;margin-top:9px">${defs}${lines.join("")}</svg>`;
 }
 
 // Overlaid trend lines (each oldest -> newest) sharing one vertical scale, each
@@ -512,7 +515,7 @@ export function multiSparkline(
 
   const labeled = drawable.filter((s) => s.label !== undefined);
   if (labeled.length === 0) {
-    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="32" preserveAspectRatio="none" style="margin-top:9px">${defsBlock}${lines}</svg>`;
+    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="32" preserveAspectRatio="none" style="display:block;margin-top:9px">${defsBlock}${lines}</svg>`;
   }
   const RH = 32; // rendered svg height, px
   // Each label sits at its line's end height; when a chart is drawn its value

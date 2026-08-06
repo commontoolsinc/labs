@@ -11,6 +11,13 @@ import type {
 
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import {
+  FabricBytes,
+  FabricEpochDays,
+  FabricEpochNsec,
+  FabricHash,
+  FabricRegExp,
+} from "@/fabric-primitives/index.ts";
+import {
   cloneSchemaMutable,
   emptySchemaObject,
   internPathSelector,
@@ -818,6 +825,12 @@ describe("schema-utils", () => {
     testType("null", null);
     testType("array", [1, 2, 3]);
     testType("object", { a: 1 });
+    // A `FabricPrimitive` gets its specific type name, not "object".
+    testType("FabricBytes", new FabricBytes(new Uint8Array([1])));
+    testType("FabricEpochDays", new FabricEpochDays(1n));
+    testType("FabricEpochNsec", new FabricEpochNsec(1n));
+    testType("FabricHash", new FabricHash(new Uint8Array(32), "fid1"));
+    testType("FabricRegExp", new FabricRegExp(/x/));
 
     describe("`undefined`", () => {
       it("returns `undefined`", () => {

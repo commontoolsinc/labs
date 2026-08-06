@@ -22,8 +22,13 @@ import {
   type CfcLabelView,
   JSONValue,
   RequestType,
+  type WireCellValue,
 } from "./protocol/mod.ts";
 import { DID } from "@commonfabric/identity";
+import {
+  FabricSpecialObject,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
 import { InitializedRuntimeConnection } from "./client/connection.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -33,6 +38,27 @@ import { getLogger } from "@commonfabric/utils/logger";
 const logger = getLogger("cell-handle", { enabled: false });
 
 export const $onCellUpdate = Symbol("$onCellUpdate");
+
+/**
+ * A cell's value as the _client_ holds it: what a cell holds, with a
+ * `CellHandle` wherever a cell sits. That is the substitution `vnode-types.ts`
+ * already makes for the render types -- `Cell` replaced by `CellHandle` --
+ * applied to a cell's own value.
+ *
+ * What a cell holds is a `FabricValue`, so that is an arm of this rather than
+ * something restated: a `FabricBytes` in a cell is a value the client holds
+ * like any other, and this stays true of whatever `FabricValue` comes to admit.
+ * The container arms are here too, since theirs hold `FabricValue` where these
+ * hold handles as well.
+ *
+ * That the connection cannot presently _carry_ all of it is a fact about
+ * `WireCellValue`, not about this: see the note there.
+ */
+export type ClientCellValue =
+  | FabricValue
+  | readonly ClientCellValue[]
+  | { readonly [key: string]: ClientCellValue }
+  | CellHandle<unknown>;
 
 /**
  * CellHandle provides a cell interface for cells living in a web worker.
@@ -124,12 +150,30 @@ export class CellHandle<T = unknown> {
   }
 
   // Optimistic local update (mirrors the old set()) plus the remote write. The
-  // request TYPE encodes the intent: CellSet is a blind overwrite, CellPush is a
-  // read-modify-write append that the runtime keeps as compare-and-set.
+  // request _type_ encodes the intent: CellSet is a blind overwrite, CellPush
+  // is a read-modify-write append that the runtime keeps as compare-and-set.
   #applyLocalAndSend(
     value: T,
     type: RequestType.CellSet | RequestType.CellPush,
   ): Promise<void> {
+    // Serialized _first_, because it can refuse. The local update below is
+    // optimistic about the _write_ -- it assumes a value the connection
+    // accepts will land -- and not about whether the value can be sent at all.
+    // Were the refusal to come after, a value the runtime is never going to
+    // see would already be this handle's cached value and would already have
+    // reached every subscriber, leaving the display showing state that does
+    // not exist.
+    //
+    // `T` is unconstrained, so this says what the write path requires rather
+    // than what the class guarantees. Constraining `T` to `ClientCellValue` is
+    // the honest fix and is not a small one: the schema-derived types
+    // (`ObjectFromProperties<...>`) and the looser `Props` of `vnode-types.ts`
+    // do not satisfy it, an interface having no implicit index signature where
+    // an identical type alias does.
+    //
+    // TODO(danfuzz): constrain `T`, once those types are assignable.
+    const serialized = CellHandle.serialize(value as ClientCellValue);
+
     this.#value = value;
 
     for (const callback of this.#callbacks.values()) {
@@ -142,7 +186,6 @@ export class CellHandle<T = unknown> {
     }
 
     const cell = this.ref();
-    const serialized = CellHandle.serialize(value);
     const request = type === RequestType.CellPush
       ? this.#conn.request<RequestType.CellPush>({
         type: RequestType.CellPush,
@@ -165,7 +208,7 @@ export class CellHandle<T = unknown> {
     await this.#conn.request<RequestType.CellSend>({
       type: RequestType.CellSend,
       cell: this.ref(),
-      event: CellHandle.serialize(event),
+      event: CellHandle.serialize(event as ClientCellValue),
     }).catch((error) => {
       if (!this.#conn.signal.aborted) {
         console.error("[CellHandle] Send failed:", error);
@@ -480,33 +523,75 @@ export class CellHandle<T = unknown> {
   }
 
   /**
-   * Recursively converts any CellHandle references in the object into CellRefs.
-   * This is a CellHandle compatible form of `convertCellsToLinks`.
+   * Converts a value the client holds into the one the connection carries,
+   * which is the same data with a `CellRef` wherever a `CellHandle` sat.
+   *
+   * Refuses a `FabricSpecialObject`, which the connection cannot carry.
+   *
+   * `CellHandle.deserialize()` is the inverse.
    */
-  static serialize(
-    value: readonly any[] | Record<string, any> | any,
-  ): any {
-    if (isCellHandle(value)) {
-      value = value.ref();
-    } else if (isRecord(value)) {
-      if (Array.isArray(value)) {
-        value = value.map((value) => CellHandle.serialize(value));
-      } else {
-        value = Object.fromEntries(
-          Object.entries(value).map(([key, value]) => [
-            key,
-            CellHandle.serialize(value),
-          ]),
-        );
-      }
-    } else if (
-      !(typeof value === "string" || typeof value === "number" ||
-        typeof value === "boolean" || value === undefined || value === null)
-    ) {
-      throw new Error(`Unknown type: ${value}`);
+  static serialize(value: ClientCellValue): WireCellValue {
+    if (isCellHandle(value)) return value.ref();
+
+    if (Array.isArray(value)) {
+      return value.map((element) => CellHandle.serialize(element));
     }
 
-    return value;
+    // A `FabricSpecialObject` is a `ClientCellValue` -- a cell holds one like
+    // any other value -- but `WireCellValue` has no representation for it, so
+    // this refuses rather than converting. It goes _before_ the record test:
+    // such a value is also a record, and that branch would otherwise rebuild
+    // it from enumerable own properties it is not supposed to have, putting
+    // `{}` on the wire in place of a `FabricBytes` and losing the bytes with
+    // nothing to show for it.
+    //
+    // A _de facto_ tripwire, in the sense of "Flag-gated tripwires" in
+    // `docs/development/EXPERIMENTAL_OPTIONS.md`: no flag gates this, and a
+    // `FabricBytes` is an ordinary shipped value, so what makes the refusal
+    // safe is that nothing writes one from the client today. The first thing
+    // that does will throw here, in the change that adds it.
+    //
+    // TODO(danfuzz): carry the whole `FabricValue` domain across this
+    // connection, at which point this becomes a conversion rather than a
+    // refusal. `JsonEncodingContext` is the mechanism, and the gap it closes
+    // is the one marked on `WireCellValue` in `protocol/types.ts`.
+    if (value instanceof FabricSpecialObject) {
+      throw new Error(
+        `Cannot yet handle \`${value.constructor.name}\` (a ` +
+          "`FabricSpecialObject`) on this connection.",
+      );
+    }
+
+    if (isRecord(value)) {
+      return Object.fromEntries(
+        Object.entries(value).map((
+          [key, member],
+        ) => [key, CellHandle.serialize(member)]),
+      );
+    }
+
+    if (
+      typeof value === "string" || typeof value === "number" ||
+      typeof value === "boolean" || value === undefined || value === null
+    ) {
+      return value;
+    }
+
+    // Reachable two ways. A `bigint` and a `symbol` are `FabricValue` arms, so
+    // a cell holds either and `ClientCellValue` admits either, while
+    // `WireCellValue` has neither -- the same gap the refusal above covers,
+    // for the two arms that are not objects. And `CellHandle<T>` does not
+    // constrain `T`, so `set()` and `send()` cast on the way in and a caller
+    // can arrive here with anything at all.
+    //
+    // `typeof` names the kind, since the value's own text rarely explains the
+    // refusal: a `1n` prints as `1`, which reads like a number that was
+    // rejected for no reason. `String()` rather than interpolation, a symbol
+    // throwing on implicit conversion and replacing this refusal with a
+    // `TypeError` naming nothing.
+    throw new Error(
+      `Cannot send a \`${typeof value}\` on this connection: ${String(value)}`,
+    );
   }
 }
 

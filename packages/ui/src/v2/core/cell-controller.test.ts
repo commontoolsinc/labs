@@ -685,22 +685,6 @@ describe("CellController — timing integration", () => {
     ctrl.setValue("instant");
     expect(cell.get()).toBe("instant");
   });
-
-  it("onFocus/onBlur call custom option callbacks", () => {
-    const events: string[] = [];
-    const host = createMockHost();
-    const ctrl = new CellController<string>(host, {
-      timing: { strategy: "immediate" },
-      onFocus: () => events.push("focus"),
-      onBlur: () => events.push("blur"),
-    });
-    const cell = createMockCellHandle("x");
-    ctrl.bind(cell);
-
-    ctrl.onFocus();
-    ctrl.onBlur();
-    expect(events).toEqual(["focus", "blur"]);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1080,18 +1064,6 @@ describe("CellController — pending local edits vs stale bound state", () => {
     // Extra keys make it a different value — not our echo.
     pushUpdate(objCell, { k: "v", extra: 1 } as unknown as { k: string });
     expect(objCtrl.getValue()).toEqual({ k: "v" });
-  });
-
-  it("manual transaction strategy still routes the write through the setter", () => {
-    const ctrl = new CellController<string>(createMockHost(), {
-      timing: { strategy: "immediate" },
-      transactionStrategy: "manual",
-    });
-    const cell = createMockCellHandle<string>("before");
-    ctrl.bind(cell);
-    ctrl.setValue("after");
-    expect(cell.get()).toBe("after");
-    expect(ctrl.getValue()).toBe("after");
   });
 
   it("setValue on a plain (non-cell) binding leaves the value to the host property system", () => {

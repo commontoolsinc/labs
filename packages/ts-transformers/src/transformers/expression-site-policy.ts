@@ -938,7 +938,6 @@ function arrayMethodCallbackValueResolvesToCollection(
       expression,
       context.checker,
       context.state.typeRegistry,
-      context.options.logger,
     ),
     context.checker,
   );

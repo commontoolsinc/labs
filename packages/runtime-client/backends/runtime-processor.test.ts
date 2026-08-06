@@ -958,6 +958,29 @@ describe("page slug redirects", () => {
 });
 
 describe("sanitizeForPostMessage", () => {
+  it("shows a twice-reachable value at both of its positions", () => {
+    // Shared, not circular: neither position is inside the other. Reporting
+    // the second as a cycle would misdescribe the data the dump exists to show.
+    const shared = { n: 1 };
+    expect(sanitizeForPostMessage({ x: shared, y: shared }))
+      .toEqual({ x: { n: 1 }, y: { n: 1 } });
+  });
+
+  it("shows a value shared between siblings after a deep subtree", () => {
+    const shared = { n: 1 };
+    expect(
+      sanitizeForPostMessage({ deep: { a: { b: shared } }, later: shared }),
+    )
+      .toEqual({ deep: { a: { b: { n: 1 } } }, later: { n: 1 } });
+  });
+
+  it("still reports a value that holds itself as circular", () => {
+    const cyclic: Record<string, unknown> = { n: 1 };
+    cyclic.self = cyclic;
+    expect(sanitizeForPostMessage(cyclic))
+      .toEqual({ n: 1, self: "[Circular]" });
+  });
+
   describe("primitives", () => {
     it("passes through null and undefined", () => {
       expect(sanitizeForPostMessage(null)).toBe(null);

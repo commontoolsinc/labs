@@ -174,19 +174,23 @@ worth calling out:
   `ModuleScopeFunctionHardeningTransformer` so coverage counters are added to
   authored bodies before hardening helpers are emitted (§16).
 
-## 4. Global Modes
+## 4. Global Options
 
-`TransformationOptions.mode` supports:
+`TransformationOptions` carries no mode switch. Every transformer behaves the
+same way on every compile: the pipeline rewrites, and reports a diagnostic only
+where a rule is actually violated. There is no validate-only configuration that
+reports what a rewrite would have been.
 
-- `transform` (default)
-- `error`
+The options that do change what a compile produces are described alongside the
+behavior they change:
 
-Current mode-sensitive behavior:
-
-- `JsxExpressionSiteRouterTransformer` in `error` mode reports diagnostics
-  instead of rewriting JSX expressions that would require reactive rewrites in
-  non-compute contexts.
-- Other transformers currently do not branch on mode.
+- `patternCoverage` — coverage instrumentation (§16)
+- `moduleIdentities` and `canonicalWriterIdentityFile` — the file spellings and
+  module identities that writer-identity claims are minted with (§17.3)
+- `assertDiagnostics` — whether an `assert(...)` body records its operands, so
+  that a failing pattern-test assertion can report them
+- `state` and `diagnosticsCollector` — cross-stage communication and diagnostic
+  collection (§2)
 
 ## 5. Call Kind Detection Contract
 
@@ -751,10 +755,6 @@ For each `JsxExpression`:
   - computed wrapping is skipped
 - compute-context JSX does not lower `&&` / `||`
 - pattern-context JSX lowers `&&` / `||` deterministically
-- in `mode: "error"`:
-  - report `reactive:jsx-expression` for non-compute contexts requiring
-    rewrite
-  - no rewrite
 
 ### 7.2 Emitter behaviors
 
@@ -1447,8 +1447,7 @@ seed.
 
 Like all trailing stages it is gated only on the injected `__cfHelpers` binding
 (`HelpersOnlyTransformer.filter`, `src/core/transformers.ts`; injection per
-§2.1) and does not branch on `mode` (§4). It emits no diagnostics; it only
-rewrites expressions.
+§2.1). It emits no diagnostics; it only rewrites expressions.
 
 ### 13.1 The two cause roots
 
@@ -2952,7 +2951,7 @@ Additional non-fixture unit suites cover:
 - cast/empty-array/pattern-context/opaque-get/schema-shrink validation
 - diagnostic message transformer behavior
 - event-handler detection heuristics
-- reactive analysis/normalization/runtime-style APIs
+- reactive analysis and normalization APIs
 - pipeline regression and policy/capability-analysis behavior
 - lift-applied call helper and identifier utilities
 

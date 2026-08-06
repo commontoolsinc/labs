@@ -246,7 +246,7 @@ describe("arrays", () => {
           .toBe(false);
       });
 
-      it("answers rather than throwing for `null` and `undefined`", () => {
+      it("returns rather than throwing for `null` and `undefined`", () => {
         expect(isArrayWithOnlyIndexProperties(null))
           .toBe(false);
         expect(
@@ -255,7 +255,7 @@ describe("arrays", () => {
           .toBe(false);
       });
 
-      it("answers rather than throwing for a primitive", () => {
+      it("returns rather than throwing for a primitive", () => {
         expect(isArrayWithOnlyIndexProperties("abc"))
           .toBe(false);
         expect(isArrayWithOnlyIndexProperties(42))

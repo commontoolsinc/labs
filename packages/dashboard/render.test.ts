@@ -10,6 +10,7 @@ import {
 } from "./render.ts";
 import { humanSpan } from "./lib.ts";
 import { FAVICON_VERSION } from "./favicon.ts";
+import { liveUpdateStream } from "./stream-client.ts";
 
 const TEST_VERSION = "1".repeat(40);
 
@@ -78,7 +79,7 @@ Deno.test("renderTile: an absent value/sub/hint/aside renders nothing rather tha
   const html = renderTile(view());
   assertEquals(
     html,
-    `<div class="tile good"><p class="lbl"><span class="dot green"></span> labs ci<span class="spacer"></span></p></div>`,
+    `<div class="tile good"><div class="texture"></div><p class="lbl"><span class="dot green"></span> labs ci<span class="spacer"></span></p></div>`,
   );
 });
 
@@ -202,18 +203,24 @@ Deno.test("shell: the freshness age and the refresh interval reach both the text
   );
   assertStringIncludes(html, "let base = 7;");
   assertStringIncludes(html, `new EventSource('/events')`);
+  assertStringIncludes(html, `es.addEventListener('update'`);
+  assertStringIncludes(html, `es.addEventListener('ping', alive)`);
+  assertStringIncludes(html, `es.addEventListener('open', alive)`);
   assertStringIncludes(
     html,
-    `es.onmessage = (e) => { if (e.data === 'reload') location.reload(); };`,
+    `es.addEventListener('error', () => { updates.lost(); paint(); });`,
   );
-  assertStringIncludes(html, `es.addEventListener('update'`);
   assertStringIncludes(html, `reconcileTiles(grid, update.gridHtml)`);
   assertStringIncludes(html, `reconcileTiles(wide, update.wideHtml)`);
   assertStringIncludes(
     html,
     `if (update.shellVersion !== SHELL_VERSION) { location.reload(); return; }`,
   );
-  assertEquals(html.match(/location\.reload\(\)/g)?.length, 2);
+  assertEquals(
+    html.match(/location\.reload\(\)/g)?.length,
+    1,
+    "a version mismatch is the one thing that navigates the page",
+  );
   assertStringIncludes(
     html,
     `if (current.outerHTML === next.outerHTML) return current;`,
@@ -223,7 +230,63 @@ Deno.test("shell: the freshness age and the refresh interval reach both the text
   assertStringIncludes(html, `link.dataset.focusKey === focusedKey`);
 });
 
-Deno.test("shell: live data and runtime settings keep the Git commit version", () => {
+Deno.test("shell: the page watches its own stream and reopens one that stops delivering", () => {
+  const html = shell("", "", 0, 45_000, TEST_VERSION, "good");
+  // The silence the page reconnects on is the silence that turns the dot red.
+  assertStringIncludes(html, "const RED_AFTER = REFRESH + 10000;");
+  assertStringIncludes(html, `ago * 1000 <= RED_AFTER ? 'amber' : 'red'`);
+  assertStringIncludes(html, `const updates = liveUpdateStream(RED_AFTER, () => {`);
+  assertStringIncludes(
+    html,
+    `badge.textContent = updates.check(now) ? '● LIVE' : '● OFFLINE';`,
+  );
+  assertStringIncludes(html, `document.addEventListener('visibilitychange', paint);`);
+  assertStringIncludes(html, `addEventListener('online', paint);`);
+});
+
+// The functions the page runs are authored as TypeScript here and reach the
+// browser as the text of `Function.prototype.toString()`. That text has to be
+// JavaScript the browser accepts, and it has to stand alone: a reference to
+// anything outside the function is a name the page does not have. Neither
+// property is visible to a test that only looks for substrings.
+Deno.test("shell: the injected script is JavaScript, and each injected function stands alone", () => {
+  const script = shell("", "", 0, 45_000, TEST_VERSION, "good")
+    .match(/<script>([\s\S]*)<\/script>/)![1];
+  // Parses the whole body without running it, which is where a leftover type
+  // annotation or generic parameter would show up.
+  new Function(script);
+
+  // Evaluated on its own, outside its module, so a reference to anything at
+  // module scope throws instead of quietly resolving.
+  const source = script.match(
+    /const liveUpdateStream = ([\s\S]*?);\n {2}const badge =/,
+  )![1];
+  const injected = new Function(`return (${source});`)() as typeof liveUpdateStream;
+
+  const opened: { readyState: number; closed: boolean; close(): void }[] = [];
+  const live = injected(55_000, () => {
+    const stream = {
+      readyState: 0,
+      closed: false,
+      close() {
+        this.closed = true;
+      },
+    };
+    opened.push(stream);
+    return stream;
+  });
+  assert(live.check(0), "the page starts out hearing the server that served it");
+  assertEquals(opened.length, 1);
+  opened[0].readyState = 1;
+  live.heard(0);
+  assert(live.check(54_999));
+  assertEquals(opened.length, 1, "a stream that is delivering is left alone");
+  assertEquals(live.check(55_000), false, "and one that goes quiet is replaced");
+  assertEquals(opened.length, 2);
+  assert(opened[0].closed);
+});
+
+Deno.test("shell: live data and runtime settings keep the compatibility version", () => {
   const first = shell(
     `<div class="tile good">first</div>`,
     "",
@@ -290,6 +353,24 @@ Deno.test("shell: the browser runs the viewer-time formatter", () => {
     localizeUpdate < compareMarkup,
     "live updates are localized before their markup is compared",
   );
+});
+
+Deno.test("shell: the texture fades out towards the bottom of its own tile", () => {
+  const html = shell(renderTile(view({ status: "bad" }), "labs-ci"), "", 0, 30_000, TEST_VERSION, "bad");
+  assertStringIncludes(html, `<div class="texture"></div>`);
+  // Measured against the tile: whole for its top fifth, gone four fifths down.
+  assertStringIncludes(
+    html,
+    ".texture{position:absolute;inset:0;z-index:-1;overflow:hidden;mask-image:linear-gradient(to bottom,#000 20%,transparent 80%)}",
+  );
+  // Measured against the turned frame the texture is drawn in.
+  assertStringIncludes(
+    html,
+    ".texture::before{content:\"\";position:absolute;inset:-100%;transform:rotate(30deg)}",
+  );
+  for (const status of ["unknown", "warn", "bad"]) {
+    assertStringIncludes(html, `.tile.${status} .texture::before{`);
+  }
 });
 
 Deno.test("shell: server-measured red age changes the favicon after one hour", () => {
