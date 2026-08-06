@@ -124,12 +124,15 @@ export function createRef(
     }
 
     if (isCellResultForDereferencing(obj)) {
-      // It'll unwrap this and return the referenced doc's entity id.
+      // A query result stands for the cell it dereferences to, and derives what
+      // that cell derives.
       obj = getCellOrThrow(obj);
     }
 
-    // If referencing other docs, return their ids.
     if (isCell(obj)) {
+      // Reading the entity id is what materializes a link from an explicit
+      // cause, so it comes first: the link read below is available only once
+      // this has happened.
       const id = obj.entityId;
       if (id == null) {
         // A Cell referenced from a derived id must have an entityId; otherwise
@@ -139,7 +142,12 @@ export function createRef(
           "[createRef] Cell has no entityId; cannot derive a stable id",
         );
       }
-      return id;
+
+      // The path is part of what names a cell, so a cell derives from the link
+      // naming it -- the same form the encodable-form branch above gives a cell
+      // that arrives directly, which is what keeps the two routes at one
+      // answer. Two cells of one document derive two ids.
+      return traverse(encodableFormOf(obj));
     } else if (Array.isArray(obj)) return obj.map(traverse);
     else if (isRecord(obj)) {
       return Object.fromEntries(
