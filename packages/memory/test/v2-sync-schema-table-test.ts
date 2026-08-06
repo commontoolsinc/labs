@@ -1296,6 +1296,35 @@ Deno.test("connection-scoped compression carries a body once, then references it
   assertEquals(expandSessionSyncSchemas(second, cache), sync);
 });
 
+Deno.test("expansion leaves an inline schema alone", () => {
+  // Not every schema position on an expanded frame holds a reference: a
+  // server may compress some and leave others, and a position holding an
+  // ordinary value is data. Expansion must pass those through rather than
+  // treat every schema position as a reference to resolve.
+  const inline: JSONSchema = { type: "string" };
+  const sync: SessionSync = {
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:inline-schema",
+      scope: "space",
+      seq: 1,
+      doc: {
+        value: {
+          ref: linkRefFrom({ id: "of:target", path: [], schema: inline }),
+        },
+      },
+    }],
+    removes: [],
+  };
+
+  const cache = new Map<string, JSONSchema>();
+  assertEquals(expandSessionSyncSchemas(sync, cache), sync);
+  assertEquals(cache.size, 0);
+});
+
 Deno.test("connection-scoped references need a table or a delivered body", () => {
   const hash = internSchema(largeSchema(), true).taggedHashString;
   const orphaned = compressSessionSyncSchemas(
