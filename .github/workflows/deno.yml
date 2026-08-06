@@ -22,7 +22,7 @@ jobs:
   # ---------------------------------------------------------------------------
   check:
     name: "Check"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
@@ -78,7 +78,7 @@ jobs:
 
   cfcheck:
     name: "CFC Pattern Check (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -102,7 +102,7 @@ jobs:
 
   pattern-compat:
     name: "Pattern Update Compatibility (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -130,7 +130,7 @@ jobs:
 
   pattern-vintage:
     name: "Pattern Update State Continuity"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: 📥 Checkout repository
@@ -177,7 +177,7 @@ jobs:
 
   baselines-append-only:
     name: "Pattern Baselines Append-Only"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       # Needs real history: the check diffs against the merge base, and the
@@ -202,7 +202,7 @@ jobs:
 
   test:
     name: "Test (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -259,7 +259,7 @@ jobs:
 
   runner-test:
     name: "Runner Tests (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -321,7 +321,7 @@ jobs:
 
   build-toolshed:
     name: "Build Binary (toolshed)"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
@@ -347,7 +347,7 @@ jobs:
 
   build-bg-piece-service:
     name: "Build Binary (bg-piece-service)"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
@@ -371,7 +371,7 @@ jobs:
 
   build-cf:
     name: "Build Binary (cf)"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
@@ -395,7 +395,7 @@ jobs:
 
   generated-patterns-integration-test:
     name: "Generated Patterns Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -475,7 +475,7 @@ jobs:
 
   package-integration-test:
     name: "Package Integration Tests (${{ matrix.suite_name }})"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: ["build-toolshed"]
     strategy:
@@ -579,7 +579,7 @@ jobs:
 
   cli-integration-test:
     name: "CLI Integration Tests (${{ matrix.suite_name }})"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.timeout_minutes }}
     needs: ["build-toolshed", "build-cf"]
     strategy:
@@ -737,7 +737,7 @@ jobs:
 
   pattern-integration-test:
     name: "Pattern Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: ["build-toolshed"]
     strategy:
@@ -871,7 +871,7 @@ jobs:
 
   pattern-reload-integration-test:
     name: "Pattern Reload Integration Tests"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
@@ -931,7 +931,7 @@ jobs:
 
   pattern-unit-test:
     name: "Pattern Unit Tests (${{ matrix.chunk }}/${{ matrix.total }})"
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: ["build-cf"]
     strategy:
@@ -1010,7 +1010,7 @@ jobs:
   coverage-check:
     name: "Coverage Check"
     if: (github.event_name == 'pull_request') || (github.ref_name == 'main')
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     needs:
       - check
@@ -1103,7 +1103,7 @@ jobs:
       - pattern-unit-test
       - coverage-check
     permissions: {}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - name: 🔎 Verify pull request jobs
         env:
@@ -1123,7 +1123,7 @@ jobs:
   attest-binaries:
     name: "Attest and Upload Binaries"
     if: github.ref == 'refs/heads/main'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     # A release artifact must not outlive a failed pattern-migration gate.
     # Production deploys consume this artifact without rerunning those gates.
@@ -1374,7 +1374,7 @@ jobs:
     name: "Deploy to Rapids (Staging)"
     if: github.ref == 'refs/heads/main'
     needs: ["attest-binaries"]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     environment: toolshed
     steps:
       - name: 📥 Checkout repository
@@ -1407,7 +1407,7 @@ jobs:
         "package-integration-test",
         "cli-integration-test",
       ]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     environment: ci
     steps:
       - name: 📥 Checkout repository
