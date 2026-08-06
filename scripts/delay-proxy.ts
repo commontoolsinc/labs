@@ -87,7 +87,17 @@ export class LinkScheduler {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function pump(
+/**
+ * Forward one direction of a connection through the emulated link. Exported
+ * for the deterministic failure-path test; production entry is the listener
+ * below.
+ *
+ * The write chain never rejects: a failed destination write flips
+ * `writeFailed`, after which remaining queued chunks drain without delay so
+ * completions keep flowing, a paused reader is woken to observe the failure,
+ * and the loop stops consuming the producer.
+ */
+export async function pump(
   from: Deno.Conn,
   to: Deno.Conn,
   scheduler: LinkScheduler,
@@ -95,9 +105,10 @@ async function pump(
 ) {
   let chain: Promise<void> = Promise.resolve();
   let resumeSignal: (() => void) | null = null;
+  let writeFailed = false;
   const buf = new Uint8Array(64 * 1024);
   try {
-    while (true) {
+    while (!writeFailed) {
       if (scheduler.shouldPause()) {
         await new Promise<void>((resolve) => {
           resumeSignal = resolve;
@@ -110,12 +121,20 @@ async function pump(
       counter.n += n;
       const ready = scheduler.enqueue(performance.now(), chunk.length);
       chain = chain.then(async () => {
-        const wait = ready - performance.now();
-        if (wait > 0) await sleep(wait);
-        let off = 0;
-        while (off < chunk.length) off += await to.write(chunk.subarray(off));
+        if (!writeFailed) {
+          const wait = ready - performance.now();
+          if (wait > 0) await sleep(wait);
+          try {
+            let off = 0;
+            while (off < chunk.length) {
+              off += await to.write(chunk.subarray(off));
+            }
+          } catch (_) {
+            writeFailed = true;
+          }
+        }
         scheduler.complete(chunk.length);
-        if (resumeSignal !== null && scheduler.canResume()) {
+        if (resumeSignal !== null && (scheduler.canResume() || writeFailed)) {
           const resume = resumeSignal;
           resumeSignal = null;
           resume();
@@ -123,13 +142,9 @@ async function pump(
       });
     }
   } catch (_) {
-    // Reader or writer side torn down; fall through to half-close.
+    // Reader side torn down; fall through to half-close.
   }
-  try {
-    await chain;
-  } catch (_) {
-    // Writer gone; nothing left to flush.
-  }
+  await chain;
   try {
     (to as Deno.TcpConn).closeWrite();
   } catch (_) {
