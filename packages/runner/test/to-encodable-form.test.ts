@@ -254,9 +254,13 @@ describe("to-encodable-form", () => {
       // laundered -- `.map()` honors `Symbol.species`, so the result is still
       // a subclass instance, carrying a live prototype that `isInertArray()`
       // exists to reject.
+      // Each names the ARRAY refusal specifically. "Not representable" alone is
+      // shared with the plain-object refusal, so it would still pass if one of
+      // these were classified as an object instead -- which is exactly the
+      // regression that would make the reported reason wrong.
       expect(() =>
         withAliasBindings(Object.assign([1, 2], { extra: "x" }) as any)
-      ).toThrow("Not representable");
+      ).toThrow("array that is not an inert array");
       const accessorIndexed = [1, 2];
       Object.defineProperty(accessorIndexed, 0, {
         get: () => 42,
@@ -264,15 +268,15 @@ describe("to-encodable-form", () => {
         configurable: true,
       });
       expect(() => withAliasBindings(accessorIndexed as any)).toThrow(
-        "Not representable",
+        "array that is not an inert array",
       );
       class Subclassed extends Array {}
       expect(() => withAliasBindings(Subclassed.from([1, 2]) as any)).toThrow(
-        "Not representable",
+        "array that is not an inert array",
       );
       expect(() =>
         withAliasBindings(Object.setPrototypeOf([1, 2], null) as any)
-      ).toThrow("Not representable");
+      ).toThrow("array that is not an inert array");
 
       // ...while an ordinary inert array still walks through untouched.
       expect(withAliasBindings([1, 2] as any)).toEqual([1, 2]);
