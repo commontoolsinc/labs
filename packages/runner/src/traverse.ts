@@ -3315,7 +3315,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
             match = true;
             for (const req of branch.required) {
               // The nominal brand key has no runtime existence; a fabric
-              // value satisfies it by construction.
+              // value satisfies it by construction. Removable with the
+              // other brand exemptions once the generator skips the brand
+              // (see opaqueLeafMissesRequired's doc comment).
               if (
                 req === FABRIC_SPECIAL_OBJECT_BRAND &&
                 doc.value instanceof FabricSpecialObject
@@ -4680,7 +4682,9 @@ export function canBranchMatch(
     ) {
       for (const req of resolved.required) {
         // The nominal brand key has no runtime existence; a fabric value
-        // satisfies it by construction.
+        // satisfies it by construction. Removable with the other brand
+        // exemptions once the generator skips the brand (see
+        // opaqueLeafMissesRequired's doc comment).
         if (
           req === FABRIC_SPECIAL_OBJECT_BRAND &&
           value instanceof FabricSpecialObject
@@ -4709,8 +4713,12 @@ function schemaTypeIncludesObject(type: JSONSchemaObj["type"]): boolean {
  * so a class accessor such as `FabricBytes.length` satisfies
  * `required: ["length"]` while a key the primitive lacks rejects it. The
  * nominal brand key generated schemas require has no runtime existence and
- * is satisfied by the instance itself. A fabric-primitive-typed schema is
- * not gated here (its type never includes "object").
+ * is satisfied by the instance itself; that exemption (here and at the
+ * other brand-aware check sites) exists because the schema-generator's
+ * object formatter currently emits the brand into `required`, and it can
+ * be removed once the generator skips the brand and stored schemas that
+ * carry it have cycled out. A fabric-primitive-typed schema is not gated
+ * here (its type never includes "object").
  *
  * Presence is the whole check: property sub-schemas are NOT enforced
  * against a primitive's accessor values, so
