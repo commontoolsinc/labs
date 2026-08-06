@@ -116,21 +116,31 @@ export function isReadIgnoredForCommit(meta?: Metadata): boolean {
 // Both the wrapper and the inner storage transaction(s) are marked, since
 // read()/buildReads run on the inner one; the chain walk tolerates extra wrapper
 // layers.
-// Transactions whose commit promise should resolve at VERDICT receipt
-// rather than marker coverage (CT-1950). For callers — controlled-staleness
-// test fixtures foremost — that need "durably accepted" without implying
-// "fan-out delivered": awaiting a coverage-resolving commit forces the
-// batch pass through, which destroys any premise built on peers not yet
-// having received it. State application still parks; only the promise
-// timing changes.
-const resolveOnVerdictTxs = new WeakSet<object>();
+// Fan-out coverage waits, recorded per transaction (CT-1950). The push path
+// resolves its result at the server verdict and records the parked
+// application's promise here; the transaction layer drains the record so
+// that its commit() promise resolves only once the subscribed view reflects
+// the committed write. The split exists so post-commit effects gated on
+// durability alone (commit callbacks) can hook the verdict instead of
+// inheriting the fan-out window.
+const coverageWaits = new WeakMap<object, Promise<void>[]>();
 
-export function markResolveOnVerdictTx(tx: object): void {
-  for (const layer of blindWriteTxChain(tx)) resolveOnVerdictTxs.add(layer);
+export function recordCoverageWait(tx: object, wait: Promise<void>): void {
+  const waits = coverageWaits.get(tx);
+  if (waits === undefined) {
+    coverageWaits.set(tx, [wait]);
+  } else {
+    waits.push(wait);
+  }
 }
 
-export function isResolveOnVerdictTx(tx: object): boolean {
-  return resolveOnVerdictTxs.has(tx);
+export function takeCoverageWaits(tx: object): Promise<void>[] {
+  const waits = coverageWaits.get(tx);
+  if (waits === undefined) {
+    return [];
+  }
+  coverageWaits.delete(tx);
+  return waits;
 }
 
 const uiInputBlindWriteTxs = new WeakSet<object>();

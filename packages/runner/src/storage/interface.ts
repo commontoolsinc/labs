@@ -701,6 +701,28 @@ export type StorageTransactionStatus =
  * will send it to an upstream storage provider which will either accept, if no
  * invariants have being invalidated, or reject and fail commit.
  */
+
+/**
+ * Options for {@link IStorageTransaction.commit}.
+ */
+export interface TransactionCommitOptions {
+  /**
+   * When the returned promise resolves for an ACCEPTED commit.
+   *
+   * - `"coverage"` (default): once the caller's subscribed view reflects
+   *   the committed write and the foreign novelty it was applied on top of
+   *   (marker coverage, spec §4.11.2).
+   * - `"verdict"`: once the commit is durably accepted, without waiting
+   *   for the fan-out — and without synced() holding on it. For callers
+   *   whose premise is "accepted but not yet fanned out": controlled-
+   *   staleness test fixtures foremost. State application still parks;
+   *   only what the caller observes changes.
+   *
+   * Rejections resolve at the verdict either way.
+   */
+  resolveAt?: "coverage" | "verdict";
+}
+
 export interface IStorageTransaction {
   /**
    * Optional change group used to associate commits with scheduler actions.
@@ -1014,7 +1036,20 @@ export interface IStorageTransaction {
    * but may not be visible to another runtime. When the returned promise
    * resolves, the data is fully committed and available to other processes.
    */
-  commit(): Promise<Result<Unit, CommitError>>;
+  commit(
+    options?: TransactionCommitOptions,
+  ): Promise<Result<Unit, CommitError>>;
+
+  /**
+   * Resolves with the same result as {@link commit}, but no later than the
+   * moment the commit's fate is known — the server verdict or a local
+   * rejection. The commit promise itself may resolve later: it additionally
+   * waits for the subscribed view to reflect the committed write. Effects
+   * gated on durability alone (commit callbacks) hook this instead of the
+   * commit promise. Optional: backends without the split fall back to the
+   * commit promise.
+   */
+  commitVerdict?(): Promise<Result<Unit, CommitError>>;
 
   /**
    * Optional native commit draft hook for storage backends that can consume a
@@ -1328,6 +1363,19 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * commit with no effects keeps its existing fire-and-forget fast path.
    */
   hasPendingPostCommitEffects(): boolean;
+
+  /**
+   * Resolves once the current commit's post-commit effect layer — commit
+   * callbacks and the CFC outbox flush — has run. The effects run at the
+   * verdict, so this may resolve before the commit promise itself, which
+   * additionally waits for the subscribed view to reflect the write.
+   * Barriers that wait for a fire-and-forget commit's effects (work
+   * registration, the sqlite query RPC + writeback) wait on this rather
+   * than the commit promise: the promise's extra wait is on incoming watch
+   * frames, which quiescence must not depend on. Resolved when no commit
+   * is in flight.
+   */
+  postCommitEffectsSettled(): Promise<void>;
 
   /**
    * Add a callback to be called when the transaction settles. The callback
@@ -1684,6 +1732,7 @@ export interface ISpaceReplica extends ISpace {
   commitNative?(
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
+    options?: TransactionCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>>;
 }
 

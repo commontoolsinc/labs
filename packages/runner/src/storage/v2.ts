@@ -87,6 +87,7 @@ import type {
   State,
   StorageNotification,
   StorageTransactionRejected,
+  TransactionCommitOptions,
   Unit,
 } from "./interface.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
@@ -96,12 +97,12 @@ import {
   getDirectTransactionReadActivities,
 } from "./transaction-inspection.ts";
 import {
-  isResolveOnVerdictTx,
   getBlindStructuralTarget,
   isMergeableOpRead,
   isReadExcludedFromConflict,
   isReadIgnoredForCommit,
   isReadMarkedAsAttemptedWrite,
+  recordCoverageWait,
 } from "./reactivity-log.ts";
 
 // A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
@@ -2799,6 +2800,7 @@ class SpaceReplica implements ISpaceReplica {
   async commitNative(
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
+    options?: TransactionCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const schedulerObservation = getPersistentSchedulerStateConfig()
       ? transaction.schedulerObservation
@@ -2852,6 +2854,7 @@ class SpaceReplica implements ISpaceReplica {
           schedulerObservation,
           preconditions,
           sqliteOps,
+          options,
         ),
     );
   }
@@ -3271,6 +3274,7 @@ class SpaceReplica implements ISpaceReplica {
     schedulerObservation?: FabricValue,
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
+    commitOptions?: TransactionCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const activePreconditions = activeCommitPreconditions(preconditions);
     if (
@@ -3379,7 +3383,7 @@ class SpaceReplica implements ISpaceReplica {
           operations,
           commit,
           source,
-          { waitForSchedulerObservations: true },
+          { waitForSchedulerObservations: true, commitOptions },
         ),
     );
     this.#commitPromises.add(promise);
@@ -3510,10 +3514,12 @@ class SpaceReplica implements ISpaceReplica {
       routeSources?: readonly IStorageTransaction[];
       prepareIssue?: (commit: ClientCommit) => boolean;
       waitForSchedulerObservations?: boolean;
+      commitOptions?: TransactionCommitOptions;
     } = {},
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const routeSources = options.routeSources ??
       (source === undefined ? [] : [source]);
+    const resolveAtVerdict = options.commitOptions?.resolveAt === "verdict";
     const schedulerObservationDependencies =
       options.waitForSchedulerObservations === true
         ? this.schedulerObservationDependenciesBefore(localSeq)
@@ -3635,9 +3641,18 @@ class SpaceReplica implements ISpaceReplica {
             wireCommit,
             () => this.markRouteWriteIssued(routeSources),
           );
-          const settled = this.settleAccept(localSeq, operations, applied);
-          if (source === undefined || !isResolveOnVerdictTx(source)) {
-            await settled;
+          const settled = this.settleAccept(
+            localSeq,
+            operations,
+            applied,
+            resolveAtVerdict,
+          );
+          if (!resolveAtVerdict) {
+            if (source === undefined) {
+              await settled;
+            } else {
+              recordCoverageWait(source, settled);
+            }
           }
           telemetry?.submit({
             type: "storage.push.complete",
@@ -3679,9 +3694,14 @@ class SpaceReplica implements ISpaceReplica {
           localSeq,
           operations,
           outcome.applied,
+          resolveAtVerdict,
         );
-        if (source === undefined || !isResolveOnVerdictTx(source)) {
-          await settledRace;
+        if (!resolveAtVerdict) {
+          if (source === undefined) {
+            await settledRace;
+          } else {
+            recordCoverageWait(source, settledRace);
+          }
         }
         telemetry?.submit({
           type: "storage.push.complete",
@@ -4382,6 +4402,7 @@ class SpaceReplica implements ISpaceReplica {
     localSeq: number,
     operations: NativeCommitOperation[],
     applied: AppliedCommit,
+    resolveAtVerdict = false,
   ): Promise<void> {
     // Parking requires a live marker channel: a server that stages
     // per-verdict markers AND an active sync consumer to deliver them. With
@@ -4403,6 +4424,19 @@ class SpaceReplica implements ISpaceReplica {
     }
     const settled = Promise.withResolvers<void>();
     this.#parkedAccepts.set(localSeq, { operations, applied, settled });
+    // synced() holds on the parked application, not just the verdict: its
+    // contract is "storage fully settled", which under parking includes the
+    // fan-out of this replica's own accepted writes (CT-1950). The push
+    // promise resolves at the verdict, so the barrier needs its own hold.
+    // A verdict-resolving commit opts out of the hold as it does of the
+    // promise timing: its premise is "accepted but not fanned out", which
+    // a synced() that forces the fan-out through would destroy.
+    if (!resolveAtVerdict) {
+      const hold: Promise<Result<Unit, StorageTransactionRejected>> = settled
+        .promise.then(() => ({ ok: {} }));
+      this.#commitPromises.add(hold);
+      hold.then(() => this.#commitPromises.delete(hold));
+    }
     return settled.promise;
   }
 

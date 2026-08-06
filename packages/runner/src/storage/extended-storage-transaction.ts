@@ -28,6 +28,7 @@ import type {
   Result,
   StorageTransactionFailed,
   StorageTransactionStatus,
+  TransactionCommitOptions,
   TransactionReactivityLog,
   TransactionWriteDetail,
   Unit,
@@ -267,6 +268,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   >();
   private statusOverride?: StorageTransactionStatus;
   private commitCallbacksDispatched = false;
+  // The verdict-time effect run of the current commit(): callbacks plus the
+  // CFC outbox flush. What settled()-style barriers wait on in place of the
+  // commit promise, whose resolution additionally waits for view coverage.
+  #postCommitEffects?: Promise<void>;
+  // The transaction's fate, resolved exactly when the commit callbacks
+  // dispatch — every fate path (commit verdict, abort, pre-storage
+  // rejection, internal commit rejection) funnels through that dispatch.
+  readonly #verdict = Promise.withResolvers<Result<Unit, CommitError>>();
   private commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
   private createOnlyMarks = new Map<MemorySpace, Set<string>>();
   private outboxIdempotencyKeys = new Set<string>();
@@ -1156,6 +1165,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.#cfcState.outbox.length > 0;
   }
 
+  postCommitEffectsSettled(): Promise<void> {
+    // Resolved before commit() reaches storage (pre-storage rejections
+    // dispatch callbacks synchronously and clear the outbox), pending
+    // between commit() entry and the verdict-time effect run.
+    return this.#postCommitEffects ?? Promise.resolve();
+  }
+
+  commitVerdict(): Promise<Result<Unit, CommitError>> {
+    return this.#verdict.promise;
+  }
+
   private buildPreparedDigestInput(): PreparedDigestInput {
     // Each pushed record is deepFrozen so that every CfcAddress (and every
     // path inside one) that flows into the digest input is immutable from
@@ -1768,6 +1788,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       return;
     }
     this.commitCallbacksDispatched = true;
+    this.#verdict.resolve(result);
     // Call all callbacks, wrapping each in try/catch to prevent one
     // failing callback from breaking others.
     for (const callback of this.commitCallbacks) {
@@ -1805,7 +1826,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return result;
   }
 
-  async commit(): Promise<Result<Unit, CommitError>> {
+  async commit(
+    options?: TransactionCommitOptions,
+  ): Promise<Result<Unit, CommitError>> {
     if (this.statusOverride?.status === "error") {
       return { error: this.statusOverride.error };
     }
@@ -1896,16 +1919,54 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
     }
 
-    const promise = this.tx.commit();
+    const promise = this.tx.commit(options);
 
-    // Call commit callbacks after commit completes (success or failure) Note
-    // that promise always resolves, even if the commit fails, in which case it
-    // passes an error message as result. An exception here would be an internal
-    // error that should propagate.
-    promise.then(
-      (result) => {
+    // The post-commit effect layer — commit callbacks and the CFC outbox
+    // flush — runs once the commit's fate is known (success or failure):
+    // the verdict, when the backend splits it from the commit promise. The
+    // promise itself may resolve later, once the subscribed view reflects
+    // the write (CT-1950 coverage); effects guard on durability alone
+    // (start the LLM request, register background work), so holding them
+    // to coverage would delay every post-commit effect by a fan-out window
+    // for nothing. Note that both promises always resolve, even if the
+    // commit fails, in which case they pass an error message as result. An
+    // exception here would be an internal error that should propagate. The
+    // verdict promise never rejects; a rejected commit promise dispatches
+    // below, and runCommitCallbacks' once-guard covers the fallback case
+    // where the two promises are the same.
+    // Raced with the promise, not taken alone: in the real flow the
+    // verdict always settles first (coverage only stretches the promise),
+    // but a wrapped commit whose inner commit() was replaced or bypassed
+    // (test stubs) never resolves the inner verdict, and the effect run —
+    // and with it this commit()'s own completion — must not hang on it.
+    const verdict = this.tx.commitVerdict !== undefined
+      ? Promise.race([this.tx.commitVerdict(), promise])
+      : promise;
+    const effects = verdict.then(
+      async (result) => {
         this.runCommitCallbacks(result);
+        if (result.ok && !readOnly) {
+          for (const effect of this.#cfcState.outbox) {
+            try {
+              await effect.flush(this);
+              this.cfcInstrumentation.onOutboxFlush?.(effect);
+            } catch (error) {
+              logger.error(
+                "storage-error",
+                "Post-commit side effect failed:",
+                { effect, error },
+              );
+            }
+          }
+          this.outboxIdempotencyKeys.clear();
+        } else {
+          this.clearPostCommitOutbox();
+        }
       },
+      () => {},
+    );
+    this.#postCommitEffects = effects;
+    promise.catch(
       (reason) => {
         const error: CommitError = {
           name: "StorageTransactionAborted",
@@ -1928,23 +1989,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     );
 
     const result = await promise;
-    if (result.ok && !readOnly) {
-      for (const effect of this.#cfcState.outbox) {
-        try {
-          await effect.flush(this);
-          this.cfcInstrumentation.onOutboxFlush?.(effect);
-        } catch (error) {
-          logger.error(
-            "storage-error",
-            "Post-commit side effect failed:",
-            { effect, error },
-          );
-        }
-      }
-      this.outboxIdempotencyKeys.clear();
-    } else {
-      this.clearPostCommitOutbox();
-    }
+    // commit() still spans the effect layer: callers that await the commit
+    // observe the outbox flushed, exactly as when the flush ran inline here.
+    await effects;
 
     return result;
   }
@@ -2171,6 +2218,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.wrapped.hasPendingPostCommitEffects();
   }
 
+  postCommitEffectsSettled(): Promise<void> {
+    return this.wrapped.postCommitEffectsSettled();
+  }
+
   enableMultiSpaceWrites(order?: readonly MemorySpace[]): void {
     this.wrapped.enableMultiSpaceWrites?.(order);
   }
@@ -2354,8 +2405,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.wrapped.abort(reason);
   }
 
-  commit(): Promise<Result<Unit, CommitError>> {
-    return this.wrapped.commit();
+  commit(
+    options?: TransactionCommitOptions,
+  ): Promise<Result<Unit, CommitError>> {
+    return this.wrapped.commit(options);
   }
 
   addCommitCallback(
