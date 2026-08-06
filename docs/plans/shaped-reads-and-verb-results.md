@@ -258,6 +258,11 @@ This is why a cell's declared schema matters beyond type-checking: it is what
 lets a caller's shape become a fetch instruction instead of a filter applied
 after the fact.
 
+A caller's selection states the root kind too, so honouring it would let
+ambiguous-root sources narrow as well — but no case has been shown that needs
+it, and the source most likely to have wanted it is the receipt, which now
+carries its own schema.
+
 ### Defect: an unshaped read serializes live handles
 
 A read with no shape loads the value and serializes whatever objects it finds.
@@ -397,25 +402,31 @@ unless noted.
 
 ## Open questions
 
-**Whether a caller-supplied shape may fix the root container kind.** Narrowing
-keys on the *source* schema today. A caller's shape states the root kind too,
-and honouring it would let schema-less sources narrow. The rule barring caller
-metadata covers `ifc`/`asCell`/`scope`/`default`; root container kind is
-structure rather than metadata, so this may be a clean exception. Largely moot
-if receipts carry a schema, since the receipt is the schema-less source that
-motivated the question.
+**What a receipt's schema should record.** The root container kind alone is
+enough for narrowing to engage; a verb's result is a record, so
+`{"type": "object"}` would do — assuming a non-record return is impossible,
+which the contract has not been checked for.
 
-**What shape a receipt should declare.** A structural schema is enough for
-narrowing to engage — it only needs the root container kind. Whether that shape
-should also record which positions hold links, and in what encoding, is open:
-the obvious spelling is `asCell`, which would put a treatment keyword on a
-document nothing can be written through.
+Recording the full structure — including which positions hold links — is what
+makes a reader's selection match a declaration rather than coincide with a
+runtime value, which is the second reason for giving receipts a schema at all.
+The cost is deriving it from the value at write time rather than writing a
+constant.
 
-**Invocation id namespace.** Nothing in a receipt's address identifies who
-called. A supplied id is hashed together with the stream link, so it is
-namespaced per verb binding but not by principal — no DID or session enters the
-hash. An invocation id is therefore a read key shared by everyone using that
-verb in that space: two callers picking the same id read one receipt, and a
-guessed id reads someone else's result. Pre-existing, and reachable once
-receipts are read deliberately. The consequences and the three ways out are
-worked through in [Verb calls: working notes](verb-result-selection.md).
+One detail either way: a link position in a source schema is spelled `asCell`,
+and `["cell"]` asserts a writable handle on a document nothing can be written
+through. Whether a receipt should say that, something narrower, or nothing about
+link positions, is open.
+
+**Should an invocation id be namespaced by its caller?** Nothing in a receipt's
+address identifies who called: a supplied id is hashed together with the stream
+link, so it is namespaced per verb binding but not by principal — no DID or
+session enters the hash. An invocation id is therefore a read key shared by
+everyone using that verb in that space. Two callers picking the same id read one
+receipt, and a guessed id reads someone else's result.
+
+Adding the caller's DID to that hash is mechanically cheap — identity into a
+hash that already exists. The cost is that it changes deduplication semantics
+and breaks deliberate id-sharing between agents, if that is worth keeping. The
+consequences and the three ways out are worked through in
+[Verb calls: working notes](verb-result-selection.md).
