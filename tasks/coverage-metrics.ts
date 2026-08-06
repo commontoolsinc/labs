@@ -211,6 +211,19 @@ export async function collectSourceFiles(
   return files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 }
 
+/**
+ * Whether the metric charges for `relativePath`, a path relative to the
+ * repository root. It has to be under a root the metric walks as well as pass
+ * the file-level test below, which `collectSourceFiles` applies in that order.
+ */
+export function isTrackedSourcePath(relativePath: string): boolean {
+  const normalized = toPosix(relativePath);
+  const underSourceRoot = SOURCE_ROOTS.some((sourceRoot) =>
+    normalized.startsWith(`${sourceRoot}/`)
+  );
+  return underSourceRoot && shouldTrackSourceFile(normalized);
+}
+
 export function shouldTrackSourceFile(relativePath: string): boolean {
   const normalized = toPosix(relativePath);
   if (normalized === "scripts" || normalized.startsWith("scripts/")) {
