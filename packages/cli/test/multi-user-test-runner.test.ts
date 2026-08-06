@@ -40,9 +40,9 @@ describe(
     });
 
     it("carries markers announced crosswise", async () => {
-      // Each participant announces before crossing the other's marker. With
-      // one marker document per announcer nothing conflicts, so both markers
-      // arrive; sharing one document drops the second and hangs the wait.
+      // Each participant announces before crossing the other's marker, from
+      // a replica that predates the other's announcement. One marker document
+      // per announcer keeps that order conflict-free.
       const { passed, failed } = await runTests(
         fixture("crosswise-markers.test.tsx"),
         { root: FIXTURES },

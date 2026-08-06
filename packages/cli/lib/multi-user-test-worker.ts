@@ -20,7 +20,7 @@
  * server computes by diffing current storage, which cannot carry the marker
  * while omitting an earlier write it has not yet sent, and a document
  * outside that set is fetched on demand by the assertion's own `pull()`.
- * That is what lets an assertion be read once instead of retried.
+ * That is what lets an assertion be read once.
  *
  * Realm isolation is required, not an optimization: two runtimes in one
  * realm cross-talk through module-level state (verified-load registries,
@@ -93,10 +93,9 @@ const SETTLE_FAST_MS = 2;
 
 /**
  * One marker document per participant, so the only writer of a document is
- * the participant it belongs to. A single shared document would take a
- * conflict whenever a participant announced while holding a replica that
- * predates another participant's announcement, and the marker it dropped
- * would never arrive.
+ * the participant it belongs to. Announcing is then conflict-free whatever
+ * order participants announce in, including from a replica that predates
+ * another participant's announcement.
  */
 function markersCause(participant: string): string {
   return `multi-user-test-markers:${participant}`;

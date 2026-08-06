@@ -1,10 +1,9 @@
 /// <cts-enable />
 /**
  * Both participants announce before either crosses the other's marker, so
- * each announces from a replica that predates the other's announcement. A
- * marker document with more than one writer takes a conflict here and drops
- * the marker it was asked to record, which shows up as a wait that never
- * ends.
+ * each announces from a replica that predates the other's announcement. Each
+ * writes its own marker document, so announcing in that order is
+ * conflict-free and both markers arrive.
  */
 import { assert, multiUserTest, pattern, Writable } from "commonfabric";
 

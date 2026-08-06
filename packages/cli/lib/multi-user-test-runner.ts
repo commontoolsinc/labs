@@ -38,13 +38,12 @@
  * fails with a deadlock report.
  *
  * A marker is also a durable write in the shared space, which is what makes
- * the handshake a data barrier rather than bookkeeping. Each participant
- * announces into its own marker document, committing after everything it has
- * already committed; crossing a marker waits for it to arrive in the awaiting
- * participant's replica. By then the server holds what the announcing
- * participant wrote first, so the reads that follow resolve against it. An
- * assertion placed after a marker is therefore read once: a false value is a
- * failure rather than a cue to try again.
+ * the handshake a data barrier. Each participant announces into its own
+ * marker document, committing after everything it has already committed;
+ * crossing a marker waits for it to arrive in the awaiting participant's
+ * replica. By then the server holds what the announcing participant wrote
+ * first, so the reads that follow resolve against it. An assertion placed
+ * after a marker is therefore read once, and a false value is a failure.
  */
 
 import { Identity } from "@commonfabric/identity";
