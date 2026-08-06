@@ -101,7 +101,6 @@ import {
 import type {
   DockerRunscAdditionalMountConfig,
   DockerRunscSandboxConfig,
-  HarnessSandboxConfig,
   SandboxRuntime,
 } from "./sandbox/types.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
@@ -213,7 +212,7 @@ interface ResolveSandboxConfigOptions {
 const resolveSandboxConfig = (
   config: HarnessConfig,
   options: ResolveSandboxConfigOptions,
-): HarnessSandboxConfig => {
+): DockerRunscSandboxConfig => {
   if (config.sandbox !== undefined) {
     return config.sandbox;
   }
@@ -241,16 +240,6 @@ const resolveSandboxConfig = (
       ? { cfcInvocationContextDir: options.cfcInvocationContextDir }
       : {}),
   });
-};
-
-const createSandboxRuntime = (
-  config: HarnessSandboxConfig,
-  processRunner?: ProcessRunner,
-): SandboxRuntime => {
-  switch (config.kind) {
-    case "docker-runsc-cfc":
-      return new DockerRunscSandboxRuntime(config, processRunner);
-  }
 };
 
 const resolveInitialCurrentDir = (
@@ -409,13 +398,12 @@ export class CfHarnessEngine {
     // sandboxRuntime is the thing that actually executes and carries its own
     // enforcement guarantees, while `sandboxConfig` in that branch is the
     // unused resolved config and may describe a different sandbox entirely.
-    this.#ownedRunscConfig = options.sandboxRuntime === undefined &&
-        sandboxConfig?.kind === "docker-runsc-cfc"
+    this.#ownedRunscConfig = options.sandboxRuntime === undefined
       ? sandboxConfig
       : undefined;
     this.hostProcessRunner = options.processRunner ?? new DenoProcessRunner();
     this.sandbox = options.sandboxRuntime ??
-      createSandboxRuntime(sandboxConfig!, options.processRunner);
+      new DockerRunscSandboxRuntime(sandboxConfig!, options.processRunner);
     this.workspaceHostPath = sandboxConfig?.workspaceHostPath ??
       options.workspaceHostPath;
     this.workspaceMountPath = normalizeSandboxRoot(

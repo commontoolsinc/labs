@@ -3871,7 +3871,7 @@ Deno.test("runCfHarnessCli threads fabric-mount into engine additionalMounts", a
   assertEquals(exitCode, 0);
   assertEquals(stderr, []);
   const engine = createdOptions?.engine as CfHarnessEngine | undefined;
-  const mounts = engine?.sandbox.describe?.()?.cfc?.mounts;
+  const mounts = engine?.sandbox.describe().cfc?.mounts;
   assertEquals(mounts?.length, 2);
   assertEquals(mounts?.[1]?.kind, "fabric-fuse");
   assertEquals(mounts?.[1]?.sandboxPath, "/fabric");
@@ -3940,7 +3940,7 @@ Deno.test("runCfHarnessCli threads host-mount into engine additionalMounts", asy
   assertEquals(exitCode, 0);
   assertEquals(stderr, []);
   const engine = createdOptions?.engine as CfHarnessEngine | undefined;
-  const mounts = engine?.sandbox.describe?.()?.cfc?.mounts;
+  const mounts = engine?.sandbox.describe().cfc?.mounts;
   assertEquals(mounts?.[1], {
     kind: "host-bind",
     name: "file-cabinet",
@@ -4010,7 +4010,7 @@ Deno.test("runCfHarnessCli threads sandbox-image into engine sandbox config", as
   assertEquals(stderr, []);
   const engine = createdOptions?.engine as CfHarnessEngine | undefined;
   assertEquals(
-    engine?.sandbox.describe?.()?.cfc?.image,
+    engine?.sandbox.describe().cfc?.image,
     "registry.example/cf:deno2",
   );
 });
