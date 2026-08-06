@@ -20,10 +20,13 @@ import {
 import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
+  getSyncSchemaCasConfig,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
+  resetSyncSchemaCasConfig,
   setCommitPreconditionsConfig,
   setPersistentSchedulerStateConfig,
+  setSyncSchemaCasConfig,
 } from "@commonfabric/memory/v2";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import {
@@ -210,6 +213,15 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
   commitPreconditions?: boolean | undefined;
+  /**
+   * Scope the memory sync frame's hash-keyed schema table to the CONNECTION
+   * rather than to each frame, so a schema body travels on the first frame
+   * naming it and later frames carry the reference alone. Negotiated per
+   * connection and exclusive with the frame-local table. Wire-size only — it
+   * changes when a body travels, never what a peer ends up holding. Defaults
+   * to off; see `docs/development/EXPERIMENTAL_OPTIONS.md`.
+   */
+  syncSchemaCasV1?: boolean | undefined;
   /**
    * Project a handler's plain JSON return into its per-event receipt cell
    * instead of the empty `{}` witness, so a caller — or a same-id retry that
@@ -1000,6 +1012,8 @@ export class Runtime {
       getPersistentSchedulerStateConfig();
     setCommitPreconditionsConfig(this.experimental.commitPreconditions);
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
+    setSyncSchemaCasConfig(this.experimental.syncSchemaCasV1);
+    this.experimental.syncSchemaCasV1 = getSyncSchemaCasConfig();
     // Unlike the flags above, only propagate when EXPLICITLY set: the ambient
     // flag is also a test seam (tests toggle `setEagerSourceAnnotation`
     // directly around runtime construction), and an unconditional
@@ -1428,6 +1442,7 @@ export class Runtime {
     resetModernCellRepConfig();
     resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
+    resetSyncSchemaCasConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

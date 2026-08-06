@@ -935,7 +935,12 @@ export function resetSyncSchemaTableConfig(): void {
  * body travels, never what a peer ends up holding.
  */
 export function setSyncSchemaCasConfig(enabled?: boolean): void {
-  syncSchemaCasEnabled = enabled ?? true;
+  // Absent means the default, and this capability's default is OFF — the
+  // opposite of `setSyncSchemaTableConfig`, whose feature ships on. The
+  // runtime propagates `experimental.syncSchemaCasV1` unconditionally, so an
+  // `enabled ?? true` here would arm the capability for every runtime that
+  // never asked for it.
+  syncSchemaCasEnabled = enabled ?? false;
 }
 
 export function getSyncSchemaCasConfig(): boolean {

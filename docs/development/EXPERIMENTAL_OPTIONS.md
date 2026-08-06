@@ -44,7 +44,7 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237); `hold` removed CT-1925 (#5110) | keep `preempt` as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
-| [`syncSchemaCasV1`](#syncschemacasv1) | `setSyncSchemaCasConfig()` (negotiated per connection) | off | Bernhard Seefeld | measure distinct schemas per connection, then default on and retire `syncSchemaTableV2` | implemented, off by default |
+| [`syncSchemaCasV1`](#syncschemacasv1) | `RuntimeOptions.experimental.syncSchemaCasV1` (`EXPERIMENTAL_SYNC_SCHEMA_CAS`); negotiated per connection | off | Bernhard Seefeld | measure distinct schemas per connection, then default on and retire `syncSchemaTableV2` | implemented, off by default |
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off | Ben Follington (#4937; shell toggle #4974) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default, not yet measured over real latency |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
@@ -662,10 +662,17 @@ the per-epic implementation notes).
 
 ### `syncSchemaCasV1`
 
-- **Toggle via.** `setSyncSchemaCasConfig()` in
-  [`packages/memory/v2.ts`](../../packages/memory/v2.ts). Advertised as a
-  capability in the memory `hello` handshake and negotiated per connection, so a
-  peer only receives the connection-scoped form if it advertises support.
+- **Toggle via.** `RuntimeOptions.experimental.syncSchemaCasV1`, or
+  `EXPERIMENTAL_SYNC_SCHEMA_CAS=true` through the canonical env mapping in
+  [`runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts). The
+  Runtime propagates it to `setSyncSchemaCasConfig()` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts), which is also the
+  direct seam tests use. It is advertised as a capability in the memory `hello`
+  handshake and negotiated per connection, so a peer only receives the
+  connection-scoped form if it advertises support. Because the server reads the
+  same ambient flag when it builds its own handshake, setting it on a process
+  arms both ends that process hosts — a toolshed's memory server as well as its
+  runtime's client.
 - **Added by.** Bernhard Seefeld.
 - **Purpose.** A wire-size optimization: it scopes the hash-keyed schema table
   to the CONNECTION rather than to each frame, so a schema body travels on the

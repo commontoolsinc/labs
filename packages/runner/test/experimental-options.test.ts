@@ -9,9 +9,12 @@ import {
 } from "@commonfabric/data-model/cell-rep";
 import {
   getCommitPreconditionsConfig,
+  getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
+  getSyncSchemaCasConfig,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
+  resetSyncSchemaCasConfig,
 } from "@commonfabric/memory/v2";
 
 const signer = await Identity.fromPassphrase("test experimental");
@@ -26,6 +29,7 @@ describe("ExperimentalOptions", () => {
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
     resetPersistentSchedulerStateConfig();
+    resetSyncSchemaCasConfig();
   });
 
   describe("Runtime construction", () => {
@@ -45,6 +49,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        syncSchemaCasV1: false,
         plainResultReceipts: false,
         computedCellIds: false,
         // Read back from the ambient flag (a test seam that deliberately does
@@ -68,6 +73,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: true,
         persistentSchedulerState: false,
         commitPreconditions: true,
+        syncSchemaCasV1: false,
         plainResultReceipts: true,
         computedCellIds: true,
         eagerSourceAnnotation: false,
@@ -87,6 +93,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: true,
+        syncSchemaCasV1: false,
         plainResultReceipts: true,
         computedCellIds: true,
         // Read back from the ambient flag (a test seam that deliberately does
@@ -112,6 +119,27 @@ describe("ExperimentalOptions", () => {
       expect(getModernCellRepConfig()).toBe(true);
 
       await runtime.dispose();
+      await sm.close();
+    });
+
+    it("constructing Runtime with syncSchemaCasV1 sets global config", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          syncSchemaCasV1: true,
+        },
+      });
+
+      expect(getSyncSchemaCasConfig()).toBe(true);
+      // The handshake advertises from the same ambient flag, so setting it on
+      // a process arms BOTH ends it hosts — a toolshed's memory server as well
+      // as its runtime's client.
+      expect(getMemoryProtocolFlags().syncSchemaCasV1).toBe(true);
+
+      await runtime.dispose();
+      expect(getSyncSchemaCasConfig()).toBe(false);
       await sm.close();
     });
 

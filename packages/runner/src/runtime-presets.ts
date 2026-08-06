@@ -200,6 +200,11 @@ export const EXPERIMENTAL_ENV_VARS = {
   plainResultReceipts: "EXPERIMENTAL_PLAIN_RESULT_RECEIPTS",
   systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
+  // Connection-scoped memory schema tables: default-off during a staged
+  // rollout, and env-reachable because turning it on is a per-deployment
+  // decision — the server advertises the capability from the same ambient
+  // flag this sets, so a toolshed enables both ends by setting it.
+  syncSchemaCasV1: "EXPERIMENTAL_SYNC_SCHEMA_CAS",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 
 /**
