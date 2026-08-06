@@ -145,8 +145,11 @@ export function createRef(
       return Object.fromEntries(
         Object.entries(obj).map(([key, value]) => [key, traverse(value)]),
       );
-    } else if (typeof obj === "function") return obj.toString();
-    else return obj;
+    }
+
+    // A function is all that is left: the walk answered every primitive at the
+    // top, and `isRecord()` admits every other non-null object.
+    return obj.toString();
   }
 
   // The entity kind deliberately does NOT enter the preimage: a computed
