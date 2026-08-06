@@ -519,7 +519,7 @@ These are not tickets to create until the relevant human answer is known.
 - This frozen handoff report:
   `docs/history/topics-performance-investigation-2026-08-06.md`
 - Live working notes:
-  `docs/plans/topics-performance-investigation.md`
+  `docs/plans/topics-performance-improvement.md`
 - Original coherence audit and weekly automation prompt:
   `docs/history/coherence-audit-2026-08-06.md`
 - Cached immutable SQLite snapshot: path and hash in the manifest above.
