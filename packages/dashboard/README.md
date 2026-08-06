@@ -576,7 +576,21 @@ Notes:
   benchmarks the latest run measured and the highlighted window when applicable.
   **Red** marks the **most recent run failing outright, or finishing green on CI
   with no readable benchmark data**. A successful run with no usable output is
-  treated as failed. This
+  treated as failed. Either failure takes over that second line, in place of the
+  count and the window. A run that failed outright dates the outage and counts
+  it: **last good 2 days ago · 12 runs failed**. The count reads back through
+  the newest-first run list. It stops at the first completed run that did not
+  fail, so a cancelled run ends it. The date comes from the newest run that
+  passed, including one that passed on a later attempt, and it is read from the
+  run list the collection paged rather than from the trend's 45-day window. That
+  list runs to the end of the first page past 45 days, so an older outage is
+  dated whenever the run that ended it is still on the last page fetched. With
+  no passing run anywhere on the list there is nothing to date the outage from,
+  and the line is the count alone: **last 12 runs failed**. A run that finished green
+  with nothing readable reads **no benchmark data**. A **running** badge sits in
+  the header while a run is under way, wherever in the list it sits — a rerun
+  keeps its original place instead of moving to the head. The badge says the
+  colour may be about to move; the runs that have finished still set it. The red
   state reads the workflow-run list and the latest run's cached result. It
   therefore fires when the artifacts cannot be read. **Orange** means at least
   one CPU index is **trending up** past 5%. Each CPU trend uses the runs in the
@@ -620,6 +634,12 @@ Notes:
   days in the window the trend is marked new: there is too little data to claim one.
   The window is capped by the 90-day artifact retention, so it shows at most ~45
   days and only as far back as the job has run.
+  - The tile collects every minute, which is what the run state needs: a
+    benchmark run lasts about an hour, so a slower collection could miss one from
+    start to finish and never show its **running** badge. Each collection pages
+    the run list. The artifact history behind it is left alone while the last
+    refresh is recent and already covers the runs that list names — nothing new
+    has been sampled, so there is nothing to download.
   - The tile drills through to the per-benchmark history behind `/bench`, which the
     tile's collection keeps warm in the background. The collection lists
     benchmark runs on main. It samples one run per shortest-view bucket,
@@ -662,7 +682,13 @@ Notes:
     Idle between
     collections. During collection it shows cached, queued, requested,
     responded, outstanding, and failed artifact checks. Changing the range
-    leaves the server collection running and joins it from the new page.
+    leaves the server collection running and joins it from the new page. The
+    page closes with a **rerun hand-off**: a link to GitHub, where the run is
+    started. It targets the newest completed run when that run failed, whose
+    **Re-run all jobs** repeats it, and the workflow otherwise, whose **Run
+    workflow** starts a fresh run. The dashboard's GitHub token is read-only, so
+    the board cannot start a run itself, and GitHub decides whether the viewer
+    may start one.
   - The **CI duration history** view at `/bench?view=ci` selects either labs
     `deno.yml` or loom `test-fast.yml`. It charts every job's start-to-finish
     duration on one calendar-time axis. An overall row measures the workflow
