@@ -1,4 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
+import { isInertArray } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
   FabricInstance,
@@ -129,8 +130,16 @@ export function withAliasBindings(
     }
   }
 
-  // If this is an array, process each element recursively.
-  if (Array.isArray(value)) {
+  // If this is an INERT array, process each element recursively. A non-inert
+  // array falls through to the sanctioned conversion below, which refuses it,
+  // for the same reason a non-inert plain object is refused there: `.map()`
+  // rebuilds by index, so it drops a named or symbol-keyed property and
+  // EVALUATES an accessor-backed index into a data property, and -- since
+  // `.map()` honors `Symbol.species` -- hands back an `Array` subclass
+  // instance still carrying its live prototype. The first two produce an array
+  // that satisfies `isFabricValue()` while meaning something else; the last
+  // produces one that does not satisfy it at all.
+  if (Array.isArray(value) && isInertArray(value)) {
     return (value as FactoryInput<any>).map((v: FactoryInput<any>, i: number) =>
       withAliasBindings(v, resolveCellAlias, ignoreSelfAliases, [
         ...path,

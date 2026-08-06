@@ -581,8 +581,11 @@ export function createQueryResultProxy<T>(
           // keys, ahead of any other name -- rather than appending it. Own-key
           // order is load-bearing: a consumer can tell an index-only array from
           // one carrying named properties by asking whether `length` comes
-          // last (`isArrayWithOnlyIndexProperties()` does exactly that), and
-          // appending would make a named property look like an index-only one.
+          // last, and appending would make a named property look like an
+          // index-only one. `isInertArray()` reads exactly that, and fabric
+          // membership (`isFabricValue()`) is decided by it for every array,
+          // so the order here is what makes a proxied array carrying a named
+          // property fail membership instead of passing as index-only.
           const firstNonIndex = keys.findIndex((key) =>
             !((typeof key === "string") && isArrayIndexPropertyName(key))
           );
