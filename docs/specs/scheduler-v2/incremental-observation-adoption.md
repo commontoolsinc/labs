@@ -161,7 +161,7 @@ refresh at the same semantic head preserves the existing delivery slot.
   coalesced window carries the same rows.
 
   The window is then filtered to what THIS session may adopt, exactly as
-  the doc diff is scoped (`v2-adoption-attach-test.ts` pins all three):
+  the doc diff is scoped (`v2-adoption-attach.test.ts` pins all three):
 
   - **Watch-scoped:** a row ships only when every address in `reads`,
     `shallowReads`, `actualChangedWrites`, and `currentKnownWrites` is inside

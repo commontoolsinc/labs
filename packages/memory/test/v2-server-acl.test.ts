@@ -48,7 +48,7 @@ const assertResponse = <Result>(
 // next batched frame — a marker-only empty frame when nothing watched is
 // dirty. Tests whose subject is not verdict ordering shift past those
 // frames here; the ordering contract itself is pinned by
-// v2-verdict-catchup-test.ts.
+// v2-verdict-catchup.test.ts.
 const nextResponse = <Result>(
   messages: ServerMessage[],
 ): ResponseMessage<Result> => {

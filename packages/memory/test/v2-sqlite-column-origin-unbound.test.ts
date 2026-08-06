@@ -2,7 +2,7 @@
 // where the FFI is NOT bound. Deno gives each test file its own module state, so
 // `cached` starts undefined here — the state the server sees before the first
 // labeled query, and the state a bind failure leaves behind. The sibling file
-// v2-sqlite-column-origin-test.ts covers the bound, happy path.
+// v2-sqlite-column-origin.test.ts covers the bound, happy path.
 
 import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import {

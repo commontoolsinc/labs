@@ -548,7 +548,7 @@ subscription, and scheduler modules under `packages/runner/src/scheduler/`.
   factory as an atomic codec value while still traversing its encoded state.
 - [ ] Cover `packages/memory/v2.ts` `encodeMemoryBoundary` /
   `decodeMemoryBoundary` with a focused
-  `packages/memory/test/v2-factory-boundary-test.ts` round trip.
+  `packages/memory/test/v2-factory-boundary.test.ts` round trip.
 - [ ] Add a fresh-runtime client/server round trip in which one runtime writes a
   factory, another decodes it, and a runner materializes/invokes it.
 - [ ] Add typed factory round trips through Cells, query-result proxies, pieces,
