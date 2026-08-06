@@ -24,6 +24,23 @@ export interface AppStateConfig {
 
 export type AppStateConfigKey = keyof AppStateConfig;
 
+// A config key names a field the display toggles record actually has. A
+// `shell-command` event arrives as an untyped DOM event, so the key it carries
+// is checked here before it reaches the record.
+export function isAppStateConfigKey(
+  value: unknown,
+): value is AppStateConfigKey {
+  if (typeof value !== "string") return false;
+  switch (value) {
+    case "showShellPieceListView":
+    case "showDebuggerView":
+    case "showQuickJumpView":
+    case "showSidebar":
+      return true;
+  }
+  return false;
+}
+
 export type AppStateSerialized = Omit<AppState, "identity" | "apiUrl"> & {
   identity?: TransferrableInsecureCryptoKeyPair | null;
   apiUrl: string;

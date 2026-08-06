@@ -6,6 +6,7 @@ import {
   AppView,
   assertIdentityChangeAllowed,
   clone,
+  isAppStateConfigKey,
   isViewingDefaultPatternView,
   navigate,
   resolveIdentity,
@@ -408,6 +409,9 @@ export class XRootView extends BaseView implements ShellApp {
   }
 
   setConfig(key: AppStateConfigKey, value: boolean): Promise<void> {
+    if (!isAppStateConfigKey(key)) {
+      throw new Error(`Invalid config key: ${key}`);
+    }
     const next = clone(this.app);
     next.config[key] = value;
     return this.#commit(next, `set-config ${key}=${value}`);

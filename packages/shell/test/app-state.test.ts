@@ -5,6 +5,7 @@ import {
   appViewToUrlPath,
   assertIdentityChangeAllowed,
   deserialize,
+  isAppStateConfigKey,
   isAppView,
   isEmbeddedView,
   isViewingDefaultPatternView,
@@ -35,6 +36,18 @@ describe("AppState", () => {
     assertIdentityChangeAllowed(first, undefined);
     assertIdentityChangeAllowed(undefined, second);
     assertIdentityChangeAllowed(first, first);
+  });
+
+  it("accepts only the four display toggles as config keys", () => {
+    assert(isAppStateConfigKey("showShellPieceListView"));
+    assert(isAppStateConfigKey("showDebuggerView"));
+    assert(isAppStateConfigKey("showQuickJumpView"));
+    assert(isAppStateConfigKey("showSidebar"));
+    assert(!isAppStateConfigKey("identity"));
+    assert(!isAppStateConfigKey("__proto__"));
+    assert(!isAppStateConfigKey(""));
+    assert(!isAppStateConfigKey(undefined));
+    assert(!isAppStateConfigKey(0));
   });
 
   it("resolves an identity from either an Identity or a raw key pair", async () => {
