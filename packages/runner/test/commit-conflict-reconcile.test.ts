@@ -89,15 +89,23 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     const CAUSE = "strand-doc";
 
     // A seeds the doc at v0 and publishes it to the shared server.
+    // A's commits carry the verdict-resolution mark: this test's premise is
+    // controlled staleness (B must NOT have received A's writes yet), and
+    // awaiting a coverage-resolving commit forces the batched fan-out
+    // through — which is shared with B's session and would destroy the
+    // premise. B's convergence to v0 is an explicit sync/pull.
     const docA = rtA.getCell<{ v: string }>(space, CAUSE, undefined);
     {
       const tx = rtA.edit();
       docA.withTx(tx).set({ v: "v0" });
       rtA.prepareTxForCommit(tx);
-      const res = await tx.commit();
+      const res = await tx.commit({ resolveAt: "verdict" });
       expect(res.error, `seed v0: ${JSON.stringify(res.error)}`)
         .toBeUndefined();
-      await storageA.synced();
+      // No synced(): the barrier holds on A's parked accept, which forces
+      // the shared fan-out batch through — to B too, destroying the
+      // staleness premise. The awaited verdict-marked commit is already
+      // durably accepted, which is all B's explicit pull needs.
     }
 
     // B converges to v0.
@@ -118,10 +126,10 @@ describe("read-repair: stale read after cross-replica conflict", () => {
       const tx = rtA.edit();
       docA.withTx(tx).set({ v: "v1" });
       rtA.prepareTxForCommit(tx);
-      const res = await tx.commit();
+      const res = await tx.commit({ resolveAt: "verdict" });
       expect(res.error, `bump v1: ${JSON.stringify(res.error)}`)
         .toBeUndefined();
-      await storageA.synced();
+      // No synced() here either — same premise-preservation as the seed.
     }
 
     // B's `confirmed` is provably stale here: it still views v0, because the

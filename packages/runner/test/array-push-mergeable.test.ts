@@ -6,7 +6,6 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import type { Cell } from "../src/cell.ts";
-import { markResolveOnVerdictTx } from "../src/storage/reactivity-log.ts";
 import { Runtime } from "../src/runtime.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import {
@@ -179,9 +178,7 @@ describe("mergeable array appends", () => {
         tx0,
       );
       seedCell.set(["seed"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Both sessions load the seeded list. After this both replicas hold
@@ -194,18 +191,14 @@ describe("mergeable array appends", () => {
       // Session 1 appends "A".
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2 appends "B" WITHOUT having observed session 1's "A": its
       // replica still holds ["seed"] at the pre-"A" basis.
       const txB = rt2.edit();
       rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB).push("B");
-      markResolveOnVerdictTx(txB);
-
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurable(server);
@@ -236,9 +229,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -247,9 +238,7 @@ describe("mergeable array appends", () => {
 
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2 appends "B" through the proxy while still at the pre-"A" basis.
@@ -257,9 +246,7 @@ describe("mergeable array appends", () => {
       const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
         .getAsQueryResult([], txB, true) as unknown as string[];
       proxy.push("B");
-      markResolveOnVerdictTx(txB);
-
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       expect([...await readDurable(server)].sort()).toEqual(["A", "B", "seed"]);
@@ -286,9 +273,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -298,9 +283,7 @@ describe("mergeable array appends", () => {
       // Session 1 appends "A".
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2, still at the pre-"A" basis, reads the list explicitly and
@@ -310,9 +293,7 @@ describe("mergeable array appends", () => {
       const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
       cellB.get();
       cellB.push("B");
-      markResolveOnVerdictTx(txB);
-
-      const result = await txB.commit();
+      const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
       const durable = await readDurable(server);
@@ -345,9 +326,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -357,9 +336,7 @@ describe("mergeable array appends", () => {
       // Session 1 appends "A", moving the durable length from 1 to 2.
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2, still at the pre-"A" basis, reads the length (1) and pushes an
@@ -369,9 +346,7 @@ describe("mergeable array appends", () => {
       const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
       const len = (cellB.key("length") as unknown as Cell<number>).get();
       cellB.push(`item-${len}`);
-      markResolveOnVerdictTx(txB);
-
-      const result = await txB.commit();
+      const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
       const durable = await readDurable(server);
@@ -397,9 +372,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -408,9 +381,7 @@ describe("mergeable array appends", () => {
 
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
@@ -419,9 +390,7 @@ describe("mergeable array appends", () => {
       let count = 0;
       for (const _ of proxy) count++;
       proxy.push(`item-${count}`);
-      markResolveOnVerdictTx(txB);
-
-      const result = await txB.commit();
+      const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
       const durable = await readDurable(server);
@@ -449,9 +418,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -462,9 +429,7 @@ describe("mergeable array appends", () => {
       const txA = rt1.edit();
       (rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA)
         .key("0") as unknown as Cell<string>).set("edited");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2 reads the length and pushes; the length did not change, so the
@@ -473,9 +438,7 @@ describe("mergeable array appends", () => {
       const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
       const len = (cellB.key("length") as unknown as Cell<number>).get();
       cellB.push(`item-${len}`);
-      markResolveOnVerdictTx(txB);
-
-      const result = await txB.commit();
+      const result = await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       expect(result.error).toBeUndefined();
@@ -507,9 +470,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -518,9 +479,7 @@ describe("mergeable array appends", () => {
 
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
@@ -528,9 +487,7 @@ describe("mergeable array appends", () => {
         .getAsQueryResult([], txB, true) as unknown as string[];
       const len = proxy.length;
       proxy.push(`item-${len}`);
-      markResolveOnVerdictTx(txB);
-
-      const result = await txB.commit();
+      const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
       const durable = await readDurable(server);
@@ -559,9 +516,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -570,9 +525,7 @@ describe("mergeable array appends", () => {
 
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
@@ -580,9 +533,7 @@ describe("mergeable array appends", () => {
         .getAsQueryResult([], txB, true) as unknown as string[];
       const len = Object.keys(proxy).length;
       proxy.push(`item-${len}`);
-      markResolveOnVerdictTx(txB);
-
-      const result = await txB.commit();
+      const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
       const durable = await readDurable(server);
@@ -610,9 +561,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -621,18 +570,14 @@ describe("mergeable array appends", () => {
 
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).addUnique("A");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
       const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
       const len = (cellB.key("length") as unknown as Cell<number>).get();
       cellB.addUnique(`item-${len}`);
-      markResolveOnVerdictTx(txB);
-
-      const result = await txB.commit();
+      const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
       const durable = await readDurable(server);
@@ -670,18 +615,14 @@ describe("mergeable array appends", () => {
         tx0,
       );
       seedCell.set(["one", "two"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2 appends "three" while its replica is still stale-short (it has
       // not pulled ["one","two"]).
       const txB = rt2.edit();
       rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB).push("three");
-      markResolveOnVerdictTx(txB);
-
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurable(server);
@@ -712,18 +653,14 @@ describe("mergeable array appends", () => {
         tx0,
       );
       seedCell.set(["one", "two"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
       const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
       cell.key(0).set("ONE");
       cell.push("three");
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const durable = await readDurable(server);
@@ -746,18 +683,14 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
       const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
       cell.addUnique("a");
       cell.push("b");
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["seed", "a", "b"]);
@@ -778,18 +711,14 @@ describe("mergeable array appends", () => {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0)
         .set(["seed", "old"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
       const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
       cell.removeByValue("old");
       cell.addUnique("new");
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["seed", "new"]);
@@ -811,9 +740,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
@@ -821,9 +748,7 @@ describe("mergeable array appends", () => {
         .getAsQueryResult([], tx1, true) as unknown as string[];
       proxy.push("b");
       proxy.unshift("z");
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["z", "seed", "b"]);
@@ -847,9 +772,7 @@ describe("mergeable array appends", () => {
         "c",
         "a",
       ]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
@@ -858,9 +781,7 @@ describe("mergeable array appends", () => {
       proxy.push("b");
       proxy.sort();
       expect(cell.get()).toEqual(["a", "b", "c"]);
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["a", "b", "c"]);
@@ -879,18 +800,14 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
       const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
       cell.push("b");
       cell.set(["x", "y", "z"]);
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["x", "y", "z"]);
@@ -919,9 +836,7 @@ describe("mergeable array appends", () => {
         "b",
         "c",
       ]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
@@ -929,9 +844,7 @@ describe("mergeable array appends", () => {
       cell.set(["x", "y", "z"]);
       cell.push("d");
       expect(cell.get()).toEqual(["x", "y", "z", "d"]);
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["x", "y", "z", "d"]);
@@ -957,9 +870,7 @@ describe("mergeable array appends", () => {
         "b",
         "c",
       ]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const punched: string[] = [];
@@ -971,9 +882,7 @@ describe("mergeable array appends", () => {
       cell.set(punched);
       cell.push("d");
       expect(0 in (cell.get() as string[])).toBe(false);
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const durable = await readDurable(server);
@@ -1012,9 +921,7 @@ describe("mergeable array appends", () => {
       );
       cell.set(sparse);
       cell.push("d");
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const storage = SharedServerStorageManager.connectTo(server, {
@@ -1061,18 +968,14 @@ describe("mergeable array appends", () => {
       seed[2] = "c";
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(seed);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
       const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
       cell.set(["A", "b", "c"]);
       cell.push("d");
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["A", "b", "c", "d"]);
@@ -1103,9 +1006,7 @@ describe("mergeable array appends", () => {
         "b",
         "c",
       ]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -1119,18 +1020,14 @@ describe("mergeable array appends", () => {
       // nothing for a wrongly-widened poison to destroy.
       cell.push("d");
       cell.key(1).set("B");
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2 appends against the pre-edit basis. The edit-plus-push
       // transaction stayed mergeable, so this merges rather than clobbering.
       const tx2 = rt2.edit();
       rt2.getCell<string[]>(space, CAUSE, stringListSchema, tx2).push("z");
-      markResolveOnVerdictTx(tx2);
-
-      await tx2.commit();
+      await tx2.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["a", "B", "c", "d", "z"]);
@@ -1156,9 +1053,7 @@ describe("mergeable array appends", () => {
         "b",
         "c",
       ]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
@@ -1166,9 +1061,7 @@ describe("mergeable array appends", () => {
       cell.set(["a"]);
       cell.push("d");
       expect(cell.get()).toEqual(["a", "d"]);
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["a", "d"]);
@@ -1193,9 +1086,7 @@ describe("mergeable array appends", () => {
         "b",
         "c",
       ]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
@@ -1203,9 +1094,7 @@ describe("mergeable array appends", () => {
       cell.set([]);
       cell.addUnique("x", "y");
       expect(cell.get()).toEqual(["x", "y"]);
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["x", "y"]);
@@ -1233,9 +1122,7 @@ describe("mergeable array appends", () => {
       rt1.getCell(space, HOLDER_CAUSE, holderSchema, tx0).set({
         rows: ["a", "b", "c"],
       });
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
@@ -1243,9 +1130,7 @@ describe("mergeable array appends", () => {
       holder.set({ rows: ["a"] });
       holder.key("rows").push("d");
       expect(holder.get()).toEqual({ rows: ["a", "d"] });
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const storage = SharedServerStorageManager.connectTo(server, {
@@ -1285,9 +1170,7 @@ describe("mergeable array appends", () => {
       const tx0 = rt1.edit();
       rt1.getCell<string[][]>(space, NESTED_CAUSE, nestedListSchema, tx0)
         .set([["a"]]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
@@ -1300,9 +1183,7 @@ describe("mergeable array appends", () => {
       outer.push(["x"]);
       (outer.key(1) as unknown as Cell<string[]>).push("y");
       expect(outer.get()).toEqual([["a"], ["x", "y"]]);
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurableNested(server, NESTED_CAUSE)).toEqual([
@@ -1335,9 +1216,7 @@ describe("mergeable array appends", () => {
       const tx0 = rt1.edit();
       rt1.getCell<string[][]>(space, NESTED_CAUSE, nestedListSchema, tx0)
         .set([["a"], ["b"]]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[][]>(
@@ -1358,9 +1237,7 @@ describe("mergeable array appends", () => {
       outer.push(["x"]);
       (outer.key(0) as unknown as Cell<string[]>).push("y");
       expect(outer.get()).toEqual([["a", "y"], ["b"], ["x"]]);
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2 appends against the pre-push basis. Both ops above stayed
@@ -1368,9 +1245,7 @@ describe("mergeable array appends", () => {
       const tx2 = rt2.edit();
       rt2.getCell<string[][]>(space, NESTED_CAUSE, nestedListSchema, tx2)
         .push(["z"]);
-      markResolveOnVerdictTx(tx2);
-
-      await tx2.commit();
+      await tx2.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       expect(await readDurableNested(server, NESTED_CAUSE)).toEqual([
@@ -1402,9 +1277,7 @@ describe("mergeable array appends", () => {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0)
         .set(["seed", "old"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -1413,9 +1286,7 @@ describe("mergeable array appends", () => {
 
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2, at the pre-"A" basis, does the mixed-op "update my entry"
@@ -1424,9 +1295,7 @@ describe("mergeable array appends", () => {
       const cellB = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB);
       cellB.removeByValue("old");
       cellB.addUnique("new");
-      markResolveOnVerdictTx(txB);
-
-      const result = await txB.commit();
+      const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
       expect(await readDurable(server)).toEqual(["seed", "old", "A"]);
@@ -1450,9 +1319,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -1461,18 +1328,14 @@ describe("mergeable array appends", () => {
 
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).push("A");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
       const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
         .getAsQueryResult([], txB, true) as unknown as string[];
       proxy.push(1 in proxy ? "had-1" : "no-1");
-      markResolveOnVerdictTx(txB);
-
-      const result = await txB.commit();
+      const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
       expect(await readDurable(server)).toEqual(["seed", "A"]);
@@ -1502,9 +1365,7 @@ describe("mergeable array appends", () => {
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(
         ["a", , "c"] as string[],
       );
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -1516,9 +1377,7 @@ describe("mergeable array appends", () => {
       const txA = rt1.edit();
       (rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA)
         .key(1) as unknown as Cell<string>).set("b");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2, at the pre-fill basis, probes `1 in arr` (false) and pushes.
@@ -1526,9 +1385,7 @@ describe("mergeable array appends", () => {
       const proxy = rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
         .getAsQueryResult([], txB, true) as unknown as string[];
       proxy.push(1 in proxy ? "had-1" : "no-1");
-      markResolveOnVerdictTx(txB);
-
-      const result = await txB.commit();
+      const result = await txB.commit({ resolveAt: "verdict" });
 
       expect(result.error).toBeDefined();
       expect(await readDurable(server)).toEqual(["a", "b", "c"]);
@@ -1552,9 +1409,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -1563,17 +1418,13 @@ describe("mergeable array appends", () => {
 
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).addUnique("A");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // rt2 still holds ["seed"] (has not observed "A").
       const txB = rt2.edit();
       rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB).addUnique("B");
-      markResolveOnVerdictTx(txB);
-
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurable(server);
@@ -1601,9 +1452,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -1612,18 +1461,14 @@ describe("mergeable array appends", () => {
 
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA).addUnique("X");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // rt2 adds "X" too, against its stale ["seed"] base — it never observed
       // rt1's add.
       const txB = rt2.edit();
       rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB).addUnique("X");
-      markResolveOnVerdictTx(txB);
-
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurable(server);
@@ -1648,9 +1493,7 @@ describe("mergeable array appends", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<number>(space, COUNTER_CAUSE, numberSchema, tx0).set(0);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<number>(space, COUNTER_CAUSE, numberSchema);
@@ -1660,17 +1503,13 @@ describe("mergeable array appends", () => {
 
       const txA = rt1.edit();
       rt1.getCell<number>(space, COUNTER_CAUSE, numberSchema, txA).increment(1);
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // rt2 still reads 0 (has not observed rt1's increment).
       const txB = rt2.edit();
       rt2.getCell<number>(space, COUNTER_CAUSE, numberSchema, txB).increment(1);
-      markResolveOnVerdictTx(txB);
-
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       expect(await readDurableNumber(server)).toBe(2);
@@ -1690,9 +1529,7 @@ describe("mergeable array appends", () => {
     try {
       const tx = rt1.edit();
       rt1.getCell<number>(space, COUNTER_CAUSE, numberSchema, tx).increment(5);
-      markResolveOnVerdictTx(tx);
-
-      await tx.commit();
+      await tx.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurableNumber(server)).toBe(5);
@@ -1719,9 +1556,7 @@ describe("mergeable array appends", () => {
         "b",
         "c",
       ]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(space, CAUSE, stringListSchema);
@@ -1731,18 +1566,14 @@ describe("mergeable array appends", () => {
       const txA = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, txA)
         .removeByValue("a");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // rt2, still holding ["a","b","c"], removes a different element.
       const txB = rt2.edit();
       rt2.getCell<string[]>(space, CAUSE, stringListSchema, txB)
         .removeByValue("c");
-      markResolveOnVerdictTx(txB);
-
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["b"]);
@@ -1771,9 +1602,7 @@ describe("mergeable array appends", () => {
         "b",
         "c",
       ]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
@@ -1781,9 +1610,7 @@ describe("mergeable array appends", () => {
       cell.key(0).set("A");
       cell.removeByValue("c");
       expect(cell.get()).toEqual(["A", "b"]);
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["A", "b"]);
@@ -1807,9 +1634,7 @@ describe("mergeable array appends", () => {
         "b",
         "c",
       ]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
@@ -1817,9 +1642,7 @@ describe("mergeable array appends", () => {
       cell.removeByValue("c");
       cell.key(0).set("A");
       expect(cell.get()).toEqual(["A", "b"]);
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["A", "b"]);
@@ -1845,9 +1668,7 @@ describe("mergeable array appends", () => {
         "b",
         "c",
       ]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
@@ -1855,9 +1676,7 @@ describe("mergeable array appends", () => {
       cell.set(["p", "q"]);
       cell.removeByValue("p");
       expect(cell.get()).toEqual(["q"]);
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       expect(await readDurable(server)).toEqual(["q"]);
@@ -1888,9 +1707,7 @@ describe("mergeable array appends", () => {
       cell.set(["p", "q"]);
       cell.removeByValue("p");
       expect(cell.get()).toEqual(["q"]);
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const storage = SharedServerStorageManager.connectTo(server, {
@@ -1937,9 +1754,7 @@ describe("mergeable array appends", () => {
       rt1.getCell(space, HOLDER_CAUSE, holderSchema, tx0).set({
         rows: ["a", "b", "c"],
       });
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const tx1 = rt1.edit();
@@ -1947,9 +1762,7 @@ describe("mergeable array appends", () => {
       holder.set({ rows: ["p", "q"] });
       holder.key("rows").removeByValue("p");
       expect(holder.get()).toEqual({ rows: ["q"] });
-      markResolveOnVerdictTx(tx1);
-
-      await tx1.commit();
+      await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const storage = SharedServerStorageManager.connectTo(server, {
@@ -2019,9 +1832,7 @@ describe("mergeable array appends", () => {
         rows: ["a", "b", "c"],
         title: "before",
       });
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell(space, HOLDER_CAUSE, holderSchema);
@@ -2032,9 +1843,7 @@ describe("mergeable array appends", () => {
       const txA = rt1.edit();
       rt1.getCell(space, HOLDER_CAUSE, holderSchema, txA)
         .key("rows").removeByValue("a");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2, still at the pre-removal basis, removes a different element
@@ -2044,9 +1853,7 @@ describe("mergeable array appends", () => {
       const holderB = rt2.getCell(space, HOLDER_CAUSE, holderSchema, txB);
       holderB.key("rows").removeByValue("c");
       holderB.key("title").set("after");
-      markResolveOnVerdictTx(txB);
-
-      const result = await txB.commit();
+      const result = await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       expect(result.error).toBeUndefined();
@@ -2067,9 +1874,7 @@ describe("mergeable array appends", () => {
       const tx = rt1.edit();
       const cell = rt1.getCell<number>(space, COUNTER_CAUSE, numberSchema, tx);
       expect(() => cell.increment(0)).toThrow();
-      markResolveOnVerdictTx(tx);
-
-      await tx.commit();
+      await tx.commit({ resolveAt: "verdict" });
     } finally {
       await rt1.dispose();
     }
@@ -2109,9 +1914,7 @@ describe("mergeable array appends", () => {
         tx0,
       );
       seedCell.setRaw([{ v: 1 }, { v: 2 }]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2 loads the seeded state; its replica now holds the same base.
@@ -2125,9 +1928,7 @@ describe("mergeable array appends", () => {
       rt1.getCell<Item[]>(space, OBJ_CAUSE, objListSchema, txA).key(0).set(
         { v: 9 },
       );
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2, WITHOUT having observed that edit, performs a framed
@@ -2143,9 +1944,7 @@ describe("mergeable array appends", () => {
         rt2.getCell<Item[]>(space, OBJ_CAUSE, objListSchema, txB).addUnique(
           { v: 3 },
         );
-        markResolveOnVerdictTx(txB);
-
-        await txB.commit();
+        await txB.commit({ resolveAt: "verdict" });
       } finally {
         popFrame(frame);
       }
@@ -2193,9 +1992,7 @@ describe("mergeable array appends", () => {
       expect(() => cell.increment(NaN)).toThrow();
       expect(() => cell.increment(Infinity)).toThrow();
       expect(() => cell.increment(-Infinity)).toThrow();
-      markResolveOnVerdictTx(tx);
-
-      await tx.commit();
+      await tx.commit({ resolveAt: "verdict" });
     } finally {
       await rt1.dispose();
     }
@@ -2288,9 +2085,7 @@ describe("keyed collections via elementById", () => {
       const vote = votes0.elementById("alice|opt1");
       vote.set({ voterName: "alice", optionId: "opt1", voteType: "yes" });
       votes0.addUnique(vote);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2, which never observed the write, addresses the same vote by
@@ -2312,9 +2107,7 @@ describe("keyed collections via elementById", () => {
           rt2.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema, txR)
             .elementById("alice|opt1"),
         );
-      markResolveOnVerdictTx(txR);
-
-      await txR.commit();
+      await txR.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       expect(await readDurableVotes(server)).toEqual([]);
@@ -2338,9 +2131,7 @@ describe("keyed collections via elementById", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema, tx0).set([]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const votes2 = rt2.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema);
@@ -2357,9 +2148,7 @@ describe("keyed collections via elementById", () => {
       const a = votesA.elementById("alice|opt1");
       a.set({ voterName: "alice", optionId: "opt1", voteType: "yes" });
       votesA.addUnique(a);
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2, still at the empty base, adds a different key.
@@ -2373,9 +2162,7 @@ describe("keyed collections via elementById", () => {
       const b = votesB.elementById("bob|opt2");
       b.set({ voterName: "bob", optionId: "opt2", voteType: "no" });
       votesB.addUnique(b);
-      markResolveOnVerdictTx(txB);
-
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurableVotes(server);
@@ -2410,9 +2197,7 @@ describe("keyed collections via elementById", () => {
     try {
       const tx0 = rt1.edit();
       rt1.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema, tx0).set([]);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const votes2 = rt2.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema);
@@ -2429,9 +2214,7 @@ describe("keyed collections via elementById", () => {
       const a = votesA.elementById("alice|opt1");
       a.set({ voterName: "alice", optionId: "opt1", voteType: "yes" });
       votesA.addUnique(a);
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
@@ -2444,9 +2227,7 @@ describe("keyed collections via elementById", () => {
       const b = votesB.elementById("alice|opt1");
       b.set({ voterName: "alice", optionId: "opt1", voteType: "yes" });
       votesB.addUnique(b);
-      markResolveOnVerdictTx(txB);
-
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurableVotes(server);
@@ -2485,9 +2266,7 @@ describe("keyed collections via elementById", () => {
       const vote = votes0.elementById("alice|opt1");
       vote.set({ voterName: "alice", optionId: "opt1", voteType: "yes" });
       votes0.addUnique(vote);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const votes2 = rt2.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema);
@@ -2498,18 +2277,14 @@ describe("keyed collections via elementById", () => {
       const txA = rt1.edit();
       rt1.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema, txA)
         .elementById("alice|opt1").key("voteType").set("no");
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // Session 2, still at the pre-edit basis, edits a different field.
       const txB = rt2.edit();
       rt2.getCell<Vote[]>(space, VOTES_CAUSE, voteListSchema, txB)
         .elementById("alice|opt1").key("voterName").set("alice2");
-      markResolveOnVerdictTx(txB);
-
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurableVotes(server);
@@ -2597,16 +2372,12 @@ describe("mergeable op guards and single-session branches", () => {
   it("push with no items is a no-op", async () => {
     const tx0 = rt.edit();
     rt.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["a"]);
-    markResolveOnVerdictTx(tx0);
-
-    await tx0.commit();
+    await tx0.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const tx = rt.edit();
     rt.getCell<string[]>(space, CAUSE, stringListSchema, tx).push();
-    markResolveOnVerdictTx(tx);
-
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     expect(await readDurable(server)).toEqual(["a"]);
@@ -2647,16 +2418,12 @@ describe("mergeable op guards and single-session branches", () => {
   it("removeByValue with no matching element is a no-op", async () => {
     const tx0 = rt.edit();
     rt.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["a", "b"]);
-    markResolveOnVerdictTx(tx0);
-
-    await tx0.commit();
+    await tx0.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const tx = rt.edit();
     rt.getCell<string[]>(space, CAUSE, stringListSchema, tx).removeByValue("z");
-    markResolveOnVerdictTx(tx);
-
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     expect(await readDurable(server)).toEqual(["a", "b"]);
@@ -2703,9 +2470,7 @@ describe("mergeable op guards and single-session branches", () => {
     const cell = rt.getCell<string[]>(space, CAUSE, stringListSchema, tx);
     cell.addUnique("a");
     cell.addUnique("b");
-    markResolveOnVerdictTx(tx);
-
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     expect([...await readDurable(server)].sort()).toEqual(["a", "b"]);
@@ -2714,18 +2479,14 @@ describe("mergeable op guards and single-session branches", () => {
   it("increment then decrement in one transaction nets no change", async () => {
     const tx0 = rt.edit();
     rt.getCell<number>(space, COUNTER_CAUSE, numberSchema, tx0).set(5);
-    markResolveOnVerdictTx(tx0);
-
-    await tx0.commit();
+    await tx0.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const tx = rt.edit();
     const cell = rt.getCell<number>(space, COUNTER_CAUSE, numberSchema, tx);
     cell.increment(1);
     cell.increment(-1);
-    markResolveOnVerdictTx(tx);
-
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     expect(await readDurableNumber(server)).toBe(5);
@@ -2744,9 +2505,7 @@ describe("mergeable op guards and single-session branches", () => {
 
     const tx0 = rt.edit();
     rt.getCell(space, cause, docSchema, tx0).set({ tags: [], count: 0 });
-    markResolveOnVerdictTx(tx0);
-
-    await tx0.commit();
+    await tx0.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     // Two distinct mergeable ops on the SAME entity document but different
@@ -2756,9 +2515,7 @@ describe("mergeable op guards and single-session branches", () => {
     const doc = rt.getCell(space, cause, docSchema, tx);
     doc.key("tags").addUnique("x");
     doc.key("count").increment(2);
-    markResolveOnVerdictTx(tx);
-
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const readBack = SharedServerStorageManager.connectTo(server, {
@@ -2859,9 +2616,7 @@ describe("mergeable op guards and single-session branches", () => {
       "b",
       "c",
     ]);
-    markResolveOnVerdictTx(tx0);
-
-    await tx0.commit();
+    await tx0.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const tx = rt.edit();
@@ -2918,9 +2673,7 @@ describe("mergeable op guards and single-session branches", () => {
       const cause = `nested-intents-${name}`;
       const tx0 = rt.edit();
       rt.getCell<string[][]>(space, cause, nested, tx0).set(seed);
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt.storageManager.synced();
 
       const tx = rt.edit();
@@ -3042,9 +2795,7 @@ describe("mergeable op guards and single-session branches", () => {
 
     const tx0 = rt.edit();
     rt.getCell(space, cause, docSchema, tx0).set({ tags: [], count: 5 });
-    markResolveOnVerdictTx(tx0);
-
-    await tx0.commit();
+    await tx0.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const tx = rt.edit();
@@ -3052,9 +2803,7 @@ describe("mergeable op guards and single-session branches", () => {
     doc.key("count").increment(1);
     doc.key("count").increment(-1);
     doc.key("tags").addUnique("x");
-    markResolveOnVerdictTx(tx);
-
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const readBack = SharedServerStorageManager.connectTo(server, {
@@ -3086,9 +2835,7 @@ describe("mergeable op guards and single-session branches", () => {
     cell.set([]);
     cell.push("x");
     cell.set(5);
-    markResolveOnVerdictTx(tx);
-
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const readBack = SharedServerStorageManager.connectTo(server, {
@@ -3113,18 +2860,14 @@ describe("mergeable op guards and single-session branches", () => {
   it("an append superseded by an empty-array set yields no tail op", async () => {
     const tx0 = rt.edit();
     rt.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["a"]);
-    markResolveOnVerdictTx(tx0);
-
-    await tx0.commit();
+    await tx0.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const tx = rt.edit();
     const cell = rt.getCell<string[]>(space, CAUSE, stringListSchema, tx);
     cell.push("x");
     cell.set([]);
-    markResolveOnVerdictTx(tx);
-
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     expect(await readDurable(server)).toEqual([]);
@@ -3137,18 +2880,14 @@ describe("mergeable op guards and single-session branches", () => {
       "b",
       "c",
     ]);
-    markResolveOnVerdictTx(tx0);
-
-    await tx0.commit();
+    await tx0.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     const tx = rt.edit();
     const cell = rt.getCell<string[]>(space, CAUSE, stringListSchema, tx);
     cell.removeByValue("a");
     cell.removeByValue("b");
-    markResolveOnVerdictTx(tx);
-
-    await tx.commit();
+    await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
     expect(await readDurable(server)).toEqual(["c"]);
@@ -3227,9 +2966,7 @@ describe("keyed object list (home spaces shape)", () => {
       rt1.getCell<NamedEntry[]>(space, NAMED_CAUSE, namedListSchema, tx0).set(
         [],
       );
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<NamedEntry[]>(
@@ -3250,9 +2987,7 @@ describe("keyed object list (home spaces shape)", () => {
       const a = spacesA.elementById("alpha");
       a.set({ name: "alpha" });
       spacesA.addUnique(a);
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // rt2 still holds [] (has not observed "alpha").
@@ -3266,9 +3001,7 @@ describe("keyed object list (home spaces shape)", () => {
       const b = spacesB.elementById("beta");
       b.set({ name: "beta" });
       spacesB.addUnique(b);
-      markResolveOnVerdictTx(txB);
-
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurableNamed(server);
@@ -3295,9 +3028,7 @@ describe("keyed object list (home spaces shape)", () => {
       rt1.getCell<NamedEntry[]>(space, NAMED_CAUSE, namedListSchema, tx0).set(
         [],
       );
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<NamedEntry[]>(
@@ -3318,9 +3049,7 @@ describe("keyed object list (home spaces shape)", () => {
       const a = spacesA.elementById("dup");
       a.set({ name: "dup" });
       spacesA.addUnique(a);
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const txB = rt2.edit();
@@ -3333,9 +3062,7 @@ describe("keyed object list (home spaces shape)", () => {
       const b = spacesB.elementById("dup");
       b.set({ name: "dup" });
       spacesB.addUnique(b);
-      markResolveOnVerdictTx(txB);
-
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurableNamed(server);
@@ -3371,9 +3098,7 @@ describe("keyed object list (home spaces shape)", () => {
         e.set({ name });
         seed.addUnique(e);
       }
-      markResolveOnVerdictTx(tx0);
-
-      await tx0.commit();
+      await tx0.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<NamedEntry[]>(
@@ -3392,9 +3117,7 @@ describe("keyed object list (home spaces shape)", () => {
         txA,
       );
       spacesA.removeByValue(spacesA.elementById("b"));
-      markResolveOnVerdictTx(txA);
-
-      await txA.commit();
+      await txA.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
       // rt2, still holding all three, removes a different space.
@@ -3406,9 +3129,7 @@ describe("keyed object list (home spaces shape)", () => {
         txB,
       );
       spacesB.removeByValue(spacesB.elementById("c"));
-      markResolveOnVerdictTx(txB);
-
-      await txB.commit();
+      await txB.commit({ resolveAt: "verdict" });
       await rt2.storageManager.synced();
 
       const durable = await readDurableNamed(server);

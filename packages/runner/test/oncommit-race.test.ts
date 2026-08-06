@@ -424,6 +424,11 @@ describe("onCommit callback final outcome", () => {
     );
 
     await runtime.idle();
+    // idleWithPendingCommits spans the event commit AND its disposition
+    // handling (the tracked handled-chain), which is what delivers the
+    // onCommit callback; synced() alone stops at storage settlement, a few
+    // microtasks before the callback runs.
+    await runtime.scheduler.idleWithPendingCommits();
     await runtime.storageManager.synced();
 
     expect(statuses).toEqual(["done"]);
