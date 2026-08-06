@@ -343,6 +343,25 @@ describe("cf piece get transforms", () => {
     });
   });
 
+  it("keeps predicate reads a rejecting projection declines", () => {
+    const predicate = {
+      type: "object",
+      properties: { status: true },
+      additionalProperties: false,
+    } as const;
+    expect(mergeMasks(predicate, false)).toEqual(predicate);
+    expect(mergeMasks(true, false)).toBe(true);
+    expect(mergeMasks(predicate, {
+      type: "object",
+      properties: { topic: false },
+      additionalProperties: false,
+    })).toEqual({
+      type: "object",
+      properties: { status: true, topic: false },
+      additionalProperties: false,
+    });
+  });
+
   it("narrows referenced source schemas without dropping Fabric metadata", () => {
     const source: JSONSchema = {
       $ref: "#/$defs/Item",
@@ -1878,6 +1897,260 @@ describe("cf piece get transforms", () => {
     });
     expect((await seed.commit()).ok).toBeDefined();
   }
+
+  describe("$link projection marker", () => {
+    const noteSchema = {
+      type: "object",
+      properties: { title: { type: "string" }, body: { type: "string" } },
+    } as const satisfies JSONSchema;
+    const boardSchema = {
+      type: "object",
+      properties: {
+        notes: { type: "array", items: noteSchema },
+        topic: noteSchema,
+        label: { type: "string" },
+      },
+    } as const satisfies JSONSchema;
+
+    /**
+     * A board whose `topic` and `notes` entries are stored as links, the shape
+     * a verb produces when it hands back the piece it created. `written` says
+     * whether the note documents exist: reading an unwritten one has to reach
+     * storage, which is what makes a read of it observable.
+     */
+    async function seedBoard(
+      cause: string,
+      written: boolean,
+    ): Promise<{ board: Cell<unknown>; notes: Cell<unknown>[] }> {
+      const tx = runtime.edit();
+      const notes = ["a", "b", "c"].map((suffix) => {
+        const note = runtime.getCell(
+          space,
+          `${cause}-note-${suffix}`,
+          noteSchema,
+          tx,
+        );
+        if (written) note.set({ title: suffix, body: `body ${suffix}` });
+        return note;
+      });
+      const board = runtime.getCell(space, `${cause}-board`, boardSchema, tx);
+      board.setRaw({
+        notes: notes.map((note) => note.getAsLink()),
+        topic: notes[0].getAsLink(),
+        label: "Field notes",
+      } as never);
+      expect((await tx.commit()).ok).toBeDefined();
+      return {
+        board: runtime.getCell(space, `${cause}-board`, boardSchema),
+        notes,
+      };
+    }
+
+    function addressOf(cell: Cell<unknown>) {
+      return {
+        id: cell.getAsNormalizedFullLink().id,
+        space,
+        scope: "space",
+        path: [],
+      };
+    }
+
+    it("returns a marked position's address instead of its contents", async () => {
+      const { board, notes } = await seedBoard("link-marker-instead", true);
+      expect(
+        await deriveSelectedValue(runtime, space, board, {
+          projection: await parseSelectionProjection(
+            '{"properties":{"topic":{"$link":true}}}',
+          ),
+        }),
+      ).toEqual({ topic: { $link: addressOf(notes[0]) } });
+    });
+
+    it("returns the address and the contents asked for beside it", async () => {
+      const { board, notes } = await seedBoard("link-marker-beside", true);
+      expect(
+        await deriveSelectedValue(runtime, space, board, {
+          projection: await parseSelectionProjection(
+            '{"type":"object","properties":{"topic":' +
+              '{"$link":true,"type":"object","properties":{"title":true}}}}',
+          ),
+        }),
+      ).toEqual({ topic: { $link: addressOf(notes[0]), title: "a" } });
+    });
+
+    it("returns an address per element for a marked collection", async () => {
+      const { board, notes } = await seedBoard("link-marker-collection", true);
+      expect(
+        await deriveSelectedValue(runtime, space, board, {
+          projection: await parseSelectionProjection(
+            '{"properties":{"notes":{"type":"array","items":{"$link":true}}}}',
+          ),
+        }),
+      ).toEqual({ notes: notes.map((note) => ({ $link: addressOf(note) })) });
+    });
+
+    it("reads one document for a marked collection, not one per element", async () => {
+      const { board, notes } = await seedBoard("link-marker-reads", false);
+      const provider = storageManager.open(space);
+      const originalSync = provider.sync.bind(provider);
+      let syncedUris: string[] = [];
+      provider.sync = ((uri, selector, scope) => {
+        syncedUris.push(uri);
+        return originalSync(uri, selector, scope);
+      }) as typeof provider.sync;
+      const boardUri = board.getAsNormalizedFullLink().id;
+      const noteUris: string[] = notes.map((note) =>
+        note.getAsNormalizedFullLink().id
+      );
+      // A read of the transform's own session documents says nothing about
+      // which of the board's data this selection reached.
+      const boardDocuments = (uris: string[]) =>
+        uris.filter((uri) => uri === boardUri || noteUris.includes(uri));
+
+      syncedUris = [];
+      await deriveSelectedValue(runtime, space, board, {
+        projection: await parseSelectionProjection(
+          '{"properties":{"notes":{"type":"array","items":{"$link":true}}}}',
+        ),
+      });
+      const marked = boardDocuments(syncedUris);
+
+      syncedUris = [];
+      await deriveSelectedValue(
+        runtime,
+        space,
+        runtime.getCell(space, "link-marker-reads-board", boardSchema),
+        {
+          projection: await parseSelectionProjection(
+            '{"properties":{"notes":{"type":"array","items":' +
+              '{"type":"object","properties":{"title":true}}}}}',
+          ),
+        },
+      );
+
+      expect(marked).toEqual([boardUri]);
+      expect(boardDocuments(syncedUris)).toEqual(noteUris);
+    });
+
+    it("returns the address of the position it was read at for a marked root", async () => {
+      const { board, notes } = await seedBoard("link-marker-root", true);
+      expect(
+        await deriveSelectedValue(runtime, space, board.key("topic"), {
+          projection: await parseSelectionProjection('{"$link":true}'),
+        }),
+      ).toEqual({ $link: addressOf(notes[0]) });
+    });
+
+    it("returns where an inline value lives when nothing is linked there", async () => {
+      const tx = runtime.edit();
+      const board = runtime.getCell(
+        space,
+        "link-marker-inline",
+        boardSchema,
+        tx,
+      );
+      board.set({
+        notes: [],
+        topic: { title: "a", body: "inline" },
+        label: "L",
+      });
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const read = runtime.getCell(space, "link-marker-inline", boardSchema);
+      expect(
+        await deriveSelectedValue(runtime, space, read, {
+          projection: await parseSelectionProjection(
+            '{"properties":{"topic":{"$link":true}}}',
+          ),
+        }),
+      ).toEqual({
+        topic: {
+          $link: {
+            id: read.getAsNormalizedFullLink().id,
+            space,
+            scope: "space",
+            path: ["topic"],
+          },
+        },
+      });
+    });
+
+    it("returns the address alone where the contents are not an object", async () => {
+      const { board } = await seedBoard("link-marker-scalar", true);
+      expect(
+        await deriveSelectedValue(runtime, space, board, {
+          projection: await parseSelectionProjection(
+            '{"type":"object","properties":{"label":{"$link":true,"type":"string"}}}',
+          ),
+        }),
+      ).toEqual({
+        label: {
+          $link: {
+            id: board.getAsNormalizedFullLink().id,
+            space,
+            scope: "space",
+            path: ["label"],
+          },
+        },
+      });
+    });
+
+    it("leaves a marked collection alone when nothing is stored at it", async () => {
+      const tx = runtime.edit();
+      const board = runtime.getCell(
+        space,
+        "link-marker-unset",
+        boardSchema,
+        tx,
+      );
+      board.set({ topic: { title: "a", body: "b" }, label: "L" } as never);
+      expect((await tx.commit()).ok).toBeDefined();
+
+      expect(
+        await deriveSelectedValue(
+          runtime,
+          space,
+          runtime.getCell(space, "link-marker-unset", boardSchema),
+          {
+            projection: await parseSelectionProjection(
+              '{"type":"object","properties":{"label":true,"notes":' +
+                '{"type":"array","items":{"$link":true}}}}',
+            ),
+          },
+        ),
+      ).toEqual({ label: "L" });
+    });
+
+    it("refuses a marker combined with a filter", async () => {
+      const { board } = await seedBoard("link-marker-filter", true);
+      await expect(
+        deriveSelectedValue(runtime, space, board.key("notes"), {
+          filter: parseSelectionFilter('.title == "a"'),
+          projection: await parseSelectionProjection(
+            '{"type":"array","items":{"$link":true}}',
+          ),
+        }),
+      ).rejects.toThrow("--filter cannot be combined");
+    });
+
+    it("refuses a marker that is not `true`", async () => {
+      await expect(parseSelectionProjection('{"$link":"yes"}')).rejects
+        .toThrow('"$link" must be `true`');
+    });
+
+    it("refuses a marker under `additionalProperties`", async () => {
+      await expect(
+        parseSelectionProjection('{"additionalProperties":{"$link":true}}'),
+      ).rejects.toThrow(
+        '"$link" is not supported under "additionalProperties"',
+      );
+    });
+
+    it("still refuses `asCell` in a projection", async () => {
+      await expect(parseSelectionProjection('{"asCell":["cell"]}')).rejects
+        .toThrow('"asCell" is controlled by the source schema');
+    });
+  });
 
   function derivedConfidentiality(id: string): string[] {
     type StoredEntry = {

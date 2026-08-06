@@ -1412,6 +1412,13 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     ),
     "Project each returned item to selected fields.",
   )
+  .example(
+    cliText(
+      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items ` +
+        `--schema '{"type":"array","items":{"$link":true}}'`,
+    ),
+    "Return each item's address instead of its contents.",
+  )
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option("--input", "Read from the piece's input cell instead of result cell")
   .option(

@@ -139,6 +139,7 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 | Get field          | `deno task cf piece get --piece ID fieldPath ...`                                                    |
 | Filter array       | `deno task cf piece get --piece ID items --filter '.active == true' ...`                             |
 | Project fields     | `deno task cf piece get --piece ID items --schema id,title ...`                                      |
+| Read addresses     | `deno task cf piece get --piece ID items --schema '{"type":"array","items":{"$link":true}}' ...`     |
 | Step + get         | `deno task cf piece get --piece ID fieldPath --step ...`                                             |
 | Set field          | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
 | Call handler       | `deno task cf piece call --piece ID handlerName ...`                                                 |
@@ -256,8 +257,14 @@ omitted linked subgraphs are not hydrated; ambiguous compositions can retain a
 wider selector, and schema-less or root-union sources need a value-shape read
 first. CFC behavior is the same as a computed pattern expression. Source schema
 metadata is authoritative; projection schemas cannot supply `ifc`, `asCell`,
-`scope`, or `default`. See `packages/cli/README.md` for the exact syntax and
-supported schema subset.
+`scope`, or `default`. A JSON `--schema` marks a position `"$link": true` to get
+that position's address — `{"id","space","scope","path"}`, all four always
+present, no schema inlined — instead of what is behind it, or beside a
+projection to get both. A marked position is never fetched, so a marked
+collection costs one document read rather than one per element; the rendered
+`id` minus its `of:` prefix is what `--piece` accepts. Markers do not compose
+with `--filter`. See `packages/cli/README.md` for the exact syntax and supported
+schema subset.
 
 For `piece call`, options before the callable name configure `piece call`.
 Arguments after the callable name configure the invoked handler or tool. The

@@ -185,6 +185,45 @@ JavaScript runs; stream handles remain capabilities. The source cell's schema
 remains authoritative for Common Fabric metadata. A caller cannot introduce or
 override `ifc`, `asCell`, `scope`, or `default` through `--schema`.
 
+#### Asking for an address instead of contents
+
+A JSON `--schema` marks a position with `"$link": true` to get that position's
+address rather than what is behind it:
+
+```bash
+cf piece get --piece ID notes --schema '{"type":"array","items":{"$link":true}}'
+```
+
+```json
+[{
+  "$link": {
+    "id": "of:fid1:…",
+    "space": "did:key:…",
+    "scope": "space",
+    "path": []
+  }
+}]
+```
+
+All four fields are always present, so a caller indexes them without branching:
+`id` keeps its scheme, `space` and `scope` are filled in even when they match
+the reader's own, and `path` is `[]` at a document's root. No schema is inlined
+and no write-redirect flag rides along. The rendered `id`, minus its `of:`
+prefix, is what `cf piece call --piece` and `cf piece get --piece` accept.
+
+The marker sits beside a projection when both are wanted —
+`{"$link":true,"type":"object","properties":{"title":true}}` returns the address
+and the title — and replaces the contents when it is alone. It is accepted
+anywhere `properties` is, except under `additionalProperties`, whose membership
+the stored value rather than the selection decides.
+
+A marked position is never fetched: it contributes a rejecting selector to the
+same path union the projection builds, and the address comes from the link
+stored in the containing document. A marked collection therefore costs one
+document read rather than one per element. The marker is a JSON-schema spelling
+only, and it cannot be combined with `--filter`: the elements a predicate keeps
+no longer say which positions they came from, and an address names a position.
+
 ## Built Binary
 
 `deno task build-binaries cf` compiles the CLI to `dist/cf` — fully

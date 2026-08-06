@@ -200,8 +200,8 @@ Run it against any host:
 API_URL=http://localhost:8000 packages/cli/integration/verbs-over-the-cli.sh
 ```
 
-CI runs it in the `piece-call` shard. It takes about ten seconds and eleven `cf`
-invocations against a warm local toolshed.
+CI runs it in the `piece-call` shard. It takes under half a minute and around
+twenty `cf` invocations against a warm local toolshed.
 
 Each step demonstrates one use case:
 
@@ -210,12 +210,14 @@ Each step demonstrates one use case:
 | 1–2 | Deploy a pattern, then ask what it can do |
 | 3 | A create hands back the piece it created |
 | 4 | A verb returns what it wrote, including what only it could compute |
-| 5 | A replayed id returns the original result; nothing runs twice |
-| 6 | A piece result needs no option; a plain record does — and the write lands either way |
-| 7 | A value-less verb settles with the empty witness |
-| 8 | A refused call does not spend its invocation id |
-| 9 | Reading a verb redirects to `cf piece call` |
-| 10 | Timings on stderr, Invocation JSON still clean on stdout |
+| 5 | A call's result names the document behind each path, and that address calls |
+| 6 | A read returns an address in place of what is behind it |
+| 7 | A replayed id returns the original result; nothing runs twice |
+| 8 | A piece result needs no option; a plain record does — and the write lands either way |
+| 9 | A value-less verb settles with the empty witness |
+| 10 | A refused call does not spend its invocation id |
+| 11 | Reading a verb redirects to `cf piece call` |
+| 12 | Timings on stderr, Invocation JSON still clean on stdout |
 
 ## Addressing a piece you were handed
 
@@ -254,3 +256,46 @@ rather than to the result.
 A pattern should not mint identifier fields to make any of this easier —
 rendering identity is the client's job, and a pattern-authored fid is a copy
 that can go stale.
+
+### Asking a read for an address
+
+A cell is a point in a graph, so a read that does not say where to stop follows
+links onward and hands back a copy of everything behind them. `--schema` says
+where to stop: a position marked `{"$link": true}` returns that position's
+address rather than its contents.
+
+```bash
+cf piece get --piece <board> notes \
+  --schema '{"type":"array","items":{"$link":true}}'
+```
+
+```json
+[
+  { "$link": { "id": "of:fid1:…", "space": "did:key:…", "scope": "space", "path": [] } }
+]
+```
+
+Those four fields are always present, so a caller indexes them without
+branching. `id` keeps its scheme, because the scheme is the kind and dropping
+it retargets the address silently. No schema is inlined: a stored link can
+carry an entire one, and what was asked for is where the value lives.
+
+The marker sits beside a projection when both are wanted, and the answer
+carries both:
+
+```bash
+cf piece get --piece <board> notes --schema \
+  '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}'
+```
+
+```json
+[{ "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" }]
+```
+
+A marked position is not fetched — the address is stored in the document that
+contains it, so a marked collection of a hundred notes costs the one read that
+document already needed. Where the marker is the whole selection, nothing
+behind it is read at all.
+
+The address a marked read returns is one `cf piece call` accepts, minus the
+`of:` prefix, which is the reason to ask for it.
