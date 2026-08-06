@@ -9,7 +9,7 @@ The command surface — the third concern in that umbrella,
 [CLI surface shape](cli-surface-shape.md) — is out of scope here and moves on
 its own timeline. One piece of it is unavoidable: the concise selection syntax
 needs its own flag before it can grow address notation, so `--select` lands in
-WS-A rather than waiting.
+the first stage rather than waiting.
 
 ## Governing decisions
 
@@ -30,27 +30,29 @@ derived from what a selection omitted.
 are never a reader's to supply, in either syntax, and this work adds no
 carve-out.
 
-## Two assumptions, and where they bite
+**The address change lands before addresses are published.** Scoping invocation
+ids to a session changes where a receipt lives. Doing that before anything hands
+a caller a receipt address means no caller ever holds one that later moves.
 
-Two design questions are unresolved
-([shaped reads](shaped-reads-and-verb-results.md), "Open questions"). This plan
-proceeds on the assumption that both resolve affirmatively, and confines the
-work that depends on them to WS-D.
+## What is settled
 
-**Receipts carry a durable schema.** Assumed yes. What it gates is narrower than
-it looks: without it, `piece call --select` still works — the selection is
-applied after materialization instead of bounding the fetch. The feature stands;
-the network win waits.
+Both questions this work once waited on are decided, and the design records
+them.
 
-**Invocation ids are scoped to a session.** Assumed yes, and scoped by
-*session* rather than by principal — an identity does not separate the callers
-that actually collide, since agents are told to work under their human's key
-rather than mint their own. This one is **address-changing**: a given id
-resolves to a different receipt than it did before. Sequencing it last is
-deliberate but not free, and the cost is recorded under Risks rather than
-hidden.
+**Receipts carry a descriptive schema**, distinct from the declared result
+schema that waits for the Fabric-types stream design. The compatibility gate
+compares only a pattern's argument and result schemas across versions, so it
+never reaches a receipt and no permanence obligation attaches.
 
-If either resolves negatively, WS-D changes and WS-A through WS-C do not.
+**Invocation ids are scoped to a session**, not a principal. An identity
+separates nothing when agents work under their human user's key, and a minted
+session is unguessable where a DID is public.
+
+One detail inside the second is still open: what an absent session means.
+Treating it as unscoped preserves today's behavior and today's collision;
+refusing without one makes every caller opt in before naming an invocation at
+all. With minting explicit, unscoped-with-a-documented-gap is the reasonable
+default, and S2 decides it.
 
 ## Non-goals
 
@@ -58,156 +60,135 @@ Collection windowing, recovery of an outcome whose address was lost, batching,
 a canonical locator, and the command-surface renames. Each is recorded as
 deferred in the design documents, with the condition that would reopen it.
 
-## Workstreams
+## Stage 1 — foundation
 
-### WS-A — the shared read step
+Nothing here is visible to a caller.
 
-**A1. Factor the read step out.** One implementation taking a cell and a
-selection and producing structured output, with `piece get` as its first caller.
-Pure refactor: no behavior change, no new surface. Everything below depends on
-it.
+**F1. Factor the read step out.** *(M)* One implementation turning a cell and a
+selection into structured output, with `piece get` as its first caller.
 
-**A2. `--select` for the concise syntax.** The concise path list moves to its
-own flag; `--schema` keeps full schemas and `@file`. Concise input on `--schema`
-continues to work as a deprecated alias — this step removes nothing.
+Its shape is the thing to get right, because three more callers arrive later. It
+takes a **cell**, not a piece address — resolving an address to a cell belongs to
+the caller, which is what lets `piece call` hand it a receipt and `wish` hand it
+a resolved target. It takes the selection already parsed, so each arrival owns
+its own flag surface. It returns the structured value, leaving rendering to the
+caller. The existing transform in `packages/cli/lib/piece-get-transform.ts` is
+the body of it; this is an extraction, not a rewrite.
 
-*Exit:* `piece get` reads through the factored step, both flags work, and the
-existing projection tests pass unchanged against either spelling.
+**F2. `--select` for the concise syntax.** *(S)* The concise path list moves to
+its own flag; `--schema` keeps full schemas and `@file`. Concise input on
+`--schema` continues to work as a deprecated alias — this stage removes nothing.
 
-### WS-B — addresses in results
+*Exit:* `piece get` reads through the factored step, both flags work, and
+`packages/cli/test/piece-get-transform.test.ts` passes **unchanged**. A moved
+expectation means the extraction changed behavior and is wrong.
 
-**B1. `$link` in a selection.** The projection-only keyword, rejected today
+## Stage 2 — addresses in results
+
+**A1. `$link` in a selection.** *(M)* The projection-only keyword, refused today
 alongside the treatment keywords, becomes meaningful: a marked position returns
-its address instead of its contents. Rendering is the declared link shape, not
-the runtime envelope.
+its address rather than its contents, rendered as the declared link shape and
+not the runtime envelope.
 
-**B2. Compose the rejecting selector.** A marked position contributes a
+**A2. Compose the rejecting selector.** *(M)* A marked position contributes a
 rejecting selector to the path union the projection already builds, so its
-target is never loaded. This is what makes a marked collection cost one document.
+target is never loaded. This is what makes a marked collection cost one document
+rather than one per element.
 
-**B3. `@` in `--select`.** The suffix desugars to `{"$link": true}` at the leaf,
-in place. `topic@,topic.title` unions into a marker plus a projection and
+**A3. `@` in `--select`.** *(S)* The suffix desugars to `{"$link": true}` at the
+leaf, in place. `topic@,topic.title` unions into a marker plus a projection and
 renders as one result carrying both.
 
-**B4. `--piece` accepts the entity URI.** `entityIdFrom` takes an `of:` scheme
-and refuses `computed:` rather than stripping it. Independently testable, and
-everything that composes an emitted address into a following command waits on it.
+**A4. `--piece` accepts the entity URI.** *(S)* `entityIdFrom` takes an `of:`
+scheme and refuses `computed:` rather than stripping it. Independent of
+everything else here, and everything that composes an emitted address into a
+following command waits on it.
 
 *Exit:* a created child's address survives a read, composes into the next
 command without reshaping, and a marked collection is measurably one document.
 
-### WS-C — calls inherit the read step
+## Stage 3 — session identity
 
-**C1. `piece call` gains the selection flags.** `--select`, `--schema`,
-`--filter`, all routed through WS-A's implementation. No second output path.
+Ahead of anything that publishes a receipt address, so no caller holds one that
+later moves.
 
-**C2. `receipt` as a top-level envelope field.** Published from
+**S1. Mint and plumb a session.** *(M)* `cf session new` emits a random opaque
+string on stdout; `--session` and `CF_SESSION` carry it, following `CF_IDENTITY`
+and `CF_API_URL`. Accepted and threaded through, but **not yet joined to the
+hash** — nothing observable changes, and the mechanism can be exercised before
+it matters.
+
+**S2. Join the session to the hash.** *(S)* The session enters the hash
+`scopeCallerEventId` computes, so an id chosen in one agent's session and in
+another's land on different receipts. Decides what an absent session means.
+
+This is the one address-changing commit in the plan. It carries nothing else,
+lands in a single deploy, and does not roll out behind a flag that would leave
+two addressing schemes live at once.
+
+*Exit:* two sessions using the same invocation id against the same verb resolve
+to different receipts; one session replaying an id resolves to the same one.
+
+## Stage 4 — calls
+
+**C1. Receipt cells carry a descriptive schema.** *(M)* Written to the durable
+schema metadata at result-write time, in the same create-only transaction. Not
+the `getCell` schema argument, which seeds link scope and the in-memory cell
+only. Lands before C2 so a selection over a receipt is bounded from the first
+call that can express one.
+
+**C2. `piece call` gains the selection flags.** *(S)* `--select`, `--schema`,
+`--filter`, all routed through F1. No second output path.
+
+**C3. `receipt` as a top-level envelope field.** *(S)* Published from
 `tx.handlingReceiptLink`, so a caller holds the address before the outcome
 exists — including under `--no-wait`, which today returns none.
 
-*Exit:* a verb's result and the same data read directly render identically, and
-the walkthrough's `jq | sed` address extraction is replaced by reading the
-rendered address.
+*Exit:* a verb's result and the same data read directly render identically under
+the same selection, and the walkthrough's `jq | sed` address extraction is
+replaced by reading the rendered address.
 
-### WS-D — the assumed decisions
+## Dependencies
 
-Ordered last, and each lands only once its question is settled.
+Stages are ordered, but not everything in them is blocked.
 
-**D1. Receipt cells carry a descriptive schema.** Written to the durable schema
-metadata at result-write time, in the same create-only transaction. Not the
-`getCell` schema argument, which seeds link scope and the in-memory cell only.
-Unlocks fetch narrowing on receipts.
-
-**D2. Invocation ids scoped to a caller session.** A session identity joins the
-hash `scopeCallerEventId` already computes, so `add-comment-1` chosen in one
-agent's session and in another's land on different receipts.
-
-*Why not a principal.* A DID separates nothing here: agents are directed to work
-under their human user's identity rather than mint their own, so the collision
-that actually happens is two agents under one key. A session distinguishes them;
-an identity does not.
-
-*Why not either session id that already exists.* The storage session
-(`packages/runner/src/storage/v2.ts`) is minted with `crypto.randomUUID()` and
-re-minted on close. It keys commit idempotency as `(sessionId, localSeq)`, and
-because every `cf` invocation is a separate process it is fresh each time.
-Scoping by it would destroy the property `--invocation` exists for: a same-id
-replay from a new process would compute a different address and never deduplicate
-against the original. `cf-harness`'s session store is durable but is harness
-state, and not every caller is that harness.
-
-*So this needs a new concept*: a caller session identity, supplied to the CLI
-and stable across the invocations that belong to one agent's working session.
-Three things it has to satisfy, and they pull against each other:
-
-- **Stable across invocations**, or same-id retry stops deduplicating — the
-  feature it is scoping.
-- **Distinct between concurrent callers**, or it does not solve the problem.
-- **Supplied, not derived.** Nothing in a `cf` process can infer which agent
-  session it belongs to; it arrives as a flag or environment variable, following
-  `CF_IDENTITY` and `CF_API_URL`.
-
-*Minted explicitly, by `cf session new`.* The session is a **namespace, not an
-entity**: it is only ever hashed into the event id, so nothing stores it,
-registers it, or expires it. Minting is a random opaque string on stdout, which
-makes it cheaper than `cf id new` — no key generation — and it follows the shape
-that command already established:
-
-```bash
-cf session new > cf.session
-export CF_SESSION=$(cat cf.session)
-cf piece call --invocation add-1 ...
-```
-
-Explicit rather than implicit, for two reasons. A session managed automatically
-is one a caller cannot answer questions about — *which session am I in, and is
-this retry landing where the last one did?* — and the two obvious automatic
-schemes each break something: minting per process destroys same-id replay, and
-persisting to a dotfile puts the answer somewhere the caller never looks.
-
-The second reason is stronger, and it is why a minted session beats any derived
-one. The exposure has two halves: two callers colliding on an id, and a third
-party *guessing* an id to read someone's outcome. A scope derived from identity
-closes only the first, because a DID is public — an address stays computable by
-anyone holding the piece, the verb, and a conventional id. A minted random
-session closes both, because it cannot be guessed.
-
-*The design question inside it* is what an absent session means. Treating it as
-unscoped preserves today's behavior and today's collision; refusing without one
-makes every caller opt in before they can name an invocation at all. Given the
-minting is explicit, the reasonable default is unscoped-with-a-documented-gap
-rather than an implicit mint, but this plan does not decide it.
-
-Address-changing; see Risks.
-
-## Phases
-
-| Phase | Contents | Blocked by |
+| Item | Blocked by | Note |
 | --- | --- | --- |
-| 1 | A1, A2 | — |
-| 2 | B1, B2, B3, B4 | A1 for B1–B3; B4 independent |
-| 3 | C1, C2 | A1; C1 also on B1 for marked positions in call results |
-| 4 | D1, D2 | the open questions |
-
-B4 has no dependency on the rest and can land at any point in phases 1–3; it is
-grouped with WS-B because that is where its value appears.
+| F1 | — | everything selection-shaped depends on it |
+| F2 | — | independent of F1; grouped for one flag change |
+| A1 | F1 | |
+| A2 | A1 | |
+| A3 | A1, F2 | needs both the marker and the flag |
+| A4 | — | can land any time; grouped where its value shows |
+| S1 | — | |
+| S2 | S1 | must precede C3 |
+| C1 | — | independent; ordered before C2 for the bound |
+| C2 | F1, A1 | A1 for marked positions in call results |
+| C3 | S2 | the ordering this plan exists to get right |
 
 ## Test strategy
 
-**A1 is a refactor, so its test is that nothing changes.** The existing
-`piece-get-transform` suite passes untouched. Any diff in its expectations means
-the factoring changed behavior and is wrong.
+**F1 is a refactor, so its test is that nothing changes.**
+`packages/cli/test/piece-get-transform.test.ts` passes untouched.
 
-**B1–B3 want a fixture with a returned child**, which
-`packages/cli/integration/pattern/verb-results.tsx` already is. Assertions worth
-pinning: a marked position renders an address and not its contents; a marker
-plus a sibling projection renders both; a marked collection issues one document
-read rather than one per element.
+**A1–A3 extend the CLI integration walkthrough.**
+`packages/cli/integration/pattern/verb-results.tsx` is already a fixture with a
+returned child, and `verbs-over-the-cli.sh` already drives it; the walkthrough
+gains steps rather than a new fixture. Three assertions worth pinning: a marked
+position renders an address and not its contents; a marker beside a sibling
+projection renders both; a marked collection issues one document read. The third
+wants a unit test in `packages/cli/test/` rather than the shell walkthrough,
+since counting reads is not observable from stdout.
 
-**B4 is testable by identity**: the same piece resolves through a bare hash and
-through its `of:` form, and `computed:` is refused by name rather than coerced.
+**A4 is testable by identity**, as a unit test: the same piece resolves through a
+bare hash and through its `of:` form, and `computed:` is refused by name rather
+than coerced.
 
-**C1's test is symmetry.** The same note read through `piece get` and read out of
+**S2 wants two sessions and one verb** — an integration test, since it is about
+addresses that differ across processes. The negative case matters as much: one
+session replaying an id must still deduplicate.
+
+**C2's test is symmetry.** The same note read through `piece get` and read out of
 a `piece call` result produce the same rendering under the same selection.
 
 **Waiting.** Anything that needs a receipt to exist subscribes rather than polls
@@ -215,26 +196,24 @@ a `piece call` result produce the same rendering under the same selection.
 
 ## Risks
 
-**Scoping ids late is address-changing.** Once WS-C publishes `receipt`, a
-caller can keep an address; when D2 lands, the same invocation id resolves
-somewhere else. Old receipts stay readable at their old addresses, but a replay
-spanning the change stops deduplicating and re-executes. The window is the
-deploy boundary and the exposure is same-id retries in flight across it. It
-lands in one deploy rather than gradually, and does not roll out behind a flag
-that could leave two addressing schemes live at once.
+**F1 is a refactor over code with a live consumer.** `piece get`'s projection is
+recently changed and load-bearing for the topics workflow. The mitigation is
+that F1 adds no surface: if its test expectations move, it has gone wrong.
 
-**Session scoping puts one more thing in the caller's keeping.** After D2 an
+**S2 changes where receipts live.** The ordering removes most of this — nothing
+has published an address yet, so no caller holds one that moves. What remains is
+in-flight retries across the deploy: an id issued before the change and replayed
+after resolves somewhere new and re-executes rather than deduplicating. Bounded
+to that window, and the reason S2 lands alone.
+
+**Session scoping puts one more thing in the caller's keeping.** After S2 an
 address depends on the session it was created under, so a caller who loses that
 session id cannot recompute where its outcome went. That is the recovery case
 already deferred in the design, now with a second input to retain alongside the
 piece, verb and id. It argues for the session identity being something a harness
 persists rather than something a human types.
 
-**A1 is a refactor over code with a live consumer.** `piece get`'s projection is
-recently changed and load-bearing for the topics workflow. The mitigation is
-that A1 adds no surface: if its test expectations move, it has gone wrong.
-
-**`$link` is a wire contract from B1 onward.** Its field defaults are specified
+**`$link` is a wire contract from A1 onward.** Its field defaults are specified
 in the design; changing them after callers read them is the breakage the
 declared shape exists to prevent.
 
@@ -244,8 +223,9 @@ Each step carries its own, rather than a sweep at the end.
 
 | Step | Owed |
 | --- | --- |
-| A2 | `packages/cli/README.md` output conventions: two flags, which syntax each takes |
-| B1, B3 | The marker and the suffix, same file; [Verbs over the CLI](../common/verbs-over-the-cli.md), already stale |
-| B4 | Address forms wherever `--piece` is taught — the CLI README and the tutorial's workflow chapter |
-| C1, C2 | `piece call`'s section, and the envelope's fields |
-| D1 | Whatever the receipt declares, in the design document's open-question slot |
+| F2 | `packages/cli/README.md` output conventions: two flags, which syntax each takes |
+| A1, A3 | The marker and the suffix, same file; [Verbs over the CLI](../common/verbs-over-the-cli.md), already stale |
+| A4 | Address forms wherever `--piece` is taught — the CLI README and the tutorial's workflow chapter |
+| S1, S2 | `cf session new`, `CF_SESSION`, and what an absent session means; the CLI README and the agent-facing skills that teach invocation ids |
+| C1 | What a receipt declares, in the design document's open-question slot |
+| C2, C3 | `piece call`'s section, and the envelope's fields |
