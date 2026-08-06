@@ -381,6 +381,16 @@ class Connection {
   // and this set dies with the connection. A peer that receives a frame but
   // fails to process it discards the connection for the same reason
   // (`discardConnectionIfSchemaCas` in v2/client.ts).
+  //
+  // Scoped to the CONNECTION, deliberately unlike the session's `entities`
+  // cache next to it, which answers the same "what does the peer already
+  // hold" question for documents and survives a resume. The matching
+  // lifetime for schema bodies is the connection's, because the peer's half
+  // of this ledger is the `Client`'s `#schemaCache` and a Client holds one
+  // connection at a time. A session is the wrong axis in both directions: it
+  // outlives the connection, and it can be resumed by a DIFFERENT client
+  // whose cache is empty — inheriting "already delivered" there would send
+  // that client references it could never resolve.
   #deliveredSchemas = new Set<string>();
   // Negotiated persistentSchedulerState: when both sides carry the flag,
   // subscription sync pushes to this connection include the scheduler

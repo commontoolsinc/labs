@@ -1025,10 +1025,11 @@ Deno.test("connection-scoped schema bodies span a connection, not a frame", asyn
 
 /** What a watch view holds after a frame the client could not process. */
 type LostFrameOutcome = {
-  /** The document whose schema rode on the lost frame. */
-  lost: EntityDocument | null | undefined;
-  /** A later document naming that same schema. */
-  later: EntityDocument | null | undefined;
+  /** The document whose schema rode on the lost frame, or null if none
+   *  arrived. */
+  lost: EntityDocument | null;
+  /** A later document naming that same schema, or null if none arrived. */
+  later: EntityDocument | null;
 };
 
 /**
@@ -1103,8 +1104,11 @@ const watchAfterALostEffect = async (
     // Woken by the view, not by a deadline: an update that never arrives
     // leaves this await pending with nothing else holding the loop, which
     // Deno reports as a failure rather than a hang.
-    const documentOf = (id: string) =>
-      view.entities.find((entity) => entity.id === id)?.document;
+    // An entity the view never received and one it holds as absent both mean
+    // "no document arrived"; collapse them so a caller asserts the outcome
+    // rather than which of the two spellings produced it.
+    const documentOf = (id: string): EntityDocument | null =>
+      view.entities.find((entity) => entity.id === id)?.document ?? null;
     while (documentOf("of:later") == null) {
       const update = await updates.next();
       if (update.done) break;

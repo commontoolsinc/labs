@@ -393,6 +393,14 @@ export class Client {
       error.name = "InvalidMessageError";
       if (this.#helloPending !== null) {
         this.#helloPending.reject(error);
+        // A frame arriving in the handshake window that this client cannot
+        // read leaves the server's connection having already answered a
+        // `hello`, so the reconnect loop's next attempt on this transport is
+        // refused as a repeat and no retry can ever succeed on it. Drop the
+        // transport so that attempt opens a fresh one. Deliberately not the
+        // cas discard: nothing is connected yet, and this hazard belongs to
+        // the handshake rather than to either schema encoding.
+        void this.transport.close().catch(() => undefined);
       } else {
         this.rejectPending(error);
         this.discardConnectionIfSchemaCas(error);

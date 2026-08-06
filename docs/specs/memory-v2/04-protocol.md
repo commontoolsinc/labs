@@ -501,9 +501,15 @@ their upserts advanced the session's server-side cache when the frame was
 built, and resume-time catch-up diffs against that advanced cache. A send that
 fails observably is the one case repaired, by rolling that advance back.
 
-Because the delivered set is per connection, a reconnect resets the server's
-side while a client may retain bodies from the previous connection. That
-direction is safe: the server re-sends a body the client already holds.
+The delivered set is scoped to the connection, not to the logical session that
+tracks which documents a client already holds. The two answer the same
+question for different things and are deliberately not aligned: a session
+outlives the connection, and it may be resumed by a different client, whose
+store of schema bodies is empty. Inheriting a delivered set across such a
+resume would send that client references it can never resolve. Scoping to the
+connection also means a reconnect resets the server's side while a client may
+retain bodies from the previous one — the safe direction, where the server
+re-sends a body the client already holds.
 
 Earlier revisions of this encoding also interned the `schema` field of
 `$alias` records. Those records are Pattern-binding vocabulary, not links —
