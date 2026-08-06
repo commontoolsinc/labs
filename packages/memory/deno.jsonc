@@ -22,9 +22,16 @@
       "command": "deno bench --allow-read --allow-write --allow-ffi --allow-env test/v2-entity-id-list.bench.ts"
     }
   },
+  // Test discovery. Most of this package's tests predate the repo-wide
+  // `<topic>.test.ts` naming in docs/development/unit-test-coding-style.md and
+  // are called `<topic>-test.ts`; both names are collected, so a file written
+  // to the current convention runs here too. The `test/` prefix keeps the
+  // helper modules that live next to the sources out of the run, and `**`
+  // reaches the mirrored subdirectories the naming guide describes.
   "test": {
     "include": [
-      "test/*-test.ts"
+      "test/**/*-test.ts",
+      "test/**/*.test.ts"
     ]
   },
   "exports": {
