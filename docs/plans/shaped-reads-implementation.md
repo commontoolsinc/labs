@@ -147,10 +147,36 @@ Three things it has to satisfy, and they pull against each other:
   session it belongs to; it arrives as a flag or environment variable, following
   `CF_IDENTITY` and `CF_API_URL`.
 
+*Minted explicitly, by `cf session new`.* The session is a **namespace, not an
+entity**: it is only ever hashed into the event id, so nothing stores it,
+registers it, or expires it. Minting is a random opaque string on stdout, which
+makes it cheaper than `cf id new` — no key generation — and it follows the shape
+that command already established:
+
+```bash
+cf session new > cf.session
+export CF_SESSION=$(cat cf.session)
+cf piece call --invocation add-1 ...
+```
+
+Explicit rather than implicit, for two reasons. A session managed automatically
+is one a caller cannot answer questions about — *which session am I in, and is
+this retry landing where the last one did?* — and the two obvious automatic
+schemes each break something: minting per process destroys same-id replay, and
+persisting to a dotfile puts the answer somewhere the caller never looks.
+
+The second reason is stronger, and it is why a minted session beats any derived
+one. The exposure has two halves: two callers colliding on an id, and a third
+party *guessing* an id to read someone's outcome. A scope derived from identity
+closes only the first, because a DID is public — an address stays computable by
+anyone holding the piece, the verb, and a conventional id. A minted random
+session closes both, because it cannot be guessed.
+
 *The design question inside it* is what an absent session means. Treating it as
 unscoped preserves today's behavior and today's collision; refusing without one
-makes every caller opt in before they can name an invocation at all. This plan
-does not decide that.
+makes every caller opt in before they can name an invocation at all. Given the
+minting is explicit, the reasonable default is unscoped-with-a-documented-gap
+rather than an implicit mint, but this plan does not decide it.
 
 Address-changing; see Risks.
 
