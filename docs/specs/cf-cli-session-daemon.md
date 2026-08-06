@@ -1,0 +1,469 @@
+# `cf` CLI session daemon
+
+## Status
+
+This document specifies intended behavior. The daemon is not implemented.
+
+## Summary
+
+Fabric-facing `cf` commands currently create an identity session, runtime,
+storage manager, authenticated memory connection, and synchronized replica for
+each invocation. A named local daemon retains the reusable connection state so
+separate CLI invocations can avoid that setup cost.
+
+The daemon is a **session host**, not an execution host. It retains identity,
+connection, replica, and safe content-addressed caches. Every request receives
+fresh execution state, and request-created pieces, reactive graphs,
+subscriptions, collectors, and background work are torn down before the next
+request executes.
+
+Daemon use is explicit. Ordinary `cf` commands continue to run directly. A
+caller starts a named daemon and selects it on each routed command. The CLI
+never silently starts a daemon, selects one, falls back to direct execution, or
+replays a mutation.
+
+## Goals
+
+- Reduce the latency of repeated fine-grained commands against one Fabric
+  context.
+- Preserve the direct command's arguments, output, exit status, authorization,
+  synchronization, and durability behavior.
+- Support independent CLI processes, agents, scripts, and shell completion.
+- Make daemon selection, ownership, compatibility, health, and staleness
+  visible to the caller.
+- Prevent overlapping daemon requests from introducing new runtime or storage
+  races.
+- Detect loaded code and identity material becoming stale and fail closed.
+
+## Non-goals
+
+- Keeping pieces or reactive execution running between commands.
+- Making a sequence of CLI commands atomic.
+- Providing offline reads from a stale replica.
+- Providing exactly-once mutation execution after a daemon crash.
+- Accelerating local-only, offline, test, or interactive terminal commands.
+- Serving watch, subscribe, streaming, or otherwise indefinite commands. These
+  commands retain execution by definition and remain direct. A retained-
+  execution host, if wanted, is a separate design built on the session and
+  lifecycle seams established here.
+- Sharing one daemon across unrelated identities, APIs, primary spaces, or
+  runtime configurations.
+- Hiding daemon use as an automatic implementation detail.
+
+## Use cases and command scope
+
+### Repeated inspection
+
+Humans and agents repeatedly inspect one space through:
+
+- `cf piece ls`
+- `cf piece get`, excluding `--step` initially
+- `cf piece inspect`
+- `cf piece verbs`
+- `cf piece search`
+- `cf piece map`
+
+These commands form the first implementation scope. They reuse the synchronized
+replica while receiving fresh request execution state.
+
+### Live shell completion
+
+`cf completion complete` uses the daemon for live piece, callable, and cell-path
+candidates when the half-typed command line contains `--daemon <name>`. The
+completion parser resolves that option from the line it is completing; the
+shell script does not carry a daemon setting of its own. Completion script
+generation remains direct.
+
+Completion keeps its existing silent-empty failure contract. An absent, busy,
+stale, or incompatible daemon produces no live candidates and no diagnostic in
+the candidate stream. This is the deliberate exception to the normal routed-
+command rule that daemon failures are reported to the caller.
+
+### Fine-grained mutation
+
+The required second scope is:
+
+- `cf piece set`
+- `cf piece apply`
+- `cf piece call`
+- `cf piece link`
+- `cf piece set-slug`
+- `cf piece rm`
+
+These commands require request identifiers, confirmed completion, and explicit
+outcome-unknown handling. They never receive transport-level automatic replay.
+
+### Pattern development and semantic discovery
+
+The following commands are later scope because they add filesystem,
+compilation, or execution-lifecycle concerns:
+
+- `cf piece new`
+- `cf piece setsrc`
+- `cf piece getsrc`
+- `cf piece step`
+- `cf deps update`
+- `cf wish`
+
+ACL operations, `cf piece view`, non-watching `cf piece render`,
+`cf piece recreate-root`, and `cf piece set-home` are compatible optional scope
+but do not drive the design.
+
+### Direct-only commands
+
+Local, offline, test, process-management, and interactive commands remain
+direct. This includes `check`, `test`, `view`, `id`, `init`, `inspect`, `space`,
+`fuse`, daemon-management commands, and completion script generation.
+`cf piece render --watch` and any future watch or subscription form remain
+direct. `cf exec` also remains direct; routing a shebang-run mounted callable
+through a named daemon requires a separate explicit propagation design.
+
+Every command not listed as supported defaults to unsupported. Passing
+`--daemon` to an unsupported command fails before dispatch and names the direct
+invocation as the available behavior. New commands do not acquire daemon
+support merely by being added to the CLI.
+
+## User interface
+
+### Starting and selecting a daemon
+
+A caller creates a fixed named context:
+
+```console
+cf daemon start work \
+  --api-url https://example.com \
+  --identity ./work.key \
+  --space team-space
+```
+
+The command reports the name, PID, owning checkout or immutable build, API,
+identity DID, primary space, runtime configuration fingerprint, and socket
+location. It reports readiness only after the daemon owns its name, listens on
+its private endpoint, has installed its source and identity watchers, and can
+answer the control protocol.
+
+A routed command names the daemon:
+
+```console
+cf --daemon work piece get --piece fid1:abc123 items
+```
+
+An absent, stale, degraded, foreign, or incompatible daemon causes the command
+to fail before dispatch. The CLI explains the state and the explicit recovery
+command. It does not start a replacement or run the operation directly.
+
+Connection options repeated on a routed command must match the daemon context.
+A conflicting API, identity, primary space, or runtime option is an error.
+
+### Management and observability
+
+The control surface is:
+
+- `cf daemon ls`
+- `cf daemon status <name>`
+- `cf daemon logs <name>`
+- `cf daemon stop <name>`
+- `cf daemon restart <name>`
+
+Status includes ownership and compatibility metadata, connection and sync
+state, source state, the active request, queue depth, retained resource counts,
+and the last terminal daemon error. Trace mode separates client startup, IPC,
+queue wait, request setup, command work, synchronization, cleanup, and total
+latency.
+
+Normal command stdout retains its existing format. The explicit `--daemon`
+selection identifies the route without wrapping JSON or adding a banner.
+
+## Namespace and ownership
+
+Daemon names occupy one namespace per OS user and host. The namespace lives in
+a user-private runtime directory and is shared across `cf` processes and
+checkouts. A live name is exclusive.
+
+Starting an occupied name reports one of:
+
+- the compatible daemon is already running;
+- the name belongs to another checkout or build; or
+- the name has a different Fabric or runtime context.
+
+The new process never replaces, stops, or repurposes the owner automatically.
+
+Every connection begins with a compatibility handshake. Source-mode execution
+requires the same canonical checkout and source generation. Immutable clients
+may share a daemon when their immutable build identity and execution protocol
+match. A foreign client can use the stable control protocol to inspect the
+daemon but cannot dispatch commands.
+
+## Fixed daemon context
+
+A daemon is fixed to this compatibility tuple:
+
+```text
+checkout or immutable build
++ execution protocol version
++ API origin
++ identity fingerprint
++ primary space
++ runtime and experimental configuration fingerprint
+```
+
+The runtime may discover and open other spaces while following cross-space
+links. Those providers remain subordinate to the fixed primary context and do
+not allow later requests to retarget the daemon.
+
+The tuple also makes process-wide runtime state reusable. Pattern environment,
+LLM routing, experimental configuration, one-time SES initialization, deferred
+compiler state, and sidecar pattern caches cannot be safely retargeted between
+unrelated requests merely by constructing another `Runtime`. Fixing API,
+identity, and configuration is therefore a correctness boundary, not only a
+user-interface convention. Every retained cache must still include all inputs
+that can change its result; existing caches whose keys are narrower must be
+fixed or kept request-owned.
+
+## Retained and request-owned state
+
+### Retained state
+
+The daemon may retain:
+
+- the deserialized identity and signer;
+- the storage manager and its authenticated session identity;
+- memory transports and synchronized replicas;
+- storage watches and bounded storage-level pull knowledge, including the
+  per-document deduplication state that prevents repeated pull registration;
+- fixed configuration and server compatibility metadata; and
+- caches whose keys fully identify their content and configuration.
+
+### Request-owned state
+
+Every request owns and must release:
+
+- its runtime execution facade;
+- started pieces and reactive graphs;
+- request subscriptions and scheduler work;
+- error and console collectors;
+- navigation callbacks and other command effects; and
+- filesystem/compiler state that is not safely content-addressed.
+
+The next request is not admitted to execution until cleanup has stopped
+request-owned work and the previous request has reached the same confirmed
+storage boundary as its direct command.
+
+`Runtime.dispose({ closeStorage: false })` is the existing starting seam: it is
+intended to tear down a runtime while leaving its caller-owned storage manager
+open. It is not sufficient unchanged. `Scheduler` and `Runner` each register a
+storage-manager subscription during construction, and runtime disposal does not
+currently unregister those subscriptions. Sequential runtimes would therefore
+leave disposed schedulers and runners reachable from the retained manager.
+
+The lifecycle work must also classify manager state that outlives a runtime,
+including telemetry attachment, document-pull deduplication, registered space
+identities, and dynamic host knowledge. It must prove which state is valid for
+the fixed daemon tuple, what resets at a request boundary, and what remains
+bounded. Reusing the current CLI runtime unchanged is not sufficient: process
+exit currently supplies part of that isolation.
+
+Making storage subscription ownership explicit is useful independently of this
+daemon: any test or service that constructs sequential runtimes over one
+retained manager otherwise risks keeping disposed runtime objects reachable.
+
+## Request scheduling
+
+The daemon accepts multiple client connections and may hold multiple requests,
+but one daemon context executes exactly one request at a time. Accepted requests
+enter a bounded FIFO queue.
+
+This serialization protects shared runtime configuration, one authenticated
+memory session, request output attribution, and request cleanup. Nominally
+read-only commands are not initially parallel because they can start pieces,
+establish watches, pull linked data, and trigger reactive computation.
+
+The queue has both a request-count bound and a total queued-payload bound. A
+full queue rejects admission immediately with `DAEMON_BUSY`; callers do not
+retry automatically. A queued request is cancellable. Once a mutation begins,
+client disconnection does not cancel or replay it.
+
+Serialization only orders requests through this daemon. Browsers, other
+daemons, servers, and direct CLI invocations remain concurrent Fabric actors.
+Memory's optimistic commit, precondition, path-conflict, and conflict-retry
+semantics remain authoritative. The daemon adds no distributed lock and does
+not make separate commands atomic.
+
+## Request identity and mutation outcomes
+
+Every admitted request has an instance-qualified request ID and advances
+through explicit states:
+
+```text
+queued -> canceled
+queued -> executing -> completed
+                  -> canceled (reads only)
+                  -> failed
+                  -> outcome-unknown
+```
+
+The daemon retains a bounded, in-memory-only result ledger for reconnecting
+clients. It is never persisted and its payloads are excluded from default logs.
+A queued request whose client disconnects is removed. A disconnected read may
+be canceled or allowed to finish with its output discarded. An executing
+mutation finishes and records its result while the daemon remains alive.
+
+If the daemon crashes after mutation dispatch without recording a terminal
+result, the client reports `outcome-unknown`. Neither side repeats the mutation.
+Durable exactly-once behavior requires a server-recognized idempotency contract
+and is separate work.
+
+## Output and caller context
+
+The execution protocol keeps stdout, stderr, and exit status distinct and
+ordered. It applies backpressure rather than accumulating unbounded output.
+Stdin uses framed streaming or a bounded complete payload. Client cancellation
+and signals are explicit protocol events.
+
+The client sends its original working directory, absolute forms of recognized
+file arguments, and an allowlisted command environment. The daemon never
+changes process-global cwd to serve a request and never receives the caller's
+complete environment. Interactive TTY commands remain direct.
+
+Request-scoped diagnostics return only to their request. Reactive or transport
+diagnostics that outlive a request go to the daemon log and cannot contaminate
+a later request's stdout or stderr.
+
+## Freshness and connectivity
+
+The retained replica is not an offline result cache. Before executing a
+request, the daemon establishes that the required session is connected and
+synchronized and surfaces permanent authorization failures. If it cannot
+establish freshness, the request fails without returning an old cached value.
+
+The storage transport's normal reconnection machinery remains responsible for
+connection recovery. On each connection epoch the daemon revalidates server
+compatibility before admitting further requests. It does not add a polling
+timer or hidden command retry loop.
+
+## Staleness
+
+### Immutable builds
+
+Client and daemon exchange immutable build identity and protocol versions.
+Mismatch prevents dispatch. The error identifies both builds and requires the
+caller to use the owning client, choose another daemon, or restart it.
+
+### Mutable source checkouts
+
+Git commit identity is insufficient for dirty worktrees. Before announcing
+readiness, a source daemon installs filesystem watchers over a conservative
+manifest containing its implementation sources, workspace configuration, and
+lock inputs. Any relevant event advances the source epoch and permanently marks
+the loaded process stale, even if the file is later changed back.
+
+Pattern files supplied as command inputs are not daemon implementation. They
+are read fresh per request and use content identity for any retained cache.
+
+The daemon also watches its identity key. A key change makes the authenticated
+context stale. Server build compatibility is rechecked on transport reconnect.
+
+### Stale transition
+
+Staleness changes the daemon from `running` to `draining-stale`:
+
+1. Stop admitting new requests.
+2. Let the active request complete under the code generation with which it
+   began.
+3. Reject queued requests with `DAEMON_STALE` without direct fallback.
+4. Drain confirmed writes and tear down request and retained state.
+5. Exit and require an explicit restart.
+
+If staleness is detected during an active mutation, its actual result remains
+authoritative. A successful result is not converted into a generic failure that
+would invite replay. The response adds a stderr warning that the daemon became
+stale and cannot accept another request.
+
+## Lifecycle and crash recovery
+
+Name acquisition and endpoint publication are atomic. Namespace metadata
+contains a daemon instance nonce; PID alone is not proof of ownership because
+PIDs are reused. A client removes an abandoned endpoint only after the control
+endpoint is unreachable and the recorded owner is proven dead.
+
+Graceful stop rejects new admission, rejects queued work, lets the active
+request finish, drains confirmed writes, closes storage sessions, and exits.
+Forced termination is a separately named explicit operation and warns when an
+active mutation can be left outcome-unknown.
+
+The daemon has no automatic idle shutdown. Resource bounds and explicit
+management, rather than a sleep or timeout, govern its lifetime.
+
+## Security
+
+- Runtime directories, metadata, and endpoints are private to the OS user.
+- Startup resists symlink and endpoint-replacement races.
+- The control endpoint verifies same-user peers where the platform supports
+  peer credentials. Endpoint and directory permissions remain the required
+  protection on runtimes, including Deno, that cannot expose Unix peer
+  credentials.
+- Metadata and logs identify the signer by DID or fingerprint and never contain
+  private key bytes.
+- Request payloads and cell values are excluded from default logs.
+- Holding a deserialized signer for the daemon lifetime is an explicit security
+  tradeoff reported by `daemon status`. Any same-user process able to reach the
+  endpoint can ask the daemon to act as that identity without reading or
+  unlocking the key again. A future passphrase, hardware, or interactive key
+  boundary must decide explicitly whether daemon lifetime is allowed to outlive
+  that authorization ceremony.
+
+## Protocol separation
+
+A small stable control protocol supports identity, status, compatibility, and
+shutdown across execution versions. A separately versioned execution protocol
+carries commands, streams, cancellation, and results. Control compatibility
+does not imply permission to execute.
+
+## Implementation stages
+
+1. Use the existing `CF_CLI_TRACE_TIMINGS=1` phase instrumentation and an outer
+   process measurement to define representative direct and warm-workload
+   baselines. Compare the daemon against the compiled CLI and simpler direct-
+   startup optimizations. This is a go/no-go gate: do not build the daemon when
+   the measured reusable cost does not justify its lifecycle and security
+   surface.
+2. Start from `Runtime.dispose({ closeStorage: false })` and prove request-
+   runtime teardown over a retained storage manager. Add the missing
+   scheduler/runner storage unsubscription and demonstrate no live piece,
+   scheduler, subscription, collector, process-global cross-contamination, or
+   background-work leakage.
+3. Implement the private namespace, stable control protocol, explicit lifecycle,
+   compatibility handshake, and source/identity invalidation.
+4. Implement bounded serialized request transport and read-only MVP commands.
+5. Route explicitly selected live completion through the read path.
+6. Add mutation request IDs, terminal-result lookup, confirmed completion, and
+   outcome-unknown handling before enabling mutation commands.
+7. Add filesystem and compiler commands only after cwd, input freshness, and
+   content-cache boundaries are validated.
+
+## Validation
+
+The implementation must demonstrate:
+
+- exact stdout, stderr, JSON, and exit-status parity with direct commands;
+- no request-owned live execution after request cleanup;
+- confirmed writes before the next queued request begins;
+- no automatic replay under disconnect or daemon crash;
+- deterministic rejection of incompatible, foreign, and stale daemons;
+- source and identity changes preventing all later dispatch;
+- bounded queue, result-ledger, provider, cache, and memory growth;
+- no cross-request diagnostic or output contamination;
+- fresh-state failure rather than implicit offline reads; and
+- a material warm-latency improvement on repeated supported commands.
+
+## Open implementation questions
+
+- What extensions around `Runtime.dispose({ closeStorage: false })` provide
+  complete storage unsubscription and correct reset/retention behavior for
+  manager and process-global state?
+- What conservative source manifest covers the source daemon without watching
+  mutable data, logs, and build outputs?
+- What queue, payload, output, and result-ledger bounds fit agent and completion
+  workloads?
+- Which read commands can later prove safe parallel execution without changing
+  their Fabric or output semantics?

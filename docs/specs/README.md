@@ -35,6 +35,7 @@ decision is reversed or superseded).
 
 ### Data, storage, and execution
 
+- [`cf` CLI session daemon](cf-cli-session-daemon.md)
 - [JSON Schema](json_schema.md)
 - [Sigil data model](data-model/sigil.md)
 - [Sparse-array preservation](sparse-array-preservation.md)
