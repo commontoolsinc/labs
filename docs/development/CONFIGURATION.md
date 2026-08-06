@@ -82,7 +82,7 @@ for `TASK_MODELS.coding` / `TASK_MODELS.json`.
 | Var | Purpose |
 |---|---|
 | `FAL_API_KEY` | `/routes/ai/img` (image gen), `/routes/ai/voice` (transcription). |
-| `JINA_API_KEY` | `/routes/ai/webreader`. |
+| `JINA_API_KEY` | `/routes/agent-tools/web-read` (page extraction), `/routes/link-preview` (link previews). |
 
 ---
 

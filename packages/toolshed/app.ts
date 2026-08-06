@@ -5,7 +5,6 @@ import aiLLM from "@/routes/ai/llm/llm.index.ts";
 import configureOpenAPI from "@/lib/configure-open-api.ts";
 import aiImg from "@/routes/ai/img/img.index.ts";
 import aiVoice from "@/routes/ai/voice/voice.index.ts";
-import aiWebReader from "@/routes/ai/webreader/webreader.index.ts";
 import linkPreview from "@/routes/link-preview/link-preview.index.ts";
 import agentToolsWebSearch from "@/routes/agent-tools/web-search/web-search.index.ts";
 import agentToolsWebRead from "@/routes/agent-tools/web-read/web-read.index.ts";
@@ -35,7 +34,6 @@ const routes = [
   aiLLM,
   aiImg,
   aiVoice,
-  aiWebReader,
   linkPreview,
   agentToolsWebSearch,
   agentToolsWebRead,
