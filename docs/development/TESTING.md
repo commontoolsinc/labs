@@ -57,6 +57,12 @@ inside one runs the Deno running the task whatever `PATH` says:
 A test launched from a script can read `Deno.execPath()` directly, as
 `packages/dashboard/test/runner.ts` does with `--allow-run=${Deno.execPath()},git`.
 
+That a task's `deno` is the running one rather than one found on `PATH` is what
+makes the computed form name the right binary, so
+`packages/test-support/src/isolated-deno.test.ts` holds it in place: it runs a
+task with a decoy `deno` as the only entry on the child's `PATH` and fails if the
+decoy is the one that runs.
+
 ### Test Structure
 
 - **Unit tests**: Use `@std/testing/bdd` (`describe`/`it`) with `@std/expect` for assertions
