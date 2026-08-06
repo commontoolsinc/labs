@@ -5,6 +5,7 @@
 
 import { assert, assertEquals } from "@std/assert";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { jsonFromValue } from "@commonfabric/data-model/codec-json";
 import {
   resetModernCellRepConfig,
@@ -15,6 +16,7 @@ import {
   annotate,
   collectLinks,
   decodedLinkOf,
+  summarize,
   summarizeLink,
 } from "../decode.ts";
 import { decodeStored } from "../decode.ts";
@@ -68,14 +70,41 @@ Deno.test("decode: summarizeLink keeps the computed: scheme visible", () => {
 });
 
 Deno.test("decode: BigInt and Fabric instances are JSON-safe after annotate", () => {
-  const annotated = annotate({ big: 10n, nested: [1n, "ok"] }) as {
+  // A Fabric instance is in the fixture because it is half of what this test
+  // is named for: it keeps its state in private fields, so a walk that rebuilds
+  // a record from enumerable properties renders it `{}` -- the outcome
+  // `annotate` exists to prevent.
+  const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+  const annotated = annotate({ big: 10n, bytes, nested: [1n, "ok"] }) as {
     big: { $bigint: string };
+    bytes: { $fabric: string };
     nested: Array<unknown>;
   };
   assertEquals(annotated.big, { $bigint: "10" });
+  assertEquals(
+    Object.keys(annotated.bytes),
+    ["$fabric"],
+    "a Fabric instance is lowered to its debug string, not rebuilt as `{}`",
+  );
+  assert(
+    annotated.bytes.$fabric.length > 0,
+    "the debug string says something",
+  );
   // the whole thing must JSON.stringify without throwing (the HTML/CLI export path)
   const json = JSON.stringify(annotated);
   assert(json.includes('"$bigint"'), "bigint lowered to a tagged record");
+  assert(
+    json.includes('"$fabric"'),
+    "Fabric instance lowered to a tagged record",
+  );
+});
+
+Deno.test("decode: summarize names a Fabric instance rather than its keys", () => {
+  // `summarize` feeds table cells. The empty-brace rendering is the tell that
+  // it descended something it should have named instead.
+  const summary = summarize(new FabricBytes(new Uint8Array([1, 2, 3])));
+  assert(summary !== "{}", "not the empty-record rendering");
+  assert(summary.length > 0, "some canonical description");
 });
 
 Deno.test("decode: a present `undefined` is not silently dropped on export", () => {
