@@ -18,6 +18,7 @@ import {
   githubCiSpend,
 } from "./tiles/github-ci-spend.ts";
 import { projectMonthly, settled } from "./spend.ts";
+import { RUNNING_COLOR, STATUS_COLOR } from "./palette.ts";
 import { modelSpend } from "./tiles/model-spend.ts";
 import {
   benchmark,
@@ -112,7 +113,7 @@ Deno.test(
       "first-try green · 199 of last 200 runs",
     );
     assert(
-      !(view.extra ?? "").includes("#e2504a"),
+      !(view.extra ?? "").includes(STATUS_COLOR.bad),
       "the 201st run must be outside the grid and percentage window",
     );
   },
@@ -133,10 +134,13 @@ Deno.test("labs ci trust grid: cell colors match trust scoring", async () => {
     ...(view.extra ?? "").matchAll(/background:(#[0-9a-f]+)/g),
   ].map((match) => match[1]);
   assertEquals(view.value, "25.0%");
-  assertEquals(colors.filter((color) => color === "#43c574").length, 1);
-  assertEquals(colors.filter((color) => color === "#e2504a").length, 3);
-  assertEquals(colors.filter((color) => color === "#6ea8fe").length, 1);
-  assertEquals(colors.filter((color) => color === "#7c828c").length, 2);
+  assertEquals(colors.filter((color) => color === STATUS_COLOR.good).length, 1);
+  assertEquals(colors.filter((color) => color === STATUS_COLOR.bad).length, 3);
+  assertEquals(colors.filter((color) => color === RUNNING_COLOR).length, 1);
+  assertEquals(
+    colors.filter((color) => color === STATUS_COLOR.unknown).length,
+    2,
+  );
 });
 
 Deno.test("ci-duration window: the 6h window when it has >= 20 runs, else the most recent 20", async () => {

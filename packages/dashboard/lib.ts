@@ -1,6 +1,7 @@
 // Shared helpers used across tiles and the core.
 import type { Status } from "./types.ts";
 import { PROD_SERVICE } from "./config.ts";
+import { RUNNING_COLOR, STATUS_COLOR } from "./palette.ts";
 import {
   type GitHubPrimaryRateLimit,
   performanceGitHubRateLimit,
@@ -150,14 +151,7 @@ export const STATUS_DOT: Record<Status, string> = { good: "green", warn: "amber"
 export const escapeHtml = (s: string) =>
   s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
 
-// Per-status left edge for a sparkline's fade gradient — a shade just below the
-// tile's own (status-tinted) background, so the line fades up out of the tile.
-export const SPARK_FADE: Record<Status, string> = {
-  good: "#0e1915",
-  warn: "#1a1713",
-  bad: "#1e1113",
-  unknown: "#121317",
-};
+export { SPARK_FADE } from "./palette.ts";
 
 // How a sparkline caption spells a day span, consistently across tiles:
 // "5 days", "1 day", "<1 day".
@@ -553,7 +547,13 @@ export function thin<T>(arr: T[], max: number): T[] {
 export function strip(cells: { outcome: string; href: string }[], cols: number): string {
   if (!cells.length) return "";
   const col = (d: string) =>
-    d === "green" ? "#43c574" : d === "red" ? "#e2504a" : d === "run" ? "#6ea8fe" : "#7c828c";
+    d === "green"
+      ? STATUS_COLOR.good
+      : d === "red"
+      ? STATUS_COLOR.bad
+      : d === "run"
+      ? RUNNING_COLOR
+      : STATUS_COLOR.unknown;
   const html = cells.map((c) =>
     `<a class="cell" href="${escapeHtml(c.href)}" target="_blank" rel="noopener" style="background:${col(c.outcome)}"></a>`
   ).join("");
