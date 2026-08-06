@@ -64,15 +64,17 @@ export default pattern<{ me: Cell<User> }>(({ me }) => {
   );
 
   return {
-    [UI]: lift((rows: typeof recent.result) =>
-      (rows ?? []).map((m) => (
-        // m.author_cf_link is a live Cell<User>; reading it is independently reactive
-        <div>
-          <b>{lift((u: User | undefined) => u?.name)(m.author_cf_link)}</b>:{" "}
-          {m.body}
-        </div>
-      ))
-    )(recent.result),
+    [UI]: lift((rows: typeof recent.result) => (
+      <cf-vstack>
+        {(rows ?? []).map((m) => (
+          // m.author_cf_link is a live Cell<User>; reading it is independently reactive
+          <div>
+            <b>{lift((u: User | undefined) => u?.name)(m.author_cf_link)}</b>:{" "}
+            {m.body}
+          </div>
+        ))}
+      </cf-vstack>
+    ))(recent.result),
     send: send.with({ author: me }),
   };
 });

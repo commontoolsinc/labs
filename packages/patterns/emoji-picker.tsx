@@ -11,6 +11,7 @@ import {
   NAME,
   pattern,
   UI,
+  type UIRenderable,
   Writable,
 } from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
@@ -2684,7 +2685,10 @@ const clearSelection = handler<unknown, { selectedEmoji: Writable<string> }>(
 );
 
 // ===== The Pattern =====
-export const EmojiPicker = pattern<EmojiPickerInput, EmojiPickerInput>(
+export const EmojiPicker = pattern<
+  EmojiPickerInput,
+  EmojiPickerInput & UIRenderable
+>(
   ({ selectedEmoji }) => {
     const displayText = computed(() =>
       selectedEmoji ? `Selected: ${selectedEmoji}` : "None"
