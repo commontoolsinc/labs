@@ -125,7 +125,6 @@
     "npm:hono@^4.12.31": "4.12.31",
     "npm:htmlparser2@12": "12.0.0",
     "npm:htmlparser2@12.0.0": "12.0.0",
-    "npm:json5@^2.2.3": "2.2.3",
     "npm:jsonschema@^1.5.0": "1.5.0",
     "npm:leaflet@^1.9.4": "1.9.4",
     "npm:lit@^3.3.3": "3.3.3",
@@ -1652,10 +1651,6 @@
     "json-schema@0.4.0": {
       "integrity": "sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA=="
     },
-    "json5@2.2.3": {
-      "integrity": "sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==",
-      "bin": true
-    },
     "jsonschema@1.5.0": {
       "integrity": "sha512-K+A9hhqbn0f3pJX17Q/7H6yQfD/5OXgdrR5UE12gMXCiN9D5Xq2o5mddV2QEcX/bjla99ASsAAQUyMCCRWAEhw=="
     },
@@ -2076,11 +2071,6 @@
         "dependencies": [
           "npm:source-map-js@^1.2.1",
           "npm:typescript@6.0.3"
-        ]
-      },
-      "packages/llm": {
-        "dependencies": [
-          "npm:json5@^2.2.3"
         ]
       },
       "packages/memory": {
