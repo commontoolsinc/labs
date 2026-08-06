@@ -797,6 +797,20 @@ persists as-is, a live cell handle converts to a link, so a one-line setter
 verb's receipt links to the cell it mutated. The create-only witness
 semantics are unchanged either way.
 
+A receipt-only handling also describes what it wrote, in the same transaction,
+on the cell's durable `schema` metadata — so a receipt says what it holds the
+way any other cell does, which is what lets a reader's selection narrow the
+fetch instead of filtering an already-loaded value. The description is
+structural and nothing more: the root container kind, plus the property names
+when that kind is a record. Every property is left admissible, which is what
+keeps a link position honest, since the spelling that would name one is
+`asCell` and `["cell"]` asserts a writable handle on a document nothing can be
+written through. A value with no container kind of its own — a scalar, or a
+link, whose kind is its target's — goes undeclared. None of this constrains a
+later write: the create-only mark means the value the schema describes is the
+only value that document ever holds. A verb's *declared* result type is a
+separate question, settled at the type layer and never reaching the runtime.
+
 For an inline, non-navigation handler result, an `inSpace` child does not move
 that canonical handler-result wrapper into the child space. The result/receipt
 stays in the handler's originating space, while each child node materializes its
