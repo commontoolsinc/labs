@@ -99,6 +99,20 @@ export function createRef(
     if (obj instanceof BaseFabricPrimitive) return obj;
     if (isSigilLink(obj) || isEntityRef(obj)) return obj;
 
+    // A cell's METHOD is not a value. A `Reactive` answers a method name with a
+    // proxy that is callable and is also a projection of the cell at that name,
+    // so the encodable form of one is a link to a path holding nothing. Deriving
+    // from it would name a document after a path that does not exist, so it
+    // fails closed rather than mint an id nobody can resolve (audit S14).
+    //
+    // A builder artifact is a function carrying the member too, and is not
+    // reactive, which is what separates the two here.
+    if (typeof obj === "function" && isReactive(obj)) {
+      throw new Error(
+        "[createRef] Cell method is not a value; cannot derive a stable id",
+      );
+    }
+
     // A builder artifact is replaced by its encodable form, then descended
     // into: what the ref is derived from is the form that gets written.
     // Functions qualify because a pattern factory is one.
