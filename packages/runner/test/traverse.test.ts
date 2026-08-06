@@ -1916,6 +1916,27 @@ describe("canBranchMatch", () => {
     ).toBe(true);
   });
 
+  it("treats the nominal brand key as present on a fabric value", () => {
+    // The generator's emitted shape for a FabricBytes-typed field: the
+    // brand has no runtime existence, so a fabric value satisfies it by
+    // construction; `length` is satisfied by the class accessor.
+    const branch = {
+      type: "object",
+      required: ["length", "@commonfabric/FabricSpecialObject"],
+    } as const;
+    expect(canBranchMatch(branch, new FabricBytes(new Uint8Array([1]))))
+      .toBe(true);
+    // No exemption for a plain record, which genuinely lacks the brand.
+    expect(canBranchMatch(branch, { length: 1 })).toBe(false);
+    // A key the primitive lacks still rejects it.
+    expect(
+      canBranchMatch(
+        { type: "object", required: ["x"] },
+        new FabricBytes(new Uint8Array([1])),
+      ),
+    ).toBe(false);
+  });
+
   it("conservatively accepts property-level const (values may be unresolved links)", () => {
     // Even when the property value doesn't match the const, we can't reject
     // because the value might be a link that resolves to a matching value.

@@ -319,6 +319,38 @@ describe("FabricPrimitive leaf routing in schema traversal", () => {
     expect(got.blob).toBeInstanceOf(FabricBytes);
   });
 
+  it("matches the generator's brand-requiring branch of an anyOf", async () => {
+    // The anyOf prefilters must apply the same brand exemption as the leaf
+    // arm: a branch requiring ["length", brand] is satisfiable by a
+    // FabricBytes, so pre-pruning must not reject it.
+    const schema = {
+      type: "object",
+      properties: {
+        blob: {
+          anyOf: [
+            {
+              type: "object",
+              required: ["length", "@commonfabric/FabricSpecialObject"],
+            },
+            { type: "string" },
+          ],
+        },
+      },
+    } as const satisfies JSONSchema;
+    const c = runtime.getCell<{ blob: Uint8Array }>(
+      space,
+      "typed-fabric-anyof-brand",
+      schema,
+      tx,
+    );
+    c.set({ blob: new Uint8Array([8]) });
+    await tx.commit();
+    tx = runtime.edit();
+
+    const got = c.withTx(tx).get() as Record<string, unknown>;
+    expect(got.blob).toBeInstanceOf(FabricBytes);
+  });
+
   it("rejects a FabricPrimitive when every anyOf branch demands `required`", async () => {
     const schema = {
       type: "object",
