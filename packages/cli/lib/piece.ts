@@ -331,6 +331,14 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
             as: session.as,
             memoryHost: new URL(config.apiUrl),
             spaceIdentity: session.spaceIdentity,
+            // CLI parity with the shell's dogfood toggle for this storage
+            // setting; registry entry in
+            // docs/development/EXPERIMENTAL_OPTIONS.md.
+            settings: {
+              experimentalConcurrentWatchRefresh:
+                Deno.env.get("EXPERIMENTAL_CONCURRENT_WATCH_REFRESH") ===
+                  "true",
+            },
           }),
           experimental: experimentalOptionsFromEnv(Deno.env.get),
           errorHandlers: [

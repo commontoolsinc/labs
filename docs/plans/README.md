@@ -43,6 +43,11 @@ a record: archive it to `docs/history/plans/` following the procedure in
 - [Topics migration rehearsal](topics-migration-rehearsal.md) is the concrete,
   unexecuted script for `setsrc`-ing the Estuary Topics board against a clone
   and then live.
+- [Topics interaction performance](topics-performance-improvement.md)
+  sequences the staged reduction of interaction cost — bytes moved, sync
+  waves, compute floor, and storage growth — toward few-second interactions,
+  with the measured evidence frozen in
+  [`../history/topics-performance-testbed-2026-08-06.md`](../history/topics-performance-testbed-2026-08-06.md).
 - [`cf space clone` rehearsal](space-clone-rehearsal.md) records the design for
   rehearsal-grade copies of populated spaces. The tooling has shipped (`cf
   space`, `cf inspect churn`); the operating procedure lives in

@@ -40,6 +40,30 @@ import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 
+/**
+ * `CF_WS_SIZE_LOG=1` logs every outbound protocol message as
+ * `[ws-out] <type> <bytes>` on stderr — the per-message composition behind a
+ * connection's transfer volume. Bytes are the UTF-8 length of the encoded
+ * payload (what the wire carries, before WebSocket framing). The `typeof Deno`
+ * guard keeps this client loadable in browser workers; the try/catch keeps it
+ * loadable in Deno processes running without `--allow-env` — a denied read
+ * counts as unset, any other failure propagates (the same shape as
+ * `sqlite/column-origin.ts`).
+ */
+const WS_SIZE_LOG = typeof Deno !== "undefined" && (() => {
+  try {
+    return Deno.env.get("CF_WS_SIZE_LOG") === "1";
+  } catch (e) {
+    if (
+      e instanceof Deno.errors.NotCapable ||
+      e instanceof Deno.errors.PermissionDenied
+    ) {
+      return false;
+    }
+    throw e;
+  }
+})();
+
 export type Transport = {
   send(payload: string): Promise<void>;
   close(): Promise<void>;
@@ -266,7 +290,7 @@ export class Client {
     const requestId = message.requestId as string;
     const pending = Promise.withResolvers<unknown>();
     this.#pending.set(requestId, pending);
-    await this.transport.send(encodeMemoryBoundary(message));
+    await this.send(message);
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
@@ -327,16 +351,26 @@ export class Client {
     await this.ensureConnected();
   }
 
+  /** Single exit for outbound messages so `CF_WS_SIZE_LOG` sees every send. */
+  private send(message: FabricPlainObject): Promise<void> {
+    const encoded = encodeMemoryBoundary(message);
+    if (WS_SIZE_LOG) {
+      const bytes = new TextEncoder().encode(encoded).length;
+      console.error(`[ws-out] ${String(message.type)} ${bytes}`);
+    }
+    return this.transport.send(encoded);
+  }
+
   private async hello(): Promise<void> {
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
     try {
       await Promise.all([
-        this.transport.send(encodeMemoryBoundary({
+        this.send({
           type: "hello",
           protocol: MEMORY_PROTOCOL,
           flags: getMemoryProtocolFlags(),
-        })),
+        }),
         ack.promise,
       ]);
       this.#connected = true;

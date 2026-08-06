@@ -44,7 +44,7 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237); `hold` removed CT-1925 (#5110) | keep `preempt` as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
-| [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off | Ben Follington (#4937; shell toggle #4974) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default, not yet measured over real latency |
+| [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile); in the CLI, `EXPERIMENTAL_CONCURRENT_WATCH_REFRESH=true` | off | Ben Follington (#4937; shell toggle #4974) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default; WAN-testbed measurement 2026-08-06 shows no effect on the cold-start CLI workload (waves are dependent) — removal decision tracked in CT-1959 |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
 
@@ -730,7 +730,14 @@ the per-epic implementation notes).
   effect on the next runtime (reload), not live. Threaded shell → worker via
   `runtimeHostFlags()`
   ([`packages/shell/src/lib/host-toggles.ts`](../../packages/shell/src/lib/host-toggles.ts))
-  → `RuntimeInternals.create` → `runtime-processor.ts`'s storage settings.
+  → `RuntimeInternals.create` → `runtime-processor.ts`'s storage settings. In
+  the **CLI** (`loadManager` in
+  [`packages/cli/lib/piece.ts`](../../packages/cli/lib/piece.ts) and
+  `PiecesController` in
+  [`packages/piece/src/ops/pieces-controller.ts`](../../packages/piece/src/ops/pieces-controller.ts))
+  the environment variable `EXPERIMENTAL_CONCURRENT_WATCH_REFRESH=true`
+  enables it for that process — dogfood parity so command-line A/B runs can
+  exercise the flag.
 - **Added by.** Ben Follington (#4937; shell dogfood toggle #4974).
 - **Purpose.** By default watch acquisition is strict single-flight per space: a
   guard holds every watch refresh after the first until the prior response
@@ -747,8 +754,13 @@ the per-epic implementation notes).
   a tuning value. End state is either graduation to always-on with a settled
   window, or removal if the render-side fix (initial-render descent) makes the
   waterfall shallow enough that concurrency no longer pays.
-- **Status on 2026-07-24.** Implemented behind the flag, off by default; not yet
-  measured end-to-end over real latency.
+- **Status on 2026-08-06.** Implemented behind the flag, off by default.
+  Measured on a WAN-emulated rehearsal-clone testbed (190 ms RTT): no effect
+  on the cold-start CLI workload (16.9 s off vs 16.6 s on) — the cold-start
+  waves are dependent (each wave's targets are discovered from the previous
+  wave's values), which overlapping cannot collapse. Evidence:
+  [`../history/topics-performance-testbed-2026-08-06.md`](../history/topics-performance-testbed-2026-08-06.md).
+  This supports the removal path below; the decision is tracked in CT-1959.
 - **Path to removal.** Graduate to always-on once measured safe and beneficial,
   or remove if superseded by reducing the round-trip count at the source.
 

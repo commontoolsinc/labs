@@ -269,6 +269,12 @@ export class PiecesController<T = unknown> {
         as: session.as,
         memoryHost: new URL(apiUrl),
         spaceIdentity: session.spaceIdentity,
+        // CLI parity with the shell's dogfood toggle for this storage
+        // setting; registry entry in docs/development/EXPERIMENTAL_OPTIONS.md.
+        settings: {
+          experimentalConcurrentWatchRefresh:
+            readEnv("EXPERIMENTAL_CONCURRENT_WATCH_REFRESH") === "true",
+        },
       }),
       experimental: experimentalOptionsFromEnv(readEnv),
       moduleByteCache,
