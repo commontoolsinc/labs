@@ -37,7 +37,7 @@ import {
   type WatchAddResult,
 } from "../v2.ts";
 import { Server } from "../v2/server.ts";
-import { connect, type Transport } from "../v2/client.ts";
+import { connect, loopback, type Transport } from "../v2/client.ts";
 import {
   compressServerMessageSchemas,
   compressSessionSyncSchemas,
@@ -1023,56 +1023,23 @@ Deno.test("connection-scoped schema bodies span a connection, not a frame", asyn
   }
 });
 
-/**
- * A loopback that opens a fresh server connection whenever it has none, the
- * way `WebSocketTransport` opens a fresh socket once the old one is not OPEN.
- * `loopback()` binds one `Server.connect` for its lifetime, so it cannot carry
- * a client through a reconnect. `rewrite` sees each outbound frame and may
- * alter it, standing in for what a transport does to a frame in flight.
- */
-const reconnectingLoopback = (
-  server: Server,
-  rewrite: (payload: string) => string,
-): Transport => {
-  let receiver = (_payload: string) => {};
-  let closeReceiver = (_error?: Error) => {};
-  let connection: ReturnType<Server["connect"]> | null = null;
-  const open = () => {
-    connection ??= server.connect((message) => {
-      receiver(rewrite(encodeMemoryBoundary(message)));
-    });
-    return connection;
-  };
-  return {
-    async send(payload) {
-      await open().receive(payload);
-    },
-    close() {
-      const current = connection;
-      connection = null;
-      current?.close();
-      closeReceiver();
-      return Promise.resolve();
-    },
-    setReceiver(next) {
-      receiver = next;
-    },
-    setCloseReceiver(next) {
-      closeReceiver = next;
-    },
-  };
+/** What a watch view holds after a frame the client could not process. */
+type LostFrameOutcome = {
+  /** The document whose schema rode on the lost frame. */
+  lost: EntityDocument | null | undefined;
+  /** A later document naming that same schema. */
+  later: EntityDocument | null | undefined;
 };
 
 /**
- * Drives a real Client against a real Server, corrupting the first
- * session/effect so the client's decode fails on it — the frame reaches the
- * client, which then cannot process it. Returns what the watch view holds for
- * a document whose schema rode on that lost frame.
+ * Drives a real Client against a real Server over `loopback`, corrupting one
+ * session/effect so the client's own decode path fails on it — the frame
+ * reaches the client, which then cannot process it.
  */
-const documentAfterALostEffect = async (
+const watchAfterALostEffect = async (
   label: string,
   cas: boolean,
-): Promise<EntityDocument | null | undefined> => {
+): Promise<LostFrameOutcome> => {
   setSyncSchemaCasConfig(cas);
   const space = `did:key:z6Mk-sync-schema-lost-frame-${label}`;
   const server = new Server({
@@ -1083,14 +1050,25 @@ const documentAfterALostEffect = async (
     // refresh happened to emit first.
     subscriptionRefreshDelayMs: 60_000,
   });
+  const base = loopback(server);
   let corruptNextEffect = false;
-  const transport = reconnectingLoopback(server, (payload) => {
-    if (corruptNextEffect && payload.includes("session/effect")) {
-      corruptNextEffect = false;
-      return `${payload}!corrupt`;
-    }
-    return payload;
-  });
+  const transport: Transport = {
+    send: (payload) => base.send(payload),
+    close: () => base.close(),
+    setReceiver(next) {
+      base.setReceiver((payload) => {
+        if (corruptNextEffect && payload.includes("session/effect")) {
+          corruptNextEffect = false;
+          next(`${payload}!corrupt`);
+          return;
+        }
+        next(payload);
+      });
+    },
+    setCloseReceiver(next) {
+      base.setCloseReceiver?.(next);
+    },
+  };
 
   const client = await connect({ transport });
   try {
@@ -1125,14 +1103,13 @@ const documentAfterALostEffect = async (
     // Woken by the view, not by a deadline: an update that never arrives
     // leaves this await pending with nothing else holding the loop, which
     // Deno reports as a failure rather than a hang.
-    while (true) {
+    const documentOf = (id: string) =>
+      view.entities.find((entity) => entity.id === id)?.document;
+    while (documentOf("of:later") == null) {
       const update = await updates.next();
-      if (update.done) return undefined;
-      const later = update.value.entities.find(
-        (entity) => entity.id === "of:later",
-      );
-      if (later?.document != null) return later.document;
+      if (update.done) break;
     }
+    return { lost: documentOf("of:lost"), later: documentOf("of:later") };
   } finally {
     await client.close();
     await server.close();
@@ -1140,13 +1117,27 @@ const documentAfterALostEffect = async (
   }
 };
 
-Deno.test("a connection that loses a frame recovers under either encoding", async () => {
-  // The frame-local encoding heals on the next frame: it describes itself.
-  assertExists(await documentAfterALostEffect("frame-local", false));
-  // The connection-scoped encoding cannot heal in place — the body is gone
-  // and no request can fetch it — so the client must discard the connection
-  // and let a fresh one re-teach the bodies.
-  assertExists(await documentAfterALostEffect("cas", true));
+Deno.test("a frame the client cannot process costs that frame, not the connection", async () => {
+  // Under the frame-local encoding the next frame describes itself, so the
+  // connection keeps delivering.
+  const frameLocal = await watchAfterALostEffect("frame-local", false);
+  assertExists(frameLocal.later);
+
+  // The connection-scoped encoding cannot heal in place: the server counts
+  // the lost frame's body as delivered, later frames reference it bare, and
+  // no request fetches a schema by hash. The client must discard the
+  // connection so a fresh one re-teaches the bodies. Without that, `later`
+  // never arrives and this wait fails.
+  const cas = await watchAfterALostEffect("cas", true);
+  assertExists(cas.later);
+
+  // What is NOT recovered, under EITHER encoding: the lost frame's own
+  // content. Its upserts advanced the server's session cache when the frame
+  // was built, and resume-time catch-up diffs against that advanced cache —
+  // see rollbackUndeliveredSync, which repairs only a send that threw. The
+  // discard restores the connection, not the frame.
+  assertEquals(frameLocal.lost, null);
+  assertEquals(cas.lost, null);
 });
 
 Deno.test("both peers must advertise cas before a frame stops describing itself", async () => {

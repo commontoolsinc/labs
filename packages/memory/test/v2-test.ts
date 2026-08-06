@@ -310,6 +310,27 @@ describe("parseMemoryProtocolFlags", () => {
     );
   });
 
+  it("accepts the canonical syncSchemaCasV1 key", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({
+        syncSchemaCasV1: true,
+      }),
+      {
+        modernCellRep: false,
+        persistentSchedulerState: false,
+        commitPreconditions: false,
+        syncSchemaTableV2: false,
+        syncSchemaCasV1: true,
+        sqliteCommitRowLabelEval: false,
+        pendingReadStacks: false,
+        verdictCatchUpMarkers: false,
+        entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
+      },
+    );
+  });
+
   it("accepts the sqliteCommitRowLabelEval capability key", () => {
     assertEquals(
       parseMemoryProtocolFlags({
@@ -434,6 +455,7 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags([true]), null);
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: "true" }), null);
     assertEquals(parseMemoryProtocolFlags({ syncSchemaTableV2: "true" }), null);
+    assertEquals(parseMemoryProtocolFlags({ syncSchemaCasV1: "true" }), null);
     assertEquals(
       parseMemoryProtocolFlags({ verdictCatchUpMarkers: "true" }),
       null,

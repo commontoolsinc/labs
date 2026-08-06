@@ -3015,10 +3015,14 @@ export class Server {
    * evaluation cannot elide them as already-snapshotted), re-stage its
    * marker obligation, and re-dirty its ids origin-less so a pass is
    * scheduled and the docs fan out authoritatively. Rollback rather than
-   * buffering: only a locally-throwing send is visible in-process, and a
-   * dying socket loses "successfully sent" frames just the same — the
-   * durable repair for that is resume-time catch-up, not a server-side
-   * buffer. A doc REMOVED by the lost frame is the accepted residue: its
+   * buffering: only a locally-throwing send is visible in-process, so this is
+   * the whole repair, and it reaches only the losses it is told about. A frame
+   * a dying socket accepted and dropped, or one the peer received and failed
+   * to process, already advanced this cache at build time; resume-time
+   * catch-up diffs against that advanced cache and so does not re-send it.
+   * Those frames' contents are lost to that client until a full
+   * re-evaluation. A doc REMOVED by the lost frame is the accepted residue:
+   * its
    * cache entry is already gone and cannot be re-diffed; the client keeps
    * it until a full re-evaluation or reconnect (watch-shrink removes are
    * advisory today). */

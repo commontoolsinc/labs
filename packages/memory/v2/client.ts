@@ -518,27 +518,45 @@ export class Client {
     if (!this.#schemaCasNegotiated || this.#closed || !this.#connected) {
       return;
     }
-    // Closing comes FIRST: reconnect() reuses a transport whose socket is
-    // still open, which would keep the server's Connection — and the
-    // delivered set that is the problem — alive. The transport's close
-    // receiver then drives the usual reconnect; a transport that has none is
-    // driven here instead.
-    void this.transport.close().catch(() => undefined).finally(() => {
-      if (this.#connected && !this.#closed) {
-        this.onClose(error);
-      }
-    });
+    // Leave the connected state SYNCHRONOUSLY, before yielding to the close.
+    // A transport's close can take arbitrarily long — a half-open socket is
+    // exactly where a frame gets mangled — and anything that observed a
+    // connected client meanwhile would send on a transport already on its way
+    // out: `ensureConnected` would skip the handshake, and the transport would
+    // open a fresh socket that never receives a `hello`. Clearing the flag
+    // here also makes this single-flight, so the further frames a desynced
+    // connection is expected to fail start no second discard.
+    this.markDisconnected(error);
+    void this.transport.close()
+      .catch(() => undefined)
+      .then(() => this.#closed ? undefined : this.reconnect())
+      .catch(() => undefined);
+  }
+
+  /** The state half of a disconnect: stop reporting connected, tell the
+   *  sessions, and settle everything in flight. Split out of {@link onClose}
+   *  so a discard can take it synchronously and leave the reconnect to its
+   *  own sequencing. */
+  private markDisconnected(error?: Error): void {
+    this.#connected = false;
+    for (const session of this.#spaces) {
+      session.handleDisconnect();
+    }
+    this.rejectPending(toConnectionError(error));
   }
 
   private onClose(error?: Error): void {
     if (this.#closed) {
       return;
     }
-    this.#connected = false;
-    for (const session of this.#spaces) {
-      session.handleDisconnect();
-    }
-    this.rejectPending(toConnectionError(error));
+    // Runs on the close a discard initiated as well as on an unsolicited one.
+    // Both halves tolerate the repeat: `handleDisconnect` only clears a flag,
+    // `rejectPending` finds the map already drained, and `reconnect` is
+    // single-flighted, so the second caller joins the first attempt rather
+    // than starting a competing one. This must NOT be skipped while
+    // disconnected — a close arriving mid-handshake is what settles the
+    // pending hello and lets the reconnect loop take its next attempt.
+    this.markDisconnected(error);
     void this.reconnect().catch(() => undefined);
   }
 
@@ -1685,21 +1703,38 @@ export const connect = Client.connect;
 
 export const loopback = (server: Server): Transport => {
   let receiver = (_payload: string) => {};
-  const connection = server.connect((message) => {
-    receiver(encodeMemoryBoundary(message));
-  });
+  let closeReceiver = (_error?: Error) => {};
+  let connection: ReturnType<Server["connect"]> | null = null;
+  // Opened on demand rather than once, so a client that closes this transport
+  // can reconnect through it — a closed Connection refuses every message, and
+  // binding one for the transport's lifetime would strand the client mid
+  // handshake. Mirrors WebSocketTransport, which opens a fresh socket whenever
+  // it has none.
+  const open = () => {
+    connection ??= server.connect((message) => {
+      receiver(encodeMemoryBoundary(message));
+    });
+    return connection;
+  };
   return {
     async send(payload: string) {
-      await connection.receive(payload);
+      await open().receive(payload);
     },
     close() {
-      connection.close();
+      const current = connection;
+      connection = null;
+      current?.close();
+      if (current !== null) {
+        closeReceiver();
+      }
       return Promise.resolve();
     },
     setReceiver(next) {
       receiver = next;
     },
-    setCloseReceiver() {},
+    setCloseReceiver(next) {
+      closeReceiver = next;
+    },
   };
 };
 

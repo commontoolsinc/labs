@@ -495,6 +495,12 @@ carry an obligation for the gap:
   frame describes itself and the connection heals. Establishing a new
   connection resets the server's delivered set.
 
+Discarding restores the connection, not the frame. Under either encoding, the
+documents carried by a frame that never reached its peer are not redelivered:
+their upserts advanced the session's server-side cache when the frame was
+built, and resume-time catch-up diffs against that advanced cache. A send that
+fails observably is the one case repaired, by rolling that advance back.
+
 Because the delivered set is per connection, a reconnect resets the server's
 side while a client may retain bodies from the previous connection. That
 direction is safe: the server re-sends a body the client already holds.

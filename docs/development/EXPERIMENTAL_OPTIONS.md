@@ -683,6 +683,11 @@ the per-epic implementation notes).
   frames reference them bare, and no protocol request fetches a schema by hash.
   The client therefore discards the connection when a frame fails to decode or
   expand, and the fresh connection starts the server's delivered set empty.
+  What that restores is the connection, not the frame. A lost frame's own
+  documents are gone to that client under **both** encodings — their upserts
+  advanced the server's session cache when the frame was built, and
+  resume-time catch-up diffs against that advanced cache. Only a send that
+  throws is repaired, by `rollbackUndeliveredSync`.
 - **Current default and planned end state.** Off by default while the
   per-connection cost is measured. Both sides grow monotonically: the server
   keeps a set of tagged hashes per connection, and the client keeps whole
