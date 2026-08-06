@@ -90,11 +90,9 @@ Deno.test("an unknown budget yields no threshold rather than a guess", () => {
   assertEquals(compactThresholdForBudget(1_000, 2_000), undefined);
 });
 
-Deno.test("compaction is sent once the registry budget is known", async () => {
+Deno.test("listModels primes the compaction budget", async () => {
   const captured: Captured[] = [];
-  // Order matches the call sequence below: completion, registry, completion.
   const client = clientWith(captured, [
-    completed([]),
     registry([{
       id: MODEL,
       capabilities: { contextWindow: 1_050_000, maxOutputTokens: 128_000 },
@@ -102,16 +100,12 @@ Deno.test("compaction is sent once the registry budget is known", async () => {
     completed([]),
   ]);
 
-  // Before discovery there is no budget, so no threshold is asserted.
-  await client.complete(turn());
-  assertEquals(captured[0].body.context_management, undefined);
-
   const models = await client.listModels();
   assertEquals(models[0].contextWindow, 1_050_000);
   assertEquals(models[0].maxOutputTokens, 128_000);
 
   await client.complete(turn());
-  assertEquals(captured[2].body.context_management, [{
+  assertEquals(captured[1].body.context_management, [{
     type: "compaction",
     compact_threshold: 691_500,
   }]);
@@ -313,13 +307,33 @@ Deno.test("a compaction from another model is not replayed", async () => {
 // The default must work on the normal run path, with no primed catalog.
 // ---------------------------------------------------------------------------
 
-const bigTranscript = (): HarnessTranscriptMessage[] => [
-  { role: "user", content: "x".repeat(250_000) },
+const toolHeavyTranscript = (): HarnessTranscriptMessage[] => [
+  { role: "user", content: "Go." },
+  {
+    role: "assistant",
+    content: "",
+    toolCalls: [{
+      id: "call-large",
+      type: "function",
+      function: {
+        name: "write_file",
+        arguments: JSON.stringify({ content: "x".repeat(210_000) }),
+      },
+    }],
+  },
+  {
+    role: "tool",
+    toolCallId: "call-large",
+    toolName: "write_file",
+    content: "done",
+  },
 ];
 
-Deno.test("the default threshold applies without any listModels() call", async () => {
+Deno.test("the default accounts for the rendered Responses input", async () => {
   const captured: Captured[] = [];
-  // Nothing primes the catalog here: this is what a real run does.
+  // Nothing primes the catalog here: this is what a normal run does. Budget
+  // discovery cannot be gated on transcript text because the rendered input
+  // also contains tools, images, and encrypted continuation items.
   const client = clientWith(captured, [
     registry([{
       id: MODEL,
@@ -328,7 +342,7 @@ Deno.test("the default threshold applies without any listModels() call", async (
     completed([]),
   ]);
 
-  await client.complete(turn({ transcript: bigTranscript() }));
+  await client.complete(turn({ transcript: toolHeavyTranscript() }));
 
   assertEquals(captured[0].url, `${GATEWAY}/v1/models`);
   assertEquals(captured[1].body.context_management, [{
@@ -337,7 +351,7 @@ Deno.test("the default threshold applies without any listModels() call", async (
   }]);
 });
 
-Deno.test("discovery is attempted once, then reused", async () => {
+Deno.test("successful discovery is attempted once, then reused", async () => {
   const captured: Captured[] = [];
   const client = clientWith(captured, [
     registry([{
@@ -347,8 +361,8 @@ Deno.test("discovery is attempted once, then reused", async () => {
     completed([]),
   ]);
 
-  await client.complete(turn({ transcript: bigTranscript() }));
-  await client.complete(turn({ transcript: bigTranscript() }));
+  await client.complete(turn({ transcript: toolHeavyTranscript() }));
+  await client.complete(turn());
 
   const listCalls = captured.filter((c) => c.url.endsWith("/v1/models")).length;
   assertEquals(listCalls, 1, "discovery must not repeat per turn");
@@ -358,7 +372,6 @@ Deno.test("small turns pay no discovery round trip", async () => {
   const captured: Captured[] = [];
   const client = clientWith(captured, [completed([])]);
 
-  // Nothing this small can approach any registry-derived threshold.
   await client.complete(turn());
 
   assertEquals(captured.length, 1);
@@ -366,9 +379,23 @@ Deno.test("small turns pay no discovery round trip", async () => {
   assertEquals(captured[0].body.context_management, undefined);
 });
 
-Deno.test("an unreachable registry degrades instead of failing the run", async () => {
+Deno.test("an explicit threshold avoids registry discovery", async () => {
   const captured: Captured[] = [];
-  let call = 0;
+  const client = clientWith(captured, [completed([])]);
+
+  await client.complete(turn({ compactThreshold: 12_000 }));
+
+  assertEquals(captured.length, 1);
+  assertEquals(captured[0].url, `${GATEWAY}/v1/responses`);
+  assertEquals(captured[0].body.context_management, [{
+    type: "compaction",
+    compact_threshold: 12_000,
+  }]);
+});
+
+Deno.test("a later turn retries after an unreachable registry", async () => {
+  const captured: Captured[] = [];
+  let registryCalls = 0;
   const client = new OpenAICompatibleGatewayModelClient(
     new OpenAICompatibleGatewayClient({
       baseUrl: GATEWAY,
@@ -380,10 +407,24 @@ Deno.test("an unreachable registry degrades instead of failing the run", async (
             ? JSON.parse(String(init.body)) as Record<string, unknown>
             : {},
         });
-        call += 1;
-        // Discovery fails; the completion that follows must still succeed.
         if (String(input).endsWith("/v1/models")) {
-          return Promise.resolve(new Response("nope", { status: 503 }));
+          registryCalls += 1;
+          // The current turn degrades gracefully. The next turn must retry
+          // rather than treating this transient failure as a populated cache.
+          return Promise.resolve(
+            registryCalls === 1
+              ? new Response("nope", { status: 503 })
+              : new Response(
+                JSON.stringify(registry([{
+                  id: MODEL,
+                  capabilities: {
+                    contextWindow: 1_050_000,
+                    maxOutputTokens: 128_000,
+                  },
+                }])),
+                { status: 200 },
+              ),
+          );
         }
         return Promise.resolve(
           new Response(JSON.stringify(completed([])), { status: 200 }),
@@ -392,12 +433,28 @@ Deno.test("an unreachable registry degrades instead of failing the run", async (
     }),
   );
 
-  const result = await client.complete(turn({ transcript: bigTranscript() }));
-  assertEquals(result.assistant.content, "");
+  const first = await client.complete(turn({
+    transcript: toolHeavyTranscript(),
+  }));
+  assertEquals(first.assistant.content, "");
   // Compaction is a guard, so losing it is not worth failing a run over.
-  const last = captured[captured.length - 1];
-  assertEquals(last.body.context_management, undefined);
-  assert(call >= 2);
+  assertEquals(captured[1].body.context_management, undefined);
+
+  const second = await client.complete(turn({
+    transcript: toolHeavyTranscript(),
+  }));
+  assertEquals(second.assistant.content, "");
+  assertEquals(registryCalls, 2);
+  assertEquals(captured.map((call) => call.url), [
+    `${GATEWAY}/v1/models`,
+    `${GATEWAY}/v1/responses`,
+    `${GATEWAY}/v1/models`,
+    `${GATEWAY}/v1/responses`,
+  ]);
+  assertEquals(captured[3].body.context_management, [{
+    type: "compaction",
+    compact_threshold: 691_500,
+  }]);
 });
 
 // ---------------------------------------------------------------------------

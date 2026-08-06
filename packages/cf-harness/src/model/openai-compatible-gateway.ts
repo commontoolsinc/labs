@@ -24,6 +24,7 @@ import {
   assertPromptCacheModeSupported,
   normalizeTerminalResponse,
   providerRunAffinityKey,
+  type ResponsesInputItem,
   toResponsesInput,
   toResponsesTools,
 } from "./responses-protocol.ts";
@@ -286,25 +287,32 @@ const toModelAttempt = (
 });
 
 /**
- * Transcript size below which registry discovery is not worth a round trip.
+ * Conservative serialized-input size at which model-budget discovery starts.
  *
- * The smallest input budget the registry advertises is 272,000 tokens, so the
- * smallest 75% guard sits at 204,000 — roughly 800,000 characters. A turn
- * under this floor cannot approach any derived threshold, so ordinary runs
- * pay no extra request and only genuinely large contexts trigger discovery.
+ * This is deliberately measured after Responses conversion rather than from
+ * transcript text. The wire input also carries tool-call arguments, images,
+ * encrypted continuation items, and tool schemas, any of which can dominate
+ * the token count. UTF-8 bytes avoid pretending to know the model tokenizer;
+ * the floor only decides when one cached registry request becomes worthwhile.
  */
-const BUDGET_DISCOVERY_FLOOR_CHARS = 200_000;
+const BUDGET_DISCOVERY_FLOOR_BYTES = 200_000;
 
-const transcriptSize = (
-  transcript: readonly HarnessTranscriptMessage[],
+const renderedResponsesInputByteLength = (
+  instructions: string | undefined,
+  input: readonly ResponsesInputItem[],
+  tools: readonly ResponsesInputItem[],
 ): number =>
-  transcript.reduce((total, message) => total + message.content.length, 0);
+  new TextEncoder().encode(JSON.stringify({
+    ...(instructions !== undefined ? { instructions } : {}),
+    input,
+    ...(tools.length > 0 ? { tools } : {}),
+  })).byteLength;
 
 export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
   readonly providerId = OPENAI_COMPATIBLE_GATEWAY_PROVIDER_ID;
   /** Input budgets by model id, keyed from the gateway registry. */
   readonly #compactThresholds = new Map<string, number>();
-  /** Registry discovery is attempted once per client, successful or not. */
+  /** Successful registry discovery is shared and cached per client. */
   #budgetDiscovery?: Promise<void>;
 
   constructor(readonly gatewayClient: OpenAICompatibleGatewayClient) {}
@@ -314,19 +322,28 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
    * caller having to call `listModels()` first — nothing on the normal run
    * path does.
    *
-   * Runs at most once per client and never fails a turn: compaction is a
-   * guard, so an unreachable registry means running without it rather than
-   * aborting the run.
+   * A successful request runs at most once per client. A failed request never
+   * fails the model turn, but is cleared so a later turn can try discovery
+   * again instead of losing the compaction guard for the rest of the run.
    */
   #ensureBudgets(signal?: AbortSignal): Promise<void> {
-    this.#budgetDiscovery ??= this.listModels(signal)
+    if (this.#budgetDiscovery !== undefined) return this.#budgetDiscovery;
+    const discovery = this.listModels(signal)
       .then(() => {})
-      .catch(() => {});
-    return this.#budgetDiscovery;
+      .catch(() => {
+        if (this.#budgetDiscovery === discovery) {
+          this.#budgetDiscovery = undefined;
+        }
+      });
+    this.#budgetDiscovery = discovery;
+    return discovery;
   }
 
   async #resolveCompactThreshold(
     request: HarnessModelTurnRequest,
+    instructions: string | undefined,
+    input: readonly ResponsesInputItem[],
+    tools: readonly ResponsesInputItem[],
   ): Promise<number | undefined> {
     if (request.compactThreshold !== undefined) {
       return request.compactThreshold > 0
@@ -335,7 +352,8 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
     }
     if (
       !this.#compactThresholds.has(request.model) &&
-      transcriptSize(request.transcript) >= BUDGET_DISCOVERY_FLOOR_CHARS
+      renderedResponsesInputByteLength(instructions, input, tools) >=
+        BUDGET_DISCOVERY_FLOOR_BYTES
     ) {
       await this.#ensureBudgets(request.signal);
     }
@@ -416,19 +434,25 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
       "drop",
     );
     const tools = toResponsesTools(request.tools);
-    const compactThreshold = await this.#resolveCompactThreshold(request);
+    const input = request.promptCacheMode === "explicit"
+      ? addFirstUserPromptCacheBreakpoint(
+        converted.input,
+        GATEWAY_RESPONSES_LABEL,
+      )
+      : converted.input;
+    const compactThreshold = await this.#resolveCompactThreshold(
+      request,
+      converted.instructions,
+      input,
+      tools,
+    );
     const payload: OpenAIResponsesRequest = {
       model: request.model,
       store: false,
       ...(converted.instructions !== undefined
         ? { instructions: converted.instructions }
         : {}),
-      input: request.promptCacheMode === "explicit"
-        ? addFirstUserPromptCacheBreakpoint(
-          converted.input,
-          GATEWAY_RESPONSES_LABEL,
-        )
-        : converted.input,
+      input,
       ...(tools.length > 0 ? { tools } : {}),
       tool_choice: "auto",
       parallel_tool_calls: true,
