@@ -262,17 +262,27 @@ default, its planned end state, and its removal path, plus the propagation paths
 - Shell-side toggles are baked at build time — toggling requires a rebuild.
 - The same env var must be set everywhere the flag is read.
 
-The environment-backed flags (the only ones settable without editing code) are:
+The environment-backed runtime flags (the canonical `EXPERIMENTAL_ENV_VARS`
+mapping in
+[`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts))
+are:
 
 | Flag | Env var |
 |---|---|
 | `modernCellRep` | `EXPERIMENTAL_MODERN_CELL_REP` |
 | `persistentSchedulerState` | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` |
 | `eagerSourceAnnotation` | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` |
+| `plainResultReceipts` | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` |
+| `systemPatternAutoUpdate` | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` |
+| `computedCellIds` | `EXPERIMENTAL_COMPUTED_CELL_IDS` |
 
-The runtime-only flags (`commitPreconditions`, the CFC enforcement dials) and the
-storage, memory-protocol, and shell flags are documented in the registry. See it
-for the complete list.
+One storage setting also has an environment toggle:
+`EXPERIMENTAL_CONCURRENT_WATCH_REFRESH=true` enables
+`experimentalConcurrentWatchRefresh` in the CLI and `PiecesController` (in the
+shell it is the `commonfabric.concurrentWatchRefresh()` console toggle
+instead). The programmatic-only flags (`commitPreconditions`, the CFC
+enforcement dials) and the memory-protocol and shell flags are documented in
+the registry. See it for the complete list.
 
 ---
 

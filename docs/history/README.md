@@ -87,6 +87,15 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [topics-performance-testbed-2026-08-06.md](topics-performance-testbed-2026-08-06.md)
+  — Topics storage anatomy (the read-set byte pie) and WAN-testbed startup
+  measurements, August 2026.
+- [topics-performance-investigation-2026-08-06.md](topics-performance-investigation-2026-08-06.md)
+  — Topics startup latency, scoped-write, and Rapids snapshot evidence
+  handoff, August 2026.
+- [coherence-audit-2026-08-06.md](coherence-audit-2026-08-06.md)
+  — callable verb results, receipts, and Topics integration audit snapshot,
+  August 2026.
 - [estuary-source-migration-2026-08-04.md](packages/patterns/lunch-poll/estuary-source-migration-2026-08-04.md)
   — rehearsal and live `setsrc` moving the Estuary lunch poll onto the mainline
   pattern, August 2026.

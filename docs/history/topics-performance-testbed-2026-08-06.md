@@ -154,13 +154,16 @@ consistent with the ~108 s observed there.
 ### Transfer volume and composition
 
 One cold `verbs` run moves **28 MB**: 20,015,496 bytes up, 8,108,073 bytes
-down (proxy totals; identical across runs). Outbound message composition:
+down (proxy TCP totals; identical across runs). Outbound message composition,
+measured with `CF_WS_SIZE_LOG` as UTF-8 payload bytes before WebSocket
+framing (the per-type sum, 20,029,242, brackets the proxy's TCP figure):
 
 | Message type | Count | Bytes |
 | --- | ---: | ---: |
 | `transact` | 4 | 17,290,301 |
-| `session.watch.add` | 20 | 2,736,489 |
+| `session.watch.add` | 20 | 2,737,241 |
 | `session.open` + `session.ack` | 4 | 1,385 |
+| `hello` | 1 | 315 |
 
 The four transacts are two commit attempts sent twice: an 8,459,433-byte
 first attempt that the server rejects, then its 8,828,550-byte retry, plus the
@@ -171,7 +174,7 @@ read-validity-induced.
 
 The twenty `watch.add` messages are the round-trip waves; their 2.74 MB is
 dominated by full JSON Schemas inlined in watch selectors — the largest single
-request is 2,013,305 bytes.
+request is 2,013,901 bytes.
 
 Every run also appended the 8,828,447-byte session-materialization commit to
 the clone — six byte-identical instances across the experiments. Reading the

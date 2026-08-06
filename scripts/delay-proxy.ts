@@ -35,18 +35,32 @@ console.log(
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Stop reading from the producer once this many bytes sit queued behind the
+ * emulated link — the proxy's stand-in for the send buffer a real constrained
+ * link would fill, so producers see backpressure instead of the proxy
+ * buffering an entire transfer in memory.
+ */
+const HIGH_WATER_BYTES = 256 * 1024;
+
 async function pump(from: Deno.Conn, to: Deno.Conn, counter: { n: number }) {
   let chain: Promise<void> = Promise.resolve();
   // Modeled instant at which the emulated link last finished transmitting;
   // the next chunk cannot start before it (serialization under the cap).
   let linkFreeAt = 0;
+  let queuedBytes = 0;
   const buf = new Uint8Array(64 * 1024);
   try {
     while (true) {
+      if (queuedBytes >= HIGH_WATER_BYTES) {
+        await chain;
+        continue;
+      }
       const n = await from.read(buf);
       if (n === null) break;
       const chunk = buf.slice(0, n);
       counter.n += n;
+      queuedBytes += n;
       const arrival = performance.now() + DELAY_MS;
       chain = chain.then(async () => {
         let ready = Math.max(arrival, linkFreeAt);
@@ -58,6 +72,7 @@ async function pump(from: Deno.Conn, to: Deno.Conn, counter: { n: number }) {
         if (wait > 0) await sleep(wait);
         let off = 0;
         while (off < chunk.length) off += await to.write(chunk.subarray(off));
+        queuedBytes -= chunk.length;
       });
     }
   } catch (_) {
