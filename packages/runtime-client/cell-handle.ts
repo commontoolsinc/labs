@@ -544,6 +544,12 @@ export class CellHandle<T = unknown> {
     // `{}` on the wire in place of a `FabricBytes` and losing the bytes with
     // nothing to show for it.
     //
+    // A DE-FACTO tripwire, in the sense of "Flag-gated tripwires" in
+    // `docs/development/EXPERIMENTAL_OPTIONS.md`: no flag gates this, and a
+    // `FabricBytes` is an ordinary shipped value, so what makes the refusal
+    // safe is that nothing writes one from the client today. The first thing
+    // that does will throw here, in the change that adds it.
+    //
     // TODO(danfuzz): carry the whole `FabricValue` domain across this
     // connection, at which point this becomes a conversion rather than a
     // refusal. `JsonEncodingContext` is the mechanism, and the gap it closes
