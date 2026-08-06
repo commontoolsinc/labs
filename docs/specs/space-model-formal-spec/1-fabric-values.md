@@ -3041,19 +3041,68 @@ boundary-only serialization and the three-layer architecture:
 
 ### 7.2 Unifying JSON Encoding
 
-Three legacy conventions in the current codebase must be migrated to the unified
-`/<Type>@<Version>` format:
+**The JSON layering defined by `codec-json` is to be the only JSON layering the
+system defines. This is settled.** It is the direction the system is committed
+to, not one option among several: a value's JSON form is the
+`/<Type>@<Version>` tagged-object convention of `3-json-encoding.md`, and no
+other layer defines a competing one.
 
-| Legacy Convention | Where Used | Example | New Form |
-|-------------------|------------|---------|----------|
-| IPLD sigil | Links (`sigil-types.ts`) | `{ "/": { "link@1": { id, path, space } } }` | `{ "/Link@1": { id, path, space } }` |
-| `@` prefix | Errors (`fabric-value.ts`) | `{ "@Error": { name, message, ... } }` | `{ "/Error@1": { name, message, ... } }` |
-| `$` prefix (stream) | Streams (`builder/types.ts`) | `{ "$stream": true }` | `{ "/Stream@1": null }` |
+**It is not yet the whole truth of the system, and this section says so
+deliberately.** Conventions predating that decision still appear on the wire,
+and they are being retired rather than accommodated. The distinction matters for
+anyone reading this to decide something: treat the unified encoding as the
+target to build toward and to write new code against, and treat what follows as
+the remaining distance, not as a menu.
 
-> **Note on `$stream`:** In the current codebase, `$stream` is a stateless
-> marker — it signals that a cell path is a stream endpoint rather than carrying
-> reconstructible state. Under the new encoding it becomes `{ "/Stream@1": null }`
-> (a stateless tagged type per Section 5 of `3-json-encoding.md`), preserving its marker semantics.
+`codec-json` already holds up its end. It attaches no meaning to any of the
+conventions below — a record carrying one round-trips as the record it is, with
+the marker as an ordinary key. So the work is not to teach the JSON layer about
+alternative encodings; it is to retire the conventions where they are produced
+and recognized, in the layers above it.
+
+**What remains:**
+
+| Convention | Where Produced and Recognized | Example | Unified Form |
+|------------|-------------------------------|---------|--------------|
+| Link-ref envelope | Links (`runner/src/sigil-types.ts`, chokepointed on `data-model/cell-rep`) | `{ "/": { "link@1": { id, path, space } } }` | `{ "/Link@1": { id, path, space } }` |
+| `$stream` marker | Streams (`runner/src/builder/types.ts`) | `{ "$stream": true }` | `{ "/Stream@1": null }` |
+
+> **Note on `$stream`:** `$stream` is a stateless marker — it signals that a
+> cell path is a stream endpoint rather than carrying reconstructible state.
+> Under the unified encoding it becomes `{ "/Stream@1": null }` (a stateless
+> tagged type per Section 5 of `3-json-encoding.md`), preserving its marker
+> semantics.
+
+> **The link-ref envelope has a named owner.** `sigil-types.ts` states that the
+> envelope and its tag belong to `data-model/cell-rep`, the chokepoint that
+> dispatches the form — and the envelope's occurrences are concentrated there
+> rather than scattered across the tree. The unification therefore has a place
+> to happen rather than a search to perform first, which is a large part of why
+> the direction is settled and not merely intended.
+
+> **"IPLD" here names a shape, not a codec.** No IPLD codec is used: `dag-cbor`
+> and `multihash` appear nowhere, and `dag-json` only as a link to the IPLD spec
+> in prose. (`multiformats` is a real dependency, but `identity` uses it for
+> multibase and varint handling in DIDs, which is unrelated to this section.) So
+> retiring IPLD here means retiring the `{ "/": … }` envelope above and nothing
+> else; reading it as a codec to rip out overstates the work considerably.
+
+> **`$alias` is not on this list, and must not be added to it.** It is a
+> Pattern-binding form rather than a link, and it is kept: link recognition is
+> sigil-only, and `$alias` survives as binding vocabulary. Its open work is
+> unrelated to this section — making alias objects unambiguously distinguishable
+> from plain objects, so that the full plain-object space stays available to
+> callers.
+
+> **On counting what remains.** A bare search for `$`-prefixed tokens badly
+> overstates the residue: JSON Schema keywords (`$ref`, `$defs`, `$schema`),
+> CFC datalog variables (`{ var: "$s" }` and kin), and Pattern authoring
+> vocabulary (`$UI`, `$NAME`, `$TYPE`) all match and none are on this arc — the
+> datalog variables alone outnumber `$stream` several times over. Any figure
+> quoted for this work should come from a classified count, and a count of
+> occurrences measures distance from the end state rather than the effort to
+> close it, since it does not distinguish a live wire path from a debugging or
+> inspection one.
 
 ### 7.3 Replacing CID-Based Hashing
 
