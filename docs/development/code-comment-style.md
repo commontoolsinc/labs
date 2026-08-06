@@ -106,11 +106,11 @@ orders" is a sentence about the code.
 
 ### Not the neighbors
 
-A comment says what the code it sits next to does. Whatever is true of another
-module is that module's business, and a criticism of it planted here is a claim
-nobody maintaining either file will think to revisit. "`glazeOf()` tolerates
-some of these today, but that tolerance is a bug rather than a contract" is a
-comment in the wrong file, and possibly a bug report that was never filed.
+A comment is about the code it sits next to. Whatever is true of another module
+is that module's business, and a criticism of it planted here is a claim nobody
+maintaining either file will think to revisit. "`glazeOf()` tolerates some of
+these today, but that tolerance is a bug rather than a contract" is a comment in
+the wrong file, and possibly a bug report that was never filed.
 
 Noting a genuine present-tense inconsistency _within_ the current system is
 fine, because that is the system as it is: "the opposite of the
@@ -173,8 +173,15 @@ instead:
 before|used to|previously|no longer|formerly|the alternative|rather than the old
 ```
 
-Not every hit is wrong — "before" has honest uses. Every hit is a place to ask
-which system the sentence describes: the one in the file, or one that is gone.
+That list is a starting point, not a specification of the rule. It leans toward
+the past-tense shapes, and has nothing in it that would catch a rollout stage, a
+count of callers, or a complaint about a neighbor; the sections above are the
+rule. Nor is every hit wrong — "before" has honest uses. Each one is a place to
+ask which system the sentence describes: the one in the file, or one that is
+gone.
+
+The list is meant to grow. When a comment of one of these shapes gets past it,
+add the wording that would have caught it.
 
 ## Removing code removes its comments
 
