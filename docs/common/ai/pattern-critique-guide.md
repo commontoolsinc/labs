@@ -255,13 +255,15 @@ Applies only to patterns with multiple people or a "current user" concept. **N/A
 | identity comparison | dedup or "is this me?" by display-name equality | compare a cell reference with `equals()`, never the mutable name |
 | ownership / authorship | "who created / wrote this" stored as a bare name | snapshot the actor's profile, or attest with CFC `AuthoredByCurrentUser` / `RepresentsCurrentUser` |
 
-On the viewer wish: `initialNameApplied` is the display name — the same field
-`#profileName` resolves, with the bootstrap initial name applied. The raw
-`name` is the owner-protected field and reads `""` for a tick longer on a
-freshly created profile, so a gate on `name` flickers where one on
-`initialNameApplied` does not. Separate `#profileName` / `#profileAvatar`
-wishes remain correct; they just cost a resolution each for fields one
-`#profile` wish already carries.
+On the viewer wish: `initialNameApplied` and `name` are not two spellings of
+one field. `name` is the profile's owner-protected `Writable` — asking for it
+hands out a write-capable cell, not a display string. `initialNameApplied` is
+the derived read-only string, and it is what `#profileName` resolves. A
+display surface wants the derived one; declare it optional, as
+`packages/patterns/shared-profile-demo` does.
+
+Separate `#profileName` / `#profileAvatar` wishes remain correct; they just
+cost a resolution each for fields one `#profile` wish already carries.
 
 See `docs/common/patterns/multi-user-patterns.md#presenting-identity` and `docs/common/components/COMPONENTS.md#identity-components`. Severity: a forgeable / dead-string **current-viewer** identity is MAJOR (wrong behavior across users); rendering others as name strings is MINOR–MAJOR per case; rendering a co-participant with `cf-avatar` when their live profile cell is available is MINOR (misses the trusted seal and live data).
 
