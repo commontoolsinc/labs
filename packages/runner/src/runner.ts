@@ -337,6 +337,12 @@ const recordOutputSchemaPolicyInputs = (
     return;
   }
 
+  // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, whose enumerable
+  // properties are empty, so descent stops here rather than reaching a
+  // `FabricInstance`'s codec contents. What is lost is not data but a policy
+  // input: a write-redirect link nested inside one records no `kind: "schema"`
+  // entry. It fails _closed_ -- a later write is refused rather than allowed
+  // -- so this is a completeness gap, not a hole.
   if (isRecord(outputBinding) && !isCellLink(outputBinding)) {
     for (const [key, child] of Object.entries(outputBinding)) {
       recordOutputSchemaPolicyInputs(
@@ -628,6 +634,12 @@ const recordSetupProjectionPolicyInputs = (
     return;
   }
 
+  // TODO(danfuzz): same gap as `recordOutputSchemaPolicyInputs()` above, and
+  // more reachable here: `projection` is the _raw_ pattern argument, so a
+  // `FabricSpecialObject` a pattern actually wrote is what arrives. `isRecord`
+  // admits one and its empty entries end the descent, so a link inside a
+  // `FabricInstance`'s codec contents records no structural-provenance input.
+  // Fails closed, as above.
   if (isRecord(projection) && !isCellLink(projection)) {
     for (const [key, child] of Object.entries(projection)) {
       recordSetupProjectionPolicyInputs(
