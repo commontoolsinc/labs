@@ -41,7 +41,7 @@ export class GlobalShortcutsController implements ReactiveController {
   #onKeyDown = (e: KeyboardEvent) => {
     if (e.defaultPrevented) return;
     if (e.repeat) return;
-    if (isEditableTarget(e.target)) return;
+    if (isEditableTarget(e)) return;
 
     const mod = this.#usesCommandKey
       ? e.metaKey && !e.ctrlKey
@@ -70,14 +70,21 @@ export class GlobalShortcutsController implements ReactiveController {
   };
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
-  const element = target as HTMLElement | null;
-  const tag = (element?.tagName || "").toLowerCase();
-  return !!(
-    element &&
-    (element.isContentEditable ||
-      tag === "input" ||
-      tag === "textarea" ||
-      tag === "select")
-  );
+// Whether the key event is aimed at somewhere the user is entering text. The
+// shell's views render into shadow roots, and an event that crosses a shadow
+// boundary reports the shadow host as its target, so the composed path is what
+// names the element holding focus.
+function isEditableTarget(e: KeyboardEvent): boolean {
+  for (const node of e.composedPath()) {
+    const element = node as HTMLElement;
+    if (typeof element.tagName !== "string") continue;
+    if (element.isContentEditable) return true;
+    switch (element.tagName.toLowerCase()) {
+      case "input":
+      case "textarea":
+      case "select":
+        return true;
+    }
+  }
+  return false;
 }

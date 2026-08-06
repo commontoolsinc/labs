@@ -14,7 +14,9 @@ import type { Command } from "../shared/mod.ts";
 function withStubbedEnv<T>(
   platform: string,
   run: (env: {
-    dispatch: (init: Partial<KeyboardEventLike>) => KeyboardEventLike;
+    dispatch: (
+      init: Partial<Omit<KeyboardEventLike, "composedPath">>,
+    ) => KeyboardEventLike;
     commands: Command[];
     navigations: unknown[];
     disconnect: () => void;
@@ -91,7 +93,9 @@ function makeHost(commands: Command[], view: unknown) {
 }
 
 // The slice of KeyboardEvent the controller reads, plus a `preventDefault` that
-// records the call the way the real event does.
+// records the call the way the real event does. `path` stands in for the
+// composed path, innermost node first, and ends in the two non-element nodes a
+// real path ends in.
 interface KeyboardEventLike {
   code: string;
   altKey: boolean;
@@ -100,11 +104,14 @@ interface KeyboardEventLike {
   shiftKey: boolean;
   repeat: boolean;
   defaultPrevented: boolean;
-  target: unknown;
+  path: unknown[];
+  composedPath(): unknown[];
   preventDefault(): void;
 }
 
-function makeEvent(init: Partial<KeyboardEventLike>): KeyboardEventLike {
+function makeEvent(
+  init: Partial<Omit<KeyboardEventLike, "composedPath">>,
+): KeyboardEventLike {
   const event: KeyboardEventLike = {
     code: "KeyA",
     altKey: false,
@@ -113,7 +120,8 @@ function makeEvent(init: Partial<KeyboardEventLike>): KeyboardEventLike {
     shiftKey: false,
     repeat: false,
     defaultPrevented: false,
-    target: null,
+    path: [],
+    composedPath: () => [...event.path, { nodeType: 9 }, {}],
     preventDefault() {
       event.defaultPrevented = true;
     },
@@ -203,12 +211,29 @@ describe("GlobalShortcutsController", () => {
       ]
     ) {
       withStubbedEnv(MAC, ({ dispatch, commands, navigations }) => {
-        dispatch({ code: "KeyO", metaKey: true, shiftKey: true, target });
-        dispatch({ code: "KeyW", altKey: true, target });
+        const path = [target, { tagName: "BODY" }];
+        dispatch({ code: "KeyO", metaKey: true, shiftKey: true, path });
+        dispatch({ code: "KeyW", altKey: true, path });
         expect(commands).toEqual([]);
         expect(navigations).toEqual([]);
       });
     }
+  });
+
+  it("skips a text-entry element inside a shadow root", () => {
+    withStubbedEnv(MAC, ({ dispatch, commands, navigations }) => {
+      // A keydown that crosses a shadow boundary reports the host as its
+      // target, so only the composed path still names the input.
+      const path = [
+        { tagName: "INPUT" },
+        { tagName: "X-QUICK-JUMP-VIEW" },
+        { tagName: "BODY" },
+      ];
+      dispatch({ code: "KeyO", metaKey: true, shiftKey: true, path });
+      dispatch({ code: "KeyW", altKey: true, path });
+      expect(commands).toEqual([]);
+      expect(navigations).toEqual([]);
+    });
   });
 
   it("still fires for a plain element target", () => {
@@ -217,7 +242,11 @@ describe("GlobalShortcutsController", () => {
         code: "KeyO",
         metaKey: true,
         shiftKey: true,
-        target: { tagName: "DIV", isContentEditable: false },
+        path: [
+          { tagName: "DIV", isContentEditable: false },
+          { tagName: "X-APP-VIEW" },
+          { tagName: "BODY" },
+        ],
       });
       expect(commands).toHaveLength(1);
     });
