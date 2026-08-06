@@ -726,7 +726,7 @@ control, and there is no single "it converged" promise to await.
   the timing-sensitive re-queue can recover. The automatic re-run is the behavior
   under test; there is by construction no event to await.
 - `packages/runner/test/memory-v2-reconnect-race.test.ts` and
-  `packages/memory/test/v2-restore-flush-test.ts` — the waits that watch for a
+  `packages/memory/test/v2-restore-flush.test.ts` — the waits that watch for a
   deliberate mid-flight sabotage or a restore replay to reach a specific in-flight
   point. These are race checkpoints the surrounding interleaving depends on;
   bounded polling expresses "wait until the sabotage/replay happened" without

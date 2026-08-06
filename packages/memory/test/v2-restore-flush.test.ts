@@ -13,7 +13,7 @@ const SPACE = "did:key:z6Mk-restore-flush-test";
 /**
  * Transport that wraps a real Server with lazy connection creation and
  * controlled disconnect/reconnect. Follows the same pattern as
- * ReconnectableLoopbackTransport in v2-client-test.ts.
+ * ReconnectableLoopbackTransport in v2-client.test.ts.
  */
 class ReconnectableTransport implements Transport {
   connectionCount = 0;

@@ -134,7 +134,7 @@ not required** for our access pattern: reads observe only *committed* state
 [Ordering within a commit](#ordering-within-a-commit)), writes serialize on the
 engine connection, and each query is a *fresh* read transaction (`.all()`), so a
 reused pooled connection observes writes committed after it opened (pinned by a
-test in `v2-sqlite-protocol-test.ts`). WAL remains a future hardening for
+test in `v2-sqlite-protocol.test.ts`). WAL remains a future hardening for
 concurrent read-*during*-write, not a correctness prerequisite.
 
 An additive schema migration on the write connection bumps the schema cookie;
