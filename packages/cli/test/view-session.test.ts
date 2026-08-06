@@ -233,6 +233,122 @@ Deno.test("session: clearing a selection clamps expansion-margin panning", () =>
   assertEquals(s.view().left, atRightEdge, "right does not move left");
 });
 
+const TOTALS_DIFF = [
+  "diff --git a/a.ts b/a.ts",
+  "index 1111111..2222222 100644",
+  "--- a/a.ts",
+  "+++ b/a.ts",
+  "@@ -1,3 +1,3 @@",
+  " keep",
+  "-old",
+  "+new",
+  "diff --git a/b.ts b/b.ts",
+  "index 3333333..4444444 100644",
+  "--- a/b.ts",
+  "+++ b/b.ts",
+  "@@ -1 +1,2 @@",
+  " x",
+  "+added",
+  "",
+].join("\n");
+
+function totalsSource(editable = false): EditableSource {
+  return {
+    label: null,
+    isDiff: true,
+    editable,
+    parse: (next) => parseDocument(next),
+    save: () => "",
+  };
+}
+
+Deno.test("session: a diff source carries whole-diff totals to the view", () => {
+  const s = new Session(
+    parseDocument(TOTALS_DIFF),
+    { color: false, showLineNumbers: false },
+    { width: 40, height: 6 },
+    undefined,
+    totalsSource(),
+  );
+  assertEquals(s.view().diffTotals, { adds: 2, dels: 1 });
+  const rows = renderFrame(s.displayDoc(), s.view());
+  assert(rows[0].endsWith("+2 −1"), "the first line's corner sums both files");
+
+  const plain = new Session(
+    parseDocument(TOTALS_DIFF),
+    { color: false, showLineNumbers: false },
+    { width: 40, height: 6 },
+  );
+  assertEquals(
+    plain.view().diffTotals,
+    null,
+    "no totals without a diff source",
+  );
+
+  const noFiles = new Session(
+    parseDocument(SAMPLE),
+    { color: false, showLineNumbers: false },
+    { width: 40, height: 6 },
+    undefined,
+    totalsSource(),
+  );
+  assertEquals(noFiles.view().diffTotals, null, "no totals without diff files");
+});
+
+Deno.test("session: edit mode hides the whole-diff totals", () => {
+  const s = new Session(
+    parseDocument(TOTALS_DIFF),
+    { color: false, showLineNumbers: false },
+    { width: 40, height: 8 },
+    undefined,
+    totalsSource(true),
+  );
+  press(s, "e");
+  assert(s.view().cursor, "the text cursor is active");
+  assertEquals(s.view().diffTotals, null);
+  assert(!renderFrame(s.displayDoc(), s.view())[0].includes("+2 −1"));
+  press(s, "escape");
+  assertEquals(s.view().diffTotals, { adds: 2, dels: 1 });
+});
+
+Deno.test("session: a wrapped first line flows around the totals label", () => {
+  const s = new Session(
+    parseDocument(TOTALS_DIFF),
+    { color: false, showLineNumbers: false },
+    { width: 20, height: 6 },
+    undefined,
+    totalsSource(),
+  );
+  press(s, "\\");
+  const rows = renderFrame(s.displayDoc(), s.view());
+  assertEquals(rows[0], "diff --git a/a\\+2 −1");
+  assertEquals(rows[1], ".ts b/a.ts          ");
+});
+
+Deno.test("session: panning reaches content hidden under the totals label", () => {
+  const PAN_DIFF = [
+    "diff --git a/src/app.ts b/src/app.ts",
+    "index 1111111..2222222 100644",
+    "--- a/src/app.ts",
+    "+++ b/src/app.ts",
+    "@@ -1,2 +1,2 @@",
+    " keep",
+    "-old",
+    "+new",
+    "",
+  ].join("\n");
+  const s = expandableSession(PAN_DIFF, 20);
+  press(s, ...Array(4).fill("l"));
+  // The first line is 36 columns; the clamp leaves room to pan its tail out
+  // from under the five-column label: 36 − (20 − 5).
+  assertEquals(s.view().left, 21);
+  assertEquals(
+    renderFrame(s.displayDoc(), s.view())[0],
+    "ts b/src/app.ts+1 −1",
+    "the end of the first line is visible beside the label",
+  );
+});
+
 Deno.test("session: removing the gutter clamps expansion-margin panning", () => {
   const s = expandableSession("abcdefghijklmnopqrst", 10);
   press(s, "#");
