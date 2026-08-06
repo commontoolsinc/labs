@@ -10,6 +10,7 @@
 import {
   assert,
   assertEquals,
+  assertMatch,
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
@@ -21,7 +22,9 @@ import {
   benchmark,
   type BenchmarkFetchProgress,
   benchmarkHistoryCheckResponse,
+  benchmarkFailureLabel,
   benchmarkHistoryProgressResponse,
+  benchmarkRerunHandoff,
   benchmarkTrend,
   benchPage,
   formatNs,
@@ -38,6 +41,18 @@ import {
   ciHistoryBucketMs,
 } from "../ci-job-history.ts";
 import { PERFORMANCE_VIEW_STYLES } from "../performance-views.ts";
+
+// The history store falls back to the system temporary directory when no cache
+// directory is named. The package's test runner names a fresh one for each run.
+// Running this file directly gets whatever the last run left behind, which then
+// answers these tests in place of their own fixtures. Name a directory here when
+// nothing else has.
+if (Deno.env.get("DASHBOARD_CACHE_DIR") === undefined) {
+  Deno.env.set(
+    "DASHBOARD_CACHE_DIR",
+    await Deno.makeTempDir({ prefix: "benchmark-test-cache-" }),
+  );
+}
 
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
@@ -357,7 +372,7 @@ Deno.test("benchmark: no token -> gray, and nothing is fetched", async () => {
     assertEquals(v.value, "—");
     assertEquals(v.sub, "set GH_TOKEN");
     assertEquals(v.href, "/bench?view=runtime&repo=labs");
-    assertEquals(v.hint, "all metrics ↗");
+    assertEquals(v.hint, "metrics ↗");
     assertEquals(calls, []);
   });
 });
@@ -921,9 +936,12 @@ Deno.test("benchmark: paging stops at the 45-day cutoff; failures and out-of-win
     // is out of the window, so there is no duration to headline.
     assertEquals(v.status, "bad");
     assertEquals(v.value, "—");
-    assertEquals(v.sub, "last run failed");
+    // Every failure on the page, in a row. The one success is older than the
+    // trend's window, but it is still on the page fetched, so it still dates the
+    // outage the failures make.
+    assertMatch(v.sub ?? "", /^last good \d+ days ago · 99 runs failed$/);
     assertEquals(v.href, "/bench?view=runtime&repo=labs");
-    assertEquals(v.hint, "all metrics ↗");
+    assertEquals(v.hint, "metrics ↗");
     assertEquals(apiCalls(calls).length, 1); // page 2 was never asked for
     assertEquals(artifactCalls(calls), []); // and no artifact was downloaded
   });
@@ -936,7 +954,7 @@ Deno.test("benchmark: an empty page ends the paging", async () => {
   );
   await withApi({ pages: { 1: page1, 2: [] } }, async (calls) => {
     const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
-    assertEquals(v.sub, "last run failed"); // every run in the window failed
+    assertEquals(v.sub, "last 100 runs failed"); // every run in the window failed
     // A full page still inside the window is followed; the empty page 2 stops it.
     assertEquals(
       apiCalls(calls).map((c) => c.match(/[?&]page=(\d+)/)![1]),
@@ -1253,8 +1271,238 @@ Deno.test("benchmark: a failed most-recent run turns the tile red over its last 
   ], async () => {
     const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
     assertEquals(v.status, "bad"); // the newest run failed
-    assertEquals(v.sub, "last run failed");
+    assertMatch(v.sub ?? "", /^last good .+ ago · 1 run failed$/);
     assertStringIncludes(v.value ?? "", "flat"); // the trend of the runs before the failure
+    assert(!(v.extra ?? "").includes("benchmark")); // the failure took the count line
+  });
+});
+
+Deno.test("benchmark: consecutive failures are counted on the tile", async () => {
+  const at = (d: number) => SAMPLED_BASE - (7 - d) * DAY;
+  // Seven good days, then three failures in a row.
+  await withTotals([
+    ...Array.from({ length: 7 }, (_, d) => ({ id: 9_310 + d, at: at(d), total: 5e6 })),
+    ...Array.from({ length: 3 }, (_, f) => ({
+      id: 9_390 + f,
+      at: SAMPLED_BASE + (f + 1) * HOUR,
+      conclusion: "failure",
+    })),
+  ], async () => {
+    const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+    assertEquals(v.status, "bad"); // red however flat the trend is
+    assertMatch(v.sub ?? "", /^last good .+ ago · 3 runs failed$/);
+    assertStringIncludes(v.value ?? "", "flat"); // the trend over the runs before the failures
+    assert(!(v.extra ?? "").includes("benchmark")); // no count line beside the failure line
+  });
+});
+
+Deno.test("benchmark: a failure outranks a rising trend", async () => {
+  // Eight days whose one benchmark climbs from 5 to 12 ms, which alone reads orange,
+  // and then a failed run.
+  const at = (d: number) => SAMPLED_BASE - (8 - d) * DAY;
+  await withTotals([
+    ...Array.from({ length: 8 }, (_, d) => ({ id: 9_330 + d, at: at(d), total: (5 + d) * 1e6 })),
+    { id: 9_398, at: SAMPLED_BASE + HOUR, conclusion: "failure" },
+  ], async () => {
+    const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+    assertEquals(v.status, "bad"); // red, not the orange the rise would give
+    assertMatch(v.sub ?? "", /^last good .+ ago · 1 run failed$/);
+    assertStringIncludes(v.value ?? "", "▲"); // the rise is still the headline
+  });
+});
+
+Deno.test("benchmark: a cancelled run ends the count of consecutive failures", async () => {
+  const at = (d: number) => SAMPLED_BASE - (7 - d) * DAY;
+  // Two failures with a cancelled run between them: only the newest failure can be
+  // counted, because the cancelled run neither failed nor succeeded.
+  await withTotals([
+    ...Array.from({ length: 7 }, (_, d) => ({ id: 9_320 + d, at: at(d), total: 5e6 })),
+    { id: 9_395, at: SAMPLED_BASE + HOUR, conclusion: "failure" },
+    { id: 9_396, at: SAMPLED_BASE + 2 * HOUR, conclusion: "cancelled" },
+    { id: 9_397, at: SAMPLED_BASE + 3 * HOUR, conclusion: "failure" },
+  ], async () => {
+    const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+    assertEquals(v.status, "bad");
+    assertMatch(v.sub ?? "", /^last good .+ ago · 1 run failed$/);
+  });
+});
+
+Deno.test("benchmark: the failure line dates the outage and counts the failures", () => {
+  const now = BASE + 3 * DAY;
+  const good = ghRun(1, BASE, "success");
+  const failures = [ghRun(3, BASE + 2 * DAY, "failure"), ghRun(2, BASE + DAY, "failure")];
+  assertEquals(
+    benchmarkFailureLabel([...failures, good], now),
+    "last good 3 days ago · 2 runs failed",
+  );
+  assertEquals(
+    benchmarkFailureLabel([ghRun(4, now - HOUR, "failure"), ghRun(5, now - 4 * HOUR, "success")], now),
+    "last good 4 hours ago · 1 run failed",
+  );
+  // Nothing has passed in the window, so there is no outage to date.
+  assertEquals(benchmarkFailureLabel(failures, now), "last 2 runs failed");
+  assertEquals(benchmarkFailureLabel([failures[0]], now), "last run failed");
+  // A cancelled run ends the count but is not a good run to date the outage from.
+  assertEquals(
+    benchmarkFailureLabel([failures[0], ghRun(6, BASE + DAY, "cancelled"), good], now),
+    "last good 3 days ago · 1 run failed",
+  );
+  // A run that passed on a later attempt is still a run that passed.
+  assertEquals(
+    benchmarkFailureLabel([failures[0], ghRun(7, BASE + DAY, "success", 2)], now),
+    "last good 2 days ago · 1 run failed",
+  );
+});
+
+Deno.test("benchmark: a collection reads the run list every time and the artifacts only when a run is new", async () => {
+  // The tile collects every minute to keep up with the run state. The artifact
+  // history behind it moves with the runs, so a collection that finds the same
+  // sampled runs downloads nothing.
+  const directory = await Deno.makeTempDir({ prefix: "benchmark-cadence-" });
+  const previousCacheDirectory = Deno.env.get("DASHBOARD_CACHE_DIR");
+  Deno.env.set("DASHBOARD_CACHE_DIR", directory);
+  const at = (d: number) => SAMPLED_BASE - (7 - d) * DAY;
+  const artifacts: Api["artifacts"] = {};
+  const zips: Api["zips"] = {};
+  const runs: GhRun[] = [];
+  for (let d = 0; d <= 7; d++) {
+    const id = 9_280 + d;
+    runs.push(ghRun(id, at(d)));
+    artifacts[id] = [{ id: id * 10, name: "bench-results", expired: false }];
+    zips[id * 10] = await totalZip(5e6);
+  }
+  const newestFirst = [...runs].reverse();
+  const inFlight = {
+    ...ghRun(9_289, SAMPLED_BASE + HOUR),
+    status: "queued",
+    conclusion: null,
+  };
+  try {
+    const isolated = await import(`./benchmark.ts?cadence=${crypto.randomUUID()}`);
+    await withApi({ pages: { 1: newestFirst }, artifacts, zips }, async (calls) => {
+      await isolated.benchmark.collect(ctx({ GH_TOKEN: "t" }));
+      const firstArtifactReads = artifactCalls(calls).length;
+      const firstListReads = apiCalls(calls).length - firstArtifactReads;
+      assert(firstArtifactReads > 0); // a cold cache reads them
+      assert(firstListReads > 0);
+
+      const second = await isolated.benchmark.collect(ctx({ GH_TOKEN: "t" }));
+      assertEquals(artifactCalls(calls).length, firstArtifactReads); // nothing new to read
+      assert(apiCalls(calls).length - artifactCalls(calls).length > firstListReads);
+      assertEquals(second.aside, undefined); // no run under way
+      assertEquals(second.status, "good");
+    });
+    // A run starts. The next collection sees it from the run list alone.
+    await withApi({ pages: { 1: [inFlight, ...newestFirst] }, artifacts, zips }, async (calls) => {
+      const view = await isolated.benchmark.collect(ctx({ GH_TOKEN: "t" }));
+      assertStringIncludes(view.aside ?? "", "running");
+      assertEquals(artifactCalls(calls), []); // an unfinished run has no artifact
+    });
+  } finally {
+    if (previousCacheDirectory === undefined) {
+      Deno.env.delete("DASHBOARD_CACHE_DIR");
+    } else Deno.env.set("DASHBOARD_CACHE_DIR", previousCacheDirectory);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("benchmark: a run under way shows on the tile before there is any history", async () => {
+  // Nothing has been collected yet, so the tile has no chart and no verdict. The
+  // run list still says a run is going, and that is worth showing.
+  const directory = await Deno.makeTempDir({ prefix: "benchmark-cold-badge-" });
+  const previousCacheDirectory = Deno.env.get("DASHBOARD_CACHE_DIR");
+  Deno.env.set("DASHBOARD_CACHE_DIR", directory);
+  try {
+    const isolated = await import(`./benchmark.ts?cold-badge=${crypto.randomUUID()}`);
+    const inFlight = {
+      ...ghRun(9_270, BASE),
+      status: "in_progress",
+      conclusion: null,
+    };
+    await withApi({ pages: { 1: [inFlight] } }, async () => {
+      const view = await isolated.benchmark.collect(ctx({ GH_TOKEN: "t" }));
+      assertEquals(view.value, "—"); // no history to headline
+      assertEquals(view.sub, "benchmark data unavailable");
+      assertStringIncludes(view.aside ?? "", "running");
+    });
+  } finally {
+    if (previousCacheDirectory === undefined) {
+      Deno.env.delete("DASHBOARD_CACHE_DIR");
+    } else Deno.env.set("DASHBOARD_CACHE_DIR", previousCacheDirectory);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("benchmark: the rerun hand-off picks its target from the newest completed run", () => {
+  const workflow = `https://github.com/${REPO}/actions/workflows/benchmarks.yml`;
+  const failed = ghRun(3, BASE, "failure");
+  const inFlight = { ...ghRun(4, BASE + HOUR), status: "in_progress", conclusion: null };
+  assertEquals(benchmarkRerunHandoff(undefined).href, workflow); // no run list yet
+  assertEquals(benchmarkRerunHandoff([]).href, workflow);
+  assertEquals(benchmarkRerunHandoff([ghRun(1, BASE)]).href, workflow);
+  assertEquals(benchmarkRerunHandoff([ghRun(2, BASE, "cancelled")]).href, workflow);
+  assertEquals(benchmarkRerunHandoff([ghRun(5, BASE, "success", 2)]).href, workflow);
+  const handoff = benchmarkRerunHandoff([failed]);
+  assertEquals(handoff.href, `https://github.com/${REPO}/actions/runs/3`);
+  assertStringIncludes(handoff.label, "rerun the failed benchmark run");
+  // A run under way at the head does not hide the failure it sits above.
+  assertEquals(
+    benchmarkRerunHandoff([inFlight, failed]).href,
+    `https://github.com/${REPO}/actions/runs/3`,
+  );
+});
+
+Deno.test("benchmark: the drill-down closes with a rerun hand-off to the failed run", async () => {
+  const at = (d: number) => SAMPLED_BASE - (7 - d) * DAY;
+  await withTotals([
+    ...Array.from({ length: 7 }, (_, d) => ({ id: 9_240 + d, at: at(d), total: 5e6 })),
+    { id: 9_249, at: SAMPLED_BASE + HOUR, conclusion: "failure" },
+  ], async () => {
+    await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+    const html = benchPage("p99", "file", 45, BASE);
+    assertStringIncludes(html, `https://github.com/${REPO}/actions/runs/9249`);
+    assertStringIncludes(html, "rerun the failed benchmark run ↗");
+    assertStringIncludes(html, "does not start runs itself");
+    // The hand-off closes the page, below the charts and the source note.
+    assert(html.indexOf('<p class="handoff">') > html.indexOf('<p class="note">'));
+    assert(html.indexOf('<p class="handoff">') > html.indexOf('class="blist"'));
+    // A later collection that cannot reach GitHub leaves the hand-off naming the
+    // run it knows failed, rather than dropping back to the workflow.
+    await withApi({ status: 500 }, async () => {
+      await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+    });
+    assertStringIncludes(
+      benchPage("p99", "file", 45, BASE),
+      `https://github.com/${REPO}/actions/runs/9249`,
+    );
+  });
+});
+
+Deno.test("benchmark: a run under way is a badge, not a verdict", async () => {
+  const at = (d: number) => SAMPLED_BASE - (7 - d) * DAY;
+  const artifacts: Api["artifacts"] = {};
+  const zips: Api["zips"] = {};
+  const runs: GhRun[] = [];
+  for (let d = 0; d <= 7; d++) {
+    const id = 9_260 + d;
+    runs.push(ghRun(id, at(d)));
+    artifacts[id] = [{ id: id * 10, name: "bench-results", expired: false }];
+    zips[id * 10] = await totalZip(5e6);
+  }
+  const newestFirst = [...runs].reverse();
+  const inFlight = {
+    ...ghRun(9_269, SAMPLED_BASE + HOUR),
+    status: "in_progress",
+    conclusion: null,
+  };
+  await withApi({ pages: { 1: [inFlight, ...newestFirst] }, artifacts, zips }, async () => {
+    const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+    assertStringIncludes(v.aside ?? "", "running");
+    assertEquals(v.status, "good"); // the runs that finished still set the colour
+  });
+  await withApi({ pages: { 1: newestFirst }, artifacts, zips }, async () => {
+    const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
+    assertEquals(v.aside, undefined); // nothing under way
   });
 });
 

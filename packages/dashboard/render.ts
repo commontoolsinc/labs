@@ -170,6 +170,9 @@ ${faviconLink(status)}
   .big.good{color:#62d18d}.big.warn{color:#f0b968}.big.bad{color:#f0726c}.big.unknown{color:#9aa0ab}
   .sub{font-size:13px;color:#9aa0ab;margin:5px 0 0}
   .running{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#8a93a5;letter-spacing:.02em;text-transform:none;margin-top:10px}
+  /* In the header the badge is a facet of a single line, not a block under the
+     chart, so it takes the line's own vertical rhythm. */
+  .lbl .running{margin-top:0;margin-right:8px}
   .rdot{width:7px;height:7px;border-radius:50%;background:#6ea8fe;flex:none}
   .cells{display:grid;gap:1px;margin-top:10px}
   .cell{aspect-ratio:1;border-radius:1px}
