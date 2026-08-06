@@ -96,6 +96,13 @@ function formatTree(node: unknown, indent = 0): string {
   const name = obj.name as string | undefined;
   if (!name) {
     // Not a vdom node — try to stringify
+    //
+    // TODO(danfuzz): This is an unsafe use of `stringify()`. `node` comes from
+    // a cell, so it is a `FabricValue`, and a `FabricSpecialObject` keeps its
+    // state in private fields rather than in enumerable properties -- so a
+    // `FabricBytes` or a `FabricError` here renders as `{}` rather than
+    // throwing. `toCompactDebugString()`
+    // (`@commonfabric/data-model/value-debug`) is what names one.
     try {
       return `${pad}${JSON.stringify(node)}`;
     } catch {
@@ -114,6 +121,11 @@ function formatTree(node: unknown, indent = 0): string {
       } else if (typeof value === "string") {
         propParts.push(`${key}="${value}"`);
       } else {
+        // TODO(danfuzz): This is an unsafe use of `stringify()`. `value` is a
+        // render prop read from a cell, so it is a `FabricValue`, and a
+        // `FabricSpecialObject` among them renders as `{}` -- silently, since
+        // the `catch` below only sees a throw. Same fix as the node case
+        // above: `toCompactDebugString()`.
         try {
           propParts.push(`${key}=${JSON.stringify(value)}`);
         } catch {
