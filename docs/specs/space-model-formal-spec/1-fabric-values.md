@@ -3054,11 +3054,24 @@ anyone reading this to decide something: treat the unified encoding as the
 target to build toward and to write new code against, and treat what follows as
 the remaining distance, not as a menu.
 
-`codec-json` already holds up its end. It attaches no meaning to any of the
-conventions below — a record carrying one round-trips as the record it is, with
-the marker as an ordinary key. So the work is not to teach the JSON layer about
-alternative encodings; it is to retire the conventions where they are produced
-and recognized, in the layers above it.
+`codec-json` already holds up its end: **neither convention below is an encoding
+it defines**, so the work is not to teach the JSON layer about alternative
+encodings, but to retire the conventions where they are produced and recognized,
+in the layers above it. The two get there by different routes, and the
+difference matters to anyone tracing a value through the wire format.
+
+- **`$stream` is an ordinary key.** The JSON layer attaches no meaning to it: a
+  record carrying it round-trips as the record it is.
+- **The link-ref envelope is not.** `/` is reserved — the prefix is wholly owned
+  by the encoding system in the wire format (Section 9 of `3-json-encoding.md`),
+  so a `/`-keyed record reaching the wire is a tagged value, a built-in escape,
+  or an encoding error, never a literal user key. A literal one survives only by
+  being wrapped in the `/object` escape first.
+
+That the envelope needs escaping is the stronger statement of the two. It is not
+a rival encoding the JSON layer tolerates alongside its own; it is user data the
+layer has to work around, and it can only reach the wire intact by being hidden
+from the very rule that gives `/` its meaning.
 
 **What remains:**
 
