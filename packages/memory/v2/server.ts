@@ -368,11 +368,19 @@ class Connection {
   // instead of to each frame. Exclusive with #syncSchemaTable — a peer must
   // know from the handshake whether a frame is self-describing.
   #syncSchemaCas = false;
-  // Tagged hashes of the schema bodies this connection has DELIVERED. A hash
-  // enters only after its carrying frame reached the transport: send() is the
+  // Tagged hashes of the schema bodies handed to this connection's transport.
+  // A hash enters only after its carrying frame was accepted: send() is the
   // commit point for sync state (see the rollback in flushDirty), and a body
-  // recorded but never delivered would strand every later reference naming
-  // it, with no way for the peer to ask for it.
+  // recorded but never sent would strand every later reference naming it, with
+  // no way for the peer to ask for it.
+  //
+  // Acceptance is weaker than arrival, and the gap is closed on both sides
+  // rather than here. A transport that discards instead of throwing does so
+  // because its socket is no longer open, and a socket that cannot carry this
+  // frame carries no later one either — the stranded reference is never sent,
+  // and this set dies with the connection. A peer that receives a frame but
+  // fails to process it discards the connection for the same reason
+  // (`discardConnectionIfSchemaCas` in v2/client.ts).
   #deliveredSchemas = new Set<string>();
   // Negotiated persistentSchedulerState: when both sides carry the flag,
   // subscription sync pushes to this connection include the scheduler

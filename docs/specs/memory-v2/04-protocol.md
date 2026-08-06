@@ -475,15 +475,29 @@ connection, and MUST reject the frame when neither satisfies it. Bodies are
 verified on arrival under the same hash rule as the frame-local encoding, so a
 body resolved from an earlier frame has already been checked.
 
-A server MUST NOT record a body as delivered until the frame carrying it has
-reached the transport. A frame that fails to send is recomputed from durable
+A server MUST NOT record a body as delivered until the transport has accepted
+the frame carrying it. A frame that fails to send is recomputed from durable
 state, and the recomputed frame carries the body again; recording it earlier
 would emit later references that the peer has no way to resolve and no way to
-request. Because the delivered set is per connection, a reconnect resets the
-server's side while a client may retain bodies from the previous connection.
-That direction is safe — the server re-sends a body the client already holds —
-and it is the only direction that can occur, since a client that forgets has by
-construction established a new connection.
+request.
+
+Acceptance by a transport is weaker than arrival at the peer, so both sides
+carry an obligation for the gap:
+
+- A transport that discards a frame without reporting failure does so because
+  its connection is already ending. It MUST NOT go on to carry a later frame
+  for that connection, so the stranded reference is never sent and the
+  delivered set dies with the connection.
+- A client that receives a frame but fails to decode or expand it MUST discard
+  the connection rather than continue on it. The frame may have carried bodies
+  the server has recorded, and this encoding gives the client no way to
+  recover them in place — unlike the frame-local encoding, where the next
+  frame describes itself and the connection heals. Establishing a new
+  connection resets the server's delivered set.
+
+Because the delivered set is per connection, a reconnect resets the server's
+side while a client may retain bodies from the previous connection. That
+direction is safe: the server re-sends a body the client already holds.
 
 Earlier revisions of this encoding also interned the `schema` field of
 `$alias` records. Those records are Pattern-binding vocabulary, not links —

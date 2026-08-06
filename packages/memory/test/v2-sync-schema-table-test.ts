@@ -37,6 +37,7 @@ import {
   type WatchAddResult,
 } from "../v2.ts";
 import { Server } from "../v2/server.ts";
+import { connect, type Transport } from "../v2/client.ts";
 import {
   compressServerMessageSchemas,
   compressSessionSyncSchemas,
@@ -49,7 +50,10 @@ import {
   findSyncSchemaRef,
 } from "../v2/sync-schema-ref.ts";
 import { mapLinkSchemas } from "../v2/schema-table-links.ts";
-import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
+import {
+  testSessionOpenAuthFactory,
+  testSessionOpenServerOptions,
+} from "./v2-auth-test-helpers.ts";
 
 const textEncoder = new TextEncoder();
 
@@ -1017,6 +1021,132 @@ Deno.test("connection-scoped schema bodies span a connection, not a frame", asyn
     await server.close();
     resetSyncSchemaCasConfig();
   }
+});
+
+/**
+ * A loopback that opens a fresh server connection whenever it has none, the
+ * way `WebSocketTransport` opens a fresh socket once the old one is not OPEN.
+ * `loopback()` binds one `Server.connect` for its lifetime, so it cannot carry
+ * a client through a reconnect. `rewrite` sees each outbound frame and may
+ * alter it, standing in for what a transport does to a frame in flight.
+ */
+const reconnectingLoopback = (
+  server: Server,
+  rewrite: (payload: string) => string,
+): Transport => {
+  let receiver = (_payload: string) => {};
+  let closeReceiver = (_error?: Error) => {};
+  let connection: ReturnType<Server["connect"]> | null = null;
+  const open = () => {
+    connection ??= server.connect((message) => {
+      receiver(rewrite(encodeMemoryBoundary(message)));
+    });
+    return connection;
+  };
+  return {
+    async send(payload) {
+      await open().receive(payload);
+    },
+    close() {
+      const current = connection;
+      connection = null;
+      current?.close();
+      closeReceiver();
+      return Promise.resolve();
+    },
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver(next) {
+      closeReceiver = next;
+    },
+  };
+};
+
+/**
+ * Drives a real Client against a real Server, corrupting the first
+ * session/effect so the client's decode fails on it — the frame reaches the
+ * client, which then cannot process it. Returns what the watch view holds for
+ * a document whose schema rode on that lost frame.
+ */
+const documentAfterALostEffect = async (
+  label: string,
+  cas: boolean,
+): Promise<EntityDocument | null | undefined> => {
+  setSyncSchemaCasConfig(cas);
+  const space = `did:key:z6Mk-sync-schema-lost-frame-${label}`;
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL(`memory://sync-schema-lost-frame-${label}`),
+    // Only the explicit flushes below deliver, so the corrupted frame is the
+    // one carrying the schema body rather than whichever frame a scheduled
+    // refresh happened to emit first.
+    subscriptionRefreshDelayMs: 60_000,
+  });
+  let corruptNextEffect = false;
+  const transport = reconnectingLoopback(server, (payload) => {
+    if (corruptNextEffect && payload.includes("session/effect")) {
+      corruptNextEffect = false;
+      return `${payload}!corrupt`;
+    }
+    return payload;
+  });
+
+  const client = await connect({ transport });
+  try {
+    const session = await client.mount(space, {}, testSessionOpenAuthFactory);
+    const view = await session.watchAdd([{
+      id: "w",
+      kind: "graph",
+      query: {
+        roots: [
+          { id: "of:lost", selector: { path: [], schema: false } },
+          { id: "of:later", selector: { path: [], schema: false } },
+        ],
+      },
+    }]);
+
+    const updates = view.subscribe();
+    const schema = largeSchema();
+    corruptNextEffect = true;
+    await server.writeDocument(space, "of:lost", {
+      ref: linkRefFrom({ id: "of:target-lost", path: [], schema }),
+    });
+    await server.flushSessions([space]);
+
+    // A later document naming the same schema. A connection that recorded the
+    // lost frame's body as delivered sends a bare reference the client can
+    // never resolve, and this document never arrives.
+    await server.writeDocument(space, "of:later", {
+      ref: linkRefFrom({ id: "of:target-later", path: [], schema }),
+    });
+    await server.flushSessions([space]);
+
+    // Woken by the view, not by a deadline: an update that never arrives
+    // leaves this await pending with nothing else holding the loop, which
+    // Deno reports as a failure rather than a hang.
+    while (true) {
+      const update = await updates.next();
+      if (update.done) return undefined;
+      const later = update.value.entities.find(
+        (entity) => entity.id === "of:later",
+      );
+      if (later?.document != null) return later.document;
+    }
+  } finally {
+    await client.close();
+    await server.close();
+    resetSyncSchemaCasConfig();
+  }
+};
+
+Deno.test("a connection that loses a frame recovers under either encoding", async () => {
+  // The frame-local encoding heals on the next frame: it describes itself.
+  assertExists(await documentAfterALostEffect("frame-local", false));
+  // The connection-scoped encoding cannot heal in place — the body is gone
+  // and no request can fetch it — so the client must discard the connection
+  // and let a fresh one re-teach the bodies.
+  assertExists(await documentAfterALostEffect("cas", true));
 });
 
 Deno.test("both peers must advertise cas before a frame stops describing itself", async () => {

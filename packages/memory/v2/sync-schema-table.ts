@@ -44,9 +44,9 @@ export type CompressedServerMessage = {
   message: ServerMessage;
   /**
    * Tagged hashes whose schema bodies ride on THIS message — what the sender
-   * may add to its {@link DeliveredSchemas} once the message reaches the
-   * transport, and not one moment sooner: a staged body that never arrives
-   * strands every later reference naming it. Always empty under the
+   * may add to its {@link DeliveredSchemas} once the transport has accepted
+   * the message, and not one moment sooner: a staged body the transport
+   * rejects strands every later reference naming it. Always empty under the
    * frame-local encoding, which re-sends every body and so has nothing to
    * remember.
    */
@@ -213,8 +213,9 @@ export const expandSessionSyncSchemas = (
     // sits at a position this expander does not interpret — a legacy `$alias`
     // schema position interned by an older server — so there is nothing to
     // rewrite; report it rather than hand the session cache a ref as data.
-    // A connection-scoped receiver never takes this path: its references are
-    // expected to outlive the frame that carried their bodies.
+    // Passing a cache opts out of this shortcut, because under the
+    // connection-scoped encoding an empty table is the steady state and its
+    // references resolve against earlier frames.
     for (const upsert of sync.upserts) {
       const ref = findSyncSchemaRef(upsert.doc);
       if (ref !== undefined) {

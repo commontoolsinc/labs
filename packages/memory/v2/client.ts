@@ -166,13 +166,23 @@ export class Client {
   // for other spaces on this client alive.
   #fatalError: Error | null = null;
   // Schema bodies delivered under the connection-scoped encoding, by tagged
-  // hash. Deliberately NOT cleared on reconnect: the server tracks what it has
-  // delivered per Connection, so a reconnect makes the SERVER forget while
-  // this client remembers, and it re-sends bodies already held here — wasteful
-  // and correct. The unsafe drift is the reverse, and it cannot happen: this
-  // map dies only with the Client, and a new Client means a new socket, hence
-  // a new Connection with an empty delivered set.
+  // hash. Every entry was verified against the hash naming it, so holding one
+  // the server no longer counts as delivered costs bytes, never correctness.
+  //
+  // Deliberately NOT cleared on reconnect: the server tracks delivery per
+  // Connection, so a reconnect makes the SERVER forget while this map
+  // remembers, and it re-sends bodies already held here. The reverse — this
+  // map behind what the server counts as delivered — is what strands a
+  // connection, and the two ways to reach it are both closed: the map dies
+  // only with the Client, whose replacement means a new Connection, and a
+  // frame that fails to populate it discards the connection
+  // (`discardConnectionIfSchemaCas`).
   #schemaCache: SchemaCache = new Map();
+  // Whether the last handshake negotiated the connection-scoped schema
+  // encoding, mirroring the server's own negotiation. Frames on such a
+  // connection are not self-describing, which changes what a frame this client
+  // fails to process costs — see #discardConnection.
+  #schemaCasNegotiated = false;
 
   private constructor(
     private readonly transport: Transport,
@@ -376,6 +386,7 @@ export class Client {
         this.#helloPending.reject(error);
       } else {
         this.rejectPending(error);
+        this.discardConnectionIfSchemaCas(error);
       }
       return;
     }
@@ -402,6 +413,8 @@ export class Client {
         // consumers (e.g. the runner's sqlite write-gate relaxation) read
         // these; absent-on-old-server keys parse to false — fail closed.
         this.#serverFlags = helloOk.flags;
+        this.#schemaCasNegotiated = helloOk.flags.syncSchemaCasV1 === true &&
+          expectedFlags.syncSchemaCasV1 === true;
         try {
           this.#sessionOpenAuthContext = requireSessionOpenAuthMetadata(
             helloOk.sessionOpen,
@@ -486,6 +499,35 @@ export class Client {
     if (this.#fatalError) {
       throw this.#fatalError;
     }
+  }
+
+  /**
+   * Drops the transport so later frames arrive on a fresh connection, when
+   * this one carries schema bodies across frames.
+   *
+   * A frame this client fails to process may have carried schema bodies the
+   * server has already recorded as delivered. Under the frame-local encoding
+   * that costs exactly one frame: the next one describes itself and the
+   * connection heals. Under the connection-scoped encoding it is terminal —
+   * every later reference to those bodies is unresolvable, and there is no
+   * protocol request for a schema by hash, so the connection would keep
+   * failing frames while looking healthy. A new connection starts the server's
+   * delivered set empty, which re-teaches the bodies.
+   */
+  private discardConnectionIfSchemaCas(error: Error): void {
+    if (!this.#schemaCasNegotiated || this.#closed || !this.#connected) {
+      return;
+    }
+    // Closing comes FIRST: reconnect() reuses a transport whose socket is
+    // still open, which would keep the server's Connection — and the
+    // delivered set that is the problem — alive. The transport's close
+    // receiver then drives the usual reconnect; a transport that has none is
+    // driven here instead.
+    void this.transport.close().catch(() => undefined).finally(() => {
+      if (this.#connected && !this.#closed) {
+        this.onClose(error);
+      }
+    });
   }
 
   private onClose(error?: Error): void {

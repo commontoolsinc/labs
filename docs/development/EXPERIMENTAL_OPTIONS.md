@@ -677,11 +677,22 @@ the per-epic implementation notes).
   connection, and this one wins when both are negotiated. A peer must know from
   the handshake alone whether a frame is self-describing, so a connection never
   mixes them.
+- **Recovering from a lost frame.** Frames under this encoding are not
+  self-describing, so a frame a peer receives but fails to process is not
+  survivable in place: the bodies it carried are counted as delivered, later
+  frames reference them bare, and no protocol request fetches a schema by hash.
+  The client therefore discards the connection when a frame fails to decode or
+  expand, and the fresh connection starts the server's delivered set empty.
 - **Current default and planned end state.** Off by default while the
-  distinct-schema count per connection is measured — the delivered set grows
-  monotonically for a connection's lifetime, and that measurement decides
-  whether it needs a cap with an inline fallback. The end state is on by
-  default, then retiring `syncSchemaTableV2` and its negotiation.
+  per-connection cost is measured. Both sides grow monotonically: the server
+  keeps a set of tagged hashes per connection, and the client keeps whole
+  schema bodies for the life of the `Client` — which in a browser tab is the
+  life of the tab, since a reconnect reuses it — including schemas of documents
+  since unwatched or deleted. Neither side caps or evicts. That measurement
+  decides whether either needs a cap with an inline fallback; inlining is
+  always decodable, so exceeding a cap degrades to the frame-local behavior
+  rather than breaking. The end state is on by default, then retiring
+  `syncSchemaTableV2` and its negotiation.
 - **Status on 2026-08-05.** Implemented, off by default, unmeasured in the
   field.
 - **Path to removal.** Default it on, confirm no peer still needs the
