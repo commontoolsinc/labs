@@ -345,6 +345,47 @@ Deno.test("delegated admission: the engine refuses delegated carriage on derived
     } finally {
       db.close();
     }
+    // A SESSIONLESS delegated batch (no actingSession) carrying a
+    // SESSION-scoped op: refused at admission — a sessionless actor has
+    // no session instance (scopes.md §5), and falling through would key
+    // the row `session:<actingPrincipal>:<delegating envelope session>`,
+    // a chimera instance no party ever acted as.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server:outbox",
+          space: SPACE,
+          commit: setCommit(2, [{
+            id: "of:delegated-sessionless",
+            scope: "session",
+          }]),
+          delegated: {
+            actingPrincipal: "did:key:alice",
+            capabilityRef: "cap:grant",
+          },
+        }),
+      ProtocolError,
+      "sessionless delegated",
+    );
+    // The same sessionless carriage with only USER- and space-scoped
+    // ops admits: no session component enters those keys, so the
+    // absent actingSession is legitimate (a derivation-emitted chain).
+    applyCommit(engine, {
+      sessionId: "server:outbox",
+      space: SPACE,
+      commit: setCommit(3, [
+        { id: "of:delegated-sessionless-user", scope: "user" },
+        { id: "of:delegated-sessionless-space" },
+      ]),
+      delegated: {
+        actingPrincipal: "did:key:alice",
+        capabilityRef: "cap:grant",
+      },
+    });
+    assertEquals(
+      revisionScopeKeys(path, "of:delegated-sessionless-user"),
+      ["user:did%3Akey%3Aalice"],
+    );
   } finally {
     resetServerExecutionConfig();
     close(engine);

@@ -80,9 +80,14 @@ const logger = getLogger("wave-accumulator", {
  *   — a whole-doc set (the first-ever watermark write materializing
  *   the doc), or a semantic conflict such as a whole-doc authored
  *   intrusion — DROPS the contribution whole: there is no event to
- *   requeue, and the loop re-derives its bookkeeping (W is re-advanced
- *   by the next wave; watermark forgery is an accepted authored
- *   intrusion — protocol.md §1's threat model).
+ *   requeue, and no re-advance is scheduled by the drop itself. The
+ *   loop's watermark advance is INPUT-driven, so the dropped doc write
+ *   is re-landed only by the next input batch's advance — on a quiet
+ *   space the doc simply lags (while the wave's commit metadata and
+ *   the loop's in-memory W, decided before the drop, already carry the
+ *   advance — see space-server.ts's bookkeeping-write comment).
+ *   Watermark forgery is an accepted authored intrusion — protocol.md
+ *   §1's threat model.
  *
  * The remaining §3d non-re-derivable members — `eventWatermark` advances
  * and effect intents — are produced by Phase 3 events and the stage-G
@@ -685,8 +690,13 @@ export class WaveAccumulator
     };
 
     // The lease check (serving-loop.md §2's stop-committing MUST): work
-    // sealed under a lapsed tenure never commits — recovery under the
-    // next tenure re-marks and re-runs from the basis index instead.
+    // sealed under a lapsed tenure never commits. Recovery: the serving
+    // loop PARKS the space on this abort, and re-activation's
+    // fresh-runtime recompute-on-demand is the ONLY post-abort arm —
+    // the withdrawal below re-arms nothing in place (no revert
+    // consumer; inputs unchanged), so a loop that continued after the
+    // abort would advance W over derivations that never re-ran
+    // (space-server.ts's lease-lost-abort park).
     if (
       this.#lease !== undefined &&
       !this.#lease.isCurrentTenure(this.#sealedTenure)

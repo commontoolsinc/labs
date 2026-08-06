@@ -381,6 +381,24 @@ Tasks:
       (speculation.md §2, owner 2026-08-02).
 - [ ] UI bindings untouched: authored writes under existing ACL + CAS.
 
+Carried-in revisits (stage-F residual, accepted for Phase 1 — owner,
+2026-08-05; both must be resolved before this phase's gates rely on
+W):
+
+- [ ] The settle input-barrier distinction: `inputSynced` cannot tell
+      a frame parked on the loop's OWN sealed commit from foreign
+      novelty, so a foreign authored frame in that position can be
+      claimed by W one wave early (self-healing next wave — the
+      documented residual at `packages/runner/src/storage/v2.ts`,
+      `inputSynced`). Either distinguish parked-on-own-seal frames
+      from foreign novelty, or exclude unapplied frames' seqs from
+      the wave's `batchHead`.
+- [ ] The pattern-updater CHECK-half bring-up verification (the
+      network source-check the unit fixture cannot serve — the
+      stage-F flagged residual in `executor-serving-loop.test.ts`):
+      verify it in the integration environment's `sx2-serving-loop`
+      surface, not a unit fixture.
+
 Success criteria (the old Phase-1 ON gates land here, merged):
 
 - [ ] `counter` and `cfc-group-chat-demo-multi-runtime` green in the

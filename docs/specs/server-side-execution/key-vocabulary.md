@@ -197,7 +197,9 @@ per-run identities where run contexts carry them):
   channel correlating one principal's activity with another's wakes.
   (The re-key also normalized the observation-identity constructor's
   raw `undefined:` prefix into `space:` — the same instance by
-  definition; the two constructors now agree.)
+  definition; the two constructors now agree. The OFF-arm shaper-merge
+  delta this produces is a recorded acceptance, ratified 2026-08-05 —
+  verification-coverage.md's stage-F recorded-acceptance row.)
 
 **Recorded sound-per-session:**
 

@@ -1704,25 +1704,6 @@ WHERE commit_seq = :commit_seq
   }));
 };
 
-/**
- * Highest local_seq the given commit session has stored — the resume
- * floor for a wave sink's localSeq counter (engine-wave-sink.ts's replay
- * keying): a same-process SpaceServer re-activation must not restart the
- * counter at 0 under the same holder session, or its early commits would
- * collide with the previous activation's rows.
- */
-export const selectMaxLocalSeq = (
-  engine: Engine,
-  sessionKey: string,
-): number => {
-  const row = engine.database.prepare(`
-SELECT COALESCE(MAX(local_seq), 0) AS local_seq
-FROM "commit"
-WHERE session_id = :session_id
-`).get({ session_id: sessionKey }) as { local_seq: number };
-  return row.local_seq;
-};
-
 /** One basis-row overwrite unit of a wave commit (serving-loop.md §3b):
  * `seq: null` marks an in-wave read, filled with the wave's own commit
  * seq at write time. */
@@ -1993,6 +1974,28 @@ const applyCommitTransaction = (
           "row) — partial carriage is refused, never defaulted",
       );
     }
+    // A sessionless delegated chain has NO session instance (scopes.md
+    // §5: a sessionless actor's session-scoped write is an ERROR —
+    // neither falling back to another identity nor minting a session is
+    // permitted). Without this refusal the writeOperation fallback
+    // below would key such a write from the DELEGATING envelope's
+    // session — `session:<actingPrincipal>:<sink session>`, a chimera
+    // instance no party ever acted as. Refused at admission, loudly.
+    if (
+      delegated.actingSession === undefined || delegated.actingSession === ""
+    ) {
+      for (const operation of commit.operations) {
+        if (operation.op === "sqlite") continue;
+        if (normalizeScope(operation.scope) === "session") {
+          throw new ProtocolError(
+            "delegated admission rejected: a sessionless delegated " +
+              "batch (no actingSession) carries a session-scoped write " +
+              "— a sessionless actor has no session instance " +
+              "(scopes.md §5, protocol.md §2's delegated row)",
+          );
+        }
+      }
+    }
   }
 
   // Derived commits key scoped writes by their EXPLICIT annotation
@@ -2164,7 +2167,11 @@ const applyCommitTransaction = (
       // identity (protocol.md §2's delegated row; scopes.md §5 —
       // consequences land in the ACTOR's instances, never the delegating
       // envelope's; stamping from the envelope would be the
-      // silent-empty-instance trap, cross-space edition).
+      // silent-empty-instance trap, cross-space edition). The
+      // `?? sessionId` fallback is safe ONLY because admission above
+      // refuses a sessionless delegated batch carrying a session-scoped
+      // op: for the ops that reach here under a sessionless delegation,
+      // no session component enters the key.
       principal: delegated?.actingPrincipal ?? principal,
       sessionId: delegated?.actingSession ?? sessionId,
       scopeKeyOverride: scopeKeyByOpIndex.get(opIndex),

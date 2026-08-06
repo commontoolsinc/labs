@@ -2294,7 +2294,9 @@ class SpaceReplica implements ISpaceReplica {
    * authored frame in exactly that position can be claimed by W one
    * wave early; its dirtiness re-enters as the next wave's input and
    * the derived correction lands there (self-healing, flagged for the
-   * Phase 2 gate hardening).
+   * Phase 2 gate hardening). Accepted for Phase 1 (owner, 2026-08-05);
+   * revisit before Phase 2's gates — the named revisit items live in
+   * docs/plans/server-execution-v2.md's Phase 2 section.
    */
   async inputSynced(): Promise<void> {
     await Promise.all([...this.#syncPromises]);

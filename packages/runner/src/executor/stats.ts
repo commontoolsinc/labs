@@ -19,6 +19,11 @@ export type ServingLoopStats = {
   authoredSeen: number;
   effectAcks: number;
   derivedCommits: number;
+  /** Demanded-structure loads that failed (serving-loop.md §1's ON-arm
+   * bring-up posture: a value the server cannot serve stays
+   * client-derived until Phase 2 hardens the load path — counted AND
+   * surfaced here, not just logged). */
+  structureLoadFailures: number;
   /** max over active spaces of (store head seq − W). */
   watermarkLag: number;
   events: {
@@ -40,6 +45,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   authoredSeen: 0,
   effectAcks: 0,
   derivedCommits: 0,
+  structureLoadFailures: 0,
   watermarkLag: 0,
   events: {
     appended: 0,

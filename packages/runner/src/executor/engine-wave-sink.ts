@@ -60,9 +60,9 @@ export class EngineWaveCommitSink implements WaveCommitSink {
    * session). Freshness is structural, not queried: the holder's
    * process-instance component makes a new process a NEW engine
    * session, so 0 never collides; a park/re-activate within one
-   * process reuses the counter. (`selectMaxLocalSeq` remains the
-   * flooring belt for a holder scheme WITHOUT a process component —
-   * nothing in production uses one.) Tests that construct throwaway
+   * process reuses the counter. (A holder scheme WITHOUT a process
+   * component would need a stored-max floor instead; no such scheme
+   * exists.) Tests that construct throwaway
    * sinks may omit `localSeqRef` and get a private counter from 0 —
    * sound for a fresh session id per test engine.
    */

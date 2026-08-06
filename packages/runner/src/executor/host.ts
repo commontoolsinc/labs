@@ -221,8 +221,9 @@ export class ExecutorHost {
         // NEW engine session — no stored localSeqs to collide with, so
         // the counter starts at 0. Same-process park/re-activate reuses
         // this ref, which is the whole replay-keying obligation
-        // (engine-wave-sink.ts). `selectMaxLocalSeq` remains the belt
-        // for a holder scheme without a process component (tests).
+        // (engine-wave-sink.ts). A holder scheme WITHOUT a process
+        // component would need a stored-max floor here instead; no such
+        // scheme exists, so none is kept.
         localSeqRef = { value: 0 };
         this.#localSeqBySpace.set(space, localSeqRef);
       }

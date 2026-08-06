@@ -3396,6 +3396,16 @@ export class Server {
    * space's instances under its own space's lease — has no producer
    * until cross-space serving (Phase 5) and needs the cross-engine
    * lease lookup designed with it.
+   *
+   * A second Phase-1 bound, also deliberate: the equality below
+   * compares the SERVICE-IDENTITY component of the holder, not the
+   * full DR1 holder — so a second process authenticated as the same
+   * service DID passes on the FIRST process's lease row. Co-hosted
+   * Phase 1 runs one serving process per memory server, so the
+   * distinction has no instances; the per-process sharpening belongs
+   * to Phase 5's cross-engine lease lookup design (the same design
+   * FP2's widening needs), recorded in verification-coverage.md's
+   * stage-F read-row entry.
    */
   async #denyExplicitInstanceReads(
     space: string,

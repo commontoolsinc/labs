@@ -26,8 +26,10 @@ import * as Engine from "@commonfabric/memory/v2/engine";
 import {
   acquireExecutionLease,
   executionLeaseHolder,
+  liveExecutionLeaseHolder,
   releaseExecutionLease,
 } from "@commonfabric/memory/v2/execution-lease";
+import { stampWaveRunContext } from "../src/executor/wave.ts";
 import { SessionRegistry } from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
@@ -57,17 +59,30 @@ class SharedServerStorageManager extends EmulatedStorageManager {
 
   private _sharedServer!: MemoryV2Server.Server;
 
+  /** Test seam for the renew-blip interleave: when set, the serving
+   * loop's settle hangs at its `inputSynced` barrier until the gate
+   * resolves — holding an open (sealed, uncommitted) wave across a
+   * lease tenure bump, deterministically. Undefined everywhere else. */
+  settleGate: Promise<void> | undefined;
+
+  override async inputSynced(): Promise<void> {
+    await super.inputSynced();
+    if (this.settleGate !== undefined) await this.settleGate;
+  }
+
   protected override server(): MemoryV2Server.Server {
     return this._sharedServer;
   }
 }
 
-const newSharedServer = (sessionTtlMs?: number) =>
+const newSharedServer = (
+  options: { sessionTtlMs?: number; subscriptionRefreshDelayMs?: number } = {},
+) =>
   new MemoryV2Server.Server({
-    ...(sessionTtlMs === undefined
+    ...(options.sessionTtlMs === undefined
       ? {}
-      : { sessions: new SessionRegistry({ ttlMs: sessionTtlMs }) }),
-    subscriptionRefreshDelayMs: 0,
+      : { sessions: new SessionRegistry({ ttlMs: options.sessionTtlMs }) }),
+    subscriptionRefreshDelayMs: options.subscriptionRefreshDelayMs ?? 0,
     authorizeSessionOpen(message) {
       const principal = (message.authorization as { principal?: unknown })
         ?.principal;
@@ -299,6 +314,10 @@ describe("stage F serving loop", () => {
     expect(stats.derivedCommits).toBeGreaterThanOrEqual(1);
     expect(stats.lease.held).toBe(1);
     expect(stats.lease.lost).toBe(0);
+    // Structure-load failures are SURFACED (serving-loop.md §1's
+    // counted-and-logged posture reaches the §7 block, not a private
+    // field): zero here — the demanded structure loaded.
+    expect(stats.structureLoadFailures).toBe(0);
     expect(stats.events.appended).toBe(0);
     expect(stats.memo.hits + stats.memo.misses).toBe(0);
 
@@ -345,6 +364,112 @@ describe("stage F serving loop", () => {
     expect(
       watermarkCell(servingRuntime!, space).get()?.seq,
     ).toBeGreaterThanOrEqual(authored2);
+  });
+
+  it("holds W until loopback frames deliver at a REAL refresh cadence: the settle's server.idle() drain is load-bearing (protocol.md §4)", async () => {
+    // The other tests run `subscriptionRefreshDelayMs: 0`, which masks
+    // the settle's `server.idle()` drain: the refresh timer fires
+    // before the settle's yield and delivers the loopback frames
+    // anyway. Here the refresh delay is set ABOVE the flush deadline
+    // (the production default, 5 ms, exhibits the same race — this
+    // margin makes the probe deterministic on slow CI), so frame
+    // delivery inside the settle happens ONLY through the explicit
+    // drain. Remove `await this.#options.server.idle()` from
+    // SpaceServer's settle and this test fails: the settle declares
+    // quiescence before the authored commit's dirtiness ever reaches
+    // the serving scheduler, W advances over the undelivered input,
+    // and the strict settled ⇒ current assertion below reads a stale
+    // derived value.
+    server = newSharedServer({ subscriptionRefreshDelayMs: 400 });
+    host = newHost({ flushDeadlineMs: 300, idleParkMs: 600_000 });
+
+    onServingRuntime = async (runtime) => {
+      const compiled = await runtime.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { computed, pattern } from 'commonfabric';",
+            "export default pattern<{ n: number }, { total: number }>(",
+            "  ({ n }) => ({ total: computed(() => n + 1) }),",
+            ");",
+          ].join("\n"),
+        }],
+      }, { space });
+      const argument = runtime.getCell<{ n: number }>(
+        space,
+        "drain-arg",
+        undefined,
+      );
+      const result = runtime.getCell<{ total: number }>(
+        space,
+        "drain-result",
+        compiled.resultSchema,
+      );
+      for (let attempt = 0;; attempt++) {
+        await argument.sync();
+        await result.sync();
+        const tx = runtime.edit();
+        runtime.run(tx, compiled, argument, result);
+        const committed = await tx.commit();
+        if (committed.error === undefined) break;
+        if (attempt >= 4) {
+          throw new Error(
+            `serving pattern run failed: ${committed.error.message}`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await runtime.idle();
+    };
+
+    openClient();
+    const engine = await server.engineForSpace(space);
+
+    const clientResult = clientRuntime.getCell<{ total: number }>(
+      space,
+      "drain-result",
+      undefined,
+    );
+    await clientResult.sync();
+    const clientArg = clientRuntime.getCell<{ n: number }>(
+      space,
+      "drain-arg",
+      undefined,
+    );
+    await clientArg.sync();
+
+    // Phase 1 — prime: first authored write, settle, observe the
+    // derived value. This also establishes the client's watermark-doc
+    // watch, so phase 2's frames arrive on a LIVE subscription (the
+    // strict assertion's precondition, as in the first test).
+    const tx = clientRuntime.edit();
+    clientArg.withTx(tx).set({ n: 41 });
+    expect((await tx.commit()).error).toBeUndefined();
+    const authoredSeq = Engine.serverSeq(engine);
+    await waitForSettled(clientRuntime, space, authoredSeq, {
+      timeoutMs: 10_000,
+    });
+    await waitUntil(
+      () => clientResult.key("total").get() === 42,
+      "client to observe the first derived value",
+    );
+
+    // Phase 2 — the strict W-soundness probe (protocol.md §4): with
+    // the subscriptions live, "settled" must mean the demanded
+    // derivation is ALREADY current — the derived value and the
+    // watermark ride one wave commit and one push frame, so this read
+    // is synchronous. Under the mutation (settle drain removed) the
+    // wave advances W without the recompute, the flush carries the
+    // watermark upsert alone, and this read sees the STALE total.
+    const tx2 = clientRuntime.edit();
+    clientArg.withTx(tx2).set({ n: 99 });
+    expect((await tx2.commit()).error).toBeUndefined();
+    const authored2 = Engine.serverSeq(engine);
+    await waitForSettled(clientRuntime, space, authored2, {
+      timeoutMs: 10_000,
+    });
+    expect(clientResult.key("total").get()).toBe(100);
   });
 
   it("hot-swaps a pattern SERVER-side: a client's pattern-pointer write dirties the piece and the SpaceServer swaps (serving-loop.md §3e, OW6)", async () => {
@@ -449,6 +574,10 @@ describe("stage F serving loop", () => {
     // updater's principal (here, the client) — the swap is the SERVER
     // reacting to it (serving-loop.md §3e; runtime-mapping N40/N41).
     expect(v2Ref?.identity).toBeDefined();
+    // Baseline BEFORE the swap: the post-swap assertions below must
+    // pin the SWAPPED derivation's own commit, not be satisfiable by
+    // v1's pre-swap derived commits.
+    const preSwapHead = Engine.serverSeq(engine);
     const pointerTx = clientRuntime.edit();
     clientResult.withTx(pointerTx).setMetaRaw("patternIdentity", v2Ref!);
     expect((await pointerTx.commit()).error).toBeUndefined();
@@ -462,11 +591,26 @@ describe("stage F serving loop", () => {
       "the server-side swap to serve 43",
       20_000,
     );
-    // The swapped-in derivation landed as a DERIVED commit.
-    const derivedAfterSwap = engine.database.prepare(
-      `SELECT COUNT(*) AS n FROM "commit" WHERE class = 'derived'`,
-    ).get() as { n: number };
-    expect(derivedAfterSwap.n).toBeGreaterThanOrEqual(1);
+    // The SWAPPED derivation's own commit: derived-class commits landed
+    // AFTER the pre-swap baseline, under the loop's own holder — v1's
+    // earlier derived commits cannot satisfy this.
+    const swapDerived = engine.database.prepare(
+      `SELECT seq, holder FROM "commit"
+       WHERE class = 'derived' AND seq > :preSwapHead ORDER BY seq`,
+    ).all({ preSwapHead }) as { seq: number; holder: string }[];
+    expect(swapDerived.length).toBeGreaterThanOrEqual(1);
+    for (const row of swapDerived) {
+      expect(row.holder).toBe(host.spaceServer(space)!.holder);
+    }
+    // And the value the client observed (43) is the NEWEST computed
+    // revision, riding one of those post-swap derived commits.
+    const latestComputed = engine.database.prepare(
+      `SELECT c.class AS class, c.seq AS seq FROM revision r
+       JOIN "commit" c ON c.seq = r.commit_seq
+       WHERE r.id LIKE 'computed:%' ORDER BY r.seq DESC LIMIT 1`,
+    ).get() as { class: string; seq: number } | undefined;
+    expect(latestComputed?.class).toBe("derived");
+    expect(latestComputed!.seq).toBeGreaterThan(preSwapHead);
     // Watermark note, deliberate: W is NOT asserted past the pointer
     // write here. The swap's by-identity reload can leave a module-doc
     // sync pending in this fully-local fixture, and an outstanding
@@ -515,8 +659,109 @@ describe("stage F serving loop", () => {
     expect(host.stats().activeSpaces).toBe(0);
   });
 
+  it("parks on a renew-blip mid-wave abort: reacquire succeeds, the aborted wave's space still parks and W does not move (serving-loop.md §2)", async () => {
+    // The renew-blip interleave, end to end: (1) a wave opens (a seal
+    // captures the CURRENT lease tenure); (2) the lease row vanishes
+    // (expiry analogue) with NO rival, so the next renew tick FAILS and
+    // the same-process reacquire SUCCEEDS — tenure bumps while the
+    // sealed wave is still uncommitted; (3) the wave reaches its commit
+    // step under the bumped tenure and aborts, its sealed writes
+    // withdrawn. The pinned behavior: the space PARKS on that abort.
+    // The pre-fix loop continued instead — and since nothing re-arms a
+    // withdrawn derivation's producer (no revert consumer; inputs
+    // unchanged) while #coverageHead had already claimed the batch, the
+    // next cycle minted a watermark-only advance claiming work that
+    // never re-ran. Deterministic mid-wave hold: the test manager's
+    // settleGate hangs the settle's inputSynced barrier, keeping the
+    // sealed wave open across the blip without any product-code hook.
+    host = newHost({
+      flushDeadlineMs: 5_000,
+      idleParkMs: 600_000,
+      renewIntervalMs: 25,
+    });
+    onServingRuntime = () => Promise.resolve();
+    openClient();
+
+    const input = clientRuntime.getCell<{ value: number }>(
+      space,
+      "renew-blip-input",
+      undefined,
+    );
+    const tx = clientRuntime.edit();
+    input.withTx(tx).set({ value: 1 });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate",
+    );
+    const spaceServer = host.spaceServer(space)!;
+    const engine = await server.engineForSpace(space);
+    // Let the activation-triggered cycle finish (its watermark-only
+    // advance claims the authored input) so the loop sits in
+    // wait-for-input — not mid-settle — before the gate closes.
+    const authoredSeq = Engine.serverSeq(engine);
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= authoredSeq,
+      "the activation cycle to settle",
+    );
+
+    // Close the gate, then open a wave: a stamped tx on the SERVING
+    // runtime seals into the wave (capturing the current tenure); its
+    // commit step cannot run until the settle passes the gated
+    // inputSynced barrier.
+    const manager = servingRuntime!
+      .storageManager as SharedServerStorageManager;
+    const gate = Promise.withResolvers<void>();
+    manager.settleGate = gate.promise;
+    const probeCell = servingRuntime!.getCell<{ n: number }>(
+      space,
+      "renew-blip-probe",
+      undefined,
+    );
+    await probeCell.sync();
+    const probeTx = servingRuntime!.edit();
+    stampWaveRunContext(probeTx, {
+      actionId: "test/renew-blip-probe",
+      kind: "derivation",
+    });
+    probeCell.withTx(probeTx).set({ n: 1 });
+    // Resolves at SEAL (the wave holds the store commit).
+    expect((await probeTx.commit()).error).toBeUndefined();
+
+    // The blip: the row vanishes with NO rival. The next renew tick
+    // fails (tenure ends) and the same-process reacquire succeeds
+    // (tenure bumps) — while the sealed wave is still gated open.
+    releaseExecutionLease(engine, { space, holder: spaceServer.holder });
+    await waitUntil(
+      () => host!.stats().lease.lost >= 1,
+      "the renew tick to fail once",
+    );
+    await waitUntil(
+      () => liveExecutionLeaseHolder(engine, space) === spaceServer.holder,
+      "the blip reacquire to restore the row",
+    );
+    const watermarkBefore = readWatermarkSeq(engine);
+
+    // Open the gate: the settle resumes, the wave reaches its commit
+    // step under the bumped tenure and aborts — and the space PARKS
+    // (the pre-fix loop stayed active here, which is what this
+    // waitUntil pins against).
+    gate.resolve();
+    await waitUntil(
+      () => host!.spaceServer(space)?.active !== true,
+      "space to park on the lease-lost wave abort",
+    );
+    manager.settleGate = undefined;
+    // Soundness: no watermark movement rode the aborted wave, and no
+    // continued loop minted a watermark-only advance after it.
+    expect(readWatermarkSeq(engine)).toBe(watermarkBefore);
+    expect(host.stats().activeSpaces).toBe(0);
+    expect(host.stats().lease.lost).toBeGreaterThanOrEqual(1);
+  });
+
   it("parks an idle space with no live sessions (IDLE_PARK_MS), releasing the lease", async () => {
-    server = newSharedServer(50);
+    server = newSharedServer({ sessionTtlMs: 50 });
     host = newHost({
       flushDeadlineMs: 500,
       idleParkMs: 100,

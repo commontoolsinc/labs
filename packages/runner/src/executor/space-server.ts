@@ -138,7 +138,6 @@ export class SpaceServer implements TransactionSealDestination {
    * upstream"): the sink is what pulls the demanded value through the
    * scheduler's pull-based laziness. Released on park. */
   readonly #demandSinks = new Map<string, () => void>();
-  #structureLoadFailures = 0;
 
   constructor(options: SpaceServerOptions) {
     this.#options = options;
@@ -350,8 +349,14 @@ export class SpaceServer implements TransactionSealDestination {
     if (lease === undefined || !this.#active) return;
     if (!lease.renew()) {
       // Stop committing immediately (serving-loop.md §2's MUST): the
-      // tenure ended inside renew(), so the in-flight wave aborts at its
-      // commit step. Then re-acquire or park.
+      // tenure ended inside renew(), so an in-flight wave aborts at its
+      // commit step. Then re-acquire or park. The reacquire keeps this
+      // loop serving ONLY when no wave sealed under the lapsed tenure:
+      // a wave that does abort at commit had its sealed derivations
+      // WITHDRAWN, and nothing re-arms their producers in place (no
+      // revert consumer; inputs unchanged), so #waveCycle parks the
+      // space on that abort rather than letting a continued loop mint a
+      // watermark-only advance over work that never re-ran.
       this.#options.stats.lease.lost += 1;
       logger.warn("lease-lost", () => [
         `space ${this.#options.space}: lease renewal failed; ` +
@@ -489,7 +494,7 @@ export class SpaceServer implements TransactionSealDestination {
           path: [],
         });
       } catch (error) {
-        this.#structureLoadFailures += 1;
+        this.#options.stats.structureLoadFailures += 1;
         logger.warn("structure-load-failed", () => [
           `demanded root ${root.id} did not load`,
           error,
@@ -640,7 +645,19 @@ export class SpaceServer implements TransactionSealDestination {
     // existing doc) so the bookkeeping conflict class's REBASE arm is
     // live: a disjoint concurrent patch to the watermark doc commutes,
     // while a whole-doc authored intrusion (forgery) still conflicts
-    // semantically and drops the advance — re-advanced next wave.
+    // semantically and drops the DOC write whole. Stated truthfully:
+    // that drop is decided inside commitWave, AFTER `advanceSealed`
+    // below already fed `derivedThrough` and armed the in-memory
+    // advance — which keys off the WAVE commit succeeding
+    // (`outcome.seq`), not off the doc write surviving — so the commit
+    // metadata and this loop's `#watermark` still advance while the doc
+    // lags, and on a quiet space no re-advance follows (the advance is
+    // input-driven; the next one comes with the next input batch).
+    // Accepted, not a gap to fix here: watermark forgery is an authored
+    // intrusion inside protocol.md §1's threat model, and the failure
+    // is conservative for clients — waitForSettled reads the DOC, so a
+    // dropped doc write leaves them unsettled (never settled early),
+    // until the next input-driven advance re-lands it.
     let advanceSealed = false;
     if (shouldAdvance) {
       const tx = runtime.edit();
@@ -681,9 +698,22 @@ export class SpaceServer implements TransactionSealDestination {
     if (exhausted) stats.wavesBudgetExhausted += 1;
     stats.supersededWrites += outcome.supersededWrites;
     if (outcome.aborted === "lease-lost") {
+      // PARK, never continue (W-soundness): the abort WITHDREW the
+      // wave's sealed derivations, nothing re-arms their producers in
+      // place (no revert consumer; the inputs did not change), and
+      // #coverageHead has already claimed the input batch — a continued
+      // loop (the renew-blip reacquire path, where lease.acquire()
+      // succeeded and this runtime kept running) would mint a
+      // watermark-only advance next cycle over demanded derivations
+      // that never re-ran, making waitForSettled lie until the next
+      // input change. Re-activation's fresh-runtime recompute-on-demand
+      // is the ONLY post-abort recovery arm (serving-loop.md §6 step 2:
+      // a demanded pull recomputes regardless).
       logger.warn("wave-aborted", () => [
-        "wave aborted: lease lost mid-wave (serving-loop.md §2)",
+        "wave aborted: lease lost mid-wave; parking " +
+        "(serving-loop.md §2)",
       ]);
+      await this.park("lease-lost-abort");
       return;
     }
     if (outcome.seq !== undefined) {
