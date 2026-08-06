@@ -134,6 +134,31 @@ describe("main command", () => {
     ]);
   });
 
+  it("takes piece call's session from the flag ahead of CF_SESSION", async () => {
+    const { piece } = await import(
+      "../commands/piece.ts?piece-call-session-test"
+    );
+    const call = piece.getCommand("call")!;
+    const sessions: Array<string | undefined> = [];
+    call.action((options) => {
+      sessions.push(options.session);
+    });
+
+    await withEnv("CF_SESSION", "from-env", async () => {
+      await piece.parse(["call", "--session", "from-flag", "increment"]);
+      await piece.parse(["call", "increment"]);
+    });
+    await withEnv("CF_SESSION", undefined, async () => {
+      await piece.parse(["call", "increment"]);
+    });
+
+    // The environment is the standing default for a shell or an agent run,
+    // and the flag is the one call that departs from it — so the flag wins.
+    // With neither, no session: nothing is invented for a caller that named
+    // none.
+    expect(sessions).toEqual(["from-flag", "from-env", undefined]);
+  });
+
   it("rejects multiple inline inputs to piece call", async () => {
     const { main } = await import(
       "../commands/main.ts?piece-call-inline-validation-test"

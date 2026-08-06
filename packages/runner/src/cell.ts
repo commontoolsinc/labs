@@ -284,6 +284,15 @@ export const recordRelevantSchemaWritePolicyInput = (
  * `eventId` is a caller-supplied durable event id (verb contract WS-D): a
  * same-id retry collides on the handling's create-only receipt.
  *
+ * `session` names the caller that chose that `eventId`. An ingress caller's id
+ * is its own word — an agent picks `add-comment-1` — and two agents can pick
+ * the same word for two different calls on one verb, so the id alone does not
+ * say whose invocation it is; the session does. It is accepted here so an
+ * ingress caller can carry the session it is acting within all the way to the
+ * point the durable id is derived. The derived id is
+ * {@link scopeCallerEventId}'s, over the caller's id and the stream, and does
+ * not take the session as an input.
+ *
  * `runtimeInjectedEventKeys` names payload keys the RUNTIME itself merged
  * into this send's event value (the LLM tool-call path injects a `result`
  * cell: `builtins/llm-dialog.ts` sends `{ ...input, result }`). The
@@ -304,6 +313,7 @@ export const recordRelevantSchemaWritePolicyInput = (
  */
 export type StreamSendOptions = {
   eventId?: string;
+  session?: string;
   runtimeInjectedEventKeys?: readonly string[];
 };
 
@@ -348,18 +358,15 @@ declare module "@commonfabric/api" {
     set(
       value: AnyCellWrapping<T> | T,
       onCommit?: (tx: IExtendedStorageTransaction) => void,
-      sendOptions?: {
-        eventId?: string;
-        runtimeInjectedEventKeys?: readonly string[];
-      },
+      sendOptions?: StreamSendOptions,
     ): C;
   }
 
   /**
    * Augment Streamable to add onCommit callback and internal send-options
-   * support (see `StreamSendOptions` — `eventId` and the runtime-injected
-   * key marker). Event is optional only when T is void (matching public
-   * API).
+   * support ({@link StreamSendOptions} — the caller's event id and session,
+   * and the runtime-injected key marker). Event is optional only when T is
+   * void (matching public API).
    */
   interface IStreamable<T> {
     send(
@@ -369,7 +376,7 @@ declare module "@commonfabric/api" {
         ] | [
           AnyCellWrapping<T> | T,
           ((tx: IExtendedStorageTransaction) => void) | undefined,
-          { eventId?: string; runtimeInjectedEventKeys?: readonly string[] },
+          StreamSendOptions,
         ]
         : [AnyCellWrapping<T> | T] | [
           AnyCellWrapping<T> | T,
@@ -377,7 +384,7 @@ declare module "@commonfabric/api" {
         ] | [
           AnyCellWrapping<T> | T,
           ((tx: IExtendedStorageTransaction) => void) | undefined,
-          { eventId?: string; runtimeInjectedEventKeys?: readonly string[] },
+          StreamSendOptions,
         ]
     ): void;
   }
