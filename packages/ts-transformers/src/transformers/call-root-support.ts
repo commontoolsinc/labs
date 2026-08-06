@@ -62,6 +62,10 @@ function hasOpaquePathTerminalReceiverChain(
  * receivers for which `.get()` is a value read. Every other receiver either
  * exposes its value directly (`opaque-get:invalid-call` covers those) or has no
  * `.get()` at all, so a read through one is never a site worth lowering.
+ *
+ * The computed spelling `<receiver>["get"]()` is the same read, and
+ * {@link classifyOpaquePathTerminalCall} already reports it as one, so both
+ * callee forms are accepted.
  */
 export function isCellReadTerminalCall(
   expression: ts.CallExpression,
@@ -72,7 +76,10 @@ export function isCellReadTerminalCall(
   }
 
   const callee = expression.expression;
-  if (!ts.isPropertyAccessExpression(callee)) {
+  if (
+    !ts.isPropertyAccessExpression(callee) &&
+    !ts.isElementAccessExpression(callee)
+  ) {
     return false;
   }
 

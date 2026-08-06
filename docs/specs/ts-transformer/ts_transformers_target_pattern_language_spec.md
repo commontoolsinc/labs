@@ -543,6 +543,8 @@ The intended split is:
    - not part of the target language, even for true cells
    - example:
      - `{ value: input.key("foo").get() }` directly in a top-level pattern body
+   - the implementation accepts this example today; see the nuance at the end
+     of this section for the shape of that unratified carve-out
 4. **`.get()` on ordinary opaque/reactive values**
    - not part of the target language
    - examples:

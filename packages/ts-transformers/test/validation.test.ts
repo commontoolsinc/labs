@@ -3242,6 +3242,28 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "allows the computed-key spelling of a .get() binding (auto-wrapped)",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      export default pattern<{ layout: Writable<string> }>(({ layout }) => {
+        const value = layout["get"]();
+        return { value };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "layout['get']() is the same read as layout.get()",
+      );
+    },
+  );
+
+  await t.step(
     "still errors on an opaque .get() binding",
     async () => {
       const source = `      import { pattern } from "commonfabric";
