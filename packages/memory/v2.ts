@@ -24,6 +24,24 @@ export type BranchName = string;
 export type SessionId = string;
 export type SessionToken = string;
 export type CellScope = "space" | "user" | "session";
+/**
+ * The commit classes of server-execution v2
+ * (docs/specs/server-side-execution/protocol.md §1). A closed set of three:
+ * `authored` (any authorized session's own writes and event appends),
+ * `derived` (the space's lease-holding SpaceServer committing derivation
+ * results), `system` (the memory server itself: bootstrap-style direct
+ * writes). The class is SERVER-DETERMINED at admission — assigned by which
+ * admission path processed the commit, never a client-supplied field — and
+ * every commit carries one in both flag arms; only the ON arm enforces the
+ * per-class admission rows (protocol.md §2). Protocol vocabulary, so it is
+ * defined once here in the wire-shape module (protocol.md §7).
+ */
+export type CommitClass = "authored" | "derived" | "system";
+export const COMMIT_CLASSES: readonly CommitClass[] = [
+  "authored",
+  "derived",
+  "system",
+];
 export type Reference = string & {
   readonly __memoryV2Reference: unique symbol;
 };
@@ -863,6 +881,7 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 // their defaults and removal paths, in docs/development/EXPERIMENTAL_OPTIONS.md.
 // Update that registry when adding or removing one.
 let persistentSchedulerStateEnabled = false;
+let serverExecutionEnabled = false;
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
 
@@ -881,6 +900,28 @@ export function getPersistentSchedulerStateConfig(): boolean {
 
 export function resetPersistentSchedulerStateConfig(): void {
   persistentSchedulerStateEnabled = false;
+}
+
+/**
+ * Ambient runtime flag for server-execution v2
+ * (`EXPERIMENTAL_SERVER_EXECUTION`; docs/specs/server-side-execution/). OFF is
+ * today's behavior byte-for-byte. The runner owns the feature, but the
+ * per-class commit admission rows (protocol.md §2) are enforced by the memory
+ * server under the flag, so the value lives beside the memory protocol flags
+ * like `persistentSchedulerState` does. Not a handshake capability: admission
+ * enforcement is server-local, so nothing about it is negotiated per
+ * connection.
+ */
+export function setServerExecutionConfig(enabled?: boolean): void {
+  serverExecutionEnabled = enabled ?? false;
+}
+
+export function getServerExecutionConfig(): boolean {
+  return serverExecutionEnabled;
+}
+
+export function resetServerExecutionConfig(): void {
+  serverExecutionEnabled = false;
 }
 
 /**

@@ -10,8 +10,10 @@ import {
 import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
+  getServerExecutionConfig,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
+  resetServerExecutionConfig,
 } from "@commonfabric/memory/v2";
 
 const signer = await Identity.fromPassphrase("test experimental");
@@ -26,6 +28,7 @@ describe("ExperimentalOptions", () => {
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
     resetPersistentSchedulerStateConfig();
+    resetServerExecutionConfig();
   });
 
   describe("Runtime construction", () => {
@@ -50,6 +53,7 @@ describe("ExperimentalOptions", () => {
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
+        serverExecution: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -71,6 +75,7 @@ describe("ExperimentalOptions", () => {
         plainResultReceipts: true,
         computedCellIds: true,
         eagerSourceAnnotation: false,
+        serverExecution: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -92,6 +97,7 @@ describe("ExperimentalOptions", () => {
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
+        serverExecution: false,
       });
       await runtime.dispose();
       await sm.close();
@@ -129,6 +135,25 @@ describe("ExperimentalOptions", () => {
 
       await runtime.dispose();
       await sm.close();
+    });
+
+    it("constructing Runtime with serverExecution sets global config", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          serverExecution: true,
+        },
+      });
+
+      expect(getServerExecutionConfig()).toBe(true);
+      expect(runtime.experimental.serverExecution).toBe(true);
+
+      await runtime.dispose();
+      await sm.close();
+
+      expect(getServerExecutionConfig()).toBe(false);
     });
 
     it("constructing Runtime with commitPreconditions sets global config", async () => {
@@ -194,6 +219,7 @@ describe("ExperimentalOptions", () => {
       expect(getModernCellRepConfig()).toBe(initial);
       expect(getPersistentSchedulerStateConfig()).toBe(false);
       expect(getCommitPreconditionsConfig()).toBe(true);
+      expect(getServerExecutionConfig()).toBe(false);
     });
   });
 });

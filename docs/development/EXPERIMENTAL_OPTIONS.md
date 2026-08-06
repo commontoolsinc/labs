@@ -34,6 +34,7 @@ was last checked against the code.
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete flag | implemented, on in the shell |
 | [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | on | Robin McCollum (#4659) | graduate to unconditional behavior, then delete flag | implemented, on by default |
+| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A) | default ON at the plan's Phase 7 flip, then delete the flag and the OFF path | Phase 1 in progress: stage A landed (flag, commit `class` metadata, CI arms, `stream-data` disable), off by default |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
@@ -71,9 +72,9 @@ The mapping from environment variable to flag is defined once, canonically, as
 and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
 the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines.
-Six flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
+Seven flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
 `eagerSourceAnnotation`, `plainResultReceipts`, `systemPatternAutoUpdate`,
-`computedCellIds`);
+`computedCellIds`, `serverExecution`);
 `commitPreconditions` is deliberately mapped to `null` there, which records
 "not env-reachable" as a decision rather than an omission.
 The mapping accepts exactly `"true"` and `"false"`; any other value is ignored
@@ -362,6 +363,59 @@ propagate](#how-flags-propagate).
 - **Path to removal.** Confirm all syncing clients carry `computed:`-aware
   readers and the default-on rollout has soaked; then remove the environment
   mapping, runtime option, builder guard, and legacy rollback tests.
+
+### `serverExecution`
+
+- **Toggle via.** `EXPERIMENTAL_SERVER_EXECUTION` environment variable (through
+  the canonical mapping described in the category note above), or
+  `RuntimeOptions.experimental.serverExecution`; browser-side via the shell
+  build define of the same name
+  ([`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts) /
+  [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts)). The
+  ambient control point is `setServerExecutionConfig` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts): the runner owns the
+  feature, but the per-class commit admission rows are enforced by the memory
+  server under the flag, so the value lives beside the memory protocol flags.
+  It is not a handshake capability — admission enforcement is server-local and
+  nothing about it is negotiated per connection.
+- **Added by.** Bernhard Seefeld, in server-execution v2 Phase 1 stage A
+  (#5339;
+  [`docs/plans/server-execution-v2.md`](../plans/server-execution-v2.md);
+  spec:
+  [`docs/specs/server-side-execution/`](../specs/server-side-execution/README.md)).
+- **Purpose.** The single flag of server-execution v2 — servers do all the
+  compute that is stored; clients commit nothing but intent. Exactly two
+  states, no shippable intermediates (spec README §3.4); deliberately named
+  unlike v1's `SERVER_PRIMARY_EXECUTION` so the archived v1 documents never
+  alias it. Both states, defined:
+  - **OFF (the default): today's behavior, byte-for-byte.** Every client
+    runtime runs and commits derivations exactly as it does today, and every
+    client commit is `authored`-class — `derived` is never claimed off the
+    flag. The commit `class` metadata is still *written* in this arm (it is
+    written in every arm from stage A onward — protocol.md §1), but nothing
+    is enforced from it, and `stream-data` behaves as today. Any OFF-arm
+    behavioral diff from a v2 stage is a phase-gate failure by itself
+    (testing.md §2).
+  - **ON: the v2 posture, growing stage by stage.** With stage A landed this
+    means: the per-class admission rows of protocol.md §2 are enforceable
+    (observably a no-op today — no lease exists yet, so no `derived`
+    producer, and the `authored`/`system` rows equal today's checks), and
+    the deferred `stream-data` built-in is disabled with a runtime error
+    naming builtins.md §5. Later stages add their surfaces under this same
+    flag (lease, serving loop, speculation, events); both halves of any
+    coupled behavior move together on it.
+- **Current default and planned end state.** Off by default in every process.
+  The integration suites run an ON arm in CI from stage A on, with explicit
+  per-phase skip lists (testing.md §2). End state: the plan's Phase 7 flips
+  the default ON after Phases 1–6 gate green and a soak period, then the flag
+  retires and the OFF code path is removed.
+- **Status on 2026-08-04.** Phase 1 stage A landed: flag plumbing end to end,
+  commit `class` metadata written in every arm, the OFF+ON CI arms, and the
+  `stream-data` disable. Off by default; the ON arm changes no observable
+  behavior beyond the `stream-data` error yet.
+- **Path to removal.** Execute the plan through its phase gates; at the
+  Phase 7 flip, retire the flag, remove the OFF path, and close out this
+  entry.
 
 ---
 
@@ -874,7 +928,10 @@ useful part of the remaining work for that flag.
 The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,
 `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`,
 `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION`,
-`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`) reach the runtime through the
+`EXPERIMENTAL_PLAIN_RESULT_RECEIPTS`,
+`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`,
+`EXPERIMENTAL_COMPUTED_CELL_IDS`,
+`EXPERIMENTAL_SERVER_EXECUTION`) reach the runtime through the
 deployed processes. The runtime-only flags (`commitPreconditions`, the CFC
 dials) reach it only through the `RuntimeOptions` passed to `new Runtime(...)`.
 

@@ -83,16 +83,20 @@ Tasks:
       `firedAt`-supplied identity and never resolves them from
       ambient state — key-vocabulary.md §3). Phase 1 stage E is
       unblocked.
-- [ ] Name the single flag — NAMED 2026-08-02:
+- [x] Name the single flag — NAMED 2026-08-02:
       `EXPERIMENTAL_SERVER_EXECUTION` (RuntimeOptions key
       `serverExecution`), deliberately distinct from v1's
       `SERVER_PRIMARY_EXECUTION` so archived docs never alias it —
       and register it in `EXPERIMENTAL_OPTIONS.md` with both states
-      defined; OFF is today byte-for-byte. Registration remains an
-      implementation task (Phase 1 stage A).
-- [ ] CI runs a flag-ON arm of the integration suites from the first PR
+      defined; OFF is today byte-for-byte. REGISTERED 2026-08-04
+      (stage A): env → runtime → ambient control point in
+      `packages/memory/v2.ts`, both states defined in the registry.
+- [x] CI runs a flag-ON arm of the integration suites from the first PR
       that has anything to test (v1 lesson: the flags-on branch never went
-      through CI).
+      through CI) — STOOD UP 2026-08-04 (stage A): the pattern and package
+      integration suites run a second, flag-ON arm with the explicit
+      per-phase skip lists in `tasks/server-execution-on-skips.ts` (empty
+      as of stage A).
 - [x] Stand up the scenario-trace suite
       ([scenario-traces.md](../specs/server-side-execution/scenario-traces.md),
       2026-08-03) — twelve end-to-end journeys, cell-by-cell with
@@ -122,7 +126,8 @@ Tasks:
 
 Success criteria:
 
-- [ ] Flag registered; a no-op ON arm passes CI identically to OFF.
+- [x] Flag registered; a no-op ON arm passes CI identically to OFF
+      (stage A, 2026-08-04).
 
 ## Interim postures — who does what, in the arm you are building
 
@@ -172,12 +177,16 @@ the server and still-deriving clients; expected, local-only, fine.
 
 Stages, one PR each except C, which is a three-PR train (below):
 
-- [ ] **A — flag + commit class + CI**: register the single flag
+- [x] **A — flag + commit class + CI**: register the single flag
       (Phase 0's naming; `EXPERIMENTAL_OPTIONS.md`, OFF is today
       byte-for-byte); land the `class` commit metadata (protocol.md
       §1, §7); stand up the OFF+ON CI arms with explicit skip lists
       (testing.md §2); disable `stream-data` under the flag (spec
-      §3.5).
+      §3.5). LANDED 2026-08-04: the class rides the commit record
+      (`class` column, stamped per admission path — transact
+      `authored`, the server's direct writes `system`; `derived`
+      tripwired until stage B's lease check), and the ON arms run
+      the full suites (skip lists empty).
 - [ ] **B — lease**: create the `execution_lease` table (engine-v3
       migration — none exists on main; v1-branch shape as prior art),
       the acquire/renew/expire cycle, and the derived-class admission
