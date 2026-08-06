@@ -119,6 +119,18 @@ Deno.test("an unrecognised literal spelling still reports rather than passing", 
   );
 });
 
+// A malformed node — no `left` at all — must be ignored rather than crash the
+// lint run. Deno's AST should never produce one, which is exactly why the guard
+// needs a test: nothing else will ever exercise it.
+Deno.test("a binary expression with no left operand is ignored", () => {
+  const reports: Report[] = [];
+  const rule = createRule(reports);
+  const visit = rule.BinaryExpression;
+  assert(visit);
+  visit({ type: "BinaryExpression", operator: "in", right: {} } as never);
+  assertEquals(reports.length, 0);
+});
+
 Deno.test("the message names the fix", () => {
   const reports = reportsFor(identifier);
   assertEquals(reports.length, 1);
