@@ -8,6 +8,7 @@ import {
   isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
 import {
+  FABRIC_SPECIAL_OBJECT_BRAND,
   isFabricPrimitiveSchemaType,
   type JSONSchemaObj,
   type SchemaPathSelector,
@@ -574,12 +575,10 @@ function prepareAnyOfBranch(
   const types = resolved.type !== undefined
     ? (Array.isArray(resolved.type) ? resolved.type : [resolved.type])
     : undefined;
-  const typeIncludesObject = resolved.type === undefined ||
-    resolved.type === "object" ||
-    (Array.isArray(resolved.type) && resolved.type.includes("object"));
-  const required = typeIncludesObject && Array.isArray(resolved.required)
-    ? resolved.required as readonly string[]
-    : undefined;
+  const required =
+    schemaTypeIncludesObject(resolved.type) && Array.isArray(resolved.required)
+      ? resolved.required as readonly string[]
+      : undefined;
   return {
     optionIsFalse: false,
     merged,
@@ -3315,6 +3314,22 @@ export class SchemaObjectTraverser<V extends FabricValue>
           } else if (branch.required !== undefined && valueIsRecord) {
             match = true;
             for (const req of branch.required) {
+              // A fabric value's surface is class accessors, so its
+              // membership test is prototype-chain `in`; the nominal brand
+              // key has no runtime existence and is satisfied by
+              // construction (removable with the other brand exemptions
+              // once the generator skips the brand — see
+              // opaqueLeafMissesRequired's doc comment).
+              if (doc.value instanceof FabricSpecialObject) {
+                if (req === FABRIC_SPECIAL_OBJECT_BRAND) continue;
+                if (
+                  !(req in (doc.value as unknown as Record<string, unknown>))
+                ) {
+                  match = false;
+                  break;
+                }
+                continue;
+              }
               // `Object.hasOwn`, not `in`: `req` is a schema-declared property
               // NAME and the value is data. `in` walks the prototype chain, so
               // a required property called `toString` was satisfied by every
@@ -3586,15 +3601,21 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // record branch below, which would otherwise decompose it.
       // Type-validate against the primitive's specific type name (e.g.
       // "FabricBytes"); a schema saying "object" also accepts it via
-      // schemaTypeMatchesValueType's subtype rule. Do not consult the
-      // schema's structural details: leaves are not property-walked.
-      return this.isValidType(
-          schemaObj,
-          schemaTypeOfFabricPrimitive(doc.value),
-        ) !==
+      // schemaTypeMatchesValueType's subtype rule. Leaves are not
+      // property-walked, but an object-typed schema's `required` keys must
+      // exist on the instance (class accessors count — `FabricBytes.length`
+      // satisfies `required: ["length"]`), mirroring the anyOf prefilters'
+      // `in` checks.
+      if (
+        this.isValidType(schemaObj, schemaTypeOfFabricPrimitive(doc.value)) ===
           TypeValidity.False
-        ? { ok: this.traversePrimitive(doc, schemaObj) }
-        : fail(TRAVERSE_FAILURES.invalidType);
+      ) {
+        return fail(TRAVERSE_FAILURES.invalidType);
+      }
+      if (opaqueLeafMissesRequired(schemaObj, doc.value)) {
+        return fail(TRAVERSE_FAILURES.invalidObject);
+      }
+      return { ok: this.traversePrimitive(doc, schemaObj) };
     } else if (doc.value instanceof FabricInstance) {
       // TODO(danfuzz): a `FabricInstance` (which can have model-visible
       // outgoing references) is not yet handled by schema traversal; correct
@@ -4675,11 +4696,21 @@ export function canBranchMatch(
   // Const/enum checks are omitted — property values may contain unresolved
   // links that would match after link resolution during traversal.
   if (isRecord(value)) {
-    const typeIncludesObject = resolved.type === undefined ||
-      resolved.type === "object" ||
-      (Array.isArray(resolved.type) && resolved.type.includes("object"));
-    if (typeIncludesObject && Array.isArray(resolved.required)) {
+    if (
+      schemaTypeIncludesObject(resolved.type) &&
+      Array.isArray(resolved.required)
+    ) {
       for (const req of resolved.required) {
+        // A fabric value's surface is class accessors, so its membership
+        // test is prototype-chain `in`; the nominal brand key has no
+        // runtime existence and is satisfied by construction (removable
+        // with the other brand exemptions once the generator skips the
+        // brand — see opaqueLeafMissesRequired's doc comment).
+        if (value instanceof FabricSpecialObject) {
+          if (req === FABRIC_SPECIAL_OBJECT_BRAND) continue;
+          if (!(req as string in value)) return false;
+          continue;
+        }
         // `Object.hasOwn`, not `in`: same own-presence question as the other
         // two required-property checks in this file.
         if (!Object.hasOwn(value, req as string)) return false;
@@ -4688,6 +4719,46 @@ export function canBranchMatch(
   }
 
   return true;
+}
+
+/** Whether the schema's `type` admits "object" (an absent type admits all). */
+function schemaTypeIncludesObject(type: JSONSchemaObj["type"]): boolean {
+  return type === undefined ||
+    type === "object" ||
+    (Array.isArray(type) && type.includes("object"));
+}
+
+/**
+ * Whether an object-typed schema names a required property the opaque leaf
+ * (a `FabricPrimitive`) does not have. Required keys are checked with `in`
+ * — prototype chain included, the same check the anyOf prefilters apply —
+ * so a class accessor such as `FabricBytes.length` satisfies
+ * `required: ["length"]` while a key the primitive lacks rejects it. The
+ * nominal brand key generated schemas require has no runtime existence and
+ * is satisfied by the instance itself; that exemption (here and at the
+ * other brand-aware check sites) exists because the schema-generator's
+ * object formatter currently emits the brand into `required`, and it can
+ * be removed once the generator skips the brand and stored schemas that
+ * carry it have cycled out. A fabric-primitive-typed schema is not gated
+ * here (its type never includes "object").
+ *
+ * Presence is the whole check: property sub-schemas are NOT enforced
+ * against a primitive's accessor values, so
+ * `{type: "object", properties: {source: {type: "number"}}}` matches a
+ * `FabricRegExp` even though its `source` is a string. Schemas generated
+ * from the real class types cannot express that mismatch, so enforcement
+ * would only ever act on hand-written schemas; until that is worth the
+ * accessor walk, shape errors of this kind pass validation.
+ */
+function opaqueLeafMissesRequired(
+  schema: JSONSchemaObj,
+  value: FabricPrimitive,
+): boolean {
+  return schemaTypeIncludesObject(schema.type) &&
+    Array.isArray(schema.required) &&
+    schema.required.some((key) =>
+      key !== FABRIC_SPECIAL_OBJECT_BRAND && !((key as string) in value)
+    );
 }
 
 /**

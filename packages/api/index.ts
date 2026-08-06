@@ -39,6 +39,15 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
 // declaration here (interface + constructor + declare-const with `new`).
 
 /**
+ * The nominal brand key declared on `FabricSpecialObject`. It exists only in
+ * the type system — a runtime instance never carries the key; `instanceof
+ * FabricSpecialObject` is its runtime form. Schema `required` presence
+ * checks must therefore treat this key as satisfied by any fabric value
+ * rather than probing for it with `in`.
+ */
+export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
+
+/**
  * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
  * single `instanceof` check for any fabric-system value type.
  *

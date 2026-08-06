@@ -1,5 +1,6 @@
 import {
   FABRIC_PRIMITIVE_SCHEMA_TYPES,
+  FABRIC_SPECIAL_OBJECT_BRAND,
   isFabricPrimitiveSchemaType,
   type JSONSchema,
   type JSONValue,
@@ -1651,6 +1652,37 @@ const validateAgainstSchemaInternal = (
         context,
       );
       if (failure !== undefined) return failure;
+    }
+
+    if (value instanceof FabricPrimitive) {
+      // An object-typed schema's `required` keys must exist on the opaque
+      // leaf. Unlike the plain-object loop below (own-props via
+      // `Object.hasOwn`), a primitive carries its surface as class
+      // accessors, so the check is `in` — `FabricBytes.length` satisfies
+      // `required: ["length"]`. `typeMatches` stays a permissive filter;
+      // this is the complete check behind it. A fabric-primitive-typed
+      // schema is not gated (its type never includes "object").
+      //
+      // Presence only: `properties` sub-schemas are not enforced against
+      // accessor values (a schema declaring `source` as a number still
+      // matches a FabricRegExp, whose `source` is a string) — the type
+      // system doesn't produce such schemas, and the property walk below
+      // deliberately stays limited to plain objects.
+      const typeAllowsObject = schema.type === undefined ||
+        asTypeArray(schema.type).includes("object");
+      if (typeAllowsObject && Array.isArray(schema.required)) {
+        for (const key of schema.required) {
+          // The nominal brand key has no runtime existence; a fabric value
+          // satisfies it by construction. Removable with the other brand
+          // exemptions (see opaqueLeafMissesRequired in traverse.ts) once
+          // the schema-generator skips the brand and stored schemas that
+          // carry it have cycled out.
+          if (key === FABRIC_SPECIAL_OBJECT_BRAND) continue;
+          if (!(key in value)) {
+            return mismatch(`missing required property ${key}`);
+          }
+        }
+      }
     }
 
     if (isFabricPlainObjectValue(value)) {
