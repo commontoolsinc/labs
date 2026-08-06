@@ -1768,7 +1768,7 @@ serialization system can round-trip it back to a real `Temperature` instance.
 
 import {
   type FabricValue,
-} from '@commonfabric/data-model/interface';
+} from '@commonfabric/data-model/fabric-value';
 import {
   CODEC,
   BaseFabricCodec,

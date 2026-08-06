@@ -66,7 +66,7 @@ import type { RuntimeProgram } from "@commonfabric/runner";
 // `asCell`/`asStream` position it holds a live cell, and a durable doc may hold
 // a fabric special object (bytes, an epoch). Neither survives a structural
 // comparison unaided — see `comparableState`.
-import { FabricSpecialObject } from "@commonfabric/data-model/interface";
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 // Relative into the runner's internals for the same reason as the test
