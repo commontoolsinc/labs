@@ -229,10 +229,10 @@ export type MutableFabricValueLayer =
  * Union of raw native JS **object** types that the fabric type system can
  * convert into `FabricInstance` wrappers or `FabricPrimitive` values. These
  * are the inputs to the "sausage grinder" -- `shallowFabricFromNativeValue()`
- * accepts `FabricValue | FabricNativeObject`, meaning callers can pass in
- * either already-fabric data or raw native JS objects. The conversion
- * produces `FabricInstance` wrappers or `FabricPrimitive` values that live
- * inside `FabricValue`.
+ * accepts `unknown`, so callers can hand it already-fabric data or raw native
+ * JS objects alike, and whatever it cannot represent is rejected there rather
+ * than excluded by the signature. The conversion produces `FabricInstance`
+ * wrappers or `FabricPrimitive` values that live inside `FabricValue`.
  *
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
  * and belongs directly in `FabricValue` without wrapping.

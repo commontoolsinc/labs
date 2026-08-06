@@ -1,4 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
+import { isInertArray } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
   FabricInstance,
@@ -129,8 +130,16 @@ export function withAliasBindings(
     }
   }
 
-  // If this is an array, process each element recursively.
-  if (Array.isArray(value)) {
+  // If this is an INERT array, process each element recursively. A non-inert
+  // array falls through to the sanctioned conversion below, which refuses it,
+  // for the same reason a non-inert plain object is refused there: `.map()`
+  // rebuilds by index, so it drops a named or symbol-keyed property and
+  // EVALUATES an accessor-backed index into a data property, and -- since
+  // `.map()` honors `Symbol.species` -- hands back an `Array` subclass
+  // instance still carrying its live prototype. The first two produce an array
+  // that satisfies `isFabricValue()` while meaning something else; the last
+  // produces one that does not satisfy it at all.
+  if (isInertArray(value)) {
     return (value as FactoryInput<any>).map((v: FactoryInput<any>, i: number) =>
       withAliasBindings(v, resolveCellAlias, ignoreSelfAliases, [
         ...path,
@@ -151,17 +160,18 @@ export function withAliasBindings(
   // `{}`. It refuses instead of doing that quietly.
   if (value instanceof FabricInstance) throw refuseFabricInstance(value);
 
-  // What remains that is an object, is not a pattern, and is not a plain
-  // object is either a native carrying a canonical fabric form (a
-  // `Uint8Array`, a `Date`) or something not representable at all. Hand it to
-  // the sanctioned conversion, which mints the fabric form or rejects.
+  // Whatever reaches here goes to the sanctioned conversion, which mints its
+  // fabric form or rejects it. Three kinds arrive: a native carrying a
+  // canonical fabric form (a `Uint8Array`, a `Date`); a non-inert array, which
+  // the array branch above declines to walk; and a value with no fabric
+  // representation at all.
   //
-  // The INERT plain-object test is what keeps this function's output vetted,
-  // and it is not interchangeable with a plain-object test. An inert plain
-  // object is a container already known good, so it skips the conversion and
-  // is walked in place -- no clone allocated only to be dropped when the
-  // `for...in` below rebuilds it. Every other record goes to the conversion
-  // and is converted or REJECTED there.
+  // The INERT tests -- this one and the array test above -- are what keep this
+  // function's output vetted, and neither is interchangeable with a bare
+  // plain-object or array check. An inert container is already known good, so
+  // it skips the conversion and is walked in place -- no clone allocated only
+  // to be dropped when the `for...in` below rebuilds it. Every other record
+  // goes to the conversion and is converted or REJECTED there.
   //
   // A plain object that is not inert must be among the rejected. Excluding it
   // here instead would launder it exactly as a native would be laundered: the
