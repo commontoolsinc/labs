@@ -9,9 +9,9 @@ between client, memory server, and SpaceServer.
   `/api/storage/memory` (`packages/toolshed/routes/storage/memory/`).
 - Client storage stack: `packages/runner/src/storage/` (`interface.ts`,
   `extended-storage-transaction.ts`, `query.ts`, `reactivity-log.ts`).
-- Store tables: `commit`, `revision`, `head`, `branch` (engine-v3).
-  `execution_lease` does not exist on main — it is created in Phase 1
-  (serving-loop.md §2; v1-branch shape as prior art).
+- Store tables: `commit`, `revision`, `head`, `branch` (engine-v3), and
+  `execution_lease` since Phase 1 stage B (serving-loop.md §2 — the
+  reduced three-field shape; the v1-branch shape was prior art only).
 
 ## 1. Commit classes
 

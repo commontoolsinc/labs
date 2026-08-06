@@ -3,8 +3,9 @@
 // admission path and never by any client-supplied value
 // (docs/specs/server-side-execution/protocol.md §1). These tests pin the
 // stage-A surface: the class is WRITTEN in every arm (no flag involved in
-// stamping), `derived` is unclaimable until the lease admission check lands
-// (Phase 1 stage B), and a pre-class store migrates by backfilling
+// stamping), `derived` is unclaimable off the flag (its ON-arm admission —
+// the stage-B lease equality check — is covered in
+// v2-execution-lease-test.ts), and a pre-class store migrates by backfilling
 // 'authored'.
 
 import { assertEquals, assertThrows } from "@std/assert";
@@ -109,7 +110,11 @@ Deno.test("commit class: a class smuggled into the client payload is inert", asy
   assertEquals(storedClasses(path), [{ seq: 1, class: "authored" }]);
 });
 
-Deno.test("commit class: 'derived' is unclaimable until the lease admission check exists", async () => {
+Deno.test("commit class: 'derived' is unclaimable off the flag", async () => {
+  // The lease admission check exists from stage B on, but it is enforced
+  // only under EXPERIMENTAL_SERVER_EXECUTION — and off the flag nothing may
+  // claim the class at all (protocol.md §1). The ON-arm admission surface is
+  // covered in v2-execution-lease-test.ts.
   const { engine } = await createEngine();
   try {
     assertThrows(
@@ -121,7 +126,7 @@ Deno.test("commit class: 'derived' is unclaimable until the lease admission chec
           commitClass: "derived",
         }),
       ProtocolError,
-      "execution_lease",
+      "EXPERIMENTAL_SERVER_EXECUTION",
     );
   } finally {
     close(engine);

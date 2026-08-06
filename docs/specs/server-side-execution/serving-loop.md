@@ -16,11 +16,14 @@ MUST/NEVER language is binding on implementers.
   (`registerBuiltins(runtime)`).
 - Store: engine-v3 sqlite per space DID
   (`packages/toolshed/cache/memory/engine-v3/`), tables `commit`,
-  `revision`, `head`, `branch`. There is NO lease table on main:
-  `execution_lease` is CREATED in Phase 1 (§2), with the v1 branch's
-  shape as prior art, not substrate (branch `engine.ts:497-507`:
-  branch PK, `lease_generation`, `host_id`, `on_behalf_of`, state
-  `active|draining|revoked`, `expires_at`).
+  `revision`, `head`, `branch` — and, since Phase 1 stage B
+  (2026-08-04), `execution_lease` in the reduced §2 shape
+  (`packages/memory/v2/engine.ts` schema;
+  `packages/memory/v2/execution-lease.ts` holder side). The v1
+  branch's richer shape was prior art, not substrate (branch
+  `engine.ts:497-507`: branch PK, `lease_generation`, `host_id`,
+  `on_behalf_of`, state `active|draining|revoked`, `expires_at`) and
+  none of it carried over.
 - Memory server + protocol: `packages/memory/v2.ts`, mounted in toolshed
   at `/api/storage/memory`
   (`packages/toolshed/routes/storage/memory/memory.routes.ts`).
@@ -125,9 +128,9 @@ construction against *clients* (no code path). Against *other server
 processes* (deploy overlap, partition) it holds via the lease:
 
 - One row per space in `execution_lease`: `(space, holder, expiresAt)`.
-  The table is CREATED in Phase 1 — it does not exist on main; the v1
-  branch's richer shape (see Anchors) is prior art to reduce from, not
-  substrate to keep.
+  The table was CREATED in Phase 1 stage B (2026-08-04), reducing the
+  v1 branch's richer shape (see Anchors) to exactly these three
+  fields — prior art, not substrate.
 - **`holder` is a PER-PROCESS identity (DR1, RULED 2026-08-03):**
   the SpaceServer's service identity plus a process-instance
   component minted at PROCESS START — stable across every renew and
