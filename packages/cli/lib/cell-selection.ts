@@ -1,3 +1,10 @@
+/**
+ * The selection a CLI read applies to a cell it has already arrived at: the
+ * `--filter` predicate and the `--schema` projection, their parsers, and the
+ * step that turns a cell plus a selection into a value. Resolving an address
+ * to a cell belongs to whoever holds the address, and stays there.
+ */
+
 import type { Cell } from "@commonfabric/api";
 import {
   ContextualFlowControl,
@@ -14,44 +21,65 @@ import { runtimeErrorLog } from "./callable.ts";
 
 type PredicateComparisonOperator = "==" | "!=" | "<" | "<=" | ">" | ">=";
 
-export type PieceGetPredicate =
+/** A parsed `--filter` expression, evaluated against one array element. */
+export type SelectionPredicate =
   | { kind: "literal"; value: string | number | boolean | null }
   | { kind: "path"; path: Array<string | number> }
-  | { kind: "not"; value: PieceGetPredicate }
+  | { kind: "not"; value: SelectionPredicate }
   | {
     kind: "boolean";
     operator: "and" | "or";
-    left: PieceGetPredicate;
-    right: PieceGetPredicate;
+    left: SelectionPredicate;
+    right: SelectionPredicate;
   }
   | {
     kind: "comparison";
     operator: PredicateComparisonOperator;
-    left: PieceGetPredicate;
-    right: PieceGetPredicate;
+    left: SelectionPredicate;
+    right: SelectionPredicate;
   };
 
-export interface ParsedPieceGetFilter {
+/**
+ * A `--filter` argument, parsed. `source` is the text as written, kept for
+ * error messages and for the result cell's cause. `paths` collects every path
+ * the predicate reads, which narrows the schema the source is read through.
+ */
+export interface ParsedSelectionFilter {
   source: string;
-  predicate: PieceGetPredicate;
+  predicate: SelectionPredicate;
   paths: Array<Array<string | number>>;
 }
 
-export interface PieceGetProjection {
+/**
+ * A `--schema` argument, parsed. `source` is the text as written; `kind`
+ * records which of the two spellings it used, since a concise field list
+ * traverses arrays implicitly and a JSON Schema does not.
+ */
+export interface SelectionProjection {
   source: string;
   schema: JSONSchema;
   kind: "concise" | "json";
 }
 
-export interface PieceGetTransform {
-  filter?: ParsedPieceGetFilter;
-  projection?: PieceGetProjection;
+/**
+ * What a caller asked to be returned from the cell it selected. Both parts are
+ * optional; a selection with neither returns the whole value.
+ */
+export interface CellSelection {
+  filter?: ParsedSelectionFilter;
+  projection?: SelectionProjection;
 }
 
-export class PieceGetTransformError extends Error {
+/**
+ * A selection that cannot be parsed, or that does not fit the value it was
+ * pointed at — a `--filter` on a non-array, a `--schema` whose root shape
+ * disagrees with the source. Reported to the user as a data error, not as an
+ * argument-parsing failure.
+ */
+export class CellSelectionError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
-    this.name = "PieceGetTransformError";
+    this.name = "CellSelectionError";
   }
 }
 
@@ -74,7 +102,7 @@ interface Token {
 }
 
 function expressionError(source: string, position: number, message: string) {
-  return new PieceGetTransformError(
+  return new CellSelectionError(
     `Invalid --filter predicate at column ${position + 1}: ${message}\n` +
       `  ${source}`,
   );
@@ -175,7 +203,7 @@ class PredicateParser {
     private readonly tokens: Token[],
   ) {}
 
-  parse(): PieceGetPredicate {
+  parse(): SelectionPredicate {
     const result = this.#parseOr();
     const trailing = this.#peek();
     if (trailing.kind !== "eof") {
@@ -213,7 +241,7 @@ class PredicateParser {
     return false;
   }
 
-  #parseOr(): PieceGetPredicate {
+  #parseOr(): SelectionPredicate {
     let left = this.#parseAnd();
     while (this.#takeKeyword("or")) {
       left = {
@@ -226,7 +254,7 @@ class PredicateParser {
     return left;
   }
 
-  #parseAnd(): PieceGetPredicate {
+  #parseAnd(): SelectionPredicate {
     let left = this.#parseComparison();
     while (this.#takeKeyword("and")) {
       left = {
@@ -239,7 +267,7 @@ class PredicateParser {
     return left;
   }
 
-  #parseComparison(): PieceGetPredicate {
+  #parseComparison(): SelectionPredicate {
     const left = this.#parseUnary();
     const token = this.#peek();
     if (token.kind !== "operator") return left;
@@ -252,14 +280,14 @@ class PredicateParser {
     };
   }
 
-  #parseUnary(): PieceGetPredicate {
+  #parseUnary(): SelectionPredicate {
     if (this.#takeKeyword("not")) {
       return { kind: "not", value: this.#parseUnary() };
     }
     return this.#parsePrimary();
   }
 
-  #parsePrimary(): PieceGetPredicate {
+  #parsePrimary(): SelectionPredicate {
     const token = this.#peek();
     if (token.kind === "left-paren") {
       this.#take();
@@ -295,7 +323,7 @@ class PredicateParser {
     );
   }
 
-  #parsePath(): PieceGetPredicate {
+  #parsePath(): SelectionPredicate {
     this.#take();
     const path: Array<string | number> = [];
     const first = this.#peek();
@@ -339,7 +367,7 @@ class PredicateParser {
 }
 
 function collectPredicatePaths(
-  predicate: PieceGetPredicate,
+  predicate: SelectionPredicate,
   result: Array<Array<string | number>>,
 ): void {
   switch (predicate.kind) {
@@ -359,9 +387,9 @@ function collectPredicatePaths(
   }
 }
 
-export function parsePieceGetFilter(source: string): ParsedPieceGetFilter {
+export function parseSelectionFilter(source: string): ParsedSelectionFilter {
   if (source.trim().length === 0) {
-    throw new PieceGetTransformError("--filter predicate must not be empty");
+    throw new CellSelectionError("--filter predicate must not be empty");
   }
   const predicate = new PredicateParser(
     source,
@@ -413,7 +441,7 @@ function comparePredicateValues(
     (typeof left !== "number" || typeof right !== "number") &&
     (typeof left !== "string" || typeof right !== "string")
   ) {
-    throw new PieceGetTransformError(
+    throw new CellSelectionError(
       `--filter ${operator} requires two numbers or two strings`,
     );
   }
@@ -429,11 +457,11 @@ function comparePredicateValues(
   }
 }
 
-export function evaluatePieceGetPredicate(
-  predicate: PieceGetPredicate,
+export function evaluateSelectionPredicate(
+  predicate: SelectionPredicate,
   value: unknown,
 ): boolean {
-  const evaluate = (node: PieceGetPredicate): unknown => {
+  const evaluate = (node: SelectionPredicate): unknown => {
     switch (node.kind) {
       case "literal":
         return node.value;
@@ -490,24 +518,24 @@ function normalizeProjectionSchema(
 ): JSONSchema {
   if (schema === true) return true;
   if (schema === false) {
-    throw new PieceGetTransformError(
+    throw new CellSelectionError(
       `Invalid --schema at ${path}: false cannot project a value`,
     );
   }
   if (!isRecord(schema) || Array.isArray(schema)) {
-    throw new PieceGetTransformError(
+    throw new CellSelectionError(
       `Invalid --schema at ${path}: expected a JSON Schema object`,
     );
   }
   for (const key of Object.keys(schema)) {
     if (FORBIDDEN_PROJECTION_KEYS.has(key)) {
-      throw new PieceGetTransformError(
+      throw new CellSelectionError(
         `Invalid --schema at ${path}: "${key}" is controlled by the source ` +
           "schema and cannot be supplied by a projection",
       );
     }
     if (UNSUPPORTED_PROJECTION_KEYS.has(key)) {
-      throw new PieceGetTransformError(
+      throw new CellSelectionError(
         `Invalid --schema at ${path}: "${key}" is not supported by projection schemas`,
       );
     }
@@ -516,7 +544,7 @@ function normalizeProjectionSchema(
   const result: Record<string, unknown> = { ...schema };
   if (schema.properties !== undefined) {
     if (!isRecord(schema.properties) || Array.isArray(schema.properties)) {
-      throw new PieceGetTransformError(
+      throw new CellSelectionError(
         `Invalid --schema at ${path}: "properties" must be an object`,
       );
     }
@@ -553,7 +581,7 @@ function normalizeProjectionSchema(
 function conciseProjectionSchema(source: string): JSONSchema {
   const paths = source.split(",").map((part) => part.trim());
   if (paths.some((path) => path.length === 0)) {
-    throw new PieceGetTransformError(
+    throw new CellSelectionError(
       "Invalid --schema concise projection: expected comma-separated field paths",
     );
   }
@@ -563,7 +591,7 @@ function conciseProjectionSchema(source: string): JSONSchema {
     if (
       segments.some((segment) => !/^[A-Za-z_$][A-Za-z0-9_$-]*$/.test(segment))
     ) {
-      throw new PieceGetTransformError(
+      throw new CellSelectionError(
         `Invalid --schema field path ${JSON.stringify(path)}`,
       );
     }
@@ -600,19 +628,19 @@ export interface ProjectionParseDependencies {
   readTextFile?: (path: string) => Promise<string>;
 }
 
-export async function parsePieceGetProjection(
+export async function parseSelectionProjection(
   source: string,
   deps: ProjectionParseDependencies = {},
-): Promise<PieceGetProjection> {
+): Promise<SelectionProjection> {
   const trimmed = source.trim();
   if (trimmed.length === 0) {
-    throw new PieceGetTransformError("--schema must not be empty");
+    throw new CellSelectionError("--schema must not be empty");
   }
 
   if (trimmed.startsWith("@")) {
     const path = trimmed.slice(1);
     if (path.length === 0) {
-      throw new PieceGetTransformError(
+      throw new CellSelectionError(
         "--schema @file requires a file path",
       );
     }
@@ -620,7 +648,7 @@ export async function parsePieceGetProjection(
     try {
       contents = await (deps.readTextFile ?? Deno.readTextFile)(path);
     } catch (error) {
-      throw new PieceGetTransformError(
+      throw new CellSelectionError(
         `Could not read --schema file "${path}": ${
           error instanceof Error ? error.message : String(error)
         }`,
@@ -631,7 +659,7 @@ export async function parsePieceGetProjection(
     try {
       parsed = JSON.parse(contents);
     } catch (error) {
-      throw new PieceGetTransformError(
+      throw new CellSelectionError(
         `Invalid JSON in --schema file "${path}": ${
           error instanceof Error ? error.message : String(error)
         }`,
@@ -650,7 +678,7 @@ export async function parsePieceGetProjection(
     try {
       parsed = JSON.parse(trimmed);
     } catch (error) {
-      throw new PieceGetTransformError(
+      throw new CellSelectionError(
         `Invalid JSON passed to --schema: ${
           error instanceof Error ? error.message : String(error)
         }`,
@@ -669,6 +697,26 @@ export async function parsePieceGetProjection(
     schema: conciseProjectionSchema(trimmed),
     kind: "concise",
   };
+}
+
+/**
+ * Parses a command's `--filter` and `--schema` arguments into the selection
+ * they describe, or `undefined` when neither was given and the caller wants
+ * the whole value.
+ */
+export async function parseCellSelectionOptions(options: {
+  filter?: string;
+  schema?: string;
+}): Promise<CellSelection | undefined> {
+  const filter = options.filter === undefined
+    ? undefined
+    : parseSelectionFilter(options.filter);
+  const projection = options.schema === undefined
+    ? undefined
+    : await parseSelectionProjection(options.schema);
+  return filter === undefined && projection === undefined
+    ? undefined
+    : { filter, projection };
 }
 
 function schemaTypes(schema: JSONSchema | undefined): string[] {
@@ -917,7 +965,7 @@ export function schemaMayBeArray(
       // Unlike root classification, concise-path alignment cannot safely
       // continue without resolving the schema that determines array traversal.
       unresolvedRef: (error) => {
-        throw new PieceGetTransformError(
+        throw new CellSelectionError(
           `Could not resolve source schema reference for --schema: ${
             error instanceof Error ? error.message : String(error)
           }`,
@@ -1181,7 +1229,7 @@ interface ResolvedProjection {
 }
 
 function resolveProjection(
-  projection: PieceGetProjection | undefined,
+  projection: SelectionProjection | undefined,
   sourceSchema: JSONSchema | undefined,
   sourceIsArray: boolean,
 ): ResolvedProjection | undefined {
@@ -1231,7 +1279,7 @@ function resolveProjection(
     projection.schema !== true &&
     sourceIsArray !== projectsArrayItems
   ) {
-    throw new PieceGetTransformError(
+    throw new CellSelectionError(
       sourceIsArray
         ? "A JSON --schema for an array value must describe the returned " +
           'array (for example {"type":"array","items":{...}}).'
@@ -1258,12 +1306,19 @@ function resolveProjection(
   };
 }
 
-export interface DerivePieceGetDependencies {
+/** Optional hooks into {@link deriveSelectedValue}'s internals. */
+export interface DeriveSelectedValueDependencies {
+  /** Called with the cell the returned value was read from. */
   onOutputCell?: (cell: Cell<unknown>) => void;
 }
 
 /**
- * Apply a piece-get filter/projection through an actual runtime pattern graph.
+ * Applies `selection` to `sourceCell` through an actual runtime pattern graph,
+ * returning the value the caller asked for.
+ *
+ * `runtime` and `space` say where that pattern runs, and are the caller's to
+ * decide rather than the cell's: a path that crosses a link can land
+ * `sourceCell` in a space other than the one its reader is working in.
  *
  * The filter uses the runner's list builtin, so predicate observations taint
  * collection membership exactly as they do in authored patterns. Array
@@ -1274,12 +1329,12 @@ export interface DerivePieceGetDependencies {
  * shape only; source schemas remain authoritative for CFC and other Fabric
  * metadata.
  */
-export async function derivePieceGetValue(
+export async function deriveSelectedValue(
   runtime: Runtime,
   space: MemorySpace,
   sourceCell: Cell<unknown>,
-  transform: PieceGetTransform,
-  deps: DerivePieceGetDependencies = {},
+  selection: CellSelection,
+  deps: DeriveSelectedValueDependencies = {},
 ): Promise<unknown> {
   const declaredSourceSchema = sourceCell.schema;
   const sourceSchema = isRecord(declaredSourceSchema) &&
@@ -1289,7 +1344,7 @@ export async function derivePieceGetValue(
   const sourceValueCell = sourceSchema === declaredSourceSchema
     ? sourceCell
     : sourceCell.asSchema(sourceSchema);
-  if (transform.filter === undefined && transform.projection === undefined) {
+  if (selection.filter === undefined && selection.projection === undefined) {
     return await sourceValueCell.pull();
   }
 
@@ -1297,30 +1352,30 @@ export async function derivePieceGetValue(
   const sourceIsArray = rootKind === "unknown"
     ? Array.isArray(await sourceValueCell.pull())
     : rootKind === "array";
-  if (transform.filter !== undefined && !sourceIsArray) {
-    throw new PieceGetTransformError(
+  if (selection.filter !== undefined && !sourceIsArray) {
+    throw new CellSelectionError(
       "--filter can only be applied to an array",
     );
   }
   const projection = resolveProjection(
-    transform.projection,
+    selection.projection,
     sourceSchema,
     sourceIsArray,
   );
   const sourceItemSchema = schemaAtArrayItem(sourceSchema);
-  const predicateItemMask = transform.filter === undefined
+  const predicateItemMask = selection.filter === undefined
     ? undefined
-    : maskFromPaths(transform.filter.paths);
+    : maskFromPaths(selection.filter.paths);
   const projectionMaskSchema = projection?.mask;
   const projectionItemMask = projection?.itemMask;
 
   let sourceMask: ProjectionMask = true;
-  if (transform.filter !== undefined && projection === undefined) {
+  if (selection.filter !== undefined && projection === undefined) {
     // Filtering returns original elements. Keep their complete source schema
     // on the links that survive, while the predicate pattern below narrows the
     // actual predicate reads.
     sourceMask = true;
-  } else if (transform.filter !== undefined) {
+  } else if (selection.filter !== undefined) {
     sourceMask = {
       type: "array",
       items: mergeMasks(
@@ -1345,7 +1400,7 @@ export async function derivePieceGetValue(
   };
 
   let predicatePattern: ReturnType<typeof pattern> | undefined;
-  if (transform.filter !== undefined) {
+  if (selection.filter !== undefined) {
     const elementSchema = selectSourceSchema(
       sourceItemSchema,
       predicateItemMask!,
@@ -1365,8 +1420,8 @@ export async function derivePieceGetValue(
     const predicateModule = lift(
       ({ element, params }: {
         element: unknown;
-        params: { predicate: PieceGetPredicate };
-      }) => evaluatePieceGetPredicate(params.predicate, element),
+        params: { predicate: SelectionPredicate };
+      }) => evaluateSelectionPredicate(params.predicate, element),
       argumentSchema,
       { type: "boolean" },
     );
@@ -1457,7 +1512,7 @@ export async function derivePieceGetValue(
       let result: any = value;
       if (predicatePattern !== undefined) {
         result = result.filterWithPattern(predicatePattern as any, {
-          predicate: transform.filter!.predicate,
+          predicate: selection.filter!.predicate,
         });
       }
       if (itemProjectionPattern !== undefined) {
@@ -1477,8 +1532,8 @@ export async function derivePieceGetValue(
     {
       pieceGetTransform: {
         source: sourceValueCell.getAsNormalizedFullLink(),
-        filter: transform.filter?.source,
-        schema: transform.projection?.source,
+        filter: selection.filter?.source,
+        schema: selection.projection?.source,
       },
     },
     mainResultSchema,
@@ -1506,7 +1561,7 @@ export async function derivePieceGetValue(
     runtime.prepareTxForCommit(tx);
     const committed = await tx.commit();
     if (committed.error !== undefined) {
-      throw new PieceGetTransformError(
+      throw new CellSelectionError(
         `Could not apply piece get transform: ${committed.error}`,
       );
     }
@@ -1524,12 +1579,12 @@ export async function derivePieceGetValue(
       // test in piece-get-transform.test.ts guards this package-boundary
       // coupling.
       if (
-        transform.filter !== undefined &&
+        selection.filter !== undefined &&
         recorded.some((error) =>
           error.message === "filter currently only supports arrays"
         )
       ) {
-        throw new PieceGetTransformError(
+        throw new CellSelectionError(
           "--filter can only be applied to an array",
         );
       }
@@ -1539,12 +1594,12 @@ export async function derivePieceGetValue(
           error.message === "map currently only supports arrays"
         )
       ) {
-        throw new PieceGetTransformError(
+        throw new CellSelectionError(
           "--schema can only project array items from an array value",
         );
       }
       const lastError = recorded.at(-1)!;
-      throw new PieceGetTransformError(
+      throw new CellSelectionError(
         `Could not apply piece get transform: ${lastError.message}`,
       );
     }

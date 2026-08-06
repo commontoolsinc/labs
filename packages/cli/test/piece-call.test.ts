@@ -39,7 +39,7 @@ import {
   WaitBoundExpired,
 } from "../commands/piece.ts";
 import { LinkValidationError } from "../lib/piece.ts";
-import { PieceGetTransformError } from "../lib/piece-get-transform.ts";
+import { CellSelectionError } from "../lib/cell-selection.ts";
 
 describe("executePieceCallable", () => {
   it("reports not-found when the piece cell has no schema-cast surface", async () => {
@@ -3030,12 +3030,12 @@ describe("piece get data errors", () => {
     expect(report?.hint).toBeUndefined();
   });
 
-  it("reports transform failures without an unrelated --input hint", () => {
-    const transformError = new PieceGetTransformError(
+  it("reports selection failures without an unrelated --input hint", () => {
+    const selectionError = new CellSelectionError(
       "--filter can only be applied to an array",
     );
-    expect(isPieceGetDataError(transformError)).toBe(true);
-    const report = pieceGetDataErrorReport(transformError, {
+    expect(isPieceGetDataError(selectionError)).toBe(true);
+    const report = pieceGetDataErrorReport(selectionError, {
       input: false,
       piece: "fid1:piece-123",
     });
