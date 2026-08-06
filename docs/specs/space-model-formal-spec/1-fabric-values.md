@@ -61,17 +61,25 @@ layer (Section 8) and represented in `FabricValue` trees as `FabricInstance`
 wrapper classes (Section 1.4).
 
 > **Package note:** The data model implementation lives in
-> `packages/data-model/`. The fabric-value types, base classes
-> (`FabricSpecialObject`, `FabricInstance`, `FabricPrimitive`), and the
-> in-process lifecycle symbols (`DEEP_FREEZE`, `IS_DEEP_FROZEN`) are
-> defined in `packages/data-model/interface.ts`; the serialization
-> vocabulary (the `CODEC` symbol, `FabricCodec`, `ReconstructionContext`,
-> `SerializationContext`) lives in `packages/data-model/codec-common/`
-> (Section 2). The dispatch and conversion
-> functions are in `packages/data-model/fabric-value.ts`. Type declarations visible to
-> patterns are in `packages/api/index.ts` (inline `interface` + `declare
-> const` pattern). The `packages/runner/` wires concrete implementations
-> into builder exports.
+> `packages/data-model/`. The fabric-value types and the base classes
+> (`FabricSpecialObject`, `FabricInstance`, `FabricPrimitive`) are declared in
+> `interface.ts`, and the in-process lifecycle symbols (`DEEP_FREEZE`,
+> `IS_DEEP_FROZEN`) on `BaseFabricInstance` alongside the abstract base that
+> carries them (Section 8.6). The serialization vocabulary (the `CODEC`
+> symbol, `FabricCodec`, `ReconstructionContext`, `SerializationContext`)
+> lives in `codec-common/` (Section 2), and the conversion functions in
+> `native-conversion.ts` (Section 8).
+>
+> **Where a thing is declared is not where it is imported from.** The package
+> exports one surface for all of the above, `fabric-value`, which re-exports
+> them; the modules named here are internal and not reachable as subpaths.
+> Cite them to say where something is defined, and import from
+> `@commonfabric/data-model/fabric-value`.
+>
+> Type declarations visible to patterns are in `packages/api/index.ts`
+> (inline `interface` + `declare const` pattern), and must agree with the
+> `data-model` declarations — nothing checks that mechanically.
+> `packages/runner/` wires concrete implementations into builder exports.
 
 ```typescript
 // Shown at module scope.
@@ -108,10 +116,38 @@ type FabricValue =
   //       - System types: `UnknownValue`, `ProblematicValue`
   | FabricInstance
 
-  // (d) Recursive containers
-  | FabricValue[]
-  | { [key: string]: FabricValue };
+  // (d) Recursive containers -- read-only; see the immutability callout below
+  | readonly FabricValue[]
+  | { readonly [key: string]: FabricValue };
 ```
+
+> **Fabric values are deeply read-only, with one intentional hole.** The
+> container arms are read-only, and because their element and property types
+> are themselves `FabricValue`, that read-only-ness is inherited all the way
+> down: a `FabricValue` tree cannot be written through at any depth. The
+> implementation names the two container arms `FabricArray`
+> (`ReadonlyArray<FabricValue>`) and `FabricPlainObject`
+> (`Readonly<Record<string, FabricValue>>`); this is the type-level
+> counterpart of the runtime deep-freeze contract in Section 8.6, and the two
+> are meant to agree.
+>
+> The hole is the `FabricInstance` arm. An instance exposes arbitrary members,
+> and a member can change instance state — including which values the instance
+> refers to — so the read-only-ness stops at an instance boundary and does not
+> reach what lies beyond it. This is deliberate rather than an oversight: the
+> intended semantics *are* expressible in TypeScript, but not concisely enough
+> to be worth the cost at every use site. Treat the type-level guarantee as
+> covering the containers and the primitives, and Section 8.6 as the statement
+> that actually binds instances.
+>
+> **Construction is the exception that proves the rule.** Building a container
+> requires writing to it, so the implementation provides
+> `MutableFabricValueLayer` — a value whose *root* container is mutable
+> (`MutableFabricArrayLayer` is `FabricValue[]`,
+> `MutableFabricPlainObjectLayer` is `Record<string, FabricValue>`) while
+> everything nested within it remains an ordinary read-only `FabricValue`. It
+> is a single construction layer, not a deep thaw, and it is a builder's type:
+> a value that has finished being built is a `FabricValue`.
 
 > **Restricted and excluded JS types.**
 >
@@ -173,17 +209,44 @@ native JS object types that the conversion layer can handle:
  */
 type FabricNativeObject =
   | Error
-  | Map<FabricValue | FabricNativeObject, FabricValue | FabricNativeObject>
-  | Set<FabricValue | FabricNativeObject>
+  | Map<unknown, unknown>
+  | Set<unknown>
   | Date
   | RegExp
   | Uint8Array;
+
+/**
+ * A `FabricValue`, a `FabricNativeObject`, or a deep tree of either — the
+ * values that convert to and from fabric form. This is the precondition of
+ * `fabricFromNativeValue()`, the result of `nativeFromFabricValue()`, and
+ * what `isFabricCompatible()` tests for (Section 8).
+ */
+type FabricOrConvertibleNativeValue =
+  | FabricValue
+  | FabricNativeObject
+  | readonly FabricOrConvertibleNativeValue[]
+  | { readonly [key: string]: FabricOrConvertibleNativeValue };
 ```
 
-The `FabricNativeObject` type exists solely at function parameter/return
-boundaries — for example, `shallowFabricFromNativeValue()` accepts
-`FabricValue | FabricNativeObject` as input (Section 8). It is never a
-member of `FabricValue`.
+`Map` and `Set` are named with unconstrained type arguments: their contents are
+checked when they are converted, not by the type. The constraint has nowhere to
+bind in any case while `FabricMap` and `FabricSet` remain stubbed
+(Sections 1.4.3 and 1.4.4).
+
+Neither type is ever a member of `FabricValue`; both exist solely at the
+conversion boundary (Section 8). Of the two, **`FabricOrConvertibleNativeValue`
+is the one the boundary actually speaks**, and it exists because
+`FabricValue | FabricNativeObject` cannot say "or a tree of these." A container
+arm of `FabricValue` holds `FabricValue`s, so it cannot hold an `Error`; and a
+`FabricNativeObject` is a single native object, not a container of them.
+Converting a `FabricError` yields an `Error`, so an array of `FabricError`s
+converts to an array of `Error`s — a value that is neither a `FabricValue` nor a
+`FabricNativeObject`, and which only the recursive type names. It is what
+`fabricFromNativeValue()` succeeds on, what `nativeFromFabricValue()` returns,
+and what `isFabricCompatible()` tests (Sections 8.3 and 8.4). It is a
+precondition rather than a parameter type: the conversion functions that accept
+arbitrary input declare `unknown` and reject what they cannot convert
+(Section 8.2).
 
 Every arm names a specific native class. There is no duck-typed arm: a value
 becomes fabric-representable by being one of these, by implementing the fabric
@@ -3221,9 +3284,9 @@ returned value is always a valid `FabricValue` regardless of its frozen state.
 /**
  * Type predicate: returns `true` if `fabricFromNativeValue()` would succeed
  * on the given value — i.e., the value is a `FabricValue`, a
- * `FabricNativeObject`, or a tree of these types. The return type is a
- * type predicate (`value is FabricValue | FabricNativeObject`), so
- * callers can use `isFabricCompatible(x)` as a type guard in conditionals.
+ * `FabricNativeObject`, or a tree of these types. That is exactly what
+ * `FabricOrConvertibleNativeValue` names (Section 1.2), so callers can use
+ * `isFabricCompatible(x)` as a type guard in conditionals.
  *
  * This is a check-without-conversion function for system boundaries where
  * code receives `unknown` and needs to determine convertibility without
@@ -3231,10 +3294,9 @@ returned value is always a valid `FabricValue` regardless of its frozen state.
  * and allocation).
  *
  * Relationship to other functions and checks:
- * - The narrower conceptual check -- "is `x` already a `FabricValue`?",
- *   which would NOT accept raw native types like `Error` or `Map` -- has
- *   no standalone predicate; a dedicated `isFabricValue()` is a noted
- *   TODO in `deep-freeze.ts`.
+ * - `isFabricValue(x)` (in `type-check.ts`): the narrower check — "is `x`
+ *   already a `FabricValue`?" — which does NOT accept raw native types like
+ *   `Error` or `Map`.
  * - `isFabricCompatible(x)`: "Could `x` be converted to a `FabricValue` via
  *   `fabricFromNativeValue()`?" Returns `true` for both `FabricValue`
  *   values AND `FabricNativeObject` values (and deep trees thereof).
@@ -3243,7 +3305,7 @@ returned value is always a valid `FabricValue` regardless of its frozen state.
  */
 export function isFabricCompatible(
   value: unknown,
-): value is FabricValue | FabricNativeObject;
+): value is FabricOrConvertibleNativeValue;
 ```
 
 The function recursively checks the value tree. It returns `true` if and only
@@ -3307,7 +3369,7 @@ symbols.
 export function nativeFromFabricValue(
   value: FabricValue,
   frozen?: boolean, // default: true
-): FabricValue;
+): FabricOrConvertibleNativeValue;
 ```
 
 #### Unwrapping Rules
@@ -3327,8 +3389,10 @@ export function nativeFromFabricValue(
 | Arrays | Recursively unwrapped; output frozen | Recursively unwrapped; output NOT frozen |
 | Plain objects | Recursively unwrapped; output frozen | Recursively unwrapped; output NOT frozen |
 
-The output type is `FabricValue | FabricNativeObject`, reflecting that the
-result may contain native JS types at any depth.
+The output type is `FabricOrConvertibleNativeValue` (Section 1.2), reflecting
+that the result may contain native JS types at any depth — a container of them
+is neither a `FabricValue` nor a `FabricNativeObject`, so the recursive type is
+what names it.
 
 > **Implementation: `FabricNativeWrapper` dispatch.** The unwrapping
 > functions use a single `instanceof FabricNativeWrapper` check to identify
