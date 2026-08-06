@@ -371,7 +371,16 @@ export class Client {
       ]);
       this.#connected = true;
     } finally {
-      this.#helloPending = null;
+      // Only retire the handshake this call installed. A failed handshake can
+      // have a REPLACEMENT already in flight by the time it unwinds — closing
+      // the transport drives `onClose`, which a transport may report
+      // synchronously, and the reconnect that follows installs its own
+      // pending. Clearing unconditionally would retire that one, leaving its
+      // `hello.ok` unrecognized and its handshake awaiting an ack nothing
+      // will ever resolve.
+      if (this.#helloPending === ack) {
+        this.#helloPending = null;
+      }
     }
   }
 

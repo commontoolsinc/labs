@@ -1032,6 +1032,50 @@ type LostFrameOutcome = {
   later: EntityDocument | null;
 };
 
+Deno.test("a failed handshake settles rather than stranding its replacement", async () => {
+  // Closing the transport on an unreadable handshake frame can drive
+  // `onClose` synchronously, so the reconnect it triggers installs its own
+  // pending handshake BEFORE the failed one unwinds. A `hello()` that retired
+  // the pending unconditionally would retire the replacement's, leaving that
+  // handshake awaiting an ack nothing resolves — and `close()`, which waits
+  // on the reconnect, never returning.
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://sync-schema-handshake-strand"),
+    subscriptionRefreshDelayMs: 60_000,
+  });
+  const base = loopback(server);
+  let corruptNextHelloOk = true;
+  const transport: Transport = {
+    send: (payload) => base.send(payload),
+    close: () => base.close(),
+    setReceiver(next) {
+      base.setReceiver((payload) => {
+        if (corruptNextHelloOk && payload.includes("hello.ok")) {
+          corruptNextHelloOk = false;
+          next(`${payload}!corrupt`);
+          return;
+        }
+        next(payload);
+      });
+    },
+    setCloseReceiver(next) {
+      base.setCloseReceiver?.(next);
+    },
+  };
+
+  try {
+    // Either outcome is acceptable — the handshake may fail or the retry may
+    // land — but it must SETTLE. Before the identity guard this neither
+    // resolved nor rejected.
+    await connect({ transport })
+      .then((client) => client.close())
+      .catch(() => undefined);
+  } finally {
+    await server.close();
+  }
+});
+
 /**
  * Drives a real Client against a real Server over `loopback`, corrupting one
  * session/effect so the client's own decode path fails on it — the frame
