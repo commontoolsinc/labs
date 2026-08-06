@@ -27,7 +27,7 @@ replays a mutation.
 - Reduce the latency of repeated fine-grained commands against one Fabric
   context.
 - Preserve the direct command's arguments, output, exit status, authorization,
-  synchronization, and durability behavior.
+  piped-input behavior, synchronization, and durability behavior.
 - Support independent CLI processes, agents, scripts, and shell completion.
 - Make daemon selection, ownership, compatibility, health, and staleness
   visible to the caller.
@@ -273,15 +273,26 @@ The daemon accepts multiple client connections and may hold multiple requests,
 but one daemon context executes exactly one request at a time. Accepted requests
 enter a bounded FIFO queue.
 
+The short-lived client completely materializes any stdin input before queue
+admission. It reads through end of stream, parses and validates the input under
+the direct command's existing rules, and retains the normalized value until the
+request reaches the execution lane. Invalid or interrupted input therefore
+fails before daemon dispatch, and a producer that has not closed its stream
+keeps only its client waiting rather than occupying the daemon queue. Once the
+request reaches the head, the daemon grants a backpressured transfer of the
+explicit value and does not begin command execution until that transfer is
+complete.
+
 This serialization protects shared runtime configuration, one authenticated
 memory session, request output attribution, and request cleanup. Nominally
 read-only commands are not initially parallel because they can start pieces,
 establish watches, pull linked data, and trigger reactive computation.
 
-The queue has both a request-count bound and a total queued-payload bound. A
-full queue rejects admission immediately with `DAEMON_BUSY`; callers do not
-retry automatically. A queued request is cancellable. Once a mutation begins,
-client disconnection does not cancel or replay it.
+The queue has a request-count bound and stores only bounded request metadata;
+queued input values remain in their client processes. A full queue rejects
+admission immediately with `DAEMON_BUSY`; callers do not retry automatically. A
+queued request is cancellable. Once a mutation begins, client disconnection does
+not cancel or replay it.
 
 Serialization only orders requests through this daemon. Browsers, other
 daemons, servers, and direct CLI invocations remain concurrent Fabric actors.
@@ -317,8 +328,13 @@ and is separate work.
 
 The execution protocol keeps stdout, stderr, and exit status distinct and
 ordered. It applies backpressure rather than accumulating unbounded output.
-Stdin uses framed streaming or a bounded complete payload. Client cancellation
-and signals are explicit protocol events.
+The daemon never reads or inherits a caller's stdin. The client owns terminal
+and pipe detection and converts caller input into an explicit normalized request
+payload before admission. Thus piped `piece set`, `piece apply`, and `piece call`
+retain their direct behavior without multiplexing ambient stdin through a
+long-lived process. The daemon command handlers accept an explicit input value
+and have no stdin reader available. Client cancellation and signals are explicit
+protocol events.
 
 The client sends its original working directory, absolute forms of recognized
 file arguments, and an allowlisted command environment. The daemon never
@@ -437,7 +453,9 @@ does not imply permission to execute.
 4. Implement bounded serialized request transport and read-only MVP commands.
 5. Route explicitly selected live completion through the read path.
 6. Add mutation request IDs, terminal-result lookup, confirmed completion, and
-   outcome-unknown handling before enabling mutation commands.
+   outcome-unknown handling before enabling mutation commands. Refactor stdin-
+   accepting commands so the client materializes and validates their normalized
+   input and daemon handlers can consume it without ambient stdin access.
 7. Add filesystem and compiler commands only after cwd, input freshness, and
    content-cache boundaries are validated.
 
@@ -453,6 +471,9 @@ The implementation must demonstrate:
 - source and identity changes preventing all later dispatch;
 - bounded queue, result-ledger, provider, cache, and memory growth;
 - no cross-request diagnostic or output contamination;
+- piped-input parity with direct commands, including client-side failure before
+  dispatch for malformed, interrupted, or incomplete input;
+- no daemon handler access to process stdin;
 - fresh-state failure rather than implicit offline reads; and
 - a material warm-latency improvement on repeated supported commands.
 
@@ -463,7 +484,8 @@ The implementation must demonstrate:
   manager and process-global state?
 - What conservative source manifest covers the source daemon without watching
   mutable data, logs, and build outputs?
-- What queue, payload, output, and result-ledger bounds fit agent and completion
-  workloads?
+- What queue, input-transfer, output, and result-ledger bounds fit agent and
+  completion workloads without imposing a smaller value limit than direct
+  commands?
 - Which read commands can later prove safe parallel execution without changing
   their Fabric or output semantics?
