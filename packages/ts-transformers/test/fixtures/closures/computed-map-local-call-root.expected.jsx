@@ -66,7 +66,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["done"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_2 = __cfHelpers.lift<{
     row: {
         done: boolean;

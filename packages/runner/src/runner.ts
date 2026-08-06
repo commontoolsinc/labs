@@ -57,7 +57,6 @@ import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   getDerivedInternalCell,
-  getDerivedInternalCellLink,
   getMetaCell,
   getMetaLink,
   isAliasBinding,
@@ -4520,28 +4519,17 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     outputCells: readonly NormalizedFullLink[],
   ): NormalizedFullLink[] {
-    return this.collectStaticRedirectWriteTargetsWithCompleteness(
-      tx,
-      outputCells,
-    ).targets;
-  }
-
-  private collectStaticRedirectWriteTargetsWithCompleteness(
-    tx: IExtendedStorageTransaction,
-    outputCells: readonly NormalizedFullLink[],
-  ): { targets: NormalizedFullLink[]; complete: boolean } {
     // Write redirects are the static writable-output form: resolving them here
     // lets pull-mode indexing treat the resolved target like a normal declared
     // write. Dynamic writable-input writes use materializer envelopes instead.
     if (!outputCells.some((link) => link.overwrite === "redirect")) {
-      return { targets: [], complete: true };
+      return [];
     }
 
     // Redirect-target resolution is op-wiring machinery (machineryRead):
     // its reads must not consume `*`-path membership templates.
     return tx.runWithAmbientReadMeta(machineryRead, () => {
       const targets: NormalizedFullLink[] = [];
-      let complete = true;
       for (const output of outputCells) {
         if (output.overwrite !== "redirect") continue;
         try {
@@ -4553,7 +4541,6 @@ export class Runner {
           );
           targets.push(target);
         } catch (error) {
-          complete = false;
           // Some setup paths have not fully materialized metadata redirects
           // yet. Leave those to runtime dependency collection after the action
           // has run, but keep debug context for unexpected resolution failures.
@@ -4563,39 +4550,7 @@ export class Runner {
           ]);
         }
       }
-      return { targets: dedupeNormalizedLinks(targets), complete };
-    });
-  }
-
-  private collectStaticReadTargetsWithCompleteness(
-    tx: IExtendedStorageTransaction,
-    inputCells: readonly NormalizedFullLink[],
-  ): { targets: NormalizedFullLink[]; complete: boolean } {
-    // Declared inputs can point through their argument-slot redirect and then
-    // through an ordinary link to the effective source cell. Resolve the full
-    // static chain so the completeness certificate covers the same target the
-    // action transaction will record at runtime.
-    return tx.runWithAmbientReadMeta(machineryRead, () => {
-      const targets: NormalizedFullLink[] = [];
-      let complete = true;
-      for (const input of inputCells) {
-        try {
-          const { overwrite: _overwrite, ...target } = resolveLink(
-            this.runtime,
-            tx,
-            input,
-            "value",
-          );
-          targets.push(target);
-        } catch (error) {
-          complete = false;
-          logger.debug("static-read-target", () => [
-            "Unable to resolve static read target",
-            { input, error },
-          ]);
-        }
-      }
-      return { targets: dedupeNormalizedLinks(targets), complete };
+      return dedupeNormalizedLinks(targets);
     });
   }
 
@@ -6173,69 +6128,17 @@ export class Runner {
         )
         : []);
     const hasMaterializerWriteEnvelopes = materializerWriteEnvelopes.length > 0;
-    const redirectWriteTargets = (!hasMaterializerWriteEnvelopes ||
-        module.completeSchedulerScopeSummary === true)
-      ? this.collectStaticRedirectWriteTargetsWithCompleteness(tx, writes)
-      : { targets: [], complete: true };
-    const redirectReadTargets = module.completeSchedulerScopeSummary === true
-      ? this.collectStaticReadTargetsWithCompleteness(tx, reads)
-      : { targets: [], complete: true };
     const staticRedirectWriteTargets = hasMaterializerWriteEnvelopes
       ? []
-      : redirectWriteTargets.targets;
+      : this.collectStaticRedirectWriteTargets(tx, writes);
     const schedulingWrites = dedupeNormalizedLinks([
       ...writes,
       ...staticRedirectWriteTargets,
     ]);
-    const structuralMetaLinks = module.completeSchedulerScopeSummary === true
-      ? (["pattern", "argument", "result"] as const)
-        .map((field) => getMetaLink(resultCell, field))
-        .filter((link): link is NormalizedFullLink => link !== undefined)
-      : [];
-    const internalMetaLink = module.completeSchedulerScopeSummary === true
-      ? getMetaCell(resultCell, "internal", tx)
-        .getAsNormalizedFullLink()
-      : undefined;
-    const derivedInternalLinks = module.completeSchedulerScopeSummary === true
-      ? (pattern.derivedInternalCells ?? []).map((descriptor) =>
-        getDerivedInternalCellLink(resultCell, descriptor)
-      )
-      : [];
     const wrappedAction = Object.assign(action, {
       reads,
       writes: schedulingWrites,
       ...(hasMaterializerWriteEnvelopes ? { materializerWriteEnvelopes } : {}),
-      ...(module.completeSchedulerScopeSummary === true &&
-          redirectWriteTargets.complete && redirectReadTargets.complete
-        ? {
-          completeSchedulerScopeSummary: {
-            complete: true as const,
-            piece: resultCell.getAsNormalizedFullLink(),
-            // The callback's declared reads are only part of the action's
-            // structurally fixed read surface. Reads follow static redirects;
-            // the runner also materializes the immutable argument container
-            // and reads direct output cells while diffing/writing their values.
-            // Include those framework reads in the trusted certificate so a
-            // complete space-only lift is not mistaken for a contradiction.
-            reads: dedupeNormalizedLinks([
-              ...reads,
-              ...redirectReadTargets.targets,
-              inputsCell.getAsNormalizedFullLink(),
-              resultCell.getAsNormalizedFullLink(),
-              ...structuralMetaLinks,
-              ...(internalMetaLink ? [internalMetaLink] : []),
-              ...derivedInternalLinks,
-              ...schedulingWrites,
-            ]),
-            writes: dedupeNormalizedLinks([
-              ...schedulingWrites,
-              ...redirectWriteTargets.targets,
-            ]),
-            materializerWriteEnvelopes,
-            directOutputs: writes,
-          },
-        }
-        : {}),
       module,
       pattern,
     });

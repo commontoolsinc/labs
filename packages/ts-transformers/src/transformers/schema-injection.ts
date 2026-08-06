@@ -2397,13 +2397,6 @@ function prependSchemaArguments(
     // read by neither. (For an authored `node`, getSourceMapRange(node)
     // returns the node itself, so its own range is what gets carried.)
     if (isSingleEmptyObjectInput(node.arguments)) {
-      const completeSchedulerScopeSummary = context.factory
-        .createObjectLiteralExpression([
-          context.factory.createPropertyAssignment(
-            "completeSchedulerScopeSummary",
-            context.factory.createTrue(),
-          ),
-        ], false);
       const rebuiltInner = preserveSourceMapRange(
         context.factory.createCallExpression(
           innerLiftCall.expression,
@@ -2411,11 +2404,15 @@ function prependSchemaArguments(
           [
             ...calleeArgs,
             context.factory.createFalse(),
-            // Keep the trusted scheduler options in lift's fourth parameter;
-            // the no-input form intentionally has no result schema.
-            context.factory.createIdentifier("undefined"),
-            completeSchedulerScopeSummary,
-            ...trailingInnerArgs,
+            // The no-input form intentionally has no result schema; pad the
+            // slot only when trailing options must stay in lift's fourth
+            // parameter.
+            ...(trailingInnerArgs.length > 0
+              ? [
+                context.factory.createIdentifier("undefined"),
+                ...trailingInnerArgs,
+              ]
+              : []),
           ],
         ),
         innerLiftCall,

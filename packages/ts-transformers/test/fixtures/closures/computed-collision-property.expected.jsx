@@ -36,7 +36,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     },
     required: ["multiplier", "value"]
-} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
+} as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: computed-collision-property
 // Verifies: a captured cell named the same as a returned object property does not rename the property
 //   computed(() => ({ multiplier: multiplier.get(), value: ... })) → lift(...)({ multiplier })

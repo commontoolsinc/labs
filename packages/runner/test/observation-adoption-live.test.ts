@@ -14,13 +14,12 @@ import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 // Incremental observation adoption
 // (docs/specs/scheduler-v2/incremental-observation-adoption.md): two LIVE
-// runtimes on one in-process server. When runtime A's action runs commit,
-// their observations ride the subscription push, and runtime B ADOPTS them
-// for its own registered equivalent actions instead of re-running — B's
-// derived values update with zero per-element op runs (the expensive user
-// computations; see opRuns below for why coordinators may still reconcile).
-// A B-local write still runs B's actions (adoption must not deaden local
-// reactivity), and A adopts B's observations symmetrically.
+// runtimes on one in-process server. With the transformer completeness
+// certificate deleted (docs/specs/server-side-execution/serving-loop.md §3b),
+// every persisted observation row is owned by its writer's exact session —
+// adoption C6's fail-closed arm. Nothing ships to another session, so a
+// receiving runtime converges by RUNNING its own computations, and a B-local
+// write keeps running B's actions as before.
 
 const signer = await Identity.fromPassphrase("observation adoption live");
 const space = signer.did();
@@ -117,7 +116,7 @@ describe("incremental observation adoption (live)", () => {
     await server?.close();
   });
 
-  it("a receiver adopts the writer's runs instead of re-running", async () => {
+  it("certificate-less rows stay session-owned; a receiver re-runs", async () => {
     // Runtime A creates and settles the piece.
     const rt1 = newRuntime(managerA);
     const rt2 = newRuntime(managerB);
@@ -149,15 +148,12 @@ describe("incremental observation adoption (live)", () => {
       const persisted = await managerA.open(space)
         .listSchedulerActionSnapshots!({ ownerSpace: space, limit: 1000 });
       expect(persisted.snapshots).toHaveLength(1);
-      expect(persisted.snapshots[0].executionContextKey).toBe("space");
-      expect(
-        (persisted.snapshots[0].observation as {
-          completeActionScopeSummary?: unknown;
-        }).completeActionScopeSummary,
-      ).toBeDefined();
+      // Without a completeness certificate the server never creates a shared
+      // space/user row: the run's row is owned by the writer's exact session.
+      expect(persisted.snapshots[0].executionContextKey).toMatch(/^session:/);
 
-      // Runtime B joins the SAME live piece (its boot rehydrates from A's
-      // persisted observations — the reload case of the same mechanism).
+      // Runtime B joins the SAME live piece. A's rows are owned by A's exact
+      // session, so B's boot listing returns nothing and B runs fresh.
       const resultLink = r1.getAsNormalizedFullLink();
       const resultCell2 = rt2.getCellFromLink(resultLink);
       await resultCell2.sync();
@@ -168,9 +164,10 @@ describe("incremental observation adoption (live)", () => {
       await rt2.idle();
       expect(resultCell2.key("doubled").getAsQueryResult()).toBe(2);
 
-      // LIVE SKIP: runtime A writes the input; A's source-backed computation
-      // runs and commits; B receives the writes + observations via the
-      // subscription push and converges WITHOUT running any computation.
+      // FAIL-CLOSED: runtime A writes the input; A's source-backed computation
+      // runs and commits; B receives the doc writes via the subscription push
+      // but no adoptable row (A's row is session-owned), so B converges by
+      // running its own computation.
       rt2.scheduler.setActionRunTraceEnabled(true);
       const adoptedBefore = adoptOkCount();
       const tx2 = rt1.edit();
@@ -187,36 +184,10 @@ describe("incremental observation adoption (live)", () => {
         ),
       ).toBe(20);
       const liveTrace = rt2.scheduler.getActionRunTrace();
-      expect(opRuns(liveTrace)).toEqual([]);
-      expect(adoptOkCount()).toBeGreaterThan(adoptedBefore);
+      expect(opRuns(liveTrace).length).toBeGreaterThan(0);
+      expect(adoptOkCount()).toBe(adoptedBefore);
 
-      // Repeat with the same dependency shape. The later observation must ride
-      // the later semantic commit's sync window rather than retaining the first
-      // run's already-consumed delivery slot.
-      const beforeRepeated = rt2.scheduler.getActionRunTrace().length;
-      const adoptedBeforeRepeated = adoptOkCount();
-      const txRepeated = rt1.edit();
-      valueCell1.withTx(txRepeated).set(11);
-      expect((await txRepeated.commit()).error).toBeUndefined();
-      await rt1.idle();
-      await rt1.storageManager.synced();
-      expect(
-        await waitForCellValue<number>(
-          rt2,
-          resultCell2.key("doubled"),
-          (v) => v === 22,
-        ),
-      ).toBe(22);
-      expect(
-        opRuns(
-          rt2.scheduler.getActionRunTrace().slice(beforeRepeated),
-        ),
-      ).toEqual([]);
-      expect(adoptOkCount()).toBeGreaterThan(adoptedBeforeRepeated);
-
-      // LOCAL REACTIVITY PRESERVED: a B-local write runs B's own lift
-      // (adoption must not deaden the receiving scheduler). A still converges;
-      // its push window may run or adopt depending on observation ordering.
+      // LOCAL REACTIVITY: a B-local write runs B's own lift, as before.
       const valueCell2 = rt2.getCell(space, "adopt-value", VALUE_SCHEMA);
       await valueCell2.sync();
       const beforeLocal = rt2.scheduler.getActionRunTrace().length;

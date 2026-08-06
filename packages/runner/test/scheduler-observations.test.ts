@@ -240,102 +240,6 @@ describe("persistent scheduler observations", () => {
     expect(isSchedulerActionObservation(observation)).toBe(true);
   });
 
-  it("binds complete structural summaries to observation fingerprints", () => {
-    const summaryReads = [{ ...readAddress, path: [...readAddress.path] }];
-    const observation = buildSchedulerActionObservation({
-      ownerSpace: "did:key:space",
-      actionId: "pattern.tsx:computed:complete",
-      actionKind: "computation",
-      branch: "",
-      pieceId: "space:of:piece",
-      processGeneration: 0,
-      implementationFingerprint: "impl:complete",
-      runtimeFingerprint: "runtime:complete",
-      observedAtSeq: 7,
-      transactionKind: "action-run",
-      transactionLog: {
-        reads: [readAddress],
-        shallowReads: [],
-        writes: [writeAddress],
-        attemptedWrites: [],
-      },
-      currentKnownWrites: [writeAddress],
-      completeActionScopeSummary: {
-        version: 1,
-        complete: true,
-        piece: {
-          space: "did:key:space",
-          scope: "space",
-          id: "of:piece",
-          path: ["value"],
-        },
-        reads: summaryReads,
-        writes: [writeAddress],
-        materializerWriteEnvelopes: [materializerEnvelope],
-        directOutputs: [writeAddress],
-      },
-    });
-
-    expect(observation.completeActionScopeSummary).toMatchObject({
-      version: 1,
-      complete: true,
-      implementationFingerprint: "impl:complete",
-      runtimeFingerprint: "runtime:complete",
-      reads: [readAddress],
-    });
-    summaryReads[0]!.path.push("mutated-after-build");
-    expect(observation.completeActionScopeSummary?.reads).toEqual([
-      readAddress,
-    ]);
-    expect(isSchedulerActionObservation(observation)).toBe(true);
-    expect(isSchedulerActionObservation({
-      ...observation,
-      completeActionScopeSummary: {
-        ...observation.completeActionScopeSummary!,
-        runtimeFingerprint: "runtime:forged",
-      },
-    })).toBe(false);
-  });
-
-  it("suppresses complete summaries for fallback action fingerprints", () => {
-    const observation = buildSchedulerActionObservation({
-      ownerSpace: "did:key:space",
-      actionId: "unverified-action",
-      actionKind: "computation",
-      branch: "",
-      pieceId: "space:of:piece",
-      processGeneration: 0,
-      implementationFingerprint: "action:piece:unverified-action",
-      runtimeFingerprint: schedulerRuntimeFingerprint(),
-      observedAtSeq: 1,
-      transactionKind: "action-run",
-      transactionLog: {
-        reads: [],
-        shallowReads: [],
-        writes: [],
-        attemptedWrites: [],
-      },
-      currentKnownWrites: [],
-      completeActionScopeSummary: {
-        version: 1,
-        complete: true,
-        piece: {
-          space: "did:key:space",
-          scope: "space",
-          id: "of:piece",
-          path: ["value"],
-        },
-        reads: [],
-        writes: [],
-        materializerWriteEnvelopes: [],
-        directOutputs: [],
-      },
-    });
-
-    expect(observation.completeActionScopeSummary).toBeUndefined();
-    expect(isSchedulerActionObservation(observation)).toBe(true);
-  });
-
   it("rejects persisted observations missing required scheduler metadata", () => {
     const observation = buildSchedulerActionObservation({
       actionId: "pattern.tsx:computed:1",
@@ -815,91 +719,7 @@ describe("persistent scheduler observations", () => {
     }
   });
 
-  it("accepts a certified cross-space PerUser candidate", async () => {
-    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
-    try {
-      let runs = 0;
-      const action = Object.assign(
-        function crossSpaceUserCandidate() {
-          runs++;
-        },
-        {
-          writes: [writeLink],
-          implementationHash: "cf:module/test:cross-space-user",
-        },
-      );
-      const actionId = "cf:module/test:cross-space-user";
-      const crossSpaceUserRead = {
-        ...readAddress,
-        space: "did:key:other-space" as const,
-        scope: "user" as const,
-      };
-      const observation = buildSchedulerActionObservation({
-        ownerSpace: space,
-        actionId,
-        actionKind: "effect",
-        branch: "",
-        pieceId: "space:of:cross-space-user-process",
-        processGeneration: 1,
-        implementationFingerprint: schedulerImplementationFingerprint(
-          action,
-          actionId,
-          undefined,
-        ),
-        runtimeFingerprint: schedulerRuntimeFingerprint(),
-        observedAtSeq: 5,
-        transactionKind: "action-run",
-        currentKnownWrites: [writeAddress],
-        transactionLog: {
-          reads: [crossSpaceUserRead],
-          shallowReads: [],
-          writes: [],
-        },
-        completeActionScopeSummary: {
-          version: 1,
-          complete: true,
-          piece: {
-            space,
-            scope: "space",
-            id: "of:cross-space-user-process",
-            path: [],
-          },
-          reads: [crossSpaceUserRead],
-          writes: [writeAddress],
-          materializerWriteEnvelopes: [],
-          directOutputs: [writeAddress],
-        },
-      });
-      testRuntime.runtime.scheduler.subscribe(action, {
-        reads: [],
-        shallowReads: [],
-        writes: [],
-      }, {
-        isEffect: true,
-        rehydrateFromStorage: {
-          space,
-          pieceId: observation.pieceId,
-          processGeneration: 1,
-          ...currentSnapshotOracle,
-          snapshotsByActionId: new Map([[
-            actionId,
-            [{
-              executionContextKey: "user:did%3Akey%3Aalice",
-              observation,
-            }],
-          ]]),
-        },
-      });
-
-      await testRuntime.runtime.idle();
-      expect(runs).toBe(0);
-      expect(testRuntime.runtime.scheduler.isDirty(action)).toBe(false);
-    } finally {
-      await disposeSchedulerTestRuntime(testRuntime);
-    }
-  });
-
-  it("rejects a fallback-fingerprint shared candidate and runs fresh", async () => {
+  it("rejects a shared-context candidate and runs fresh", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
       let runs = 0;
@@ -932,26 +752,6 @@ describe("persistent scheduler observations", () => {
           writes: [],
         },
       });
-      const forgedObservation: SchedulerActionObservation = {
-        ...observation,
-        completeActionScopeSummary: {
-          version: 1,
-          complete: true,
-          implementationFingerprint: observation.implementationFingerprint,
-          runtimeFingerprint: observation.runtimeFingerprint,
-          piece: {
-            space,
-            scope: "space",
-            id: "of:unproved-shared-process",
-            path: [],
-          },
-          reads: [readAddress],
-          writes: [writeAddress],
-          materializerWriteEnvelopes: [],
-          directOutputs: [writeAddress],
-        },
-      };
-
       testRuntime.runtime.scheduler.subscribe(action, {
         reads: [],
         shallowReads: [],
@@ -965,7 +765,10 @@ describe("persistent scheduler observations", () => {
           ...currentSnapshotOracle,
           snapshotsByActionId: new Map([[
             actionId,
-            [{ executionContextKey: "space", observation: forgedObservation }],
+            // A shared (non-session) context row is never adoptable without
+            // the deleted completeness certificate: selection fail-closes to
+            // the exact-session context.
+            [{ executionContextKey: "space", observation }],
           ]]),
         },
       });
@@ -1012,20 +815,6 @@ describe("persistent scheduler observations", () => {
           reads: [readAddress],
           shallowReads: [],
           writes: [],
-        },
-        completeActionScopeSummary: {
-          version: 1,
-          complete: true,
-          piece: {
-            space,
-            scope: "space",
-            id: "of:dirty-narrower-process",
-            path: [],
-          },
-          reads: [readAddress],
-          writes: [writeAddress],
-          materializerWriteEnvelopes: [],
-          directOutputs: [writeAddress],
         },
       });
 
@@ -1373,20 +1162,6 @@ describe("persistent scheduler observations", () => {
           writes: [],
         },
         currentKnownWrites: [writeAddress],
-        completeActionScopeSummary: {
-          version: 1,
-          complete: true,
-          piece: {
-            space,
-            scope: "space",
-            id: "of:adoption-context-piece",
-            path: [],
-          },
-          reads: [readAddress],
-          writes: [writeAddress],
-          materializerWriteEnvelopes: [],
-          directOutputs: [writeAddress],
-        },
       });
       const oracle = {
         readsCurrentAtSeq: () => true,
@@ -2290,26 +2065,6 @@ describe("persistent scheduler observations", () => {
 
       expect(await result.pull()).toEqual({ doubled: 10 });
       await runtimeA.storageManager.synced();
-      const persisted = await persistedSchedulerSnapshots(
-        runtimeA,
-        resultCellPieceId(resultCellA),
-      );
-      const completeObservation = persisted.find((snapshot) =>
-        snapshot.observation.completeActionScopeSummary !== undefined
-      )?.observation;
-      expect(completeObservation?.completeActionScopeSummary).toMatchObject({
-        version: 1,
-        complete: true,
-        implementationFingerprint: completeObservation
-          ?.implementationFingerprint,
-        runtimeFingerprint: completeObservation?.runtimeFingerprint,
-        piece: {
-          space,
-          scope: "space",
-          id: resultCellA.getAsNormalizedFullLink().id,
-          path: ["value"],
-        },
-      });
       await runtimeA.dispose({ closeStorage: false });
 
       const server = (storageManager as unknown as {

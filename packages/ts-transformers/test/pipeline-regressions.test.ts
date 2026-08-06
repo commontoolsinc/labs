@@ -83,10 +83,7 @@ function schedulerOptionsFor(
       continue;
     }
     const value = literalToValue(argument) as Record<string, unknown>;
-    if (
-      "completeSchedulerScopeSummary" in value ||
-      "materializerWriteInputPaths" in value
-    ) {
+    if ("materializerWriteInputPaths" in value) {
       return value;
     }
   }
@@ -375,7 +372,7 @@ const p = pattern<{ mentionable: MentionablePiece[] }, { [UI]: any }>((
 );
 
 Deno.test(
-  "Pipeline regression: scheduler options preserve helper-backed keys in lift callbacks",
+  "Pipeline regression: lift callbacks preserve helper-backed keys",
   async () => {
     const source = await Deno.readTextFile(
       new URL(
@@ -388,12 +385,6 @@ Deno.test(
     });
     const root = parseModule(output);
 
-    assert(
-      callsNamed(root, "lift").some((call) =>
-        schedulerOptionsFor(call)?.completeSchedulerScopeSummary === true
-      ),
-      "expected the transformed lift to carry a completeness marker",
-    );
     const pieceNameReads = collect(root, ts.isElementAccessExpression).filter(
       (access) =>
         ts.isIdentifier(access.expression) &&
@@ -407,7 +398,7 @@ Deno.test(
         access.argumentExpression.expression.text === "__cfHelpers" &&
         access.argumentExpression.name.text === "NAME"
       ),
-      "options-bearing lift callbacks must retain __cfHelpers.NAME",
+      "lift callbacks must retain __cfHelpers.NAME",
     );
   },
 );
@@ -1710,8 +1701,14 @@ export default pattern<Input>(({ departments }) => {
 );
 
 Deno.test(
-  "Pipeline regression: complete source lifts emit scheduler scope proof including proven-empty",
+  "Pipeline regression: lifts carry no scheduler options beyond write paths",
   async () => {
+    // The transformer's completeness certificate is deleted
+    // (docs/specs/server-side-execution/serving-loop.md §3b). A lift's only
+    // scheduler-options field is `materializerWriteInputPaths`, so writeless
+    // sources — proven-empty computations included — emit no options object
+    // at all: the no-input form is exactly `lift(cb, false)` and the
+    // input-bearing form exactly `lift(cb, argSchema, resSchema)`.
     const source = `import { computed, pattern } from "commonfabric";
 
 export default pattern<{ value: number }>(({ value }) => {
@@ -1725,46 +1722,21 @@ export default pattern<{ value: number }>(({ value }) => {
       types: COMMONFABRIC_TYPES,
     });
     const root = parseModule(output);
+    const incrementedLift = liftCallFor(root, "incremented");
+    assertEquals(incrementedLift.arguments.length, 3);
+    assertEquals(schedulerOptionsFor(incrementedLift), undefined);
+    const constantLift = liftCallFor(root, "constant");
+    assertEquals(constantLift.arguments.length, 2);
     assertEquals(
-      schedulerOptionsFor(liftCallFor(root, "incremented"))
-        ?.completeSchedulerScopeSummary,
-      true,
-    );
-    assertEquals(
-      schedulerOptionsFor(liftCallFor(root, "constant"))
-        ?.completeSchedulerScopeSummary,
-      true,
-    );
-  },
-);
-
-Deno.test(
-  "Pipeline regression: uncertain source lifts do not emit scheduler scope proof",
-  async () => {
-    const source = `import { computed, pattern } from "commonfabric";
-
-export default pattern<{ value: Record<string, string>; key: string }>(
-  ({ value, key }) => {
-    const dynamic = computed(() => value[key]);
-    return { dynamic };
-  },
-);
-`;
-
-    const output = await transformSource(source, {
-      types: COMMONFABRIC_TYPES,
-    });
-    const root = parseModule(output);
-    assertEquals(
-      schedulerOptionsFor(liftCallFor(root, "dynamic"))
-        ?.completeSchedulerScopeSummary,
-      undefined,
+      constantLift.arguments[1]?.kind,
+      ts.SyntaxKind.FalseKeyword,
+      "the no-input form is lift(cb, false)",
     );
   },
 );
 
 Deno.test(
-  "Pipeline regression: uncertain writers keep materializer paths without scope proof",
+  "Pipeline regression: uncertain writers keep materializer paths",
   async () => {
     const source =
       `import { computed, pattern, type Writable } from "commonfabric";
@@ -1791,46 +1763,6 @@ export default pattern<Input>(({ departments, values, key }) => {
       liftCallFor(parseModule(output), "dynamicWriter"),
     );
     assertEquals(options?.materializerWriteInputPaths, [["departments"]]);
-    assertEquals(options?.completeSchedulerScopeSummary, undefined);
-  },
-);
-
-Deno.test(
-  "Pipeline regression: unreadable cell arguments do not emit scheduler scope proof",
-  async () => {
-    const source = `import { lift, pattern, type Writable } from "commonfabric";
-import { sendMixed, type Auth } from "ambiguous-clients";
-
-export default pattern<{ auth: Writable<Auth>; marker: boolean }>(
-  ({ auth, marker }) => {
-    const sent = lift((candidate: Writable<Auth>) => {
-      sendMixed(candidate);
-      return marker;
-    })(auth);
-    return { sent };
-  },
-);
-`;
-
-    const output = await transformSource(source, {
-      types: {
-        ...COMMONFABRIC_TYPES,
-        "ambiguous-clients.d.ts": `declare module "ambiguous-clients" {
-  import type { Writable } from "commonfabric";
-  export type Auth = { token: string };
-  export interface AuthCell {
-    get(): Auth | undefined;
-    update(values: { token?: string }): void;
-  }
-  export function sendMixed(auth: AuthCell | Writable<Auth>): void;
-}`,
-      },
-    });
-    assertEquals(
-      schedulerOptionsFor(liftCallFor(parseModule(output), "sent"))
-        ?.completeSchedulerScopeSummary,
-      undefined,
-    );
   },
 );
 
