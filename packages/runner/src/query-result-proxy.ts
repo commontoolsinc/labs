@@ -212,11 +212,28 @@ export function createQueryResultProxy<T>(
     return value;
   }
 
-  // TODO(danfuzz): This may have to do something special to handle concrete
-  // instances of `FabricInstance` so that they get perceived as such by the
-  // proxy's clients. Unlike `FabricPrimitive`, `FabricInstance`s are not
-  // necessarily frozen and _do_ expose outgoing references (just as plain
-  // objects and arrays do).
+  // A `FabricInstance` is _not_ exempted here the way a `FabricPrimitive` is
+  // above, so one gets wrapped in a proxy -- and that has a consequence outside
+  // this file which is easy to miss from here.
+  //
+  // The proxy target is an empty stub and there is no `getPrototypeOf` trap, so
+  // a proxied instance's prototype is `Object.prototype` and
+  // `instanceof FabricInstance` is _false_ for it. Every
+  // `instanceof FabricInstance` guard in the runner is therefore blind to an
+  // instance that arrives through a cell read -- the refusal does not fire and
+  // the walk proceeds to rebuild the value as a bare `{}`. That is around ten
+  // sites and counting, so they are not listed here to go stale;
+  // `grep -rn 'instanceof FabricInstance' packages/runner/src` finds them.
+  //
+  // `test/llm-dialog-special-objects.test.ts` pins that end to end, so closing
+  // this turns that test red rather than letting it pass silently.
+  //
+  // TODO(danfuzz): make a proxied `FabricInstance` perceived as one by the
+  // proxy's clients. Note this is not simply extending the raw-return exemption
+  // above: unlike a primitive, an instance is not necessarily frozen and _does_
+  // expose outgoing references (just as plain objects and arrays do), so the
+  // proxy is here on purpose and something has to preserve type identity
+  // without losing member resolution.
 
   // Stored objects are deep-frozen during storage normalization
   // (fabricFromNativeValueModern). A frozen proxy target would force every

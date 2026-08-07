@@ -124,7 +124,7 @@ describe("llm-dialog-special-objects", () => {
     });
 
     it("flattens a cell-resolved `FabricError`, which the refusal misses", () => {
-      // A KNOWN BLIND SPOT, pinned so it cannot widen unnoticed, and so that
+      // A _known blind spot_, pinned so it cannot widen unnoticed, and so that
       // closing it turns this red rather than passing silently.
       //
       // `getAsQueryResult()` hands back a `FabricPrimitive` raw but wraps a
