@@ -29,6 +29,7 @@ import {
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
+import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { type Cell, isCell } from "./cell.ts";
 import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
 import {
@@ -140,11 +141,9 @@ export function dataUriFromValueWithResolvedLinks(
  * media type is returned as it came in, on the same footing as a link
  * naming a document in a space.
  *
- * A `FabricPrimitive` comes back as the same instance, correctly: a leaf holds
- * no link to inline.
- *
- * A `FabricInstance` comes back as the same instance too, and that is a gap
- * rather than an answer -- see the `TODO` in the record branch.
+ * A `FabricPrimitive` comes back as the same instance: a leaf holds no link to
+ * inline. A `FabricInstance` is refused, since passing one through would leave
+ * a link inside it un-inlined.
  *
  * @param value - The value to find and inline data: URI links in.
  * @returns The value with any data: URI links inlined.
@@ -219,23 +218,29 @@ export function findAndInlineDataUriLinks(value: any): any {
       }
     }
     return next ?? value;
+  } else if (value instanceof FabricPrimitive) {
+    // A leaf, and `isRecord`, so it leaves ahead of the record branch below.
+    // It holds no link to inline, so returning it whole is the answer rather
+    // than an omission.
+    return value;
+  } else if (value instanceof FabricInstance) {
+    // NOT answered by passing through. An instance's state can carry a `data:`
+    // URI link -- a `FabricError`'s extras bag, for one -- and this walk exists
+    // to inline exactly those. Handing the value back whole hands it back
+    // UNTRANSFORMED, so the link survives as a link and the walk's purpose is
+    // defeated for everything inside the wrapper. It refuses rather than doing
+    // that quietly.
+    //
+    // Nothing reaches this in production today, de facto rather than by
+    // construction: a `FabricError` is ungated and exposed to pattern authors,
+    // so what keeps this safe is that nothing yet routes one through a `data:`
+    // URI.
+    //
+    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
+    // at which point this becomes a walk rather than a refusal -- the same gap
+    // marked at the sibling walk in `dataUriFromValueWithResolvedLinks()`.
+    refuseFabricInstance(value, "when inlining `data:` URI links");
   } else if (isRecord(value)) {
-    // A `FabricSpecialObject` is `isRecord` and so arrives here rather than at
-    // the leaf return, and is not damaged: the clone happens only once an entry
-    // inlines to something new, and such a value has zero enumerable own
-    // properties, so the loop body never runs and the original goes back by
-    // identity -- including when a SIBLING inlines and forces the surrounding
-    // record to clone, since that clone copies the reference across.
-    //
-    // For a `FabricPrimitive` that is the whole answer: a leaf holds no link to
-    // inline.
-    //
-    // TODO(danfuzz): a `FabricInstance` is NOT answered by passing through. Its
-    // state can carry a `data:` URI link -- a `FabricError`'s extras bag, for
-    // one -- and that link is never inlined, so the value comes back whole and
-    // untransformed. Reaching it needs codec-mediated traversal into instance
-    // state, the same gap marked at the sibling walk in
-    // `dataUriFromValueWithResolvedLinks()`.
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {
       const inlined = findAndInlineDataUriLinks(entry);

@@ -343,12 +343,13 @@ describe("data URI inlining", () => {
       // object has zero enumerable own properties: the loop body never runs,
       // so `next` stays undefined and the original comes back by identity.
       //
-      // For a `FabricPrimitive` that is the whole answer, and the guarantee --
-      // though indirect, resting entirely on the zero-property fact -- is
-      // pinned here so that giving one an enumerable property turns this red.
+      // For a `FabricPrimitive` that is the answer: a leaf holds no link to
+      // inline, and the guarantee -- indirect, resting on the zero-property
+      // fact -- is pinned so that giving one an enumerable property turns this
+      // red.
       //
-      // For a `FabricInstance` it is NOT the answer: not being flattened is not
-      // the same as being handled, and the third test below pins that gap.
+      // For a `FabricInstance` it is NOT the answer, so the walk refuses one:
+      // not being flattened is not the same as being handled.
 
       it("returns a `FabricBytes` as the same instance", () => {
         const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
@@ -356,10 +357,10 @@ describe("data URI inlining", () => {
         expect(findAndInlineDataUriLinks(bytes)).toBe(bytes);
       });
 
-      it("leaves a `data:` URI link inside a `FabricError` un-inlined", () => {
-        // A KNOWN GAP, pinned as one. A `FabricInstance` is not answered by
-        // passing through: its state can carry a link that this walk exists to
-        // inline, and coming back whole means coming back untransformed.
+      it("throws for a `FabricError` rather than passing it through", () => {
+        // Passing an instance through would hand it back UNTRANSFORMED: its
+        // state can carry a `data:` URI link that this walk exists to inline,
+        // and coming back whole means coming back with that link intact.
         //
         // The control is the point -- the same link inlines on a plain object,
         // so what changes the outcome is the wrapper, not the link.
@@ -377,9 +378,10 @@ describe("data URI inlining", () => {
           e: "inlined value",
         });
 
-        const result = findAndInlineDataUriLinks(failure) as FabricError;
-        expect(result).toBe(failure);
-        expect(result.getExtra("attachment")).toEqual(link);
+        expect(() => findAndInlineDataUriLinks(failure)).toThrow(
+          "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
+            "inlining `data:` URI links.",
+        );
       });
 
       it("keeps a special object whole while inlining a sibling", () => {
