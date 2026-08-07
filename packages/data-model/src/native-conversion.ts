@@ -690,11 +690,6 @@ export function nativeFromFabricValue(
     return deepUnwrapFabricError(value, frozen);
   }
 
-  // TODO(danfuzz): Latent — this unwrap is one level deep: `FabricMap` and
-  // `FabricSet` copy their entries through untouched, so a wrapper nested
-  // inside one stays wrapped, where the `FabricError` arm above recurses.
-  // The wrapper family wants the recursive treatment uniformly once those
-  // classes carry live traffic.
   if (value instanceof FabricNativeWrapper) {
     return value.toNativeValue(frozen);
   }

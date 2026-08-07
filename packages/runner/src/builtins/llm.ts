@@ -1430,12 +1430,6 @@ export function generateObject<T extends Record<string, unknown>>(
         ...llmParams,
         tools: toolCatalog.llmTools,
       };
-      // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
-      // `.get()`-path today, but will in the not-too-distant future; at that
-      // point this JSON round-trip silently loses any
-      // `FabricPrimitive`/`FabricInstance` (class instances don't survive
-      // JSON) — before it reaches `createFrozenRequestSnapshot`, which
-      // exists to preserve them. Mark ahead of that.
       const requestSnapshot = createFrozenRequestSnapshot(
         JSON.parse(
           JSON.stringify({

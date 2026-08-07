@@ -5870,14 +5870,6 @@ export class Runner {
           // is an ambient local read (it may kick off, but never await, a
           // sync); guard each access so one lazy read failing doesn't abort
           // the rest of the presync.
-          //
-          // TODO(danfuzz): Latent — `isRecord` admits a
-          // `FabricSpecialObject`, whose `Object.keys` are empty, so a
-          // `Cell` inside a `FabricInstance` would be skipped here and the
-          // handler body would race the storage response for it. Today the
-          // materialization this walks cannot deliver one (back-to-cell
-          // annotation throws on a `FabricInstance` first); the gap arms
-          // when that throw becomes a walk.
           if (!isRecord(value)) return;
           if (seen.has(value)) return;
           seen.add(value);
