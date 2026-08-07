@@ -1,12 +1,23 @@
-// Provision a vouched ingest channel (iteration 1: out-of-band, operator-run).
+// Provision a vouched ingest channel — the OPERATOR / break-glass path.
 //
-// Why: iteration 1 has no self-serve create endpoint on purpose — an unauthed
-// create that takes a caller-supplied target space is a confused-deputy write
-// primitive (anyone could get a legitimately-minted mark written into another
-// user's space). Until the platform has HTTP-level caller auth, channels are
-// minted here, by an operator who already holds the service identity. This mints
-// a per-install token, writes the registration into the toolshed service space,
-// and prints the token ONCE. Adding an install = re-run this; no redeploy.
+// PREFER `cf ingest mint`. Users can now mint their own channels against
+// /api/ingest-channels, signing with their own identity key; the server checks
+// they hold an explicit OWNER grant on the target space's ACL, which is what
+// closes the confused-deputy hole that kept creation out-of-band originally.
+// See docs/features/self-serve-ingest-channels.md.
+//
+// This script remains for the cases the self-serve path cannot cover: minting
+// for a space whose ACL does not (yet) name a concrete owner, and recovery when
+// the control plane itself is unavailable. It bypasses the ownership check
+// entirely — it runs AS the operator identity — so treat it as an admin action.
+//
+// A channel minted here has no verified `owner`, so it does not appear in a
+// user's own `cf ingest ls`. It DOES appear in `cf ingest ls --space <space>`,
+// which lists everything targeting a space its current owner holds — so a
+// break-glass channel is discoverable, and revocable, by that owner.
+//
+// It mints a per-install token, writes the registration into the toolshed
+// service space, and prints the token ONCE. Adding an install = re-run this.
 //
 // Usage:
 //   deno task provision-ingest-channel \
@@ -24,6 +35,7 @@ import {
   isValidSegment,
   saveRegistration,
 } from "@/routes/ingest/ingest.utils.ts";
+import { DEFAULT_TTL_DAYS } from "@/routes/ingest-channels/ingest-channels.utils.ts";
 
 const flags = parseArgs(Deno.args, {
   string: ["space", "install-id", "cause-prefix", "name"],
@@ -94,6 +106,17 @@ try {
 
   const { secret, secretHash } = generateIngestSecret();
 
+  // Carry the existing lifecycle state forward. Building a fresh object here
+  // silently un-revokes a retired channel, deletes its revocation history,
+  // orphans a self-serve channel from its owner's list, resets the revision
+  // that lifecycle writes are gated on, and drops the expiry — which is the
+  // only way this deployment can still issue a credential that never expires.
+  const now = new Date();
+  const expiresAt = existing?.expiresAt !== undefined &&
+      Date.parse(existing.expiresAt) > now.getTime()
+    ? existing.expiresAt
+    : new Date(now.getTime() + DEFAULT_TTL_DAYS * 86_400_000).toISOString();
+
   await saveRegistration(runtime, identity.did(), {
     id,
     name,
@@ -103,8 +126,25 @@ try {
     sink: "journal",
     secretHash,
     createdBy: identity.did(),
-    createdAt: new Date().toISOString(),
+    createdAt: existing?.createdAt ?? now.toISOString(),
     enabled: true,
+    expiresAt,
+    revision: (existing?.revision ?? 0) + 1,
+    ...(existing?.owner !== undefined ? { owner: existing.owner } : {}),
+    // Re-provisioning is an operator re-authorizing the channel, so the live
+    // revocation clears; the record of it does not.
+    ...(existing?.revoked !== undefined
+      ? {
+        revocations: [
+          ...(existing.revocations ?? []).map((r) => ({ at: r.at, by: r.by })),
+          { at: existing.revoked.at, by: existing.revoked.by },
+        ],
+      }
+      : existing?.revocations !== undefined
+      ? {
+        revocations: existing.revocations.map((r) => ({ at: r.at, by: r.by })),
+      }
+      : {}),
   });
   await runtime.storageManager.synced();
 

@@ -1,0 +1,61 @@
+import { createRouter } from "@/lib/create-app.ts";
+import env from "@/env.ts";
+import { bodyLimit } from "@hono/hono/body-limit";
+import { requireFirstPartyHttpAuth } from "@/middlewares/first-party-http-auth.ts";
+import { createRateLimiter, rateLimit } from "@/middlewares/rate-limit.ts";
+import * as handlers from "./ingest-channels.handlers.ts";
+import * as routes from "./ingest-channels.routes.ts";
+
+const router = createRouter();
+
+// Opt-in gate, mirroring the memory-dump router: when the deployment has not
+// enabled self-serve, every verb 404s as if the routes never existed rather
+// than 403-ing. An endpoint that is not meant to be reachable should not
+// advertise itself. Mounted FIRST so nothing downstream — not the body limit,
+// not the rate limiter, not signature verification — runs for a disabled
+// deployment. See INGEST_SELF_SERVE_ENABLED in env.ts for why the default is
+// off: minting issues a durable capability that outlives the trust conditions
+// which authorized it.
+router.use(`${routes.BASE}/*`, async (c, next) => {
+  if (!env.INGEST_SELF_SERVE_ENABLED) return c.notFound();
+  await next();
+});
+
+// ORDER MATTERS: the body limit must run BEFORE the auth middleware.
+// `verifyFirstPartyHttpRequest` buffers the entire body (to hash it) *before*
+// it verifies the Ed25519 signature, so without a cap here an attacker with a
+// fresh-looking auth header and a garbage signature can force arbitrary
+// allocation without ever being authenticated. These payloads are a few hundred
+// bytes; 16 KB is generous.
+router.use(
+  `${routes.BASE}/*`,
+  bodyLimit({
+    maxSize: 16_384,
+    onError: (c) => c.json({ error: "Payload too large" }, 413),
+  }),
+);
+
+// Also ahead of auth: an unauthenticated flood should be bounded before it
+// costs an Ed25519 verification. Minting is durable work an anonymous keypair
+// can trigger, so it gets the tighter bucket; listing is read-only.
+const mintLimiter = createRateLimiter({ capacity: 10, refillPerSecond: 0.1 });
+const readLimiter = createRateLimiter({ capacity: 60, refillPerSecond: 1 });
+for (const verb of ["mint", "rotate", "revoke"]) {
+  router.use(`${routes.BASE}/${verb}`, rateLimit(mintLimiter));
+}
+router.use(`${routes.BASE}/list`, rateLimit(readLimiter));
+
+// Deliberately NO cors(): a credentialed control plane must not opt into the
+// data plane's wildcard origin. Note this does NOT yield an absent
+// `access-control-allow-origin` — routes/static and routes/shell register
+// `cors({ origin: "*" })` on `"*"`, which applies app-wide. What blocks CSRF is
+// that those policies allow only GET/OPTIONS, so a cross-origin POST carrying
+// the mandatory CF-Request-* headers always preflights and the preflight
+// refuses the method. Pinned by .routes.test.ts.
+router.use(`${routes.BASE}/*`, requireFirstPartyHttpAuth());
+
+export default router
+  .openapi(routes.mint, handlers.mint)
+  .openapi(routes.list, handlers.list)
+  .openapi(routes.rotate, handlers.rotate)
+  .openapi(routes.revoke, handlers.revoke);

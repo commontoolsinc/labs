@@ -1129,7 +1129,9 @@ sweep does not mistake them for missing experimental flags:
   [the configuration reference](./CONFIGURATION.md#runner-diagnostics).
 - **CLI controls** (environment): `CF_EXEC_SHEBANG`, `CF_CLI_TRACE_TIMINGS`,
   `CF_PROFILE_DONE_MARKER`.
-- **Operational and build toggles**: `MEMORY_ACL_MODE` (`off` / `observe` /
+- **Operational and build toggles**: `RATE_LIMIT_TRUST_FORWARDED_FOR`
+  (deployment topology, not a feature dial — see CONFIGURATION.md),
+  `MEMORY_ACL_MODE` (`off` / `observe` /
   `enforce` space-access policy), `MEMORY_DUMP_ENABLED` (state-inspector dump
   endpoint), `OTEL_ENABLED`, `PRODUCTION` (shell build mode). ACL mode is a
   permanent deployment policy ladder, not an experimental runtime feature.

@@ -1,6 +1,7 @@
 import { Command, ValidationError } from "@cliffy/command";
 import { HelpCommand } from "@cliffy/command/help";
 import { acl } from "./acl.ts";
+import { ingest } from "./ingest.ts";
 import { check } from "./dev.ts";
 import { completion } from "./completion.ts";
 import { deps } from "./deps.ts";
@@ -94,6 +95,7 @@ export const main = new Command()
   .reset()
   // @ts-ignore for the above type issue
   .command("acl", acl)
+  .command("ingest", ingest)
   // @ts-ignore for the above type issue
   .command("piece", piece)
   .command("check", check)

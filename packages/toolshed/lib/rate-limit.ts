@@ -1,0 +1,74 @@
+// A minimal in-process token bucket. Deliberately approximate: an abuse bound,
+// not a quota system, and each toolshed instance keeps its own buckets, so the
+// deployment-wide budget belongs at trusted ingress. See
+// middlewares/rate-limit.ts for how requests are keyed.
+
+export interface RateLimiterOptions {
+  /** Burst size — the most a single key may spend at once. */
+  capacity: number;
+  /** Sustained rate. */
+  refillPerSecond: number;
+  /**
+   * Hard cap on tracked keys, so the limiter cannot itself become the memory
+   * exhaustion it exists to prevent. When full, the least-recently-used key is
+   * evicted — which grants that key a fresh bucket, so keep this well above the
+   * number of distinct clients you expect.
+   */
+  maxKeys?: number;
+  /**
+   * Clock source, injectable so refill behaviour can be tested by advancing a
+   * counter rather than sleeping. A timing-dependent test of a rate limiter is
+   * flaky by construction, and the repo's waiting guidance rules sleeps out.
+   */
+  now?: () => number;
+}
+
+export interface RateLimiter {
+  /** Spend one token. `false` means the caller is over its limit. */
+  take(key: string): boolean;
+}
+
+interface Bucket {
+  tokens: number;
+  updatedAt: number;
+}
+
+export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
+  const {
+    capacity,
+    refillPerSecond,
+    maxKeys = 10_000,
+    now = Date.now,
+  } = options;
+  // Insertion order is iteration order, so the first key is the LRU once every
+  // touch re-inserts.
+  const buckets = new Map<string, Bucket>();
+
+  return {
+    take(key) {
+      const at = now();
+      const existing = buckets.get(key);
+      const bucket: Bucket = existing ?? { tokens: capacity, updatedAt: at };
+      if (existing) {
+        const elapsedSeconds = (at - existing.updatedAt) / 1000;
+        bucket.tokens = Math.min(
+          capacity,
+          existing.tokens + elapsedSeconds * refillPerSecond,
+        );
+        bucket.updatedAt = at;
+        buckets.delete(key);
+      }
+
+      const allowed = bucket.tokens >= 1;
+      if (allowed) bucket.tokens -= 1;
+
+      buckets.set(key, bucket);
+      while (buckets.size > maxKeys) {
+        const oldest = buckets.keys().next();
+        if (oldest.done) break;
+        buckets.delete(oldest.value);
+      }
+      return allowed;
+    },
+  };
+}

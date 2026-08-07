@@ -5,7 +5,9 @@
     // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
     "test": "ENV=test deno test --no-check -A --env-file=.env.test",
     "llm-exercise": "deno run --allow-env --allow-net ./scripts/llm-exercise.ts",
-    "provision-ingest-channel": "deno run -A --env-file=.env scripts/provision-ingest-channel.ts"
+    "provision-ingest-channel": "deno run -A --env-file=.env scripts/provision-ingest-channel.ts",
+    "audit-ingest-channels": "deno run -A --env-file=.env scripts/audit-ingest-channels.ts",
+    "retire-ingest-channels": "deno run -A --env-file=.env scripts/retire-ingest-channels.ts"
   },
   "imports": {
     // Dependency guide: ../../docs/development/DEPENDENCIES.md
