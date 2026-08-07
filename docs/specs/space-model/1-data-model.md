@@ -575,7 +575,7 @@ internal walkers):
 ```typescript
 // Shown inside a pattern body.
 // At boundary exit (inside the context's encode walk)
-function encodeValue(value: FabricValue): JsonWireValue {
+function encodeValue(value: FabricValue): JsonCodecValue {
   const codec = registry.codecFromValue(value);
   if (codec) {
     const state = encodeValue(codec.encode(value)); // context recurses
@@ -586,7 +586,7 @@ function encodeValue(value: FabricValue): JsonWireValue {
 
 // At boundary entry (inside the context's decode walk)
 function decodeValue(
-  data: JsonWireValue,
+  data: JsonCodecValue,
   ctx: ReconstructionContext,
 ): FabricValue {
   const unwrapped = unwrapTag(data);
