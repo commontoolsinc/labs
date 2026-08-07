@@ -768,6 +768,35 @@ export interface IStorageTransaction {
   ): void;
 
   /**
+   * Make this transaction's writes AUTHORITATIVE: every value write is
+   * recorded and committed even when it equals the currently-visible
+   * state, instead of being elided as a no-op (deletes of absent slots
+   * stay no-ops — there is nothing to assert). One-way; there is no
+   * un-mark.
+   *
+   * Exists for effect-COMPLETION writebacks under the serving posture
+   * (server-execution v2 stage G, serving-loop.md §4): the ordinary
+   * no-op elision diffs against the replica's OPTIMISTIC view, which
+   * layers not-yet-settled sealed overlays over confirmed state. A
+   * completion that diffs its `inputHash`/`pending` writes against a
+   * DOOMED overlay (a sealed derivation write a later wave-commit
+   * supersede-drops, §3d) elides the very write that makes its result
+   * durable-consistent — leaving `result present + inputHash stale`,
+   * which the next run's memo guard reads as "inputs changed" and
+   * destroys the just-served value. Authoritative mode makes the
+   * completion assert its full memo state unconditionally; ordinary
+   * transactions keep the elision (it exists to shrink the conflict
+   * surface, and for them the optimistic view is the right diff base).
+   */
+  markAuthoritativeWrites?(): void;
+
+  /** Whether {@link markAuthoritativeWrites} was applied to this
+   * transaction. Consulted by the value-diff write path
+   * (`normalizeAndDiff`), whose equal-leaf elision sits ABOVE the
+   * transaction layer and must yield for the same reason. */
+  isAuthoritativeWrites?(): boolean;
+
+  /**
    * Record one mergeable-write delta against the document at `address` (see
    * {@link MergeableOpDelta}): elements appended at the array's tail or set-added
    * by identity, a numeric increment, or a value removed by identity. The commit

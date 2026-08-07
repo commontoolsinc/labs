@@ -15,15 +15,24 @@
 // exactly the stampWaveRunContext pattern one module over:
 //
 // - OFF arm, and ON-arm client speculation: no seal destination is
-//   installed, the marker is never read, and the writeback commits to
-//   the store exactly as today — byte-identical behavior, one WeakMap
+//   installed, the marker is never read, and the authoritative-writes
+//   mark below is gated off by the same absence — the writeback commits
+//   to the store exactly as today: byte-identical behavior, one WeakMap
 //   write of overhead.
 // - ON-arm serving: the SpaceServer's seal dispatcher routes a marked
 //   transaction to the effect-completion committer instead of the wave
 //   (space-server.ts). An UNMARKED builtin writeback keeps stage F's
 //   posture — refused at the seal as unstamped (§3d's ruling), loudly —
 //   so a missed marking surfaces as an error, never as silent
-//   mis-classification.
+//   mis-classification. Marked transactions additionally commit their
+//   writes AUTHORITATIVELY (markAuthoritativeWrites): the no-op elision
+//   diffs against the replica's optimistic view, and under the serving
+//   posture that view can layer a DOOMED sealed overlay (a derivation
+//   write a later wave-commit supersede-drops, §3d) — eliding the
+//   completion's `inputHash`/`pending` writes against it durably lands
+//   `result present + inputHash stale`, which the next run's memo guard
+//   reads as "inputs changed" and destroys the just-served value (the
+//   completion-visibility wedge, F2).
 
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
@@ -33,13 +42,21 @@ const effectCompletionKeys = new WeakMap<object, string>();
  * Mark a writeback transaction as the completion of the served effect
  * `effectKey` (the builtin's memo/outbox id, e.g. `fetchJson:<hash>`).
  * Call it FIRST inside the writeback's transaction callback, before any
- * writes — the marker must be present when the transaction closes.
+ * writes — the marker must be present when the transaction closes, and
+ * the authoritative-writes mode must cover every write the callback
+ * makes.
  */
 export function markEffectCompletion(
   tx: IExtendedStorageTransaction,
   effectKey: string,
 ): void {
   effectCompletionKeys.set(tx, effectKey);
+  // Completion writebacks are authoritative (F2): under the serving
+  // posture (seal destination configured — the gate lives in
+  // ExtendedStorageTransaction) their writes commit even where the
+  // optimistic view says they are no-ops. Everywhere else this is a
+  // no-op, preserving the byte-identical OFF-arm contract above.
+  tx.markAuthoritativeWrites?.();
 }
 
 export function effectCompletionKeyOf(
