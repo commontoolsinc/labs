@@ -236,6 +236,73 @@ Deno.test("buildJsonTreeAsync matches synchronous nested tree structure", async 
   );
 });
 
+function describeSubtree(tree: FsTree, ino: bigint): unknown {
+  const node = tree.getNode(ino);
+  if (!node) throw new Error(`Inode ${ino} not found`);
+  // The inode is part of the description: two builds of the same value into
+  // fresh trees allocate from the same starting number, so equal inodes mean
+  // the two builds created the same entries in the same order.
+  if (node.kind === "dir") {
+    return {
+      ino: String(ino),
+      kind: node.kind,
+      jsonType: node.jsonType,
+      children: [...node.children].map((
+        [name, childIno],
+      ) => [name, describeSubtree(tree, childIno)]),
+    };
+  }
+  if (node.kind === "file") {
+    return {
+      ino: String(ino),
+      kind: node.kind,
+      jsonType: node.jsonType,
+      content: decoder.decode(node.content),
+    };
+  }
+  return { ino: String(ino), kind: node.kind };
+}
+
+Deno.test("buildJsonTreeAsync matches synchronous build across many batches", async () => {
+  // Wide and deep enough that both entry points run several batches, so a
+  // batch boundary falls in the middle of a directory's children.
+  const data = Object.fromEntries(
+    Array.from({ length: 40 }, (_, group) => [
+      `group${group}`,
+      {
+        index: group,
+        items: Array.from({ length: 12 }, (_, item) => ({
+          label: `g${group}i${item}`,
+          nested: { deep: item },
+        })),
+      },
+    ]),
+  );
+
+  const syncTree = new FsTree();
+  buildJsonTree(syncTree, syncTree.rootIno, "data", data);
+
+  const asyncTree = new FsTree();
+  await buildJsonTreeAsync(asyncTree, asyncTree.rootIno, "data", data);
+
+  assertEquals(
+    describeSubtree(asyncTree, asyncTree.rootIno),
+    describeSubtree(syncTree, syncTree.rootIno),
+  );
+
+  // The last node queued sits many batches past the first, so a batch that
+  // dropped or repeated a node would show up here even if it did so on both
+  // paths alike.
+  const dataIno = asyncTree.lookup(asyncTree.rootIno, "data")!;
+  const groupIno = asyncTree.lookup(dataIno, "group39")!;
+  const itemIno = asyncTree.lookup(asyncTree.lookup(groupIno, "items")!, "11")!;
+  assertEquals(getFileContent(asyncTree, itemIno, "label"), "g39i11");
+  assertEquals(
+    getFileContent(asyncTree, asyncTree.lookup(itemIno, "nested")!, "deep"),
+    "11",
+  );
+});
+
 Deno.test("FsTree - clear removes subtree", () => {
   const tree = new FsTree();
   const data = { a: { b: 1, c: 2 }, d: 3 };
@@ -420,7 +487,6 @@ Deno.test("buildJsonTree - handler cells skipped via skipEntry", () => {
     tree.rootIno,
     "result",
     data,
-    undefined,
     resolveLink,
     0,
     skipEntry,
@@ -456,7 +522,7 @@ Deno.test("buildJsonTree - sigil link becomes symlink via resolveLink", () => {
     name: "Alice",
   };
 
-  buildJsonTree(tree, tree.rootIno, "result", data, undefined, resolveLink, 0);
+  buildJsonTree(tree, tree.rootIno, "result", data, resolveLink, 0);
 
   const resultIno = tree.lookup(tree.rootIno, "result")!;
 
@@ -486,7 +552,7 @@ Deno.test("buildJsonTree - sigil link in nested array gets correct depth", () =>
     ],
   };
 
-  buildJsonTree(tree, tree.rootIno, "result", data, undefined, resolveLink, 0);
+  buildJsonTree(tree, tree.rootIno, "result", data, resolveLink, 0);
 
   const resultIno = tree.lookup(tree.rootIno, "result")!;
   const itemsIno = tree.lookup(resultIno, "items")!;
@@ -509,7 +575,7 @@ Deno.test("buildJsonTree - unresolvable sigil link falls through to object", () 
     ref: { "/": { "link@1": { id: "bafy123" } } },
   };
 
-  buildJsonTree(tree, tree.rootIno, "result", data, undefined, resolveLink, 0);
+  buildJsonTree(tree, tree.rootIno, "result", data, resolveLink, 0);
 
   const resultIno = tree.lookup(tree.rootIno, "result")!;
   const refIno = tree.lookup(resultIno, "ref")!;
@@ -755,7 +821,6 @@ Deno.test("buildJsonTree - .tool callables appear beside ordinary fields", () =>
     "result",
     data,
     undefined,
-    undefined,
     0,
     (value) => isPatternToolValue(value),
   );
@@ -803,7 +868,6 @@ Deno.test("buildJsonTree - .json siblings replace handlers and tools with sigils
     tree.rootIno,
     "result",
     data,
-    undefined,
     undefined,
     0,
     (value) => isHandlerCell(value) || isPatternToolValue(value),
