@@ -1,7 +1,13 @@
+/** Options common to the caches defined here. */
 export interface CacheOptions {
+  /** Maximum number of entries to hold. */
   capacity?: number;
 }
 
+/**
+ * Options for a cache that bounds the total weight of what it holds, as well
+ * as the number of entries.
+ */
 export interface WeightedCacheOptions<K, V> extends CacheOptions {
   /**
    * Cost of one entry, in whatever unit `maxWeight` is expressed in. Supply
@@ -9,40 +15,55 @@ export interface WeightedCacheOptions<K, V> extends CacheOptions {
    * bounds how many things a cache holds, not how much memory they take.
    */
   weigh?: (key: K, value: V) => number;
+
+  /** Maximum total weight to hold, in the unit `weigh` reports. */
   maxWeight?: number;
 }
 
 /**
- * A Map that drops its oldest key once it holds `limit` of them. Insertion
+ * A `Map` that drops its oldest key once it holds `limit` of them. Insertion
  * order is the eviction order, and re-setting a key refreshes its place, so
  * what goes first is whatever has gone longest without being written.
  *
- * The point of the Map-shaped surface is that an unbounded `Map` field becomes
- * bounded by changing only its declaration. Reach for this where the entries
- * are hints — a value whose loss costs a slower path, never a wrong answer —
- * and where the keys keep arriving: one per instance of something the program
- * creates and discards, rather than one per fixed thing it knows about.
+ * The point of the `Map`-shaped surface is that an unbounded `Map` field
+ * becomes bounded by changing only its declaration. Reach for this where the
+ * entries are hints — a value whose loss costs a slower path, never a wrong
+ * answer — and where the keys keep arriving: one per instance of something
+ * the program creates and discards, rather than one per fixed thing it knows
+ * about.
  */
 export class BoundedKeyMap<K, V> implements ReadonlyMap<K, V> {
   readonly #entries = new Map<K, V>();
   readonly #limit: number;
 
+  /**
+   * Constructs an instance which holds at most `limit` entries. A `limit`
+   * below `1` is taken as `1`, there being no useful cache of size zero.
+   */
   constructor(limit: number) {
     this.#limit = Math.max(limit, 1);
   }
 
+  /** @inheritDoc */
   get size(): number {
     return this.#entries.size;
   }
 
+  /** @inheritDoc */
   has(key: K): boolean {
     return this.#entries.has(key);
   }
 
+  /** @inheritDoc */
   get(key: K): V | undefined {
     return this.#entries.get(key);
   }
 
+  /**
+   * Sets `key` to `value`, dropping the oldest entries as needed to stay
+   * within the limit. Setting a key that is already present refreshes its
+   * place, making it the newest.
+   */
   set(key: K, value: V): void {
     this.#entries.delete(key);
     // Keys come out in insertion order, so this drops the oldest first, and
@@ -54,30 +75,37 @@ export class BoundedKeyMap<K, V> implements ReadonlyMap<K, V> {
     this.#entries.set(key, value);
   }
 
+  /** Removes the entry for `key`, returning whether there was one. */
   delete(key: K): boolean {
     return this.#entries.delete(key);
   }
 
+  /** Removes all entries. */
   clear(): void {
     this.#entries.clear();
   }
 
-  // The read side is the standard ReadonlyMap surface, so a consumer that only
-  // reads takes `ReadonlyMap` and accepts either this or a plain Map. Every
-  // traversal runs oldest first, which is the order entries are dropped in.
+  // The read side is the standard `ReadonlyMap` surface, so a consumer that
+  // only reads takes `ReadonlyMap` and accepts either this or a plain `Map`.
+  // Every traversal runs oldest first, which is the order entries are dropped
+  // in.
 
+  /** @inheritDoc */
   entries(): MapIterator<[K, V]> {
     return this.#entries.entries();
   }
 
+  /** @inheritDoc */
   keys(): MapIterator<K> {
     return this.#entries.keys();
   }
 
+  /** @inheritDoc */
   values(): MapIterator<V> {
     return this.#entries.values();
   }
 
+  /** @inheritDoc */
   forEach(
     callback: (value: V, key: K, map: ReadonlyMap<K, V>) => void,
     thisArg?: unknown,
@@ -87,19 +115,36 @@ export class BoundedKeyMap<K, V> implements ReadonlyMap<K, V> {
     }
   }
 
+  /** @inheritDoc */
   [Symbol.iterator](): MapIterator<[K, V]> {
     return this.#entries.entries();
   }
 }
 
+/** One entry of an `LRUCache`, as a node of its recency list. */
 interface LRUNode<K, V> {
+  /** Key the entry is stored under. */
   key: K;
+
+  /** Value stored. */
   value: V;
+
+  /** Weight of the entry, per the cache's `weigh` option. */
   weight: number;
+
+  /** Adjacent node toward the oldest end, or `null` at that end. */
   prev: LRUNode<K, V> | null;
+
+  /** Adjacent node toward the newest end, or `null` at that end. */
   next: LRUNode<K, V> | null;
 }
 
+/**
+ * Cache which drops its least recently used entry once it is full, where a
+ * successful `get()` and any `put()` both count as a use. Fullness is by
+ * entry count, and additionally by total weight when the `weigh` option is
+ * supplied.
+ */
 export class LRUCache<K, V> {
   #map = new Map<K, LRUNode<K, V>>();
   #head: LRUNode<K, V> | null = null;
@@ -112,12 +157,18 @@ export class LRUCache<K, V> {
   #maxWeight: number;
   #weight = 0;
 
+  /**
+   * Constructs an instance per `options`, holding at most `capacity` entries
+   * (`1000` by default) and, when `weigh` is given, at most `maxWeight` total
+   * weight.
+   */
   constructor(options: WeightedCacheOptions<K, V> = {}) {
     this.#capacity = Math.max(options.capacity ?? 1000, 1);
     this.#weigh = options.weigh;
     this.#maxWeight = options.maxWeight ?? Infinity;
   }
 
+  /** Number of entries currently held. */
   get size(): number {
     return this.#map.size;
   }
@@ -127,10 +178,18 @@ export class LRUCache<K, V> {
     return this.#weight;
   }
 
+  /**
+   * Indicates whether there is an entry for `key`. This does not count as a
+   * use, and so does not affect what gets dropped next.
+   */
   has(key: K): boolean {
     return this.#map.has(key);
   }
 
+  /**
+   * Returns the value for `key`, or `undefined` if there is no entry. A hit
+   * counts as a use.
+   */
   get(key: K): V | undefined {
     const node = this.#map.get(key);
     if (node === undefined) {
@@ -140,6 +199,10 @@ export class LRUCache<K, V> {
     return node.value;
   }
 
+  /**
+   * Sets `key` to `value`, counting as a use, and drops entries as needed to
+   * stay within the capacity and weight bounds.
+   */
   put(key: K, value: V): void {
     const weight = this.#weigh?.(key, value) ?? 0;
     const existingNode = this.#map.get(key);
@@ -163,6 +226,7 @@ export class LRUCache<K, V> {
     this.#evictToFit();
   }
 
+  /** Removes the entry for `key`, returning whether there was one. */
   delete(key: K): boolean {
     const node = this.#map.get(key);
     if (node === undefined) {
@@ -174,6 +238,7 @@ export class LRUCache<K, V> {
     return true;
   }
 
+  /** Removes all entries. */
   clear(): void {
     this.#map.clear();
     this.#head = null;
@@ -181,15 +246,19 @@ export class LRUCache<K, V> {
     this.#weight = 0;
   }
 
-  // Evict from the least-recently-used end until the weight budget is met.
-  // The most recent entry stays even when it alone exceeds the budget, so a
-  // single oversized value cannot leave the cache empty on every put.
+  /**
+   * Helper for `put()`, which drops entries from the oldest end until the
+   * weight budget is met. The newest entry stays even when it alone exceeds
+   * the budget, so a single oversized value cannot leave the cache empty on
+   * every `put()`.
+   */
   #evictToFit(): void {
     while (this.#weight > this.#maxWeight && this.#map.size > 1) {
       this.#evictHead();
     }
   }
 
+  /** Unlinks `node` from the recency list. */
   #removeNode(node: LRUNode<K, V>): void {
     if (node.prev !== null) {
       node.prev.next = node.next;
@@ -205,6 +274,7 @@ export class LRUCache<K, V> {
     node.next = null;
   }
 
+  /** Links `node` in at the newest end of the recency list. */
   #addToTail(node: LRUNode<K, V>): void {
     if (this.#tail === null) {
       this.#head = node;
@@ -216,6 +286,7 @@ export class LRUCache<K, V> {
     }
   }
 
+  /** Moves `node` to the newest end of the recency list. */
   #moveToTail(node: LRUNode<K, V>): void {
     if (node === this.#tail) {
       return;
@@ -224,6 +295,7 @@ export class LRUCache<K, V> {
     this.#addToTail(node);
   }
 
+  /** Drops the entry at the oldest end, if there is one. */
   #evictHead(): void {
     if (this.#head === null) {
       return;
