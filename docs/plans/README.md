@@ -62,3 +62,7 @@ a record: archive it to `docs/history/plans/` following the procedure in
   investigation those documents do not carry: what produces a receipt and what
   its existence proves, how a receipt's address is derived, and the error and
   exit-status conventions. Sketches to draw from, not a settled contract.
+- [Shaped reads and verb results — implementation plan](shaped-reads-implementation.md)
+  sequences the read layer, the calls layered on it, and the remaining
+  arrivals, ordering the address change ahead of anything that publishes an
+  address so no caller holds one that moves.
