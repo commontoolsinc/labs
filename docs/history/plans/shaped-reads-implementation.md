@@ -1,12 +1,20 @@
+---
+status: historical
+created: 2026-08-07
+archived: 2026-08-07
+reason: "Read-layer sequencing plan; its remaining items were folded into the single verbs sequencing plan."
+superseded-by: docs/plans/verbs-implementation.md
+---
+
 # Shaped reads and verb results — implementation plan
 
 Sequences the read layer and the calls layered on it, as designed in
-[Reading Fabric data](fabric-read-model.md) and
-[Shaped reads and verb results](shaped-reads-and-verb-results.md). Read the
+[Reading Fabric data](../../plans/fabric-read-model.md) and
+[Shaped reads and verb results](../../plans/shaped-reads-and-verb-results.md). Read the
 design first; this document assumes it and does not restate it.
 
 The command surface — the third concern in that umbrella,
-[CLI surface shape](cli-surface-shape.md) — is out of scope here and moves on
+[CLI surface shape](../../plans/cli-surface-shape.md) — is out of scope here and moves on
 its own timeline. One piece of it is unavoidable: the concise selection syntax
 needs its own flag before it can grow address notation, so `--select` lands in
 the first stage rather than waiting.
@@ -441,7 +449,7 @@ Each step carries its own, rather than a sweep at the end.
 | Step | Owed |
 | --- | --- |
 | F2 | `packages/cli/README.md` output conventions: two flags, which syntax each takes |
-| A1, A3 | The marker and the suffix, same file; [Verbs over the CLI](../common/verbs-over-the-cli.md), already stale |
+| A1, A3 | The marker and the suffix, same file; [Verbs over the CLI](../../common/verbs-over-the-cli.md), already stale |
 | A4 | Address forms wherever `--piece` is taught — the CLI README and the tutorial's workflow chapter |
 | S1, S2 | `cf invocation-session new`, `CF_INVOCATION_SESSION`, and what an absent session means; the CLI README and the agent-facing skills that teach invocation ids |
 | C1 | What a receipt declares, in the design document's open-question slot |

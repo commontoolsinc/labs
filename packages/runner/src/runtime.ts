@@ -218,9 +218,9 @@ export interface ExperimentalOptions {
    * path; this covers plain values, which are otherwise discarded. Defaults
    * to on since the invocation-protocol integration proof (#5244's
    * three-topic fixture; verb contract,
-   * docs/plans/pattern-verb-contract-implementation.md WS-C/WS-D). Pass
-   * `false` (or `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false`) as a temporary
-   * rollback override while the flag exists.
+   * docs/history/plans/pattern-verb-contract-implementation.md WS-C/WS-D).
+   * Pass `false` (or `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false`) as a
+   * temporary rollback override while the flag exists.
    */
   plainResultReceipts?: boolean | undefined;
   /**
