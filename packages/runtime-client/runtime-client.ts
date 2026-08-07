@@ -158,7 +158,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   // TODO(unused)
-  // Currently unused in shell, but a PieceManager-like layer
+  // Currently unused in shell, but a PiecesController-like layer
   // could be built using this
   async getCell<T>(
     space: DID,
@@ -373,7 +373,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   /**
-   * Wait for the PieceManager to be synced with storage.
+   * Wait for the space's pieces controller to be synced with storage.
    *
    * Note: storage sync is connection-wide, so this awaits all open
    * spaces; `space` only selects which space's piece context (and its

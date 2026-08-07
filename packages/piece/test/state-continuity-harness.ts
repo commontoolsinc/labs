@@ -422,7 +422,7 @@ export const DEFAULT_VINTAGE_ROOT_KEY = "vintage-root";
  * The cause of a captured space's root cell — shared by the harness helper
  * below and by the capture, which pins the test pattern's result cell to it.
  *
- * The cause is fixed rather than minted, because `PieceManager.setupPersistent`
+ * The cause is fixed rather than minted, because `PiecesController.setupPersistent`
  * otherwise defaults to `{ space, random: crypto.randomUUID() }` and the root's
  * entity id would differ on every capture — the fixture could then never be
  * re-read by id. (Root creation through `ensureDefaultPattern` bakes

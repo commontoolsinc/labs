@@ -44,7 +44,8 @@ import {
   storedSchemaCoversCandidateEnvelope,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
-import { pieceId, PieceManager } from "../manager.ts";
+import { pieceId } from "../piece-id.ts";
+import type { PiecesController } from "./pieces-controller.ts";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { compileProgram } from "./utils.ts";
 import {
@@ -1239,7 +1240,7 @@ function canFollowSourceScope(
 /** @internal Exported for focused producer-topology contract tests. */
 export function durableSourceContract(
   linkedCell: Cell<unknown>,
-  manager: PieceManager,
+  pieces: PiecesController,
 ): DurableSourceContract | undefined {
   const rawSourceLink = linkedCell.getAsNormalizedFullLink();
   // Producer-owned metadata (`schema`, and the `result` backlink) is
@@ -1254,7 +1255,7 @@ export function durableSourceContract(
   // result cell of its legitimate contract.
   const metaScope = ((): LinkScope | undefined => {
     if (rawSourceLink.scope === "space") return rawSourceLink.scope;
-    const scopedRoot = manager.runtime.getCellFromLink(
+    const scopedRoot = pieces.runtime.getCellFromLink(
       { ...rawSourceLink, path: [], schema: undefined },
       undefined,
       linkedCell.tx,
@@ -1264,7 +1265,7 @@ export function durableSourceContract(
     return hasScopedMeta ? rawSourceLink.scope : undefined;
   })();
   const sourceLink = { ...rawSourceLink, scope: metaScope };
-  const sourceRoot = manager.runtime.getCellFromLink(
+  const sourceRoot = pieces.runtime.getCellFromLink(
     { ...sourceLink, path: [], schema: undefined },
     undefined,
     linkedCell.tx,
@@ -1292,7 +1293,7 @@ export function durableSourceContract(
   // asSchema().
   const resultLink = getMetaLink(sourceRoot, "result");
   if (resultLink === undefined) return undefined;
-  const ownerResult = manager.runtime.getCellFromLink(
+  const ownerResult = pieces.runtime.getCellFromLink(
     { ...resultLink, schema: undefined },
     undefined,
     linkedCell.tx,
@@ -1324,7 +1325,7 @@ export function durableSourceContract(
         path,
         rawBasePath: [...argumentLink.path],
         schemaBaseDepth: 0,
-        validationCell: manager.runtime.getCellFromLink(
+        validationCell: pieces.runtime.getCellFromLink(
           { ...argumentLink, schema: undefined },
           undefined,
           linkedCell.tx,
@@ -1347,7 +1348,7 @@ export function durableSourceContract(
           (descriptor as { link: unknown }).link,
           ownerResult,
         );
-        const internalLink = manager.runtime.getCellFromLink(
+        const internalLink = pieces.runtime.getCellFromLink(
           parsedInternalLink,
           parsedInternalLink.schema,
           linkedCell.tx,
@@ -1361,7 +1362,7 @@ export function durableSourceContract(
             path,
             rawBasePath: [...internalLink.path],
             schemaBaseDepth: 0,
-            validationCell: manager.runtime.getCellFromLink(
+            validationCell: pieces.runtime.getCellFromLink(
               { ...internalLink, schema: undefined },
               undefined,
               linkedCell.tx,
@@ -1396,7 +1397,7 @@ export function durableSourceContract(
       if (isLink(value)) {
         try {
           const parsed = parseLinkOrThrow(value, projectionCell);
-          const target = manager.runtime.getCellFromLink(
+          const target = pieces.runtime.getCellFromLink(
             parsed,
             parsed.schema,
             linkedCell.tx,
@@ -1575,7 +1576,7 @@ export function assertSuppliedLinkSchemasCompatible(
   links: readonly SuppliedLink[],
   destinationSchema: JSONSchema,
   baseCell: Cell<unknown>,
-  manager: PieceManager,
+  pieces: PiecesController,
   options: {
     basePath?: readonly (string | number)[];
     destinationIsStream?: boolean;
@@ -1656,7 +1657,7 @@ export function assertSuppliedLinkSchemasCompatible(
       );
     }
     const link = parseLinkOrThrow(suppliedLink.value, linkBase);
-    const linkedCell = manager.runtime.getCellFromLink(
+    const linkedCell = pieces.runtime.getCellFromLink(
       { ...link, schema: undefined },
       undefined,
       linkBase.tx,
@@ -1664,7 +1665,7 @@ export function assertSuppliedLinkSchemasCompatible(
     // A direct Cell view can be narrowed with asSchema() just as easily as a
     // serialized alias can carry a narrowed schema. Neither is a future-value
     // invariant, so every durable link needs producer-owned Piece metadata.
-    let durableSource = durableSourceContract(linkedCell, manager);
+    let durableSource = durableSourceContract(linkedCell, pieces);
     if (
       durableSource === undefined && options.priorArgumentSchema !== undefined
     ) {
@@ -1841,12 +1842,12 @@ export function assertSuppliedLinkSchemasCompatible(
       // skip it because `isCell` was the only way in, and a live Cell has no
       // separate envelope to forge. A serialized link only reaches here when
       // it is identical to already-committed state, but committed does not
-      // mean vetted — raw write paths (`PieceManager.link`) commit links
+      // mean vetted — raw write paths (`PiecesController.link`) commit links
       // without ever running this validator — so re-assert it: a carried
       // wrapper's `asCell` STACK (kind and scope, per `asCellShapesMatch`;
       // payload schemas are proved separately against the durable contracts)
       // has to match every durable contract of the source. (Loom's injected
-      // links carry no envelope — `PieceManager.link` serializes with
+      // links carry no envelope — `PiecesController.link` serializes with
       // `KeepAsCell.OnlyStream` — so the real restore case is unaffected.)
       if (!isCell(suppliedLink.value)) {
         const carried = ContextualFlowControl.getAsCellValues(link.schema);
@@ -2107,7 +2108,7 @@ export function omitMissingProjectionAliases(
   raw: unknown,
   schemaView: unknown,
   cell: Cell<unknown>,
-  manager: PieceManager,
+  pieces: PiecesController,
   schemaViewPresent = true,
   changedPaths: readonly (readonly (string | number)[])[] = [],
   resolving = new Set<string>(),
@@ -2134,13 +2135,13 @@ export function omitMissingProjectionAliases(
       throw new Error("projection alias reconciliation requires a transaction");
     }
     const parsed = parseLinkOrThrow(raw, cell);
-    const fullLink = manager.runtime.getCellFromLink(
+    const fullLink = pieces.runtime.getCellFromLink(
       parsed,
       undefined,
       tx,
     ).getAsNormalizedFullLink();
     const resolved = resolveLink(
-      manager.runtime,
+      pieces.runtime,
       tx,
       fullLink,
       "value",
@@ -2160,7 +2161,7 @@ export function omitMissingProjectionAliases(
       ) {
         return MISSING_PROJECTION_ALIAS;
       }
-      const resolvedCell = manager.runtime.getCellFromLink(
+      const resolvedCell = pieces.runtime.getCellFromLink(
         { ...resolved, schema: undefined },
         undefined,
         tx,
@@ -2170,7 +2171,7 @@ export function omitMissingProjectionAliases(
         state.value,
         resolvedSchemaView,
         resolvedCell,
-        manager,
+        pieces,
         schemaViewPresent,
         changedPaths,
         resolving,
@@ -2212,7 +2213,7 @@ export function omitMissingProjectionAliases(
       rawChild,
       childViewPresent ? viewRecord[key] : undefined,
       cell.key(key as keyof unknown) as Cell<unknown>,
-      manager,
+      pieces,
       childViewPresent,
       childChangedPaths,
       resolving,
@@ -2229,7 +2230,7 @@ export function omitMissingProjectionAliases(
 function validateDurableSourceRoots(
   destination: DurableSourceContract,
   nextValue: unknown,
-  manager: PieceManager,
+  pieces: PiecesController,
   acceptOpaqueValue: (value: unknown, schema: JSONSchema) => boolean,
 ): string | undefined {
   const groups: Array<{
@@ -2274,7 +2275,7 @@ function validateDurableSourceRoots(
       group.cell.getRawUntyped(),
       schemaView,
       group.cell,
-      manager,
+      pieces,
       true,
       group.paths,
     );
@@ -2377,10 +2378,10 @@ class PiecePropIo implements PieceCellIo {
   }
 
   async set(value: unknown, path?: CellPath) {
-    const manager = this.#cc.manager();
+    const pieces = this.#cc.pieces();
     let committedTargetCell: Cell<unknown> | undefined;
 
-    const { error } = await manager.runtime.editWithRetry((tx) => {
+    const { error } = await pieces.runtime.editWithRetry((tx) => {
       // Resolve the target from the piece metadata inside every retry. A
       // concurrent setsrc may replace the argument link/schema after this
       // write starts; reusing a cell captured before the retry would then
@@ -2388,9 +2389,9 @@ class PiecePropIo implements PieceCellIo {
       const piece = this.#cc.getCell().withTx(tx);
       let targetCell: Cell<unknown>;
       if (this.#type === "input") {
-        targetCell = manager.getArgument(piece);
+        targetCell = pieces.getArgument(piece);
       } else {
-        const resultCell = manager.getResult(piece);
+        const resultCell = pieces.getResult(piece);
         const durableSchema = resultCell.getMetaRaw("schema") as
           | JSONSchema
           | undefined;
@@ -2413,7 +2414,7 @@ class PiecePropIo implements PieceCellIo {
         left.path.some((segment, index) => segment !== right.path[index]);
       const originalWriteTarget = txCell.getAsNormalizedFullLink();
       const resolvedWriteTarget = resolveLink(
-        manager.runtime,
+        pieces.runtime,
         tx,
         originalWriteTarget,
         "writeRedirect",
@@ -2425,14 +2426,14 @@ class PiecePropIo implements PieceCellIo {
       const validateWriteDestination = (nextValue: unknown): void => {
         if (!writesThroughTerminal) return;
         const resolved = resolvedWriteTarget;
-        const resolvedCell = manager.runtime.getCellFromLink(
+        const resolvedCell = pieces.runtime.getCellFromLink(
           resolved,
           resolved.schema,
           tx,
         );
         const durableDestination = durableSourceContract(
           resolvedCell,
-          manager,
+          pieces,
         );
         if (durableDestination === undefined) {
           throw new Error(
@@ -2445,7 +2446,7 @@ class PiecePropIo implements PieceCellIo {
           isStream: boolean;
         };
         try {
-          const destinationRootCell = manager.runtime.getCellFromLink(
+          const destinationRootCell = pieces.runtime.getCellFromLink(
             { ...resolved, path: [], schema: undefined },
             undefined,
             tx,
@@ -2478,7 +2479,7 @@ class PiecePropIo implements PieceCellIo {
               links,
               contract.schema,
               resolvedCell,
-              manager,
+              pieces,
               { destinationRoot: contract.root },
             );
           }
@@ -2509,7 +2510,7 @@ class PiecePropIo implements PieceCellIo {
           issue = validateDurableSourceRoots(
             destination,
             nextValue,
-            manager,
+            pieces,
             acceptsProvedLink,
           );
         }
@@ -2531,12 +2532,12 @@ class PiecePropIo implements PieceCellIo {
           // payload and must go through Cell.set(). Inspect the actual Cell so
           // compound and referenced stream schemas behave identically.
           const rawTarget = resolveLink(
-            manager.runtime,
+            pieces.runtime,
             tx,
             txCell.getAsNormalizedFullLink(),
             "writeRedirect",
           );
-          manager.runtime.getCellFromLink(rawTarget, undefined, tx)
+          pieces.runtime.getCellFromLink(rawTarget, undefined, tx)
             .setRawUntyped(undefined);
         } else {
           txCell.set(nextValue);
@@ -2563,7 +2564,7 @@ class PiecePropIo implements PieceCellIo {
           linksToRestore,
           schema,
           targetCell,
-          manager,
+          pieces,
           {
             basePath: writePath,
             destinationIsStream: isStream(txCell),
@@ -2578,7 +2579,7 @@ class PiecePropIo implements PieceCellIo {
           const link = parseLinkOrThrow(suppliedLink.value, linkBase);
           const linkValue = preservedDirectHandles.has(suppliedLink)
             ? suppliedLink.value
-            : manager.runtime.getCellFromLink(
+            : pieces.runtime.getCellFromLink(
               link,
               sanitizeSchemaForLinks(link.schema, KeepAsCell.OnlyStream),
               tx,
@@ -2668,7 +2669,7 @@ class PiecePropIo implements PieceCellIo {
           linksToRestore,
           schema,
           targetCell,
-          manager,
+          pieces,
           {
             basePath: writePath,
             destinationIsStream: isStream(txCell),
@@ -2683,7 +2684,7 @@ class PiecePropIo implements PieceCellIo {
           const link = parseLinkOrThrow(suppliedLink.value, linkBase);
           const linkValue = preservedDirectHandles.has(suppliedLink)
             ? suppliedLink.value
-            : manager.runtime.getCellFromLink(
+            : pieces.runtime.getCellFromLink(
               link,
               sanitizeSchemaForLinks(link.schema, KeepAsCell.OnlyStream),
               tx,
@@ -2732,7 +2733,7 @@ class PiecePropIo implements PieceCellIo {
               targetCell.withTx(tx).getRawUntyped(),
               targetCell.withTx(tx).get(),
               targetCell.withTx(tx),
-              manager,
+              pieces,
               true,
               [writePath],
             ),
@@ -2764,20 +2765,20 @@ class PiecePropIo implements PieceCellIo {
     const targetCell = committedTargetCell ?? await this.#getTargetCell();
 
     if (this.#type === "input") {
-      await manager.getResult(this.#cc.getCell()).pull();
+      await pieces.getResult(this.#cc.getCell()).pull();
     } else {
       await targetCell.pull();
     }
-    await manager.synced();
+    await pieces.synced();
   }
 
   #getTargetCell(): Promise<Cell<unknown>> {
     if (this.#type === "input") {
       return Promise.resolve(
-        this.#cc.manager().getArgument(this.#cc.getCell()),
+        this.#cc.pieces().getArgument(this.#cc.getCell()),
       );
     } else if (this.#type === "result") {
-      return Promise.resolve(this.#cc.manager().getResult(this.#cc.getCell()));
+      return Promise.resolve(this.#cc.pieces().getResult(this.#cc.getCell()));
     }
     throw new Error(`Unknown property type "${this.#type}"`);
   }
@@ -2785,7 +2786,7 @@ class PiecePropIo implements PieceCellIo {
 
 export class PieceController<T = unknown> {
   #cell: Cell<T>;
-  #manager: PieceManager;
+  #pieces: PiecesController;
   #mutationVersion = 0;
   #latestSuccessfulMutationVersion = 0;
   readonly id: string;
@@ -2793,13 +2794,13 @@ export class PieceController<T = unknown> {
   input: PieceCellIo;
   result: PieceCellIo;
 
-  constructor(manager: PieceManager, cell: Cell<T>) {
+  constructor(pieces: PiecesController, cell: Cell<T>) {
     const id = pieceId(cell);
     if (!id) {
       throw new Error("Could not get an ID from a Cell<Piece>");
     }
     this.id = id;
-    this.#manager = manager;
+    this.#pieces = pieces;
     this.#cell = cell;
     this.input = new PiecePropIo(this, "input");
     this.result = new PiecePropIo(this, "result");
@@ -2829,10 +2830,10 @@ export class PieceController<T = unknown> {
     if (trackedSource !== undefined) source.origin = trackedSource;
 
     try {
-      const program = await this.#manager.runtime.patternManager
+      const program = await this.#pieces.runtime.patternManager
         .getPatternSourceProgramByIdentity(
           ref.identity,
-          this.#manager.getSpace(),
+          this.#pieces.getSpace(),
         );
       return program?.main === undefined
         ? { ...ref, source }
@@ -2854,8 +2855,8 @@ export class PieceController<T = unknown> {
           assertSuppliedLinkSchemasCompatible(
             links,
             pattern.argumentSchema,
-            this.#manager.getArgument(this.#cell),
-            this.#manager,
+            this.#pieces.getArgument(this.#cell),
+            this.#pieces,
           );
           // Validate the exact caller value before Runner serializes Cell
           // handles into argument links. Every accepted link below has already
@@ -2888,7 +2889,7 @@ export class PieceController<T = unknown> {
           // The identity guard prevents a concurrent setsrc from being
           // overwritten by this already-loaded pattern.
           return await execute(
-            this.#manager,
+            this.#pieces,
             this.id,
             pattern,
             input,
@@ -2934,11 +2935,11 @@ export class PieceController<T = unknown> {
     await this.#cell.sync();
     const ref = getPatternIdentityRef(this.#cell);
     if (!ref) throw new Error("piece missing pattern identity");
-    const runtime = this.#manager.runtime;
+    const runtime = this.#pieces.runtime;
     const pattern = await runtime.patternManager.loadPatternByIdentity(
       ref.identity,
       ref.symbol,
-      this.#manager.getSpace(),
+      this.#pieces.getSpace(),
     );
     if (!pattern) {
       throw new Error(
@@ -2966,10 +2967,10 @@ export class PieceController<T = unknown> {
   > {
     const ref = getPatternIdentityRef(this.#cell);
     if (!ref) throw new Error("piece missing pattern identity");
-    const program = await this.#manager.runtime.patternManager
+    const program = await this.#pieces.runtime.patternManager
       .getPatternSourceProgramByIdentity(
         ref.identity,
-        this.#manager.getSpace(),
+        this.#pieces.getSpace(),
       );
     if (!program) return undefined;
     return { ...program, mainExport: ref.symbol };
@@ -3024,7 +3025,7 @@ export class PieceController<T = unknown> {
         throw new Error("piece is not following a source");
       }
       const baseline = await preparePieceSourceTransitionBaseline(
-        this.#manager.runtime,
+        this.#pieces.runtime,
         this.#cell,
         expected,
       );
@@ -3037,9 +3038,9 @@ export class PieceController<T = unknown> {
       const mutationVersion = ++this.#mutationVersion;
       try {
         await this.#runMutation(mutationVersion, async () => {
-          const result = await this.#manager.runtime.editWithRetry((tx) => {
+          const result = await this.#pieces.runtime.editWithRetry((tx) => {
             applyPieceSourceTransition(
-              this.#manager.runtime,
+              this.#pieces.runtime,
               this.#cell,
               tx,
               previousRef,
@@ -3072,11 +3073,11 @@ export class PieceController<T = unknown> {
         );
       }
       assertPieceSourceArgumentUsable(confirmed.review);
-      const loaded = await this.#manager.runtime.patternManager
+      const loaded = await this.#pieces.runtime.patternManager
         .loadPatternByIdentity(
           confirmed.candidate.identity,
           confirmed.candidate.symbol,
-          this.#manager.getSpace(),
+          this.#pieces.getSpace(),
         );
       if (loaded === undefined) {
         throw new Error("the confirmed source version is not available");
@@ -3087,7 +3088,7 @@ export class PieceController<T = unknown> {
         previousPattern,
         candidate,
         this.#cell,
-        this.#manager,
+        this.#pieces,
       );
       assertPieceSourceArgumentUsable(currentReview);
       if (
@@ -3111,7 +3112,7 @@ export class PieceController<T = unknown> {
       }
     } else {
       const baseline = await preparePieceSourceTransitionBaseline(
-        this.#manager.runtime,
+        this.#pieces.runtime,
         this.#cell,
         expected,
       );
@@ -3121,10 +3122,10 @@ export class PieceController<T = unknown> {
       let selectedRevisionId: string | undefined;
       const selected = sourceRevision(revisions, action.revisionId);
       if (action.kind === "restore") {
-        const retained = await this.#manager.runtime.patternManager
+        const retained = await this.#pieces.runtime.patternManager
           .getPatternSourceProgramByIdentity(
             selected.pattern.identity,
-            this.#manager.getSpace(),
+            this.#pieces.getSpace(),
           );
         if (retained === undefined) {
           throw new Error(
@@ -3142,8 +3143,8 @@ export class PieceController<T = unknown> {
           );
         }
         const resolved = await resolvePieceOriginSource(
-          this.#manager.runtime,
-          this.#manager.getSpace(),
+          this.#pieces.runtime,
+          this.#pieces.getSpace(),
           selected.origin,
           selected.pattern.symbol,
         );
@@ -3153,10 +3154,10 @@ export class PieceController<T = unknown> {
         selectedRevisionId = selected.revisionId;
       }
 
-      candidate = await compileProgram(this.#manager, program, {
+      candidate = await compileProgram(this.#pieces, program, {
         previousEntryIdentity: previousRef.identity,
       });
-      const candidateRef = this.#manager.runtime.patternManager
+      const candidateRef = this.#pieces.runtime.patternManager
         .getArtifactEntryRef(candidate);
       if (candidateRef === undefined) {
         throw new Error("the candidate source has no pattern identity");
@@ -3174,7 +3175,7 @@ export class PieceController<T = unknown> {
         previousPattern,
         candidate,
         this.#cell,
-        this.#manager,
+        this.#pieces,
       );
       assertPieceSourceArgumentUsable(review);
       if (hasPieceSourceCompatibilityIssues(review.issues)) {
@@ -3198,7 +3199,7 @@ export class PieceController<T = unknown> {
     try {
       await this.#runMutation(mutationVersion, async () => {
         return await execute(
-          this.#manager,
+          this.#pieces,
           this.id,
           candidate,
           undefined,
@@ -3210,7 +3211,7 @@ export class PieceController<T = unknown> {
               : (argumentCell) => {
                 const evidence = pieceSourceArgumentEvidence(
                   argumentCell,
-                  this.#manager,
+                  this.#pieces,
                 );
                 if (evidence !== acceptedReview.argumentEvidence) {
                   throw new Error(
@@ -3223,7 +3224,7 @@ export class PieceController<T = unknown> {
                 assertPieceSourceRetainedLinksCompatible(
                   argumentCell,
                   argumentSchema,
-                  this.#manager,
+                  this.#pieces,
                   previousPattern.argumentSchema,
                 );
               } catch (error) {
@@ -3251,7 +3252,7 @@ export class PieceController<T = unknown> {
           previousPattern,
           candidate,
           this.#cell,
-          this.#manager,
+          this.#pieces,
         );
         assertPieceSourceArgumentUsable(review);
         if (hasPieceSourceCompatibilityIssues(review.issues)) {
@@ -3287,10 +3288,10 @@ export class PieceController<T = unknown> {
   ): Promise<PatternCompatibilityReport> {
     const { pattern: previousPattern, ref: previousRef } = await this
       .#loadCurrentPattern();
-    const candidate = await compileProgram(this.#manager, program, {
+    const candidate = await compileProgram(this.#pieces, program, {
       previousEntryIdentity: previousRef.identity,
     });
-    const candidateRef = this.#manager.runtime.patternManager
+    const candidateRef = this.#pieces.runtime.patternManager
       .getArtifactEntryRef(candidate);
     if (candidateRef === undefined) {
       throw new Error("the candidate source has no pattern identity");
@@ -3299,7 +3300,7 @@ export class PieceController<T = unknown> {
       previousPattern,
       candidate,
       this.#cell,
-      this.#manager,
+      this.#pieces,
     );
     const compatible = !hasPieceSourceCompatibilityIssues(review.issues);
     return {
@@ -3330,7 +3331,7 @@ export class PieceController<T = unknown> {
           throw new Error("piece missing source state");
         }
         const baseline = await preparePieceSourceTransitionBaseline(
-          this.#manager.runtime,
+          this.#pieces.runtime,
           this.#cell,
           expected,
           expected.revisionId === null && expected.origin === null
@@ -3338,7 +3339,7 @@ export class PieceController<T = unknown> {
             : {},
         );
         const pattern = await compileProgram(
-          this.#manager,
+          this.#pieces,
           program,
           baseline.kind === "retain"
             ? { previousEntryIdentity: previousRef.identity }
@@ -3369,7 +3370,7 @@ export class PieceController<T = unknown> {
           null,
           baseline,
         );
-        return await execute(this.#manager, this.id, pattern, undefined, {
+        return await execute(this.#pieces, this.id, pattern, undefined, {
           start: true,
           expectedPatternIdentity: previousRef,
           validateArgumentLinks: options?.dangerouslyAllowIncompatibleSchema
@@ -3379,7 +3380,7 @@ export class PieceController<T = unknown> {
                 suppliedLinks(argumentCell.getRaw()),
                 argumentSchema,
                 argumentCell,
-                this.#manager,
+                this.#pieces,
                 {
                   priorArgumentSchema: previousPattern.argumentSchema,
                   // `applySetupState` rewrites the argument from `getRaw()`, so
@@ -3451,11 +3452,11 @@ export class PieceController<T = unknown> {
       await cell.sync();
       const refBeforeLoad = getPatternIdentityRef(cell);
       if (!refBeforeLoad) return;
-      const pattern = await this.#manager.runtime.patternManager
+      const pattern = await this.#pieces.runtime.patternManager
         .loadPatternByIdentity(
           refBeforeLoad.identity,
           refBeforeLoad.symbol,
-          this.#manager.getSpace(),
+          this.#pieces.getSpace(),
         );
       if (!pattern) return;
       await cell.sync();
@@ -3495,17 +3496,17 @@ export class PieceController<T = unknown> {
   }
 
   async readingFrom(): Promise<PieceController[]> {
-    const cells = await this.#manager.getReadingFrom(this.#cell);
-    return cells.map((cell) => new PieceController(this.#manager, cell));
+    const cells = await this.#pieces.getReadingFrom(this.#cell);
+    return cells.map((cell) => new PieceController(this.#pieces, cell));
   }
 
   async readBy(): Promise<PieceController[]> {
-    const cells = await this.#manager.getReadByPieces(this.#cell);
-    return cells.map((cell) => new PieceController(this.#manager, cell));
+    const cells = await this.#pieces.getReadByPieces(this.#cell);
+    return cells.map((cell) => new PieceController(this.#pieces, cell));
   }
 
-  manager(): PieceManager {
-    return this.#manager;
+  pieces(): PiecesController {
+    return this.#pieces;
   }
 }
 
@@ -3558,7 +3559,7 @@ const RETAINED_INPUT_COMPATIBILITY_PREFIX =
 function assertPieceSourceRetainedLinksCompatible(
   argumentCell: Cell<unknown>,
   candidateSchema: JSONSchema,
-  manager: PieceManager,
+  pieces: PiecesController,
   priorArgumentSchema: JSONSchema,
 ): void {
   try {
@@ -3566,7 +3567,7 @@ function assertPieceSourceRetainedLinksCompatible(
       suppliedLinks(argumentCell.getRaw()),
       candidateSchema,
       argumentCell,
-      manager,
+      pieces,
       {
         priorArgumentSchema,
         linksPreservedVerbatim: true,
@@ -3583,7 +3584,7 @@ function assertPieceSourceRetainedLinksCompatible(
 
 function pieceSourceArgumentEvidence(
   argumentCell: Cell<unknown>,
-  manager: PieceManager,
+  pieces: PiecesController,
 ): string {
   const raw = argumentCell.getRaw();
   const links = suppliedLinks(raw).map((suppliedLink) => {
@@ -3593,12 +3594,12 @@ function pieceSourceArgumentEvidence(
     }
     try {
       const link = parseLinkOrThrow(suppliedLink.value, linkBase);
-      const linkedCell = manager.runtime.getCellFromLink(
+      const linkedCell = pieces.runtime.getCellFromLink(
         { ...link, schema: undefined },
         undefined,
         linkBase.tx,
       );
-      const contract = durableSourceContract(linkedCell, manager);
+      const contract = durableSourceContract(linkedCell, pieces);
       return {
         path: suppliedLink.path,
         target: {
@@ -3635,7 +3636,7 @@ async function pieceSourceCompatibilityReview(
   previousPattern: Pattern,
   candidate: Pattern,
   piece: Cell<unknown>,
-  manager: PieceManager,
+  pieces: PiecesController,
 ): Promise<NonNullable<PreparedPieceSourceChange["review"]>> {
   const issues: PieceSourceCompatibilityIssues = {};
   try {
@@ -3644,7 +3645,7 @@ async function pieceSourceCompatibilityReview(
     issues.schema = error instanceof Error ? error.message : String(error);
   }
 
-  const argumentCell = manager.getArgument(piece);
+  const argumentCell = pieces.getArgument(piece);
   await argumentCell.sync();
   const materializedArgument = argumentCell.asSchema(undefined).get();
   const validationArgument = mergeSchemaDefaults(
@@ -3668,7 +3669,7 @@ async function pieceSourceCompatibilityReview(
     assertPieceSourceRetainedLinksCompatible(
       argumentCell,
       candidate.argumentSchema,
-      manager,
+      pieces,
       previousPattern.argumentSchema,
     );
   } catch (error) {
@@ -3677,11 +3678,11 @@ async function pieceSourceCompatibilityReview(
       : String(error);
   }
 
-  const cfc = pieceSourceCfcEnvelopeIssue(argumentCell, candidate, manager);
+  const cfc = pieceSourceCfcEnvelopeIssue(argumentCell, candidate, pieces);
   if (cfc !== undefined) issues.cfc = cfc;
 
   return {
-    argumentEvidence: pieceSourceArgumentEvidence(argumentCell, manager),
+    argumentEvidence: pieceSourceArgumentEvidence(argumentCell, pieces),
     issues,
   };
 }
@@ -3719,11 +3720,11 @@ async function pieceSourceCompatibilityReview(
 function pieceSourceCfcEnvelopeIssue(
   argumentCell: Cell<unknown>,
   candidate: Pattern,
-  manager: PieceManager,
+  pieces: PiecesController,
 ): string | undefined {
   const link = argumentCell.getAsNormalizedFullLink();
   // `readTx()` cannot write, so the dry run stays a dry run.
-  const stored = loadStoredCfcEnvelope(manager.runtime.readTx(), {
+  const stored = loadStoredCfcEnvelope(pieces.runtime.readTx(), {
     space: link.space,
     id: link.id,
     scope: link.scope,
@@ -3818,7 +3819,7 @@ function pieceSourceTransition(
 }
 
 async function execute(
-  manager: PieceManager,
+  pieces: PiecesController,
   pieceId: string,
   pattern: Pattern,
   input?: object,
@@ -3836,5 +3837,5 @@ async function execute(
     sourceTransition?: PieceSourceTransition;
   },
 ): Promise<Cell<unknown>> {
-  return await manager.runWithPattern(pattern, pieceId, input, options);
+  return await pieces.runWithPattern(pattern, pieceId, input, options);
 }
