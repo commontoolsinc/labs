@@ -120,10 +120,20 @@ transform pattern runs. And the verb-read refusal stays with `piece get` rather
 than moving into the shared step, which keeps the step free of policy and leaves
 open whether call results should inherit it.
 
+*Exit:* `piece get` reads through the factored step and
+`packages/cli/test/piece-get-transform.test.ts` passes **untouched** — not one
+expectation added, moved, or removed. That is the whole test of a refactor, and
+it is worth stating alone because the two items below deliberately change what
+the flags accept. A moved expectation here means the extraction changed
+behavior and is wrong.
+
 **F2. `--select` for the concise syntax.** *(S)* The concise path list moves to
 its own flag; `--schema` keeps full schemas and `@file`. Concise input on
 `--schema` continues to work, without a warning — there is no removal date yet,
 and warning on every invocation would be noise in the skills that teach it.
+
+*Exit:* both flags work, a concise list on `--schema` still works and warns
+about nothing, and naming both on one command is refused.
 
 **F3. A projection schema is checked against an allowlist.** *(M)* Today two
 denylists are consulted and every key in neither is accepted and ignored. So a
@@ -142,10 +152,10 @@ The reason it is worth the work is that a projection which quietly returns `{}`
 is the same failure this plan has already had to fix twice — a missing `type`
 and an untyped `items` root each returned nothing and reported nothing.
 
-*Exit:* `piece get` reads through the factored step, both flags work, an
-unrecognized key is refused by name, and
-`packages/cli/test/piece-get-transform.test.ts` passes **unchanged**. A moved
-expectation means the extraction changed behavior and is wrong.
+*Exit:* an unrecognized key is refused and the message names it; a tolerated
+keyword is accepted and ignored; a honored keyword is unaffected. This item adds
+expectations rather than moving them — nothing that passed before it may fail
+after, since every key that works today is either honored or tolerated.
 
 ## Stage 2 — addresses in results
 
