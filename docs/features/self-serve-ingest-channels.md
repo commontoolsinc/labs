@@ -164,7 +164,7 @@ Four forks were resolved explicitly rather than by default:
    routine, and a beacon offline across one otherwise cannot tell "re-pair me"
    from "the server is broken" — it drops its buffer or retries forever.
 2. **The deployment precondition below is documented, not enforced by a flag.**
-3. **`requestId` is required** on mint and rotate (see Hardening §1).
+3. **`requestId` is required** on mint, rotate, AND revoke (see Hardening §1).
 4. **The control plane's paths are NOT added to
    `PROTECTED_TOOLSHED_FIRST_PARTY_ROUTES`.** That list is the in-runtime
    signer's allowlist; adding these would let any pattern mint a channel with
@@ -306,6 +306,21 @@ Four hazards that this change introduces or amplifies, each with its fix:
    victim's live beacon token. *Fix:* a caller-supplied random `requestId`,
    persisted beside the registration; a repeat is a 409 no-op that returns no
    secret. Durable, no in-memory cache, no timer.
+
+   Revoke needs the same id for a different reason: it returns no secret, but
+   its signed body names only the channel, so a captured revoke stays a working
+   weapon for its whole proof window. Replayed *after* the owner notices the
+   outage and re-pairs the device, it kills the freshly minted credential — the
+   attacker gets a second kill out of one captured request. The subtle half is
+   the already-revoked leg: answering a replay with a bare 200 spends nothing,
+   so the attacker just waits for the re-mint and fires again. Revoke therefore
+   consumes its id even on the no-op, writing the registration unchanged for no
+   reason other than to spend it.
+
+   In every case the id is consumed in the **same transaction** as the write it
+   guards. Claiming it beforehand burns the id whenever the write then fails,
+   which turns the idempotency key into the one thing that does not survive the
+   failure it exists to make retryable.
 2. **Existence oracle.** "Deployment does not host this space" and "you are not
    the owner" must be **one indistinguishable 403**. Otherwise, combined with
    derivable space DIDs, a dictionary of space names enumerates the deployment's
@@ -508,12 +523,35 @@ fresh bucket — which makes key churn a reset primitive. Enforce the real
 deployment-wide budget at trusted ingress (the reverse proxy or CDN), and set
 `RATE_LIMIT_TRUST_FORWARDED_FOR` only when such a proxy is actually in front.
 
-Durable bookkeeping is bounded rather than unbounded: request claims are
-compacted into one cell per owner, pruned to the proof replay window and capped;
-the live-channel cap counts live channels rather than index length. The
-per-owner and per-space indexes still grow with history, which is deliberate —
-they are the audit inventory — but that means history, not live capability, is
-what accumulates.
+Durable bookkeeping is bounded rather than unbounded, on four axes:
+
+- **Request claims** are compacted into one cell per owner, pruned to the proof
+  replay window, and capped. Full means refuse, not evict: dropping the oldest
+  entry would discard the very claim that proves a replay.
+- **The owner and space indexes** hold LIVE ids only. Revoking removes the id,
+  so the owner index's length *is* the owner's live-channel count — which is
+  what makes "revoke some before minting more" a remedy that actually frees
+  something, and what lets the cap be read straight off the index.
+- **The live-channel cap** is enforced inside the transaction that updates that
+  index, not from a read before it. A count taken beforehand is advisory: a
+  burst of concurrent mints all read the same under-cap number and all commit.
+- **The audit inventory** is the one index that is never pruned — a revoked
+  channel stays in it on purpose, because that is what a trust-condition sweep
+  enumerates. So it is the one that cannot be a single array: it is sharded by
+  UTC month (mirroring the data plane's per-day partition cells) behind a shard
+  directory bounded by calendar time rather than by traffic. The pre-sharding
+  flat index is still read, so nothing provisioned before sharding goes
+  missing.
+
+Backing all of it is a **lifetime per-owner creation quota**. Everything a mint
+writes outlives revocation deliberately — the registration cell so a retired
+token can be told apart from an unknown one, the audit entry so the sweep can
+still find it — so mint → revoke → mint frees a live slot but frees no storage.
+Liveness was never the right bound on state one authenticated user can create.
+The quota is a monotone counter, not a list: the thing bounding unbounded growth
+must not itself be an unbounded array. It is generous (a runaway stop, not a
+product limit), it is not refunded by revoking, and its refusal says so rather
+than sending the user round a loop that cannot succeed.
 
 ## Known limits
 
