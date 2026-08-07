@@ -108,12 +108,17 @@ the caller could not have computed them.
 
 `--invocation <id>` makes a call idempotent. The id is your own word for the
 call — and `add-comment-1` is a word two agents both reach for, so an id on its
-own does not say whose invocation it is. A **session** does. Mint one per agent
-run and carry it on every call of that run:
+own does not say whose invocation it is. An **invocation session** does. Mint
+one per agent run and carry it on every call of that run:
 
 ```bash
-export CF_SESSION=$(cf session new)
+export CF_INVOCATION_SESSION=$(cf invocation-session new)
 ```
+
+The environment is where a session belongs, because it is closer to a secret
+than a setting: it is what keeps an outcome's address out of reach of a
+stranger, and a command's arguments are readable in a process listing where its
+environment is not. `--invocation-session <id>` overrides it for one call.
 
 The pair is what names an invocation. Replaying a settled id **from the session
 that chose it** returns the **original** result rather than re-executing:
@@ -138,9 +143,10 @@ id is not enough to read someone else's outcome — the session is the part a
 stranger cannot guess.
 
 `--invocation` therefore requires a session, and a call naming an id without one
-is refused, pointing you at `cf session new` and `--session`. Pass neither and
-both are minted for that one call: a random id names an outcome nothing else
-will ask for, and a call that never intended to replay loses nothing.
+is refused, pointing you at `cf invocation-session new` and
+`CF_INVOCATION_SESSION`. Pass neither and both are minted for that one call: a
+random id names an outcome nothing else will ask for, and a call that never
+intended to replay loses nothing.
 
 A **rejected** call is different from a settled one: it never spends its id. If
 a verb refuses the payload, correct it and retry under the same id.

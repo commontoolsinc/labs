@@ -8,8 +8,8 @@ import { exec } from "./exec.ts";
 import { fuse } from "./fuse.ts";
 import { init } from "./init.ts";
 import { inspect } from "./inspect.ts";
+import { invocationSession } from "./invocation-session.ts";
 import { piece } from "./piece.ts";
-import { session } from "./session.ts";
 import { space } from "./space.ts";
 import { identity } from "./identity.ts";
 import { test } from "./test-command.ts";
@@ -168,6 +168,6 @@ export const main = new Command()
   .command("completion", completion)
   .command("id", identity)
   .command("init", init)
-  .command("session", session)
+  .command("invocation-session", invocationSession)
   .command("test", test)
   .command("wish", wish);

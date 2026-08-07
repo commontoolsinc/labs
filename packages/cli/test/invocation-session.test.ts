@@ -1,6 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { renderNewSession, session } from "../commands/session.ts";
+import {
+  invocationSession,
+  renderNewSession,
+} from "../commands/invocation-session.ts";
 import { newSessionId } from "../lib/session.ts";
 
 // A random (version 4) UUID: the version nibble is 4 and the variant nibble is
@@ -8,7 +11,7 @@ import { newSessionId } from "../lib/session.ts";
 const RANDOM_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-describe("session", () => {
+describe("invocation-session", () => {
   describe("newSessionId()", () => {
     it("returns a distinct id on every call", () => {
       const minted = new Set(
@@ -35,7 +38,8 @@ describe("session", () => {
 
       // Exactly one bare token per call: no prose to strip and no envelope to
       // parse (`cf id new`'s PEM has one because it carries key material; a
-      // session carries none), so `$(cf session new)` captures the id itself.
+      // session carries none), so `$(cf invocation-session new)` captures the
+      // id itself.
       expect(written.length).toBe(2);
       expect(written[0]).toMatch(RANDOM_UUID);
       expect(written[1]).toMatch(RANDOM_UUID);
@@ -44,9 +48,9 @@ describe("session", () => {
     });
   });
 
-  describe("session", () => {
+  describe("invocationSession", () => {
     it("registers `new` as a subcommand", () => {
-      expect(session.getCommand("new")?.getName()).toBe("new");
+      expect(invocationSession.getCommand("new")?.getName()).toBe("new");
     });
   });
 });

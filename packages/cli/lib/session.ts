@@ -12,9 +12,12 @@
  * The id is a bare unguessable string. There is no format to parse and no key
  * material to store — a session signs nothing and authenticates nobody, so
  * giving it a keyfile shape would only invite storing and handling it as if it
- * did. Mint one per agent run, carry it in `CF_SESSION` (or `--session`), and
- * let every call of that run share it: one run is exactly the span over which
- * repeating an id should mean repeating a call.
+ * did. Mint one per agent run and let every call of that run share it: one run
+ * is exactly the span over which repeating an id should mean repeating a call.
+ * `CF_INVOCATION_SESSION` is the way to carry it, and
+ * `--invocation-session <id>` the one-call override, because an unguessable
+ * string stays unguessable only while it is out of the process listing an
+ * argument shows up in.
  *
  * The session is joined to the address a handling's receipt lands at, so it
  * decides what a replay finds: the same id under two sessions reaches two

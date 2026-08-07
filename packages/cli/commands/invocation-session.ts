@@ -4,8 +4,9 @@ import { render } from "../lib/render.ts";
 import { newSessionId } from "../lib/session.ts";
 
 /**
- * Emit a freshly minted session id. Nothing else goes to stdout: the id is the
- * whole output, so `$(cf session new)` captures exactly it.
+ * Emit a freshly minted invocation session id. Nothing else goes to stdout:
+ * the id is the whole output, so `$(cf invocation-session new)` captures
+ * exactly it.
  *
  * The `write` seam is the unit-test hold on the command's output — a command
  * action body only ever runs under Cliffy, and is therefore unreachable from
@@ -15,17 +16,17 @@ export function renderNewSession(write: (text: string) => void = render): void {
   write(newSessionId());
 }
 
-export const session = new Command()
-  .name("session")
+export const invocationSession = new Command()
+  .name("invocation-session")
   .description(
-    "Mint the session `cf piece call --session` names: the caller an " +
-      "invocation id was chosen within. One per agent run.",
+    "Mint an invocation session: the caller an invocation id passed to " +
+      "`cf piece call` was chosen within. One per agent run.",
   )
   .default("help")
-  /* session new */
-  .command("new", "Output a new session id to stdout.")
+  /* invocation-session new */
+  .command("new", "Output a new invocation session id to stdout.")
   .example(
-    cliText("export CF_SESSION=$(cf session new)"),
+    cliText("export CF_INVOCATION_SESSION=$(cf invocation-session new)"),
     "Mint a session for this shell, so every call made from it shares one.",
   )
   .action(() => renderNewSession());

@@ -134,21 +134,26 @@ describe("main command", () => {
     ]);
   });
 
-  it("takes piece call's session from the flag ahead of CF_SESSION", async () => {
+  it("reads piece call's invocation session from `CF_INVOCATION_SESSION`, behind `--invocation-session`", async () => {
     const { piece } = await import(
       "../commands/piece.ts?piece-call-session-test"
     );
     const call = piece.getCommand("call")!;
     const sessions: Array<string | undefined> = [];
     call.action((options) => {
-      sessions.push(options.session);
+      sessions.push(options.invocationSession);
     });
 
-    await withEnv("CF_SESSION", "from-env", async () => {
-      await piece.parse(["call", "--session", "from-flag", "increment"]);
+    await withEnv("CF_INVOCATION_SESSION", "from-env", async () => {
+      await piece.parse([
+        "call",
+        "--invocation-session",
+        "from-flag",
+        "increment",
+      ]);
       await piece.parse(["call", "increment"]);
     });
-    await withEnv("CF_SESSION", undefined, async () => {
+    await withEnv("CF_INVOCATION_SESSION", undefined, async () => {
       await piece.parse(["call", "increment"]);
     });
 
@@ -156,6 +161,12 @@ describe("main command", () => {
     // and the flag is the one call that departs from it — so the flag wins.
     // With neither, no session: nothing is invented for a caller that named
     // none.
+    //
+    // The middle reading is the one that pins the env var to this option:
+    // the variable is declared under the `CF_` prefix, and what reaches
+    // `.invocationSession` is the remainder camel-cased. A name whose
+    // remainder camel-cases to anything else would leave that reading
+    // `undefined` while the flag readings stayed green.
     expect(sessions).toEqual(["from-flag", "from-env", undefined]);
   });
 
