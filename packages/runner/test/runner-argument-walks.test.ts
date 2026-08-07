@@ -159,6 +159,38 @@ describe("runner-argument-walks", () => {
   });
 
   describe("collectWritableCellArgumentLinks", () => {
+    it("throws for a `FabricError` standing at an `asCell` node", () => {
+      // The `asCell` branch collects and returns, so a guard placed after it
+      // would never see a value standing there -- a link nested in an instance
+      // would be missed while the walk reported success. This pins that the
+      // guard runs first.
+      const { resultCell, value } = fixture();
+      const walks = runtime.runner as unknown as WalkAccess;
+      const asCellSchema = {
+        type: "object",
+        properties: { payload: { type: "object", asCell: ["cell"] } },
+      };
+
+      expect(
+        walks.collectWritableCellArgumentLinks(
+          asCellSchema,
+          { payload: value.ref },
+          resultCell,
+        ).length,
+      ).toBe(1);
+
+      expect(() =>
+        walks.collectWritableCellArgumentLinks(
+          asCellSchema,
+          { payload: wrapped(value.ref) },
+          resultCell,
+        )
+      ).toThrow(
+        "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
+          "collecting writable cell links from an argument.",
+      );
+    });
+
     it("throws for a `FabricError` rather than missing a link inside it", () => {
       const { resultCell, value } = fixture();
       const walks = runtime.runner as unknown as WalkAccess;

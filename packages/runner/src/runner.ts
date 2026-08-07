@@ -4766,6 +4766,35 @@ export class Runner {
         seen.set(schema, new Set([pathKey]));
       }
 
+      // Ahead of the `asCell` branch below, deliberately. That branch collects
+      // and returns, so a guard placed after it never sees a value standing at
+      // an `asCell` or `writeonly` node -- and a link nested in an instance
+      // there would be missed while the walk reported success.
+      //
+      // A `FabricSpecialObject` at a container position is INDEXED rather than
+      // rebuilt, so nothing is decomposed. For a `FabricPrimitive` that settles
+      // it: zero enumerable own properties, every keyed read yields
+      // `undefined`, and a leaf holds no link to collect anyway.
+      //
+      // A `FabricInstance` is refused. A write-redirect link nested in its
+      // codec contents is unreachable by property name, so passing one through
+      // _misses_ that link -- and over-collection is this walker's safe
+      // direction, which makes a miss the unsafe one.
+      //
+      // Nothing reaches this in production today, de facto rather than by
+      // construction: a `FabricError` is ungated and exposed to pattern
+      // authors, so what keeps this safe is that no action argument yet
+      // carries one.
+      //
+      // TODO(danfuzz): descend by codec-mediated traversal into instance
+      // state, at which point this becomes a walk rather than a refusal.
+      if (currentValue instanceof FabricInstance) {
+        refuseFabricInstance(
+          currentValue,
+          "when collecting writable cell links from an argument",
+        );
+      }
+
       const asCell = schema.asCell;
       if (
         Array.isArray(asCell) &&
@@ -4790,30 +4819,6 @@ export class Runner {
       // could let an asCell marker escape tracking; over-collection is this
       // walker's safe direction (mirrors joinSchema's `not` union).
       //
-      // A `FabricSpecialObject` standing where a schema names a container is
-      // INDEXED rather than rebuilt, so nothing is decomposed. For a
-      // `FabricPrimitive` that settles it: it has zero enumerable own
-      // properties, every keyed read yields `undefined`, and a leaf holds no
-      // link to collect anyway.
-      //
-      // A `FabricInstance` is refused. A write-redirect link nested in its
-      // codec contents is unreachable by property name, so passing one through
-      // _misses_ that link -- and over-collection is this walker's safe
-      // direction, which makes a miss the unsafe one.
-      //
-      // Nothing reaches this in production today, de facto rather than by
-      // construction: a `FabricError` is ungated and exposed to pattern
-      // authors, so what keeps this safe is that no action argument yet
-      // carries one.
-      //
-      // TODO(danfuzz): descend by codec-mediated traversal into instance
-      // state, at which point this becomes a walk rather than a refusal.
-      if (currentValue instanceof FabricInstance) {
-        refuseFabricInstance(
-          currentValue,
-          "when collecting writable cell links from an argument",
-        );
-      }
       forEachSubschema(schema as JSONSchema, (child, keyword, key, index) => {
         switch (keyword) {
           case "properties":
