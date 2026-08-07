@@ -437,6 +437,19 @@ export class Page extends EventTarget {
     return elements.map((element) => this.decorateElement(element));
   }
 
+  // Extended method: Dispatch one trusted click at a viewport point.
+  //
+  // For a caller that has already worked out where to click — a wait that
+  // measured its target at the instant the target was ready, say — this is the
+  // dispatch on its own, with no measurement of its own to go stale.
+  // The interaction observer sees this dispatch as it sees an element's, with
+  // no element to name, so a presentation recording still moves and pulses its
+  // cursor over a click aimed by coordinates.
+  async clickPoint(point: { x: number; y: number }): Promise<void> {
+    this.checkIsOk();
+    await this.dispatchObservedClick(undefined, point);
+  }
+
   // Passthru of `@astral/astral`'s `Page#close`
   async close() {
     this.checkIsOk();
@@ -531,35 +544,26 @@ export class Page extends EventTarget {
     element: AstralElementHandle,
     options?: Parameters<AstralElementHandle["click"]>[0],
   ): Promise<void> {
-    await element.scrollIntoView();
-    const model = await element.boxModel();
-    if (!model) throw new Error("Unable to get stable box model to click on");
-
-    const origin = model.content[0];
-    let point: { x: number; y: number };
-    if (options?.offset) {
-      point = {
-        x: origin.x + options.offset.x,
-        y: origin.y + options.offset.y,
-      };
-    } else {
-      const total = model.content.reduce(
-        (result, vertex) => ({
-          x: result.x + vertex.x,
-          y: result.y + vertex.y,
-        }),
-        { x: 0, y: 0 },
-      );
-      point = {
-        x: total.x / model.content.length,
-        y: total.y / model.content.length,
-      };
+    const aim = await aimAtElement(element, options?.offset);
+    if ("unclickable" in aim) {
+      throw new Error(`Cannot click ${describeAimTarget(aim)}`);
     }
-
-    await this.interactionObserver?.beforeClick?.(
+    await this.dispatchObservedClick(
       element as ElementHandle,
-      point,
+      { x: aim.x, y: aim.y },
+      options,
     );
+  }
+
+  // Dispatch one trusted click at `point`, with the interaction observer told
+  // before and after. The observer's failure is reported only when the click
+  // itself succeeded, so a recording problem never masks a click problem.
+  private async dispatchObservedClick(
+    element: ElementHandle | undefined,
+    point: { x: number; y: number },
+    options?: Parameters<AstralElementHandle["click"]>[0],
+  ): Promise<void> {
+    await this.interactionObserver?.beforeClick?.(element, point);
     let actionError: unknown;
     try {
       await this.page!.mouse.click(point.x, point.y, options);
@@ -567,11 +571,7 @@ export class Page extends EventTarget {
       actionError = error;
     }
     try {
-      await this.interactionObserver?.afterClick?.(
-        element as ElementHandle,
-        point,
-        actionError,
-      );
+      await this.interactionObserver?.afterClick?.(element, point, actionError);
     } catch (observerError) {
       if (actionError === undefined) throw observerError;
     }
@@ -604,5 +604,112 @@ export class Page extends EventTarget {
       if (actionError === undefined) throw observerError;
     }
     if (actionError !== undefined) throw actionError;
+  }
+}
+
+/**
+ * Where a trusted click should land, or why it cannot land at all.
+ *
+ * The point is in viewport coordinates, which is what `Input.dispatchMouseEvent`
+ * takes, and is measured after the element has been scrolled into view.
+ */
+export type AimResult =
+  | { x: number; y: number }
+  | {
+    unclickable: "detached" | "not-rendered" | "unresolvable";
+    tag?: string;
+    id?: string;
+    rootHost?: string;
+    display?: string;
+    visibility?: string;
+    width?: number;
+    height?: number;
+    detail?: string;
+  };
+
+/**
+ * Scroll `element` into view and measure the point to click, both inside a
+ * single page turn.
+ *
+ * Aiming is one turn on purpose. Scrolling and measuring as two protocol
+ * commands leaves the page free to relayout or rebuild between them, and the
+ * second command then measures something other than what the first scrolled to.
+ * Doing both in the page means the coordinates describe the element as it was
+ * at one instant, and the only remaining gap is the one dispatch that follows.
+ *
+ * An element with no layout box yields `unclickable` naming what is wrong with
+ * it, rather than an empty measurement the caller has to guess at.
+ */
+async function aimAtElement(
+  element: AstralElementHandle,
+  offset?: { x: number; y: number },
+): Promise<AimResult> {
+  try {
+    return await element.evaluate(
+      (
+        el: Element,
+        offsetX: number | null,
+        offsetY: number | null,
+      ): AimResult => {
+        const describe = () => ({
+          tag: el.tagName.toLowerCase(),
+          id: el.id,
+          rootHost: (el.getRootNode() as ShadowRoot).host?.tagName
+            ?.toLowerCase(),
+        });
+        if (!el.isConnected) {
+          return { unclickable: "detached", ...describe() };
+        }
+        // Instant, because a page-level `scroll-behavior: smooth` would leave
+        // the element still moving when the rect below is read.
+        el.scrollIntoView({
+          block: "nearest",
+          inline: "nearest",
+          behavior: "instant",
+        });
+        const style = globalThis.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        if (
+          style.display === "none" || style.visibility === "hidden" ||
+          rect.width === 0 || rect.height === 0
+        ) {
+          return {
+            unclickable: "not-rendered",
+            ...describe(),
+            display: style.display,
+            visibility: style.visibility,
+            width: rect.width,
+            height: rect.height,
+          };
+        }
+        return offsetX === null || offsetY === null
+          ? { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+          : { x: rect.x + offsetX, y: rect.y + offsetY };
+      },
+      { args: [offset?.x ?? null, offset?.y ?? null] },
+    );
+  } catch (error) {
+    // A handle whose node the DOM agent no longer knows about cannot be
+    // resolved to a page object at all. That happens to every outstanding
+    // handle the moment anything else queries the document, so it is a
+    // separate condition from an element that is present but unclickable.
+    return { unclickable: "unresolvable", detail: String(error) };
+  }
+}
+
+/** The human-readable half of an {@link AimResult} that cannot be clicked. */
+function describeAimTarget(aim: Extract<AimResult, { unclickable: string }>) {
+  const named = aim.id ? `${aim.tag}#${aim.id}` : aim.tag ?? "the element";
+  const inside = aim.rootHost ? ` inside <${aim.rootHost}>` : "";
+  switch (aim.unclickable) {
+    case "detached":
+      return `${named}${inside}: it is no longer in the document`;
+    case "not-rendered":
+      return `${named}${inside}: it has no layout box ` +
+        `(display: ${aim.display}, visibility: ${aim.visibility}, ` +
+        `${aim.width}x${aim.height})`;
+    default:
+      return `the element: its handle no longer resolves to a node ` +
+        `(${aim.detail})`;
   }
 }

@@ -1092,7 +1092,7 @@ export const wireMemoryProtocolFlags = (
  * tag-like strings): the client receive-path expansion gate (v2/client.ts),
  * `containsReservedSchemaRefSubstring` (v2/sync-schema-ref.ts), and the
  * engine's commit/stored-row probes (v2/engine.ts). A pinning test in
- * test/v2-sync-schema-table-test.ts fails loudly if verbatim embedding ever
+ * test/v2-sync-schema-table.test.ts fails loudly if verbatim embedding ever
  * stops holding.
  */
 export const encodeMemoryBoundary = (value: FabricValue): string =>

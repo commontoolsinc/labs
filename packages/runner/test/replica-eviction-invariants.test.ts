@@ -193,8 +193,11 @@ describe("a cross-replica conflict settles", () => {
       const tx = rtA.edit();
       docA.withTx(tx).set({ v: "v0" });
       rtA.prepareTxForCommit(tx);
-      expect((await tx.commit()).error).toBeUndefined();
-      await storageA.synced();
+      // Verdict-marked, no synced(): the barrier would hold on the parked
+      // accept and force the shared fan-out through, destroying the
+      // controlled staleness this test is built on. The awaited verdict is
+      // durably accepted, which is all B's explicit sync/pull needs.
+      expect((await tx.commit({ resolveAt: "verdict" })).error).toBeUndefined();
     }
 
     // B catches up, then stages a write over a read taken at v0.
@@ -214,8 +217,7 @@ describe("a cross-replica conflict settles", () => {
       const tx = rtA.edit();
       docA.withTx(tx).set({ v: "v1" });
       rtA.prepareTxForCommit(tx);
-      expect((await tx.commit()).error).toBeUndefined();
-      await storageA.synced();
+      expect((await tx.commit({ resolveAt: "verdict" })).error).toBeUndefined();
     }
     expect(docB.get()).toEqual({ v: "v0" });
 

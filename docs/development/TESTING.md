@@ -37,6 +37,32 @@ This boundary keeps a verification test independent of mutable registry
 metadata. It also makes an accidental dependency graph change fail as an
 out-of-date lockfile instead of silently resolving a different graph.
 
+Both helpers start the Deno that is running the test, found through
+`Deno.execPath()`. Starting the program named `deno` instead would find whatever
+copy comes first on `PATH`, which is a different version than the pin in
+`mise.toml` on any machine whose shell Deno is not that pin. The versions share
+one cache directory and each reads transpiled sources only from its own part of
+it, so a test that collects a coverage profile under one version and reports it
+under the other gets a report with every file missing.
+
+Deno resolves an allowlist entry of `deno` through `PATH` as well, so
+`--allow-run=deno` refuses the very binary the test is running under. Name that
+binary instead of widening the grant. A task line can compute it, because `deno`
+inside one runs the Deno running the task whatever `PATH` says:
+
+```
+--allow-run=$(deno eval "console.log(Deno.execPath())")
+```
+
+A test launched from a script can read `Deno.execPath()` directly, as
+`packages/dashboard/test/runner.ts` does with `--allow-run=${Deno.execPath()},git`.
+
+That a task's `deno` is the running one rather than one found on `PATH` is what
+makes the computed form name the right binary, so
+`packages/test-support/src/isolated-deno.test.ts` holds it in place: it runs a
+task with a decoy `deno` as the only entry on the child's `PATH` and fails if the
+decoy is the one that runs.
+
 ### Test Structure
 
 - **Unit tests**: Use `@std/testing/bdd` (`describe`/`it`) with `@std/expect` for assertions

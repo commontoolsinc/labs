@@ -53,6 +53,14 @@ export abstract class FabricSpecialObject {
  * than this class directly; `BaseFabricInstance` is where shared
  * template-method scaffolding (such as `shallowClone()`) lives.
  *
+ * An instance holds all of its state privately and makes it reachable only
+ * through members, so it has no own properties at all. A structural view of
+ * one -- a spread, `Object.keys()`, a naive walk -- therefore sees nothing.
+ * Mutable state is exposed as an accessor pair over a private field, whose
+ * setter is responsible for honoring the instance's frozen state:
+ * `Object.freeze()` bears only on own properties and so cannot enforce that
+ * on its own.
+ *
  * Subclasses must implement `deepClone()` and `shallowClone()`; both are
  * normally inherited from `BaseFabricInstance` as template methods, with the
  * subclass supplying the symbol-keyed clone core each one calls. The
@@ -221,10 +229,10 @@ export type MutableFabricValueLayer =
  * Union of raw native JS **object** types that the fabric type system can
  * convert into `FabricInstance` wrappers or `FabricPrimitive` values. These
  * are the inputs to the "sausage grinder" -- `shallowFabricFromNativeValue()`
- * accepts `FabricValue | FabricNativeObject`, meaning callers can pass in
- * either already-fabric data or raw native JS objects. The conversion
- * produces `FabricInstance` wrappers or `FabricPrimitive` values that live
- * inside `FabricValue`.
+ * accepts `unknown`, so callers can hand it already-fabric data or raw native
+ * JS objects alike, and whatever it cannot represent is rejected there rather
+ * than excluded by the signature. The conversion produces `FabricInstance`
+ * wrappers or `FabricPrimitive` values that live inside `FabricValue`.
  *
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
  * and belongs directly in `FabricValue` without wrapping.

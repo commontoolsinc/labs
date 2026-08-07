@@ -23,6 +23,7 @@ import {
   areLinksSame,
   type Cancel,
   type Cell,
+  type CellLinkInput,
   ContextualFlowControl,
   convertCellsToLinks,
   isCell,
@@ -3054,6 +3055,11 @@ export class WorkerReconciler {
    */
   // deno-lint-ignore no-explicit-any
   private transformPropValue(key: string, value: unknown): any {
+    // TODO(danfuzz): the `typeof` gate admits a `FabricSpecialObject`, so a
+    // fabric-valued `style` prop is routed into the `Object.entries` walk of
+    // `styleObjectToCssString` — yielding an empty CSS string, silently —
+    // before it can reach `convertCellsToLinks` below, the one conversion
+    // here that knows the fabric types.
     if (
       key === "style" && value && typeof value === "object" &&
       !Array.isArray(value)
@@ -3063,7 +3069,11 @@ export class WorkerReconciler {
     // Use convertCellsToLinks to handle Cells, circular refs, and non-JSON values.
     // Pass doNotConvertCellResults to prevent already-resolved values (from .sink())
     // from being converted back to links - we want the actual data for props.
-    return convertCellsToLinks(value, {
+    //
+    // A prop is whatever a pattern put on a render node, which is `unknown` at
+    // this seam and a `CellLinkInput` in fact; the conversion rejects what is
+    // neither fabric nor convertible.
+    return convertCellsToLinks(value as CellLinkInput, {
       doNotConvertCellResults: true,
       includeSchema: true,
       keepAsCell: KeepAsCell.OnlyStream,
@@ -3855,6 +3865,14 @@ export class WorkerReconciler {
       return "";
     } else if (typeof value === "object") {
       // Objects are not expected here - warn and render their JSON as a fallback
+      //
+      // TODO(danfuzz): this is an unsafe use of `stringify()`: a
+      // `FabricSpecialObject` child (a `FabricEpochNsec` timestamp placed in
+      // `children`, say) renders as the literal text `{}` — the warn fires
+      // but nothing throws. Wants a `FabricSpecialObject` test ahead of this
+      // point, rendered via `toCompactDebugString()` from
+      // `@commonfabric/data-model/value-debug` (or the primitive's own
+      // string form).
       console.warn("unexpected object when value was expected", value);
       return JSON.stringify(value);
     }

@@ -291,7 +291,14 @@ Deno.test("fold: a summary omits markers for a hidden expansion edge", () => {
   assertEquals(view.expandUp, false);
   assertEquals(view.diffAnnotations, [{ line: 7, kind: "expandDown" }]);
   const rendered = renderFrame(s.displayDoc(), view);
-  assertEquals(rendered[0].trimEnd(), "▸ src/app.ts  +1 −1");
+  assert(
+    rendered[0].startsWith("▸ src/app.ts  +1 −1 "),
+    "the summary line is shown",
+  );
+  assert(
+    rendered[0].endsWith("+2 −1"),
+    "the corner carries the whole-diff totals",
+  );
   assertEquals(rendered[7].at(-1), "◢");
 
   const internals = s as unknown as {

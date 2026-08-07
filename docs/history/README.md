@@ -124,6 +124,10 @@ One line per archived document; each document's header carries the fuller
 - [2026-07-28-completed-transaction-retention.md](packages/runner/2026-07-28-completed-transaction-retention.md)
   — a completed transaction kept the activity of everything it read, and the
   unbounded document cache that still exhausts a browser tab, July 2026.
+- [2026-08-04-coverage-gate-base-branch-drift.md](development/2026-08-04-coverage-gate-base-branch-drift.md)
+  — why Coverage Check failed `packages/runner` at random: the ratchet graded a
+  pull request merged with a newer `main` against an older `main` baseline,
+  August 2026.
 - [pattern-update-open-argument-investigation.md](plans/pattern-update-open-argument-investigation.md)
   — why the open-argument update class went unvalidated on the repair path, and
   the correction of an earlier measurement that named the wrong mechanism,

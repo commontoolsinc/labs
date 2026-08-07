@@ -68,4 +68,25 @@ describe("append to filter input during the resume await window", () => {
     expect(heldCount).toBeGreaterThan(0);
     expect(output).toEqual(["a", "b", "c", "d", "e"]);
   });
+
+  it("applies removal while obsolete predicate syncs remain held", async () => {
+    const { output, outputWhileHeld, heldCount } =
+      await runResumeAppendScenario({
+        signer,
+        space,
+        server,
+        program: PROGRAM,
+        cellId: "remove-during-resume",
+        resultKey: "kept",
+        items: ITEMS,
+        appended: undefined,
+        updateItems: () => [],
+        read: labels,
+        buildExpected: ["a", "b", "c", "d"],
+      });
+
+    expect(heldCount).toBeGreaterThan(0);
+    expect(outputWhileHeld).toEqual([]);
+    expect(output).toEqual([]);
+  });
 });

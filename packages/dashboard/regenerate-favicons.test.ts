@@ -38,7 +38,9 @@ Deno.test("favicon regeneration preserves read errors", async () => {
 });
 
 Deno.test("favicon regeneration command verifies the committed output", async () => {
-  const result = await new Deno.Command("deno", {
+  // The command runs under the Deno running this test, not the program named
+  // `deno`, which would be whichever copy comes first on `PATH`.
+  const result = await new Deno.Command(Deno.execPath(), {
     args: [
       "run",
       "--allow-read",

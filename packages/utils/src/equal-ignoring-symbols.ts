@@ -4,6 +4,14 @@ import { isRecord } from "@commonfabric/utils/types";
 
 /**
  * Strips all symbol properties from an object recursively
+ *
+ * TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, and the
+ * `Object.keys` rebuild renders one as `{}` — on BOTH sides of the matchers
+ * below, so a test asserting on cell-read values judges any two same-shaped
+ * values with differing fabric contents equal, and its failure diff prints
+ * `{}`. The matchers fail open on exactly the fabric-content differences.
+ * Wants a `FabricSpecialObject` test returning the value whole (fabric
+ * classes hold no own symbol properties to strip).
  */
 export function stripSymbols(obj: unknown): unknown {
   if (!isRecord(obj)) return obj;

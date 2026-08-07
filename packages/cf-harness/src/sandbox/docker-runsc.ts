@@ -13,7 +13,6 @@ import type {
   DockerNetworkMode,
   DockerRunscAdditionalMount,
   DockerRunscAdditionalMountConfig,
-  DockerRunscCfcInvocationContextTransport,
   DockerRunscSandboxConfig,
   ResolveDockerRunscSandboxConfigOptions,
   SandboxCommandRequest,
@@ -225,26 +224,16 @@ const dockerMountArg = (mount: {
     mount.readOnly ? ",readonly" : ""
   }`;
 
-const resolveCfcInvocationContextTransport = (
+const resolveCfcInvocationContextDir = (
   options: ResolveDockerRunscSandboxConfigOptions,
-): DockerRunscCfcInvocationContextTransport | undefined => {
-  if (options.cfcInvocationContextTransport !== undefined) {
-    return {
-      kind: "sidecar",
-      dir: validateAbsoluteHostDir(
-        options.cfcInvocationContextTransport.dir,
-        "cfcInvocationContextTransport.dir",
-      ),
-    };
-  }
+): string | undefined => {
   const dir = optionalNonEmptyString(
     options.cfcInvocationContextDir ??
       readEnvVar(CFC_INVOCATION_CONTEXT_DIR_ENV),
   );
-  return dir === undefined ? undefined : {
-    kind: "sidecar",
-    dir: validateAbsoluteHostDir(dir, "cfcInvocationContextDir"),
-  };
+  return dir === undefined
+    ? undefined
+    : validateAbsoluteHostDir(dir, "cfcInvocationContextDir");
 };
 
 export const resolveDockerRunscSandboxConfig = (
@@ -265,11 +254,8 @@ export const resolveDockerRunscSandboxConfig = (
   const cfcResultDir = optionalNonEmptyString(
     options.cfcResultDir ?? readEnvVar(CFC_RESULT_DIR_ENV),
   );
-  const cfcInvocationContextTransport = resolveCfcInvocationContextTransport(
-    options,
-  );
+  const cfcInvocationContextDir = resolveCfcInvocationContextDir(options);
   return {
-    kind: "docker-runsc-cfc",
     dockerBinary: options.dockerBinary ?? DEFAULT_DOCKER_BINARY,
     runtimeName: options.runtimeName ?? DEFAULT_DOCKER_RUNTIME_NAME,
     image: options.image ?? DEFAULT_DOCKER_RUNSC_IMAGE,
@@ -283,8 +269,8 @@ export const resolveDockerRunscSandboxConfig = (
     additionalMounts,
     extraDockerArgs: options.extraDockerArgs ?? [],
     ...(cfcResultDir !== undefined ? { cfcResultDir } : {}),
-    ...(cfcInvocationContextTransport !== undefined
-      ? { cfcInvocationContextTransport }
+    ...(cfcInvocationContextDir !== undefined
+      ? { cfcInvocationContextDir }
       : {}),
   };
 };
@@ -292,7 +278,7 @@ export const resolveDockerRunscSandboxConfig = (
 /**
  * In `enforce-*` modes the runtime depends on two trusted sidecar transports:
  *
- *  - `cfcInvocationContextTransport` — the harness writes the initial-taint
+ *  - `cfcInvocationContextDir` — the harness writes the initial-taint
  *    invocation context the sandbox reads in. Without it the sandbox starts
  *    untainted, so input labels (prompt-slot influence, prior observed labels)
  *    are silently dropped.
@@ -311,7 +297,7 @@ export const assertDockerRunscCfcTransportForMode = (
   mode: CfcEnforcementMode,
   config: Pick<
     DockerRunscSandboxConfig,
-    "cfcResultDir" | "cfcInvocationContextTransport"
+    "cfcResultDir" | "cfcInvocationContextDir"
   >,
 ): void => {
   // `disabled` and `observe` do not mediate or deny tool output, so a missing
@@ -320,7 +306,7 @@ export const assertDockerRunscCfcTransportForMode = (
     return;
   }
   const missing: string[] = [];
-  if (config.cfcInvocationContextTransport === undefined) {
+  if (config.cfcInvocationContextDir === undefined) {
     missing.push(
       `CFC invocation-context transport (set --cfc-invocation-context-dir or ${CFC_INVOCATION_CONTEXT_DIR_ENV})`,
     );
@@ -554,8 +540,6 @@ const cfcResultFromRunscSidecar = (
 };
 
 export class DockerRunscSandboxRuntime implements SandboxRuntime {
-  readonly kind = "docker-runsc-cfc" as const;
-
   constructor(
     readonly config: DockerRunscSandboxConfig,
     private readonly runner: ProcessRunner = new DenoProcessRunner(),
@@ -598,7 +582,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
 
   describe(): SandboxRuntimeDescription {
     return {
-      kind: this.kind,
+      kind: "docker-runsc-cfc",
       defaultWorkingDirectory: this.defaultWorkingDirectory(),
       cfc: {
         runtimeRequested: true,
@@ -608,11 +592,8 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
         mounts: this.#mountDescriptions(),
         networkMode: this.config.dockerNetworkMode,
         extraDockerArgsCount: this.config.extraDockerArgs.length,
-        ...(this.config.cfcInvocationContextTransport !== undefined
-          ? {
-            invocationContextTransport:
-              this.config.cfcInvocationContextTransport.kind,
-          }
+        ...(this.config.cfcInvocationContextDir !== undefined
+          ? { invocationContextTransport: "sidecar" }
           : {}),
       },
     };
@@ -809,35 +790,28 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
     request: SandboxCommandRequest,
     createResult: SandboxCommandResult,
   ): Promise<SandboxCommandResult | undefined> {
-    if (
-      this.config.cfcInvocationContextTransport === undefined ||
-      request.cfcInvocationContext === undefined
-    ) {
+    const dir = this.config.cfcInvocationContextDir;
+    if (dir === undefined || request.cfcInvocationContext === undefined) {
       return undefined;
     }
-    const transport = this.config.cfcInvocationContextTransport;
-    switch (transport.kind) {
-      case "sidecar": {
-        try {
-          await Deno.mkdir(transport.dir, { recursive: true });
-          await Deno.writeTextFile(
-            cfcSidecarPath(transport.dir, containerID),
-            `${JSON.stringify(request.cfcInvocationContext, null, 2)}\n`,
-          );
-          return undefined;
-        } catch (error) {
-          return {
-            stdout: createResult.stdout,
-            stderr: appendStderr(
-              createResult.stderr,
-              `failed to write CFC invocation context sidecar: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            ),
-            exitCode: 125,
-          };
-        }
-      }
+    try {
+      await Deno.mkdir(dir, { recursive: true });
+      await Deno.writeTextFile(
+        cfcSidecarPath(dir, containerID),
+        `${JSON.stringify(request.cfcInvocationContext, null, 2)}\n`,
+      );
+      return undefined;
+    } catch (error) {
+      return {
+        stdout: createResult.stdout,
+        stderr: appendStderr(
+          createResult.stderr,
+          `failed to write CFC invocation context sidecar: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ),
+        exitCode: 125,
+      };
     }
   }
 }

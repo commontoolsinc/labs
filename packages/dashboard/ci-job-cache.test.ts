@@ -1,10 +1,16 @@
-import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 import {
   type CachedCiHistoryRefresh,
   type CachedCiRun,
   CI_JOB_CACHE_DAYS,
   CI_JOB_HISTORY_SAMPLING_VERSION,
   CiJobHistoryStore,
+  ganttRunSummary,
 } from "./ci-job-cache.ts";
 
 const DAY_MS = 86_400_000;
@@ -30,30 +36,140 @@ function cachedRun(
     at,
     overallSeconds: 60,
     jobs: [{ name: "test", seconds: 60 }],
-    gantt: {
+    gantt: ganttRunSummary({
       status: "completed",
       conclusion: "success",
       event: "push",
       headBranch: "main",
       workflowName: "CI",
       startedAt,
-      jobs: [{
-        name: "test",
-        status: "completed",
-        conclusion: "success",
-        started_at: startedAt,
-        completed_at: completedAt,
-        steps: [{
-          name: "run",
-          number: 1,
-          conclusion: "success",
-          started_at: startedAt,
-          completed_at: completedAt,
-        }],
-      }],
-    },
+    }, [{
+      attempt: runAttempt,
+      name: "test",
+      status: "completed",
+      conclusion: "success",
+      started_at: startedAt,
+      completed_at: completedAt,
+      steps: [],
+    }]),
   };
 }
+
+Deno.test("CI job cache removes the layout that held step detail inline", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-job-cache-" });
+  const superseded = `${directory}/fabric-wall-ci-job-history.json`;
+  const file = `${directory}/fabric-wall-ci-run-index.json`;
+  try {
+    await Deno.writeTextFile(superseded, JSON.stringify({ version: 1 }));
+    await Deno.writeTextFile(`${superseded}.lock`, "");
+    // What an interrupted save under that layout leaves behind, as large as
+    // the file it was replacing.
+    const abandoned = `${superseded}.${crypto.randomUUID()}.tmp`;
+    await Deno.writeTextFile(abandoned, JSON.stringify({ version: 1 }));
+    const run = cachedRun(1);
+    await Deno.writeTextFile(
+      file,
+      JSON.stringify({ version: 1, runs: [run] }),
+    );
+
+    const store = new CiJobHistoryStore(file);
+    await store.load();
+
+    // The superseded file is never read, only deleted: it grows large enough
+    // that reading it would cost the memory the split layout saves.
+    await assertRejects(() => Deno.stat(superseded), Deno.errors.NotFound);
+    await assertRejects(
+      () => Deno.stat(`${superseded}.lock`),
+      Deno.errors.NotFound,
+    );
+    await assertRejects(() => Deno.stat(abandoned), Deno.errors.NotFound);
+    assertEquals(store.get(REPO, WORKFLOW, 1, 1), run);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("CI job cache reports a superseded file it cannot reach", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-job-cache-" });
+  const file = `${directory}/fabric-wall-ci-run-index.json`;
+  const logged: string[] = [];
+  const originalError = console.error;
+  const originalRemove = Deno.remove;
+  const originalReadDir = Deno.readDir;
+  try {
+    await Deno.writeTextFile(
+      `${directory}/fabric-wall-ci-job-history.json`,
+      JSON.stringify({ version: 1 }),
+    );
+    console.error = (...parts: unknown[]) =>
+      void logged.push(parts.map(String).join(" "));
+    Deno.readDir = () => {
+      throw new Deno.errors.PermissionDenied("cannot list");
+    };
+    Deno.remove = () =>
+      Promise.reject(new Deno.errors.PermissionDenied("cannot remove"));
+
+    // The store still loads: a cache directory that cannot be swept is not a
+    // reason to lose the CI history.
+    await new CiJobHistoryStore(file).load();
+  } finally {
+    console.error = originalError;
+    Deno.remove = originalRemove;
+    Deno.readDir = originalReadDir;
+    await Deno.remove(directory, { recursive: true });
+  }
+
+  // These files are the largest in the cache directory, so a process that
+  // cannot reach them says so rather than leaving the volume full in silence.
+  assertEquals(logged.length, 3);
+  assertStringIncludes(logged[0], "could not list");
+  assertStringIncludes(logged[1], "fabric-wall-ci-job-history.json");
+  assertStringIncludes(logged[1], "cannot remove");
+});
+
+Deno.test("CI job cache never removes the file it was given", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-job-cache-" });
+  const file = `${directory}/fabric-wall-ci-job-history.json`;
+  try {
+    const run = cachedRun(1);
+    await Deno.writeTextFile(
+      file,
+      JSON.stringify({ version: 1, runs: [run] }),
+    );
+
+    const store = new CiJobHistoryStore(file);
+    await store.load();
+
+    assertEquals(store.get(REPO, WORKFLOW, 1, 1), run);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("CI job cache orders retained attempts by when their run started", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "ci-job-cache-" });
+  try {
+    const store = new CiJobHistoryStore(`${directory}/history.json`);
+    // A rerun keeps its original, smaller run identifier but starts later, so
+    // ordering by identifier would put the newest attempt last.
+    store.set(cachedRun(500, 1, NOW - 3 * DAY_MS));
+    store.set(cachedRun(500, 2, NOW));
+    store.set(cachedRun(900, 1, NOW - DAY_MS));
+
+    assertEquals(store.attempts(REPO, WORKFLOW), [
+      { runId: 500, runAttempt: 2 },
+      { runId: 900, runAttempt: 1 },
+      { runId: 500, runAttempt: 1 },
+    ]);
+    assertEquals(store.attempts(REPO, WORKFLOW, 2), [
+      { runId: 500, runAttempt: 2 },
+      { runId: 900, runAttempt: 1 },
+    ]);
+    assertEquals(store.attempts("other/repo", WORKFLOW), []);
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
 
 Deno.test("CI job cache refreshes legacy and outdated samples without dropping their runs", async () => {
   const directory = await Deno.makeTempDir({ prefix: "ci-job-cache-" });
@@ -167,12 +283,12 @@ Deno.test("CI job cache rejects a sampling version that is not a version", async
 Deno.test("CI job cache rejects malformed persisted structures before merging", async () => {
   const directory = await Deno.makeTempDir({ prefix: "ci-job-cache-" });
   const valid = cachedRun(1);
-  const invalidStep = structuredClone(valid);
-  invalidStep.gantt.jobs[0].steps = [null] as never;
-  const invalidJob = structuredClone(valid);
-  invalidJob.gantt.jobs = [null] as never;
-  const invalidAttempt = structuredClone(valid);
-  invalidAttempt.gantt.jobs[0].attempt = 0;
+  const invalidDrawable = structuredClone(valid);
+  invalidDrawable.gantt.drawable = "yes" as never;
+  const invalidAttemptTagged = structuredClone(valid);
+  invalidAttemptTagged.gantt.attemptTagged = 1 as never;
+  const missingDrawable = structuredClone(valid) as { gantt: unknown };
+  missingDrawable.gantt = { ...valid.gantt, drawable: undefined };
   const invalidGantt = { ...valid, gantt: null };
   const invalidSha = { ...valid, headSha: "not-a-commit" };
   const cases: { value: unknown; message: string }[] = [
@@ -190,15 +306,15 @@ Deno.test("CI job cache rejects malformed persisted structures before merging", 
       message: "Invalid CI job history cache entry",
     },
     {
-      value: { version: 1, runs: [invalidJob] },
+      value: { version: 1, runs: [invalidDrawable] },
       message: "Invalid CI job history cache entry",
     },
     {
-      value: { version: 1, runs: [invalidStep] },
+      value: { version: 1, runs: [invalidAttemptTagged] },
       message: "Invalid CI job history cache entry",
     },
     {
-      value: { version: 1, runs: [invalidAttempt] },
+      value: { version: 1, runs: [missingDrawable] },
       message: "Invalid CI job history cache entry",
     },
     {
@@ -293,7 +409,10 @@ Deno.test("CI job cache records a validated commit on an exact run attempt", asy
     await store.load();
     const run = store.set(cachedRun(250));
     const revision = store.revision;
-    assertEquals(store.setHeadSha(REPO, WORKFLOW, 999, 1, "a".repeat(40)), undefined);
+    assertEquals(
+      store.setHeadSha(REPO, WORKFLOW, 999, 1, "a".repeat(40)),
+      undefined,
+    );
     const tagged = store.setHeadSha(
       REPO,
       WORKFLOW,

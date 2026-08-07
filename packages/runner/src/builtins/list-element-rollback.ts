@@ -8,15 +8,25 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 /**
  * The per-element bookkeeping a list coordinator keeps across reconciles.
+ *
+ * `needsSetup` says the element's setup writes are not known to be durable, so
+ * the next reconcile issues them again. Issuing them clears it, and the
+ * rollback below sets it again when the reconcile carrying them does not become
+ * durable.
  */
 export type ElementRun = {
   resultCell: Cell<any>;
   lastIndex: number;
+  needsSetup: boolean;
+  /** The reconcile that last issued this element's setup writes. */
+  setupIssuance?: object;
 };
 
 export interface ListSetupRollback {
   /** An entry this reconcile added to the coordinator's element map. */
   created(elementKey: string, entry: ElementRun): void;
+  /** Setup writes this reconcile staged for an entry that already existed. */
+  setupIssued(entry: ElementRun): void;
   /** An index this reconcile moved, with the value it moved away from. */
   indexChanged(entry: ElementRun, previousIndex: number): void;
   /** A result container this reconcile installed, with a restore for the old one. */
@@ -41,6 +51,12 @@ export interface ListSetupRollback {
  * outcome — an abort, a terminal or permanent refusal, a transport failure —
  * has no such re-run behind it, so the record has to go.
  *
+ * The setup writes themselves are what the re-run has to re-issue, and every
+ * failed outcome loses them, stale basis included. Marking the entry as needing
+ * setup again is therefore the one undo that applies to all of them: an element
+ * whose entry survives is set up again by the next reconcile, rather than
+ * reading as undefined for as long as the coordinator lives.
+ *
  * Each undo checks that the state it is about to revert is still the state this
  * reconcile installed. An overlapping reconcile that has already moved the same
  * entry owns it, and its bookkeeping matches durable writes of its own.
@@ -51,6 +67,7 @@ export function trackListSetupRollback(
   elementRuns: Map<string, ElementRun>,
 ): ListSetupRollback {
   const created = new Map<string, ElementRun>();
+  const setUp = new Set<ElementRun>();
   const indexChanges = new Map<
     ElementRun,
     { from: number; to: number }
@@ -58,11 +75,28 @@ export function trackListSetupRollback(
   const resultRestores: Array<() => void> = [];
   let registered = false;
 
+  // This tracker's identity as an issuer of setup writes. Two reconciles for
+  // one coordinator overlap whenever the first is still awaiting its commit,
+  // and the debt belongs to whichever of them issued the setup last: a
+  // transaction that failed after a later one made the same element durable
+  // has nothing to restore.
+  const issuance = {};
+
+  const markSetupIssued = (entry: ElementRun): void => {
+    entry.setupIssuance = issuance;
+    setUp.add(entry);
+    entry.needsSetup = false;
+  };
+
   const registerRollback = (): void => {
     if (registered) return;
     registered = true;
     tx.addCommitCallback((_settledTx, result) => {
       if (!result.error) return;
+      for (const entry of setUp) {
+        if (entry.setupIssuance !== issuance) continue;
+        entry.needsSetup = true;
+      }
       if (
         isConflictRejection(result.error) ||
         isStorageTransactionInconsistent(result.error)
@@ -103,6 +137,11 @@ export function trackListSetupRollback(
   return {
     created(elementKey, entry) {
       created.set(elementKey, entry);
+      markSetupIssued(entry);
+      registerRollback();
+    },
+    setupIssued(entry) {
+      markSetupIssued(entry);
       registerRollback();
     },
     indexChanged(entry, previousIndex) {

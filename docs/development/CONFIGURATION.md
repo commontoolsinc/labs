@@ -13,6 +13,7 @@ of each section.
 | Shell (browser, build-time) | [`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts), [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts) |
 | Background piece service | [`packages/background-piece-service/src/env.ts`](../../packages/background-piece-service/src/env.ts) |
 | CLI | [`packages/cli/launcher.ts`](../../packages/cli/launcher.ts), [`packages/cli/mod.ts`](../../packages/cli/mod.ts) |
+| cf-harness | [`packages/cf-harness/src/cli.ts`](../../packages/cf-harness/src/cli.ts), [`packages/cf-harness/src/provenance.ts`](../../packages/cf-harness/src/provenance.ts) |
 | Integration tests | [`packages/integration/env.ts`](../../packages/integration/env.ts) |
 | Experimental flags | [`docs/development/EXPERIMENTAL_OPTIONS.md`](./EXPERIMENTAL_OPTIONS.md) |
 
@@ -27,7 +28,7 @@ Required only if you're running the toolshed.
 
 | Var | Default | Notes |
 |---|---|---|
-| `ENV` | `development` | `development`, `production`, or `test`. `ENV=test` is required by the test runner. |
+| `ENV` | `development` | `development`, `production`, or `test`. `ENV=test` is required by the test runner, and marks a unit-suite run in cf-harness provenance. |
 | `HOST` | `0.0.0.0` | Bind address. |
 | `PORT` | `8000` | Server port. Also overridable via the `--port=N` CLI arg (used by `deno --watch`, which doesn't forward env vars). |
 | `LOG_LEVEL` | `info` | One of `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`. |
@@ -49,10 +50,6 @@ for the registration logic.
 | `CFTS_AI_LLM_ANTHROPIC_API_KEY` | Anthropic (Claude) |
 | `CFTS_AI_LLM_OPENAI_API_KEY` | OpenAI |
 | `CFTS_AI_LLM_GROQ_API_KEY` | Groq |
-| `CFTS_AI_LLM_CEREBRAS_API_KEY` | Cerebras |
-| `CFTS_AI_LLM_PERPLEXITY_API_KEY` | Perplexity |
-| `CFTS_AI_LLM_XAI_API_KEY` | xAI (Grok) |
-| `CFTS_AI_LLM_AWS_ACCESS_KEY_ID` + `CFTS_AI_LLM_AWS_SECRET_ACCESS_KEY` | AWS Bedrock |
 | `CFTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS` + `CFTS_AI_LLM_GOOGLE_VERTEX_PROJECT` + `CFTS_AI_LLM_GOOGLE_VERTEX_LOCATION` | Google Vertex AI |
 
 > Note: toolshed uses the `CFTS_AI_LLM_` prefix (not the conventional
@@ -81,7 +78,7 @@ for `TASK_MODELS.coding` / `TASK_MODELS.json`.
 | Var | Purpose |
 |---|---|
 | `FAL_API_KEY` | `/routes/ai/img` (image gen), `/routes/ai/voice` (transcription). |
-| `JINA_API_KEY` | `/routes/ai/webreader`. |
+| `JINA_API_KEY` | `/routes/agent-tools/web-read` (page extraction), `/routes/link-preview` (link previews). |
 
 ---
 
@@ -116,7 +113,6 @@ All blank by default. Each integration is gated on its `_CLIENT_ID` /
 
 | Var | Purpose |
 |---|---|
-| `DISCORD_WEBHOOK_URL` | General-purpose alerts. |
 | `LLM_HEALTH_DISCORD_WEBHOOK` | LLM health monitor alerts. |
 | `HOSTNAME` | Included in alerts so multi-host deploys are distinguishable. |
 
@@ -195,13 +191,13 @@ from `commontoolsinc/gvisor` (branch `cfc_v2`), and the cluster is provisioned b
 
 Off by default; flip `OTEL_ENABLED=true` to start exporting.
 
-| Var | Default |
-|---|---|
-| `OTEL_ENABLED` | `false` |
-| `OTEL_SERVICE_NAME` | `toolshed` |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` |
-| `OTEL_TRACES_SAMPLER` | `always_on` |
-| `OTEL_TRACES_SAMPLER_ARG` | `1.0` |
+| Var | Default | Notes |
+|---|---|---|
+| `OTEL_ENABLED` | `false` | |
+| `OTEL_SERVICE_NAME` | `toolshed` | Also read by cf-harness, independently of `OTEL_ENABLED`, to name the service that launched it. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | |
+| `OTEL_TRACES_SAMPLER` | `always_on` | |
+| `OTEL_TRACES_SAMPLER_ARG` | `1.0` | |
 
 ---
 
@@ -336,6 +332,42 @@ Passed before the CLI args; rarely needed:
 | `--config <path>` | `<labs-root>/deno.jsonc` | Override the Deno config. |
 | `--cli-entrypoint <path>` | `<labs-root>/packages/cli/mod.ts` | Override the CLI entry. |
 | `--cwd <path>` | `INIT_CWD` env or `process.cwd()` | Override the working directory passed to the CLI. |
+
+---
+
+## cf-harness
+
+Environment reading for the harness lives in
+[`packages/cf-harness/src/cli.ts`](../../packages/cf-harness/src/cli.ts), which
+resolves the gateway, model, sandbox, and credential settings, and in
+[`packages/cf-harness/src/provenance.ts`](../../packages/cf-harness/src/provenance.ts),
+which reads the variables below.
+[`packages/cf-harness/README.md`](../../packages/cf-harness/README.md) is the
+reference for the full set.
+
+### Provenance
+
+Every request the harness sends to the LLM gateway says what caused it, so
+gateway traffic can be read by the workload behind it. These variables govern
+what it reports;
+[`docs/features/gateway-request-provenance.md`](../features/gateway-request-provenance.md)
+states the invariants.
+
+| Var | Default | Notes |
+|---|---|---|
+| `CF_HARNESS_PRINCIPAL` | _(generated)_ | Declares the label naming this machine. Generated on first use and kept in `$CF_HARNESS_HOME/principal` otherwise. |
+| `CF_HARNESS_INTEGRATION` | _(unset)_ | Set to `1` by the package's `test:integration` task. Gates the environment-dependent integration tests, and marks the invoker as `integration-test`. |
+
+The invoker is read from the environment rather than declared:
+`CF_HARNESS_INTEGRATION` marks the integration suite, `ENV=test` the unit
+suite, `GITHUB_ACTIONS` or `CI` a continuous-integration run,
+`OTEL_SERVICE_NAME` a service, and a Loom run manifest a Loom dispatch. A test
+run keeps no principal, so it never writes to the harness home.
+
+The harness also reads variables it does not define: `OTEL_SERVICE_NAME` for
+the service that launched it, `ENV=test` to recognize the unit suite,
+`GITHUB_ACTIONS` and `CI` for a continuous-integration run, and `CLAUDECODE` and
+`CODEX_SANDBOX` for the coding-agent session it is running inside.
 
 ---
 

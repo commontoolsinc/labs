@@ -254,12 +254,16 @@ export interface CellGetRequest extends BaseRequest {
  * present `undefined` is a value a cell can hold, and the containers are
  * readonly.
  *
- * TODO(danfuzz): this still cannot carry the whole `FabricValue` domain -- a
- * `FabricSpecialObject` has no representation here, though the transport is
- * `postMessage` rather than JSON, so that is a gap rather than a limit.
- * `JsonEncodingContext` (`@commonfabric/data-model/codec-json`) is the
- * mechanism, already used for blob-upload bodies in
- * `backends/runtime-processor.ts`.
+ * TODO(danfuzz): this still cannot carry the whole `FabricValue` domain. A
+ * `FabricSpecialObject` has no representation here, and neither does a
+ * `bigint` or a `symbol`, both of which are `FabricValue` arms. The transport
+ * is `postMessage` rather than JSON, so that is a gap rather than a limit --
+ * though structured clone alone does not close it, a class instance arriving
+ * with its prototype and private fields gone. `JsonCodec`
+ * (`@commonfabric/data-model/codec-json`) is the mechanism, already used for
+ * blob-upload bodies in `backends/runtime-processor.ts`. Until then
+ * `CellHandle.serialize()` refuses all three, so what the gap costs is a throw
+ * rather than silent loss.
  */
 export type WireCellValue =
   | null

@@ -843,24 +843,52 @@ otherwise hand it back whole, leaving a binding nested inside it silently
 unresolved.
 
 These throws are **discovery instruments**. Each one that fires names a site
-that owes work before the relevant flag can graduate, which is more useful than
-a quiet wrong answer that surfaces later as corrupted data.
+that owes work — for a flag-gated site, work the flag needs before it can
+graduate — which is more useful than a quiet wrong answer that surfaces later
+as corrupted data.
 
-**The invariant that makes this safe rather than merely lucky:** anything
-introduced that would reach one of these throws is itself gated on an experiment
-flag. A default configuration therefore never arrives at one, and any arrival is
-something a flag was deliberately turned on to reach.
+**The invariant that makes this safe rather than merely lucky:** nothing that
+reaches one of these throws is believed to be in production use. That is what a
+tripwire asserts, and it is what makes refusing the right answer — refusing
+costs nothing if nobody is doing the thing, and says so immediately if somebody
+is.
 
-Two obligations follow, and they are the reason this is recorded here rather
+The invariant holds in two strengths, and it is worth knowing which one a given
+site has:
+
+- **By construction**, where an experiment flag gates the only path that
+  arrives. A default configuration never reaches the throw, and any arrival is
+  something a flag was deliberately turned on to reach.
+- **De facto**, where the value is shipped and ungated and simply has no
+  production caller yet. A `FabricError` is exposed to pattern authors
+  (`builder/factory.ts`) and reaches these throws with every flag off; a
+  `FabricBytes` written from the client reaches `CellHandle.serialize()`'s
+  refusal the same way. Nothing stops such a call being written tomorrow. What
+  makes the tripwire safe today is that none exists.
+
+The second is the weaker claim, but it does not fail quietly, and that is the
+point. Add a production use of one of these values and the throw fires — at the
+moment the use is added, in the change that added it — leaving exactly two
+honest ways forward: implement the handling the throw names, or back the use
+out. So the tripwire is its own enforcement, which is why an ungated site is
+legitimate. What it is not is a flag, so do not cite this section as though one
+stood behind every throw.
+
+Three obligations follow, and they are the reason this is recorded here rather
 than at any one of the sites:
 
 - **Adding a feature.** If your change would let a value reach one of these
-  throws in a default configuration, gate the change on an experiment flag. That
-  is what keeps the default path clear and the tripwire honest.
-- **Meeting one.** A throw firing under a flag is the instrument working, not a
-  defect in it. The answer is to implement the missing handling at the site it
-  names — that work *is* the flag's graduation work — rather than to exempt the
-  value so the walk stays quiet.
+  throws in a default configuration, you have three options and they are all
+  fine: gate the change on an experiment flag, implement the handling the throw
+  names first, or do not add the use. What is not an option is shipping the use
+  and leaving the throw reachable in production.
+- **Adding a throw.** Say which strength it has. A de-facto one is legitimate —
+  several exist — but it is a claim about the callers that exist today, so it
+  should be made deliberately rather than assumed from this section.
+- **Meeting one.** A throw firing is the instrument working, not a defect in it.
+  Implement the missing handling at the site it names — for a flag-gated site
+  that work *is* the flag's graduation work — or back out the use that reached
+  it. What is not on the list is exempting the value so the walk stays quiet.
 
 Worked example: with [`modernCellRep`](#moderncellrep) on, a link is a
 `FabricLink` and therefore a `FabricInstance`, so ordinary links reach these

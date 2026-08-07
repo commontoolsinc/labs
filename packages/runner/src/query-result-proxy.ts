@@ -511,8 +511,18 @@ export function createQueryResultProxy<T>(
       // `toString`. Storage traversal deliberately considers own properties
       // only; keeping the same boundary here also avoids recording spurious
       // reactive dependencies for prototype members.
+      //
+      // The receiver is the container, not this proxy: a prototype accessor
+      // has to run against the object that actually holds the state. Every
+      // `FabricInstance` keeps its state in private fields behind accessors,
+      // and a private field is unreachable from a proxy that does not declare
+      // it. (The receiver is immaterial for a data property, which is what
+      // every prototype member of a plain object or array is, so this costs
+      // those nothing.) A `FabricInstance` leafs through storage traversal
+      // whole, so the read of the container already covers what an accessor
+      // returns.
       if (!Object.hasOwn(value, prop) && prop in value) {
-        return Reflect.get(value, prop, receiver);
+        return Reflect.get(value, prop);
       }
 
       return createQueryResultProxy(
@@ -571,8 +581,11 @@ export function createQueryResultProxy<T>(
           // keys, ahead of any other name -- rather than appending it. Own-key
           // order is load-bearing: a consumer can tell an index-only array from
           // one carrying named properties by asking whether `length` comes
-          // last (`isArrayWithOnlyIndexProperties()` does exactly that), and
-          // appending would make a named property look like an index-only one.
+          // last, and appending would make a named property look like an
+          // index-only one. `isInertArray()` reads exactly that, and fabric
+          // membership (`isFabricValue()`) is decided by it for every array,
+          // so the order here is what makes a proxied array carrying a named
+          // property fail membership instead of passing as index-only.
           const firstNonIndex = keys.findIndex((key) =>
             !((typeof key === "string") && isArrayIndexPropertyName(key))
           );
@@ -791,6 +804,11 @@ export function isCellResult(value: any): value is CellResult<any> {
 export function snapshotQueryResult<T>(value: T): T {
   const seen = new WeakMap<object, unknown>();
   const snapshot = (current: unknown): unknown => {
+    // TODO(danfuzz): the leaf test covers `FabricPrimitive` but not
+    // `FabricInstance`, so an instance (live traffic — the fetch builtins
+    // store a `FabricError` result) falls to the `Object.keys` rebuild below
+    // and snapshots as `{}`, its codec contents lost. It wants the same
+    // leaf-through treatment until a codec-contents walk exists.
     if (
       current === null || typeof current !== "object" ||
       current instanceof FabricPrimitive
