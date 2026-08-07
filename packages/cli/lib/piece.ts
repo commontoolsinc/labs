@@ -76,10 +76,10 @@ import { deriveDiskHandleId } from "./sqlite-source.ts";
 import { startVersionCheck } from "./version-check.ts";
 import { stderrConsoleHandler } from "./json-output.ts";
 import {
-  derivePieceGetValue,
-  type PieceGetTransform,
-  PieceGetTransformError,
-} from "./piece-get-transform.ts";
+  type CellSelection,
+  CellSelectionError,
+  deriveSelectedValue,
+} from "./cell-selection.ts";
 
 export interface EntryConfig {
   mainPath: string;
@@ -115,7 +115,7 @@ export interface SetPiecePatternOptions {
 export interface GetCellValueOptions {
   input?: boolean;
   step?: boolean;
-  transform?: PieceGetTransform;
+  selection?: CellSelection;
 }
 
 /** A `cf piece get` path that lands ON a verb. Reading a verb returns the
@@ -225,7 +225,7 @@ interface PieceOperationDependencies extends PieceResolutionDeps {
     source: "input data" | "result data" | "metadata",
     error: unknown,
   ) => void;
-  derivePieceGetValue?: typeof derivePieceGetValue;
+  deriveSelectedValue?: typeof deriveSelectedValue;
 }
 
 const CLI_TRACE_TIMINGS = Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
@@ -2361,16 +2361,16 @@ export async function getCellValue(
     }
 
     const prop = options.input ? "input" : "result";
-    if (options.transform !== undefined) {
+    if (options.selection !== undefined) {
       const rootCell = await piece[prop].getCell();
       const targetCell = rootCell.key(...path);
-      let transformed: unknown;
+      let selected: unknown;
       try {
-        transformed = await (deps.derivePieceGetValue ?? derivePieceGetValue)(
+        selected = await (deps.deriveSelectedValue ?? deriveSelectedValue)(
           manager.runtime,
           manager.getSpace(),
           targetCell,
-          options.transform,
+          options.selection,
         );
       } catch (error) {
         if (
@@ -2387,21 +2387,21 @@ export async function getCellValue(
         }
         throw error;
       }
-      // Read-path guard (verb contract WS-F): the transform path returns
+      // Read-path guard (verb contract WS-F): the selection path returns
       // early, so it needs the same verb refusal the plain read applies
-      // below — a verb read through a transform is the same mistake.
-      const transformPathVerb = await classifyReadPathVerb(piece, prop, path);
-      if (transformPathVerb) {
+      // below — a verb read through a selection is the same mistake.
+      const selectionPathVerb = await classifyReadPathVerb(piece, prop, path);
+      if (selectionPathVerb) {
         throw new PieceVerbReadError(
-          transformPathVerb.verb,
+          selectionPathVerb.verb,
           resolvedConfig.piece,
-          transformPathVerb.callable,
+          selectionPathVerb.callable,
         );
       }
       const sourceWasAbsent = typeof targetCell.getRaw === "function" &&
         targetCell.getRaw() === undefined;
       if (
-        !options.input && transformed === undefined &&
+        !options.input && selected === undefined &&
         await resultProjectionFailedAtPath(piece, path)
       ) {
         throw await verbReadRefusalOrNull(
@@ -2411,15 +2411,15 @@ export async function getCellValue(
           resolvedConfig.piece,
         ) ?? new PieceResultProjectionError(path, shouldStep);
       }
-      if (transformed === undefined && !sourceWasAbsent) {
-        throw new PieceGetTransformError(
+      if (selected === undefined && !sourceWasAbsent) {
+        throw new CellSelectionError(
           "Cannot read transformed value: the filter/schema expression did " +
             "not materialize a JSON-renderable value. This is not JSON " +
             "null. Retry with --step for a computed result, or inspect the " +
             "selected source data and schema.",
         );
       }
-      return transformed;
+      return selected;
     }
 
     let value: unknown;
