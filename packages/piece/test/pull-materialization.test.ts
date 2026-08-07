@@ -2128,12 +2128,63 @@ describe("piece pull materialization", () => {
     expect(await controller.result.get()).toEqual({ value: 2 });
 
     await expect(controller.result.set("bad", ["value"])).rejects.toThrow(
-      /updated result does not match its schema/,
+      /updated (result|value) does not match its schema/,
     );
     expect(await controller.result.get()).toEqual({ value: 2 });
   });
 
-  it("does not hide invalid raw result siblings during path validation", async () => {
+  it("an ABSENT unrelated required property does not invalidate a path write — the ON-arm server-derived-late shape (RULED 2026-08-07)", async () => {
+    // The ruled scenario verbatim: under EXPERIMENTAL_SERVER_EXECUTION
+    // a fresh client's local view legitimately LACKS server-derived
+    // required properties ($NAME et al) when it writes an unrelated
+    // property. The whole-result validation failed this with `missing
+    // required property`; the narrowed guard validates only the
+    // written subtree, so the write succeeds. (Stale-view fixture: the
+    // required sibling simply never materializes locally.)
+    const resultSchema = {
+      type: "object",
+      properties: {
+        value: { type: "number" },
+        name: { type: "string" },
+      },
+      required: ["value", "name"],
+    } as const;
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema,
+        // `name` is REQUIRED by the schema but absent from the local
+        // view — the server-derived-late shape.
+        result: { value: 1 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    await controller.result.set(2, ["value"]);
+    // Raw readback: the schema-typed get validates the WHOLE object
+    // and reads undefined while the required sibling is still absent —
+    // exactly the local view the ruled write succeeds against.
+    expect((piece.getRaw() as { value?: number }).value).toBe(2);
+    // The written value's own protection still binds.
+    await expect(controller.result.set("bad", ["value"])).rejects.toThrow(
+      /updated (result|value) does not match its schema/,
+    );
+  });
+
+  it("an invalid UNRELATED sibling does not invalidate a valid path write (the narrowed #4717 guard — RULED 2026-08-07)", async () => {
+    // RECONCILED with the set-validation ruling: the pre-ruling test
+    // pinned the WHOLE-RESULT validation deliberately (an invalid raw
+    // sibling made an unrelated path write throw). That over-reach is
+    // the mechanism that made a fresh ON-arm client's property write
+    // fail on server-derived-late unrelated required properties, so
+    // the guard now validates ONLY the written subtree — the same
+    // rationale the stream branch always carried ("unrelated result
+    // projections … cannot invalidate an otherwise valid event"). The
+    // written value's own protection stays (the sibling tests above
+    // and below still throw on invalid WRITTEN values).
     const resultSchema = {
       type: "object",
       properties: {
@@ -2160,10 +2211,15 @@ describe("piece pull materialization", () => {
 
     expect(piece.get()).toEqual({ a: 1 });
     expect(piece.getRaw()).toEqual({ a: 1, b: "bad" });
-    await expect(controller.result.set(3, ["a"])).rejects.toThrow(
-      /updated result does not match its schema/,
+    // The VALID write at ["a"] succeeds regardless of the invalid
+    // sibling…
+    await controller.result.set(3, ["a"]);
+    expect(piece.get()).toEqual({ a: 3 });
+    // …and an INVALID write at ["a"] still throws (#4717's protection,
+    // narrowed to the written path).
+    await expect(controller.result.set("bad", ["a"])).rejects.toThrow(
+      /updated (result|value) does not match its schema/,
     );
-    expect(piece.getRaw()).toEqual({ a: 1, b: "bad" });
   });
 
   it("does not hide present explicit undefined behind an optional alias", async () => {
@@ -2197,8 +2253,14 @@ describe("piece pull materialization", () => {
 
     expect(Object.hasOwn(argument.getRaw() as object, "b")).toBe(true);
     expect(Object.hasOwn(piece.get(), "b")).toBe(false);
+    // Post-ruling (the narrowed #4717 guard): the whole-result schema
+    // validation no longer fires for the unrelated path — the explicit
+    // undefined behind the alias is still NOT hidden, surfaced by the
+    // WRITE-DESTINATION validation instead ("updated result does not
+    // match its write destination"), which materializes through the
+    // alias and catches b on the same write.
     await expect(controller.result.set(3, ["a"])).rejects.toThrow(
-      /updated result does not match its schema/,
+      /updated (result|value) does not match its (schema|write destination)/,
     );
     expect(argument.getRaw()).toEqual({ a: 1, b: undefined });
   });
@@ -2347,10 +2409,26 @@ describe("piece pull materialization", () => {
     const controller = new PieceController(manager, piece);
 
     expect(piece.get()).toEqual({ value: 1 });
-    await expect(controller.result.set(2, ["value"])).rejects.toThrow(
-      /updated result does not match its schema/,
+    // RECONCILED with the set-validation ruling (2026-08-07): the
+    // pre-ruling whole-result validation made this unrelated write
+    // throw on the sibling's explicit undefined. Under the narrowed
+    // guard the valid write at ["value"] succeeds — and the explicit
+    // undefined at the derived Cell root is RETAINED, neither hidden
+    // nor clobbered by the write.
+    await controller.result.set(2, ["value"]);
+    expect(piece.get()).toEqual({ value: 2 });
+    expect(
+      Object.hasOwn(
+        (piece.key("optional").resolveAsCell().getRawUntyped() === undefined
+          ? { optional: undefined }
+          : {}) as object,
+        "optional",
+      ),
+    ).toBe(true);
+    // The written value's own protection still binds.
+    await expect(controller.result.set("bad", ["value"])).rejects.toThrow(
+      /updated (result|value) does not match its schema/,
     );
-    expect(piece.getRaw()).toMatchObject({ value: 1 });
   });
 
   it("validates result stream payloads independently of sibling projections", async () => {
@@ -2411,7 +2489,7 @@ describe("piece pull materialization", () => {
       expect(events).toEqual([7]);
 
       await expect(controller.result.set("bad", ["event"])).rejects.toThrow(
-        /updated result does not match its schema/,
+        /updated (result|value) does not match its schema/,
       );
       expect(events).toEqual([7]);
     } finally {
@@ -2517,7 +2595,7 @@ describe("piece pull materialization", () => {
       await runtime.idle();
       expect(events).toEqual([5]);
       await expect(controller.result.set(-1, ["event"])).rejects.toThrow(
-        /updated result does not match its schema/,
+        /updated (result|value) does not match its schema/,
       );
       expect(events).toEqual([5]);
     } finally {
@@ -2664,7 +2742,7 @@ describe("piece pull materialization", () => {
     await updater.setPattern(compiledResultNarrowingProgram("number"));
     await expect(
       staleController.result.set("bad", ["value"]),
-    ).rejects.toThrow(/updated result does not match its schema/);
+    ).rejects.toThrow(/updated (result|value) does not match its schema/);
     expect(await updater.result.get(["value"])).toBe(4);
   });
 
@@ -4972,7 +5050,7 @@ describe("piece pull materialization", () => {
     expect(await controller.input.get(["slot"])).toBe(7);
     await expect(
       compatibleController.result.set("bad", ["value"]),
-    ).rejects.toThrow(/updated result does not match its schema/);
+    ).rejects.toThrow(/updated (result|value) does not match its schema/);
     expect(await controller.input.get(["slot"])).toBe(7);
   });
 

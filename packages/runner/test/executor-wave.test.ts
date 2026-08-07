@@ -42,7 +42,7 @@ import {
   executionLeaseHolder,
 } from "@commonfabric/memory/v2/execution-lease";
 import { selectSchedulerBasisRows } from "@commonfabric/memory/v2/scheduler-basis";
-import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
+import { decodeMemoryBoundary, resolveScopeKey } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -1829,6 +1829,141 @@ describe("stage D seal-into-wave", () => {
     // The forged/raced authored value stands (accepted threat model).
     const stored = Engine.readState(engine, { id: wmLink.id });
     expect(stored?.document).toEqual({ value: { seq: 999 } });
+  });
+
+  it("stage F+2: one wave batch holds TWO instances of ONE doc — the sink/engine fold at cardinality 2 (M1's write half)", async () => {
+    const lease = liveLease();
+    const aliceKey = resolveScopeKey("user", {
+      principal: "did:key:fan-alice",
+      sessionId: "alice-s1",
+    });
+    const bobKey = resolveScopeKey("user", {
+      principal: "did:key:fan-bob",
+      sessionId: "bob-s1",
+    });
+    const outcome = await newSink().commitWave({
+      space,
+      home: true,
+      basisSeq: Engine.serverSeq(engine),
+      rebasedHeads: [],
+      operations: [
+        {
+          op: "set",
+          id: "of:fanout-two-instances" as never,
+          scope: "user",
+          value: { value: { total: 1 } },
+        },
+        {
+          op: "set",
+          id: "of:fanout-two-instances" as never,
+          scope: "user",
+          value: { value: { total: 2 } },
+        },
+      ] as never,
+      preconditions: [],
+      annotations: [
+        { op: 0, scopeKey: aliceKey },
+        { op: 1, scopeKey: bobKey },
+      ],
+      consequenceOf: [],
+      basisInstances: [],
+      holder: lease.holder,
+    });
+    expect(outcome.error).toBeUndefined();
+    const rows = engine.database.prepare(
+      `SELECT scope_key FROM revision WHERE id = :id ORDER BY scope_key`,
+    ).all({ id: "of:fanout-two-instances" }) as { scope_key: string }[];
+    expect(rows.map((r) => r.scope_key)).toEqual(
+      [aliceKey, bobKey].sort(),
+    );
+    lease.release();
+  });
+
+  it("stage F+2: two stamped runs with two demanded identities fold into one wave — per-run keys on writes and basis rows (M1 at cardinality 2)", async () => {
+    const lease = liveLease();
+
+    // A shared space-scoped doc BOTH runs read, so each run's basis
+    // rows have real content to pin per (action, instance).
+    const seed = runtime.getCell<{ value: number }>(
+      space,
+      "wave-m1-fanout-seed",
+      undefined,
+    );
+    const seedTx = runtime.edit();
+    seed.withTx(seedTx).set({ value: 5 });
+    expect((await seedTx.commit()).error).toBeUndefined();
+
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+
+    // Each demanded instance derives its OWN slot doc (the per-instance
+    // result cells the byScope machinery keys — key-vocabulary §1 site
+    // 3): the runs share NO local doc, which is what the landed depth
+    // supports — the replica's per-instance READ keying (one doc, two
+    // instances read locally) is the owed scheduler/replica follow-up,
+    // and the same-doc ENGINE fold is pinned by the sink-level test
+    // above.
+    const identities = [
+      { principal: "did:key:fan-alice", sessionId: "alice-s1" },
+      { principal: "did:key:fan-bob", sessionId: "bob-s1" },
+    ] as const;
+    const cells = identities.map((_, index) =>
+      runtime.getCell<{ value: number }>(
+        space,
+        `wave-m1-fanout-${index}`,
+        undefined,
+        undefined,
+        "user",
+      )
+    );
+    for (const [index, identity] of identities.entries()) {
+      const tx = runtime.edit();
+      stampWaveRunContext(tx, {
+        actionId: "derive-fanout",
+        kind: "derivation",
+        scopeKeyIdentity: identity,
+        actionScopeKey: resolveScopeKey("user", identity),
+      });
+      const base = seed.withTx(tx).get();
+      cells[index].withTx(tx).set({ value: (base?.value ?? 0) + index + 1 });
+      const committed = await tx.commit();
+      if (committed.error !== undefined) {
+        throw new Error(
+          `run ${index} seal failed: ${committed.error.message}`,
+        );
+      }
+    }
+
+    runtime.clearSealDestination();
+    const outcome = await wave.commitWave(newSink());
+    await wave.settled();
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.supersededWrites).toBe(0);
+
+    // Each run's write keyed by ITS demanded instance — never the
+    // wave-level identity's.
+    for (const [index, identity] of identities.entries()) {
+      const link = cells[index].getAsNormalizedFullLink();
+      const rows = engine.database.prepare(
+        `SELECT scope_key FROM revision WHERE id = :id`,
+      ).all({ id: link.id }) as { scope_key: string }[];
+      expect(rows.map((r) => r.scope_key)).toEqual([
+        resolveScopeKey("user", identity),
+      ]);
+    }
+    // ONE wave commit carried both runs; basis rows keyed per
+    // (action, instance) — §3b's overwrite unit at cardinality 2. Each
+    // instance's rows carry the run's REAL read of the shared seed.
+    const seedId = seed.getAsNormalizedFullLink().id;
+    for (const identity of identities) {
+      const basis = selectSchedulerBasisRows(engine, {
+        branch: "",
+        action: "derive-fanout",
+        actionScopeKey: resolveScopeKey("user", identity),
+      });
+      expect(basis.length).toBeGreaterThanOrEqual(1);
+      expect(basis.some((row) => row.entity === seedId)).toBe(true);
+    }
   });
 
   it("stage F: M1 — a run's per-run scopeKeyIdentity keys its scoped writes and basis rows (the demand-supplied instance)", async () => {

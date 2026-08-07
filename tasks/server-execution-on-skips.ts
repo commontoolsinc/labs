@@ -27,7 +27,8 @@ export type ServerExecutionPhase =
   | "phase-4"
   | "phase-5"
   | "phase-6"
-  | "phase-7";
+  | "phase-7"
+  | "phase-2-followup";
 
 export type ServerExecutionOnSkip = {
   /** Test file, relative to the suite's package root (the directory the
@@ -66,16 +67,29 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   ServerExecutionSuite,
   ServerExecutionOnSkip[]
 > = {
+  // Phase 2 retired the entry this file held since stage F (the
+  // two-browsers CFC gate): the client derivation-commit path is
+  // removed by construction, the two-deriver interim's CAS storm with
+  // it — the exact unskipping condition the entry named. That gate now
+  // runs (and passes) ON.
   patterns: [
     {
-      file: "integration/cfc-group-chat-demo-two-browsers.test.ts",
-      phase: "phase-2",
-      reason: "two-deriver interim: two real browser shells boot against " +
-        "a toolshed whose serving loop also derives, and the trusted-" +
-        "profile UI never becomes fillable under the CAS storming the " +
-        "plan documents as expected until Phase 2 removes the client " +
-        "derivation-commit path (this exact test is a named Phase 2 " +
-        "gate). The single-browser and multi-runtime variants pass ON.",
+      file: "integration/sx2-serving-loop.test.ts",
+      phase: "phase-2-followup",
+      reason: "reproducer of the ESCALATED demand-cycle starvation " +
+        "fork: the SpaceServer's cycle runs #loadDemandedStructure " +
+        "BEFORE the settle race with no deadline, and never-loadable " +
+        "demanded roots are re-attempted every cycle since the " +
+        "ensure-retry fix, throttling input consumption. The RULED " +
+        "id-class exclusion (2026-08-07: computed:/cid:/watermark " +
+        "roots register no piece demand) REDUCED it — post-exclusion " +
+        "the loop consumes input again — but of:-class roots without " +
+        "pattern meta (registry/home/argument docs) still churn per " +
+        "cycle pending the owed terminal-state design " +
+        "(verification-coverage.md §3's demand-cycle row), and under " +
+        "load the gate's settle window sees too few cycles. The " +
+        "sx2-speculation gate runs unskipped; this entry lifts with " +
+        "the terminal-state follow-up.",
     },
   ],
   runner: [],

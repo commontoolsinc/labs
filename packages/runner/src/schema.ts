@@ -31,6 +31,7 @@ import {
   undefinedDataLink,
 } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import { waveRunContextOf } from "./executor/wave.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
 import {
@@ -1170,7 +1171,12 @@ export function validateAndTransform(
     tx!,
     selector,
     createDefaultTraversalContext(
-      runtime.scopeKeyIdentity,
+      // The traversal's acting identity (key-vocabulary.md §1 sites
+      // 5-6): a served run's DEMAND-SUPPLIED identity when the wave run
+      // context carries one (M1's per-run threading, server-execution
+      // v2 Phase 2), else the runtime's own session.
+      waveRunContextOf(tx as IExtendedStorageTransaction)
+        ?.scopeKeyIdentity ?? runtime.scopeKeyIdentity,
       options?.traverseCells ?? false,
       undefined,
       undefined,

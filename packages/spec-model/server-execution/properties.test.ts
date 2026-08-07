@@ -15,8 +15,13 @@ import {
   admitDerived,
   applicableSet,
   apply,
+  applyFanout,
   explore,
+  type FanoutState,
+  fanoutStateKey,
+  type FanoutStep,
   holderId,
+  makeFanout,
   makeWorld,
   pushRowsFor,
   sessionKey,
@@ -833,4 +838,141 @@ Deno.test("bridge: model scope-key constructors byte-agree with the real wire vo
   // keeps the literal `:` separators exact, so these no longer collide.
   assert(sessionKey("a:b", "c") !== sessionKey("a", "b:c"));
   assert(userKey("session:x") !== sessionKey("x", "x"));
+});
+
+// ---------- C11: narrowing / fan-out (Phase 2 pre-gate, OW3) ----------
+//
+// One extension covers the OW3 trio (verification-coverage §3):
+// instance sets stay CLEAN PRODUCTS over principals (scopes §2's
+// monotonicity), the enforcement/attribution unit under fan-out is the
+// RUN — `action × instance`, never the action (serving-loop §3c) —
+// and W never forks (scopes §9): one integer, waiting on DEMANDED
+// siblings only, undemanded instances never holding it back
+// (scopes §2's watermark × fan-out composition).
+
+const FAN_MENU = (): FanoutStep[] => [
+  { kind: "fanInput" },
+  { kind: "fanNarrow", by: U1 },
+  { kind: "fanNarrow", by: U2 },
+  { kind: "fanDemand", user: U1 },
+  { kind: "fanDemand", user: U2 },
+  { kind: "fanWave" },
+];
+
+function exploreFanout(
+  s0: FanoutState,
+  maxSteps: number,
+): FanoutState[] {
+  const all: FanoutState[] = [];
+  const visited = new Set<string>();
+  const stack: Array<{ s: FanoutState; depth: number }> = [
+    { s: s0, depth: 0 },
+  ];
+  while (stack.length > 0) {
+    const { s, depth } = stack.pop()!;
+    const key = fanoutStateKey(s);
+    if (visited.has(key)) continue;
+    visited.add(key);
+    all.push(s);
+    if (depth < maxSteps) {
+      for (const step of FAN_MENU()) {
+        const next = applyFanout(s, step);
+        if (fanoutStateKey(next) !== key) {
+          stack.push({ s: next, depth: depth + 1 });
+        }
+      }
+    }
+  }
+  return all;
+}
+
+Deno.test("C11a: instance sets are CLEAN PRODUCTS over principals — never ragged, on every reachable schedule (scopes §2)", () => {
+  const all = exploreFanout(makeFanout([U1, U2]), 7);
+  assert(all.length > 50, `state space too small (${all.length})`);
+  const legalInstanceKeys = new Set([userKey(U1), userKey(U2)]);
+  for (const s of all) {
+    assertEquals(s.violations, []);
+    const keys = Object.keys(s.instances);
+    if (s.narrowed) {
+      // Narrow for EVERYONE: no broad value instance survives, and
+      // every value instance is a principal's — a subset of the clean
+      // product, never a key outside it.
+      assert(!keys.includes(SPACE_KEY), "broad value after narrowing");
+      for (const key of keys) {
+        assert(legalInstanceKeys.has(key), `ragged instance key ${key}`);
+      }
+    } else {
+      // Broad for EVERYONE: no principal instance exists before the
+      // one shared redirect fact does.
+      for (const key of keys) {
+        assertEquals(key, SPACE_KEY, `pre-narrowing instance ${key}`);
+      }
+    }
+  }
+});
+
+Deno.test("C11b: the fan-out unit is the RUN — `action × instance`, one principal's writes per run, never merged (serving-loop §3c)", () => {
+  const all = exploreFanout(makeFanout([U1, U2]), 7);
+  for (const s of all) {
+    for (const run of s.runs) {
+      // Every run names exactly ONE instance and wrote exactly that
+      // instance — the granularity CFC labels and attribution ride at.
+      assertEquals(run.wrote, run.instanceKey);
+    }
+  }
+  // And fan-out genuinely happens: some schedule runs BOTH principals'
+  // instances (the N-runs-as-N-principals-in-one-wave shape).
+  assert(
+    all.some((s) =>
+      s.runs.some((r) => r.instanceKey === userKey(U1)) &&
+      s.runs.some((r) => r.instanceKey === userKey(U2))
+    ),
+    "no schedule exercised cardinality 2",
+  );
+});
+
+Deno.test("C11c: W never forks — one integer, waiting on DEMANDED siblings only; undemanded instances never hold it back (scopes §2, §9)", () => {
+  const all = exploreFanout(makeFanout([U1, U2]), 7);
+  for (const s of all) {
+    // Type-level: FanoutState.W is a single number (a per-instance
+    // watermark shape cannot even be expressed); behaviorally the rule
+    // binds the ADVANCE, not the standing state — protocol §4: a fresh
+    // subscription arriving AFTER W may still trigger a recompute that
+    // lands in a LATER derived commit, so a post-W new demand with a
+    // stale instance is a legal state. What must hold: a wave never
+    // ADVANCES W while any instance demanded at advance time is stale.
+    assert(typeof s.W === "number");
+    const advanced = applyFanout(s, { kind: "fanWave" });
+    if (advanced.W > s.W) {
+      for (const key of advanced.demanded) {
+        assertEquals(
+          advanced.instances[key] ?? 0,
+          advanced.input,
+          `the wave advanced W to ${advanced.W} with demanded ${key} stale`,
+        );
+      }
+    }
+  }
+  // Undemanded-never-holds: a schedule exists where U2's instance is
+  // stale (or absent) while W covers the input — because only U1
+  // demanded.
+  assert(
+    all.some((s) =>
+      s.narrowed && s.W === s.input && s.W > 0 &&
+      s.demanded.includes(userKey(U1)) &&
+      !s.demanded.includes(userKey(U2)) &&
+      (s.instances[userKey(U2)] ?? 0) < s.input
+    ),
+    "no schedule showed an undemanded sibling left behind while W " +
+      "advanced",
+  );
+  // Demanded-holds: a schedule exists where BOTH are demanded and W
+  // lags the input until the wave runs both.
+  assert(
+    all.some((s) =>
+      s.demanded.includes(userKey(U1)) &&
+      s.demanded.includes(userKey(U2)) && s.W < s.input
+    ),
+    "no schedule showed W waiting on demanded siblings",
+  );
 });

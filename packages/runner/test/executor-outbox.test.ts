@@ -167,6 +167,7 @@ describe("stage G outbox + sqlite discharge", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      servingPosture: true,
       experimental: { serverExecution: true },
     });
     engine = await server.engineForSpace(space);

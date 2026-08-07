@@ -8,6 +8,7 @@ import type { Program } from "@commonfabric/js-compiler";
 import { CompilerError } from "@commonfabric/js-compiler/errors";
 import type { CellScope } from "../builder/types.ts";
 import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
+import { waveRunContextOf } from "../executor/wave.ts";
 import { narrowestScope } from "../scope.ts";
 
 /**
@@ -204,6 +205,25 @@ export function compileAndRun(
 
     // Now we're sure that we have a new file to compile
     pendingWithLog.set(true);
+
+    // Client speculation under EXPERIMENTAL_SERVER_EXECUTION
+    // (server-execution v2 Phase 2): compilation is an EFFECTFUL step,
+    // so `compile-and-run` children are NOT speculable — the branch
+    // keeps its ordinary pending state and reads through until the
+    // authoritative child arrives (builtins.md §3; speculation.md §2;
+    // runtime-mapping N37/N38). Unlike the request-hash builtins, the
+    // compile launches from a floating promise rather than a
+    // post-commit effect, so the overlay destination cannot intercept
+    // it — the gate lives here. A SERVED run (a stamped wave run) is
+    // unaffected: serving compile-and-run is its own port (stage G's
+    // out-of-scope note), and its writebacks refuse under serving
+    // until then.
+    if (
+      runtime.experimental.serverExecution === true &&
+      waveRunContextOf(tx) === undefined
+    ) {
+      return;
+    }
 
     // Capture requestId for this compilation run
     const thisRequestId = requestId;

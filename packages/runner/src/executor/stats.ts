@@ -35,11 +35,28 @@ export type ServingLoopStats = {
   authoredSeen: number;
   effectAcks: number;
   derivedCommits: number;
-  /** Demanded-structure loads that failed (serving-loop.md §1's ON-arm
-   * bring-up posture: a value the server cannot serve stays
-   * client-derived until Phase 2 hardens the load path — counted AND
-   * surfaced here, not just logged). */
+  /** Demanded-structure loads that THREW (serving-loop.md §1: a value
+   * the server cannot serve is counted AND surfaced here, not just
+   * logged). Counted per attempt; the loop retries the root on each
+   * subsequent input-driven demand cycle until the load lands. */
   structureLoadFailures: number;
+  /** Demanded-structure ensure attempts that returned FALSE — the root
+   * carried no loadable pattern identity yet, typically the creation
+   * race (the demand cycle ran before the piece's instantiation
+   * commit applied to the serving replica). Counted per attempt, like
+   * structureLoadFailures, and retried the same way: the missing meta
+   * arrives as an input, which fires the retrying cycle. A count that
+   * grows without settling flags a demanded root that never becomes
+   * loadable (e.g. a plain value doc demanded as if it owned a
+   * piece). */
+  structureLoadDeferred: number;
+  /** Waves whose W advance was CLAMPED below the input batch head
+   * because inbound foreign novelty was still shadowed by a parked own
+   * write (the settle input barrier, Phase 2 revisit (a):
+   * `ISpaceReplica.unappliedForeignSeqFloor`). The clamp is honesty,
+   * not a failure — W catches up the wave after the shadow clears — but
+   * a count that grows without settling flags a wedged marker channel. */
+  watermarkClamped: number;
   /** max over active spaces of (store head seq − W). */
   watermarkLag: number;
   events: {
@@ -62,6 +79,8 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   effectAcks: 0,
   derivedCommits: 0,
   structureLoadFailures: 0,
+  structureLoadDeferred: 0,
+  watermarkClamped: 0,
   watermarkLag: 0,
   events: {
     appended: 0,

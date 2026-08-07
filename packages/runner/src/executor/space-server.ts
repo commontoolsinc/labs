@@ -69,11 +69,15 @@ import {
   type WaveWriteAnnotation,
 } from "./wave.ts";
 import { EngineWaveCommitSink } from "./engine-wave-sink.ts";
-import { readWatermarkSeq, watermarkCell } from "./watermark.ts";
+import { readWatermarkSeq, watermarkDocLink } from "./watermark.ts";
 import type { ServingLoopStats } from "./stats.ts";
 import { type SealedEffectBatch, SpaceOutbox } from "./outbox.ts";
 import { effectCompletionKeyOf } from "./effect-completion.ts";
-import { resolveScopeKey } from "@commonfabric/memory/v2";
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+  SERVER_EXECUTION_WATERMARK_DOC_ID,
+} from "@commonfabric/memory/v2";
 import type { PostCommitSideEffect } from "../cfc/types.ts";
 
 const logger = getLogger("space-server", { enabled: true, level: "warn" });
@@ -121,6 +125,19 @@ export type SpaceServerOptions = {
 const DEFAULT_FLUSH_DEADLINE_MS = 100;
 const DEFAULT_IDLE_PARK_MS = 30_000;
 
+/** The well-known never-a-piece id classes excluded from piece demand
+ * (RULED 2026-08-07): a `computed:` doc is a derivation result, a
+ * `cid:` doc is a content-addressed bundle, and the watermark doc is
+ * the settledness subscription — none can ever carry `patternIdentity`
+ * meta, so an `ensurePieceRunning` attempt (and its retry churn) is
+ * structurally futile. Remaining `of:` ids are NOT distinguishable by
+ * id class (a not-yet-created piece and a never-a-piece value doc look
+ * alike) — the complete terminal-state design is the owed follow-up. */
+const neverAPieceRootId = (id: string): boolean =>
+  id === SERVER_EXECUTION_WATERMARK_DOC_ID ||
+  id.startsWith("computed:") ||
+  id.startsWith("cid:");
+
 /**
  * One space's serving loop. The SpaceServer IS the seal destination — a
  * stable dispatcher over rotating wave accumulators, so an action tx
@@ -155,11 +172,30 @@ export class SpaceServer implements TransactionSealDestination {
   readonly #parked = Promise.withResolvers<void>();
   #idleSince: number | undefined;
   #demandedRoots = new Set<string>();
+  /** Demanded roots whose `ensurePieceRunning` has not yet SUCCEEDED —
+   * it returned false (typically the creation race: the demand cycle
+   * ran before the piece's `patternIdentity` meta applied to the
+   * serving replica) or threw. Re-attempted once per demand cycle
+   * until the load lands: cycles are input-driven, and the missing
+   * meta arrives as an input (the instantiation commit), which fires
+   * the cycle that retries — bounded, no timers. Without this set a
+   * root attempted once before its meta existed stayed in
+   * `#demandedRoots` forever and the piece never started server-side
+   * (waves committed watermark-only while `waitForSettled` claimed
+   * the derivation current). */
+  readonly #pendingStructureLoads = new Set<string>();
   /** Live readers per demanded root — DEMAND ITSELF (serving-loop.md
    * §1: "a subscription to a value recomputes that value and its
    * upstream"): the sink is what pulls the demanded value through the
    * scheduler's pull-based laziness. Released on park. */
   readonly #demandSinks = new Map<string, () => void>();
+  /** The demanded IDENTITY per scoped demand key (server-execution v2
+   * Phase 2, M1's demand carriage — scopes.md §5: the demand supplies
+   * the run identity). The per-instance run SUPPLY (the scheduler
+   * running a scoped action once per demanded instance, stamping each
+   * run from this registry through #stampRun's widened seam) is the
+   * owed scheduler-instance-dimension follow-up. */
+  readonly #demandedIdentities = new Map<string, ScopeKeyIdentity>();
   /** The stage-G effect channel (serving-loop.md §4–§5). */
   #outbox: SpaceOutbox | undefined;
   /** A drain left undelivered rows behind (transport-class failure):
@@ -258,6 +294,18 @@ export class SpaceServer implements TransactionSealDestination {
           "(serving-loop.md §3: flag ON, server posture)",
       );
     }
+    if (runtime.servingPosture !== true) {
+      await dispose();
+      lease.release();
+      this.#lease = undefined;
+      throw new Error(
+        "SpaceServer runtime must be constructed with servingPosture " +
+          "(serving-loop.md §3): without it the Phase-2 speculation " +
+          "overlay is the runtime's default seal destination and its " +
+          "factory-time structure loads would divert instead of " +
+          "committing through the loopback plane",
+      );
+    }
     this.#runtime = runtime;
     this.#disposeRuntime = dispose;
     this.#sink = new EngineWaveCommitSink({
@@ -289,6 +337,17 @@ export class SpaceServer implements TransactionSealDestination {
     runtime.effectMemoObserver = () => {
       this.#options.stats.memo.hits += 1;
     };
+    // The shadow-flip WAKE (Phase 2's settle input barrier): a clamped
+    // wave's floor lifts when the replica's parked promotion flips the
+    // shadowed foreign value visible — a dirtiness with NO admitted
+    // commit behind it (the commit was drained waves ago; only its
+    // VISIBILITY changed), so nothing on the feed ends the loop's input
+    // wait and a then-quiet space would sit out the idle window with W
+    // still clamped. The replica's flip path resolves the wait
+    // directly; the woken cycle derives over the foreign value and W
+    // catches up.
+    runtime.storageManager.open(space).replica.shadowFlipObserver = () =>
+      this.#feedArrived?.resolve();
 
     // W = read watermark doc (0 if absent).
     this.#watermark = readWatermarkSeq(engine);
@@ -458,6 +517,17 @@ export class SpaceServer implements TransactionSealDestination {
     return this.#pendingEffectsByWave.size;
   }
 
+  /** DIAGNOSTIC (tests): the demanded identities recorded for a root
+   * doc — M1's demand carriage at scoped cardinality (Phase 2). Two
+   * principals demanding one scoped root yield two entries. */
+  demandedIdentitiesOf(id: string): ScopeKeyIdentity[] {
+    const identities: ScopeKeyIdentity[] = [];
+    for (const [key, identity] of this.#demandedIdentities) {
+      if (key.endsWith(`\0${id}`)) identities.push(identity);
+    }
+    return identities;
+  }
+
   #openWave(): WaveAccumulator {
     if (this.#currentWave === undefined) {
       const { engine, space } = this.#options;
@@ -477,15 +547,24 @@ export class SpaceServer implements TransactionSealDestination {
   }
 
   /** serving-loop.md §3d's stamping duty: the scheduler hands every run
-   * here; per-run demanded identities (M1) plug into this seam when
-   * Phase 2 maps demand to instances — Phase 1 runs carry the durable
-   * action id and kind, and scoped addresses resolve via the wave
-   * identity (cardinality 1). */
+   * here. Per-run demanded identities (M1) PASS THROUGH this seam
+   * (Phase 2): a run whose ServerRunInfo carries a demand-supplied
+   * identity resolves its scoped reads, result cells, seal, basis rows,
+   * and outbox carriage against THAT instance; a run without one keeps
+   * the wave-level identity (the cardinality-1 fallback). The SUPPLY
+   * side — the scheduler running a scoped action once per demanded
+   * instance — is the owed scheduler-instance-dimension follow-up. */
   #stampRun(tx: IExtendedStorageTransaction, info: ServerRunInfo): void {
     stampWaveRunContext(tx, {
       actionId: info.actionId,
       kind: info.kind,
       ...(info.eventId !== undefined ? { eventId: info.eventId } : {}),
+      ...(info.scopeKeyIdentity !== undefined
+        ? { scopeKeyIdentity: info.scopeKeyIdentity }
+        : {}),
+      ...(info.actionScopeKey !== undefined
+        ? { actionScopeKey: info.actionScopeKey }
+        : {}),
     });
   }
 
@@ -815,9 +894,14 @@ export class SpaceServer implements TransactionSealDestination {
    * the server-side watch registry names what clients demand; each
    * demanded root's owning piece is ensured running (the sanctioned
    * auto-load prior art) so the scheduler can pull the demanded value
-   * and its upstream. Failures are counted and logged — the ON-arm
-   * bring-up posture: a value the server cannot serve stays
-   * client-derived until Phase 2 hardens the load path. */
+   * and its upstream. An ensure that does not land is COUNTED and
+   * RETRIED: a false return (structure not loadable yet — the creation
+   * race, where demand precedes the instantiation commit's arrival on
+   * the serving replica) counts toward §7's structureLoadDeferred, a
+   * throw toward structureLoadFailures, and either leaves the root in
+   * `#pendingStructureLoads` for the next input-driven cycle — the
+   * missing meta arrives as a commit, and that commit fires the cycle
+   * that retries. */
   async #loadDemandedStructure(): Promise<void> {
     const runtime = this.#runtime;
     if (runtime === undefined) return;
@@ -827,13 +911,37 @@ export class SpaceServer implements TransactionSealDestination {
       // client demand.
       { excludePrincipal: this.#options.serviceIdentity },
     );
+    // Demand keys are PER INSTANCE (server-execution v2 Phase 2, M1's
+    // demand carriage): a scoped root demanded by two principals is two
+    // demand entries, each carrying its demander's identity — the
+    // registry the per-instance run supply (the owed scheduler
+    // follow-up) consumes, and the diagnostic the fan-out tests pin.
+    // A space root has no identity and one entry, exactly as before.
+    const keyOf = (root: {
+      id: string;
+      scope?: string;
+      identity?: { principal?: string; sessionId?: string };
+    }): string => {
+      const scope = root.scope ?? "space";
+      if (scope === "space" || root.identity === undefined) {
+        return `space\0${root.id}`;
+      }
+      try {
+        return `${
+          resolveScopeKey(scope as never, {
+            principal: root.identity.principal,
+            sessionId: root.identity.sessionId as never,
+          })
+        }\0${root.id}`;
+      } catch {
+        return `${scope}\0${root.id}`;
+      }
+    };
     // Retire demand for roots no client watches anymore: the sink is
     // the demand, so cancelling it returns the value to pull-based
     // laziness (the materialized structure stays registered — structure
     // is not a start/stop policy, serving-loop.md §1).
-    const currentKeys = new Set(
-      roots.map((root) => `${root.scope ?? "space"}\0${root.id}`),
-    );
+    const currentKeys = new Set(roots.map(keyOf));
     for (const [key, cancel] of this.#demandSinks) {
       if (currentKeys.has(key)) continue;
       try {
@@ -843,24 +951,86 @@ export class SpaceServer implements TransactionSealDestination {
       }
       this.#demandSinks.delete(key);
       this.#demandedRoots.delete(key);
+      this.#demandedIdentities.delete(key);
+    }
+    // A pending load whose demand retired stops retrying (pruned
+    // directly against the demanded keys, not via the sink loop above:
+    // a root whose SINK creation failed has no sink entry to retire
+    // through).
+    for (const key of this.#pendingStructureLoads) {
+      if (!currentKeys.has(key)) this.#pendingStructureLoads.delete(key);
     }
     for (const root of roots) {
-      const key = `${root.scope ?? "space"}\0${root.id}`;
-      if (this.#demandedRoots.has(key)) continue;
-      this.#demandedRoots.add(key);
-      try {
-        await ensurePieceRunning(runtime, {
-          space: this.#options.space,
-          id: root.id as never,
-          scope: root.scope ?? "space",
-          path: [],
-        });
-      } catch (error) {
-        this.#options.stats.structureLoadFailures += 1;
-        logger.warn("structure-load-failed", () => [
-          `demanded root ${root.id} did not load`,
-          error,
-        ]);
+      const key = keyOf(root);
+      const firstDemand = !this.#demandedRoots.has(key);
+      // A known root re-enters this loop ONLY while its structure load
+      // is still owed (the retry arm); its identity entry and demand
+      // sink were installed on first demand and are not re-created.
+      if (!firstDemand && !this.#pendingStructureLoads.has(key)) continue;
+      if (firstDemand) {
+        this.#demandedRoots.add(key);
+        if (root.identity !== undefined) {
+          this.#demandedIdentities.set(key, {
+            ...(root.identity.principal === undefined
+              ? {}
+              : { principal: root.identity.principal }),
+            ...(root.identity.sessionId === undefined
+              ? {}
+              : { sessionId: root.identity.sessionId as never }),
+          });
+        }
+      }
+      // Id-class exclusion (RULED 2026-08-07): well-known never-a-piece
+      // ids register NO piece demand — no `ensurePieceRunning` attempt,
+      // no retry, no `structureLoadDeferred` increment (the counter
+      // stays meaningful for genuinely not-yet-loadable pieces).
+      // `computed:` docs are derivation results, `cid:` docs are
+      // content-addressed bundles, and the watermark doc is the
+      // settledness subscription every waitForSettled/overlay client
+      // holds — none can ever carry `patternIdentity` meta. The demand
+      // SINK below still registers where applicable: value-granular
+      // pull is not piece demand. The COMPLETE terminal-state design —
+      // terminal-on-loaded-doc-without-pattern-meta with
+      // commit-triggered re-arm — is the named owed follow-up
+      // (verification-coverage.md's owed register): id classes cannot
+      // distinguish a not-yet-created piece from a never-a-piece doc
+      // for the remaining `of:` ids, so the general fix needs the
+      // meta-observing re-arm, not a bigger blocklist.
+      if (neverAPieceRootId(root.id)) {
+        this.#pendingStructureLoads.delete(key);
+        if (!firstDemand) continue;
+      } else {
+        try {
+          const started = await ensurePieceRunning(runtime, {
+            space: this.#options.space,
+            id: root.id as never,
+            scope: root.scope ?? "space",
+            path: [],
+          });
+          if (started) {
+            this.#pendingStructureLoads.delete(key);
+          } else {
+            // A false return is a load that cannot land YET — most
+            // often the creation race, where this cycle ran before the
+            // piece's `patternIdentity` meta applied to the serving
+            // replica. Counted per attempt (§7 structureLoadDeferred)
+            // and left pending: the next input-driven cycle retries.
+            this.#pendingStructureLoads.add(key);
+            this.#options.stats.structureLoadDeferred += 1;
+            logger.debug?.("structure-load-deferred", () => [
+              `demanded root ${root.id} not loadable yet; ` +
+              "retrying next demand cycle",
+            ]);
+          }
+        } catch (error) {
+          this.#pendingStructureLoads.add(key);
+          this.#options.stats.structureLoadFailures += 1;
+          logger.warn("structure-load-failed", () => [
+            `demanded root ${root.id} did not load`,
+            error,
+          ]);
+        }
+        if (!firstDemand) continue;
       }
       try {
         // The demand itself: a live reader per demanded root. Without
@@ -955,8 +1125,9 @@ export class SpaceServer implements TransactionSealDestination {
             // synchronously on send, but their application schedules
             // work; the yield lets it register dirtiness so the
             // isIdle() probe below sees it. (An application parked
-            // behind one of our own sealed commits stays the
-            // documented inputSynced residual.)
+            // behind one of our own sealed commits is excluded from
+            // the W advance below via unappliedForeignSeqFloor — the
+            // settle input barrier, Phase 2 revisit (a).)
             await new Promise((resolve) => setTimeout(resolve, 0));
             return "settled" as const;
           })(),
@@ -985,8 +1156,52 @@ export class SpaceServer implements TransactionSealDestination {
     // carries no watermark movement. The advance is input-driven (the
     // batch head only moves when commits arrive), so a quiet space
     // commits nothing.
-    const advanceTo = exhausted ? this.#watermark : batchHead;
+    //
+    // The settle input barrier (Phase 2 revisit (a)): the settle above
+    // proves frames were SENT and pulls settled — not that every
+    // frame's novelty is VISIBLE. A foreign frame integrating under one
+    // of the loop's own parked commits (CT-1927) stays shadowed until
+    // the marker promotes it, and its dirtiness registers only then
+    // (the replica's shadow-flip notification). Excluding those seqs
+    // from the advance — the plan's sanctioned alternative to awaiting
+    // them, which would deadlock — keeps W honest: it never claims a
+    // seq whose demanded derivations could not have run. The clamp
+    // lifts by itself: promotion fires the notification AND the
+    // shadow-flip wake (`shadowFlipObserver`, installed at activation —
+    // without it a then-quiet space would wait out the idle window),
+    // the woken wave derives over the foreign value, and W catches up.
+    const shadowFloor = runtime.storageManager
+      .open(this.#options.space).replica.unappliedForeignSeqFloor?.();
+    const inputVisibleHead = shadowFloor === undefined
+      ? batchHead
+      : Math.min(batchHead, shadowFloor - 1);
+    const advanceTo = exhausted
+      ? this.#watermark
+      : Math.max(this.#watermark, inputVisibleHead);
     const shouldAdvance = !exhausted && advanceTo > this.#watermark;
+    if (
+      !exhausted && inputVisibleHead < batchHead &&
+      batchHead > this.#watermark
+    ) {
+      // Counted whenever the floor held W below an OTHERWISE-ADVANCING
+      // batch head (serving-loop.md §7's "actually clamped below the
+      // input batch head"): the partial clamp (advanceTo strictly
+      // between W and batchHead) AND the full suppression — the
+      // shadowed seq is the lowest input above W, or the shadowed
+      // REMOVE's sentinel floor 1 holds W entirely — where advanceTo
+      // == W and the pre-fix `advanceTo > W` guard missed the count. A
+      // floor with batchHead ≤ W is still NOT a clamp: no advance was
+      // owed. An exhausted flush is likewise excluded — exhaustion
+      // suppresses the advance regardless of the floor, and §7's
+      // wavesBudgetExhausted carries that case.
+      this.#options.stats.watermarkClamped += 1;
+      logger.info?.("watermark-clamped", () => [
+        `space ${this.#options.space}: W advance clamped to ` +
+        `${advanceTo} (batchHead ${batchHead}, shadow floor ` +
+        `${shadowFloor}) — foreign novelty parked behind an own ` +
+        "sealed commit (settle input barrier)",
+      ]);
+    }
 
     if (!haveContributions && !shouldAdvance) {
       // Nothing sealed and no watermark movement: no commit (the
@@ -1032,7 +1247,22 @@ export class SpaceServer implements TransactionSealDestination {
         actionId: WATERMARK_ACTION_ID,
         kind: "bookkeeping",
       });
-      watermarkCell(runtime, this.#options.space).withTx(tx).key("seq").set(
+      // BLIND key-path write (RULED 2026-08-07): the cell route's
+      // read-before-write synced the watermark doc over the loopback
+      // SESSION plane under the service principal — DENIED on
+      // owner-only-ACL spaces (a harmless but noisy AuthorizationError
+      // per run). The loop's own bookkeeping write needs no
+      // session-plane read: it stays a key-path write inside the wave
+      // transaction (protocol.md §4's same-transaction invariant and
+      // §3d's bookkeeping REBASE arm both keyed off the path shape,
+      // unchanged), consistent with watermark.ts's engine-direct READ
+      // posture — clients keep reading the doc through their ordinary
+      // subscription.
+      tx.writeValueOrThrow(
+        {
+          ...watermarkDocLink(this.#options.space),
+          path: ["seq"],
+        },
         advanceTo,
       );
       const committed = await tx.commit();
@@ -1186,6 +1416,8 @@ export class SpaceServer implements TransactionSealDestination {
     }
     this.#demandSinks.clear();
     this.#demandedRoots.clear();
+    this.#demandedIdentities.clear();
+    this.#pendingStructureLoads.clear();
     const wave = this.#currentWave;
     this.#currentWave = undefined;
     await this.#sealChain;
@@ -1202,6 +1434,10 @@ export class SpaceServer implements TransactionSealDestination {
       if (this.#runtime !== undefined) {
         this.#runtime.asyncWorkObserver = undefined;
         this.#runtime.effectMemoObserver = undefined;
+        // The shadow-flip wake dies with the tenure (a late flip on a
+        // disposing replica must not poke a parked loop's stale wait).
+        this.#runtime.storageManager.open(this.#options.space).replica
+          .shadowFlipObserver = undefined;
       }
       this.#runtime?.clearSealDestination();
       await this.#disposeRuntime?.();

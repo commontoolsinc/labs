@@ -26,6 +26,16 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
 
 ## 2. What may speculate
 
+- The membership test is the SCHEDULER TELL (RULED, owner 2026-08-07;
+  protocol.md §1 carries the primary statement and the owner's
+  rationale): ONLY scheduler-driven work moves to the server —
+  scheduler-stamped derivation and handler runs are what divert here.
+  Commits OUTSIDE the scheduler — setup/instantiation transactions,
+  imperative creation (with its sanctioned `.pull`-for-round-one
+  flow), UI bindings, widget edits — are the client's authored acts
+  and commit as today. NO creation carve-out: a pattern instantiated
+  within a lift/map/filter is a derived computation like any other,
+  so its first run diverts even at instantiation.
 - Pure structural nodes: freely.
 - Handlers: run locally on fire, writes go to the overlay (events.md §2);
   the committed artifact is the event only.
@@ -87,6 +97,17 @@ Divergence is silent by default: the authoritative value replaces the
 speculative one in the same render path — the simplest thing, and
 exactly how conflicts render today (RULED 2026-08-02). No flicker
 suppression beyond what rebasing gives.
+
+Stated honestly (RULED 2026-08-07; owed from the wedge round): the
+overlay retires on watermark coverage of its BASIS, not on value
+ARRIVAL — "the store wins" carries no by-construction guarantee that
+the store HOLDS what won at withdrawal time (W covers DEMANDED
+derivations; nothing about an entry's own output riding the covering
+wave is implied). What makes retirement safe is the serving loop's
+first-round reliability machinery — the demanded-structure loads with
+their counted, retried deferrals (serving-loop.md §1/§3's demand
+cycle and its ensure-retry) — which makes the demanded derivation
+exist and land.
 
 ## 5. Offline
 

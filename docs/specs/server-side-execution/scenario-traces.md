@@ -2,7 +2,7 @@
 
 **Verification instrument, NON-NORMATIVE.** The detail docs govern;
 a trace never overrides them. What a trace does is force the
-composition question the doc-by-doc organization hides: fourteen
+composition question the doc-by-doc organization hides: fifteen
 canonical end-to-end journeys, each traced hop by hop, with every
 load-bearing value — identity, `scope_key`, commit class, envelope,
 stamp source — written down explicitly WITH A CITATION. A cell that
@@ -413,6 +413,31 @@ url₂, which succeeds. The host also crashes once, in Q5's window.
 - T14.Q6 — Which §7 counters move across the journey (the miss, the
   suppressed re-fire, the input-driven retry)?
 
+### T15 — Client speculation under the flag: overlay lifecycle (Phase 2; OW4)
+
+Purpose: the client half of the ON posture end to end — what runs,
+what commits, what retires, and what never leaves the process
+(speculation.md is the governing doc).
+Setup: flag ON. S1's client replicates part of space A: a derivation
+D = f(X) downstream of doc X; an effectful node E (`fetchData`)
+downstream of D; a second branch G reading a doc Y the client has
+NOT replicated. U1 edits X through a UI binding; the SpaceServer
+derives authoritatively and pushes.
+
+- T15.Q1 — U1's binding edit: what commits (class, envelope), and
+  what does the client's local run do with D?
+- T15.Q2 — The overlay entry for D: what does it record, and which
+  instances may the overlay hold?
+- T15.Q3 — The local run reaches E: does it execute? What does it
+  read, and what renders when the memo key differs from the stored
+  one?
+- T15.Q4 — The branch through unreplicated Y: does speculation fetch
+  Y? What renders?
+- T15.Q5 — The push arrives: what retires the D entry, exactly — the
+  input-origin rule, stated precisely?
+- T15.Q6 — What may the client NEVER do with the overlay or under
+  it? Cite the tripwires.
+
 ## 4. Reference answers
 
 **Run 2026-08-03** — six Sonnet trace runners (two traces each),
@@ -799,6 +824,49 @@ these.
   post-completion re-run's suppressed re-fire counts `memo.hits`;
   the input-driven retry counts a second `memo.misses` +
   `outbox.queued`. [serving-loop §4, §7]
+
+### T15 (COMPLETE — authored with Phase 2, 2026-08-07; OW4's impl witnesses are `packages/runner/test/speculation-overlay.test.ts` and the `sx2-speculation` integration surface)
+
+- Q1: the binding edit commits AUTHORED under S1's session envelope —
+  state authorship under existing ACL + CAS, unchanged (README §3.6).
+  The client's local run re-derives D and REDIRECTS the run's writes
+  into the overlay — rendering reads the echo immediately; nothing
+  about D is committed (there is no client code path that could —
+  speculation §1; protocol §1's FORBIDDEN clause). [README §1, §3.6;
+  speculation §1, §3]
+- Q2: a process-memory entry recording the seq basis the speculation
+  ran against and its origin (the input's commit); it is never
+  serialized, synced, or committed, and the overlay holds ONLY S1's
+  own user/session instances — a foreign instance is unreplicated and
+  its branch is pending, so the overlay never holds one. [speculation
+  §1, §2; scopes §4]
+- Q3: E NEVER executes client-side. The run reads through to E's last
+  COMMITTED result; if the recomputed memo key differs from the
+  stored one, the branch reads as pending and the UI shows its
+  ordinary loading state until the server's completion pushes — no
+  exceptions, no "just this one idempotent GET". [speculation §2;
+  README §3.5]
+- Q4: no — speculation NEVER blocks on a fetch and never triggers a
+  network read; the branch through Y is PENDING and renders its
+  ordinary loading state, reconciling when the server's derived value
+  arrives (the server discovers the same read by running with the
+  store local — the asymmetry is the point). [speculation §2;
+  serving-loop §3b]
+- Q5: input-origin retirement (speculation §4 step 3): the entry
+  retires once its authored origin is ACKED and the pushed watermark
+  covers it — `W ≥` that commit's seq — REGARDLESS of value
+  agreement (the store wins); a live-input echo whose commit is
+  unacked or not yet covered stays (the user is mid-typing).
+  Divergence is silent value replacement in the same render path.
+  [speculation §3, §4; protocol §4]
+- Q6: FORBIDDEN client-side under the flag: constructing a
+  `derived`-class commit; committing any handler write (Phase 3's
+  deletion — until then handler writes commit authored, which is the
+  plan's stated interim, not an overlay write); executing an
+  effectful builtin; persisting the overlay; sending overlay contents
+  to any server; deciding "the server is wrong" — the store wins by
+  construction. [speculation §6; protocol §1; the plan's interim
+  postures]
 
 ## 5. Findings routing
 

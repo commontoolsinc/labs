@@ -1092,3 +1092,124 @@ export function explore(
   }
   return { finals, all, statesSeen: visited.size };
 }
+
+// ---------- narrowing / fan-out sub-model (Phase 2 pre-gate, OW3) ----------
+//
+// The three bound rules ONE extension covers (verification-coverage
+// OW3): instance sets are CLEAN PRODUCTS over principals, never ragged
+// (scopes §2's monotonicity — narrowing is for everyone or no one);
+// the CFC/attribution unit under fan-out is the RUN, `action ×
+// instance`, never the action (serving-loop §3c); and nothing forks W
+// (scopes §9 — W stays ONE integer, waiting on DEMANDED siblings only,
+// undemanded instances never holding it back — scopes §2's
+// watermark × fan-out composition). Self-contained: one scoped node
+// downstream of one shared space-scoped input, exhaustively driven by
+// the property suite's own DFS. Uses the SAME key constructors as the
+// main model (bridge-checked against the wire vocabulary).
+
+export interface FanoutState {
+  /** The principals that exist (each may demand its own instance). */
+  principals: UserId[];
+  /** The ONE broad-slot redirect fact (scopes §2: the link INTO the
+   * narrower scope is itself shared state at the broader scope, so one
+   * written redirect narrows the node for EVERY reader at once). */
+  narrowed: boolean;
+  /** Demanded instance keys (a subscription per principal). */
+  demanded: string[];
+  /** instanceKey -> the input generation its value is current through.
+   * Pre-narrowing the only legal key is `space`; post-narrowing only
+   * `user:<p>` keys (the never-ragged shape the properties pin). */
+  instances: Record<string, number>;
+  /** The shared upstream input's generation (an authored input). */
+  input: number;
+  /** ONE watermark integer for the whole node (scopes §9). */
+  W: number;
+  /** Every run, as `action × instance` (serving-loop §3c): one entry
+   * per RUN with the single instance it ran as and wrote. */
+  runs: Array<{ instanceKey: string; wrote: string }>;
+  violations: string[];
+}
+
+export type FanoutStep =
+  | { kind: "fanInput" }
+  | { kind: "fanNarrow"; by: UserId }
+  | { kind: "fanDemand"; user: UserId }
+  | { kind: "fanWave" };
+
+export function makeFanout(principals: UserId[]): FanoutState {
+  return {
+    principals: [...principals],
+    narrowed: false,
+    demanded: [SPACE_KEY],
+    instances: {},
+    input: 1,
+    W: 0,
+    runs: [],
+    violations: [],
+  };
+}
+
+export function applyFanout(s0: FanoutState, step: FanoutStep): FanoutState {
+  const s = structuredClone(s0);
+  switch (step.kind) {
+    case "fanInput": {
+      // The shared space-scoped upstream advances: every instance of
+      // the node is now stale against it.
+      s.input += 1;
+      return s;
+    }
+    case "fanNarrow": {
+      // A run (as `by`) DISCOVERS the narrowing (scopes §2, ruled): the
+      // discovering wave writes exactly two things — the broad-slot
+      // redirect (the one shared fact) and the discovering run's OWN
+      // instance value. Sibling instances materialize on THEIR OWN
+      // demand. The broad slot stops being a value instance the same
+      // moment for every reader — the clean-product shape.
+      if (s.narrowed) return s;
+      s.narrowed = true;
+      delete s.instances[SPACE_KEY];
+      s.demanded = s.demanded.filter((key) => key !== SPACE_KEY);
+      const own = userKey(step.by);
+      s.instances[own] = s.input;
+      s.runs.push({ instanceKey: own, wrote: own });
+      if (!s.demanded.includes(own)) s.demanded.push(own);
+      s.demanded.sort();
+      return s;
+    }
+    case "fanDemand": {
+      const key = s.narrowed ? userKey(step.user) : SPACE_KEY;
+      if (!s.demanded.includes(key)) {
+        s.demanded.push(key);
+        s.demanded.sort();
+      }
+      return s;
+    }
+    case "fanWave": {
+      // The wave derives every DEMANDED stale instance — one RUN per
+      // instance, each reading/writing ONLY its own (serving-loop §3c:
+      // the unit is `action × instance`; a merged run would be the
+      // over-tainting the section forbids). W advances to the input
+      // batch head iff every DEMANDED instance is current — demanded
+      // siblings are waited on, undemanded ones NEVER hold W back
+      // (scopes §2's composition; §9's no-forks).
+      for (const key of s.demanded) {
+        if ((s.instances[key] ?? 0) !== s.input) {
+          s.instances[key] = s.input;
+          s.runs.push({ instanceKey: key, wrote: key });
+        }
+      }
+      const demandedCurrent = s.demanded.every(
+        (key) => (s.instances[key] ?? 0) === s.input,
+      );
+      if (demandedCurrent) s.W = s.input;
+      return s;
+    }
+  }
+}
+
+/** The visited-state key for the fan-out DFS (runs are audit trail —
+ * kept in the key so distinct histories stay distinct for the run-unit
+ * property). */
+export function fanoutStateKey(s: FanoutState): string {
+  return stableStringify(s);
+}

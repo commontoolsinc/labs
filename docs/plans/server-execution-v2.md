@@ -396,34 +396,102 @@ derivation interim, and stays (protocol.md §1).
 
 Tasks:
 
-- [ ] Remove the client's derivation-commit path under the flag (by
-      construction, not firewall).
-- [ ] Speculation overlay: run the derived graph locally, render
+- [x] Remove the client's derivation-commit path under the flag (by
+      construction, not firewall). LANDED 2026-08-07: the speculation
+      overlay is the DEFAULT seal destination of every non-serving
+      flag-ON runtime (`packages/runner/src/speculation/
+      overlay-destination.ts`) — a stamped derivation-kind run's
+      writes redirect into the replica's pending layer and no code
+      path from a derivation run to the wire exists; serving runtimes
+      are marked `servingPosture` at construction and never default
+      to it (the SpaceServer refuses activation without the mark).
+- [x] Speculation overlay: run the derived graph locally, render
       immediately, replace on authoritative arrival (drop authority,
-      never the ability to run).
-- [ ] Effectful nodes read through to last committed results — never
+      never the ability to run). LANDED 2026-08-07: overlay entries
+      apply through `sealNative` (speculative — outside the
+      `synced()` barrier), render through the ordinary pending
+      materialization, and retire on watermark coverage of the
+      entry's read basis + acked origins via success-shaped
+      `superseded` withdrawals (no cascade — an authored commit that
+      read the echo is decided by CAS); chained entries re-sweep on
+      settlement.
+- [x] Effectful nodes read through to last committed results — never
       speculated. Result-as-pattern children may instantiate
       overlay-locally, converging by cause-derived identity
-      (speculation.md §2, owner 2026-08-02).
-- [ ] UI bindings untouched: authored writes under existing ACL + CAS.
+      (speculation.md §2, owner 2026-08-02). LANDED 2026-08-07: a
+      speculative run's egress effect kinds are OWNED AND DROPPED at
+      the destination (memo hits keep reading through; misses render
+      pending), `navigateTo` stays enactable (reversible),
+      `compile-and-run` is gated at the BUILTIN (its floating compile
+      launch cannot be intercepted at the destination), and that gate's
+      true interim scope is wider than "not speculable": it suppresses
+      fresh compiles for EVERY flag-ON non-wave run — client
+      derivation, F10 handler runs, imperative flows — and the serving
+      side refuses the writebacks until the compile-and-run serving
+      port (stage G's out-of-scope note) lands, so fresh
+      compile-and-run is INERT in the ON arm everywhere until that
+      port (memo'd results still read through; the gate's both-arms
+      pins live in `packages/runner/test/compile-and-run.test.ts`);
+      result-as-pattern children ride the derivation run's overlay
+      writes.
+- [x] UI bindings untouched: authored writes under existing ACL + CAS
+      (unstamped transactions never divert; pinned in
+      `speculation-overlay.test.ts` with the store-attribution query
+      — the client's committed footprint grows by exactly the
+      authored write).
 
 Carried-in revisits (stage-F residual, accepted for Phase 1 — owner,
 2026-08-05; both must be resolved before this phase's gates rely on
 W):
 
-- [ ] The settle input-barrier distinction: `inputSynced` cannot tell
+- [x] The settle input-barrier distinction: `inputSynced` cannot tell
       a frame parked on the loop's OWN sealed commit from foreign
       novelty, so a foreign authored frame in that position can be
       claimed by W one wave early (self-healing next wave — the
       documented residual at `packages/runner/src/storage/v2.ts`,
       `inputSynced`). Either distinguish parked-on-own-seal frames
       from foreign novelty, or exclude unapplied frames' seqs from
-      the wave's `batchHead`.
-- [ ] The pattern-updater CHECK-half bring-up verification (the
+      the wave's `batchHead`. RESOLVED 2026-08-07 via the exclusion
+      alternative: `ISpaceReplica.unappliedForeignSeqFloor` +
+      the SpaceServer's W-advance clamp (`watermarkClamped`,
+      serving-loop.md §7) + the flag-gated shadow-flip notification
+      in `confirmPending`, with the own-echo and seq-0 exemptions
+      pinned both arms (verification-coverage.md's Phase-2 delta).
+- [x] The pattern-updater CHECK-half bring-up verification (the
       network source-check the unit fixture cannot serve — the
       stage-F flagged residual in `executor-serving-loop.test.ts`):
       verify it in the integration environment's `sx2-serving-loop`
-      surface, not a unit fixture.
+      surface, not a unit fixture. The surface is AUTHORED
+      (`packages/patterns/integration/sx2-serving-loop.test.ts`) and
+      the machinery observation was made in the live bring-up runs
+      (quiescence with the server-side updater posture against
+      toolshed's real routes); stated honestly, that surface is
+      currently ON-skip-listed as the demand-cycle starvation fork's
+      reproducer (verification-coverage.md OW19 — it un-skips with
+      the terminal-state follow-on below), so CI witness rides the
+      serving-loop unit suite until then. A full stale-pointer
+      roll-forward journey stays the named follow-up.
+
+**Follow-on stage (APPROVED — owner nod, 2026-08-07; its own PR
+after this phase's, the way stage C's train was cut):**
+
+- [ ] **P2-F — the scheduler instance dimension + demand-cycle
+      terminal state**: per-(action × instance) read-set/dirtiness
+      state and the N-run settle loop over demanded identities
+      (consuming the SpaceServer's demanded-identity registry through
+      the widened `#stampRun` seam — verification-coverage.md OW17,
+      approved), the replica-level per-instance READ keying, AND the
+      demand-cycle terminal state with commit-triggered re-arm plus
+      the load pass moved under the flush deadline
+      (verification-coverage.md OW19 — lifts the `sx2-serving-loop`
+      ON-skip). Until it lands, scoped runs resolve via the
+      wave-level identity unless per-run identities arrive through
+      the seam (the Phase-1 fallback, cardinality-2-pinned at the
+      seam level in this phase's PR). P2-F is part of PHASE 2's gate
+      closure — it carries the suspended `sx2-serving-loop` surface
+      and, with it, the in-CI amplification-ratio gate — not optional
+      hardening (the Phase-2 independent review's assessment,
+      2026-08-07).
 
 Success criteria (the old Phase-1 ON gates land here, merged):
 

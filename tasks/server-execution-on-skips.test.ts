@@ -134,15 +134,15 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /runner: no skips — full suite runs/);
 });
 
-Deno.test("main: the stage-F patterns entry emits its ignore flag", async () => {
+Deno.test("main: the patterns list holds the Phase-2 follow-up entry (the demand-cycle starvation fork reproducer); the two-browsers gate is retired and runs", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   assertEquals(out, [
-    "--ignore=integration/cfc-group-chat-demo-two-browsers.test.ts",
+    "--ignore=integration/sx2-serving-loop.test.ts",
   ]);
   assertMatch(
     err[0],
-    /SKIP integration\/cfc-group-chat-demo-two-browsers\.test\.ts \(until phase-2\)/,
+    /SKIP integration\/sx2-serving-loop\.test\.ts \(until phase-2-followup\)/,
   );
 });
 

@@ -42,6 +42,7 @@ import {
   readWatermarkSeq,
   waitForSettled,
   watermarkCell,
+  watermarkDocLink,
 } from "../src/executor/watermark.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { getArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
@@ -97,6 +98,7 @@ const spaceSigner = await Identity.fromPassphrase("serving loop space");
 const space = spaceSigner.did() as MemorySpace;
 const serviceSigner = await Identity.fromPassphrase("serving loop service");
 const aliceSigner = await Identity.fromPassphrase("serving loop alice");
+const bobSigner = await Identity.fromPassphrase("serving loop bob");
 
 const waitUntil = async (
   predicate: () => boolean,
@@ -144,6 +146,7 @@ describe("stage F serving loop", () => {
         const runtime = new Runtime({
           apiUrl: new URL(import.meta.url),
           storageManager: manager,
+          servingPosture: true,
           ...(servingFetch !== undefined ? { fetch: servingFetch } : {}),
           experimental: {
             serverExecution: true,
@@ -373,6 +376,237 @@ describe("stage F serving loop", () => {
     expect(
       watermarkCell(servingRuntime!, space).get()?.seq,
     ).toBeGreaterThanOrEqual(authored2);
+  });
+
+  it("retries a demanded root the loader could not start YET: demand precedes the instantiation commit (the creation race), the deferred ensure re-attempts on a later cycle, and the piece serves", async () => {
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+    // NO onServingRuntime pattern run: unlike the tests above, the
+    // demanded structure must come up through the DEMAND LOADER
+    // (`ensurePieceRunning`) — the production path they side-step.
+
+    openClient();
+    const engine = await server.engineForSpace(space);
+
+    // The client's DEMAND, registered before the piece exists ANYWHERE:
+    // the session open activates the space, and the demand cycle's
+    // ensure runs against a result doc that carries no patternIdentity
+    // meta yet — the false return this test pins the retry of.
+    const clientResult = clientRuntime.getCell<{ total: number }>(
+      space,
+      "race-result",
+      undefined,
+    );
+    await clientResult.sync();
+
+    // A pre-instantiation authored input: the argument doc commits
+    // BEFORE any patternIdentity exists anywhere. The wave cycle that
+    // covers it runs the demand loader with the result root already
+    // listed (the watch above predates this commit) — the ensure
+    // attempt this test is about, guaranteed to find no meta.
+    const clientArg = clientRuntime.getCell<{ n: number }>(
+      space,
+      "race-arg",
+      undefined,
+    );
+    await clientArg.sync();
+    const argTx = clientRuntime.edit();
+    clientArg.withTx(argTx).set({ n: 41 });
+    expect((await argTx.commit()).error).toBeUndefined();
+    const preInstantiationSeq = Engine.serverSeq(engine);
+
+    // Barrier (engine-side, deterministic): W covering that commit
+    // proves the demand cycle that drained it COMPLETED — its
+    // structure-load pass listed the result root and attempted the
+    // ensure, which found no pattern identity. Everything below runs
+    // strictly AFTER that failed first attempt.
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= preInstantiationSeq,
+      "the pre-instantiation demand cycle to cover the authored input",
+    );
+
+    // The race's second half: the piece is instantiated by a separate,
+    // short-lived SERVICE-principal session — deliberately. An ordinary
+    // client that runs a piece also WATCHES the piece's sibling docs
+    // (source, internals, the computed), and each of those watches is a
+    // NEW demanded root whose own first ensure attempt — made after the
+    // meta exists — follows the result chain back to the result cell
+    // and starts the piece, healing the very terminal state this test
+    // pins. The demand loop excludes service-principal sessions from
+    // demand (serving-loop.md §1: the loop's own reads are not client
+    // demand), so this instantiator leaves the demand set exactly as
+    // the client built it: the result root and the argument root, both
+    // first-attempted before any meta existed. Its instantiation
+    // commit is an ordinary authored input on the feed.
+    const instantiatorManager = SharedServerStorageManager.connectTo(
+      server,
+      { as: serviceSigner },
+    );
+    const instantiator = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: instantiatorManager,
+    });
+    try {
+      const compiled = await instantiator.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { computed, pattern } from 'commonfabric';",
+            "export default pattern<{ n: number }, { total: number }>(",
+            "  ({ n }) => ({ total: computed(() => n + 1) }),",
+            ");",
+          ].join("\n"),
+        }],
+      }, { space });
+      const instArg = instantiator.getCell<{ n: number }>(
+        space,
+        "race-arg",
+        undefined,
+      );
+      const instResult = instantiator.getCell<{ total: number }>(
+        space,
+        "race-result",
+        compiled.resultSchema,
+      );
+      // Presync and retry a stale-read conflict, as the loader
+      // machinery itself would (the same idiom as the tests above).
+      for (let attempt = 0;; attempt++) {
+        await instArg.sync();
+        await instResult.sync();
+        const tx = instantiator.edit();
+        instantiator.run(tx, compiled, instArg, instResult);
+        const committed = await tx.commit();
+        if (committed.error === undefined) break;
+        if (attempt >= 4) {
+          throw new Error(
+            `instantiation run failed: ${committed.error.message}`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await instantiator.idle();
+    } finally {
+      // The instantiator leaves; its local run dies with it. From here
+      // on, only a SERVER-started piece can derive anything.
+      await instantiator.dispose();
+      await instantiatorManager.close();
+    }
+
+    // The wave input whose demanded derivation only a server-side
+    // piece can produce: the instantiator computed 42 for n=41 before
+    // it left, so a derivation for n=99 cannot come from anything but
+    // the serving loop.
+    const pokeTx = clientRuntime.edit();
+    clientArg.withTx(pokeTx).set({ n: 99 });
+    expect((await pokeTx.commit()).error).toBeUndefined();
+
+    // The convergence this test exists for, gated ENGINE-side: a
+    // computed revision riding a DERIVED-class commit can only be the
+    // serving loop's piece (waves without a running piece are
+    // watermark-only, and no effect completions exist here).
+    // Deliberately NOT a client-side value read first: reading through
+    // the result link would sync the computed doc and mint a fresh
+    // demanded root — the same heal path the instantiator's principal
+    // closes. Without the retry, the loader attempted both roots once
+    // before the meta existed and never re-attempts: no piece, no
+    // derived computed revision, this wait times out. With the retry,
+    // the instantiation commit fires a demand cycle, the pending root
+    // re-attempts once the meta is readable on the serving replica,
+    // the piece starts, and the poke derives 100.
+    const newestComputed = () =>
+      engine.database.prepare(
+        `SELECT c.class AS class, c.holder AS holder FROM revision r
+         JOIN "commit" c ON c.seq = r.commit_seq
+         WHERE r.id LIKE 'computed:%' ORDER BY r.seq DESC LIMIT 1`,
+      ).get() as { class: string; holder: string } | undefined;
+    await waitUntil(
+      () => newestComputed()?.class === "derived",
+      "the server-started piece to commit the demanded derivation",
+      15_000,
+    );
+    expect(newestComputed()?.holder).toBe(host.spaceServer(space)!.holder);
+
+    // Only now read through the client: the derived value reached the
+    // demanding subscriber (M4 push + link traversal).
+    await waitUntil(
+      () => clientResult.key("total").get() === 100,
+      "the derived value to reach the demanding client",
+      15_000,
+    );
+
+    // §7: the not-loadable-yet attempts were COUNTED, not silent — at
+    // least the pre-instantiation one — and none of them THREW (false
+    // returns are deferrals, not failures; the two counters stay
+    // distinct).
+    const stats = host.stats();
+    expect(stats.structureLoadDeferred).toBeGreaterThanOrEqual(1);
+    expect(stats.structureLoadFailures).toBe(0);
+  });
+
+  it("registers NO piece demand for never-a-piece id classes: computed:/cid:/watermark roots neither retry nor count as deferred (RULED 2026-08-07)", async () => {
+    host = newHost({ flushDeadlineMs: 2_000, idleParkMs: 600_000 });
+    onServingRuntime = () => Promise.resolve();
+    openClient();
+    const engine = await server.engineForSpace(space);
+
+    // The client demands ONLY never-a-piece roots: the watermark doc
+    // (every settledness subscription's watch), a `computed:` doc, and
+    // a `cid:` doc (a content-addressed bundle — the ruled class this
+    // exclusion test previously left unexercised). None can ever carry
+    // `patternIdentity` meta, so a piece-demand attempt on them is
+    // structurally futile churn — the ruled exclusion. The demand
+    // SINKs still register (value-granular pull is not piece demand).
+    const wmCell = clientRuntime.getCellFromLink<{ seq?: number }>(
+      watermarkDocLink(space),
+    );
+    await wmCell.sync();
+    const computedProbe = clientRuntime.getCellFromLink<unknown>({
+      space,
+      id: "computed:fid1:r2-exclusion-probe" as never,
+      path: [],
+    });
+    await computedProbe.sync();
+    const cidProbe = clientRuntime.getCellFromLink<unknown>({
+      space,
+      id: "cid:bafyr2exclusionprobe" as never,
+      path: [],
+    });
+    await cidProbe.sync();
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "session-open activation",
+    );
+
+    // Drive several demand cycles with UNWATCHED authored input: an
+    // address-level blind write mints no watch root (the cell route
+    // registers a watch), so the demanded-root set stays exactly the
+    // three never-a-piece ids.
+    for (const n of [1, 2, 3]) {
+      const tx = clientRuntime.edit();
+      tx.writeValueOrThrow(
+        {
+          space,
+          id: "of:r2-exclusion-kick" as never,
+          scope: "space",
+          path: ["n"],
+        },
+        n,
+      );
+      expect((await tx.commit()).error).toBeUndefined();
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= 1,
+      "the loop to cycle over the input",
+      15_000,
+    );
+
+    // The ruled counter behavior: excluded roots produce ZERO deferral
+    // churn (the counter stays meaningful for genuinely
+    // not-yet-loadable pieces) and no failures.
+    const stats = host.stats();
+    expect(stats.structureLoadDeferred).toBe(0);
+    expect(stats.structureLoadFailures).toBe(0);
   });
 
   it("holds W until loopback frames deliver at a REAL refresh cadence: the settle's server.idle() drain is load-bearing (protocol.md §4)", async () => {
@@ -1398,5 +1632,223 @@ describe("stage F serving loop", () => {
       15_000,
     );
     expect(host.stats().outbox.completed).toBeGreaterThanOrEqual(1);
+  });
+
+  it("threads per-run DEMANDED identities through the production stamper seam: two runs, two instances, two carriages (M1 at cardinality 2; T7.Q4's m-4 discharge)", async () => {
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+    onServingRuntime = () => Promise.resolve();
+    openClient();
+
+    // Activation via the client's demand.
+    const kick = clientRuntime.getCell<{ n: number }>(
+      space,
+      "fanout-kick",
+      undefined,
+    );
+    await kick.sync();
+    const kickTx = clientRuntime.edit();
+    kick.withTx(kickTx).set({ n: 1 });
+    expect((await kickTx.commit()).error).toBeUndefined();
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate",
+    );
+    const engine = await server.engineForSpace(space);
+    const serving = servingRuntime!;
+
+    const identities = [
+      {
+        label: "alice",
+        identity: {
+          principal: "did:key:fanout-alice",
+          sessionId: "alice-s1" as never,
+        },
+      },
+      {
+        label: "bob",
+        identity: {
+          principal: "did:key:fanout-bob",
+          sessionId: "bob-s1" as never,
+        },
+      },
+    ] as const;
+    const waveKey = resolveScopeKey("user", serving.scopeKeyIdentity);
+
+    // TWO runs of one action, each stamped with its DEMANDED identity
+    // through the PRODUCTION seam (runtime.stampServerRun -> the
+    // SpaceServer's #stampRun -> the wave run context). Each demanded
+    // instance derives its OWN slot doc (per-instance result cells —
+    // the landed depth; same-doc replica-read instancing is the owed
+    // scheduler follow-up, and the same-doc ENGINE fold is pinned at
+    // the wave/sink level). Each run also enqueues an effect whose
+    // carriage must carry ITS identity into the completion — the
+    // register's m-4 note made real: the carriage carries a DIFFERENT
+    // key per run, never the wave identity's.
+    const docIds: string[] = [];
+    const completions: Promise<void>[] = [];
+    for (const [index, { label, identity }] of identities.entries()) {
+      const outBase = serving.getCell<{ total?: number }>(
+        space,
+        `fanout-user-result-${label}`,
+        undefined,
+      );
+      const outScoped = serving.getCellFromLink<{ total?: number }>({
+        ...outBase.getAsNormalizedFullLink(),
+        scope: "user",
+      });
+      docIds.push(outBase.getAsNormalizedFullLink().id);
+      const runTx = serving.edit();
+      serving.stampServerRun(runTx, {
+        actionId: "test/fanout-node",
+        kind: "derivation",
+        scopeKeyIdentity: identity,
+        actionScopeKey: resolveScopeKey("user", identity),
+      });
+      outScoped.withTx(runTx).set({ total: index + 1 });
+      const effectKey = `fanoutTest:${label}`;
+      const done = Promise.withResolvers<void>();
+      completions.push(done.promise);
+      runTx.enqueuePostCommitEffect({
+        id: effectKey,
+        kind: "fanoutTest-start",
+        flush: () => {
+          const work = serving.editWithRetry((tx) => {
+            markEffectCompletion(tx, effectKey);
+            outScoped.withTx(tx).set({ total: (index + 1) * 11 });
+          }).then(({ error }) => {
+            if (error !== undefined) {
+              throw new Error(`completion failed: ${error.message}`);
+            }
+            done.resolve();
+          });
+          serving.trackAsyncWork(work);
+        },
+      });
+      expect((await runTx.commit()).error).toBeUndefined();
+    }
+    await Promise.all(completions);
+
+    // Every scoped row — the wave's writes AND the completions' — lands
+    // under the RUN'S demanded instance key, never the wave/service
+    // identity's. The completion half is T7.Q4's m-4 discharge: the
+    // outbox carriage captured at each run's seal carries a DIFFERENT
+    // per-run key.
+    for (const [index, { identity }] of identities.entries()) {
+      const expectedKey = resolveScopeKey("user", identity);
+      await waitUntil(
+        () => {
+          const rows = engine.database.prepare(
+            `SELECT DISTINCT scope_key FROM revision WHERE id = :id`,
+          ).all({ id: docIds[index] }) as Array<{ scope_key: string }>;
+          return rows.some((row) => row.scope_key === expectedKey);
+        },
+        `instance ${index} to land`,
+        20_000,
+      );
+      const keys = (engine.database.prepare(
+        `SELECT DISTINCT scope_key FROM revision WHERE id = :id`,
+      ).all({ id: docIds[index] }) as Array<{ scope_key: string }>).map((
+        row,
+      ) => row.scope_key);
+      expect(keys).toEqual([expectedKey]);
+      expect(keys.includes(waveKey)).toBe(false);
+    }
+    // Basis rows keyed per (action, instance) — serving-loop.md §3b's
+    // action_scope_key from each run's demanded identity.
+    const basisKeys = new Set(
+      (engine.database.prepare(
+        `SELECT DISTINCT action_scope_key FROM scheduler_basis
+         WHERE action = :action`,
+      ).all({ action: "test/fanout-node" }) as Array<
+        { action_scope_key: string }
+      >).map((row) => row.action_scope_key),
+    );
+    for (const { identity } of identities) {
+      expect(basisKeys.has(resolveScopeKey("user", identity))).toBe(true);
+    }
+  });
+
+  it("carries the demanding session's identity into the SpaceServer's demand registry (M1 demand carriage at cardinality 2)", async () => {
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+    onServingRuntime = () => Promise.resolve();
+
+    // TWO principals, one user-scoped root each: the watch registry
+    // must carry each demander's identity, deduped per INSTANCE — the
+    // demand half of scopes.md §5's "the DEMAND supplies the identity".
+    openClient();
+    const bobManager = SharedServerStorageManager.connectTo(server, {
+      as: bobSigner,
+    });
+    const bobRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: bobManager,
+    });
+    try {
+      const aliceCellBase = clientRuntime.getCell<{ v?: number }>(
+        space,
+        "fanout-demand-root",
+        undefined,
+      );
+      const aliceScoped = clientRuntime.getCellFromLink<{ v?: number }>({
+        ...aliceCellBase.getAsNormalizedFullLink(),
+        scope: "user",
+      });
+      await aliceScoped.sync();
+      const bobCellBase = bobRuntime.getCell<{ v?: number }>(
+        space,
+        "fanout-demand-root",
+        undefined,
+      );
+      const bobScoped = bobRuntime.getCellFromLink<{ v?: number }>({
+        ...bobCellBase.getAsNormalizedFullLink(),
+        scope: "user",
+      });
+      await bobScoped.sync();
+      const rootDocId = aliceCellBase.getAsNormalizedFullLink().id;
+
+      // Activation + a demand-load pass.
+      const kick = clientRuntime.getCell<{ n: number }>(
+        space,
+        "fanout-demand-kick",
+        undefined,
+      );
+      await kick.sync();
+      const kickTx = clientRuntime.edit();
+      kick.withTx(kickTx).set({ n: 1 });
+      expect((await kickTx.commit()).error).toBeUndefined();
+      await waitUntil(
+        () => host!.spaceServer(space)?.active === true,
+        "space to activate",
+      );
+
+      // The server-side watch registry carries BOTH identities…
+      const roots = server.watchedRootsForSpace(space, {
+        excludePrincipal: serviceSigner.did(),
+      });
+      const scopedEntries = roots.filter((root) =>
+        root.id === rootDocId && root.scope === "user"
+      );
+      const principals = new Set(
+        scopedEntries.map((root) => root.identity?.principal),
+      );
+      expect(principals.has(aliceSigner.did())).toBe(true);
+      expect(principals.has(bobSigner.did())).toBe(true);
+
+      // …and the SpaceServer's demand registry records them per
+      // instance after its next demand-load pass.
+      await waitUntil(
+        () => {
+          const identities = host!.spaceServer(space)
+            ?.demandedIdentitiesOf(rootDocId) ?? [];
+          const seen = new Set(identities.map((i) => i.principal));
+          return seen.has(aliceSigner.did()) && seen.has(bobSigner.did());
+        },
+        "the demand registry to carry both principals",
+        15_000,
+      );
+    } finally {
+      await bobRuntime.dispose();
+      await bobManager.close();
+    }
   });
 });
