@@ -10,9 +10,10 @@ import {
 } from "commonfabric";
 import {
   findElementByExactText,
-  findNode,
+  findNodeByProp,
   hasText,
   propsOf,
+  propValue,
   readValue,
 } from "../test/vnode-helpers.ts";
 import PollOptionCard from "./poll-option-card.tsx";
@@ -26,21 +27,6 @@ import type {
 } from "./main.tsx";
 
 type EmptyState = Record<PropertyKey, never>;
-
-const findNodeByProp = (
-  root: unknown,
-  prop: string,
-  expected: unknown,
-): unknown | undefined =>
-  findNode(root, (node) => {
-    const props = propsOf(node);
-    return props !== undefined && readValue(props[prop]) === expected;
-  });
-
-const propValue = (node: unknown, prop: string): unknown => {
-  const props = propsOf(node);
-  return props ? readValue(props[prop]) : undefined;
-};
 
 const noopCastVote = handler<CastVoteEvent, EmptyState>(() => {});
 const noopRemoveOption = handler<RemoveOptionEvent, EmptyState>(() => {});
