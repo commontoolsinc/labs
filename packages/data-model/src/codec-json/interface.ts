@@ -1,9 +1,9 @@
 /**
- * JSON-compatible wire format value. This is the intermediate tree
- * representation used during serialization tree walking -- NOT the final
- * serialized form (which is `string`). Internal to the JSON implementation.
+ * JSON-compatible codec value. This is the intermediate tree representation
+ * used during serialization tree walking -- NOT the final serialized form
+ * (which is `string`). Internal to the JSON implementation.
  *
- * Deep-frozen invariant: every wire tree that *enters deserialization* is
+ * Deep-frozen invariant: every such tree that *enters deserialization* is
  * deep-frozen. This is enforced at the two construction sites that feed
  * `deserialize()` -- `decode()` and `fromBytes()`, unified in
  * `#parseWireText()` -- and is what lets `unwrapTag()` / the `/quote` arm
@@ -14,10 +14,10 @@
  * deep-frozen as a side effect of `unquote()`'s recursive rebuild, but no
  * other serialize output is, and none needs to be.)
  */
-export type JsonWireValue =
+export type JsonCodecValue =
   | null
   | boolean
   | number
   | string
-  | readonly JsonWireValue[]
-  | { readonly [key: string]: JsonWireValue };
+  | readonly JsonCodecValue[]
+  | { readonly [key: string]: JsonCodecValue };
