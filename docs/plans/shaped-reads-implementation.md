@@ -150,8 +150,28 @@ scheme and refuses `computed:` rather than stripping it. Independent of
 everything else here, and everything that composes an emitted address into a
 following command waits on it.
 
+**A5. An object that asks for nothing is not read.** *(S)* `projectionMask`
+reduces an *array* whose items reject to `false`, because array traversal
+follows each element's link before it consults the item schema — a rejection one
+level down arrives after the load it was meant to prevent. An **object** whose
+every property rejects gets no such reduction, so it stays a non-rejecting
+selector.
+
+The two compose badly. Marking a field *below* a link — `notes.title@` — gives
+each element the mask `{properties: {title: false}}`, which is not `false`, so
+the array's `items` is not `false`, so the array does not reduce, so traversal
+loads every element document. The addresses are correct and cost nothing extra
+to render; the read is simply not free the way a marker on the link itself is.
+Measured at four document reads where one would do.
+
+The fix is the symmetric reduction, which then cascades: an all-rejecting object
+becomes `false`, the array's `items` becomes `false`, the array reduces, and the
+fetch is suppressed at the top. What wants care is that `false` at a position
+changes what the projector receives there, not just what the selector asks for.
+
 *Exit:* a created child's address survives a read, composes into the next
-command without reshaping, and a marked collection is measurably one document.
+command without reshaping, and a marked collection is measurably one document —
+including when the marker sits below a link rather than on it.
 
 ## Stage 3 — session identity
 
@@ -269,6 +289,7 @@ Stages are ordered, but not everything in them is blocked.
 | A2 | A1 | |
 | A3 | A1, F2 | needs both the marker and the flag |
 | A4 | — | can land any time; grouped where its value shows |
+| A5 | A2 | completes A2's property for a marker below a link; wanted before W1/W2, which inherit whatever a read costs |
 | S1 | — | |
 | S2 | S1 | must precede C3 |
 | C1 | — | independent; ordered before C2 for the bound |
@@ -294,6 +315,13 @@ since counting reads is not observable from stdout.
 **A4 is testable by identity**, as a unit test: the same piece resolves through a
 bare hash and through its `of:` form, and `computed:` is refused by name rather
 than coerced.
+
+**A5 is a read count, and the existing counter already covers it.** The test
+wrapping `storageManager.open(space).sync` asserts a marked collection syncs one
+document; the case A5 fixes is the same assertion with the marker one level
+lower. Worth pinning both, since they fail for different reasons: the marker on
+the link tests that the selector rejects, and the marker below it tests that a
+rejection propagates upward through the containers that hold it.
 
 **S2 wants two sessions and one verb** — an integration test, since it is about
 addresses that differ across processes. The negative case matters as much: one
