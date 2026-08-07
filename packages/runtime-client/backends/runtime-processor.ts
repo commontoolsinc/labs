@@ -924,6 +924,15 @@ export class RuntimeProcessor {
     // the top-level cfcLabel below). Display-only: the worker neither
     // persists nor re-imports inbound views, so the redacted copies cannot
     // round-trip into under-labeled state.
+    //
+    // TODO(danfuzz): `convertCellsToLinks` preserves a `FabricPrimitive` by
+    // identity, so despite the `as JSONValue` cast below the response can
+    // hold live fabric objects, and `postMessage`'s structured clone
+    // silently strips their prototype and private state to `{}` on the way
+    // to the main thread. The inbound direction throws instead
+    // (`CellHandle.serialize`; see the `WireCellValue` marker in
+    // `protocol/types.ts`) — this outbound direction loses silently. The
+    // subscription-update path below posts the same conversion.
     const converted = redactSigilCfcLabelViewsForDisplay(
       convertCellsToLinks(value, {
         includeSchema: true,

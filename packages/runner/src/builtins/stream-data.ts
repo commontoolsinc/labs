@@ -275,6 +275,10 @@ function snapshotStreamDataInputs(
   if (!snapshot.options) {
     return createFrozenRequestSnapshot({ url: snapshot.url });
   }
+  // TODO(danfuzz): same gap as the fetch builtin's body handling: the `body`
+  // schema is open (`{}`), and `JSON.stringify` renders a
+  // `FabricSpecialObject` body as `"{}"` — on the wire and in the request id
+  // the snapshot hashes to.
   const options = {
     ...snapshot.options,
     body: body !== undefined && typeof body !== "string"

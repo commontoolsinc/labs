@@ -17,6 +17,12 @@ const hasOwnPathSegment = (
   segment: string | number,
 ): boolean => Object.hasOwn(value, segment);
 
+// TODO(danfuzz): both descents below treat a `FabricSpecialObject` as a
+// record with no own keys, so any path into a `FabricInstance`'s codec
+// contents reports absent / `undefined`. That answer is right for a
+// `FabricPrimitive` (a leaf) but accidental for an instance — and it
+// disagrees with `getAtPath` in `traverse.ts`, whose `in`-based descent
+// resolves the same address through the instance's prototype surface.
 export const hasValueAtPath = (
   root: FabricValue | undefined,
   path: readonly string[],

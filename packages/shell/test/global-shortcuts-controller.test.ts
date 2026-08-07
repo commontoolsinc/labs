@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { GlobalShortcutsController } from "../src/lib/global-shortcuts-controller.ts";
-import type { Command } from "../shared/mod.ts";
+import type { Command } from "../src/views/BaseView.ts";
 
 // Exercises the shell's two global keyboard shortcuts: Cmd/Ctrl+Shift+O opens
 // the quick jump view, and Alt+W navigates to the space the current view
