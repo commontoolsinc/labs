@@ -46,7 +46,7 @@ export function traverseValue(
   // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
   // point this becomes a walk rather than a refusal.
   if ((value as object) instanceof FabricInstance) {
-    throw refuseFabricInstance(
+    refuseFabricInstance(
       value as FabricInstance,
       "when traversing a builder value",
     );
