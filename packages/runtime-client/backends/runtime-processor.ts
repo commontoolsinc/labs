@@ -1,6 +1,6 @@
 import { DID, Identity, type Session } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { JsonEncodingContext } from "@commonfabric/data-model/codec-json";
+import { JsonCodec } from "@commonfabric/data-model/codec-json";
 import { PieceManager } from "@commonfabric/piece";
 import {
   PieceController,
@@ -170,7 +170,7 @@ import {
 } from "./runtime-error.ts";
 
 const MAX_SERIALIZATION_DEPTH = 5;
-const blobUploadEncoding = new JsonEncodingContext();
+const blobUploadCodec = new JsonCodec();
 
 // Split-timing for the CFC label IPC path. Counts/timing are readable via
 // getLoggerCounts(); enabled silently so the hot path pays only the timestamp.
@@ -1615,7 +1615,7 @@ export class RuntimeProcessor {
     );
     // Blob upload payloads must preserve FabricBytes even when the wider
     // process is running with legacy memory JSON flags.
-    const body = blobUploadEncoding.encode({
+    const body = blobUploadCodec.encode({
       type: request.contentType,
       body: new FabricBytes(bytes),
     });
