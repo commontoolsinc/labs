@@ -33,6 +33,14 @@ function createState(): ProfileCaptureState {
   };
 }
 
+function createProfilerStarter(start: () => Promise<void>) {
+  return {
+    enable: () => Promise.resolve(),
+    setSamplingInterval: (_params: { interval: number }) => Promise.resolve(),
+    start,
+  };
+}
+
 class FakeWebSocket {
   readyState: number = WebSocket.CONNECTING;
   added: string[] = [];
@@ -120,10 +128,12 @@ class FakeCelestial {
       });
     },
     setSamplingInterval: (params: { interval: number }) => {
+      this.calls.push("Profiler.setSamplingInterval");
       this.samplingIntervals.push(params.interval);
       return Promise.resolve();
     },
     start: () => {
+      this.calls.push("Profiler.start");
       this.starts += 1;
       // What the inspector answers a `Profiler.start` it has not enabled yet.
       if (!this.profilerEnabled) {
@@ -133,6 +143,7 @@ class FakeCelestial {
       return this.startPromise ?? Promise.resolve();
     },
     stop: () => {
+      this.calls.push("Profiler.stop");
       this.stops += 1;
       return Promise.resolve({ profile: this.profile });
     },
@@ -525,19 +536,27 @@ describe("capture-deno-inspector-profile helpers", () => {
     assertEquals(stringifyRemoteObject({}), "[unknown]");
   });
 
-  it("starts the profiler when the websocket is open", async () => {
+  it("enables, configures, and starts the profiler when the websocket is open", async () => {
     const state = createState();
     const ws = new FakeWebSocket();
     ws.readyState = WebSocket.OPEN;
     const logs: string[] = [];
-    let starts = 0;
+    const calls: string[] = [];
 
     const started = await startProfilerIfReady(
       state,
       ws as unknown as WebSocket,
       {
+        enable: () => {
+          calls.push("enable");
+          return Promise.resolve();
+        },
+        setSamplingInterval: ({ interval }) => {
+          calls.push(`sampling:${interval}`);
+          return Promise.resolve();
+        },
         start: () => {
-          starts += 1;
+          calls.push("start");
           return Promise.resolve();
         },
       },
@@ -545,7 +564,7 @@ describe("capture-deno-inspector-profile helpers", () => {
     );
 
     assertEquals(started, true);
-    assertEquals(starts, 1);
+    expect(calls).toEqual(["enable", "sampling:100", "start"]);
     assertEquals(state.profilerActive, true);
     assertEquals(state.sawProfileStop, false);
     assertEquals(logs, ["profile: profiler started"]);
@@ -560,7 +579,7 @@ describe("capture-deno-inspector-profile helpers", () => {
     const started = await startProfilerIfReady(
       state,
       ws as unknown as WebSocket,
-      { start: () => Promise.resolve() },
+      createProfilerStarter(() => Promise.resolve()),
       () => {},
       { clearStop: false },
     );
@@ -588,12 +607,12 @@ describe("capture-deno-inspector-profile helpers", () => {
     const started = await startProfilerIfReady(
       state,
       ws as unknown as WebSocket,
-      {
-        start: () => {
+      createProfilerStarter(
+        () => {
           starts += 1;
           return Promise.resolve();
         },
-      },
+      ),
     );
 
     assertEquals(started, false);
@@ -605,31 +624,34 @@ describe("capture-deno-inspector-profile helpers", () => {
     const ws = new FakeWebSocket();
     ws.readyState = WebSocket.OPEN;
     let resolveStart: (() => void) | undefined;
+    const startCalled = Promise.withResolvers<void>();
     let starts = 0;
 
     const firstStart = startProfilerIfReady(
       state,
       ws as unknown as WebSocket,
-      {
-        start: () => {
+      createProfilerStarter(
+        () => {
           starts += 1;
+          startCalled.resolve();
           return new Promise<void>((resolve) => {
             resolveStart = resolve;
           });
         },
-      },
+      ),
     );
     assertEquals(state.profilerStarting, true);
+    await startCalled.promise;
 
     const secondStarted = await startProfilerIfReady(
       state,
       ws as unknown as WebSocket,
-      {
-        start: () => {
+      createProfilerStarter(
+        () => {
           starts += 1;
           return Promise.resolve();
         },
-      },
+      ),
     );
     resolveStart?.();
     const firstStarted = await firstStart;
@@ -651,9 +673,7 @@ describe("capture-deno-inspector-profile helpers", () => {
       await startProfilerIfReady(
         state,
         ws as unknown as WebSocket,
-        {
-          start: () => Promise.reject(new Error("closed")),
-        },
+        createProfilerStarter(() => Promise.reject(new Error("closed"))),
       );
     } catch (error) {
       caught = error;
@@ -671,9 +691,7 @@ describe("capture-deno-inspector-profile helpers", () => {
     const started = startProfilerIfReady(
       state,
       ws as unknown as WebSocket,
-      {
-        start: () => new Promise<void>(() => {}),
-      },
+      createProfilerStarter(() => new Promise<void>(() => {})),
     );
     assertEquals(state.profilerStarting, true);
 
@@ -929,7 +947,7 @@ describe("capture-deno-inspector-profile helpers", () => {
     });
   });
 
-  it("starts and stops from console profile markers", async () => {
+  it("enables the profiler as part of a marker-triggered start", async () => {
     await withTempDir(async (tmpDir) => {
       const celestial = new FakeCelestial();
       const logs: string[] = [];
@@ -948,6 +966,7 @@ describe("capture-deno-inspector-profile helpers", () => {
       );
 
       await resumed.promise;
+      celestial.profilerEnabled = false;
       celestial.dispatchConsole({ value: "profile start" });
       await started.promise;
       celestial.dispatchConsole({ value: "profile stop" });
@@ -955,6 +974,16 @@ describe("capture-deno-inspector-profile helpers", () => {
       assertEquals(await done, 0);
       assertEquals(celestial.starts, 1);
       assertEquals(celestial.stops, 1);
+      expect(celestial.calls).toEqual([
+        "Runtime.enable",
+        "Console.enable",
+        "Debugger.enable",
+        "Profiler.enable",
+        "Profiler.setSamplingInterval",
+        "Profiler.start",
+        "Profiler.stop",
+        "close",
+      ]);
       assertEquals(logs.includes("profile: profile stop matched"), true);
     });
   });
@@ -965,6 +994,7 @@ describe("capture-deno-inspector-profile helpers", () => {
       const gate = Promise.withResolvers<void>();
       celestial.profilerEnableGate = gate;
       const logs: string[] = [];
+      const resumed = Promise.withResolvers<void>();
       const started = Promise.withResolvers<void>();
       const done = captureDenoInspectorProfile(
         [
@@ -974,13 +1004,12 @@ describe("capture-deno-inspector-profile helpers", () => {
           "--profile-stop-pattern=profile stop",
           "--websocket-url=ws://127.0.0.1:9333/session",
         ],
-        createCaptureRuntime({ celestial, logs, started }),
+        createCaptureRuntime({ celestial, logs, resumed, started }),
       );
 
-      // `Runtime.enable` has already answered, so console events reach the
-      // capture while `Profiler.enable` is still outstanding.
-      await celestial.profilerEnableCalled.promise;
+      await resumed.promise;
       celestial.dispatchConsole({ value: "profile start" });
+      await celestial.profilerEnableCalled.promise;
       assertEquals(celestial.starts, 0);
 
       gate.resolve();
@@ -999,6 +1028,7 @@ describe("capture-deno-inspector-profile helpers", () => {
       const gate = Promise.withResolvers<void>();
       celestial.profilerEnableGate = gate;
       const logs: string[] = [];
+      const resumed = Promise.withResolvers<void>();
       const started = Promise.withResolvers<void>();
       const done = captureDenoInspectorProfile(
         [
@@ -1008,14 +1038,15 @@ describe("capture-deno-inspector-profile helpers", () => {
           "--profile-stop-pattern=profile stop",
           "--websocket-url=ws://127.0.0.1:9333/session",
         ],
-        createCaptureRuntime({ celestial, logs, started }),
+        createCaptureRuntime({ celestial, logs, resumed, started }),
       );
 
       // A stop that precedes the start marker is stale, and the deferred
       // start carries that answer rather than the default.
-      await celestial.profilerEnableCalled.promise;
+      await resumed.promise;
       celestial.dispatchConsole({ value: "profile stop" });
       celestial.dispatchConsole({ value: "profile start" });
+      await celestial.profilerEnableCalled.promise;
 
       gate.resolve();
       await started.promise;
@@ -1033,6 +1064,7 @@ describe("capture-deno-inspector-profile helpers", () => {
       const gate = Promise.withResolvers<void>();
       celestial.profilerEnableGate = gate;
       const logs: string[] = [];
+      const resumed = Promise.withResolvers<void>();
       const started = Promise.withResolvers<void>();
       const done = captureDenoInspectorProfile(
         [
@@ -1042,13 +1074,14 @@ describe("capture-deno-inspector-profile helpers", () => {
           "--profile-stop-pattern=profile stop",
           "--websocket-url=ws://127.0.0.1:9333/session",
         ],
-        createCaptureRuntime({ celestial, logs, started }),
+        createCaptureRuntime({ celestial, logs, resumed, started }),
       );
 
       // No stop preceded the start marker, so the stop that follows it is the
       // live one and survives the profiler actually starting.
-      await celestial.profilerEnableCalled.promise;
+      await resumed.promise;
       celestial.dispatchConsole({ value: "profile start" });
+      await celestial.profilerEnableCalled.promise;
       celestial.dispatchConsole({ value: "profile stop" });
 
       gate.resolve();

@@ -23,6 +23,8 @@ export type ProfileStopState = {
 };
 
 type ProfilerController = {
+  enable(): Promise<unknown>;
+  setSamplingInterval(params: { interval: number }): Promise<unknown>;
   start(): Promise<void>;
   stop(): Promise<{ profile: unknown }>;
 };
@@ -30,10 +32,7 @@ type ProfilerController = {
 type ProfileCaptureRuntimeApi = {
   Console: { enable(): Promise<unknown> };
   Debugger: { enable(params: Record<string, unknown>): Promise<unknown> };
-  Profiler: ProfilerController & {
-    enable(): Promise<unknown>;
-    setSamplingInterval(params: { interval: number }): Promise<unknown>;
-  };
+  Profiler: ProfilerController;
   Runtime: { enable(): Promise<unknown> };
   addEventListener: EventTarget["addEventListener"];
   removeEventListener: EventTarget["removeEventListener"];
@@ -274,10 +273,18 @@ export function markProfileStoppedOnce(
   return true;
 }
 
+/**
+ * Enables, configures, and starts the profiler as one guarded transaction.
+ * A marker-triggered start may happen after the debugger resumes, so the
+ * profiler domain is enabled at the point where its active state is required.
+ */
 export async function startProfilerIfReady(
   state: ProfileCaptureState,
   ws: InspectorCommandWebSocket,
-  profiler: Pick<ProfilerController, "start">,
+  profiler: Pick<
+    ProfilerController,
+    "enable" | "setSamplingInterval" | "start"
+  >,
   log: (message: string) => void = () => {},
   options: { clearStop?: boolean } = {},
 ): Promise<boolean> {
@@ -289,6 +296,11 @@ export async function startProfilerIfReady(
   }
   state.profilerStarting = true;
   try {
+    await settleInspectorCommand(ws, () => profiler.enable());
+    await settleInspectorCommand(
+      ws,
+      () => profiler.setSamplingInterval({ interval: 100 }),
+    );
     await settleInspectorCommand(ws, () => profiler.start());
     markProfilerStarted(state, options);
     log("profile: profiler started");
@@ -417,10 +429,6 @@ export async function captureDenoInspectorProfile(
   let pendingProfilerStopReason: string | undefined;
   let profilerStartError: string | undefined;
   let missingProfileStartError: string | undefined;
-  // Whether `Profiler.enable` has answered, and the start options a console
-  // marker recorded before it did.
-  let profilerEnabled = false;
-  let deferredProfilerStartOptions: { clearStop?: boolean } | undefined;
 
   const target = {
     id: websocketUrl,
@@ -496,16 +504,7 @@ export async function captureDenoInspectorProfile(
     );
     if (profileMessage.startedProfile) {
       const startOptions = { clearStop: profileMessage.hadProfileStop };
-      // `Runtime.enable` is what makes console events flow, and it resolves
-      // before `Profiler.enable` does. A target that prints its start marker
-      // in that window reaches here against a profiler the inspector has not
-      // enabled yet, and `Profiler.start` answers -32000. Hold the marker's
-      // options instead; the enable sequence starts the profiler with them.
-      if (profilerEnabled) {
-        void startProfiler(startOptions);
-      } else {
-        deferredProfilerStartOptions ??= startOptions;
-      }
+      void startProfiler(startOptions);
     }
     if (summaryRegex.test(text)) {
       requestProfilerStop("summary-matched");
@@ -586,15 +585,9 @@ export async function captureDenoInspectorProfile(
     output.log("profile: runtime enabled");
     await celestial.Console.enable();
     await celestial.Debugger.enable({});
-    await celestial.Profiler.enable();
-    await celestial.Profiler.setSamplingInterval({ interval: 100 });
-    profilerEnabled = true;
 
-    // Either the run carries no start pattern, so profiling begins at attach
-    // with no marker to answer, or a marker arrived while the enable sequence
-    // was still in flight and left the options it was seen with.
     if (state.sawProfileStart) {
-      await startProfiler(deferredProfilerStartOptions ?? {});
+      await startProfiler();
     }
 
     stopResumeOnPause = resumeDebuggerOnPause(celestial, ws, -2);
