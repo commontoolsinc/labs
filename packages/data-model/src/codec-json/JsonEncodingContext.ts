@@ -11,9 +11,9 @@ import { deepFreeze } from "@/deep-freeze.ts";
 import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionContext.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { createDefaultRegistry } from "./createDefaultRegistry.ts";
+import { createDefaultRegistry } from "@/codec-common/createDefaultRegistry.ts";
 import type { JsonWireValue } from "./interface.ts";
-import { type CodecRegistry, SELF_REP } from "./CodecRegistry.ts";
+import { type CodecRegistry, SELF_REP } from "@/codec-common/CodecRegistry.ts";
 import { CODEC_META_TAGS } from "@/codec-common/codec-meta-tags.ts";
 
 /**
