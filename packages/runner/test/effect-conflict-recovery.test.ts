@@ -153,9 +153,12 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
       srcA.withTx(tx).set(1);
       resA.withTx(tx).set(0);
       rtA.prepareTxForCommit(tx);
-      const res = await tx.commit();
+      // Verdict-marked, no synced(): the barrier would hold on A's parked
+      // accept and force the shared fan-out through — to B too, destroying
+      // the controlled staleness. The awaited verdict is durably accepted,
+      // which is all B's explicit sync/pull needs.
+      const res = await tx.commit({ resolveAt: "verdict" });
       expect(res.error, `seed: ${JSON.stringify(res.error)}`).toBeUndefined();
-      await storageA.synced();
     }
 
     // B converges to source=1, result=0.
@@ -172,9 +175,8 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
       const tx = rtA.edit();
       srcA.withTx(tx).set(2);
       rtA.prepareTxForCommit(tx);
-      const res = await tx.commit();
+      const res = await tx.commit({ resolveAt: "verdict" });
       expect(res.error, `bump: ${JSON.stringify(res.error)}`).toBeUndefined();
-      await storageA.synced();
     }
     expect(srcB.get(), "B is provably stale (still 1) before the effect runs")
       .toBe(1);
@@ -256,9 +258,12 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
       srcA.withTx(tx).set(1);
       resA.withTx(tx).set(0);
       rtA.prepareTxForCommit(tx);
-      const res = await tx.commit();
+      // Verdict-marked, no synced(): the barrier would hold on A's parked
+      // accept and force the shared fan-out through — to B too, destroying
+      // the controlled staleness. The awaited verdict is durably accepted,
+      // which is all B's explicit sync/pull needs.
+      const res = await tx.commit({ resolveAt: "verdict" });
       expect(res.error, `seed: ${JSON.stringify(res.error)}`).toBeUndefined();
-      await storageA.synced();
     }
 
     // B converges to source=1.
@@ -314,9 +319,8 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
       const tx = rtA.edit();
       srcA.withTx(tx).set(2);
       rtA.prepareTxForCommit(tx);
-      const res = await tx.commit();
+      const res = await tx.commit({ resolveAt: "verdict" });
       expect(res.error, `bump: ${JSON.stringify(res.error)}`).toBeUndefined();
-      await storageA.synced();
     }
 
     // Release the parked run; its commit now carries the stale source basis.

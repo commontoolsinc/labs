@@ -265,6 +265,13 @@ export class Client {
     }
     const requestId = message.requestId as string;
     const pending = Promise.withResolvers<unknown>();
+    // The rejection handler below only attaches after the transport send
+    // completes, and send suspends across event-loop turns on any real
+    // transport — close()'s rejectPending() can fire in that window with
+    // no handler attached yet, surfacing as an unhandled rejection. The
+    // pre-attached no-op keeps the window closed; the await below still
+    // observes the rejection.
+    pending.promise.catch(() => {});
     this.#pending.set(requestId, pending);
     await this.transport.send(encodeMemoryBoundary(message));
     const result = await pending.promise as ResponseMessage<Result>;
@@ -1630,6 +1637,14 @@ export class WatchView {
 
 export const connect = Client.connect;
 
+// NOTE: loopback resolves requests and delivers frames on MICROTASKS —
+// within the sender's own await cascade, which no real transport can do. A
+// real socket never responds before the event loop turns over, so timing
+// races that depend on "nothing arrives until I yield" are invisible under
+// this transport. Making loopback deliver on timer turns is the honest
+// fix, but it invalidates every test premise built on the artificial
+// quiescence (controlled-staleness fixtures foremost), which need explicit
+// fan-out gating first — tracked as follow-up work.
 export const loopback = (server: Server): Transport => {
   let receiver = (_payload: string) => {};
   const connection = server.connect((message) => {
