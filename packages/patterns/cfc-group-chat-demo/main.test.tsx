@@ -2,9 +2,9 @@ import { action, assert, Default, pattern, UI, Writable } from "commonfabric";
 import {
   findNodeById,
   findNodeByProp,
-  nodeIncludesText,
+  hasText,
   propValue,
-} from "../test-ui-helpers.ts";
+} from "../test/vnode-helpers.ts";
 import {
   createRandomImportedClaimedMessages,
   seededRandom,
@@ -206,7 +206,7 @@ export default pattern(() => {
       propValue(everyoneCheckbox, "checked") === true &&
       propValue(everyoneCheckbox, "disabled") === false &&
       propValue(toggleButton, "disabled") === true &&
-      nodeIncludesText(toggleButton, "Admin via everyone");
+      hasText(toggleButton, "Admin via everyone");
   });
   const assert_bootstrap_admin_can_add_room = assert(() => {
     const roomList = roomsValue(rooms);
@@ -227,17 +227,17 @@ export default pattern(() => {
       "data-ui-control",
       "admin-user-toggle",
     );
+    const userList = findNodeById(chat[UI], "trusted-admin-user-list");
     return propValue(toggleButton, "disabled") === false &&
-      nodeIncludesText(toggleButton, "Remove admin") &&
-      nodeIncludesText(
-        findNodeById(chat[UI], "trusted-admin-user-list"),
-        "Admin",
-      );
+      hasText(toggleButton, "Remove admin") &&
+      // Alice's role chip carries its text in a `label` prop, so this looks
+      // for the prop rather than for rendered text.
+      findNodeByProp(userList, "label", "Admin") !== undefined;
   });
   const assert_admin_view_lists_bob_after_lockdown = assert(() => {
     const userList = findNodeById(chat[UI], "trusted-admin-user-list");
-    return nodeIncludesText(userList, "Bob") &&
-      nodeIncludesText(userList, "Make admin");
+    return hasText(userList, "Bob") &&
+      hasText(userList, "Make admin");
   });
   const assert_last_admin_removal_blocked = assert(() =>
     chat.currentUserIsAdmin === true &&

@@ -205,10 +205,9 @@ state carry over? If not, it is probably `PerSession<>`.
 
 Findings in this category are warnings, not failures: emit them as `[WARN]`
 lines in the checklist, count them under `Warnings` in the summary, and treat
-severity as `minor`. Skip files under `deprecated/`. The tells below are seed
-examples, not a boundary — the underlying principle is: if a shipped `cf-*`
-component or theme token already expresses the intent, hand-rolling it is a
-warning. Where a tell here overlaps category 6's "arbitrary one-off visual
+severity as `minor`. The tells below are seed examples, not a boundary — the
+underlying principle is: if a shipped `cf-*` component or theme token already
+expresses the intent, hand-rolling it is a warning. Where a tell here overlaps category 6's "arbitrary one-off visual
 overrides" row, report it once, here, as `[WARN]` — not there as `[FAIL]`.
 
 | Look for | Why it's wrong | Use instead |
