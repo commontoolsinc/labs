@@ -4,7 +4,9 @@ import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
+  channelId,
   getRegistration,
+  getRegistrationIndex,
   type IngestRegistration,
   saveRegistration,
 } from "@/routes/ingest/ingest.utils.ts";
@@ -12,6 +14,7 @@ import {
   collectRows,
   defaultRuntime as auditRuntime,
   main as auditMain,
+  recoverIds,
   render,
   runAudit,
 } from "./audit-ingest-channels.ts";
@@ -91,6 +94,80 @@ describe("ingest channel operator scripts", () => {
     await saveRegistration(runtime, serviceSpace, reg());
     const rows = await collectRows(runtime, serviceSpace);
     expect(rows[0].owner).toBe("<operator-provisioned>");
+  });
+
+  // Until this change the audit-index write was best-effort and its failure
+  // swallowed, so a channel can exist that the index never learned about. An
+  // audit that walks only the index cannot find it — repairing an index by
+  // enumerating that same index only ever confirms what is already there —
+  // and the affected space's owner cannot see or revoke it.
+  describe("recovering a channel the index never learned about", () => {
+    const space = "did:key:z6MkspaceAAAA";
+    const installId = "lost-phone";
+    const lost = () => channelId(space, installId);
+
+    // What a swallowed index write leaves behind: a live registration cell and
+    // no index entry anywhere.
+    const orphan = async () => {
+      await saveRegistration(
+        runtime,
+        serviceSpace,
+        reg({ id: lost(), space, installId, owner: "did:key:zA" }),
+      );
+      const empty = { type: "array", items: { type: "string" } } as const;
+      const cells = [
+        "cf:ingest:index:2026-08",
+        `cf:ingest:by-owner:did:key:zA`,
+        `cf:ingest:by-space:${space}`,
+      ].map((cause) =>
+        runtime.getCell<string[]>(serviceSpace as never, cause, empty)
+      );
+      for (const c of cells) await c.sync();
+      await runtime.storageManager.synced();
+      const res = await runtime.editWithRetry((tx) => {
+        for (const c of cells) c.withTx(tx).set([]);
+      });
+      expect(res.error).toBeUndefined();
+    };
+
+    it("is invisible to a plain audit", async () => {
+      await orphan();
+      expect(await getRegistrationIndex(runtime, serviceSpace)).not.toContain(
+        lost(),
+      );
+      expect(await collectRows(runtime, serviceSpace)).toEqual([]);
+    });
+
+    // The id is derived from (space, installId), and the operator chose both
+    // when they provisioned it — so their own record is an exact probe.
+    it("is found and reindexed from the operator's provisioning record", async () => {
+      await orphan();
+      const candidates = recoverIds(
+        `# a channel we know we handed out\n${space} ${installId}\n`,
+      );
+      expect(candidates).toEqual([lost()]);
+
+      const rows = await collectRows(runtime, serviceSpace, true, candidates);
+      expect(rows.map((r) => r.id)).toEqual([lost()]);
+
+      // Reindexed, so every later audit finds it without the record.
+      expect(await getRegistrationIndex(runtime, serviceSpace)).toContain(
+        lost(),
+      );
+      expect((await collectRows(runtime, serviceSpace)).map((r) => r.id))
+        .toEqual([lost()]);
+    });
+
+    it("reports a candidate that resolves to nothing by omitting it", async () => {
+      const rows = await collectRows(runtime, serviceSpace, false, [
+        channelId(space, "never-existed"),
+      ]);
+      expect(rows).toEqual([]);
+    });
+
+    it("refuses a malformed recovery record rather than guessing", () => {
+      expect(() => recoverIds("did:key:zSpaceOnly\n")).toThrow("--recover");
+    });
   });
 
   it("renders both human and JSON output", async () => {

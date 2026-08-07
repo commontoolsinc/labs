@@ -13,12 +13,16 @@
 //   deno task audit-ingest-channels                  # human-readable
 //   deno task audit-ingest-channels --json           # machine-readable
 //   deno task audit-ingest-channels --repair-indexes # backfill by-space index
+//   deno task audit-ingest-channels --repair-indexes --recover known.txt
+//                                                    # also visit channels the
+//                                                    # index never learned of
 import { parseArgs } from "@std/cli/parse-args";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import env from "@/env.ts";
 import { identity } from "@/lib/identity.ts";
 import {
+  channelId,
   getLastSeen,
   getRegistration,
   getRegistrationIndex,
@@ -53,16 +57,25 @@ export async function collectRows(
    * an operator-provisioned channel has no `owner`, so nobody else can either.
    * Off by default: an audit should not write unless asked.
    *
-   * LIMIT, and it is load-bearing for a pre-enablement sweep: this walks the
-   * global audit index, so it cannot recover a registration that is missing
-   * FROM that index — a channel whose best-effort index write was lost before
-   * indexing became mandatory is invisible here. Establishing a source of
-   * truth that can find those is a prerequisite for enabling self-serve on a
-   * deployment that has provisioned channels before this change.
+   * LIMIT: this walks the audit index, so on its own it cannot recover a
+   * registration that is missing FROM that index. Until this change the index
+   * write was best-effort and its failure swallowed, so such a channel can
+   * exist. `candidates` is how you find them — see {@link recoverIds}.
    */
   repairIndexes = false,
+  /**
+   * Extra channel ids to visit, over and above the audit index. Any that
+   * resolve are reported and — with `repairIndexes` — reindexed, which is what
+   * makes a registration the index never learned about recoverable.
+   */
+  candidates: string[] = [],
 ): Promise<ChannelRow[]> {
-  const ids = await getRegistrationIndex(runtime, serviceSpace);
+  const ids = [
+    ...new Set([
+      ...await getRegistrationIndex(runtime, serviceSpace),
+      ...candidates,
+    ]),
+  ];
   const rows: ChannelRow[] = [];
   for (const id of ids) {
     const r = await getRegistration(runtime, serviceSpace, id);
@@ -98,6 +111,42 @@ export async function collectRows(
   return rows;
 }
 
+/**
+ * Turn a caller-supplied list of `<space> <installId>` pairs into channel ids.
+ *
+ * This is the answer to "what is the source of truth for a registration the
+ * index never learned about". It cannot be the index — repairing an index by
+ * enumerating that same index only ever finds what is already there. It cannot
+ * be a scan of the service space either: the memory layer exposes no
+ * space-wide enumeration, and reaching into its SQLite internals from an
+ * operator script would couple the Operation layer to Foundation internals
+ * that are actively changing.
+ *
+ * It does not need to be. A channel id is `channelId(space, installId)` —
+ * derived, not random — and `provision-ingest-channel.ts` is the only thing
+ * that ever created one, from arguments the operator chose. So the operator's
+ * own provisioning record IS the source of truth, and probing it is exact: an
+ * id either resolves to a registration or it does not.
+ *
+ * Blank lines and `#` comments are ignored so a hand-kept file can be
+ * annotated.
+ */
+export function recoverIds(text: string): string[] {
+  const ids: string[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/#.*$/, "").trim();
+    if (line === "") continue;
+    const [space, installId] = line.split(/\s+/);
+    if (space === undefined || installId === undefined) {
+      throw new Error(
+        `--recover expects '<space-did> <install-id>' per line, got: ${line}`,
+      );
+    }
+    ids.push(channelId(space, installId));
+  }
+  return ids;
+}
+
 export function render(rows: ChannelRow[], json: boolean): string[] {
   const out: string[] = [];
   if (json) {
@@ -128,10 +177,18 @@ export function render(rows: ChannelRow[], json: boolean): string[] {
 export async function runAudit(
   runtime: Runtime,
   serviceSpace: string,
-  flags: { json?: boolean; "repair-indexes"?: boolean },
+  flags: { json?: boolean; "repair-indexes"?: boolean; recover?: string },
 ): Promise<string[]> {
+  const candidates = flags.recover === undefined
+    ? []
+    : recoverIds(await Deno.readTextFile(flags.recover));
   return render(
-    await collectRows(runtime, serviceSpace, Boolean(flags["repair-indexes"])),
+    await collectRows(
+      runtime,
+      serviceSpace,
+      Boolean(flags["repair-indexes"]),
+      candidates,
+    ),
     Boolean(flags.json),
   );
 }
@@ -152,7 +209,10 @@ export async function main(
   serviceSpace: string = identity.did(),
   log: (line: string) => void = console.log,
 ): Promise<number> {
-  const flags = parseArgs(args, { boolean: ["json", "repair-indexes"] });
+  const flags = parseArgs(args, {
+    boolean: ["json", "repair-indexes"],
+    string: ["recover"],
+  });
   const runtime = makeRuntime();
   try {
     for (const line of await runAudit(runtime, serviceSpace, flags)) log(line);
