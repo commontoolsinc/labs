@@ -1642,14 +1642,15 @@ export class Runtime {
    * retried up to maxRetries times. Retryability is decided by the shared
    * rejection vocabulary (`isRetryableCommitRejection`, storage/rejection.ts),
    * which is an allow-list: a stale basis (server conflict or the local
-   * inconsistency guard), a liveness failure (connection/session), a discarded
-   * attempt (`tx.abort()` or a CFC pre-storage refusal), or an authorization
-   * denial the server itself marked `retriable`. Every other rejection — an
-   * ACL/protocol refusal, an authorization denial, a precondition failure, a
-   * commit-rule violation — is deterministic with respect to the committed data
-   * and is returned on the FIRST attempt, because re-running recomputes the
-   * identical refused write and each doomed attempt costs a round-trip plus a
-   * subscriber revert notification.
+   * inconsistency guard), a liveness failure the memory client heals on its own
+   * (a transport failure, an undecodable frame), a discarded attempt
+   * (`tx.abort()` or a CFC pre-storage refusal), or an authorization denial the
+   * server itself marked `retriable`. Every other rejection — an ACL/protocol
+   * refusal, an authorization denial, a precondition failure, a commit-rule
+   * violation, a `SessionError` (nothing on this path remounts the session, so
+   * every attempt reuses the handle the server just refused) — is returned on
+   * the FIRST attempt, because re-running cannot change the outcome and each
+   * doomed attempt costs a round-trip plus a subscriber revert notification.
    *
    * @param fn - Function to execute with the transaction.
    * @param maxRetries - Maximum number of retries.

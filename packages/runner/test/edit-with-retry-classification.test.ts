@@ -112,6 +112,16 @@ describe("editWithRetry rejection classification", () => {
       name: "TransactionError",
       message: "internal server failure",
     }],
+    // Terminal for a different reason than the rest of this list: not the data,
+    // the retry path. A commit routed to a session the server no longer knows
+    // was never evaluated — the same shape as a ConnectionError — but nothing
+    // between two attempts remounts the session, so every attempt reuses the
+    // handle the server just refused. See the SpaceReplica test at the bottom
+    // of this file, which pins that no-remount fact end to end.
+    ["SessionError", {
+      name: "SessionError",
+      message: "Unknown session for space",
+    }],
     // A malformed store operation.
     ["StoreError", { name: "StoreError", message: "malformed operation" }],
   ];
@@ -166,12 +176,12 @@ describe("editWithRetry rejection classification", () => {
       name: "StorageTransactionInconsistent",
       message: "read invalidated before commit",
     }],
-    // Liveness: the commit was never evaluated.
+    // Liveness the client heals by itself: a transport close schedules
+    // `reconnect()`, and a `transact` issued while disconnected queues in
+    // `#outstandingCommits` and calls `restoreConnection()` (memory/v2/client.ts),
+    // so the retry runs over a re-established link. `SessionError` looks like
+    // this one but is in the terminal list above — nothing remounts a session.
     ["ConnectionError", { name: "ConnectionError", message: "socket closed" }],
-    ["SessionError", {
-      name: "SessionError",
-      message: "Unknown session for space",
-    }],
     // Liveness by collateral damage: an undecodable frame makes the client's
     // `rejectPending` sweep (memory/v2/client.ts `onMessage`) reject EVERY
     // in-flight request, including commits the server may never have seen and
@@ -347,6 +357,139 @@ Deno.test("a server ProtocolError reaches editWithRetry by name, once", async ()
     );
     // Exactly one round-trip: the refusal is deterministic.
     assertEquals(factory.aclCommits - before, 1);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+    await server.close();
+  }
+});
+
+// Why `SessionError` is terminal, pinned against the real replica.
+//
+// The convergence argument for retrying one is identical to a
+// `ConnectionError`'s — the commit was never evaluated, so a re-established
+// session could land it. It fails on a fact about the RETRY PATH, not about the
+// error: nothing between two `editWithRetry` attempts remounts the session.
+// `SpaceReplica.sessionHandle()` memoizes the mount and clears it only in
+// `close()`/`closeNow()` (storage/v2.ts), and `SpaceSession.reopen()` runs only
+// from `restore()`, which only the client's transport `reconnect()` calls
+// (memory/v2/client.ts). So every attempt re-sends over the very handle the
+// server just refused.
+//
+// This asserts both halves: one commit attempt (the classification), and one
+// session creation (the fact the classification rests on). If someone teaches
+// the retry path to clear `#sessionHandle`, the second assertion is what will
+// fail — and that is the signal to move `SessionError` back into the allow-list
+// in storage/rejection.ts.
+class SessionErrorSessionFactory implements SessionFactory {
+  readonly supportsAclBootstrap = true;
+  /** Mounts created — how many times a session was (re)opened. */
+  sessions = 0;
+  /** transact() calls made after `arm()`. */
+  commits = 0;
+  #armed = false;
+
+  constructor(private readonly server: MemoryV2Server.Server) {}
+
+  arm(): void {
+    this.#armed = true;
+  }
+
+  async create(
+    space: MemorySpace,
+    signer?: Signer,
+    requested: MemoryV2Client.MountOptions = {},
+  ) {
+    this.sessions++;
+    const client = await MemoryV2Client.connect({
+      transport: MemoryV2Client.loopback(this.server),
+    });
+    const session = await client.mount(
+      space,
+      requested,
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: { principal: signer?.did() },
+      }),
+    );
+    const realTransact = session.transact.bind(session);
+    (session as unknown as { transact: unknown }).transact = (
+      commit: unknown,
+    ) => {
+      if (!this.#armed) {
+        return realTransact(commit as Parameters<typeof realTransact>[0]);
+      }
+      this.commits++;
+      // Verbatim what memory/v2/server.ts `transact` returns for a session the
+      // registry no longer holds — the ACL de-authorization sweep
+      // (`#revokeDeauthorizedSessions`) and a takeover both produce it on a
+      // still-live connection. It travels the real rejection path from here:
+      // SpaceReplica's push catch -> `toRejectedError` (which preserves the
+      // name) -> `finalizeRejection` -> editWithRetry's classification.
+      return Promise.reject(
+        Object.assign(new Error("Unknown session for space"), {
+          name: "SessionError",
+        }),
+      );
+    };
+    return { client, session };
+  }
+}
+
+Deno.test("a SessionError commits once and does not remount the session", async () => {
+  const user = await Identity.fromPassphrase("session-error user");
+  const spaceIdentity = await Identity.fromPassphrase("session-error space");
+  const space = spaceIdentity.did();
+
+  const server = new MemoryV2Server.Server({
+    store: new URL("memory://session-error-retry"),
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: { audience: TEST_AUDIENCE },
+    acl: { mode: "enforce" },
+    subscriptionRefreshDelayMs: 0,
+  });
+  const factory = new SessionErrorSessionFactory(server);
+  const storageManager = TestStorageManager.overServer(
+    { as: user, spaceIdentity },
+    factory,
+  );
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+
+  try {
+    const sync = await storageManager.open(space).sync(`of:${space}` as URI);
+    assert(!sync.error, sync.error?.message);
+    const sessionsAfterMount = factory.sessions;
+    factory.arm();
+
+    const address: IMemorySpaceAddress = {
+      space,
+      id: "of:session-error-doc" as URI,
+      type: "application/json",
+      path: [],
+    };
+    const result = await runtime.editWithRetry((tx) => {
+      tx.writeOrThrow(address, { value: 1 } as unknown as FabricValue);
+    });
+
+    assert(result.error, "the commit must be rejected");
+    assertEquals(result.error.name, "SessionError");
+    // One attempt. Before this classification the default budget spent six,
+    // all within milliseconds of each other — there is no backoff.
+    assertEquals(factory.commits, 1);
+    // And the reason one attempt is all that could ever help: the retry path
+    // never opened a new session, so a second attempt would have re-sent over
+    // the same refused handle.
+    assertEquals(factory.sessions, sessionsAfterMount);
   } finally {
     await runtime.dispose();
     await storageManager.close();

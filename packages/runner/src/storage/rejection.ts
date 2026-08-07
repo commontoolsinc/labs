@@ -92,15 +92,16 @@ export function isStorageTransactionInconsistent(
 
 /**
  * A liveness failure: the commit never reached a verdict because the link to
- * the memory server was down or the session behind it was replaced. The
- * committed data was never evaluated, so nothing about it is refused — a fresh
- * attempt over a re-established connection/session can land the identical
- * write. `ConnectionError` is the runner's normalization of a transport failure
- * (storage/v2.ts `toConnectionError`); `SessionError` is the server refusing to
- * route a commit to a session it no longer knows (memory/v2/server.ts "Unknown
- * session for space"), which the client's reconnect re-opens.
+ * the memory server was down. The committed data was never evaluated, so
+ * nothing about it is refused — a fresh attempt over a re-established
+ * connection can land the identical write, and the memory client re-establishes
+ * one WITHOUT being asked: a transport close schedules `reconnect()`, and a
+ * `transact` issued while disconnected queues in `#outstandingCommits` and calls
+ * `client.restoreConnection()` (memory/v2/client.ts). `ConnectionError` is the
+ * runner's normalization of a transport failure (storage/v2.ts
+ * `toConnectionError`).
  *
- * `InvalidMessageError` is the third liveness class, and the least obvious.
+ * `InvalidMessageError` is the other liveness class, and the less obvious one.
  * The client raises it when a frame off the wire will not decode
  * (memory/v2/client.ts `onMessage`), and then calls `rejectPending(error)` —
  * which rejects EVERY in-flight request with it, not just the request whose
@@ -118,11 +119,48 @@ export function isStorageTransactionInconsistent(
  * `retriable: true` on a session-open anti-replay race
  * (memory/v2/session-open-auth.ts) — is handled by
  * {@link isRetryableCommitRejection} reading that marker, not by class.
+ *
+ * `SessionError` is NOT here, and the reason is the retry path rather than the
+ * error: it is the same "never evaluated" shape as a `ConnectionError`, but the
+ * re-established session its convergence argument needs never arrives. Nothing
+ * between two `editWithRetry` attempts clears or remounts one:
+ *  - `SpaceReplica.sessionHandle()` (storage/v2.ts) memoizes the mount and drops
+ *    it only in `close()`/`closeNow()`, so every attempt reuses the very handle
+ *    the server just refused;
+ *  - `SpaceSession.reopen()` (memory/v2/client.ts) runs only from `restore()`,
+ *    which only the client's `reconnect()` calls — i.e. only after a TRANSPORT
+ *    close;
+ *  - `sendOutstandingCommit`'s catch (memory/v2/client.ts) keeps a commit
+ *    outstanding for replay on `isConnectionError`/`isSessionRevokedError` only;
+ *    a `SessionError` falls through and rejects the commit with `#sessionId`
+ *    untouched.
+ * Those three also say which case actually reaches here. A transport drop never
+ * surfaces as a `SessionError` at all — the commit queues and replays after the
+ * reconnect's `reopen()`, and the server re-creates even a TTL-expired session
+ * from the id the client resends (memory/v2/session-registry.ts `open`). What
+ * reaches `editWithRetry` is the other case: a LIVE connection whose session the
+ * SERVER dropped — an ACL de-authorization sweep (`#revokeDeauthorizedSessions`,
+ * memory/v2/server.ts, whose own comment is "its next message fails closed
+ * (Unknown session)"), or a takeover, both of which also delete the entry
+ * `Connection.requireSession` checks. That is terminal for the session: the
+ * client's remedy is the `session/revoked` frame, which CLOSES it
+ * (`terminateSession`), not a reopen — and a reopen would be denied at
+ * `session.open`.
+ *
+ * Retrying it is therefore all cost. With no backoff the whole budget burns
+ * within milliseconds on identical doomed round-trips, each one emitting a
+ * subscriber revert from `finalizeRejection`; and it DOWNGRADES the reported
+ * error, because once the revocation frame lands `#assertOpen()` throws
+ * `SessionRevokedError`, a name `toRejectedError` does not preserve — so the
+ * caller is handed a generic `TransactionError` instead of the real cause it
+ * would have seen on attempt 1. Move it back into the allow-list the day the
+ * retry path clears `#sessionHandle`, or the client reopens on `SessionError`:
+ * the convergence argument is sound, only the remount is missing.
  */
 export function isTransientCommitRejection(
   error: { name?: string } | undefined | null,
 ): boolean {
-  return error?.name === "ConnectionError" || error?.name === "SessionError" ||
+  return error?.name === "ConnectionError" ||
     error?.name === "InvalidMessageError";
 }
 
@@ -177,7 +215,10 @@ export function isDiscardedAttemptRejection(
  *  - stale basis locally ({@link isStorageTransactionInconsistent}) — a value
  *    read during the transaction changed on this replica; re-reading resolves.
  *  - liveness ({@link isTransientCommitRejection}) — the commit was never
- *    evaluated; a re-established connection/session can land it.
+ *    evaluated, and the client re-establishes the connection on its own, so a
+ *    retry lands it. `SessionError` is the near miss that is NOT admitted: same
+ *    "never evaluated" shape, but no one remounts the session between attempts;
+ *    see that predicate's doc for why, and for what would change the answer.
  *  - discarded attempt ({@link isDiscardedAttemptRejection}) — the attempt
  *    never reached storage and the caller asked for a fresh one.
  *
