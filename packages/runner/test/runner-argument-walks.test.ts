@@ -10,7 +10,7 @@
 //
 // A `FabricInstance` is a different case and both walks refuse one. A link in
 // its codec contents is unreachable by property name, so passing it through
-// MISSES that link -- and over-collection is these walkers' safe direction,
+// _misses_ that link -- and over-collection is these walkers' safe direction,
 // which makes a miss the unsafe one.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -118,7 +118,7 @@ describe("runner-argument-walks", () => {
 
   describe("collectArgumentSchedulerReadLinks", () => {
     it("throws for a `FabricError` rather than missing a link inside it", () => {
-      // The control is the point: the same link IS collected at the same
+      // The control is the point: the same link _is_ collected at the same
       // schema position when it sits in a plain record, so what changes the
       // outcome is the wrapper.
       const { resultCell, value } = fixture();

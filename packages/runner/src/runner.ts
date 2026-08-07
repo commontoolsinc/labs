@@ -4772,7 +4772,7 @@ export class Runner {
       //
       // A `FabricInstance` is refused. A write-redirect link nested in its
       // codec contents is unreachable by property name, so passing one through
-      // MISSES that link -- and over-collection is this walker's safe
+      // _misses_ that link -- and over-collection is this walker's safe
       // direction, which makes a miss the unsafe one.
       //
       // Nothing reaches this in production today, de facto rather than by
