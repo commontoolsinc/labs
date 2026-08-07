@@ -109,8 +109,26 @@ pattern compatibility checker — where the class decides whether adding and
 removing a key are both free, and where getting it wrong is what withdrew the
 July result-schema work. Sibling registries, not one: a projection is supplied
 per read and never compared across versions, so it has no add-and-remove
-semantics to get wrong. What transfers is classify-before-you-accept. #5309
-applied by hand to its two marks.
+semantics to get wrong. What transfers is classify-before-you-accept.
+
+*The two registries meet at lifted schemas, and this item is what couples
+them.* Today a projection ignores every key it does not recognize, so the
+durable dialect can grow freely. Refusing unrecognized keys ends that: a caller
+is told to lift a source schema and prune it, a lifted schema carries every
+keyword the generator emits, and a keyword admitted to the compat dialect
+without also reaching projection tolerance turns a projection over a marked
+schema into a refusal — on exactly the keys made deliberately free elsewhere.
+
+So the tolerated-as-annotation set is **derived from the compat checker's
+annotation keys rather than restating them**. One edit admits a key to both, and
+the vocabulary cannot fork. Where derivation is not possible, the fallback is a
+test asserting every annotation key the checker knows is non-refused by the
+projection reader — which converts a forgotten second list from a silent
+projection failure into a red test naming both registries.
+
+`tier` and `deprecated` are the newest annotation-class keys and the likeliest
+to be missing from a set drafted out of the standard JSON Schema vocabulary.
+They belong in the tolerated set on day one.
 
 *Exit:* an unrecognized key is refused and the message names it; a tolerated
 keyword is accepted and ignored. A command that ran only because a key was
