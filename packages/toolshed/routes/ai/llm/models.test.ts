@@ -30,6 +30,10 @@ const registeredModels = async (): Promise<{
 }> => {
   if (cached === undefined) {
     const probe = await Deno.makeTempFile({ suffix: ".ts" });
+    // A dedicated result file rather than stdout: module registration logs
+    // provider banners, so parsing stdout would couple the test to whatever
+    // the providers happen to print.
+    const resultPath = await Deno.makeTempFile({ suffix: ".json" });
     await Deno.writeTextFile(
       probe,
       `const mod = await import(${
@@ -42,7 +46,9 @@ const registeredModels = async (): Promise<{
         `      : []\n` +
         `  ),\n` +
         `);\n` +
-        `console.log(JSON.stringify({\n` +
+        `await Deno.writeTextFile(${
+          JSON.stringify(resultPath)
+        }, JSON.stringify({\n` +
         `  names: Object.keys(mod.MODELS),\n` +
         `  providerOptions,\n` +
         `}));\n`,
@@ -85,10 +91,13 @@ const registeredModels = async (): Promise<{
           new TextDecoder().decode(output.stderr)
         }`,
       );
-      const lines = new TextDecoder().decode(output.stdout).trim().split("\n");
-      cached = JSON.parse(lines[lines.length - 1]) as Record<string, unknown>;
+      cached = JSON.parse(await Deno.readTextFile(resultPath)) as Record<
+        string,
+        unknown
+      >;
     } finally {
       await Deno.remove(probe).catch(() => {});
+      await Deno.remove(resultPath).catch(() => {});
     }
   }
   return cached as {
