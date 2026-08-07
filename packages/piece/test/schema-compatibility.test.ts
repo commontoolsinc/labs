@@ -192,6 +192,144 @@ describe("piece schema compatibility", () => {
       additionalProperties: false,
     };
     expect(() => assertSchemaSubset(stableSource, stableTarget)).not.toThrow();
+
+    const constrainedSameNodeDefault: JSONSchema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: {
+            refsOut: { type: "array", items: { type: "string" } },
+          },
+          required: ["refsOut"],
+        },
+        { type: "undefined" },
+      ],
+      default: { refsOut: [] },
+    };
+    expect(() =>
+      assertSchemaSubset(
+        constrainedSameNodeDefault,
+        constrainedSameNodeDefault,
+      )
+    ).not.toThrow();
+
+    const disjointCompositionWithDescendantDefault: JSONSchema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: { x: { type: "number", default: 0 } },
+        },
+        { type: "undefined" },
+      ],
+    };
+    expect(() =>
+      assertSchemaSubset(
+        disjointCompositionWithDescendantDefault,
+        disjointCompositionWithDescendantDefault,
+      )
+    ).not.toThrow();
+
+    const disjointOneOfWithDescendantDefault: JSONSchema = {
+      oneOf: [
+        {
+          type: "array",
+          items: { type: "number", default: 0 },
+        },
+        { type: "string" },
+      ],
+    };
+    expect(() =>
+      assertSchemaSubset(
+        disjointOneOfWithDescendantDefault,
+        disjointOneOfWithDescendantDefault,
+      )
+    ).not.toThrow();
+
+    const impossibleAlternativeWithDescendantDefault: JSONSchema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: { x: { type: "number", default: 0 } },
+        },
+        false,
+      ],
+    };
+    expect(() =>
+      assertSchemaSubset(
+        impossibleAlternativeWithDescendantDefault,
+        impossibleAlternativeWithDescendantDefault,
+      )
+    ).not.toThrow();
+
+    const overlappingCompositionWithDescendantDefault: JSONSchema = {
+      anyOf: [
+        {
+          type: "object",
+          properties: { x: { type: "number", default: 0 } },
+        },
+        { type: "object" },
+      ],
+    };
+    expect(() =>
+      assertSchemaSubset(
+        overlappingCompositionWithDescendantDefault,
+        overlappingCompositionWithDescendantDefault,
+      )
+    ).toThrow(/not stable under default insertion/);
+
+    for (
+      const alternatives of [
+        [
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 0 } },
+          },
+          true,
+        ],
+        [
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 0 } },
+          },
+          { properties: {} },
+        ],
+        [
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 0 } },
+          },
+          { type: "unknown" },
+        ],
+        [
+          {
+            type: "number",
+            default: 0,
+          },
+          { type: "integer" },
+        ],
+        [
+          {
+            type: "integer",
+            default: 0,
+          },
+          { type: "number" },
+        ],
+      ] as JSONSchema[][]
+    ) {
+      const unprovableComposition: JSONSchema = { anyOf: alternatives };
+      expect(() =>
+        assertSchemaSubset(unprovableComposition, unprovableComposition)
+      ).toThrow(/not stable under default insertion/);
+    }
+
+    const invalidSameNodeDefault: JSONSchema = {
+      oneOf: [{ type: "number" }, { minimum: 0 }],
+      default: 1,
+    };
+    expect(() =>
+      assertSchemaSubset(invalidSameNodeDefault, invalidSameNodeDefault)
+    ).toThrow(/not stable under default insertion/);
+
     expect(() =>
       assertSchemaSubset(
         { ...stableSource, minProperties: 1 },
