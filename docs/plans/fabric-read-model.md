@@ -70,8 +70,8 @@ different ways to end up holding a cell:
 
 | Arrival | What it does |
 | --- | --- |
-| `cf piece get <addr>` | addresses a cell directly |
-| `cf piece call <addr> <verb>` | runs a verb, then reads the receipt it wrote |
+| `cf piece get --piece <addr>` | addresses a cell directly |
+| `cf piece call --piece <addr> <verb>` | runs a verb, then reads the receipt it wrote |
 | `cf wish <query>` | resolves a query to whatever satisfies it |
 | `cf exec <mountedFile>` | reaches a verb through a filesystem mount and runs it |
 

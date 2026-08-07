@@ -142,7 +142,7 @@ Any scheme for re-deriving a receipt's address has to reproduce this exactly.
 
 ```text
 receipt address = getCell(patternResultCell.space, { resultFor: cause })
-cause           = { ...inputs, $event: tx.dispatchedEventId }
+cause           = { ...inputs, $event: tx.dispatchedEventId ?? <random uuid> }
 ```
 
 `inputs` is the handler node's bound closure. The receipt lives in the **pattern
@@ -159,8 +159,10 @@ receipt. The hash is deterministic across processes, so a retry from a fresh CLI
 invocation derives the same id — which is what makes any re-derivation scheme
 possible at all.
 
-Where no id is supplied, `mintEventId` produces `evt:<per-transaction key>:<seq>`
-or `evt:<random uuid>:<id>`. Those are not re-derivable.
+Where no id is supplied, `mintEventId` produces
+`evt:<per-transaction key>:<seq>:<stream link id>` or
+`evt:<random uuid>:<stream link id>`. Both end in the stream link's id, and
+neither is re-derivable.
 
 Holding the address already, a caller needs nothing verb-aware: a receipt is a
 cell and reading it is an ordinary read. Deriving the address without it is the
@@ -178,12 +180,14 @@ reader **subscribes and wakes when it appears**; it must not poll
 [waiting-in-tests.md](../development/waiting-in-tests.md)). `--wait <seconds>`
 bounds a caller's own patience, as on `cf piece call`.
 
-`tx.handlingReceiptLink` is published at commit time, so `--no-wait` *can*
-return `receipt` — that is what migration step 2 adds. Today its exit returns
-`{id, status: "committed", deduplicated?}` and no receipt field. It also returns the invocation id — minted or
-supplied — both on stdout and, once, on stderr at the dispatch phase before any
-network work. So collect-later does **not** require supplying an id. Supplying
-one buys something narrower: it is known *before* the call, so it survives
+`tx.handlingReceiptLink` is set during handling — before the commit, and only
+when receipts are enabled — so `--no-wait` *can* return `receipt`; that is what
+migration step 2 adds. Today its exit returns
+`{invocation, status: "committed", deduplicated?}` and no receipt field. It also
+returns the invocation id — minted or supplied — both on stdout and, once, on
+stderr at the dispatch phase. So collect-later does **not** require supplying an
+id. Supplying one buys something narrower: it is known *before* the call, so it
+survives
 losing the process's output entirely.
 
 ### Retry versus readback
@@ -228,8 +232,10 @@ where it lands.
 Advisory notices about what a read could not materialize belong to the read
 layer and follow its conventions, not a call-specific rule.
 
-Unchanged: the `invocation: <id>` line announced once on stderr at dispatch,
-before any network work, so a caller whose process dies still holds the id.
+Unchanged: the `invocation: <id>` line announced once on stderr at the dispatch
+phase, so a caller whose process dies past that point still holds the id. Note
+what that does and does not survive: dispatch comes after the initial sync, so
+the id outlives a lost commit but not a sync that never completes.
 
 ### Exit status
 

@@ -97,8 +97,17 @@ than each item.
 There are two kinds of thing a reader's schema may **not** contain, for two
 different reasons (`FORBIDDEN_PROJECTION_KEYS` and
 `UNSUPPORTED_PROJECTION_KEYS`, `packages/cli/lib/piece-get-transform.ts`). Both
-are checked against the parsed projection regardless of which syntax produced
-it, so writing the full form does not unlock them.
+are checked when a full schema is parsed — the inline and `@file` forms. The
+concise form reaches neither check; what keeps it from expressing them is its
+identifier grammar, which has no way to write a keyword at all. So the two
+syntaxes agree on what they unlock, but by two different mechanisms rather than
+one shared guard.
+
+That distinction matters for anything that *becomes* meaningful later. A key in
+neither set is carried through and ignored rather than refused, so giving it a
+meaning changes behavior for a schema that already contains it, with no error
+ever having been raised. Reserving a key before it means something is what turns
+that into refuse-then-meaningful.
 
 **Fabric metadata is the source's: `asCell`, `default`, `scope`, `ifc`.** These
 sit beside `type` inside a schema and say what the value at that position *is* —
@@ -446,10 +455,20 @@ in the durable schema metadata in the same create-only transaction. That is what
 narrowing needs — a selector cannot be built without the root container kind —
 and it is the least a receipt can say and still be readable like any other cell.
 
+**It covers plain results only.** Deriving a shape needs a settled value, and a
+result holding anything reactive does not have one at the moment the receipt is
+written. So a verb returning a child piece — the case this design exists to
+serve — gets a receipt with no schema, and a selection over it matches a runtime
+value rather than a declaration. What that costs is bounded: a `$link` marker
+still renders an address and still suppresses the fetch, because a rejecting
+selector short-circuits before a source schema is consulted. What is lost is
+narrowing on field selection, and any check of a selection before the call. The
+open question below is how that gap closes.
+
 It records nothing about which positions hold links. A link position in a source
 schema is spelled `asCell`, and `["cell"]` asserts a writable handle; writing
 that onto a document nothing can be written through would be a claim the receipt
-cannot honour.
+cannot honor.
 
 Descriptive is not the end state. A schema derived from a value matches what
 happened to be written, where a schema derived from a declaration matches what

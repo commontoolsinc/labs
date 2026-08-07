@@ -58,3 +58,7 @@ a record: archive it to `docs/history/plans/` following the procedure in
   calling a verb adds — and at
   [CLI surface shape](cli-surface-shape.md) for the command surface and an
   additive path to it. Start here rather than at either part.
+- [Verb calls: working notes](verb-result-selection.md) holds the call-specific
+  investigation those documents do not carry: what produces a receipt and what
+  its existence proves, how a receipt's address is derived, and the error and
+  exit-status conventions. Sketches to draw from, not a settled contract.

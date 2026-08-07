@@ -22,7 +22,7 @@ itself part of the problem.
 | **Live data** — reading and writing running state | `piece get`/`set`/`call`/`apply`/`link`/`step`/`verbs`/`inspect`, `wish` |
 | **Piece lifecycle** — deploying and managing running programs | `piece new`/`setsrc`/`getsrc`/`rm`/`ls`/`search`/`map`/`set-slug`/`recreate-root`/`set-home` |
 | **Rendering** — turning things into something to look at | `piece view` (terminal), `piece render` (HTML), `view` (source pager) |
-| **Storage forensics** — reading the database directly, offline | `inspect` (22 subcommands), `space` (clone/verify/reset/fingerprint) |
+| **Storage forensics** — reading the database directly, mostly offline (`inspect pull` fetches from a remote) | `inspect` (22 subcommands), `space` (clone/verify/reset/fingerprint) |
 | **Filesystem projection** — exposing cells as files | `fuse` (mount/unmount/status), `exec` |
 
 Four of these are coherent and want nothing: authoring, identity and access,
@@ -112,8 +112,10 @@ splitting them costs one deprecation on a flag that is still young.
 **What a reader may not supply, in either syntax.** `asCell`, `default`,
 `scope`, and `ifc` stay the source's — they decide how a value is treated, not
 which values come back. `$ref`, `$defs`, and the combinators are unsupported.
-Both checks run against the parsed projection whatever syntax produced it, so
-writing the full form does not unlock them.
+Neither syntax can express them, though not by the same route: the checks run
+when a full schema is parsed, while the concise form is held to an identifier
+grammar with no way to write a keyword. Writing the full form does not unlock
+them.
 
 That rule needs no carve-out for the address suffix. `asCell` carries a handle
 contract as well as a boundary, and a handle cannot cross a serialized channel —
@@ -178,7 +180,7 @@ a caller depends on — steps 1–5 only add.
 2. **Give every arrival access to it** — `piece call` gains `--select`,
    `--schema` and `--filter`, `wish` gains them, and an address renders identically from each.
 3. **`--piece` accepts the `of:` address form**, so an emitted address composes
-   into the next command. This is where addressing stops being piece-flavoured
+   into the next command. This is where addressing stops being piece-flavored
    in practice.
 4. **Add positional addresses and the `#argument` suffix** beside the existing
    flags, keeping both.
