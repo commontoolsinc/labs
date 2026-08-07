@@ -1,4 +1,4 @@
-# `cf` CLI session daemon
+# `cf` CLI daemon
 
 ## Status
 
@@ -6,12 +6,12 @@ This document specifies intended behavior. The daemon is not implemented.
 
 ## Summary
 
-Fabric-facing `cf` commands currently create an identity session, runtime,
-storage manager, authenticated memory connection, and synchronized replica for
-each invocation. A named local daemon retains the reusable connection state so
-separate CLI invocations can avoid that setup cost.
+Fabric-facing `cf` commands currently create an identity-backed connection,
+runtime, storage manager, authenticated memory connection, and synchronized
+replica for each invocation. A named local daemon retains the reusable
+connection state so separate CLI invocations can avoid that setup cost.
 
-The daemon is a **session host**, not an execution host. It retains identity,
+The daemon is a **connection host**, not an execution host. It retains identity,
 connection, replica, and safe content-addressed caches. Every request receives
 fresh execution state, and request-created pieces, reactive graphs,
 subscriptions, collectors, and background work are torn down before the next
@@ -46,7 +46,7 @@ replays a mutation.
 - Accelerating local-only, offline, test, or interactive terminal commands.
 - Serving watch, subscribe, streaming, or otherwise indefinite commands. These
   commands retain execution by definition and remain direct. A retained-
-  execution host, if wanted, is a separate design built on the session and
+  execution host, if wanted, is a separate design built on the connection and
   lifecycle seams established here.
 - Sharing one daemon across unrelated identities, APIs, primary spaces, or
   runtime configurations.
@@ -289,7 +289,7 @@ fixed or kept request-owned.
 The daemon may retain:
 
 - the deserialized identity and signer;
-- the storage manager and its authenticated session identity;
+- the storage manager and its authenticated storage connection identity;
 - memory transports and synchronized replicas;
 - storage watches and bounded storage-level pull knowledge, including the
   per-document deduplication state that prevents repeated pull registration;
@@ -304,8 +304,24 @@ Every request owns and must release:
 - started pieces and reactive graphs;
 - request subscriptions and scheduler work;
 - error and console collectors;
-- navigation callbacks and other command effects; and
+- navigation callbacks and other command effects;
+- the caller's Fabric invocation identity: the `--invocation` ID paired with
+  the invocation session resolved from `--session` or `CF_SESSION`; and
 - filesystem/compiler state that is not safely content-addressed.
+
+The Fabric invocation identity is caller input, not connection state. The pair
+decides where a handling's receipt lands: the same invocation ID under two
+invocation sessions names two invocations. Retaining a pair across requests
+would place unrelated callers in one deduplication scope, where one caller
+could be told that its request settled on another caller's outcome.
+
+The short-lived client resolves the pair under the same rules as direct
+execution before daemon admission. `--session` overrides `CF_SESSION`; when
+neither half is supplied, the client mints both; and an invocation ID without
+an invocation session is rejected before dispatch. The normalized pair travels
+as an explicit request-envelope field. The daemon process never reads its own
+`CF_SESSION`, never receives it as request environment, never mints either
+half, and never retains the pair after request cleanup.
 
 The next request is not admitted to execution until cleanup has stopped
 request-owned work and the previous request has reached the same confirmed
@@ -348,7 +364,7 @@ of the explicit value and does not begin command execution until that transfer
 is complete.
 
 This serialization protects shared runtime configuration, one authenticated
-memory session, request output attribution, and request cleanup. Observational
+memory connection, request output attribution, and request cleanup. Observational
 commands are not initially parallel even though they do not start execution:
 they can establish request-owned subscriptions, pull linked data, and interact
 with the retained replica while it synchronizes.
@@ -367,7 +383,7 @@ not make separate commands atomic.
 
 ## Request identity and effectful outcomes
 
-Every admitted request has an instance-qualified request ID and advances
+Every admitted request has an instance-qualified daemon request ID and advances
 through explicit states:
 
 ```text
@@ -377,6 +393,10 @@ queued -> executing -> completed
                   -> failed
                   -> outcome-unknown
 ```
+
+The daemon request ID is transport identity for queueing, cancellation, and the
+in-memory result ledger. It is unrelated to the caller's Fabric invocation
+identity and never substitutes for either half of that durable pair.
 
 The request envelope also contains advisory origin metadata: the client
 instance nonce, client PID where meaningful, original working directory, and an
@@ -396,8 +416,11 @@ records its result while the daemon remains alive.
 
 If the daemon crashes after effectful dispatch without recording a terminal
 result, the client reports `outcome-unknown`. Neither side repeats the request.
-Durable exactly-once behavior requires a server-recognized idempotency contract
-and is separate work.
+For Fabric handler calls, the caller's invocation ID and invocation session
+form a durable idempotency identity. Reusing the pair for the same stream
+provides at-most-once commit and returns the original receipt, although handler
+execution and effects outside its transaction may repeat. That Fabric contract
+does not make automatic daemon transport replay safe.
 
 ## Output and caller context
 
@@ -425,8 +448,8 @@ a later request's stdout or stderr.
 ## Freshness and connectivity
 
 The retained replica is not an offline result cache. Before executing a
-request, the daemon establishes that the required session is connected and
-synchronized and surfaces permanent authorization failures. If it cannot
+request, the daemon establishes that the required storage connection is active
+and synchronized and surfaces permanent authorization failures. If it cannot
 establish freshness, the request fails without returning an old cached value.
 
 The storage transport's normal reconnection machinery remains responsible for
@@ -491,7 +514,7 @@ PIDs are reused. A client removes an abandoned endpoint only after the control
 endpoint is unreachable and the recorded owner is proven dead.
 
 Graceful stop rejects new admission, rejects queued work, lets the active
-request finish, drains confirmed writes, closes storage sessions, and exits.
+request finish, drains confirmed writes, closes storage connections, and exits.
 Forced termination is a separately named explicit operation and warns when an
 active effectful request can be left outcome-unknown.
 
@@ -509,6 +532,11 @@ management, rather than a sleep or timeout, govern its lifetime.
 - Metadata and logs identify the signer by DID or fingerprint and never contain
   private key bytes.
 - Request payloads and cell values are excluded from default logs.
+- The caller's invocation ID and invocation session are excluded from default
+  daemon logs, queue diagnostics, origin metadata, and result-ledger metadata.
+  The invocation session is the unguessable component of the receipt address;
+  returning it to the requesting client for recovery does not authorize
+  recording it in shared daemon diagnostics.
 - Holding a deserialized signer for the daemon lifetime is an explicit security
   tradeoff reported by `daemon status`. Any same-user process able to reach the
   endpoint can ask the daemon to act as that identity without reading or
@@ -524,10 +552,10 @@ carries commands, streams, cancellation, and results. Control compatibility
 does not imply permission to execute.
 
 Direct and routed commands share one parser that produces a normalized request
-envelope. Daemon routing is selected before importing Fabric session and runtime
-implementation modules, so the short-lived client does not pay the setup cost
-that it is delegating. The implementation does not duplicate command parsing or
-validation rules in a daemon-only client path.
+envelope. Daemon routing is selected before importing Fabric connection and
+runtime implementation modules, so the short-lived client does not pay the
+setup cost that it is delegating. The implementation does not duplicate command
+parsing or validation rules in a daemon-only client path.
 
 ## Implementation stages
 
@@ -552,11 +580,13 @@ validation rules in a daemon-only client path.
    cold, then implement bounded serialized request transport for those commands.
 5. Route explicitly selected Fabric-backed completion through the cold read
    path.
-6. Add mutation request IDs, terminal-result lookup, confirmed completion, and
-   outcome-unknown handling before enabling mutation commands. Refactor stdin-
-   accepting commands so the client materializes their input, performs
-   context-free validation, and lets daemon handlers perform schema-dependent
-   validation without ambient stdin access.
+6. Add terminal-result lookup, confirmed completion, and outcome-unknown
+   handling for effectful daemon request IDs before enabling mutation commands.
+   Refactor stdin-accepting commands so the client materializes their input,
+   performs context-free validation, and lets daemon handlers perform schema-
+   dependent validation without ambient stdin access. Carry the client-resolved
+   Fabric invocation identity as request-owned data without forwarding
+   `CF_SESSION`.
 7. Add filesystem and compiler commands only after cwd, input freshness, and
    content-cache boundaries are validated.
 
@@ -570,6 +600,17 @@ The implementation must demonstrate:
 - no request-owned live execution after request cleanup;
 - confirmed writes before the next queued request begins;
 - no automatic replay under disconnect or daemon crash;
+- the same handler call run directly and routed deriving the same receipt
+  address from the same invocation ID, invocation session, and stream;
+- sequential routed calls through one daemon using the same invocation ID and
+  stream but different invocation sessions deriving different receipt
+  addresses;
+- an invocation ID without an invocation session failing before daemon
+  admission;
+- the daemon process's environment being unable to supply or override an
+  invocation session;
+- invocation IDs and invocation sessions remaining absent from default daemon
+  logs, queue diagnostics, origin metadata, and result-ledger metadata;
 - deterministic rejection of incompatible, foreign, and stale daemons;
 - stable generated names without reservation or implicit selection;
 - isolation between the default and explicitly named daemon namespaces;
