@@ -313,13 +313,8 @@ Four hazards that this change introduces or amplifies, each with its fix:
    failure it exists to make retryable.
 
    **Revoke needs more than an id, and this is worth being precise about.** A
-   request id proves only "this exact request was already *delivered*". That
-   covers a captured revoke that was let through and then replayed — including
-   the subtle leg where the replay lands on an already-revoked channel, which
-   is why revoke spends its id even on that no-op rather than answering with a
-   free 200 the attacker could hold until the owner re-mints.
-
-   It does nothing for a request that is captured and **withheld**. An id that
+   request id proves only "this exact request was already *delivered*", so it
+   does nothing for a request that is captured and **withheld**. An id that
    was never spent looks perfectly fresh, so the request stays a live weapon
    for the rest of the proof window and lands on whatever credential exists
    when it is finally let through. The realistic shape is not exotic: swallow
@@ -336,6 +331,21 @@ Four hazards that this change introduces or amplifies, each with its fix:
    before it writes, and that a channel which moved in between produces a
    conflict the caller must re-issue against — which is the correct outcome,
    since the thing being revoked would not be the thing that was seen.
+
+   Because the generation is the binding, revoking an **already-revoked**
+   channel writes nothing: it reports the original revocation and returns. An
+   earlier version rewrote the registration unchanged to spend the request id,
+   guarding against an attacker holding a delivered-and-replayed revoke until
+   the owner re-mints — but `expectedRevision` already refuses that, since a
+   re-mint moves the generation. Once redundant, the write was actively
+   harmful: a revoked channel sits at a *stable* revision, so its precondition
+   never stops matching, and any space owner could drive unlimited
+   200-returning durable transactions through it. Reads cost nothing to repeat.
+
+   That read defaults to the caller's own channels, so revoking a channel
+   minted by *someone else* against a space you own — the case
+   revocation-by-current-owner exists for — needs `cf ingest revoke --space`,
+   which looks it up in the space's list instead.
 2. **Existence oracle.** "Deployment does not host this space" and "you are not
    the owner" must be **one indistinguishable 403**. Otherwise, combined with
    derivable space DIDs, a dictionary of space names enumerates the deployment's
@@ -618,11 +628,16 @@ refused mint writes nothing at all. Creating unlimited *spaces* remains an axis 
 but every space is already a memory store the deployment hosts, so that is the
 deployment's admission control, not this feature's.
 
-The owner meter charges **acquisition**, not creation: taking over a revoked
-channel that belonged to someone else adds a channel to the acquirer without
-creating one, and a meter read as a record of what an identity holds must not
-sit at zero while it holds three. The space meter charges creation only, since a
-takeover adds no new registration to the space.
+**Both** meters charge **acquisition**, not creation — every ownership change,
+plus every creation. For the owner meter that is because taking over a revoked
+channel adds a channel to the acquirer without creating one, and a meter read as
+a record of what an identity holds must not sit at zero while it holds three.
+
+For the space meter it is what makes the bound real at all. A fresh key refused
+a new channel can revoke an existing one and re-mint it instead: it acquires a
+channel, and mints its own permanent `by-owner`, `lifetime` and `requests`
+cells, while a creation-only space meter never moves. Key churn would route
+straight around the bound built to stop it.
 
 ## Known limits
 

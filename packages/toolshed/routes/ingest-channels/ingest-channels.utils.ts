@@ -638,6 +638,26 @@ export async function processRevoke(
   const replay = await peekReplay(deps, callerDid, input.requestId);
   if (replay) return replay;
 
+  // Already revoked: report the original revocation and write NOTHING.
+  //
+  // This used to rewrite the registration unchanged, purely to spend the
+  // request id — the worry being that a free 200 lets an attacker hold a
+  // captured revoke until the owner re-mints and fire it again. Binding to
+  // `expectedRevision` closed that on its own: a re-mint moves the generation,
+  // so the held request names one that no longer exists.
+  //
+  // Once redundant the write was actively harmful. A revoked channel sits at a
+  // STABLE revision, so its precondition never stops matching — any space owner
+  // could issue unlimited 200-returning revokes, each a real durable
+  // transaction over the registration and claims cells, metered by nothing.
+  // Reads cost nothing to repeat.
+  if (existing.registration.revoked !== undefined) {
+    return {
+      status: 200,
+      body: { id: input.id, revokedAt: existing.registration.revoked.at },
+    };
+  }
+
   return await writeRevocation(deps, callerDid, input, existing.registration, {
     claim: true,
   });
@@ -654,40 +674,21 @@ const writeRevocation = async (
   registration: IngestRegistration,
   opts: { claim: boolean },
 ): Promise<ControlResult<{ id: string; revokedAt: string }>> => {
-  // Already revoked: report the original revocation rather than overwriting it.
-  // Any owner of the space may revoke, so an overwrite would let a later caller
-  // replace an operator retirement's attribution with their own.
-  //
-  // The request id is spent even on this no-op. Answering a replay with a bare
-  // 200 spends nothing, so a captured request that has already been delivered
-  // once could simply be held until the owner re-mints and fired again. (What
-  // stops a request captured and NEVER delivered is `expectedRevision`, not
-  // this — an id that was never spent cannot be detected as reused.)
-  const alreadyRevoked = registration.revoked !== undefined;
-  const revokedAt = alreadyRevoked
-    ? registration.revoked!.at
-    : new Date().toISOString();
+  const revokedAt = new Date().toISOString();
   try {
     const history = plainRevocations(registration.revocations);
     await saveRegistration(
       deps.runtime,
       deps.serviceSpace,
-      alreadyRevoked
-        // Unchanged, at the same revision: the write exists only to spend the
-        // request id in the same transaction.
-        ? {
-          ...registration,
-          ...(history !== undefined ? { revocations: history } : {}),
-        }
-        : {
-          ...registration,
-          enabled: false,
-          revoked: { at: revokedAt, by: callerDid },
-          revision: (registration.revision ?? 0) + 1,
-          // Rebuilt, not carried through the spread: see plainRevocations.
-          // Without this the history vanishes on the SECOND revoke.
-          ...(history !== undefined ? { revocations: history } : {}),
-        },
+      {
+        ...registration,
+        enabled: false,
+        revoked: { at: revokedAt, by: callerDid },
+        revision: (registration.revision ?? 0) + 1,
+        // Rebuilt, not carried through the spread: see plainRevocations.
+        // Without this the history vanishes on the SECOND revoke.
+        ...(history !== undefined ? { revocations: history } : {}),
+      },
       input.expectedRevision,
       opts.claim
         ? { owner: callerDid, requestId: input.requestId, channel: input.id }

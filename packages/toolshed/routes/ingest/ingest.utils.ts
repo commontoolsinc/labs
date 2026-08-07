@@ -631,7 +631,11 @@ export async function getLifetimeChannelCount(
   return (cell.get() as number | undefined) ?? 0;
 }
 
-/** How many channels have ever been created against this space. */
+/**
+ * How many channel ACQUISITIONS this space has seen — creations plus ownership
+ * changes. Both are an identity taking on durable state against the space;
+ * counting only creations would leave takeover as a way around the bound.
+ */
 export async function getSpaceLifetimeChannelCount(
   runtime: Runtime,
   serviceSpace: string,
@@ -807,13 +811,16 @@ export async function saveRegistration(
     // these, so a re-mint or a rotate of an existing id is free.
     const creating = current === undefined;
 
-    // What the OWNER meter charges: bringing a channel under this identity's
+    // What BOTH meters charge: bringing a channel under a new identity's
     // control. Not just creation — a takeover (re-minting a revoked channel
-    // that belonged to someone else) leaves `current` defined, so charging only
-    // creation would let an identity accumulate channels with its meter pinned
-    // at zero, and the meter is read as a forensic record of what an identity
-    // holds. The SPACE meter charges creation only, since a takeover adds no
-    // new registration to the space.
+    // that belonged to someone else) leaves `current` defined.
+    //
+    // Charging only creation makes the space meter useless as a bound on key
+    // churn, which is its entire purpose: a fresh DID refused a new channel can
+    // instead revoke an existing one and re-mint it, acquiring a channel — and
+    // minting its own permanent `by-owner`, `lifetime` and `requests` cells —
+    // while the space meter never moves. Every ownership change is a new
+    // identity taking on durable state, so every ownership change is charged.
     const acquiring = creating ||
       (registration.owner !== undefined &&
         current?.owner !== registration.owner);
@@ -843,7 +850,7 @@ export async function saveRegistration(
     // Checked even when the registration carries no owner, and outside the
     // block above: this is the bound that survives key churn, so it must not
     // depend on there being an owner index to read.
-    if (limits?.spaceLifetime !== undefined && creating) {
+    if (limits?.spaceLifetime !== undefined && acquiring) {
       const ever = (spaceLifetimeCell.withTx(tx).get() as number | undefined) ??
         0;
       if (ever >= limits.spaceLifetime) {
@@ -861,7 +868,7 @@ export async function saveRegistration(
       lifetimeCell.withTx(tx).set(ever + 1);
     }
 
-    if (creating) {
+    if (acquiring) {
       const bound = spaceLifetimeCell.withTx(tx);
       bound.set(((bound.get() as number | undefined) ?? 0) + 1);
     }

@@ -211,6 +211,17 @@ export const ingest = new Command()
   /* ingest revoke */
   .command("revoke <id:string>", "Disable a channel you own.")
   .usage(`${commonUsage} <id>`)
+  // No `-s` short form, unlike `ls --space`: cliffy's generic inference does
+  // not unify a short-flag option with this command's positional argument, and
+  // the whole builder chain stops type-checking.
+  .option(
+    "--space <space:string>",
+    "Look the channel up among EVERY channel targeting this space rather " +
+      "than only the ones you minted. Required to revoke a channel minted by " +
+      "someone whose access to the space has since been removed — that is the " +
+      "case revocation by the current owner exists for, and such a channel is " +
+      "not in your own list.",
+  )
   .action(async (options, id: string) => {
     const config = parseConfig(options);
     // Read before write, deliberately. `revoke` binds to the generation the
@@ -218,11 +229,19 @@ export const ingest = new Command()
     // landing on a credential minted after it was signed. If the channel moved
     // in between, the server refuses and says so — the correct outcome, since
     // the thing being revoked would not be the thing that was seen.
-    const found = (await listChannels(config)).find((c) => c.id === id);
+    const space = options.space
+      ? await resolveSpaceDid(config.identityPath, options.space)
+      : undefined;
+    const found = (await listChannels(config, { space })).find((c) =>
+      c.id === id
+    );
     if (!found) {
       throw new Error(
-        `No ingest channel ${id} among the ones you own. ` +
-          `Run 'cf ingest ls' to see them.`,
+        space
+          ? `No ingest channel ${id} targeting that space.`
+          : `No ingest channel ${id} among the ones you minted. If it was ` +
+            `minted by someone else against a space you own, pass --space ` +
+            `to look it up there.`,
       );
     }
     const { revokedAt } = await revokeChannel(config, {
@@ -236,4 +255,9 @@ export const ingest = new Command()
       `Revoked ${id} at ${revokedAt}. Further POSTs are refused; the ` +
         `registration is retained as an audit record.`,
     );
-  });
+  })
+  // Returns the chain to the top-level `ingest` command. Without it the export
+  // is typed as whatever the LAST subcommand's builder produced, and once that
+  // subcommand carries an option the type no longer unifies where main.ts
+  // mounts it.
+  .reset();
