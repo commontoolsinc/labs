@@ -80,6 +80,7 @@ import {
   isReadIgnoredForScheduling,
   isReadMarkedAsAttemptedWrite,
   isUiInputBlindWriteTx,
+  registerCommitRejectionListener,
   takeCoverageWaits,
 } from "./reactivity-log.ts";
 import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
@@ -1937,6 +1938,14 @@ export class V2StorageTransaction implements IStorageTransaction {
   commit(
     options?: TransactionCommitOptions,
   ): Promise<Result<Unit, CommitError>> {
+    // A rejection seals the commit's fate before the promise resolves — the
+    // promise additionally waits out the read-repair gate so a retry runs
+    // against the repaired base. The verdict must not: finalizeRejection
+    // notifies this listener at rejection receipt, ahead of the gate.
+    registerCommitRejectionListener(
+      this,
+      (rejection) => this.#verdict.resolve({ error: rejection }),
+    );
     const promise = this.#commitImpl(options);
     // Backstop for the verdict signal: paths that never reach a push (zero
     // writes, pre-storage rejections) determine their fate exactly when the

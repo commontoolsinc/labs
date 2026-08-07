@@ -1408,6 +1408,24 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   ): void;
 
   /**
+   * Add a callback that fires when the commit's fate is sealed — the
+   * accept verdict or the rejection receipt — BEFORE the waits the commit
+   * promise (and commit callbacks) additionally sit out: view coverage on
+   * accept, the read-repair gate on rejection. For work gated on
+   * durability alone; a consumer that acts on the post-commit view (a
+   * compensation reading the repaired base, a retry) belongs on
+   * {@link addCommitCallback}. Same once-only dispatch and error isolation
+   * as commit callbacks; on synchronous fates (abort, pre-storage
+   * rejection) both layers fire together, verdict first.
+   */
+  addVerdictCallback(
+    callback: (
+      tx: IExtendedStorageTransaction,
+      result: Result<Unit, CommitError>,
+    ) => void,
+  ): void;
+
+  /**
    * Reads a value from a (local) memory address and throws on error, except for
    * `NotFoundError` which is returned as undefined.
    *

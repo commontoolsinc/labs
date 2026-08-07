@@ -2,6 +2,7 @@ import type {
   Activity,
   IMemorySpaceAddress,
   Metadata,
+  StorageTransactionRejected,
   TransactionReactivityLog,
 } from "./interface.ts";
 import { normalizeCellScope } from "../scope.ts";
@@ -116,6 +117,39 @@ export function isReadIgnoredForCommit(meta?: Metadata): boolean {
 // Both the wrapper and the inner storage transaction(s) are marked, since
 // read()/buildReads run on the inner one; the chain walk tolerates extra wrapper
 // layers.
+// Rejection listeners, registered per inner transaction (CT-1950). A
+// rejected commit's promise resolves only after finalizeRejection's
+// read-repair gate — the caller's retry needs the repaired base — but the
+// commit's FATE is sealed the moment the rejection is received, and the
+// verdict-gated effect layer (commit callbacks, outbox clearing) must not
+// wait out the repair round trip. The transaction registers its verdict
+// resolver at commit() entry; finalizeRejection notifies it before the
+// gate. Rejections only: an accept does not seal a multi-space commit's
+// aggregate fate, so accepts keep resolving the verdict with the final
+// result.
+const commitRejectionListeners = new WeakMap<
+  object,
+  (rejection: StorageTransactionRejected) => void
+>();
+
+export function registerCommitRejectionListener(
+  tx: object,
+  listener: (rejection: StorageTransactionRejected) => void,
+): void {
+  commitRejectionListeners.set(tx, listener);
+}
+
+export function notifyCommitRejected(
+  tx: object,
+  rejection: StorageTransactionRejected,
+): void {
+  const listener = commitRejectionListeners.get(tx);
+  if (listener !== undefined) {
+    commitRejectionListeners.delete(tx);
+    listener(rejection);
+  }
+}
+
 // Fan-out coverage waits, recorded per transaction (CT-1950). The push path
 // resolves its result at the server verdict and records the parked
 // application's promise here; the transaction layer drains the record so
