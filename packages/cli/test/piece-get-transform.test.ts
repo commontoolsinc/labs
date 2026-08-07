@@ -2556,6 +2556,46 @@ describe("cf piece get transforms", () => {
         });
       });
 
+      it("desugars a bare `@` to the marker at the projection's root", async () => {
+        const written = await parseSelectionProjection('{"$link":true}');
+        const parsed = parseSelectProjection("@");
+        expect(parsed.schema).toEqual(written.schema);
+        expect(parsed.markers).toEqual(written.markers);
+      });
+
+      it("returns the read source's own address for a bare `@`", async () => {
+        const { board, notes } = await seedBoard("at-suffix-root", true);
+        expect(
+          await deriveSelectedValue(runtime, space, board, {
+            projection: parseSelectProjection("@"),
+          }),
+        ).toEqual({ $link: addressOf(board) });
+        expect(
+          await deriveSelectedValue(runtime, space, board.key("topic"), {
+            projection: parseSelectProjection("@"),
+          }),
+        ).toEqual({ $link: addressOf(notes[0]) });
+      });
+
+      it("returns the read source's address beside a sibling projection", async () => {
+        const { board } = await seedBoard("at-suffix-root-union", true);
+        for (const source of ["@,label", "label,@"]) {
+          expect(
+            await deriveSelectedValue(runtime, space, board, {
+              projection: parseSelectProjection(source),
+            }),
+          ).toEqual({ $link: addressOf(board), label: "Field notes" });
+        }
+      });
+
+      it("points a leading `@` that names a file at --schema", () => {
+        for (const source of ["@projection.json", "@label", "@label,label"]) {
+          expect(() => parseSelectProjection(source)).toThrow(
+            "--select takes comma-separated field paths",
+          );
+        }
+      });
+
       it("marks a position below an array for each of its elements", async () => {
         const { board, notes } = await seedBoard("at-suffix-elements", true);
         const titleAddresses = notes.map((note) => ({

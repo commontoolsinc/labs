@@ -828,6 +828,10 @@ function conciseSelectionSchema(node: ConciseSelection): unknown {
  * list names positions rather than shapes, so it is collected as a tree first:
  * the same position can be reached by several paths, and `topic@` beside
  * `topic.title` is one position asked two questions rather than two answers.
+ *
+ * A path that is nothing but {@link CONCISE_ADDRESS_SUFFIX} names the position
+ * the read is already at, which no field path reaches because it is above
+ * every field.
  */
 function conciseProjectionSchema(
   source: string,
@@ -841,6 +845,10 @@ function conciseProjectionSchema(
   }
   const root = emptyConciseSelection();
   for (const path of paths) {
+    if (path === CONCISE_ADDRESS_SUFFIX) {
+      root.marked = true;
+      continue;
+    }
     const segments = path.split(".").map((segment) =>
       parseConciseSegment(segment, path, flag)
     );
@@ -867,18 +875,25 @@ export interface ProjectionParseDependencies {
  * Parses a `--select` argument: the comma-separated field paths, which is the
  * whole of what this flag accepts. A path segment ending in
  * {@link CONCISE_ADDRESS_SUFFIX} asks for the address of the position it
- * names. `--schema` reads the same spelling and more, so an argument written
- * in the JSON Schema language is pointed at the flag that reads it rather than
- * reported as a malformed field path.
+ * names, and a path that is only the suffix asks the read's own source for
+ * its address. `--schema` reads the same spelling and more, so an argument
+ * written in the JSON Schema language is pointed at the flag that reads it
+ * rather than reported as a malformed field path.
+ *
+ * `@file` names a schema file, which only `--schema` accepts, and a field name
+ * cannot begin with `@`. A leading one is therefore an argument for the other
+ * flag wherever it is not the bare suffix.
  */
 export function parseSelectProjection(source: string): SelectionProjection {
   const trimmed = source.trim();
   if (trimmed.length === 0) {
     throw new CellSelectionError("--select must not be empty");
   }
+  const leading = trimmed.split(",", 1)[0].trim();
   if (
-    trimmed.startsWith("{") || trimmed.startsWith("@") ||
-    trimmed === "true" || trimmed === "false"
+    trimmed.startsWith("{") || trimmed === "true" || trimmed === "false" ||
+    (leading.startsWith(CONCISE_ADDRESS_SUFFIX) &&
+      leading !== CONCISE_ADDRESS_SUFFIX)
   ) {
     throw new CellSelectionError(
       "--select takes comma-separated field paths. Pass a JSON Schema or an " +

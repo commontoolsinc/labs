@@ -311,6 +311,11 @@ cf piece get --piece <board> --select 'notes@,noteCount'
 The suffix is special only at the end of a segment, and `\@` writes a literal
 one, so a field named `user@home` stays reachable.
 
+A path that is only `@` names the position the read is already at, which no
+field path reaches because it sits above every field. `--select '@'` returns
+the source's own address in place of its contents, and `--select '@,title'`
+returns the address beside the title.
+
 A marked position is not fetched — the address is stored in the document that
 contains it, so a marked collection of a hundred notes costs the one read that
 document already needed. Where the marker is the whole selection, nothing

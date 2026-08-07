@@ -259,6 +259,23 @@ element, because that is where the field list puts a field path. Naming a
 position both ways, `topic,topic@`, returns the address beside the whole
 contents.
 
+A path that is only `@` names the position the read is already at, which no
+field path reaches because it sits above every field:
+
+```bash
+cf piece get --piece ID topic --select '@,title'
+```
+
+```json
+{ "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" }
+```
+
+It composes exactly as a suffix one level down does: `@` alone replaces the
+contents with the address, and `@` beside a field path returns both in the one
+result. A leading `@` followed by anything else is an `@file`, which `--schema`
+reads and `--select` does not, so `--select '@fields.json'` is refused and
+pointed there.
+
 A marked position is never fetched: it contributes a rejecting selector to the
 same path union the projection builds, and the address is composed from links
 already stored in the documents the read visited rather than by following one. A
