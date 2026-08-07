@@ -1957,6 +1957,91 @@ describe("CFC browser helpers", () => {
     assertEquals(clicks, 0, "the covered control should have taken no click");
   });
 
+  it("re-marks a replacement that drops the original click mark", async () => {
+    await page.evaluate((clickTargetAttr: string) => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      const surface = document.createElement("div");
+      root.append(surface);
+      document.body.append(host);
+
+      const makeButton = (generation: number) => {
+        const button = document.createElement("button");
+        button.id = "remarked-guest-button";
+        button.dataset.generation = String(generation);
+        button.textContent = "Continue as guest";
+        Object.assign(button.style, {
+          display: "block",
+          width: "200px",
+          height: "32px",
+        });
+        return button;
+      };
+      surface.append(makeButton(0));
+
+      let replacements = 0;
+      let clickedGeneration = -1;
+      let markPresentAtClick = false;
+      surface.addEventListener("click", (event) => {
+        const target = event.target as HTMLElement | null;
+        if (target?.id !== "remarked-guest-button") return;
+        clickedGeneration = Number(target.dataset.generation);
+        markPresentAtClick = target.hasAttribute(clickTargetAttr);
+      });
+
+      // Replace the control as soon as the first wait marks it. Unlike the
+      // continuous-rebuild fixture above, this replacement deliberately does
+      // not inherit the mark. The click can land only if clickMarked runs the
+      // caller's mark predicate again against the live replacement.
+      const observer = new MutationObserver(() => {
+        const marked = surface.querySelector<HTMLElement>(
+          `[${clickTargetAttr}]`,
+        );
+        if (!marked) return;
+        observer.disconnect();
+        marked.replaceWith(makeButton(1));
+        replacements++;
+      });
+      observer.observe(surface, {
+        attributes: true,
+        subtree: true,
+        attributeFilter: [clickTargetAttr],
+      });
+
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = { viewSettled: () => Promise.resolve() };
+      (globalThis as typeof globalThis & {
+        __remarkedClickResult: () => {
+          replacements: number;
+          clickedGeneration: number;
+          markPresentAtClick: boolean;
+        };
+      }).__remarkedClickResult = () => ({
+        replacements,
+        clickedGeneration,
+        markPresentAtClick,
+      });
+    }, { args: [CLICK_TARGET_ATTR] });
+
+    await clickCfButton(page, "#remarked-guest-button");
+
+    const result = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __remarkedClickResult: () => {
+          replacements: number;
+          clickedGeneration: number;
+          markPresentAtClick: boolean;
+        };
+      }).__remarkedClickResult()
+    );
+    assertEquals(result, {
+      replacements: 1,
+      clickedGeneration: 1,
+      markPresentAtClick: true,
+    });
+  });
+
   it("tells the interaction observer where a marked click landed", async () => {
     // A presentation recording animates its cursor from these callbacks. The
     // click is aimed at a point rather than resolved to a handle, so the

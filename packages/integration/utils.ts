@@ -114,14 +114,27 @@ export interface ProbeApi {
  * `args` passed to {@link waitForCondition}, and returns whether the awaited
  * condition holds. It may be async (for example to await `rt.idle()`).
  *
- * A predicate may answer with a value instead of `true`. Any truthy result
+ * A predicate may answer with a JSON value instead of `true`. Any truthy result
  * satisfies the condition, and a result other than `true` is carried back to
  * the test process as {@link waitForCondition}'s resolution. That is how a
  * wait hands over a measurement taken at the instant the condition held —
  * the coordinates a trusted click is about to be aimed at, say — without a
- * second round trip in which the page could move on.
+ * second round trip in which the page could move on. Values outside
+ * {@link PageConditionValue} are rejected rather than being silently changed
+ * by JSON serialization at the page boundary.
  */
-export type PageCondition<A extends readonly unknown[], R = unknown> = (
+export type PageConditionValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly PageConditionValue[]
+  | { readonly [key: string]: PageConditionValue };
+
+export type PageCondition<
+  A extends readonly unknown[],
+  R extends PageConditionValue = PageConditionValue,
+> = (
   probe: ProbeApi,
   ...args: A
 ) => boolean | R | Promise<boolean | R>;
@@ -302,13 +315,82 @@ function installWaiter(
   // reaches the caller without a second round trip.
   let answer: unknown = true;
 
+  // Copy an answer into the exact value JSON will carry. JSON.stringify alone
+  // is not a validator: it silently drops functions, symbols, and undefined
+  // properties, turns Map into {}, and changes non-finite numbers to null. A
+  // wait must either deliver the predicate's answer or report that it cannot;
+  // silently delivering a different value makes the condition look satisfied
+  // with an answer it never produced.
+  const copyJsonAnswer = (
+    value: unknown,
+    path = "$",
+    seen = new WeakSet<object>(),
+  ): unknown => {
+    if (
+      value === null || typeof value === "string" ||
+      typeof value === "boolean"
+    ) {
+      return value;
+    }
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) {
+        throw new TypeError(`Non-finite number at ${path} is not JSON-safe`);
+      }
+      return value;
+    }
+    if (typeof value !== "object") {
+      throw new TypeError(`${typeof value} at ${path} is not JSON-safe`);
+    }
+    if (seen.has(value)) {
+      throw new TypeError(`Cycle at ${path} is not JSON-safe`);
+    }
+
+    seen.add(value);
+    try {
+      if (Array.isArray(value)) {
+        return value.map((item, index) =>
+          copyJsonAnswer(item, `${path}[${index}]`, seen)
+        );
+      }
+
+      const prototype = Object.getPrototypeOf(value);
+      if (prototype !== Object.prototype && prototype !== null) {
+        const tag = Object.prototype.toString.call(value);
+        throw new TypeError(`${tag} at ${path} is not a plain JSON object`);
+      }
+      if (
+        Object.getOwnPropertySymbols(value).some((symbol) =>
+          Object.prototype.propertyIsEnumerable.call(value, symbol)
+        )
+      ) {
+        throw new TypeError(
+          `Enumerable symbol key at ${path} is not JSON-safe`,
+        );
+      }
+
+      const copy = Object.create(null) as Record<string, unknown>;
+      for (const key of Object.keys(value)) {
+        copy[key] = copyJsonAnswer(
+          (value as Record<string, unknown>)[key],
+          `${path}.${key}`,
+          seen,
+        );
+      }
+      return copy;
+    } finally {
+      seen.delete(value);
+    }
+  };
+
   const fire = (): boolean => {
     const notify = (globalThis as Record<string, unknown>)[bindingName];
     if (typeof notify !== "function") return false;
     signalled = true;
     let payload: string;
     try {
-      payload = JSON.stringify({ value: answer === true ? undefined : answer });
+      payload = JSON.stringify({
+        value: answer === true ? undefined : copyJsonAnswer(answer),
+      });
     } catch (error) {
       // An answer that cannot cross the boundary is reported as one. Sending
       // "no value" instead would read to the caller as a condition that held
@@ -420,7 +502,10 @@ function installWaiter(
  * the wait, so a caller acting on it acts on the page as it was when the
  * condition held, with no round trip in between for the page to change in.
  */
-export const waitForCondition = async <A extends readonly unknown[], R>(
+export const waitForCondition = async <
+  A extends readonly unknown[],
+  R extends PageConditionValue,
+>(
   page: Page,
   predicate: PageCondition<A, R>,
   { args }: { args?: A } = {},

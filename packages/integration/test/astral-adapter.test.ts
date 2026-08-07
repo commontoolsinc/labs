@@ -1,5 +1,6 @@
 import {
   assert,
+  assertAlmostEquals,
   assertEquals,
   assertRejects,
   assertStringIncludes,
@@ -1378,11 +1379,32 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
         width: "100px",
         height: "30px",
         margin: "0",
+        padding: "0",
+        border: "0",
       });
       button.addEventListener("click", () => {
         document.body.dataset.clicked = "yes";
       });
       document.body.append(button);
+
+      const offsetButton = document.createElement("button");
+      offsetButton.id = "offset-click-target";
+      offsetButton.textContent = "offset click";
+      Object.assign(offsetButton.style, {
+        position: "fixed",
+        left: "260px",
+        top: "90px",
+        width: "100px",
+        height: "30px",
+        margin: "0",
+        padding: "7px 11px 13px 17px",
+        borderStyle: "solid",
+        borderWidth: "3px 5px 9px 11px",
+        boxSizing: "content-box",
+        transform: "rotate(8deg) scale(1.2)",
+        transformOrigin: "13px 9px",
+      });
+      document.body.append(offsetButton);
 
       const input = document.createElement("input");
       input.id = "type-target";
@@ -1397,8 +1419,8 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
     );
 
     // The click aims at the centre of the control's own rect, and an offset
-    // aims from the rect's top-left corner. Both are measured in the page, so
-    // the numbers come from the pinned control above.
+    // aims from its content-box origin. This control has no border or padding,
+    // so both points are direct arithmetic on the pinned rect above.
     let mousePoint: { x: number; y: number } | undefined;
     Object.defineProperty(astralPage.mouse, "click", {
       configurable: true,
@@ -1415,10 +1437,41 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
     assertEquals(mousePoint, { x: 64, y: 66 });
     assertEquals(clickPoints[2], { x: 64, y: 66 });
 
+    // Match published Astral's offset contract: the offset is added to the
+    // content quad's top-left point. The decorated click computes that point
+    // in-page, but a stable DOM-agent box model is a useful compatibility
+    // oracle here for an asymmetrically bordered, transformed control.
+    const offsetOracle = await page.waitForSelector("#offset-click-target");
+    const offsetModel = await offsetOracle.boxModel();
+    assert(offsetModel);
+    let contentOrigin = offsetModel.content[0];
+    for (const point of offsetModel.content) {
+      if (point.x < contentOrigin.x && point.y < contentOrigin.y) {
+        contentOrigin = point;
+      }
+    }
+    const transformedOffset = { x: 4, y: 6 };
+    const offsetTarget = await page.waitForSelector("#offset-click-target");
+    await offsetTarget.click({ offset: transformedOffset });
+    assert(mousePoint);
+    assertAlmostEquals(
+      mousePoint.x,
+      contentOrigin.x + transformedOffset.x,
+      0.01,
+    );
+    assertAlmostEquals(
+      mousePoint.y,
+      contentOrigin.y + transformedOffset.y,
+      0.01,
+    );
+    assertEquals(clickPoints[3], mousePoint);
+
     const typeTarget = await page.waitForSelector("#type-target");
     await typeTarget.type("text");
     assertEquals(keyboardOptions, { delay: 17 });
     assertEquals(interactions, [
+      "beforeClick",
+      "afterClick",
       "beforeClick",
       "afterClick",
       "beforeClick",
