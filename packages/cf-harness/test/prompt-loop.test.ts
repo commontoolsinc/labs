@@ -48,7 +48,6 @@ import type { HarnessModelClient } from "../src/model/client.ts";
 import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
 import { OpenAICodexCredentialResolver } from "../src/auth/openai-codex.ts";
 import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
-import { assertPromptCacheModeSupported } from "../src/model/responses-protocol.ts";
 
 const directPromptSlotBinding: PromptSlotBinding = {
   type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
@@ -645,20 +644,23 @@ Deno.test("Codex profile model overrides fail the child without aborting the par
   );
 });
 
-Deno.test("CfHarnessPromptLoop preserves cache-mode validation for child model overrides", async () => {
+Deno.test("CfHarnessPromptLoop keeps provider controls off profile-overridden child models", async () => {
   let parentTurns = 0;
   let childTurns = 0;
   const modelClient: HarnessModelClient = {
     providerId: "test-provider",
     complete: (request) => {
-      assertPromptCacheModeSupported(request.model, request.promptCacheMode);
       if (request.model !== "gpt-5.6-terra") {
         childTurns += 1;
+        assertEquals(request.promptCacheMode, undefined);
+        assertEquals(request.reasoningEffort, undefined);
         return Promise.resolve({
-          assistant: { role: "assistant", content: "unexpected child success" },
+          assistant: { role: "assistant", content: "child search complete" },
         });
       }
       parentTurns += 1;
+      assertEquals(request.promptCacheMode, "explicit");
+      assertEquals(request.reasoningEffort, "low");
       return Promise.resolve({
         assistant: parentTurns === 1
           ? {
@@ -678,7 +680,7 @@ Deno.test("CfHarnessPromptLoop preserves cache-mode validation for child model o
           }
           : {
             role: "assistant" as const,
-            content: "Parent handled the unsupported child configuration.",
+            content: "Parent used the child result.",
           },
       });
     },
@@ -686,6 +688,7 @@ Deno.test("CfHarnessPromptLoop preserves cache-mode validation for child model o
   const loop = new CfHarnessPromptLoop({
     modelClient,
     promptCacheMode: "explicit",
+    reasoningEffort: "low",
     allowedToolIds: ["delegate_task"],
     allowedSubagentProfiles: ["web_search"],
     engine: new CfHarnessEngine({
@@ -707,15 +710,71 @@ Deno.test("CfHarnessPromptLoop preserves cache-mode validation for child model o
 
   assertEquals(
     result.finalAssistantText,
-    "Parent handled the unsupported child configuration.",
+    "Parent used the child result.",
   );
   assertEquals(parentTurns, 2);
-  assertEquals(childTurns, 0);
-  assertEquals(output.subagent.status, "failed");
+  assertEquals(childTurns, 1);
+  assertEquals(output.subagent.status, "completed");
   assertStringIncludes(
     output.subagent.summary,
-    "prompt cache mode explicit requires a GPT-5.6 model",
+    "child search complete",
   );
+});
+
+Deno.test("CfHarnessPromptLoop propagates provider controls to model-inheriting children", async () => {
+  let turns = 0;
+  const modelClient: HarnessModelClient = {
+    providerId: "test-provider",
+    complete: (request) => {
+      turns += 1;
+      assertEquals(request.model, "gpt-5.6-terra");
+      assertEquals(request.promptCacheMode, "explicit");
+      assertEquals(request.reasoningEffort, "low");
+      if (turns === 1) {
+        return Promise.resolve({
+          assistant: {
+            role: "assistant" as const,
+            content: "",
+            toolCalls: [{
+              id: "call-default-provider-controls",
+              type: "function" as const,
+              function: {
+                name: "delegate_task",
+                arguments: JSON.stringify({
+                  goal: "Inspect the inherited-model path.",
+                  profile: "default",
+                }),
+              },
+            }],
+          },
+        });
+      }
+      return Promise.resolve({
+        assistant: {
+          role: "assistant",
+          content: turns === 2 ? "child done" : "parent done",
+        },
+      });
+    },
+  };
+  const loop = new CfHarnessPromptLoop({
+    modelClient,
+    promptCacheMode: "explicit",
+    reasoningEffort: "low",
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: ["default"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "run-inherited-provider-controls",
+      model: "gpt-5.6-terra",
+      cfcEnforcementMode: "disabled",
+    }),
+  });
+
+  const result = await loop.runPrompt({ prompt: "Delegate and continue." });
+
+  assertEquals(result.finalAssistantText, "parent done");
+  assertEquals(turns, 3);
 });
 
 class FailingArtifactStore implements HarnessArtifactStore {
