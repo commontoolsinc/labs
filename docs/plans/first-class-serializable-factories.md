@@ -912,8 +912,7 @@ original pattern with `entries`.
   compatibility reader, migration fixture, or historical documentation:
 
   ```sh
-  rg -n "patternTool|PatternToolResult|extraParams" packages docs/common \
-    --glob '!packages/patterns/deprecated/**'
+  rg -n "patternTool|PatternToolResult|extraParams" packages docs/common
   ```
 
 ### WP4.4 — Stop canonical production of legacy list and tool shapes
