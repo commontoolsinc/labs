@@ -1411,10 +1411,10 @@ export class CellImpl<T extends FabricValue>
      * one: an ingress caller that owns a delivery id passes it through so a
      * retry of the same id collides on the handling's create-only receipt
      * (verb contract WS-D,
-     * docs/plans/pattern-verb-contract-implementation.md). The receipt is a
-     * COMMIT witness, not an execution witness — the redelivered event still
-     * runs the handler body and then loses the race, so effects outside the
-     * transaction repeat. `runtimeInjectedEventKeys` carries the
+     * docs/history/plans/pattern-verb-contract-implementation.md). The receipt
+     * is a COMMIT witness, not an execution witness — the redelivered event
+     * still runs the handler body and then loses the race, so effects outside
+     * the transaction repeat. `runtimeInjectedEventKeys` carries the
      * runtime-injection provenance the closed-world gate consumes. Ignored on
      * the plain-cell write path.
      */
