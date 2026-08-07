@@ -192,6 +192,81 @@ describe("late space host hints", () => {
     }
   });
 
+  it("resolves the default route when a hint reads it, not at construction", async () => {
+    const signer = await Identity.fromPassphrase("deferred-default-route");
+    const targetSpace = (await Identity.fromPassphrase(
+      "deferred-default-route-target",
+    )).did();
+    const targetId = "of:deferred-default-route-target" as URI;
+    const defaultServer = makeServer("deferred-default-route");
+    const memoryHost = new URL("https://default-toolshed.test");
+    let targetSessions = 0;
+    const sessionFactory = new LoopbackSessionFactory(() => {
+      targetSessions++;
+      return defaultServer;
+    });
+
+    // Turning the memory host into the WebSocket storage endpoint an
+    // unseeded, unhinted space opens against parses the host, joins the
+    // storage path onto it, copies the result, and parses that copy again to
+    // swap the scheme. The manager holds the host as text and does none of
+    // that until registerSpaceHost() compares against the route, so a URL
+    // parsed while the constructor runs is that resolution back inside it.
+    // Counting parses is what separates the two shapes: both read the
+    // caller's host object exactly once, one to snapshot it and the other to
+    // resolve it.
+    const RealURL = globalThis.URL;
+    let parsedWhileConstructing = 0;
+    class CountingURL extends RealURL {
+      constructor(url: string | URL, base?: string | URL) {
+        parsedWhileConstructing += 1;
+        super(url, base);
+      }
+    }
+    globalThis.URL = CountingURL as unknown as typeof URL;
+    let manager: TestStorageManager;
+    try {
+      manager = TestStorageManager.create(
+        signer,
+        sessionFactory,
+        memoryHost,
+      );
+    } finally {
+      globalThis.URL = RealURL;
+    }
+
+    try {
+      expect(parsedWhileConstructing).toBe(0);
+
+      const provider = manager.open(targetSpace);
+      const provisionalReplica = provider.replica;
+      const firstRead = await provider.sync(targetId, {
+        path: [],
+        schema: true,
+      });
+      expect(firstRead.error).toBeUndefined();
+      expect(targetSessions).toBe(1);
+
+      // The hint reads the route, so by now the route has to be there. A
+      // route that was never resolved compares unequal to the hint, which
+      // makes the hint a replacement: the replica is rebuilt and a second
+      // session opens.
+      expect(
+        manager.registerSpaceHost(
+          targetSpace,
+          "https://default-toolshed.test",
+        ),
+      ).toBe(true);
+      await manager.crossSpaceSettled();
+
+      expect(provider.replica).toBe(provisionalReplica);
+      expect(targetSessions).toBe(1);
+    } finally {
+      await manager.close();
+      await defaultServer.close();
+    }
+  });
+
   it("replays a read that first opened against the default host", async () => {
     const signer = await Identity.fromPassphrase("late-space-host-hint");
     const targetSpace = (await Identity.fromPassphrase(
