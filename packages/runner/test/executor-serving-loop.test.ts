@@ -909,13 +909,20 @@ describe("stage F serving loop", () => {
     // The miss fires exactly once; the completion commits its OWN
     // derived-class commit and the next wave serves the value — the
     // client observes it through ordinary push.
+    // 30 s here and on this step's two later observation waits: this
+    // file is deliberately real-clock, and under load the wave cycle
+    // degrades to deadline-paced waves (flushDeadlineMs 5_000), so a
+    // multi-wave leg legitimately overruns 15 s while still
+    // progressing (the soak flake signature: rare timeout reds, zero
+    // double-egress). Matches the recovery leg's 30 s "loaded box"
+    // budget below.
     await waitUntil(
       () =>
         (clientResult.key("fetch").key("result").get() as {
           from?: string;
         } | undefined)?.from === "https://stage-g.test/one",
       "client to observe the served fetch result",
-      15_000,
+      30_000,
     );
     expect(calls.filter((url) => url.endsWith("/one")).length).toBe(1);
     const stats1 = host.stats();
@@ -992,7 +999,7 @@ describe("stage F serving loop", () => {
     await waitUntil(
       () => clientResult.key("fetch").key("error").get() !== undefined,
       "client to observe the error-shaped result",
-      15_000,
+      30_000,
     );
     expect(calls.filter((url) => url.endsWith("/fails")).length).toBe(1);
     // No timer retry: give any (forbidden) retry loop time to betray
@@ -1011,7 +1018,7 @@ describe("stage F serving loop", () => {
           from?: string;
         } | undefined)?.from === "https://stage-g.test/two",
       "client to observe the retried fetch result",
-      15_000,
+      30_000,
     );
     expect(calls.filter((url) => url.endsWith("/two")).length).toBe(1);
     // FINAL stability re-check, after every later leg's waves and

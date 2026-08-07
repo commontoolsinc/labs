@@ -676,6 +676,9 @@ export class SpaceServer implements TransactionSealDestination {
       const localSeq = sealed.sealed.localSeq;
       this.#outbox?.deferRetirement(
         effectKey,
+        // A locally-rejected settle (a route replacement racing the
+        // verdict) still consults whenApplied on this replica —
+        // benign: a replaced replica re-pulls durable state.
         sealed.sealed.settled
           .catch(() => undefined)
           .then(() => replica.whenApplied!(localSeq)),
@@ -992,6 +995,11 @@ export class SpaceServer implements TransactionSealDestination {
       // is exactly what §7's wavesBudgetExhausted exists to surface.
       if (exhausted) {
         this.#options.stats.wavesBudgetExhausted += 1;
+        logger.debug?.("wave-budget-exhausted", () => [
+          `space ${this.#options.space} exhausted the flush deadline on ` +
+          `a zero-delta cycle: batchHead ${batchHead}, ` +
+          `total ${this.#options.stats.wavesBudgetExhausted}`,
+        ]);
       }
       return;
     }
@@ -1061,7 +1069,14 @@ export class SpaceServer implements TransactionSealDestination {
 
     const stats = this.#options.stats;
     stats.waves += 1;
-    if (exhausted) stats.wavesBudgetExhausted += 1;
+    if (exhausted) {
+      stats.wavesBudgetExhausted += 1;
+      logger.debug?.("wave-budget-exhausted", () => [
+        `space ${this.#options.space} exhausted the flush deadline: ` +
+        `batchHead ${batchHead}, wave seq ${outcome.seq}, ` +
+        `total ${stats.wavesBudgetExhausted}`,
+      ]);
+    }
     stats.supersededWrites += outcome.supersededWrites;
     // Stage G, post-commit: hand the wave's sealed effects to the
     // outbox BEFORE anything below can throw (a failed commit-record

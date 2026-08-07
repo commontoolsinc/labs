@@ -196,7 +196,11 @@ export class SpaceOutbox {
    * await (a late writeback of attached work) registers into a fresh
    * list, and the entry must not retire ahead of it. Never rejects —
    * barriers resolve on apply, reset, and close (the replica side), and
-   * a rejected barrier must not wedge retirement. */
+   * a rejected barrier must not wedge retirement. A registration
+   * landing in the ~1-microtask window between the final empty check
+   * here and the caller's `.finally` cleanup is deleted unawaited —
+   * the documented at-least-once straggler posture (unreachable
+   * today: every production writeback runs inside tracked work). */
   async #awaitRetireBarriers(key: string): Promise<void> {
     while (true) {
       const barriers = this.#retireBarriers.get(key);
