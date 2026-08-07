@@ -138,7 +138,7 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 | Inspect state      | `deno task cf piece inspect --piece ID ...`                                                          |
 | Get field          | `deno task cf piece get --piece ID fieldPath ...`                                                    |
 | Filter array       | `deno task cf piece get --piece ID items --filter '.active == true' ...`                             |
-| Project fields     | `deno task cf piece get --piece ID items --schema id,title ...`                                      |
+| Project fields     | `deno task cf piece get --piece ID items --select id,title ...`                                      |
 | Read addresses     | `deno task cf piece get --piece ID items --schema '{"type":"array","items":{"$link":true}}' ...`     |
 | Step + get         | `deno task cf piece get --piece ID fieldPath --step ...`                                             |
 | Set field          | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
@@ -236,41 +236,42 @@ callers can request the format explicitly.
 `piece get --filter` accepts a jq-inspired predicate over array items: paths,
 JSON literals, comparisons, `and`/`or`/`not`, and parentheses. Only `false` and
 `null` are falsey; stored `undefined` is treated like a missing value and is
-also falsey. Non-array inputs are rejected. `--schema` projects output from a
-comma-separated field list, an inline JSON Schema, or `@schema.json`; concise
-fields apply per item for arrays, while JSON Schema describes the whole output.
-In a JSON Schema, `properties` projects an object and `items` projects an array
-at every level of nesting, with or without a matching `type`. In an array-item
-projection, a typed scalar leaf that does not match stored data is omitted
-rather than reported as an error; prefer `true` leaves unless type filtering is
-intentional. Concise dotted paths follow declared source schemas through nested
-arrays: `comments.body` selects `body` from every comment and drops its
-siblings. Source-declared nullable items and properties remain null. If a
-present source cannot materialize the transform, the command exits nonzero with
-an explicit "not JSON null" error; an absent optional source retains the
-ordinary successful `null` response. If the source schema does not identify a
-nested container, concise projection still applies its field mask across
-encountered arrays to prevent sibling disclosure; use an explicit schema for a
-fixed output contract. The two flags compose as filter-then-project. Both run
-through runtime filter/map/lift nodes, which construct projected values from
-source-schema-selected reads. A declared root shape and structurally selectable
-properties make the initial read the union of predicate and projection paths, so
-omitted linked subgraphs are not hydrated; ambiguous compositions can retain a
-wider selector, and schema-less or root-union sources need a value-shape read
-first. CFC behavior is the same as a computed pattern expression. Source schema
-metadata is authoritative; projection schemas cannot supply `ifc`, `asCell`,
-`scope`, or `default`. A JSON `--schema` marks a position `"$link": true` to get
-that position's address — `{"id","space","scope","path"}`, all four always
-present, no schema inlined — instead of what is behind it, or beside a
-projection to get both. That address is the deepest stored link crossed on the
-way to the marked position plus the segments below it, so marking a field under
-a linked element names that element's own document rather than a slot in the
-collection above it; a position with no link above it keeps the source
-document's own address. A marked position is never fetched, so a marked
-collection costs one document read rather than one per element; the rendered
-`id` minus its `of:` prefix is what `--piece` accepts. Markers do not compose
-with `--filter`. See `packages/cli/README.md` for the exact syntax and supported
-schema subset.
+also falsey. Non-array inputs are rejected. Two flags project the output:
+`--select` takes a comma-separated field list, and `--schema` takes an inline
+JSON Schema or `@schema.json` — and still accepts the same field list. Naming
+both on one command is refused. A field list applies per item for arrays, while
+a JSON Schema describes the whole output. In a JSON Schema, `properties`
+projects an object and `items` projects an array at every level of nesting, with
+or without a matching `type`. In an array-item projection, a typed scalar leaf
+that does not match stored data is omitted rather than reported as an error;
+prefer `true` leaves unless type filtering is intentional. Concise dotted paths
+follow declared source schemas through nested arrays: `comments.body` selects
+`body` from every comment and drops its siblings. Source-declared nullable items
+and properties remain null. If a present source cannot materialize the
+transform, the command exits nonzero with an explicit "not JSON null" error; an
+absent optional source retains the ordinary successful `null` response. If the
+source schema does not identify a nested container, concise projection still
+applies its field mask across encountered arrays to prevent sibling disclosure;
+use an explicit schema for a fixed output contract. A filter and a projection
+compose as filter-then-project. Both run through runtime filter/map/lift nodes,
+which construct projected values from source-schema-selected reads. A declared
+root shape and structurally selectable properties make the initial read the
+union of predicate and projection paths, so omitted linked subgraphs are not
+hydrated; ambiguous compositions can retain a wider selector, and schema-less or
+root-union sources need a value-shape read first. CFC behavior is the same as a
+computed pattern expression. Source schema metadata is authoritative; projection
+schemas cannot supply `ifc`, `asCell`, `scope`, or `default`. A JSON `--schema`
+marks a position `"$link": true` to get that position's address —
+`{"id","space","scope","path"}`, all four always present, no schema inlined —
+instead of what is behind it, or beside a projection to get both. That address
+is the deepest stored link crossed on the way to the marked position plus the
+segments below it, so marking a field under a linked element names that
+element's own document rather than a slot in the collection above it; a position
+with no link above it keeps the source document's own address. A marked position
+is never fetched, so a marked collection costs one document read rather than one
+per element; the rendered `id` minus its `of:` prefix is what `--piece` accepts.
+Markers do not compose with `--filter`. See `packages/cli/README.md` for the
+exact syntax and supported schema subset.
 
 For `piece call`, options before the callable name configure `piece call`.
 Arguments after the callable name configure the invoked handler or tool. The

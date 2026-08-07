@@ -554,10 +554,11 @@ describe("cli piece parsing", () => {
     );
     expect(getFlags).toContain("--step");
     expect(getFlags).toContain("--filter");
+    expect(getFlags).toContain("--select");
     expect(getFlags).toContain("--schema");
   });
 
-  it("parses the --filter and --schema options into a selection", async () => {
+  it("parses the --filter, --select, and --schema options into a selection", async () => {
     expect(await parseCellSelectionOptions({})).toBeUndefined();
 
     const filterOnly = await parseCellSelectionOptions({
@@ -571,6 +572,17 @@ describe("cli piece parsing", () => {
     });
     expect(schemaOnly?.filter).toBeUndefined();
     expect(schemaOnly?.projection?.source).toBe("id,name");
+    expect(schemaOnly?.projection?.flag).toBe("--schema");
+
+    const selectOnly = await parseCellSelectionOptions({
+      select: "id,name",
+    });
+    expect(selectOnly?.filter).toBeUndefined();
+    expect(selectOnly?.projection?.flag).toBe("--select");
+    expect(selectOnly?.projection?.schema).toEqual(
+      schemaOnly?.projection
+        ?.schema,
+    );
 
     const both = await parseCellSelectionOptions({
       filter: ".active",
@@ -578,6 +590,32 @@ describe("cli piece parsing", () => {
     });
     expect(both?.filter?.source).toBe(".active");
     expect(both?.projection?.source).toBe("id");
+  });
+
+  it("refuses a piece get command that names both projection flags", async () => {
+    const { code, stderr } = await cf(
+      "piece get " +
+        "--identity ./definitely-missing-piece-get-review.key " +
+        "--api-url https://cf.dev --space common-knowledge " +
+        `--piece ${PIECE} --select id --schema id`,
+    );
+    expect(code).not.toBe(0);
+    expect(stripAnsi(stderr.join("\n"))).toContain(
+      'Option "--schema" conflicts with option "--select".',
+    );
+  });
+
+  it("passes a --select projection through the piece get command action", async () => {
+    const { code, stderr } = await cf(
+      "piece get " +
+        "--identity ./definitely-missing-piece-get-review.key " +
+        "--api-url https://cf.dev --space common-knowledge " +
+        `--piece ${PIECE} --select id,title`,
+    );
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain(
+      "definitely-missing-piece-get-review.key",
+    );
   });
 
   it("passes a parsed selection through the piece get command action", async () => {
