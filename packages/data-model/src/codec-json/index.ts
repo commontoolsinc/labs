@@ -15,7 +15,3 @@ export { JsonEncodingContext } from "./JsonEncodingContext.ts";
 
 // Shared wire-format vocabulary.
 export type { JsonWireValue } from "./interface.ts";
-
-// Codec registry and factory.
-export { CodecRegistry } from "./CodecRegistry.ts";
-export { createDefaultRegistry } from "./createDefaultRegistry.ts";

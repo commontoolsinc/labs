@@ -2361,14 +2361,14 @@ recursive descent and codec dispatch are entirely internal to the context.
 
 The serialization and deserialization logic is implemented as private
 methods on `JsonEncodingContext`. The context dispatches per-type logic to
-the **codecs** (Section 2.4) held in a **`CodecRegistry`** — the JSON
-context's index of which codec handles which class (for encoding) and
-which tag (for decoding). Codecs are shallow: the context owns recursion
-and tag-wrapping, and each codec translates exactly one layer.
+the **codecs** (Section 2.4) held in a **`CodecRegistry`** — an index of
+which codec handles which class (for encoding) and which tag (for
+decoding). Codecs are shallow: the context owns recursion and
+tag-wrapping, and each codec translates exactly one layer.
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/codec-json/CodecRegistry.ts
+// file: packages/data-model/codec-common/CodecRegistry.ts
 
 /**
  * Sentinel returned by `CodecRegistry.codecFromValue()` for a
@@ -2431,7 +2431,7 @@ registered codecs:
 
 #### The default registry
 
-`createDefaultRegistry()` (`codec-json/createDefaultRegistry.ts`) builds
+`createDefaultRegistry()` (`codec-common/createDefaultRegistry.ts`) builds
 the registry the shared JSON context uses. The wire-format surface is
 **explicit and curated**: fabric classes whose instances have a fixed wire
 tag supply their codec via the static `[CODEC]`, and the curated
