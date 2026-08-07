@@ -130,9 +130,9 @@ export interface TestUnit {
 
 // Packages whose test runner supports internal sharding via an environment
 // variable. When the workspace run itself is sharded, such a package is
-// expanded into `total` units so the round-robin can spread one heavy package
-// across several workspace shards. Without a workspace shard (local runs),
-// the package runs as a single unit and the variable stays unset.
+// expanded into `total` weighted units so one heavy package can run across
+// several workspace shards. Without a workspace shard (local runs), the
+// package runs as a single unit and the variable stays unset.
 const INTERNALLY_SHARDED_PACKAGES: Record<
   string,
   { total: number; envVar: string }

@@ -45,6 +45,11 @@ export function selectShardedTestFiles(
   defaultWeight: number,
 ): string[] {
   if (!shard) return [...files].sort();
+  if (shard.total > files.length) {
+    throw new Error(
+      `Shard count ${shard.total} exceeds test file count ${files.length}.`,
+    );
+  }
   const assignments = assignWeightedShards(
     files.map((name) => ({
       name,

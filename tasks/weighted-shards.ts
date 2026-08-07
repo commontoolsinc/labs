@@ -11,8 +11,9 @@ export interface WeightedShardItem {
 /**
  * Assigns weighted items to shards using longest-processing-time scheduling.
  *
- * Items in the same group occupy distinct shards. This keeps slices of one
- * package from executing concurrently in the same workspace checkout.
+ * Items in the same group occupy distinct shards when the group fits. This
+ * keeps slices of one package in separate workspace jobs when enough shards
+ * are available; larger groups fall back to ordinary weighted placement.
  */
 export function assignWeightedShards(
   items: WeightedShardItem[],

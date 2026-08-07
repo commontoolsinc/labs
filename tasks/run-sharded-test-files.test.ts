@@ -51,4 +51,15 @@ describe("run-sharded-test-files", () => {
 
     expect(selected.sort()).toEqual(files);
   });
+
+  it("rejects more shards than test files", () => {
+    expect(() =>
+      selectShardedTestFiles(
+        ["a.test.ts"],
+        { index: 1, total: Number.MAX_SAFE_INTEGER },
+        {},
+        1,
+      )
+    ).toThrow("Shard count 9007199254740991 exceeds test file count 1.");
+  });
 });
