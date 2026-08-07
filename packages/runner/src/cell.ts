@@ -3313,8 +3313,8 @@ function validateStaticData(value: unknown): void {
     // A `FabricInstance` is refused instead. Its codec contents can hold a
     // `Cell`, which is exactly what this validation exists to reject, and those
     // contents are not reachable by property name -- so passing one through
-    // SMUGGLES a cell into static data past the check meant to stop it. That is
-    // not a completeness gap; it is the validation failing open.
+    // _smuggles_ a cell into static data past the check meant to stop it.
+    // That is not a completeness gap; it is the validation failing open.
     //
     // Nothing reaches this in production today, de facto rather than by
     // construction: a `FabricError` is ungated and exposed to pattern authors,

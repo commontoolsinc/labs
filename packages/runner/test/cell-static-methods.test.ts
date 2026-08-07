@@ -223,7 +223,7 @@ describe("Cell Static Methods", () => {
     it("should reject a `FabricError` in static data", () => {
       // An instance's codec contents can hold a `Cell`, which is exactly what
       // this validation rejects, and those contents are not reachable by
-      // property name. Passing one through SMUGGLES a cell past the check --
+      // property name. Passing one through _smuggles_ a cell past the check --
       // the validation failing open -- so it refuses instead.
       withinHandlerContext(runtime, space, tx, () => {
         const failure = FabricError.fromNativeError(new Error("boom"));

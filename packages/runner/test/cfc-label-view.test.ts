@@ -1504,8 +1504,8 @@ describe("redactSigilCfcLabelViewsForDisplay", () => {
     // Passing one through leaves that view in place, which is the strip failing
     // open, so it refuses instead.
     //
-    // The control is the point -- the same view IS stripped on a plain object,
-    // so what changes the outcome is the wrapper.
+    // The control is the point -- the same view _is_ stripped on a plain
+    // object, so what changes the outcome is the wrapper.
     const plain = stripSigilCfcLabelViews({
       tagged: linkWithView("of:strip-control"),
     }) as { tagged: { "/": Record<string, Record<string, unknown>> } };
