@@ -12,6 +12,3 @@ export {
 
 // Whole-value codec for the wire format.
 export { JsonCodec } from "./JsonCodec.ts";
-
-// Shared codec-value vocabulary.
-export type { JsonCodecValue } from "./interface.ts";
