@@ -1,12 +1,13 @@
 // Source artwork for raster generation and parity tests. Runtime modules serve
 // only the generated PNGs and do not import this file.
 import type { FaviconFace } from "./favicon-types.ts";
+import { STATUS_COLOR } from "./palette.ts";
 
 const FAVICON_COLORS: Record<FaviconFace, string> = {
-  good: "#43c574",
-  warn: "#e0a852",
-  bad: "#e2504a",
-  "bad-crying": "#e2504a",
+  good: STATUS_COLOR.good,
+  warn: STATUS_COLOR.warn,
+  bad: STATUS_COLOR.bad,
+  "bad-crying": STATUS_COLOR.bad,
 };
 
 const OCTAGON = `<path d="M10 2h12l8 8v12l-8 8H10l-8-8V10Z"/>`;

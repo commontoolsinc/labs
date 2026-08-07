@@ -9,6 +9,7 @@ import {
 } from "./favicon.ts";
 import { faviconSvg } from "./favicon-artwork.ts";
 import { FAVICON_FACES } from "./favicon-types.ts";
+import { STATUS_COLOR } from "./palette.ts";
 
 Deno.test("faviconStatus: red wins, then orange, and gray never replaces green", () => {
   assertEquals(faviconStatus([]), "good");
@@ -32,26 +33,26 @@ Deno.test("favicon artwork: each face has one matching URL-backed raster icon", 
     }
   > = {
     good: {
-      color: "#43c574",
+      color: STATUS_COLOR.good,
       shape: `<rect x="2" y="2" width="28" height="28" rx="9"/>`,
       eyes: [12, 20],
       mouth: `d="M11 19c2.8 2.6 7.2 2.6 10 0"`,
     },
     warn: {
-      color: "#e0a852",
+      color: STATUS_COLOR.warn,
       shape: `<path d="M16 2 30 29H2Z"/>`,
       eyes: [13, 19],
       mouth: `d="M11 20h10"`,
       drop: 3.2,
     },
     bad: {
-      color: "#e2504a",
+      color: STATUS_COLOR.bad,
       shape: `<path d="M10 2h12l8 8v12l-8 8H10l-8-8V10Z"/>`,
       eyes: [12, 20],
       mouth: `d="M11 21c2.8-2.6 7.2-2.6 10 0"`,
     },
     "bad-crying": {
-      color: "#e2504a",
+      color: STATUS_COLOR.bad,
       shape: `<path d="M10 2h12l8 8v12l-8 8H10l-8-8V10Z"/>`,
       eyes: [12, 20],
       mouth: `d="M10.5 22c3-4 8-4 11 0"`,

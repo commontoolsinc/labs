@@ -8,7 +8,8 @@ import {
   renderTile,
   shell,
 } from "./render.ts";
-import { humanSpan } from "./lib.ts";
+import { humanSpan, STATUS_DOT } from "./lib.ts";
+import { TEXTURE_WIDTH } from "./palette.ts";
 import { FAVICON_VERSION } from "./favicon.ts";
 import { liveUpdateStream } from "./stream-client.ts";
 
@@ -358,19 +359,97 @@ Deno.test("shell: the browser runs the viewer-time formatter", () => {
 Deno.test("shell: the texture fades out towards the bottom of its own tile", () => {
   const html = shell(renderTile(view({ status: "bad" }), "labs-ci"), "", 0, 30_000, TEST_VERSION, "bad");
   assertStringIncludes(html, `<div class="texture"></div>`);
-  // Measured against the tile: whole for its top fifth, gone four fifths down.
+  // Measured against the tile: whole for its top seventh, gone seven tenths
+  // of the way down.
   assertStringIncludes(
     html,
-    ".texture{position:absolute;inset:0;z-index:-1;overflow:hidden;mask-image:linear-gradient(to bottom,#000 20%,transparent 80%)}",
+    ".texture{position:absolute;inset:0;z-index:-1;overflow:hidden;mask-image:linear-gradient(to bottom,#000 15%,transparent 70%)}",
   );
   // Measured against the turned frame the texture is drawn in.
   assertStringIncludes(
     html,
-    ".texture::before{content:\"\";position:absolute;inset:-100%;transform:rotate(30deg)}",
+    ".texture::before{content:\"\";position:absolute;top:50%;left:50%;",
   );
   for (const status of ["unknown", "warn", "bad"]) {
     assertStringIncludes(html, `.tile.${status} .texture::before{`);
   }
+  // The stroked textures are drawn at the width the palette sets, inside the
+  // data URI that carries them.
+  const strokes = [...html.matchAll(/stroke-width%3D%22([\d.]+)%22/g)];
+  assertEquals(strokes.length, 2, "one stroked texture each for warn and bad");
+  for (const stroke of strokes) assertEquals(Number(stroke[1]), TEXTURE_WIDTH);
+  // A pattern repeats at the size of the artwork that draws it. The two are
+  // written separately into the CSS, and a pattern drawn at one size and tiled
+  // at another is stretched.
+  const tiles = [
+    ...html.matchAll(
+      /width%3D%22(\d+)%22%20height%3D%22(\d+)%22[^;]*;background-size:(\d+)px (\d+)px/g,
+    ),
+  ];
+  assertEquals(tiles.length, 2, "both stroked textures set their own size");
+  for (const [, width, height, sizeX, sizeY] of tiles) {
+    assertEquals(sizeX, width, "the pattern tiles at the width it is drawn at");
+    assertEquals(sizeY, height, "and at the height it is drawn at");
+  }
+});
+
+Deno.test("shell: the turned texture layer still covers a tile far wider than it is tall", () => {
+  const html = shell("", "", 0, 30_000, TEST_VERSION, "bad");
+  const layer = /\.texture::before\{[^}]*width:(\d+)%[^}]*\}/.exec(html);
+  assert(layer, "the texture layer sets its own size");
+  assertStringIncludes(layer[0], "aspect-ratio:1");
+  assertStringIncludes(layer[0], "top:50%;left:50%");
+  assertStringIncludes(layer[0], "translate(-50%,-50%)");
+  // Turning a square about its centre sweeps its corners inward, so the layer
+  // covers the tile only while half its side still reaches the tile's corner.
+  // That reach is the tile's half-diagonal. The layer is measured off the
+  // tile's width alone, so the shape that strains it is a tall narrow tile:
+  // the tightest the wall's grid gets is a tile 0.94 as tall as it is wide,
+  // and this asks for room well past that.
+  const tallest = 1.5;
+  const halfSide = Number(layer[1]) / 100 / 2;
+  assert(
+    halfSide >= Math.hypot(1, tallest) / 2,
+    `a layer of ${layer[1]}% of the tile width leaves the corners of a tile ${
+      tallest
+    } times as tall as it is wide outside it once turned`,
+  );
+});
+
+Deno.test("shell: the header dot takes a shape per status, not just a color", () => {
+  const html = shell(renderTile(view(), "labs-ci"), "", 0, 30_000, TEST_VERSION, "good");
+  // The dot is empty and its shape is drawn by a layer inside it.
+  assertStringIncludes(html, `.dot::before{content:"";position:absolute;inset:0}`);
+  const shapes = (["good", "warn", "bad", "unknown"] as Status[]).map((status) => {
+    const rule = new RegExp(`\\.dot\\.${STATUS_DOT[status]}::before\\{([^}]*)\\}`).exec(html);
+    assert(rule, `${status} has a rule for its dot`);
+    return rule[1];
+  });
+  assertEquals(
+    new Set(shapes).size,
+    shapes.length,
+    "no two statuses draw the same dot, so the shape alone says which is which",
+  );
+  // A ring rather than a disc, for the one status that is an absence of news.
+  assertStringIncludes(shapes[3], "border:2px solid");
+  for (const shape of shapes.slice(0, 3)) assert(!shape.includes("border:"));
+});
+
+Deno.test("shell: a tile's wash and border grow with the seriousness of its status", () => {
+  const html = shell("", "", 0, 30_000, TEST_VERSION, "good");
+  const alphas = (["good", "warn", "bad"] as Status[]).map((status) => {
+    const rule = new RegExp(
+      `\\.tile\\.${status},\\.tile\\.wide\\.${status}\\{border-color:rgba\\([\\d,]+,([\\d.]+)\\);background:rgba\\([\\d,]+,([\\d.]+)\\)\\}`,
+    ).exec(html);
+    assert(rule, `${status} has a tile rule`);
+    return { edge: Number(rule[1]), wash: Number(rule[2]) };
+  });
+  for (let i = 1; i < alphas.length; i++) {
+    assert(alphas[i].edge > alphas[i - 1].edge, "each border is stronger than the last");
+    assert(alphas[i].wash > alphas[i - 1].wash, "each wash is stronger than the last");
+  }
+  // A tile that cannot tell takes no color at all.
+  assertStringIncludes(html, ".tile.unknown,.tile.wide.unknown{border-color:#2f333c}");
 });
 
 Deno.test("shell: server-measured red age changes the favicon after one hour", () => {
