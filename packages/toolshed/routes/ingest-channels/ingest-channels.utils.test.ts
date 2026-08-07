@@ -1057,6 +1057,80 @@ describe("ingest-channels control plane", () => {
     expect(err(third)).toContain("lifetime limit");
   });
 
+  // Charging the space meter only for CREATION left the bound useless. A fresh
+  // key that is refused a new channel can revoke an existing one and re-mint
+  // it instead: it acquires a channel, and mints its own permanent by-owner,
+  // lifetime and requests cells, while the space meter never moves.
+  it("charges a takeover to the space meter, so churn cannot route around it", async () => {
+    const churned = await Identity.generate();
+    const shared = await sharedSpace(churned.did());
+    const capped = { ...deps, maxLifetimeChannelsPerSpace: 1 };
+
+    const minted = await processMint(capped, alice.did(), {
+      space: shared,
+      installId: "target",
+      requestId: "req-churn-1",
+    });
+    const id = ok(minted).id;
+    expect(await getSpaceLifetimeChannelCount(runtime, operator.did(), shared))
+      .toBe(1);
+
+    // The fresh key clears the takeover guard by revoking first — permitted,
+    // it is a space owner — so `creating` is false on the re-mint.
+    expect(
+      (await processRevoke(capped, churned.did(), {
+        id,
+        requestId: "rv-churn",
+        expectedRevision: await revOf(id),
+      })).status,
+    ).toBe(200);
+
+    const takeover = await processMint(capped, churned.did(), {
+      space: shared,
+      installId: "target",
+      requestId: "req-churn-2",
+    });
+    expect(takeover.status).toBe(409);
+    expect(err(takeover)).toContain("neither does using a different key");
+
+    // Nothing durable was minted for the churned key.
+    expect(
+      await getLifetimeChannelCount(runtime, operator.did(), churned.did()),
+    ).toBe(0);
+    expect(
+      await getOwnerRegistrationIndex(runtime, operator.did(), churned.did()),
+    ).toEqual([]);
+  });
+
+  // The no-op leg must not write, and the observable proof is that it spends
+  // nothing: a request id reused against an already-revoked channel is still
+  // unclaimed, so it is answered rather than refused as a replay.
+  it("writes nothing when revoking an already-revoked channel", async () => {
+    const first = await mint(alice, "req-noop");
+    const id = ok(first).id;
+    await processRevoke(deps, alice.did(), {
+      id,
+      requestId: "rv-noop-0",
+      expectedRevision: await revOf(id),
+    });
+    const settled = await getRegistration(runtime, operator.did(), id);
+    const at = await revOf(id);
+
+    for (let i = 0; i < 3; i++) {
+      // The SAME id every time. If any pass had spent it, the next would 409.
+      const again = await processRevoke(deps, alice.did(), {
+        id,
+        requestId: "rv-noop-same",
+        expectedRevision: at,
+      });
+      expect(again.status).toBe(200);
+      expect(ok(again).revokedAt).toBe(settled?.revoked?.at);
+    }
+    expect(await revOf(id)).toBe(at);
+    expect((await getRegistration(runtime, operator.did(), id))?.revoked?.at)
+      .toBe(settled?.revoked?.at);
+  });
+
   // A per-owner quota bounds a KEYPAIR, and keypairs are free: one person can
   // grant OWNER to as many fresh DIDs as they like and spend a new allowance
   // from each — while every new DID also mints its own permanent bookkeeping
@@ -1130,10 +1204,10 @@ describe("ingest-channels control plane", () => {
       .toBe(403);
   });
 
-  // The already-revoked branch writes the registration back unchanged, which
-  // re-embeds the deep-frozen `revoked` object into a new container — the exact
-  // round-trip that silently drops values. Nothing else reaches this write: the
-  // replay tests all stop at the 409.
+  // Revoking an already-revoked channel reports the ORIGINAL revocation and
+  // writes nothing at all — a revoked channel sits at a stable revision, so a
+  // write here would have a precondition that never stops matching, and any
+  // space owner could drive unlimited durable transactions through it.
   it("keeps revocation state across a second revoke with a fresh id", async () => {
     const first = await mint(alice, "req-2rv");
     const id = ok(first).id;

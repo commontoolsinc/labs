@@ -402,6 +402,30 @@ describe("cf ingest revoke", () => {
     expect(output).toContain("retained as an audit record");
   });
 
+  // The whole point of revocation-by-current-owner is a channel minted by
+  // someone whose access has since been removed. That channel has a different
+  // owner, so it is NOT in the caller's own list — looking the revision up
+  // there would make the one case this exists for unreachable.
+  it("looks a foreign channel up in the space when --space is given", async () => {
+    const { calls } = await run([
+      "revoke",
+      "chan-1",
+      "--identity",
+      keyPath,
+      "--api-url",
+      API_URL,
+      "--space",
+      SPACE_DID,
+    ], {
+      list: { channels: [channel({ owner: "did:key:zSomeoneElse" })] },
+      revoke: { id: "chan-1", revokedAt: "2026-08-04T12:00:00.000Z" },
+    });
+
+    expect(calls[0].verb).toBe("list");
+    expect(calls[0].body.space).toBe(SPACE_DID);
+    expect(calls[1].body.expectedRevision).toBe(3);
+  });
+
   it("refuses to revoke an id that is not among the caller's channels", async () => {
     await expect(
       run([
