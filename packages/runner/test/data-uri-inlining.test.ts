@@ -8,6 +8,8 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
 import { findAndInlineDataUriLinks } from "../src/data-uri.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -330,6 +332,48 @@ describe("data URI inlining", () => {
             path: ["nested"],
           },
         },
+      });
+    });
+
+    describe("special objects", () => {
+      // A `FabricSpecialObject` is `isRecord`, so it reaches the record branch
+      // rather than the leaf return. What keeps it whole is that the branch
+      // only clones when an entry inlines to something new, and a special
+      // object has zero enumerable own properties: the loop body never runs,
+      // so `next` stays undefined and the original comes back by identity.
+      //
+      // That is a real guarantee but an indirect one, resting entirely on the
+      // zero-property fact. These pin it, so giving a special object an
+      // enumerable property turns the walk red here rather than silently
+      // flattening values in a `data:` URI.
+
+      it("returns a `FabricBytes` as the same instance", () => {
+        const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+        expect(findAndInlineDataUriLinks(bytes)).toBe(bytes);
+      });
+
+      it("returns a `FabricError` as the same instance", () => {
+        const failure = FabricError.fromNativeError(new Error("boom"));
+
+        expect(findAndInlineDataUriLinks(failure)).toBe(failure);
+      });
+
+      it("keeps a special object whole while inlining a sibling", () => {
+        // The discriminating case. A sibling that does inline forces the
+        // record branch to clone, and the clone is a `{ ...value }` spread --
+        // so this is where a special object would be flattened if the walk
+        // ever descended into one rather than copying the reference across.
+        const bytes = new FabricBytes(new Uint8Array([4, 5]));
+        const dataURI = dataUriFromValueWithResolvedLinks("inlined value");
+
+        const result = findAndInlineDataUriLinks({
+          bytes,
+          link: { "/": { [LINK_V1_TAG]: { id: dataURI, path: [] } } },
+        });
+
+        expect(result.bytes).toBe(bytes);
+        expect(result.link).toBe("inlined value");
       });
     });
   });

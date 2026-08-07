@@ -140,15 +140,7 @@ export function dataUriFromValueWithResolvedLinks(
  * media type is returned as it came in, on the same footing as a link
  * naming a document in a space.
  *
- * TODO(danfuzz): This `isRecord`-gated walk has no `FabricSpecialObject`
- * guard: after the link check, a non-link `FabricPrimitive`/`FabricInstance`
- * falls into the `Object.entries` descent, which walks it by enumerable own
- * props instead of treating it as a leaf. An instance with no enumerable
- * props happens to pass through by reference, but the copy-on-write branch
- * (`{ ...value }`) silently flattens any instance whose entry inlines
- * differently into a plain object. The payload walk
- * (`dataValue[path.shift()]`) indexes into decoded content with the same
- * blindness.
+ * A `FabricSpecialObject` comes back as the same instance, both arms of it.
  *
  * @param value - The value to find and inline data: URI links in.
  * @returns The value with any data: URI links inlined.
@@ -192,6 +184,11 @@ export function findAndInlineDataUriLinks(value: any): any {
           return findAndInlineDataUriLinks(newSigilLink);
         }
         if (path.length > 0) {
+          // TODO(danfuzz): a path segment naming something inside a
+          // `FabricInstance` indexes it by property name and yields
+          // `undefined`, because an instance's contents are reachable only
+          // through its codec. A `FabricPrimitive` needs nothing here: it is a
+          // leaf, so no path can legitimately point inside one.
           dataValue = dataValue[path.shift()!];
         } else {
           break;
@@ -219,6 +216,15 @@ export function findAndInlineDataUriLinks(value: any): any {
     }
     return next ?? value;
   } else if (isRecord(value)) {
+    // A `FabricSpecialObject` is `isRecord` and so arrives here rather than at
+    // the leaf return, and survives anyway: the clone happens only once an
+    // entry inlines to something new, and such a value has zero enumerable own
+    // properties. The loop body never runs, `next` stays undefined, and the
+    // original goes back by identity -- including when a SIBLING inlines and
+    // forces the surrounding record to clone, since that clone copies the
+    // reference across rather than descending. `data-uri-inlining.test.ts`
+    // pins both, so the zero-property fact this rests on cannot quietly stop
+    // holding.
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {
       const inlined = findAndInlineDataUriLinks(entry);
