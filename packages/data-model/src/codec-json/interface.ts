@@ -4,7 +4,7 @@
  * of encoding by `JsonCodec` vs. being JSON from some other source. The tag
  * stands for "Fabric Value Json, version 1."
  */
-export const ENCODING_PREFIX_TAG = "fvj1:";
+export const ENCODING_PREFIX_TAG = "fvj1:" as const;
 
 /**
  * JSON-compatible codec value. This is the intermediate tree representation
