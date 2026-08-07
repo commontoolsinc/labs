@@ -175,7 +175,8 @@ missing value and is also falsey. Filtering happens before schema projection.
 
 Two flags project, one per input language:
 
-- `--select` takes a comma-separated field list such as `id,title,author.name`;
+- `--select` takes a comma-separated field list such as `id,title,author.name`,
+  in which a segment ending in `@` asks for an address rather than contents;
 - `--schema` takes an inline JSON Schema object or `@path/to/schema.json`, and
   also accepts the same field list `--select` takes.
 
@@ -229,8 +230,8 @@ override `ifc`, `asCell`, `scope`, or `default` through `--schema`.
 
 #### Asking for an address instead of contents
 
-A JSON `--schema` marks a position with `"$link": true` to get that position's
-address rather than what is behind it:
+A projection marks a position to get that position's address rather than what is
+behind it. A JSON `--schema` marks with `"$link": true`:
 
 ```bash
 cf piece get --piece ID notes --schema '{"type":"array","items":{"$link":true}}'
@@ -271,13 +272,33 @@ and the title — and replaces the contents when it is alone. It is accepted
 anywhere `properties` is, except under `additionalProperties`, whose membership
 the stored value rather than the selection decides.
 
+A field list marks with a trailing `@`, which is that same marker at the
+position the segment names:
+
+```bash
+cf piece get --piece ID --select 'topic@,topic.title'
+```
+
+```json
+{ "topic": { "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" } }
+```
+
+The two paths union into the one position, and `topic@.title` says the same
+thing in one path. `@` is special only as the final character of a segment:
+`user@home` names a field, and `\@` writes a literal `@` where a trailing one
+would otherwise mark, so `a\@` names the field `a@`. A path stops where it
+stops, so `notes@` returns the address of the `notes` position itself, while
+marking a field below an array — `notes.title@` — returns an address per
+element, because that is where the field list puts a field path. Naming a
+position both ways, `topic,topic@`, returns the address beside the whole
+contents.
+
 A marked position is never fetched: it contributes a rejecting selector to the
 same path union the projection builds, and the address is composed from links
 already stored in the documents the read visited rather than by following one. A
 marked collection therefore costs one document read rather than one per element.
-The marker is a JSON-schema spelling only, and it cannot be combined with
-`--filter`: the elements a predicate keeps no longer say which positions they
-came from, and an address names a position.
+Neither spelling can be combined with `--filter`: the elements a predicate keeps
+no longer say which positions they came from, and an address names a position.
 
 #### What a selection means for a call
 

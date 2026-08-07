@@ -597,6 +597,11 @@ describe("cli piece parsing", () => {
         ?.schema,
     );
 
+    const marked = await parseCellSelectionOptions({ select: "topic@" });
+    expect(marked?.projection?.markers).toEqual({
+      properties: { topic: { marked: true } },
+    });
+
     const both = await parseCellSelectionOptions({
       filter: ".active",
       schema: "id",

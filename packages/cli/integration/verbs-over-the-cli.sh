@@ -144,6 +144,14 @@ B=$($CF piece call --quiet --piece "$FIRST" $ARGS --invocation append-read \
 check "written at create
 appended through the read" "$(echo "$B" | jq -r '.result.body // empty')" \
   "the address a read returned is one a caller can call"
+# A field list spells the same marker with a trailing @, so one read asks for
+# an address at one position and projects at another.
+AT=$($CF piece get --quiet --piece "$BOARD" $ARGS \
+  --select 'notes@,noteCount' 2>/dev/null)
+check "true" "$(echo "$AT" | jq -c '.notes | has("$link")')" \
+  "a trailing @ returns the marked position's address"
+check "true" "$(echo "$AT" | jq -c '.noteCount >= 1')" \
+  "and a sibling path projects beside it in the one result"
 
 step "7. A replayed invocation id returns the ORIGINAL result — in its session"
 # Captured rather than hard-coded: the property is that the replay changes

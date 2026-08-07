@@ -325,9 +325,10 @@ that can go stale.
 ### Asking a read for an address
 
 A cell is a point in a graph, so a read that does not say where to stop follows
-links onward and hands back a copy of everything behind them. `--schema` says
-where to stop: a position marked `{"$link": true}` returns that position's
-address rather than its contents.
+links onward and hands back a copy of everything behind them. A projection says
+where to stop: a marked position returns that position's address rather than
+its contents. A field list marks with a trailing `@`, and a JSON Schema marks
+with `{"$link": true}`.
 
 ```bash
 cf piece get --piece <board> notes \
@@ -361,6 +362,19 @@ cf piece get --piece <board> notes --schema \
 ```json
 [{ "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" }]
 ```
+
+A field list unions the same way, and its two paths meet at the one position:
+
+```bash
+cf piece get --piece <board> --select 'notes@,noteCount'
+```
+
+```json
+{ "notes": { "$link": { "id": "of:fid1:…", "…": "…" } }, "noteCount": 3 }
+```
+
+The suffix is special only at the end of a segment, and `\@` writes a literal
+one, so a field named `user@home` stays reachable.
 
 A marked position is not fetched — the address is stored in the document that
 contains it, so a marked collection of a hundred notes costs the one read that

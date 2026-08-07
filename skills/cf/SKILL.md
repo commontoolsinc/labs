@@ -139,6 +139,7 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 | Get field          | `deno task cf piece get --piece ID fieldPath ...`                                                    |
 | Filter array       | `deno task cf piece get --piece ID items --filter '.active == true' ...`                             |
 | Project fields     | `deno task cf piece get --piece ID items --select id,title ...`                                      |
+| Read an address    | `deno task cf piece get --piece ID --select 'topic@,topic.title' ...`                                |
 | Read addresses     | `deno task cf piece get --piece ID items --schema '{"type":"array","items":{"$link":true}}' ...`     |
 | Step + get         | `deno task cf piece get --piece ID fieldPath --step ...`                                             |
 | Set field          | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
@@ -261,18 +262,21 @@ union of predicate and projection paths, so omitted linked subgraphs are not
 hydrated; ambiguous compositions can retain a wider selector, and schema-less or
 root-union sources need a value-shape read first. CFC behavior is the same as a
 computed pattern expression. Source schema metadata is authoritative; projection
-schemas cannot supply `ifc`, `asCell`, `scope`, or `default`. A JSON `--schema`
-marks a position `"$link": true` to get that position's address —
-`{"id","space","scope","path"}`, all four always present, no schema inlined —
-instead of what is behind it, or beside a projection to get both. That address
-is the deepest stored link crossed on the way to the marked position plus the
-segments below it, so marking a field under a linked element names that
-element's own document rather than a slot in the collection above it; a position
-with no link above it keeps the source document's own address. A marked position
-is never fetched, so a marked collection costs one document read rather than one
-per element; the rendered `id` minus its `of:` prefix is what `--piece` accepts.
-Markers do not compose with `--filter`. See `packages/cli/README.md` for the
-exact syntax and supported schema subset.
+schemas cannot supply `ifc`, `asCell`, `scope`, or `default`. A projection marks
+a position to get that position's address — `{"id","space","scope","path"}`, all
+four always present, no schema inlined — instead of what is behind it, or beside
+a projection to get both. A JSON `--schema` marks with `"$link": true`; a field
+list marks with a trailing `@`, so `--select 'topic@,topic.title'` returns one
+`topic` carrying its address and its title. `@` is special only at the end of a
+segment and `\@` writes a literal one, which keeps a field named `user@home`
+reachable. That address is the deepest stored link crossed on the way to the
+marked position plus the segments below it, so marking a field under a linked
+element names that element's own document rather than a slot in the collection
+above it; a position with no link above it keeps the source document's own
+address. A marked position is never fetched, so a marked collection costs one
+document read rather than one per element; the rendered `id` minus its `of:`
+prefix is what `--piece` accepts. Neither spelling composes with `--filter`. See
+`packages/cli/README.md` for the exact syntax and supported schema subset.
 
 `piece call` takes the same three flags, before the callable name, with the same
 grammar, the same `--select`/`--schema` conflict, and the same error messages.
