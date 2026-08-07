@@ -43,7 +43,10 @@
 // (README §3.5).
 
 import { getLogger } from "@commonfabric/utils/logger";
-import type { CellScope } from "@commonfabric/memory/v2";
+import {
+  type CellScope,
+  SERVER_EXECUTION_WATERMARK_DOC_ID,
+} from "@commonfabric/memory/v2";
 import type { Runtime, ServerRunInfo } from "../runtime.ts";
 import type {
   IExtendedStorageTransaction,
@@ -59,7 +62,6 @@ import type {
 } from "../storage/interface.ts";
 import type { CommitError } from "../storage/interface.ts";
 import type { PostCommitSideEffect } from "../cfc/types.ts";
-import { watermarkCell } from "../executor/watermark.ts";
 
 const logger = getLogger("speculation-overlay", {
   enabled: true,
@@ -317,7 +319,19 @@ export class SpeculationOverlayDestination
   #ensureWatermarkSink(space: MemorySpace): void {
     if (this.#watermarkSinks.has(space)) return;
     try {
-      const cell = watermarkCell(this.#runtime, space);
+      // Constructed INLINE from the wire-module constant rather than
+      // through `executor/watermark.ts`: that module value-imports the
+      // sqlite ENGINE (its server-side activation read), and this
+      // module rides in every CLIENT bundle — the browser worker
+      // included, where an engine import is fatal to the whole bundle.
+      // The link shape is protocol.md §4's: the well-known doc, the
+      // SPACE instance, the whole-document path.
+      const cell = this.#runtime.getCellFromLink<{ seq?: number }>({
+        space,
+        id: SERVER_EXECUTION_WATERMARK_DOC_ID as never,
+        scope: "space",
+        path: [],
+      });
       const cancel = cell.sink((value) => {
         const seq = (value as { seq?: number } | undefined)?.seq ?? 0;
         const known = this.#watermarks.get(space) ?? 0;
