@@ -2257,37 +2257,37 @@ they don't own the wire format. A **serialization context** owns the mapping
 between classes and wire format tags, and handles format-specific
 encoding/decoding.
 
-### 4.2 Wire Format Types
+### 4.2 Codec Value Types
 
-The JSON encoding context uses an intermediate tree representation during
-serialization and deserialization. This type is internal to the JSON
-implementation — it is not part of the public boundary interface.
+`JsonCodec` uses an intermediate tree representation during serialization
+and deserialization. This type is internal to the JSON implementation — it
+is not part of the public boundary interface.
 
 ```typescript
 // file: packages/data-model/codec-json/interface.ts
 
 /**
- * JSON-compatible wire format value. This is the intermediate tree
+ * JSON-compatible codec value. This is the intermediate tree
  * representation used during serialization tree walking -- NOT the final
  * serialized form (which is `string`). Internal to the JSON implementation.
  *
- * Deep-frozen invariant on the deserialize side: every wire tree that
+ * Deep-frozen invariant on the deserialize side: every such tree that
  * enters deserialization is deep-frozen, enforced at the two construction
  * sites that feed it (`decode()` and `fromBytes()`, unified in
  * `#parseWireText()`). This is what lets the tag-unwrap and `/quote` arms
  * hand back extracted sub-trees directly without further copying. The
- * serialize-side wire trees are transient (`JSON.stringify`-ed and
- * discarded) and are not covered by this invariant. The `readonly` on the
- * array and object arms of the union expresses the deserialize-side
- * contract at the type level. See Section 8.6.
+ * serialize-side trees are transient (`JSON.stringify`-ed and discarded)
+ * and are not covered by this invariant. The `readonly` on the array and
+ * object arms of the union expresses the deserialize-side contract at the
+ * type level. See Section 8.6.
  */
-export type JsonWireValue =
+export type JsonCodecValue =
   | null
   | boolean
   | number
   | string
-  | readonly JsonWireValue[]
-  | { readonly [key: string]: JsonWireValue };
+  | readonly JsonCodecValue[]
+  | { readonly [key: string]: JsonCodecValue };
 ```
 
 ### 4.3 Public Boundary Interface
@@ -2327,7 +2327,7 @@ export interface SerializationContext<SerializedForm = unknown> {
 }
 ```
 
-The JSON encoding context implements `SerializationContext<string>`:
+`JsonCodec` implements `SerializationContext<string>`:
 
 - `encode(value)` serializes a `FabricValue` into the `/<Type>@<Version>`
   tagged wire format, then stringifies the result.
@@ -2346,25 +2346,25 @@ The JSON encoding context implements `SerializationContext<string>`:
 ### 4.4 Serialization Flow
 
 ```
-Encode:  value -> context.encode(value) -> serialized form (e.g., JSON string)
-Decode:  serialized form -> context.decode(data, context) -> FabricValue
+Encode:  value -> codec.encode(value) -> serialized form (e.g., JSON string)
+Decode:  serialized form -> codec.decode(data, context) -> FabricValue
 ```
 
-Internally, the JSON encoding context's `encode()` method calls a private
-encode walker (`#encodeValue()`) to walk the `FabricValue` tree and produce
-a `JsonWireValue` tree, then stringifies it. The `decode()` method parses
+Internally, `JsonCodec`'s `encode()` method calls a private encode walker
+(`#encodeValue()`) to walk the `FabricValue` tree and produce a
+`JsonCodecValue` tree, then stringifies it. The `decode()` method parses
 the JSON string, then calls a private decode walker (`#decodeValue()`) to
-walk the `JsonWireValue` tree and reconstruct modern runtime types. The
-recursive descent and codec dispatch are entirely internal to the context.
+walk the `JsonCodecValue` tree and reconstruct modern runtime types. The
+recursive descent and codec dispatch are entirely internal to `JsonCodec`.
 
 ### 4.5 Codecs, the Registry, and Internal Tree Walking
 
 The serialization and deserialization logic is implemented as private
-methods on `JsonEncodingContext`. The context dispatches per-type logic to
-the **codecs** (Section 2.4) held in a **`CodecRegistry`** — an index of
-which codec handles which class (for encoding) and which tag (for
-decoding). Codecs are shallow: the context owns recursion and
-tag-wrapping, and each codec translates exactly one layer.
+methods on `JsonCodec`. It dispatches per-type logic to the **codecs**
+(Section 2.4) held in a **`CodecRegistry`** — an index of which codec
+handles which class (for encoding) and which tag (for decoding). Codecs
+are shallow: `JsonCodec` owns recursion and tag-wrapping, and each codec
+translates exactly one layer.
 
 ```typescript
 // Shown for illustration only.
@@ -2432,7 +2432,7 @@ registered codecs:
 #### The default registry
 
 `createDefaultRegistry()` (`codec-common/createDefaultRegistry.ts`) builds
-the registry the shared JSON context uses. The wire-format surface is
+the registry the shared JSON codec uses. The wire-format surface is
 **explicit and curated**: fabric classes whose instances have a fixed wire
 tag supply their codec via the static `[CODEC]`, and the curated
 `codecClasses()` list from each of `fabric-primitives/` and
@@ -2470,7 +2470,7 @@ types) are handled by the walker itself after no codec matches.
 
 #### Private encode walker (`#encodeValue()`)
 
-The context's private encode walker processes the `FabricValue` tree:
+`JsonCodec`'s private encode walker processes the `FabricValue` tree:
 
 1. **Codec dispatch** — `codecFromValue()` finds how to encode the value.
    A `SELF_REP` result means the value is its own wire form (emitted
@@ -2495,7 +2495,7 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 
 #### Private decode walker (`#decodeValue()`)
 
-The context's private decode walker processes the `JsonWireValue` tree:
+`JsonCodec`'s private decode walker processes the `JsonCodecValue` tree:
 
 1. **Tag unwrapping** — checks for single-key objects with `/`-prefixed
    keys.
@@ -2507,7 +2507,7 @@ The context's private decode walker processes the `JsonWireValue` tree:
    bare `"/"` key) as an encoding error, producing a `ProblematicValue`
    (Section 3.5; see also Section 9 of `3-json-encoding.md`).
 4. **Codec dispatch** — `codecFromTag()` routes the tag to its registered
-   codec's `decode()`. When the context is in lenient mode, codec
+   codec's `decode()`. When `JsonCodec` is in lenient mode, codec
    exceptions produce `ProblematicValue`. Values returned from this arm
    are guaranteed deep-frozen at the walker boundary (the contract holds
    for both the codec-produced value and the lenient-mode
@@ -2533,7 +2533,7 @@ The context's private decode walker processes the `JsonWireValue` tree:
 > everything else; tag resolution checked a `wireTypeTag` property on each
 > instance. That made the wire-serializable surface implicit and smeared
 > the format mechanics across every handler. The codec model replaces all
-> of it: codecs are shallow (the context owns recursion and tag-wrapping),
+> of it: codecs are shallow (`JsonCodec` owns recursion and tag-wrapping),
 > the surface is explicit and curated, the class registry is retired
 > (concrete types decode through their own codecs; unknown tags fall
 > straight to `UnknownValue`), and per-instance `wireTypeTag` survives
@@ -2542,8 +2542,8 @@ The context's private decode walker processes the `JsonWireValue` tree:
 > **Previous design.** The earlier spec presented `serialize()` and
 > `deserialize()` as standalone top-level functions that received the
 > `SerializationContext` as a parameter. The current design moves these into
-> private methods on `JsonEncodingContext`, keeping the public API clean
-> (`encode()`/`decode()` only) and allowing the context to encapsulate its
+> private methods on `JsonCodec`, keeping the public API clean
+> (`encode()`/`decode()` only) and allowing the codec to encapsulate its
 > internal state (registry, codec view, lenient mode) without threading it
 > through every recursive call.
 
@@ -2583,11 +2583,11 @@ version requirements.
 The storage boundary routes through functions that bridge between the
 storage layer (JSON strings) and the runtime layer (`FabricValue`). These
 functions live in a dedicated module
-(`packages/data-model/codec-json/json-encoding.ts`).
+(`packages/data-model/codec-json/impl.ts`).
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/codec-json/json-encoding.ts
+// file: packages/data-model/codec-json/impl.ts
 
 /**
  * Encodes a fabric value to a JSON string in the standard `FabricValue`
@@ -2623,8 +2623,8 @@ export function plainObjectFromJson<T extends object = object>(
 export function seemsLikeJsonEncodedFabricValue(value: string): boolean;
 ```
 
-The module creates a single stateless `JsonEncodingContext` instance at
-module load time and reuses it for all encode/decode operations.
+The module creates a single stateless `JsonCodec` instance at module load
+time and reuses it for all encode/decode operations.
 
 The `memory` package wraps these at its serialization boundary
 (`packages/memory/v2.ts`):
@@ -3665,10 +3665,10 @@ values cross from internal serialization machinery to callers:
   intentionally NOT covered by this contract; broadening the contract
   there is a separate follow-on. See Section 4.5 step 4.
 
-- **`JsonWireValue` parse boundary.** The `#parseWireText()` helper
-  (invoked by `decode()` and `fromBytes()`) deep-freezes the parsed wire
-  tree before handing it to the decode walker. This is what makes the
-  deserialize-side `JsonWireValue` invariant load-bearing: tag-unwrap and
+- **`JsonCodecValue` parse boundary.** The `#parseWireText()` helper
+  (invoked by `decode()` and `fromBytes()`) deep-freezes the parsed tree
+  before handing it to the decode walker. This is what makes the
+  deserialize-side `JsonCodecValue` invariant load-bearing: tag-unwrap and
   the `/quote` arm can hand back extracted sub-trees directly without
   further copying because the input tree is already deep-frozen.
 

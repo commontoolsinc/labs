@@ -6,8 +6,8 @@ import {
   plainObjectFromJson,
   seemsLikeJsonEncodedFabricValue,
   valueFromJson,
-} from "@/codec-json/json-encoding.ts";
-import { JsonEncodingContext } from "@/codec-json/JsonEncodingContext.ts";
+} from "@/codec-json/impl.ts";
+import { JsonCodec } from "@/codec-json/JsonCodec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { FabricValue } from "@/fabric-value.ts";
 import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
@@ -37,11 +37,11 @@ function expectWireFormat(value: FabricValue, expected: unknown): void {
   const json = jsonFromValue(value);
   expect(seemsLikeJsonEncodedFabricValue(json)).toBe(true);
   expect(
-    JSON.parse(JsonEncodingContext.unwrapEncodedValueForTesting(json)),
+    JSON.parse(JsonCodec.unwrapEncodedValueForTesting(json)),
   ).toEqual(expected);
 }
 
-describe("json-encoding", () => {
+describe("impl", () => {
   it("round-trips `undefined`", () => {
     expect(roundTrip(undefined)).toBe(undefined);
   });

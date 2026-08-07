@@ -8,10 +8,10 @@ export {
   plainObjectFromJson,
   seemsLikeJsonEncodedFabricValue,
   valueFromJson,
-} from "./json-encoding.ts";
+} from "./impl.ts";
 
-// Encoding context.
-export { JsonEncodingContext } from "./JsonEncodingContext.ts";
+// Whole-value codec for the wire format.
+export { JsonCodec } from "./JsonCodec.ts";
 
-// Shared wire-format vocabulary.
-export type { JsonWireValue } from "./interface.ts";
+// Shared codec-value vocabulary.
+export type { JsonCodecValue } from "./interface.ts";
