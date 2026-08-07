@@ -29,6 +29,7 @@ import {
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
+import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { type Cell, isCell } from "./cell.ts";
 import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
 import {
@@ -141,9 +142,8 @@ export function dataUriFromValueWithResolvedLinks(
  * naming a document in a space.
  *
  * A `FabricPrimitive` comes back as the same instance: a leaf holds no link to
- * inline. A `FabricInstance` does too, which leaves a link inside it
- * un-inlined -- a real gap, and one this walk cannot answer by refusing; see
- * the branch that returns it.
+ * inline. A `FabricInstance` is refused, since passing one through would leave
+ * a link inside it un-inlined.
  *
  * @param value - The value to find and inline data: URI links in.
  * @returns The value with any data: URI links inlined.
@@ -224,32 +224,26 @@ export function findAndInlineDataUriLinks(value: any): any {
     // than an omission.
     return value;
   } else if (value instanceof FabricInstance) {
-    // Passed through, and unlike the sibling walks elsewhere in the runner this
-    // one does _not_ refuse.
+    // Refused. An instance's state can carry a `data:` URI link, and inlining
+    // those is what this walk is for, so passing the value through would hand
+    // it back _untransformed_ -- the link surviving as a link, the walk's
+    // purpose defeated for everything inside the wrapper.
     //
-    // Latent: an instance's state _can_ carry a `data:` URI link, so passing
-    // the value through hands it back with that link un-inlined. The route in
-    // exists -- `fabricFromNativeValue()` recursively converts a native
-    // `Error`'s `cause` and custom properties, so an author attaching a cell to
-    // an error would make one -- but nothing in the tree does that today, so
-    // the gap has no current producer.
+    // Nothing reaches this today, de facto rather than by construction. A link
+    // ends up inside an error only if an author attaches a cell to one, which
+    // `fabricFromNativeValue()` would then convert, and nothing in the tree
+    // does that; the whole suite runs green with this throw in place.
     //
-    // A refusal would be wrong regardless of that, and for an unrelated
-    // reason: this walk is not a `data:` URI operation a caller opts into. `setRawUntyped()` runs it over
-    // every raw write, including every action result (`runner.ts`), so refusing
-    // would make a `FabricError` unstorable by that route -- and one is stored
-    // that way today, by the fetch builtins. Refusing is only ever right where
-    // nothing in production arrives; here something does.
+    // It cannot be narrowed to instances that actually carry such a link, which
+    // is the shape that would sound safer: deciding that means reading the
+    // instance's codec contents, the very traversal whose absence causes the
+    // gap. So it is all instances or none -- and a tripwire that announces
+    // itself the moment these classes see real use beats a comment nobody runs.
     //
-    // Nor can the refusal be narrowed to instances that actually carry a
-    // `data:` URI link, which is the shape it would need: deciding that means
-    // reading the instance's codec contents, which is the very traversal whose
-    // absence causes the gap.
-    //
-    // TODO(danfuzz): descend by codec-mediated traversal into instance state.
-    // That closes this without a refusal, and is the same gap marked at the
-    // sibling walk in `dataUriFromValueWithResolvedLinks()`.
-    return value;
+    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
+    // at which point this becomes a walk rather than a refusal -- the same gap
+    // marked at the sibling walk in `dataUriFromValueWithResolvedLinks()`.
+    refuseFabricInstance(value, "when inlining `data:` URI links");
   } else if (isRecord(value)) {
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {

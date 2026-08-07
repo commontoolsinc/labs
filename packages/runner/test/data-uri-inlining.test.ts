@@ -349,8 +349,7 @@ describe("data URI inlining", () => {
       // red.
       //
       // For a `FabricInstance` it is _not_ the answer -- not being flattened is
-      // not the same as being handled -- but the answer is not a refusal
-      // either, for the reason the second test below gives.
+      // not the same as being handled -- so the walk refuses one.
 
       it("returns a `FabricBytes` as the same instance", () => {
         const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
@@ -358,23 +357,19 @@ describe("data URI inlining", () => {
         expect(findAndInlineDataUriLinks(bytes)).toBe(bytes);
       });
 
-      it("leaves a `data:` URI link inside a `FabricError` un-inlined", () => {
-        // A _latent gap_, pinned as one: the shape is constructible and the
-        // behavior is wrong, but nothing in the tree produces it. A link ends
-        // up inside an error only if an author attaches a cell to one, which
-        // `fabricFromNativeValue()` would then convert -- and nothing does.
-        // So this test builds the producer it does not have.
+      it("throws for a `FabricError` rather than passing it through", () => {
+        // Passing an instance through hands it back _untransformed_: its state
+        // can carry a link this walk exists to inline, so coming back whole
+        // means coming back with that link intact.
         //
-        // This walk does not refuse, where its siblings elsewhere in the runner
-        // do. `setRawUntyped()` runs it over every raw write, including every
-        // action result, and a `FabricError` is stored that way today by the
-        // fetch builtins -- so a refusal would break live traffic rather than
-        // name an unreached corner. Narrowing it to instances that actually
-        // carry such a link would need to read the instance's codec contents,
-        // which is the traversal whose absence causes the gap.
+        // Latent, and refused anyway. A link ends up inside an error only if an
+        // author attaches a cell to one, and nothing in the tree does -- so
+        // this test builds the producer it does not have. The refusal is the
+        // point: it announces itself the moment these classes see real use,
+        // where a comment would wait to be read.
         //
-        // The control is the point -- the same link inlines on a plain object,
-        // so what changes the outcome is the wrapper, not the link.
+        // The control shows the same link inlining on a plain object, so what
+        // changes the outcome is visibly the wrapper.
         const dataURI = dataUriFromValueWithResolvedLinks("inlined value");
         const link = { "/": { [LINK_V1_TAG]: { id: dataURI, path: [] } } };
         const failure = new FabricError({
@@ -389,25 +384,10 @@ describe("data URI inlining", () => {
           e: "inlined value",
         });
 
-        const result = findAndInlineDataUriLinks(failure) as FabricError;
-        expect(result).toBe(failure);
-        expect(result.getExtra("attachment")).toEqual(link);
-      });
-
-      it("stores a `FabricError` through a raw write", () => {
-        // The reason the gap above is not answered by a refusal: this walk is
-        // on the raw write path, so refusing would make an ordinary
-        // `FabricError` unstorable by that route.
-        const cell = runtime.getCell<Record<string, unknown>>(
-          space,
-          "data-uri-raw-error",
-          undefined,
-          tx,
+        expect(() => findAndInlineDataUriLinks(failure)).toThrow(
+          "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
+            "inlining `data:` URI links.",
         );
-
-        expect(() =>
-          cell.setRaw({ err: FabricError.fromNativeError(new Error("boom")) })
-        ).not.toThrow();
       });
 
       it("keeps a special object whole while inlining a sibling", () => {
