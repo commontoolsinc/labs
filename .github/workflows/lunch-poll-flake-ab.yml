@@ -12,6 +12,11 @@ name: Lunch Poll Flake A/B (experiment)
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      runs:
+        description: "Soak iterations per shard"
+        required: false
+        default: "6"
 
 jobs:
   build:
@@ -55,7 +60,7 @@ jobs:
       fail-fast: false
       matrix:
         side: [pre-fix, current]
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     steps:
       - name: 📥 Checkout side ref
         uses: actions/checkout@v7
@@ -91,11 +96,16 @@ jobs:
             echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
           fi
 
+      # Shards 1-4 run the test the way the regular job does, one instance
+      # at a time; the rest run two instances concurrently, contending for
+      # the runner's cores to widen the cross-browser commit-race window the
+      # card wedge needs.
       - name: 🔁 Run the soak
         env:
           SIDE: ${{ matrix.side }}
           SHARD: ${{ matrix.shard }}
-          RUNS: "6"
+          RUNS: ${{ github.event.inputs.runs || '6' }}
+          PAR: ${{ matrix.shard <= 4 && '1' || '2' }}
           TOOLSHED_BINARY: ${{ github.workspace }}/common-binaries/toolshed
           RESULT_DIR: flake-ab-results
         run: bash _experiment/tasks/lunch-poll-flake-ab.sh
