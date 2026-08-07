@@ -361,7 +361,9 @@ Success criteria (flag OFF — the ON gates are Phase 2's):
 
 - [x] Every stage lands with the OFF arm byte-identical to today
       (testing.md §2, as amended — byte-identical up to the recorded
-      key-vocabulary §5 acceptances, RATIFIED 2026-08-05); the ON arm
+      acceptances: key-vocabulary §5's, and stage G's claim-guard
+      delta recorded in verification-coverage §2, all RATIFIED
+      2026-08-05); the ON arm
       runs in CI from stage A with explicit skip lists, never silent
       filtering (ticked with stage G, the phase's last stage,
       2026-08-06: every stage's PR carried its OFF-arm witness — the

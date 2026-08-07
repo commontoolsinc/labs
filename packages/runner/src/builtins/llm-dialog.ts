@@ -2438,11 +2438,11 @@ async function safelyPerformUpdate(
 /**
  * Handles the pin tool call.
  */
-function handlePin(
+async function handlePin(
   runtime: Runtime,
   resolved: ResolvedToolCall & { type: "pin" },
   pinnedCells: Cell<PinnedCell[]>,
-): { type: string; value: any } {
+): Promise<{ type: string; value: any }> {
   const current = pinnedCells.get() || [];
 
   // Check if already pinned
@@ -2453,14 +2453,32 @@ function handlePin(
     };
   }
 
-  // Add new pinned cell using a transaction
-  runtime.editWithRetry((tx) => {
+  // Add new pinned cell using a transaction. AWAITED and surfaced (the
+  // stage-G review's Flag 4): fire-and-forget discarded the outcome, so
+  // ON-arm the serving posture's unstamped-seal refusal (serving-loop.md
+  // §3d) vanished as an unhandled rejection while the tool reported
+  // success. Classification (RULED 2026-08-05; implementation with
+  // Phase 3): pin is COMPLETION-CLASS turn-lifecycle state.
+  const committed = await runtime.editWithRetry((tx) => {
     const currentInTx = pinnedCells.withTx(tx).get() || [];
     pinnedCells.withTx(tx).set([
       ...currentInTx,
       { path: resolved.path, name: resolved.name },
     ]);
   });
+  if (committed.error !== undefined) {
+    logger.warn("pin-commit-failed", () => [
+      `pin of ${resolved.path} failed to commit`,
+      committed.error,
+    ]);
+    return {
+      type: "json",
+      value: {
+        success: false,
+        message: `Pin failed to commit: ${committed.error.message}`,
+      },
+    };
+  }
 
   return { type: "json", value: { success: true } };
 }
@@ -2468,11 +2486,11 @@ function handlePin(
 /**
  * Handles the unpin tool call.
  */
-function handleUnpin(
+async function handleUnpin(
   runtime: Runtime,
   resolved: ResolvedToolCall & { type: "unpin" },
   pinnedCells: Cell<PinnedCell[]>,
-): { type: string; value: any } {
+): Promise<{ type: string; value: any }> {
   const current = pinnedCells.get() || [];
   const filtered = current.filter((p) => p.path !== resolved.path);
 
@@ -2483,12 +2501,28 @@ function handleUnpin(
     };
   }
 
-  // Remove pinned cell using a transaction
-  runtime.editWithRetry((tx) => {
+  // Remove pinned cell using a transaction. Awaited and surfaced — see
+  // handlePin (Flag 4). Classification (RULED 2026-08-05;
+  // implementation with Phase 3): unpin is COMPLETION-CLASS
+  // turn-lifecycle state.
+  const committed = await runtime.editWithRetry((tx) => {
     const currentInTx = pinnedCells.withTx(tx).get() || [];
     const filteredInTx = currentInTx.filter((p) => p.path !== resolved.path);
     pinnedCells.withTx(tx).set(filteredInTx);
   });
+  if (committed.error !== undefined) {
+    logger.warn("unpin-commit-failed", () => [
+      `unpin of ${resolved.path} failed to commit`,
+      committed.error,
+    ]);
+    return {
+      type: "json",
+      value: {
+        success: false,
+        message: `Unpin failed to commit: ${committed.error.message}`,
+      },
+    };
+  }
 
   return { type: "json", value: { success: true } };
 }
@@ -2563,10 +2597,10 @@ async function handleRead(
 /**
  * Handles the update Argument tool call.
  */
-function handleUpdateArgument(
+async function handleUpdateArgument(
   runtime: Runtime,
   resolved: ResolvedToolCall & { type: "updateArgument" },
-): { type: string; value: any } {
+): Promise<{ type: string; value: any }> {
   const cell = resolved.cellRef;
   const updates = resolved.updates;
 
@@ -2586,8 +2620,13 @@ function handleUpdateArgument(
     updates,
   );
 
-  // Apply updates to argument fields
-  runtime.editWithRetry((tx) => {
+  // Apply updates to argument fields. Awaited and surfaced — see
+  // handlePin (Flag 4): the discarded outcome silently swallowed the
+  // ON-arm unstamped-seal refusal while reporting success.
+  // Classification (RULED 2026-08-05; implementation with Phase 3):
+  // updateArgument is a HANDLER-CLASS consequence — Phase-3 events
+  // territory.
+  const committed = await runtime.editWithRetry((tx) => {
     if (
       isRecord(cellifiedValue) && !Array.isArray(cellifiedValue) &&
       !isCell(cellifiedValue)
@@ -2597,6 +2636,19 @@ function handleUpdateArgument(
       argumentCell.withTx(tx).set(cellifiedValue);
     }
   });
+  if (committed.error !== undefined) {
+    logger.warn("update-argument-commit-failed", () => [
+      "updateArgument failed to commit",
+      committed.error,
+    ]);
+    return {
+      type: "json",
+      value: {
+        success: false,
+        message: `Argument update failed to commit: ${committed.error.message}`,
+      },
+    };
+  }
 
   return {
     type: "json",
@@ -2933,14 +2985,14 @@ async function invokeToolCall(
   // Handle pinned cell tools
   if (resolved.type === "pin") {
     return {
-      result: handlePin(runtime, resolved, pinnedCells!),
+      result: await handlePin(runtime, resolved, pinnedCells!),
       observedConfidentiality: [],
     };
   }
 
   if (resolved.type === "unpin") {
     return {
-      result: handleUnpin(runtime, resolved, pinnedCells!),
+      result: await handleUnpin(runtime, resolved, pinnedCells!),
       observedConfidentiality: [],
     };
   }
@@ -2973,7 +3025,7 @@ async function invokeToolCall(
   // Handle run-type tools (external, run with pattern/handler)
   if (resolved.type === "updateArgument") {
     return {
-      result: handleUpdateArgument(runtime, resolved),
+      result: await handleUpdateArgument(runtime, resolved),
       observedConfidentiality: [],
     };
   }

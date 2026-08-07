@@ -13,7 +13,11 @@
 // builtin evaluations that resolved from the stored request hash
 // (serving-loop.md §4's hit rule; reported for the fetch*, generate*
 // and sqliteQuery families — fetchProgram and llmDialog count misses
-// via the outbox but report no hit events yet), memo.misses counts
+// via the outbox but report no hit events yet). A hit is a
+// RE-EVALUATION that touched a settled effect node — not a suppressed
+// fire: one settled node re-evaluated N times counts N hits with zero
+// calls avoided, so Phase 2's gate arithmetic must not read memo.hits
+// as "avoided calls". memo.misses counts
 // effects admitted to the outbox (every deferred post-commit effect —
 // the serving posture's only producers today are the effectful
 // builtins' requests), memo.inflight the live entries;

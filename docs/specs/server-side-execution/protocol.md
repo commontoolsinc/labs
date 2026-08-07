@@ -237,6 +237,23 @@ validation, no certificates: no commit ever asserts that an execution
 happened elsewhere. If an admission question cannot be answered by
 (target, principal, lease, CAS), the design is drifting — stop.
 
+**The Phase-3 floor carve-out for sessionless space-scope emissions
+(SHAPE RULED 2026-08-05; implementation lands with Phase 3).** The
+server-produced row's completeness floor admits an ABSENT acting
+principal iff the entry is declared sessionless-space-scope: its
+`firedAt` stamps `{ session: "server" }` with NO user key, and grant
+presence (`capabilityRef`) stays mandatory — events.md §2 and the
+executable model already carry exactly these semantics, so neither
+needs an edit. What Phase 3's implementation lifts, by name: the
+source refusal in `enqueueOutboundAppend` (wave.ts — today a
+userless or grantless entry is a loud error at staging, fail-closed
+ahead of this floor), the delivery path's `?? ""` acting-principal
+mapping (the memory server's delegated-append admission), plus the
+floor negatives BOTH ways (userless
+space-scope-declared admitted; userless without the declaration
+still refused) and the model pin. Tracked in verification-coverage
+§3's Phase-3 bucket.
+
 **Derived-envelope defense-in-depth (RULED 2026-08-05; the engine
 check LANDED with Phase 1 stage F).** At admission, a `derived`
 commit's producing SESSION must be the lease holder's own service

@@ -2151,6 +2151,12 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[];
     applied: AppliedCommit;
   }>();
+  // Waiters on a parked accept's APPLICATION (server-execution v2 stage
+  // G's read-consistency barrier — see `whenApplied`). Resolved when the
+  // parked accept promotes (marker coverage, marker-channel death) or
+  // dies with the parked set (reset/close — the re-pull re-derives the
+  // durable state, so "applied" is moot and the waiter must not hang).
+  #appliedWaiters = new Map<number, PromiseWithResolvers<void>>();
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
     pending: PromiseWithResolvers<void>;
@@ -2451,6 +2457,46 @@ class SpaceReplica implements ISpaceReplica {
     return record !== undefined && record.pending.length > 0;
   }
 
+  /**
+   * Resolves when the accepted commit at `localSeq` has been APPLIED to
+   * this replica's settled view — immediately when its accept was
+   * confirmed at verdict time, else when its PARKED accept promotes
+   * (marker coverage via noteCaughtUpLocalSeq, or marker-channel death)
+   * or dies with the parked set (reset/close, where the re-pull
+   * re-derives the durable state).
+   *
+   * Server-execution v2 stage G's effect-retirement read barrier
+   * (serving-loop.md §4): an effect COMPLETION commits engine-side and
+   * resolves its verdict inline, but under CT-1927's parked accepts the
+   * promotion waits for frame markers — a window where a FRESH
+   * transaction's reads can miss the completion's writes (a dropped
+   * stale overlay re-exposes older state). The outbox holds the
+   * effect's in-flight entry across this window so a stale re-admit of
+   * the same key dedupes instead of re-claiming against unabsorbed
+   * state and firing a second egress.
+   *
+   * Callers sequence this AFTER the sealed commit's `settled` promise:
+   * settleAccept (the park-or-confirm decision) runs inside settlement,
+   * so consulting the parked set before settlement would race it.
+   */
+  whenApplied(localSeq: number): Promise<void> {
+    if (!this.#parkedAccepts.has(localSeq)) return Promise.resolve();
+    let waiter = this.#appliedWaiters.get(localSeq);
+    if (waiter === undefined) {
+      waiter = Promise.withResolvers<void>();
+      this.#appliedWaiters.set(localSeq, waiter);
+    }
+    return waiter.promise;
+  }
+
+  private resolveAppliedWaiter(localSeq: number): void {
+    const waiter = this.#appliedWaiters.get(localSeq);
+    if (waiter !== undefined) {
+      this.#appliedWaiters.delete(localSeq);
+      waiter.resolve();
+    }
+  }
+
   async close(): Promise<void> {
     this.#closed = true;
     this.#closeSignal.resolve();
@@ -2513,6 +2559,13 @@ class SpaceReplica implements ISpaceReplica {
     // re-derives durable state (which contains the accepted writes), and on
     // close there is nothing left to promote into.
     this.#parkedAccepts.clear();
+    // Their applied-waiters resolve rather than hang: the accepted writes
+    // now arrive (or died) through the re-pull, so the barrier's question
+    // — "has the settled view moved past the accept?" — is answered.
+    for (const waiter of this.#appliedWaiters.values()) {
+      waiter.resolve();
+    }
+    this.#appliedWaiters.clear();
   }
 
   private noteCaughtUpLocalSeq(localSeq: number | undefined): void {
@@ -4345,6 +4398,9 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     applied: AppliedCommit,
   ): void {
+    // The accept is being applied (immediately at verdict, or promoted
+    // off the parked set): release any read-barrier waiter (whenApplied).
+    this.resolveAppliedWaiter(localSeq);
     const keys = new Map(
       operations.map((operation) => [
         docKey(operation.id, operation.scope),

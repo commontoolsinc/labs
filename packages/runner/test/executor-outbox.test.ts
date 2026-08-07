@@ -307,6 +307,78 @@ describe("stage G outbox + sqlite discharge", () => {
     expect(outbox.carriageFor("fetchTest:key-A")).toBeUndefined();
   });
 
+  it("holds an effect's in-flight entry until every completion is READABLE: a stale re-admit across the absorption window dedupes; retirement follows the barrier (serving-loop.md §4, the B-1 read-consistency gate)", async () => {
+    // The captured double-fire this pins closed: a completion commits
+    // engine-side and the effect's work settles, but the serving
+    // replica has not APPLIED the completion yet (a parked accept
+    // awaiting its catch-up marker). Retiring the key inside that
+    // window let a later wave's stale-snapshot re-run re-admit it, and
+    // the re-admitted claim — reading unabsorbed state — passed the
+    // hash guard and egressed a second time. The retirement barrier
+    // (deferRetirement ← the completion committer's whenApplied
+    // promise) makes the re-admit DEDUPE until absorption.
+    const { outbox, stats } = newOutbox();
+    let ran = 0;
+    const effect = (): PostCommitSideEffect => ({
+      id: "fetchTest:key-b1",
+      kind: "fetchTest-start",
+      flush: () => {
+        ran += 1;
+      },
+    });
+    const tx = {} as IExtendedStorageTransaction;
+    outbox.admitSealedEffects([{
+      tx,
+      effects: [effect()],
+      context: undefined,
+    }]);
+    expect(ran).toBe(1);
+    // The completion committer registers its read barrier while the key
+    // is in flight (in production, from inside the effect's own tracked
+    // work — always before the work settles).
+    const barrier = Promise.withResolvers<void>();
+    outbox.deferRetirement("fetchTest:key-b1", barrier.promise);
+
+    // The work settles (the flush was synchronous) — but the entry MUST
+    // remain in flight: absorption is held back.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(stats.outbox.completed).toBe(1);
+    expect(outbox.inflightCount).toBe(1);
+
+    // The stale re-admit across the absorption window: DEDUPES — no
+    // second flush, no second queue/miss count.
+    outbox.admitSealedEffects([{
+      tx,
+      effects: [effect()],
+      context: undefined,
+    }]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(ran).toBe(1);
+    expect(stats.outbox.queued).toBe(1);
+    expect(stats.memo.misses).toBe(1);
+
+    // Absorption: the barrier resolves, the entry retires.
+    barrier.resolve();
+    await outbox.settle();
+    expect(outbox.inflightCount).toBe(0);
+
+    // A barrier registered for a key NOT in flight is a no-op (a
+    // straggler completion of a retired key holds nothing)...
+    const straggler = Promise.withResolvers<void>();
+    outbox.deferRetirement("fetchTest:key-b1", straggler.promise);
+    // ...so a post-absorption admit that still misses re-fires
+    // legitimately and retires without waiting on it.
+    outbox.admitSealedEffects([{
+      tx,
+      effects: [effect()],
+      context: undefined,
+    }]);
+    expect(ran).toBe(2);
+    await outbox.settle();
+    expect(outbox.inflightCount).toBe(0);
+    straggler.resolve();
+  });
+
   it("counts infrastructure failures as outbox.failed (a flush throw); effect-level failures are error-shaped RESULTS, not failures (§4)", async () => {
     const { outbox, stats } = newOutbox();
     outbox.admitSealedEffects([{
@@ -518,6 +590,113 @@ describe("stage G outbox + sqlite discharge", () => {
     expect(stats.outbox.failed).toBe(0);
     lease.release();
     lease2.release();
+  });
+
+  it("folds a FOREIGN-only-seal survivor's appends into the home batch's outbox rows (FP1 fold completeness; the stage-G review's M-A)", async () => {
+    // A contribution whose only sealed space is FOREIGN (the Phase-5
+    // provisioning shape): its cross-space appends are consequences of
+    // a SURVIVING contribution and must land as durable rows in the
+    // HOME wave transaction — the pre-fix fold sat under the home-seal
+    // guard and lost them silently.
+    const lease = liveLease();
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+
+    const foreignCell = runtime.getCell<{ value: number }>(
+      targetSpace,
+      "foreign-only-x",
+      undefined,
+    );
+    const tx1 = runtime.edit();
+    stampWaveRunContext(tx1, {
+      actionId: "handle-foreign-only",
+      kind: "event-handler",
+      eventId: "evt-foreign-only",
+    });
+    foreignCell.withTx(tx1).set({ value: 5 });
+    wave.enqueueOutboundAppend(tx1, {
+      targetSpace,
+      targetStream: "of:foreign-only-stream",
+      eventId: "evt-fo-1",
+      payload: { via: "foreign-only survivor" },
+      actingPrincipal: "user:alice",
+      actingSession: "sess-1",
+      capabilityRef: "cap-fo",
+    });
+    expect((await tx1.commit()).error).toBeUndefined();
+    runtime.clearSealDestination();
+
+    const targetEngine = await server.engineForSpace(targetSpace);
+    const sink = new EngineWaveCommitSink({
+      engineFor: (s) => (s === space ? engine : targetEngine),
+      sessionId: holder,
+      localSeqRef,
+    });
+    const outcome = await wave.commitWave(sink);
+    await wave.settled();
+    expect(outcome.aborted).toBeUndefined();
+    // The home commit exists — carried appends force it even with zero
+    // home ops — and the rows live in the HOME engine (the source-side
+    // durable queue), with the event covered by consequenceOf.
+    expect(outcome.seq).toBeDefined();
+    expect(outcome.committedEventIds).toEqual(["evt-foreign-only"]);
+    const rows = selectPendingExecutionOutboxRows(engine, { branch: "" });
+    expect(rows.length).toBe(1);
+    expect(rows[0].eventId).toBe("evt-fo-1");
+    expect(rows[0].createdSeq).toBe(outcome.seq);
+    // The foreign write itself landed at the target.
+    expect(
+      Engine.read(targetEngine, {
+        id: foreignCell.getAsNormalizedFullLink().id,
+      }),
+    ).toEqual({ value: { value: 5 } });
+    lease.release();
+  });
+
+  it("mints a zero-write contribution for a tx that sealed NOTHING but staged appends — the Phase-3 pure-forwarding handler; its appends land (M-A)", async () => {
+    // The model explicitly permits committed contributions with
+    // `writes: []` carrying cross-space appends (its cascadesCross and
+    // consequenceOf folds run for every committed contribution). The
+    // pre-fix seal() dropped the tx at the empty-assembly fast path and
+    // orphaned its staged appends silently.
+    const lease = liveLease();
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+
+    const tx1 = runtime.edit();
+    stampWaveRunContext(tx1, {
+      actionId: "handle-pure-forward",
+      kind: "event-handler",
+      eventId: "evt-forwarding",
+    });
+    // No writes at all: the handler's only consequence is the emit.
+    wave.enqueueOutboundAppend(tx1, {
+      targetSpace,
+      targetStream: "of:zero-seal-stream",
+      eventId: "evt-zs-1",
+      payload: { via: "zero-seal emitter" },
+      actingPrincipal: "user:bob",
+      actingSession: "sess-2",
+      capabilityRef: "cap-zs",
+    });
+    expect((await tx1.commit()).error).toBeUndefined();
+    expect(wave.contributionCount).toBe(1);
+    expect(wave.hasOutboundAppends).toBe(true);
+    runtime.clearSealDestination();
+
+    const outcome = await wave.commitWave(newSink());
+    await wave.settled();
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.seq).toBeDefined();
+    expect(outcome.dispositions).toEqual([{ kind: "committed" }]);
+    expect(outcome.committedEventIds).toEqual(["evt-forwarding"]);
+    const rows = selectPendingExecutionOutboxRows(engine, { branch: "" });
+    expect(rows.length).toBe(1);
+    expect(rows[0].eventId).toBe("evt-zs-1");
+    expect(rows[0].targetStream).toBe("of:zero-seal-stream");
+    expect(rows[0].actingPrincipal).toBe("user:bob");
+    expect(rows[0].createdSeq).toBe(outcome.seq);
+    lease.release();
   });
 
   it("refuses a userless (or grantless) append at the SOURCE — fail-closed ahead of the delegated floor that would destroy it at delivery", async () => {

@@ -1736,6 +1736,22 @@ export interface ISpaceReplica extends ISpace {
     source: IStorageTransaction | undefined,
     verdict: Promise<SealedCommitVerdict>,
   ): SealedNativeCommit;
+
+  /**
+   * Resolves when the accepted commit at `localSeq` has been APPLIED to
+   * this replica's settled view — immediately when the accept confirmed
+   * at verdict time, else when its parked accept promotes (catch-up
+   * marker coverage) or dies with the parked set (reset/close).
+   *
+   * Server-execution v2 stage G's effect-retirement read barrier
+   * (serving-loop.md §4): the outbox holds an effect's in-flight entry
+   * until every completion commit's writes are readable by the serving
+   * runtime, so a stale re-admit of the same key dedupes instead of
+   * re-claiming against unabsorbed state. Sequence after the sealed
+   * commit's `settled` promise — the park-or-confirm decision runs
+   * inside settlement.
+   */
+  whenApplied?(localSeq: number): Promise<void>;
 }
 
 /**

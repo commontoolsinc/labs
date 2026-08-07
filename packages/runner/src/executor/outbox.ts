@@ -59,16 +59,31 @@ export class SpaceOutbox {
   readonly #engine: Engine;
   readonly #sessionId: string;
   readonly #localSeqRef: { value: number };
-  /** In-flight effect work per effect id — §4's in-flight dedupe: a
-   * second admit of a live id attaches to (is served by) the first. */
+  /** In-flight effect entries per effect id — §4's in-flight dedupe: a
+   * second admit of a live id attaches to (is served by) the first. The
+   * stored promise is the entry's RETIREMENT (work settled AND every
+   * completion commit readable — see #retireBarriers), which is what
+   * `settle()` awaits. */
   readonly #inflight = new Map<string, Promise<void>>();
   /** Run-context carriage per in-flight effect id (§4's miss rule),
-   * consumed by the completion committer; retired when the effect's
-   * work settles (every completion write of an effect happens inside
-   * its tracked work, so nothing consults a retired entry — a late
-   * straggler falls back to the wave-level identity, which is the same
-   * identity in Phase 1). */
+   * consumed by the completion committer; retired with the entry
+   * (every completion write of an effect happens inside its tracked
+   * work, so nothing consults a retired entry — a late straggler falls
+   * back to the wave-level identity, which is the same identity in
+   * Phase 1). */
   readonly #carriage = new Map<string, WaveRunContext>();
+  /** Read-consistency barriers per in-flight effect id (serving-loop.md
+   * §4; the stage-G review's B-1): each completion commit of a served
+   * effect registers a promise that resolves when its writes are
+   * READABLE by the serving runtime (the replica applied the accept —
+   * `ISpaceReplica.whenApplied`). Retirement awaits them, so the
+   * in-flight entry keeps deduping stale re-admits across the
+   * absorption window. Without this, the captured double-fire fires: a
+   * completion commits engine-side and retires the key, a later wave's
+   * stale-snapshot re-run re-admits it, and the re-admitted claim's
+   * reads — not yet showing the completion — pass the hash guard and
+   * egress a second time. */
+  readonly #retireBarriers = new Map<string, Array<Promise<unknown>>>();
   /** Sync-span capture target for the runtime's async-work observer:
    * while an effect's flush runs its SYNCHRONOUS prefix, work the
    * builtin registers via trackAsyncWork lands here — that work IS the
@@ -108,6 +123,28 @@ export class SpaceOutbox {
     return this.#carriage.get(effectKey);
   }
 
+  /**
+   * Defer the effect's in-flight retirement behind `barrier` — the B-1
+   * read-consistency gate: the completion committer registers, per
+   * completion commit, a promise resolving when that commit's writes
+   * are READABLE by the serving runtime (the replica applied the
+   * accept). The effect's entry retires only after its work settled
+   * AND every registered barrier resolved, so a stale re-admit of the
+   * key keeps deduping across the absorption window instead of
+   * re-claiming against unabsorbed state (the captured double-egress).
+   * A registration for a key not in flight is a no-op: a straggler
+   * completion of an already-retired key has nothing to hold.
+   */
+  deferRetirement(effectKey: string, barrier: Promise<unknown>): void {
+    if (!this.#inflight.has(effectKey)) return;
+    let barriers = this.#retireBarriers.get(effectKey);
+    if (barriers === undefined) {
+      barriers = [];
+      this.#retireBarriers.set(effectKey, barriers);
+    }
+    barriers.push(barrier);
+  }
+
   get inflightCount(): number {
     return this.#inflight.size;
   }
@@ -140,14 +177,32 @@ export class SpaceOutbox {
           this.#carriage.set(key, batch.context);
         }
         const work = this.#runEffect(key, effect, batch.tx);
-        this.#inflight.set(key, work);
+        const retirement = work.catch(() => undefined)
+          .then(() => this.#awaitRetireBarriers(key))
+          .finally(() => {
+            this.#retireBarriers.delete(key);
+            this.#inflight.delete(key);
+            this.#carriage.delete(key);
+            this.#stats.memo.inflight = this.#inflight.size;
+          });
+        this.#inflight.set(key, retirement);
         this.#stats.memo.inflight = this.#inflight.size;
-        void work.finally(() => {
-          this.#inflight.delete(key);
-          this.#carriage.delete(key);
-          this.#stats.memo.inflight = this.#inflight.size;
-        });
       }
+    }
+  }
+
+  /** Await every registered read-consistency barrier for `key`,
+   * re-checking after each pass: a completion committing DURING the
+   * await (a late writeback of attached work) registers into a fresh
+   * list, and the entry must not retire ahead of it. Never rejects —
+   * barriers resolve on apply, reset, and close (the replica side), and
+   * a rejected barrier must not wedge retirement. */
+  async #awaitRetireBarriers(key: string): Promise<void> {
+    while (true) {
+      const barriers = this.#retireBarriers.get(key);
+      if (barriers === undefined || barriers.length === 0) return;
+      this.#retireBarriers.delete(key);
+      await Promise.allSettled(barriers);
     }
   }
 
@@ -202,8 +257,9 @@ export class SpaceOutbox {
     }
   }
 
-  /** Every in-flight effect settled — a test/diagnostic barrier; the
-   * serving loop never awaits it (the loop never awaits the network). */
+  /** Every in-flight effect RETIRED — work settled and every completion
+   * readable (the B-1 barrier). A test/diagnostic barrier; the serving
+   * loop never awaits it (the loop never awaits the network). */
   async settle(): Promise<void> {
     while (this.#inflight.size > 0) {
       await Promise.allSettled([...this.#inflight.values()]);
@@ -222,7 +278,10 @@ export class SpaceOutbox {
    * stream). A DETERMINISTIC admission rejection (LT4) is not retried:
    * the row is deleted and counted failed — its source-side failure
    * notice is Phase 3's events.md §5 machinery, which has no stream
-   * entries to annotate yet. Transport-class failures keep the row for
+   * entries to annotate yet. When that machinery lands, the notice
+   * must be written BEFORE the row delete (verification-coverage
+   * OW14 — today the delete discards eventId/target/reason beyond
+   * the warn log). Transport-class failures keep the row for
    * the next drain (at-least-once, no timers).
    */
   async deliverPendingAppends(): Promise<{ remaining: number }> {

@@ -329,8 +329,14 @@ export class SpaceServer implements TransactionSealDestination {
     // eventId horizon. Co-hosted delivery is an engine commit, not a
     // network await.
     try {
-      await outbox.deliverPendingAppends();
+      const drained = await outbox.deliverPendingAppends();
+      this.#outboxDrainOwed = drained.remaining > 0;
     } catch (error) {
+      // Arm the owed re-drain (the stage-G review's M-B): rows a failed
+      // activation re-send leaves behind must ride the NEXT wave's
+      // drain, not wait for the next appends-carrying wave or another
+      // re-activation.
+      this.#outboxDrainOwed = true;
       logger.warn("activation-resend-failed", () => [
         "outbox re-send on activation failed; rows kept for the next " +
         "drain (serving-loop.md §6 step 5)",
@@ -420,7 +426,22 @@ export class SpaceServer implements TransactionSealDestination {
     effects: readonly PostCommitSideEffect[],
   ): boolean {
     const wave = this.#waveByTx.get(tx);
-    if (wave === undefined || this.#outbox === undefined) return false;
+    if (wave === undefined) return false;
+    if (!this.#active || this.#outbox === undefined || wave.closed) {
+      // The park-race straggler (the stage-G review's m-3): a tx that
+      // sealed into a wave this server has since abandoned — or whose
+      // commit resolves while the space is parking/parked — hands its
+      // effects over AFTER the park cleared #pendingEffectsByWave,
+      // possibly after a REACTIVATION rebuilt the outbox. OWN AND DROP
+      // them (return true, store nothing): the abandoned wave's
+      // effects are the intended crash-equivalent path §4/§6 already
+      // cover (the effect re-misses from its memo key on demand), an
+      // inline flush here would fire network work for a contribution
+      // that never committed, and the pre-fix re-created map entry —
+      // keyed by a wave no cycle will ever consume — leaked the wave
+      // and its transactions for the server's lifetime.
+      return true;
+    }
     let pending = this.#pendingEffectsByWave.get(wave);
     if (pending === undefined) {
       pending = [];
@@ -428,6 +449,13 @@ export class SpaceServer implements TransactionSealDestination {
     }
     pending.push({ tx, effects, context: waveRunContextOf(tx) });
     return true;
+  }
+
+  /** DIAGNOSTIC (tests): how many waves currently hold deferred effect
+   * batches — the m-3 leak pin (a park-race straggler must not
+   * re-create an entry nothing consumes). */
+  get deferredEffectWaveCount(): number {
+    return this.#pendingEffectsByWave.size;
   }
 
   #openWave(): WaveAccumulator {
@@ -632,6 +660,27 @@ export class SpaceServer implements TransactionSealDestination {
       );
     }
     sealed.resolveVerdict({ committed: { seq: outcome.ok.seq } });
+    // The B-1 read-consistency gate (serving-loop.md §4): hold the
+    // effect's in-flight entry until THIS completion commit's writes
+    // are READABLE by the serving runtime. The verdict above resolves
+    // inline, but under parked accepts (CT-1927) the replica applies
+    // the promotion only when a frame's catch-up marker covers it — a
+    // window where a fresh transaction's reads can miss the
+    // completion. Retiring the key inside that window let a stale
+    // re-run's re-admit re-claim and egress a second time (the
+    // captured double-fire); deferring retirement makes the re-admit
+    // dedupe instead. Sequenced after `settled` — the park-or-confirm
+    // decision runs inside the sealed commit's settlement.
+    const replica = runtime.storageManager.open(this.#options.space).replica;
+    if (replica.whenApplied !== undefined) {
+      const localSeq = sealed.sealed.localSeq;
+      this.#outbox?.deferRetirement(
+        effectKey,
+        sealed.sealed.settled
+          .catch(() => undefined)
+          .then(() => replica.whenApplied!(localSeq)),
+      );
+    }
     this.#options.stats.derivedCommits += 1;
     // In-process dirtiness + push (the §4 injection): report like a
     // wave commit — subscribers get the derived rows, the feed carries

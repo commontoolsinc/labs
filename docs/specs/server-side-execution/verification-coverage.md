@@ -303,7 +303,11 @@ PR):
   OWN derived-class commit (never through §3d's sealing), its
   annotations sourced from the outbox carriage captured at the
   original run's seal, pinned with a scoped write + acting identity
-  in `executor-serving-loop.test.ts` (T7.Q4's impl witness).
+  in `executor-serving-loop.test.ts` (T7.Q4's impl witness). Stated
+  for Phase 1: T7.Q4's carriage-sourced `scope_key` is STRUCTURAL —
+  the E2E pins the cardinality-1 fallback (carriage identity ==
+  wave identity), and the per-run demanded identity that makes the
+  carriage carry a DIFFERENT key arrives with Phase 2's stamper.
 - serving-loop §5's FP1 rows: impl-gate → COVERED. Durable rows
   land INSIDE the wave's engine transaction (surviving contributions
   only — a dependency-dropped contribution's appends are excluded, a
@@ -340,22 +344,109 @@ PR):
 - The stage-G adversarial review's fix batch (2026-08-06), coverage
   where it added binding behavior: (i) the deferred-flush window the
   serving posture opens — a stale action re-run re-admitting a key
-  whose first effect already completed and retired — is closed at the
-  builtins' claim step (`tryClaimMutex` skips the claim when the
-  stored hash matches and a result/error landed; the E2E's
-  exactly-once external-call pins it); (ii) the sqliteQuery memo
-  decision distinguishes a SETTLED result (a hit) from a bare claim
-  marker — an orphaned claim re-issues under the serving posture
-  only (`sqliteQueryMemoDecision`, unit-pinned), restoring §6 step
-  3's re-miss premise for the one builtin whose key commits ahead of
-  its result; (iii) userless/grantless outbound appends are refused
-  at the SOURCE (`enqueueOutboundAppend`), fail-closed ahead of the
-  delegated floor that would deterministically destroy them at
-  delivery — events §2's userless space-scope emissions await their
-  Phase-3 floor ruling (the stage-G PR's Flags carry the question);
-  (iv) admit-before-delete is now pinned by a transport-failure test
-  (the row survives a non-deterministic delivery failure; the next
-  drain delivers exactly one entry).
+  whose first effect already completed — is closed by TWO mechanisms
+  in series, stated truthfully after the independent review's
+  captured double-fire showed the claim guard alone does NOT close
+  it: `tryClaimMutex`'s completed-request guard (skip the claim when
+  the stored hash matches and a result/error is READABLE —
+  unit-pinned in `fetch-claim-takeover.test.ts`) plus the
+  READABILITY-GATED in-flight retirement (serving-loop §5's ruled
+  idempotence sentence): the outbox holds the key until every
+  completion commit's writes are applied to the serving replica
+  (`ISpaceReplica.whenApplied` over CT-1927's parked accepts), so
+  the stale re-admit that used to arrive inside the ~15 ms
+  absorption window — reading a view without the completion, where
+  the guard structurally passes — now DEDUPES. Pinned by the
+  `whenApplied` unit (`memory-v2-stacked-commit.test.ts`), the
+  deterministic hold-absorption/re-admit/dedupe interleave
+  (`executor-outbox.test.ts`), and the E2E's exactly-once
+  external-call pins under repeated load runs; (ii) the sqliteQuery
+  memo decision distinguishes a SETTLED result (a hit) from a bare
+  claim marker — an orphaned claim re-issues under the serving
+  posture only (`sqliteQueryMemoDecision`, unit-pinned), restoring
+  §6 step 3's re-miss premise for the one builtin whose key commits
+  ahead of its result; (iii) userless/grantless outbound appends
+  are refused at the SOURCE (`enqueueOutboundAppend`), fail-closed
+  ahead of the delegated floor that would deterministically destroy
+  them at delivery — the Phase-3 floor carve-out for sessionless
+  space-scope emissions is now SHAPE-RULED (2026-08-05, protocol §2;
+  implementation is Phase 3's, owed below); (iv) admit-before-delete
+  is now pinned by a transport-failure test (the row survives a
+  non-deterministic delivery failure; the next drain delivers
+  exactly one entry).
+
+Delta 2026-08-06 — the stage-G INDEPENDENT review's fix batch, plus
+the owner's 2026-08-05 ruling batch (five rulings recorded; changed
+sentences, one recorded acceptance, three owed entries):
+
+- serving-loop §5's effect-idempotence sentence: AMENDED (RULED
+  2026-08-05). The old "a duplicate completion writes an identical
+  key and is a CAS no-op" described a mechanism the completion path
+  does not have; the section now states the true one — the
+  builtins' request-hash guards plus the all-no-op short-circuit,
+  completion commits deliberately at `basisSeq = NOW` (no per-doc
+  CAS), and the readability-gated in-flight retirement closing the
+  absorption-window race. CHANGED sentence; its coverage is the
+  fix-batch row above.
+- serving-loop §3d's sanctioned-stamp-kinds sentence: the
+  "acked-effect retirement when stage G lands it" clause was a
+  MIS-ATTRIBUTION (reviewer-verified): the write it describes is
+  Phase 4's client-effect retirement (protocol §5 — a
+  bookkeeping-stamped wave write among protocol §1's
+  service-identity writes). §3d now attributes it to Phase 4 and
+  notes stage G's own retirement is plane (c)'s unstamped
+  engine-table ROW delete (§1 already said so). CHANGED sentence,
+  same rows.
+- ONE RECORDED OFF-arm acceptance rides stage G (RATIFIED
+  2026-08-05; testing §2's gate clause widened the same day to name
+  this register's recorded-acceptance rows alongside
+  key-vocabulary §5's): `tryClaimMutex`'s completed-request guard
+  changes the OFF arm's cross-writer race corner. Old behavior:
+  a claimant racing another writer's completed result for the SAME
+  inputs claimed anyway, transiently cleared result/error, and
+  re-fetched (a redundant refetch plus a visible clearing blip).
+  New behavior: the claim is skipped — the stored value stands.
+  Post-B-1 shape, stated precisely: the guard reads the claimant's
+  view, so it engages exactly when the completed writeback is
+  READABLE there; the serving posture's unreadable-window case is
+  closed by the retirement gate (above), not by this guard, and
+  client-side the guard only removes the redundant-refetch corner
+  (inline flushing already made in-process ordering safe).
+- FP6's register row (field-provenance.md): the label basis is
+  STRUCTURAL, not frozen (RULED 2026-08-05) — tightening mid-flight
+  yields the stricter label, loosening matches the OFF arm's
+  write-time derivation, a frozen snapshot would write stale labels
+  over a re-labeled basis. Recorded on the row; no mechanism moved.
+- protocol §2: the Phase-3 floor carve-out for sessionless
+  space-scope emissions is SHAPE-RULED (2026-08-05) and recorded in
+  the delegated-row region — absent acting principal admitted iff
+  declared sessionless-space-scope (`firedAt = { session: "server"
+  }`, no user key), grant presence still mandatory. events §2 and
+  the model already carry the semantics; implementation is owed
+  (Phase 3, below).
+- builtins §2's fetch row: the "migrate requestHash onto the result
+  doc" prescription now carries its deferral note (the
+  internal-cell hash is functionally equivalent committed state per
+  T10.Q1; the migration is an OFF-arm cell-shape change waiting for
+  an OFF-arm ruling batch that wants it — plausibly never).
+  CHANGED sentence, same row.
+- stats.ts's memo.hits note now states the hit unit (a
+  re-evaluation touching a settled effect node, NOT a suppressed
+  fire) so Phase 2's gate arithmetic cannot read hits as "avoided
+  calls". Code-comment clarification; no counter moved.
+- FP1 fold completeness (the review's M-A): appends and consequence
+  coverage now fold for EVERY surviving contribution — the
+  foreign-only-seal survivor and the zero-seal emitter (minted as a
+  zero-write contribution, the model's committed-`writes: []`
+  shape) both land their appends and `consequenceOf`; both shapes
+  red-first pinned in `executor-outbox.test.ts`.
+- The SpaceServer's recovery seams (the review's M-B): the §6-step-5
+  activation re-send and the owed post-wave drain are now pinned at
+  the SpaceServer level (`executor-space-server.test.ts` — deleting
+  the activation re-send call turns the test red), and a
+  transport-failed ACTIVATION re-send now arms the owed re-drain so
+  surviving rows ride the next wave instead of waiting for the next
+  appends-carrying wave or re-activation.
 
 ## 3. The owed register (every genuine orphan, with its trigger)
 
@@ -442,6 +533,35 @@ journey):**
   `executor-serving-loop.test.ts` (the failure leg: an error-shaped
   result commits with the key, no timer retry fires, and only an
   input change re-fires).
+
+**Phase 3 pre-gate (when events land; pulled by Phase 3's
+pre-flight):**
+
+- OW14 — the LT4 arm's source-side notice ORDER: when Phase 3 lands
+  events.md §5's failure-notice machinery, the deterministic-
+  rejection arm must write the events §5 notice BEFORE deleting the
+  refused outbox row — today the delete discards
+  `eventId`/`target`/`reason` except a warn log, and the obligation
+  lives only in outbox.ts's LT4 comment. Owed: the write-then-delete
+  ordering plus its test (a crash between the two must re-send and
+  re-notice, deduped, never lose the notice). Trigger: Phase 3's
+  events §5 machinery landing.
+- OW15 — the sessionless space-scope floor carve-out's
+  IMPLEMENTATION (SHAPE-RULED 2026-08-05, protocol §2): lift the
+  source refusal in `enqueueOutboundAppend` for declared
+  sessionless-space-scope entries, fix the delivery path's `?? ""`
+  acting-principal mapping, land the floor negatives BOTH ways
+  (userless space-scope-declared admitted with
+  `firedAt = { session: "server" }`; userless without the
+  declaration still refused) and the model pin. Trigger: Phase 3's
+  event producers going live.
+- OW16 — the llm-dialog tool mutations' RULED classifications
+  (2026-08-05), implemented: pin and unpin commit as
+  COMPLETION-CLASS turn-lifecycle state; updateArgument commits as
+  a HANDLER-CLASS consequence. The three call sites carry the
+  ruling in comments (llm-dialog.ts — awaited and surfaced since
+  the stage-G review batch); the stamping/classing itself is
+  Phase-3 events territory. Trigger: Phase 3's pre-flight.
 
 **Phase 6 (the contract is fixed now, the check lands with
 hardening):**

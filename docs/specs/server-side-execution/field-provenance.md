@@ -211,7 +211,14 @@ FP1 and FP2 are the heavyweights.
   label basis, carried on the outbox entry with the identity
   carriage — an external result inherits its request's
   confidentiality, never default-unlabeled (serving-loop §4;
-  protocol §7).
+  protocol §7). RULED 2026-08-05, the basis is STRUCTURAL, not a
+  frozen snapshot: the completion's writeback transaction re-reads
+  the request inputs, so the labels derive from the basis AS IT
+  STANDS at writeback — a tightening mid-flight yields the stricter
+  label (conservative), a loosening matches today's OFF-arm
+  write-time derivation exactly, and a frozen at-seal snapshot is
+  REJECTED because it would write stale labels over a re-labeled
+  basis.
 - **FP7 — `capabilityRef` origin (B).** Grant minting/acquisition
   is never stated. If it is the existing capability system,
   deliberately not re-litigated, say so the way the ACL rows say

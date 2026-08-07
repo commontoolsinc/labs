@@ -73,8 +73,10 @@ const logger = getLogger("wave-accumulator", {
  * - `bookkeeping` is the SANCTIONED INTERNAL STAMP KIND stage F names
  *   when it installs the seal destination (serving-loop.md §3d, RULED
  *   2026-08-05: unstamped seals are refused, so the loop's own writes —
- *   the watermark-doc advance today; acked-effect retirement when
- *   stage G lands it — declare this kind). Conflict class:
+ *   the watermark-doc advance today; the acked-effect retirement write
+ *   when Phase 4 lands the client-effect channel, protocol.md §5 —
+ *   declare this kind; stage G's outbox-ROW retirement is an unstamped
+ *   engine-table delete on plane (c), never a commit). Conflict class:
  *   non-re-derivable, so a raced bookkeeping PATCH rebases when it
  *   commutes with the concurrent commit (the loop's steady-state
  *   watermark advance is a key-path patch); a write that cannot rebase
@@ -474,6 +476,13 @@ export class WaveAccumulator
     return this.#contributions.length;
   }
 
+  /** Whether this wave has been committed or abandoned — nothing may
+   * seal into it, and effects handed over for it are stragglers (the
+   * SpaceServer's park-race drop). */
+  get closed(): boolean {
+    return this.#closed;
+  }
+
   /** Whether any contribution staged outbound appends — the serving
    * loop's cheap gate on draining the durable outbox after this wave's
    * commit (a pre-disposition upper bound: withdrawn contributions'
@@ -542,24 +551,34 @@ export class WaveAccumulator
         return result;
       }
       // A transaction with nothing to seal (read-only, or all-no-op)
-      // contributes nothing — same as commit's empty-transaction fast
-      // path — and needs no run context: the §3d refusal below guards
-      // WRITES entering the wave, and a serving runtime's read probes
+      // AND no staged appends contributes nothing — same as commit's
+      // empty-transaction fast path — and needs no run context: the §3d
+      // refusal below guards CONSEQUENCES entering the wave (writes and
+      // staged appends alike), and a serving runtime's read probes
       // (piece structure loads, pattern-identity reads) commit nothing.
-      if (assembly.spaces.length === 0) {
+      // A tx that sealed NOTHING but STAGED APPENDS — the Phase-3
+      // pure-forwarding handler, whose only consequence is a
+      // cross-space emit — MINTS a zero-write contribution below (the
+      // stage-G review's M-A): the model explicitly permits committed
+      // contributions with `writes: []` carrying cross-space appends
+      // (its cascadesCross/consequenceOf folds run for every committed
+      // contribution), and dropping the entry here lost the appends
+      // silently.
+      const pendingAppends = this.#pendingAppendsByTx.get(tx) ?? [];
+      if (assembly.spaces.length === 0 && pendingAppends.length === 0) {
         return result;
       }
       if (context === undefined) {
         // No anonymous fallback (serving-loop.md §3d, RULED 2026-08-05):
-        // an unstamped seal WITH WRITES is a wave-host bug — every
-        // server-side commit path stamps its run context before sealing,
-        // and stage F names the sanctioned internal stamp kinds
-        // ("bookkeeping", for the loop's own writes) when it installs
-        // the seal destination. The already-sealed overlay writes are
-        // withdrawn before the throw, so nothing anonymous survives in
-        // the wave OR the overlay. Unreachable from the OFF arm: without
-        // a destination installed, seal == commit and this class never
-        // runs.
+        // an unstamped seal WITH WRITES (or staged appends) is a
+        // wave-host bug — every server-side commit path stamps its run
+        // context before sealing, and stage F names the sanctioned
+        // internal stamp kinds ("bookkeeping", for the loop's own
+        // writes) when it installs the seal destination. The
+        // already-sealed overlay writes are withdrawn before the throw,
+        // so nothing anonymous survives in the wave OR the overlay.
+        // Unreachable from the OFF arm: without a destination
+        // installed, seal == commit and this class never runs.
         for (const space of assembly.spaces) {
           space.resolveVerdict({
             withdrawn: {
@@ -583,7 +602,7 @@ export class WaveAccumulator
         readOnlyReadKeys: assembly.readOnlyReadKeys,
         // Copied: a (refused) post-seal enqueue must not be able to
         // mutate the sealed contribution through the shared array.
-        outboundAppends: [...(this.#pendingAppendsByTx.get(tx) ?? [])],
+        outboundAppends: [...pendingAppends],
       });
       return result;
     } finally {
@@ -1369,9 +1388,24 @@ export class WaveAccumulator
     // run's as a set, exactly as they would across waves.
     const basisInstances = new Map<string, WaveBasisInstanceRows>();
     for (const contribution of this.#survivors(requeued, droppedWhole)) {
+      const context = contribution.context;
+      // FP1's fold completeness (the stage-G review's M-A): appends and
+      // consequence coverage ride EVERY survivor — one that sealed only
+      // FOREIGN spaces, or sealed nothing at all (the zero-seal emitter
+      // minted in seal()), still lands its cross-space appends as
+      // durable rows in THIS home transaction and its eventId in the
+      // commit's consequenceOf. The model is explicit: its
+      // cascadesCross and consequenceOf folds run for every COMMITTED
+      // contribution, writes or not — gating them on a home seal lost
+      // both silently for the foreign-only and zero-seal shapes. A
+      // withdrawn contribution's appends still never ride (the
+      // survivors filter above): its event replays and re-emits.
+      if (context.kind === "event-handler" && context.eventId !== undefined) {
+        consequenceOf.push(context.eventId);
+      }
+      outboxAppends.push(...contribution.outboundAppends);
       const home = this.#homeSealed(contribution);
       if (home === undefined) continue;
-      const context = contribution.context;
       for (const operation of home.sealed.commit.operations) {
         if (operation.op !== "sqlite") {
           const key = docInstanceKey(
@@ -1418,13 +1452,6 @@ export class WaveAccumulator
         preconditions.push(precondition);
         preconditionOwners.push(contribution.index);
       }
-      if (context.kind === "event-handler" && context.eventId !== undefined) {
-        consequenceOf.push(context.eventId);
-      }
-      // FP1: only a SURVIVING contribution's cross-space appends become
-      // durable rows — a withdrawn contribution's event replays and
-      // re-emits them (the model's committed-only cascadesCross fold).
-      outboxAppends.push(...contribution.outboundAppends);
       // Every survivor lands its basis rows — including one whose writes
       // were dropped per-doc as superseded: its reads are true, and no
       // recompute-owed mark exists (§3d, RULED 2026-08-05).
