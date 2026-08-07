@@ -1,9 +1,8 @@
 /**
- * LEB128 (Little Endian Base 128) variable-length integer encoding.
+ * LEB128 (Little Endian Base 128) variable-length integer encoding, in both
+ * its unsigned and signed forms.
  *
- * Derived from the `leb` npm package by Dan Bornstein et alia, modernized
- * for TypeScript/Deno. Only unsigned LEB128 is needed for the canonical
- * hash (length prefixes), but signed is included for completeness.
+ * Derived from the `leb` npm package by Dan Bornstein et alia.
  *
  * Original: https://www.npmjs.com/package/leb
  * Copyright 2012-2024 the Leb Authors (Dan Bornstein et alia).
@@ -14,9 +13,9 @@
 const MAX_UINT32 = 0xFFFFFFFF;
 
 /**
- * Encode a non-negative integer as unsigned LEB128. Returns a `Uint8Array`
- * containing the variable-length encoding. Throws if the value is negative,
- * non-integer, or exceeds 2^32 - 1 (JS bitwise operators are 32-bit).
+ * Encodes a non-negative integer as unsigned LEB128. Throws if `value` is
+ * negative, non-integer, or beyond the unsigned 32-bit range, that range
+ * being what the JavaScript bitwise operators used here can carry.
  */
 export function encodeULEB128(value: number): Uint8Array {
   if (value < 0 || !Number.isInteger(value)) {
@@ -58,9 +57,9 @@ export interface DecodeResult {
 }
 
 /**
- * Decode an unsigned LEB128 value from a buffer at the given index.
- * Returns the decoded value and the index of the next byte after the
- * encoding. Throws if the encoded value exceeds 32 bits.
+ * Decodes an unsigned LEB128 value from `buffer`, starting at `index`. Throws
+ * if the buffer runs out mid-encoding, or if the encoded value is beyond the
+ * unsigned 32-bit range.
  */
 export function decodeULEB128(
   buffer: Uint8Array,
@@ -91,14 +90,15 @@ export function decodeULEB128(
   return { value: result >>> 0, nextIndex: index };
 }
 
-/** Signed 32-bit integer bounds. */
+/** Minimum value of the signed 32-bit range. */
 const MIN_INT32 = -0x80000000;
+
+/** Maximum value of the signed 32-bit range. */
 const MAX_INT32 = 0x7FFFFFFF;
 
 /**
- * Encode a signed integer as signed LEB128. Returns a `Uint8Array`
- * containing the variable-length encoding. Throws if the value is
- * non-integer or outside the signed 32-bit range.
+ * Encodes a signed integer as signed LEB128. Throws if `value` is non-integer
+ * or outside the signed 32-bit range.
  */
 export function encodeSLEB128(value: number): Uint8Array {
   if (!Number.isInteger(value)) {
@@ -136,9 +136,9 @@ export function encodeSLEB128(value: number): Uint8Array {
 }
 
 /**
- * Decode a signed LEB128 value from a buffer at the given index.
- * Returns the decoded value and the index of the next byte after the
- * encoding. Throws if the encoded value exceeds signed 32-bit range.
+ * Decodes a signed LEB128 value from `buffer`, starting at `index`. Throws if
+ * the buffer runs out mid-encoding, or if the encoded value is beyond the
+ * signed 32-bit range.
  */
 export function decodeSLEB128(
   buffer: Uint8Array,
