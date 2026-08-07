@@ -12,72 +12,9 @@ import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionCo
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { createDefaultRegistry } from "@/codec-common/createDefaultRegistry.ts";
-import type { JsonCodecValue } from "./interface.ts";
+import { ENCODING_PREFIX_TAG, type JsonCodecValue } from "./interface.ts";
 import { type CodecRegistry, SELF_REP } from "@/codec-common/CodecRegistry.ts";
 import { CODEC_META_TAGS } from "@/codec-common/codec-meta-tags.ts";
-
-/**
- * Tag prefix for the encoded form used by this module. We use this explicit
- * prefix so as to make it unambiguous when a given JSON-ish text string is
- * the result of encoding via this module vs. being JSON from some other source.
- * The tag stands for "Fabric Value Json, version 1."
- */
-const ENCODING_PREFIX_TAG = "fvj1:";
-
-/** Shared text encoder, created once. */
-const textEncoder = new TextEncoder();
-
-/** Shared text decoder, created once. */
-const textDecoder = new TextDecoder();
-
-/** Shared default handler registry, created once. */
-const defaultRegistry: CodecRegistry = createDefaultRegistry();
-
-/** Returns true if `v` is a single-key object whose key starts with `/` —
- * the wire form of an encoded instance (tag-wrapped value). */
-function isEncodedInstance(v: JsonCodecValue): boolean {
-  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
-  const keys = Object.keys(v);
-  return keys.length === 1 && keys[0]!.startsWith("/");
-}
-
-/**
- * Returns true if the already-encoded codec value `v` can be embedded
- * inside a /quote wrap without inner deserialization: primitives, plain
- * objects/arrays free of non-/quote encoded instances, and /quote-wrapped
- * values (which `unquote()` can collapse).
- */
-function isQuoteSafe(v: JsonCodecValue): boolean {
-  if (v === null || typeof v !== "object") return true;
-  if (Array.isArray(v)) return v.every((item) => isQuoteSafe(item));
-  if (!isEncodedInstance(v)) {
-    return Object.values(v).every((item) =>
-      isQuoteSafe(item as JsonCodecValue)
-    );
-  }
-  return Object.keys(v)[0] === "/quote";
-}
-
-/**
- * Unwraps /quote forms one level so their literal content can be embedded
- * directly inside a parent /quote. The inner content of a /quote is already
- * literal and must not be recursed into.
- */
-function unquote(v: JsonCodecValue): JsonCodecValue {
-  if (v === null || typeof v !== "object") {
-    return v;
-  } else if (Array.isArray(v)) {
-    const result = v.map(unquote) as JsonCodecValue;
-    return Object.freeze(result);
-  } else if (isEncodedInstance(v) && Object.keys(v)[0] === "/quote") {
-    return (v as Record<string, JsonCodecValue>)["/quote"]!;
-  } else {
-    const result = Object.fromEntries(
-      Object.entries(v).map(([k, val]) => [k, unquote(val as JsonCodecValue)]),
-    ) as JsonCodecValue;
-    return Object.freeze(result);
-  }
-}
 
 /**
  * Whole-value JSON codec implementing the `/<Type>@<Version>` wire format from
@@ -175,11 +112,11 @@ export class JsonCodec implements SerializationContext<string> {
       return null;
     }
 
-    if (!isEncodedInstance(data)) {
+    if (!JsonCodec.#isEncodedInstance(data)) {
       return null;
     }
 
-    // `isEncodedInstance()` guaranteed a single-property object, so this
+    // `#isEncodedInstance()` guaranteed a single-property object, so this
     // destructures that one entry.
     const [key, value] = Object.entries(data)[0]!;
     return { tag: key.slice(1), state: value };
@@ -187,12 +124,12 @@ export class JsonCodec implements SerializationContext<string> {
 
   /** Converts a codec-value tree to UTF-8-encoded JSON bytes. */
   private toBytes(data: JsonCodecValue): Uint8Array {
-    return textEncoder.encode(JSON.stringify(data));
+    return JsonCodec.#textEncoder.encode(JSON.stringify(data));
   }
 
   /** Parses UTF-8-encoded JSON bytes back into a codec-value tree. */
   private fromBytes(bytes: Uint8Array): JsonCodecValue {
-    const json = textDecoder.decode(bytes);
+    const json = JsonCodec.#textDecoder.decode(bytes);
     return JsonCodec.#parseWireText(json);
   }
 
@@ -203,7 +140,7 @@ export class JsonCodec implements SerializationContext<string> {
   #encodeValue(
     value: FabricValue,
     _seen?: Set<object>,
-    registry: CodecRegistry = defaultRegistry,
+    registry: CodecRegistry = JsonCodec.#defaultRegistry,
   ): JsonCodecValue {
     const codec = registry.codecFromValue(value);
 
@@ -317,10 +254,10 @@ export class JsonCodec implements SerializationContext<string> {
     // Otherwise wrap with /object so the decoder deserializes entries.
     const keys = Object.keys(result);
     if (keys.some((k) => k.startsWith("/"))) {
-      if (Object.values(result).every((v) => isQuoteSafe(v))) {
+      if (Object.values(result).every((v) => JsonCodec.#isQuoteSafe(v))) {
         const unquoted = Object.freeze(
           Object.fromEntries(
-            Object.entries(result).map(([k, v]) => [k, unquote(v)]),
+            Object.entries(result).map(([k, v]) => [k, JsonCodec.#unquote(v)]),
           ),
         );
         return this.wrapTag(CODEC_META_TAGS.quote, unquoted) as JsonCodecValue;
@@ -343,7 +280,7 @@ export class JsonCodec implements SerializationContext<string> {
   #decodeValue(
     data: JsonCodecValue,
     context: ReconstructionContext,
-    registry: CodecRegistry = defaultRegistry,
+    registry: CodecRegistry = JsonCodec.#defaultRegistry,
   ): FabricValue {
     const decoded = this.unwrapTag(data);
     if (decoded !== null) {
@@ -492,6 +429,15 @@ export class JsonCodec implements SerializationContext<string> {
   // Static members
   //
 
+  /** Shared text encoder, created once. */
+  static readonly #textEncoder = new TextEncoder();
+
+  /** Shared text decoder, created once. */
+  static readonly #textDecoder = new TextDecoder();
+
+  /** Shared default codec registry, created once. */
+  static readonly #defaultRegistry: CodecRegistry = createDefaultRegistry();
+
   /**
    * Reconstruction context for the throwaway checks in the testing helpers
    * below. Deep-freezes, as the ordinary decode path does. Paired with a
@@ -504,6 +450,60 @@ export class JsonCodec implements SerializationContext<string> {
       "no runtime context (validity check in a test-only helper).",
     ),
   );
+
+  /**
+   * Returns true if `v` is a single-key object whose key starts with `/` --
+   * the wire form of an encoded instance (tag-wrapped value).
+   */
+  static #isEncodedInstance(v: JsonCodecValue): boolean {
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+    const keys = Object.keys(v);
+    return keys.length === 1 && keys[0]!.startsWith("/");
+  }
+
+  /**
+   * Returns true if the already-encoded codec value `v` can be embedded
+   * inside a /quote wrap without inner deserialization: primitives, plain
+   * objects/arrays free of non-/quote encoded instances, and /quote-wrapped
+   * values (which `#unquote()` can collapse).
+   */
+  static #isQuoteSafe(v: JsonCodecValue): boolean {
+    if (v === null || typeof v !== "object") return true;
+    if (Array.isArray(v)) {
+      return v.every((item) => JsonCodec.#isQuoteSafe(item));
+    }
+    if (!JsonCodec.#isEncodedInstance(v)) {
+      return Object.values(v).every((item) =>
+        JsonCodec.#isQuoteSafe(item as JsonCodecValue)
+      );
+    }
+    return Object.keys(v)[0] === "/quote";
+  }
+
+  /**
+   * Unwraps /quote forms one level so their literal content can be embedded
+   * directly inside a parent /quote. The inner content of a /quote is already
+   * literal and must not be recursed into.
+   */
+  static #unquote(v: JsonCodecValue): JsonCodecValue {
+    if (v === null || typeof v !== "object") {
+      return v;
+    } else if (Array.isArray(v)) {
+      const result = v.map(JsonCodec.#unquote) as JsonCodecValue;
+      return Object.freeze(result);
+    } else if (
+      JsonCodec.#isEncodedInstance(v) && Object.keys(v)[0] === "/quote"
+    ) {
+      return (v as Record<string, JsonCodecValue>)["/quote"]!;
+    } else {
+      const result = Object.fromEntries(
+        Object.entries(v).map(
+          ([k, val]) => [k, JsonCodec.#unquote(val as JsonCodecValue)],
+        ),
+      ) as JsonCodecValue;
+      return Object.freeze(result);
+    }
+  }
 
   /**
    * Indicates if the given text has a "first-blush" appearance as valid JSON
