@@ -472,13 +472,14 @@ export function filter(
     }
 
     // A predicate attached after the resume pass whose result is still
-    // streaming in reads undefined and would exclude its element, shrinking the
-    // aggregate below the durable value the container already holds. Republishing that shrink is the
-    // reload flicker — a populated list blinks to empty and refills. Hold the
-    // durable value and wait for the pending predicates to confirm their docs,
-    // then republish against the confirmed values. A predicate whose value
-    // arrived is included; one confirmed undefined is excluded — so a genuine
-    // shrink still converges instead of freezing.
+    // streaming in reads undefined and would exclude its element, shrinking
+    // the aggregate below the durable value the container already holds.
+    // Republishing that shrink is the reload flicker — a populated list blinks
+    // to empty and refills. Hold the durable value and wait for the pending
+    // predicates to confirm their docs, then republish against the confirmed
+    // values. A predicate whose value arrived is included; one confirmed
+    // undefined is excluded — so a genuine shrink still converges instead of
+    // freezing.
     if (
       priorLen > 0 && newArrayValue.length < priorLen && pendingCells.length > 0
     ) {

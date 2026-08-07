@@ -18,6 +18,8 @@ export type ElementRun = {
   resultCell: Cell<any>;
   lastIndex: number;
   needsSetup: boolean;
+  /** The reconcile that last issued this element's setup writes. */
+  setupIssuance?: object;
 };
 
 export interface ListSetupRollback {
@@ -59,18 +61,13 @@ export interface ListSetupRollback {
  * reconcile installed. An overlapping reconcile that has already moved the same
  * entry owns it, and its bookkeeping matches durable writes of its own.
  */
-// The setup issuance each element run is currently on. It identifies one
-// issuance rather than counting them, so only its equality is meaningful.
-const latestSetupIssuance = new WeakMap<ElementRun, number>();
-let nextSetupIssuance = 1;
-
 export function trackListSetupRollback(
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
   elementRuns: Map<string, ElementRun>,
 ): ListSetupRollback {
   const created = new Map<string, ElementRun>();
-  const setUp = new Map<ElementRun, number>();
+  const setUp = new Set<ElementRun>();
   const indexChanges = new Map<
     ElementRun,
     { from: number; to: number }
@@ -78,15 +75,16 @@ export function trackListSetupRollback(
   const resultRestores: Array<() => void> = [];
   let registered = false;
 
-  // Stamp this reconcile's setup as the element's latest. Two reconciles for
+  // This tracker's identity as an issuer of setup writes. Two reconciles for
   // one coordinator overlap whenever the first is still awaiting its commit,
   // and the debt belongs to whichever of them issued the setup last: a
   // transaction that failed after a later one made the same element durable
   // has nothing to restore.
+  const issuance = {};
+
   const markSetupIssued = (entry: ElementRun): void => {
-    const issuance = nextSetupIssuance++;
-    latestSetupIssuance.set(entry, issuance);
-    setUp.set(entry, issuance);
+    entry.setupIssuance = issuance;
+    setUp.add(entry);
     entry.needsSetup = false;
   };
 
@@ -95,8 +93,8 @@ export function trackListSetupRollback(
     registered = true;
     tx.addCommitCallback((_settledTx, result) => {
       if (!result.error) return;
-      for (const [entry, issuance] of setUp) {
-        if (latestSetupIssuance.get(entry) !== issuance) continue;
+      for (const entry of setUp) {
+        if (entry.setupIssuance !== issuance) continue;
         entry.needsSetup = true;
       }
       if (

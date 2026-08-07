@@ -484,12 +484,13 @@ export function flatMap(
 
     // An element attached after the resume pass whose result is still
     // streaming in reads undefined and contributes nothing, shrinking the
-    // aggregate below the durable value the container already holds. Republishing that shrink is the
-    // reload flicker — a populated list blinks to empty and refills. Hold the
-    // durable value and wait for the pending elements to confirm their docs, then
-    // republish against the confirmed results. An element whose result arrived is
-    // contributed; one confirmed undefined is skipped — so a genuine shrink still
-    // converges instead of freezing.
+    // aggregate below the durable value the container already holds.
+    // Republishing that shrink is the reload flicker — a populated list blinks
+    // to empty and refills. Hold the durable value and wait for the pending
+    // elements to confirm their docs, then republish against the confirmed
+    // results. An element whose result arrived is contributed; one confirmed
+    // undefined is skipped — so a genuine shrink still converges instead of
+    // freezing.
     if (
       priorLen > 0 && newArrayValue.length < priorLen && pendingCells.length > 0
     ) {
