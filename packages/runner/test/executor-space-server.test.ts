@@ -33,7 +33,10 @@ import type { MemorySpace } from "../src/storage/interface.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
 import { SpaceServer } from "../src/executor/space-server.ts";
 import { stampWaveRunContext } from "../src/executor/wave.ts";
-import { emptyServingLoopStats } from "../src/executor/stats.ts";
+import {
+  emptyServingLoopStats,
+  type ServingLoopStats,
+} from "../src/executor/stats.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 class SharedServerStorageManager extends EmulatedStorageManager {
@@ -118,9 +121,12 @@ describe("stage G SpaceServer recovery seams", () => {
   });
 
   const newSpaceServer = (
-    options: { serverFacade?: MemoryV2Server.Server } = {},
+    options: {
+      serverFacade?: MemoryV2Server.Server;
+      stats?: ServingLoopStats;
+    } = {},
   ): SpaceServer => {
-    const stats = emptyServingLoopStats();
+    const stats = options.stats ?? emptyServingLoopStats();
     const created = new SpaceServer({
       space,
       server: options.serverFacade ?? server,
@@ -342,5 +348,117 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(created.deferSealedEffects(probeTx, [effect])).toBe(true);
     expect(created.deferredEffectWaveCount).toBe(0);
     expect(flushed).toBe(0);
+  });
+
+  it("clamps the W advance to the shadow floor — the min/max composition and serving-loop.md §7's counter, full suppression and the remove sentinel included — and the shadow-flip wake lifts the clamp promptly (Phase 2 settle input barrier)", async () => {
+    const stats = emptyServingLoopStats();
+    const created = newSpaceServer({ stats });
+    expect(await created.activate()).toBe(true);
+
+    // The serving replica, with the floor STUBBED: the replica-level
+    // shadow machinery (recording, exemptions, the verdict-race
+    // repair) is pinned in memory-v2-stacked-commit.test.ts; this test
+    // pins the SpaceServer's half of the contract — what the loop DOES
+    // with a floor.
+    const replica = servingRuntime!.storageManager.open(space)
+      .replica as unknown as {
+        unappliedForeignSeqFloor?: () => number | undefined;
+        shadowFlipObserver?: () => void;
+      };
+    // Activation installed the wake hook (the flip's dirtiness has no
+    // admitted-commit record behind it, so nothing else ends the
+    // loop's input wait before the idle timeout).
+    expect(replica.shadowFlipObserver).toBeDefined();
+
+    // Real commits via the memory server's direct-write path; the
+    // notices are the host feed, supplied by hand in this direct-drive
+    // harness (the ExecutorHost's admission observer in production).
+    const write = async (doc: string): Promise<number> => {
+      const applied = await server.writeDocument(space, doc, { n: 1 });
+      return applied.seq;
+    };
+    const notice = (seq: number) =>
+      created.enqueueCommit({
+        space,
+        seq,
+        class: "system",
+        sessionId: "session:clamp-probe",
+        writes: [{ id: "of:clamp-probe", scopeKey: "space" }],
+      });
+
+    // Baseline: no floor, the advance reaches the batch head.
+    const s1 = await write("of:clamp-a");
+    notice(s1);
+    await waitUntil(
+      () => created.watermark === s1,
+      "the un-clamped baseline advance",
+    );
+    expect(stats.watermarkClamped).toBe(0);
+
+    // PARTIAL clamp: two inputs, the floor shadows the second — W
+    // advances to floor-1, never the batch head. This pins the
+    // composition: `inputVisibleHead = min(batchHead, floor-1)`,
+    // `advanceTo = max(W, inputVisibleHead)` — invert either and the
+    // assertions below go red (min→max advances past the floor;
+    // max→min refuses the advance).
+    let floor: number | undefined;
+    replica.unappliedForeignSeqFloor = () => floor;
+    const s2 = await write("of:clamp-b");
+    const s3 = await write("of:clamp-c");
+    floor = s3;
+    // Enqueued back-to-back synchronously: one input batch, one cycle.
+    notice(s2);
+    notice(s3);
+    await waitUntil(
+      () => created.watermark === s2,
+      "the clamped advance to floor-1",
+    );
+    expect(created.watermark).toBe(s3 - 1);
+    expect(stats.watermarkClamped).toBe(1);
+
+    // FULL suppression: the shadowed seq is the LOWEST input above W
+    // (floor == W+1), so the advance is suppressed entirely
+    // (advanceTo == W). §7's binding sentence — "waves whose W advance
+    // was actually clamped below the input batch head" — counts
+    // exactly this; the pre-fix guard required advanceTo > W and
+    // missed it.
+    const s4 = await write("of:clamp-d");
+    notice(s4);
+    await waitUntil(
+      () => stats.watermarkClamped >= 2,
+      "the fully-suppressed clamp to be counted",
+    );
+    expect(created.watermark).toBe(s2);
+    expect(stats.watermarkClamped).toBe(2);
+
+    // The REMOVE-sentinel floor (1): a shadowed remove carries no wire
+    // seq, so its floor holds W entirely — counted the same way.
+    floor = 1;
+    const s5 = await write("of:clamp-e");
+    notice(s5);
+    await waitUntil(
+      () => stats.watermarkClamped >= 3,
+      "the sentinel-floored clamp to be counted",
+    );
+    expect(created.watermark).toBe(s2);
+
+    // The PROMPT lift: the flip resolves the input wait directly — no
+    // admitted commit remains on the feed (s3..s5 drained cycles ago;
+    // only their VISIBILITY changed), so without the wake the catch-up
+    // wave would sit out idleParkMs (600 s here) and this bounded wait
+    // would time out. Fired the way the replica's confirmPending does
+    // at promotion; poll-fired because the loop re-arms its wait
+    // between cycles (a real promotion burst fires once per flipped
+    // doc, so repeated fires are the production shape too).
+    floor = undefined;
+    await waitUntil(
+      () => {
+        replica.shadowFlipObserver?.();
+        return created.watermark === s5;
+      },
+      "the clamp to lift promptly on the shadow-flip wake",
+      15_000,
+    );
+    expect(stats.watermarkClamped).toBe(3);
   });
 });

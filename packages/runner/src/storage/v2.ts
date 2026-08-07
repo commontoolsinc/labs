@@ -2166,6 +2166,17 @@ class SpaceReplica implements ISpaceReplica {
   // the shadow clears). Entries are pruned lazily when the doc's pending
   // set empties (promotion, drop, rollback); cleared whole on reset.
   readonly #shadowedForeignSeqs = new Map<string, number>();
+  // The settle input barrier's WAKE (ISpaceReplica.shadowFlipObserver):
+  // invoked synchronously whenever a confirmPending promotion touched a
+  // doc with a standing shadow (flag ON — the flip checkout's own
+  // condition), value diff or not: the FLOOR lifts either way, and the
+  // floor is what the wake exists for. The SpaceServer installs it at
+  // activation so a clamped-then-quiet space's catch-up wave runs at
+  // the flip instead of waiting out the idle window — the flip is the
+  // one input whose dirtiness arrives WITHOUT a new admitted commit on
+  // the host feed (the commit was drained waves ago; only its
+  // VISIBILITY changed).
+  shadowFlipObserver: (() => void) | undefined;
   // localSeq -> the store seq its accept committed at (server-execution
   // v2 Phase 2, speculation.md §4): the overlay destination's retirement
   // floor is "the origin ACKED and W ≥ that commit's seq", and the ack
@@ -4769,6 +4780,13 @@ class SpaceReplica implements ISpaceReplica {
       }
     } else if (shouldNotifyShadowSinks) {
       this.notifySinksForIds(shadowTouched);
+    }
+    // The wake (see the field doc): fired on the flip regardless of
+    // notification subscribers AND regardless of a value diff — an
+    // echo-equal flip still lifts `unappliedForeignSeqFloor`, which is
+    // the state the serving loop's clamped wait is parked on.
+    if (shadowTouched.length > 0) {
+      this.shadowFlipObserver?.();
     }
   }
 

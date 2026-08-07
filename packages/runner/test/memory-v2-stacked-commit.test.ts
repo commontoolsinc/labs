@@ -542,7 +542,10 @@ class ScriptedModelTransport extends ScriptedSessionTransport {
           ? { deleted: true as const }
           : { doc: { value: upsert.value } }),
       })),
-      removes: [],
+      removes: (options.removes ?? []).map((remove) => ({
+        branch: "",
+        id: remove.id,
+      })),
     } as SessionSync);
   }
 }
@@ -554,6 +557,9 @@ type PushSyncOptions = {
     value?: RootValue;
     deleted?: true;
   }>;
+  /** Wire REMOVES (the watch-scope eviction frame): carry NO seq — the
+   * shape whose shadow records the sentinel floor 1. */
+  removes?: Array<{ id: URI }>;
   /** The server's caught-up marker: resolves client + runner read-repair
    * waiters for every localSeq <= this value. */
   caughtUpLocalSeq?: number;
@@ -2192,9 +2198,23 @@ const shadowFloorOf = (harness: Harness): number | undefined =>
     unappliedForeignSeqFloor(): number | undefined;
   }).unappliedForeignSeqFloor();
 
+/** Install the serving loop's wake hook the way the SpaceServer does at
+ * activation (`ISpaceReplica.shadowFlipObserver`), returning a live fire
+ * counter. */
+const installShadowFlipObserver = (harness: Harness): { fires: number } => {
+  const counter = { fires: 0 };
+  (harness.provider.replica as unknown as {
+    shadowFlipObserver?: () => void;
+  }).shadowFlipObserver = () => {
+    counter.fires += 1;
+  };
+  return counter;
+};
+
 Deno.test("memory v2 stacked commits: a foreign frame shadowed by a parked own write is reported by unappliedForeignSeqFloor and notifies at the shadow flip (Phase 2 input barrier, flag ON)", async () => {
   setServerExecutionConfig(true);
   const harness = await markerHarness();
+  const wake = installShadowFlipObserver(harness);
   try {
     await seedAccepted(harness, DOCS.A, valueFor("base"));
     assertEquals(
@@ -2265,11 +2285,16 @@ Deno.test("memory v2 stacked commits: a foreign frame shadowed by a parked own w
       "the shadowed integration must not notify (nothing became visible)",
     );
 
+    // No wake before the flip: the shadowed integration and the
+    // non-novelty frames above must not poke the serving loop.
+    assertEquals(wake.fires, 0);
+
     // The marker arrives: the parked accept promotes, confirmed had
     // advanced PAST the accept, so the own overlay is removed and the
     // FOREIGN value becomes visible — the shadow flip. Flag ON, the
     // replica fires the ordinary change notification for exactly this
-    // doc, and the floor lifts.
+    // doc, the floor lifts, and the serving loop's wake fires (the
+    // clamp must lift promptly, not on the idle timeout).
     harness.pushSync({ caughtUpLocalSeq: 2 });
     await waitForCondition(
       () => !hasPendingOverlay(harness, DOCS.A),
@@ -2287,6 +2312,11 @@ Deno.test("memory v2 stacked commits: a foreign frame shadowed by a parked own w
       true,
       "the shadow flip must fire a change notification for the doc",
     );
+    assertEquals(
+      wake.fires >= 1,
+      true,
+      "the shadow flip must fire the serving loop's wake observer",
+    );
   } finally {
     await harness.close();
     resetServerExecutionConfig();
@@ -2295,6 +2325,7 @@ Deno.test("memory v2 stacked commits: a foreign frame shadowed by a parked own w
 
 Deno.test("memory v2 stacked commits: the shadow flip stays silent with the flag OFF (byte-identical OFF arm), while the floor still reports and clears", async () => {
   const harness = await markerHarness();
+  const wake = installShadowFlipObserver(harness);
   try {
     await seedAccepted(harness, DOCS.A, valueFor("base"));
     assertEquals(
@@ -2328,10 +2359,139 @@ Deno.test("memory v2 stacked commits: the shadow flip stays silent with the flag
     // Same silent flip as before this change: the foreign value is
     // visible, the floor clears, and NO notification fired (the OFF arm
     // keeps today's behavior byte-for-byte; the serving loop is the
-    // only consumer of the floor).
+    // only consumer of the floor). The wake observer stays silent too —
+    // it rides the flag-ON checkout.
     expectVisible(harness, { A: valueFor("foreign") });
     assertEquals(shadowFloorOf(harness), undefined);
     assertEquals(harness.notifications.notifications.length, before);
+    assertEquals(wake.fires, 0);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: an own echo OUTRUNNING its verdict is repaired at the verdict — the mis-recorded shadow lifts before any marker (Phase 2 input barrier's own-echo race repair)", async () => {
+  const harness = await markerHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+
+    // Hold the VERDICT: the accept books only when the gate releases,
+    // so the wire order below — frame first, verdict second — is
+    // deterministic.
+    const gate = Promise.withResolvers<void>();
+    let received = false;
+    harness.model.setOutcome(2, {
+      kind: "accept",
+      responseGate: gate.promise,
+      onReceipt: () => {
+        received = true;
+      },
+    });
+    const own = beginSet(harness, DOCS.A, valueFor("own"));
+    await waitForCondition(() => received, "the commit to reach the wire");
+
+    // The OWN ECHO outruns the verdict (same socket, the race the
+    // repair exists for): localSeq 2's ack seq does not exist yet, so
+    // the own-echo exemption cannot recognize the upsert and it is
+    // MIS-RECORDED as shadowed foreign novelty. This assertion is the
+    // vacuity guard — the race genuinely happened.
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: 2, value: valueFor("own") }],
+    });
+    await waitForCondition(
+      () => shadowFloorOf(harness) === 2,
+      "the mis-recorded shadow (the race's setup)",
+    );
+
+    // The verdict lands: settleAccept records the ack AND repairs the
+    // mis-record — a shadow whose seq IS this accept's seq on a doc
+    // this accept wrote can only be the own echo (no foreign commit
+    // shares the seq). Without the repair the floor stays 2 while the
+    // accept parks below, and a quiet serving loop would clamp W
+    // forever against its own echo (nothing else prunes the entry
+    // while the doc keeps pending writes).
+    gate.resolve();
+    await assertResultOk(own.promise);
+    assertEquals(
+      shadowFloorOf(harness),
+      undefined,
+      "the verdict-race repair must lift the own-echo shadow",
+    );
+    // Still PARKED (no covering marker yet): the repair acted at
+    // VERDICT time, inside the wedge window — not as a side effect of
+    // promotion emptying the pending set.
+    assertEquals(hasPendingOverlay(harness, DOCS.A), true);
+
+    // Promote for a clean close; the floor stays lifted.
+    harness.pushSync({ caughtUpLocalSeq: 2 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "parked promotion at the marker",
+    );
+    expectVisible(harness, { A: valueFor("own") });
+    assertEquals(shadowFloorOf(harness), undefined);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a REMOVE shadowed by a parked own write records the sentinel floor 1, and it clears at promotion (Phase 2 input barrier)", async () => {
+  const harness = await markerHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+
+    // An accepted-and-PARKED own write stands over the doc.
+    harness.model.setOutcome(2, { kind: "accept" });
+    const own = beginSet(harness, DOCS.A, valueFor("own"));
+    await assertResultOk(own.promise);
+    assertEquals(hasPendingOverlay(harness, DOCS.A), true);
+
+    // A wire REMOVE integrates under it. The wire carries NO seq for
+    // removes, so the shadow records the sentinel 1 — the floor that
+    // holds W entirely until the shadow clears (the field's documented
+    // rare arm; serving-loop.md §7's clamp counts it like any other
+    // floor).
+    harness.pushSync({ removes: [{ id: DOCS.A }] });
+    await waitForCondition(
+      () => shadowFloorOf(harness) === 1,
+      "the shadowed remove's sentinel floor",
+    );
+    expectVisible(harness, { A: valueFor("own") });
+
+    // Promotion clears it: the parked accept applies over the removed
+    // base (the own write IS the doc's content again) and the floor
+    // prunes with the emptied pending set.
+    harness.pushSync({ caughtUpLocalSeq: 2 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "parked promotion at the marker",
+    );
+    assertEquals(shadowFloorOf(harness), undefined);
+    expectVisible(harness, { A: valueFor("own") });
   } finally {
     await harness.close();
   }

@@ -414,7 +414,9 @@ sentences, one recorded acceptance, three owed entries):
   READABLE there; the serving posture's unreadable-window case is
   closed by the retirement gate (above), not by this guard, and
   client-side the guard only removes the redundant-refetch corner
-  (inline flushing already made in-process ordering safe).
+  (inline flushing already made in-process ordering safe). (A SECOND
+  recorded acceptance — Phase 2's R4 written-subtree narrowing — is
+  recorded in the Phase-2 independent-review delta below.)
 - FP6's register row (field-provenance.md): the label basis is
   STRUCTURAL, not frozen (RULED 2026-08-05) — tightening mid-flight
   yields the stricter label, loosening matches the OFF arm's
@@ -515,14 +517,25 @@ client does not; this PR):
   `synced()` barrier), handler runs keep committing authored (F10),
   unstamped/binding writes untouched, egress effect kinds dropped
   with `navigateTo` enacting (the egress rule), `compile-and-run`
-  gated (not speculable), retirement on watermark coverage of the
-  entry's read basis + acked origins via success-shaped `superseded`
-  withdrawals that cascade nothing. Pinned end to end in
+  gated at the builtin — the gate's true interim scope is wider than
+  "not speculable": it suppresses fresh compiles for EVERY flag-ON
+  non-wave run and the serving side refuses the writebacks, so fresh
+  compile-and-run is INERT ON-arm until the serving port (stage G's
+  out-of-scope note) lands; both-arms pins in
+  `packages/runner/test/compile-and-run.test.ts` (the review's m5) —
+  retirement on watermark coverage of the entry's read basis + acked
+  origins via success-shaped `superseded` withdrawals that cascade
+  nothing. Pinned in
   `packages/runner/test/speculation-overlay.test.ts` (echo with zero
   client commits; the store-attribution query — zero derived-class
-  commits from any client session; retirement; F10; egress
-  suppression) and live in `packages/patterns/integration/
-  sx2-speculation.test.ts`.
+  commits from any client session; watermark-coverage retirement;
+  F10; egress suppression) and live in
+  `packages/patterns/integration/sx2-speculation.test.ts` — scoped
+  honestly (the review's m6): the acked-origins component (§4 step
+  3's KEEP half — an unacked origin holds the echo) is NOT directly
+  pinned by these suites; it rides OW4's scoping below, with direct
+  pins owed alongside the Phase-3 offline machinery that builds the
+  origin-queue fixtures they need.
 - The Phase-2 revisit (a) — the settle input barrier: RESOLVED by the
   plan's sanctioned exclusion alternative.
   `ISpaceReplica.unappliedForeignSeqFloor` reports inbound foreign
@@ -636,6 +649,64 @@ ruling 2026-08-07; this PR):
   structure loads — is pinned red-first in
   `packages/runner/test/executor-serving-loop.test.ts` (the
   demand-cycle ensure-retries test, c766ef453).
+
+Delta 2026-08-07 — the Phase-2 INDEPENDENT review's fix batch (this
+PR):
+
+- A SECOND RECORDED OFF-arm acceptance rides Phase 2's R4 fix (RULED
+  2026-08-07, owner — complexity-adjudicated: the whole-result
+  validation's over-reach was latent on BOTH arms, and narrowing was
+  chosen over carrying it; testing §2's gate clause already names
+  this register's recorded-acceptance rows, so this row is the
+  stage-G `tryClaimMutex` row's sibling). The delta:
+  `PiecePropIo.set`'s non-stream branch moved from WHOLE-RESULT
+  validation to WRITTEN-SUBTREE validation (`linkPathContracts`, the
+  sibling stream branch's long-standing approach) — property writes
+  that formerly threw on UNRELATED-property staleness (an absent or
+  invalid sibling the write never touched — the ON arm's
+  server-derived-late `$NAME` flake, and the same latent over-reach
+  OFF) now succeed, while an invalid WRITTEN value still throws and
+  correlated-anyOf paths keep the whole-result fallback (the one
+  shape path contracts cannot decompose). Pinned in
+  `packages/piece/test/pull-materialization.test.ts`: the ruled
+  absent-unrelated-required and invalid-unrelated-sibling shapes
+  (both RULED-2026-08-07-named tests), the explicit-undefined alias
+  still surfaced by the write-destination validator, the
+  derived-Cell-root pin reconciled to the narrowed contract, and the
+  correlated-union path still validated.
+- The settle input barrier's review pins (M2/M3/m4), landed with
+  probe evidence: the own-echo VERDICT-RACE repair (a frame
+  outrunning its verdict mis-records the echo as foreign; the
+  settleAccept repair lifts it — deleting the repair turns the new
+  `memory-v2-stacked-commit.test.ts` test red); the SpaceServer
+  W-clamp's counter now matches serving-loop §7's binding sentence —
+  it counts every wave whose advance the floor held below an
+  otherwise-advancing batch head, FULL suppression and the
+  remove-sentinel floor included (the pre-fix `advanceTo > W` guard
+  missed exactly those; no spec change — the code moved to the
+  sentence); and the clamp's min/max advance composition, the
+  counter, and the PROMPT lift are pinned at the SpaceServer level
+  (`executor-space-server.test.ts`, stubbed floor — either inverted
+  Math.min/Math.max turns it red). The prompt lift is new mechanism
+  (the review's m4): `ISpaceReplica.shadowFlipObserver`, installed at
+  activation and fired by `confirmPending`'s flip, resolves the
+  loop's input wait directly — without it a clamped-then-quiet space
+  waited out IDLE_PARK_MS before the catch-up wave (probe: wake
+  disabled, the prompt-lift pin times out red). The shadowed-REMOVE
+  sentinel (floor 1) gained its replica-level pin, and the R2
+  never-a-piece exclusion test now exercises the `cid:` class
+  (dropping it from the exclusion turns the test red).
+- `sx2-speculation`'s bounded destination-validator retry is now
+  VISIBLE when it engages (a loud engagement log) and scoped to the
+  cold-view creation window it exists for: the gate's new
+  steady-state edit runs with ZERO retries, so the open
+  set-validation fork engaging outside its window fails the gate
+  instead of riding the mask (the review's m9).
+- Provenance note for protocol §1's owner blockquote (the scheduler
+  tell): its primary source is the owner's coordination-channel
+  message of 2026-08-07 (off-GitHub), attested by the coordinator —
+  the quote's fidelity is not independently verifiable from repo
+  artifacts.
 
 ## 3. The owed register (every genuine orphan, with its trigger)
 

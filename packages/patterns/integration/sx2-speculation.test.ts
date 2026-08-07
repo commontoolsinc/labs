@@ -116,10 +116,15 @@ describe("sx2 speculation (Phase 2 gates)", () => {
     // set-validation fork's remaining half after the 2026-08-07
     // ruling narrowed the schema half): under load the destination's
     // producer chain materializes late and the first attempt can see
-    // a cold view. This gate's subject is the OVERLAY lifecycle; the
-    // un-retried controller path stays exercised by the counter
-    // product gate.
+    // a cold view. The retry is SCOPED to this cold-view creation
+    // window and its engagement is logged LOUDLY below — the
+    // steady-state edit further down runs with NO retry at all, so
+    // the open validator defect can never hide behind this loop
+    // outside the window it exists for. This gate's subject is the
+    // OVERLAY lifecycle; the un-retried controller path stays
+    // exercised by the counter product gate.
     const echoStart = performance.now();
+    let coldViewRetries = 0;
     let lastDestinationIssue: unknown;
     for (let attempt = 0;; attempt++) {
       try {
@@ -131,6 +136,7 @@ describe("sx2 speculation (Phase 2 gates)", () => {
           attempt < 3 &&
           String(error).includes("does not match its write destination")
         ) {
+          coldViewRetries += 1;
           lastDestinationIssue = error;
           await new Promise((resolve) => setTimeout(resolve, 500));
           continue;
@@ -139,6 +145,15 @@ describe("sx2 speculation (Phase 2 gates)", () => {
       }
     }
     if (lastDestinationIssue !== undefined) throw lastDestinationIssue;
+    if (coldViewRetries > 0) {
+      // Visible when it engages (never a silent mask): the count and
+      // the class it absorbed.
+      console.log(
+        `[sx2-speculation] cold-view retry engaged: ${coldViewRetries} ` +
+          "attempt(s) absorbed by the destination-validator window " +
+          "(the open set-validation fork's remaining half)",
+      );
+    }
     const deadline = performance.now() + 5_000;
     while (latestValue !== 7 && performance.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -175,6 +190,23 @@ describe("sx2 speculation (Phase 2 gates)", () => {
     // The value stands — now as STORE state through the same render
     // path (silent replacement, speculation.md §3).
     assertEquals(await piece.result.get(["value"]), 7);
+
+    // STEADY STATE, zero retries (the review's m9): the bounded retry
+    // above exists for the documented COLD-VIEW window only. Here the
+    // producer chain is materialized, served, and settled — a
+    // destination-validator failure now IS the open set-validation
+    // fork engaging outside its window, and it must fail this gate
+    // loudly instead of riding the mask. The raw set either lands or
+    // throws; asserting retries == 0 is exactly this un-wrapped call.
+    const watermarkBeforeSteady =
+      (watermarkCell(runtime, space).get() as { seq?: number } | undefined)
+        ?.seq ?? 0;
+    await piece.result.set(9, ["value"]);
+    await runtime.storageManager.synced();
+    await waitForSettled(runtime, space, watermarkBeforeSteady + 1, {
+      timeoutMs: 30_000,
+    });
+    assertEquals(await piece.result.get(["value"]), 9);
 
     // Echo latency is recorded, not gated: the actor-side parity
     // measurement follows testing.md §1's protocol (adjacent arms,

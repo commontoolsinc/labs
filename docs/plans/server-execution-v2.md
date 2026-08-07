@@ -422,8 +422,16 @@ Tasks:
       speculative run's egress effect kinds are OWNED AND DROPPED at
       the destination (memo hits keep reading through; misses render
       pending), `navigateTo` stays enactable (reversible),
-      `compile-and-run` is gated (not speculable — its floating
-      compile launch cannot be intercepted at the destination);
+      `compile-and-run` is gated at the BUILTIN (its floating compile
+      launch cannot be intercepted at the destination), and that gate's
+      true interim scope is wider than "not speculable": it suppresses
+      fresh compiles for EVERY flag-ON non-wave run — client
+      derivation, F10 handler runs, imperative flows — and the serving
+      side refuses the writebacks until the compile-and-run serving
+      port (stage G's out-of-scope note) lands, so fresh
+      compile-and-run is INERT in the ON arm everywhere until that
+      port (memo'd results still read through; the gate's both-arms
+      pins live in `packages/runner/test/compile-and-run.test.ts`);
       result-as-pattern children ride the derivation run's overlay
       writes.
 - [x] UI bindings untouched: authored writes under existing ACL + CAS
@@ -479,7 +487,11 @@ after this phase's, the way stage C's train was cut):**
       ON-skip). Until it lands, scoped runs resolve via the
       wave-level identity unless per-run identities arrive through
       the seam (the Phase-1 fallback, cardinality-2-pinned at the
-      seam level in this phase's PR).
+      seam level in this phase's PR). P2-F is part of PHASE 2's gate
+      closure — it carries the suspended `sx2-serving-loop` surface
+      and, with it, the in-CI amplification-ratio gate — not optional
+      hardening (the Phase-2 independent review's assessment,
+      2026-08-07).
 
 Success criteria (the old Phase-1 ON gates land here, merged):
 

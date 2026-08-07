@@ -1850,6 +1850,20 @@ export interface ISpaceReplica extends ISpace {
    * origin's echo falls back to its confirmed read basis.
    */
   ackedSeqOf?(localSeq: number): number | undefined;
+
+  /**
+   * The settle input barrier's WAKE (server-execution v2 Phase 2): when
+   * set, invoked synchronously whenever a promotion flips shadowed
+   * foreign novelty visible — the flag-ON condition of the shadow-flip
+   * notification, fired whether or not the flip produced a value diff
+   * (an echo-equal flip still lifts `unappliedForeignSeqFloor`). The
+   * SpaceServer installs it on its serving replica at activation so a
+   * clamped wave's floor lifting wakes the loop directly: the flip is
+   * the one input whose dirtiness arrives WITHOUT a new admitted commit
+   * on the host feed, so nothing else ends the loop's input wait before
+   * the idle timeout.
+   */
+  shadowFlipObserver?: (() => void) | undefined;
 }
 
 /**

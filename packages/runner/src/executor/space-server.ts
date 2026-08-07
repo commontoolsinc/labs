@@ -337,6 +337,17 @@ export class SpaceServer implements TransactionSealDestination {
     runtime.effectMemoObserver = () => {
       this.#options.stats.memo.hits += 1;
     };
+    // The shadow-flip WAKE (Phase 2's settle input barrier): a clamped
+    // wave's floor lifts when the replica's parked promotion flips the
+    // shadowed foreign value visible — a dirtiness with NO admitted
+    // commit behind it (the commit was drained waves ago; only its
+    // VISIBILITY changed), so nothing on the feed ends the loop's input
+    // wait and a then-quiet space would sit out the idle window with W
+    // still clamped. The replica's flip path resolves the wait
+    // directly; the woken cycle derives over the foreign value and W
+    // catches up.
+    runtime.storageManager.open(space).replica.shadowFlipObserver = () =>
+      this.#feedArrived?.resolve();
 
     // W = read watermark doc (0 if absent).
     this.#watermark = readWatermarkSeq(engine);
@@ -1155,8 +1166,10 @@ export class SpaceServer implements TransactionSealDestination {
     // from the advance — the plan's sanctioned alternative to awaiting
     // them, which would deadlock — keeps W honest: it never claims a
     // seq whose demanded derivations could not have run. The clamp
-    // lifts by itself: promotion fires the notification, the next wave
-    // derives over the foreign value, and W catches up.
+    // lifts by itself: promotion fires the notification AND the
+    // shadow-flip wake (`shadowFlipObserver`, installed at activation —
+    // without it a then-quiet space would wait out the idle window),
+    // the woken wave derives over the foreign value, and W catches up.
     const shadowFloor = runtime.storageManager
       .open(this.#options.space).replica.unappliedForeignSeqFloor?.();
     const inputVisibleHead = shadowFloor === undefined
@@ -1166,9 +1179,21 @@ export class SpaceServer implements TransactionSealDestination {
       ? this.#watermark
       : Math.max(this.#watermark, inputVisibleHead);
     const shouldAdvance = !exhausted && advanceTo > this.#watermark;
-    if (!exhausted && advanceTo < batchHead && advanceTo > this.#watermark) {
-      // Counted only when the clamp CHANGED the advance (a floor below
-      // an advance that would not have happened anyway is not a clamp).
+    if (
+      !exhausted && inputVisibleHead < batchHead &&
+      batchHead > this.#watermark
+    ) {
+      // Counted whenever the floor held W below an OTHERWISE-ADVANCING
+      // batch head (serving-loop.md §7's "actually clamped below the
+      // input batch head"): the partial clamp (advanceTo strictly
+      // between W and batchHead) AND the full suppression — the
+      // shadowed seq is the lowest input above W, or the shadowed
+      // REMOVE's sentinel floor 1 holds W entirely — where advanceTo
+      // == W and the pre-fix `advanceTo > W` guard missed the count. A
+      // floor with batchHead ≤ W is still NOT a clamp: no advance was
+      // owed. An exhausted flush is likewise excluded — exhaustion
+      // suppresses the advance regardless of the floor, and §7's
+      // wavesBudgetExhausted carries that case.
       this.#options.stats.watermarkClamped += 1;
       logger.info?.("watermark-clamped", () => [
         `space ${this.#options.space}: W advance clamped to ` +
@@ -1409,6 +1434,10 @@ export class SpaceServer implements TransactionSealDestination {
       if (this.#runtime !== undefined) {
         this.#runtime.asyncWorkObserver = undefined;
         this.#runtime.effectMemoObserver = undefined;
+        // The shadow-flip wake dies with the tenure (a late flip on a
+        // disposing replica must not poke a parked loop's stale wait).
+        this.#runtime.storageManager.open(this.#options.space).replica
+          .shadowFlipObserver = undefined;
       }
       this.#runtime?.clearSealDestination();
       await this.#disposeRuntime?.();

@@ -543,18 +543,19 @@ describe("stage F serving loop", () => {
     expect(stats.structureLoadFailures).toBe(0);
   });
 
-  it("registers NO piece demand for never-a-piece id classes: computed:/watermark roots neither retry nor count as deferred (RULED 2026-08-07)", async () => {
+  it("registers NO piece demand for never-a-piece id classes: computed:/cid:/watermark roots neither retry nor count as deferred (RULED 2026-08-07)", async () => {
     host = newHost({ flushDeadlineMs: 2_000, idleParkMs: 600_000 });
     onServingRuntime = () => Promise.resolve();
     openClient();
     const engine = await server.engineForSpace(space);
 
     // The client demands ONLY never-a-piece roots: the watermark doc
-    // (every settledness subscription's watch) and a `computed:` doc.
-    // Neither can ever carry `patternIdentity` meta, so a piece-demand
-    // attempt on them is structurally futile churn — the ruled
-    // exclusion. The demand SINKs still register (value-granular pull
-    // is not piece demand).
+    // (every settledness subscription's watch), a `computed:` doc, and
+    // a `cid:` doc (a content-addressed bundle — the ruled class this
+    // exclusion test previously left unexercised). None can ever carry
+    // `patternIdentity` meta, so a piece-demand attempt on them is
+    // structurally futile churn — the ruled exclusion. The demand
+    // SINKs still register (value-granular pull is not piece demand).
     const wmCell = clientRuntime.getCellFromLink<{ seq?: number }>(
       watermarkDocLink(space),
     );
@@ -565,6 +566,12 @@ describe("stage F serving loop", () => {
       path: [],
     });
     await computedProbe.sync();
+    const cidProbe = clientRuntime.getCellFromLink<unknown>({
+      space,
+      id: "cid:bafyr2exclusionprobe" as never,
+      path: [],
+    });
+    await cidProbe.sync();
     await waitUntil(
       () => host!.spaceServer(space)?.active === true,
       "session-open activation",
@@ -573,7 +580,7 @@ describe("stage F serving loop", () => {
     // Drive several demand cycles with UNWATCHED authored input: an
     // address-level blind write mints no watch root (the cell route
     // registers a watch), so the demanded-root set stays exactly the
-    // two never-a-piece ids.
+    // three never-a-piece ids.
     for (const n of [1, 2, 3]) {
       const tx = clientRuntime.edit();
       tx.writeValueOrThrow(

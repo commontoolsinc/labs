@@ -32,7 +32,10 @@ even construct one).
 question).** ONLY scheduler-driven work moves to the server:
 scheduler-stamped runs — the derivation and event-handler kinds — are
 server work under the flag, and their writes DIVERT on clients
-(speculation.md §2 carries the overlay half of this rule). Commits
+(speculation.md §2 carries the overlay half of this rule) —
+derivation-kind writes since Phase 2; handler-kind writes from
+Phase 3's events-down, until which F10's interim keeps them
+committing authored (the `authored` row above). Commits
 made OUTSIDE the scheduler are the client's authored acts and commit
 as today: the setup/instantiation transactions, imperative creation —
 a `cf piece new`-style client writing the result doc with its links
