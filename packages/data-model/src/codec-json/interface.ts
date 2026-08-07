@@ -1,4 +1,12 @@
 /**
+ * Tag prefix on the encoded form of a fabric value. The prefix is explicit so
+ * as to make it unambiguous whether a given JSON-ish text string is the result
+ * of encoding by `JsonCodec` vs. being JSON from some other source. The tag
+ * stands for "Fabric Value Json, version 1."
+ */
+export const ENCODING_PREFIX_TAG = "fvj1:";
+
+/**
  * JSON-compatible codec value. This is the intermediate tree representation
  * used during serialization tree walking -- NOT the final serialized form
  * (which is `string`). Internal to the JSON implementation.
@@ -11,7 +19,7 @@
  * trees built on the *serialize* side are not covered by this invariant: they
  * are `JSON.stringify`-ed and discarded by `encode()` / `encodeToBytes()` and
  * never reach a caller. (The serialize-side `/quote` form happens to be
- * deep-frozen as a side effect of `unquote()`'s recursive rebuild, but no
+ * deep-frozen as a side effect of `#unquote()`'s recursive rebuild, but no
  * other serialize output is, and none needs to be.)
  */
 export type JsonCodecValue =
