@@ -3,6 +3,14 @@
 ## Status
 
 This document specifies intended behavior. The daemon is not implemented.
+The invocation-identity requirements depend on the shaped-reads plan and its
+pending CLI and runner implementations ([#5435], [#5460], and [#5469]). Until
+that contract lands, they specify coordinated intended behavior rather than
+current direct-execution behavior.
+
+[#5435]: https://github.com/commontoolsinc/labs/pull/5435
+[#5460]: https://github.com/commontoolsinc/labs/pull/5460
+[#5469]: https://github.com/commontoolsinc/labs/pull/5469
 
 ## Summary
 
@@ -143,8 +151,9 @@ but do not drive the design.
 ### Direct-only commands
 
 Local, offline, test, process-management, and interactive commands remain
-direct. This includes `check`, `test`, `view`, `id`, `init`, `inspect`, `space`,
-`fuse`, daemon-management commands, and completion script generation.
+direct. This includes the top-level `cf check`, `cf test`, `cf view`, `cf id`,
+`cf init`, `cf inspect`, `cf space`, and `cf fuse` commands, daemon-management
+commands, and completion script generation.
 `cf piece render --watch` and any future watch or subscription form remain
 direct. `cf exec` also remains direct; routing a shebang-run mounted callable
 through a named daemon requires a separate explicit propagation design.
