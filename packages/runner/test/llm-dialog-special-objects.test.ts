@@ -136,8 +136,13 @@ describe("llm-dialog-special-objects", () => {
       // The refusal is not wrong, it is blind: it covers a value handed over
       // directly and cannot see one arriving this way. Every
       // `instanceof FabricInstance` tripwire in the runner shares that blind
-      // spot. Closing it is the `TODO` at `query-result-proxy.ts`, where the
-      // primitive already gets the exemption an instance does not.
+      // spot.
+      //
+      // TODO(danfuzz): this test asserts the WRONG behavior on purpose, and
+      // should be inverted -- to a refusal, matching the sibling test above --
+      // once a proxied `FabricInstance` is perceived as one. The work is at the
+      // matching `TODO` in `query-result-proxy.ts`, where a `FabricPrimitive`
+      // already gets the exemption an instance does not.
       const value = readBack({
         failure: FabricError.fromNativeError(new Error("boom")),
       });
