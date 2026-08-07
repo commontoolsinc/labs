@@ -139,13 +139,19 @@ check "written at create
 appended through the read" "$(echo "$B" | jq -r '.result.body // empty')" \
   "the address a read returned is one a caller can call"
 # A field list spells the same marker with a trailing @, so one read asks for
-# an address at one position and projects at another.
+# an address at one position and projects at another. The list is element-wise
+# across an array, so the marked collection answers with one address per note.
 AT=$($CF piece get --quiet --piece "$BOARD" $ARGS \
   --select 'notes@,noteCount' 2>/dev/null)
-check "true" "$(echo "$AT" | jq -c '.notes | has("$link")')" \
-  "a trailing @ returns the marked position's address"
+check "true" "$(echo "$AT" | jq -c \
+  '(.notes | length > 0) and ([.notes[] | has("$link")] | all)')" \
+  "a trailing @ on an array returns an address per element"
 check "true" "$(echo "$AT" | jq -c '.noteCount >= 1')" \
   "and a sibling path projects beside it in the one result"
+# The bare suffix names the position the read is already at.
+ROOT=$($CF piece get --quiet --piece "$BOARD" $ARGS --select '@' 2>/dev/null)
+check "true" "$(echo "$ROOT" | jq -c 'has("$link")')" \
+  "a bare @ returns the read source's own address"
 
 step "7. A replayed invocation id returns the ORIGINAL result"
 # Captured rather than hard-coded: the property is that the replay changes

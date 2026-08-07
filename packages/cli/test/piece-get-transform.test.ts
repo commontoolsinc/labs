@@ -2596,6 +2596,67 @@ describe("cf piece get transforms", () => {
         }
       });
 
+      it("returns an address per element for a marked array", async () => {
+        const { board, notes } = await seedBoard("at-suffix-array", true);
+        const elementAddresses = notes.map((note) => ({
+          $link: addressOf(note),
+        }));
+        const concise = await deriveSelectedValue(runtime, space, board, {
+          projection: parseSelectProjection("notes@"),
+        });
+        expect(concise).toEqual({ notes: elementAddresses });
+        // The concise spelling of the JSON items marker, so it answers with
+        // what the JSON items marker answers.
+        expect(concise).toEqual(
+          await deriveSelectedValue(runtime, space, board, {
+            projection: await parseSelectionProjection(
+              '{"properties":{"notes":{"type":"array","items":{"$link":true}}}}',
+            ),
+          }),
+        );
+        expect(
+          await deriveSelectedValue(runtime, space, board, {
+            projection: parseSelectProjection("notes@,label"),
+          }),
+        ).toEqual({ notes: elementAddresses, label: "Field notes" });
+      });
+
+      it("leaves a JSON marker on an array naming that array's own position", async () => {
+        const { board } = await seedBoard("at-suffix-json-array", true);
+        expect(
+          await deriveSelectedValue(runtime, space, board, {
+            projection: await parseSelectionProjection(
+              '{"properties":{"notes":{"$link":true}}}',
+            ),
+          }),
+        ).toEqual({
+          notes: { $link: { ...addressOf(board), path: ["notes"] } },
+        });
+      });
+
+      it("returns an address per element for a bare `@` at an array", async () => {
+        const { board, notes } = await seedBoard("at-suffix-array-root", true);
+        expect(
+          await deriveSelectedValue(runtime, space, board.key("notes"), {
+            projection: parseSelectProjection("@"),
+          }),
+        ).toEqual(notes.map((note) => ({ $link: addressOf(note) })));
+      });
+
+      it("returns each element's address beside the addresses marked below it", async () => {
+        const { board, notes } = await seedBoard("at-suffix-array-deep", true);
+        expect(
+          await deriveSelectedValue(runtime, space, board, {
+            projection: parseSelectProjection("notes@,notes.title@"),
+          }),
+        ).toEqual({
+          notes: notes.map((note) => ({
+            $link: addressOf(note),
+            title: { $link: { ...addressOf(note), path: ["title"] } },
+          })),
+        });
+      });
+
       it("marks a position below an array for each of its elements", async () => {
         const { board, notes } = await seedBoard("at-suffix-elements", true);
         const titleAddresses = notes.map((note) => ({

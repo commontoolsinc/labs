@@ -1707,10 +1707,10 @@ function sourcePosition(cell: Cell<unknown>): WalkedPosition {
 
 /**
  * Helper for {@link composeLinkAddresses}, which reads the container stored at
- * `position` so a marked collection can be walked element by element. Reaches
- * for the container's own document when the walk cannot see the container:
- * behind a link, or where the selection's read stopped above it, which is what
- * a marked collection's rejecting selector does.
+ * `position` so a JSON `items` marker can be walked element by element.
+ * Reaches for the container's own document when the walk cannot see the
+ * container: behind a link, or where the selection's read stopped above it,
+ * which is what a marked collection's rejecting selector does.
  */
 async function storedContainer(position: WalkedPosition): Promise<unknown> {
   if (position.stored?.value !== undefined) return position.stored.value;
@@ -1718,6 +1718,34 @@ async function storedContainer(position: WalkedPosition): Promise<unknown> {
   if (stored !== undefined) return stored;
   await position.cell.asSchema(false).pull();
   return position.cell.getRaw({ lastNode: "value" });
+}
+
+/**
+ * Helper for {@link composeLinkAddresses}: `markers` asked of every element of
+ * `stored`, the array a position holds. Each element is addressed from the
+ * link its own slot stores, so the answers survive a reordering of the
+ * collection.
+ */
+async function composeElementAddresses(
+  position: WalkedPosition,
+  stored: readonly unknown[],
+  markers: LinkMarkers,
+  projected: unknown,
+  implicitArrayTraversal: boolean,
+): Promise<unknown[]> {
+  const projectedItems = Array.isArray(projected) ? projected : [];
+  const items: unknown[] = [];
+  for (let index = 0; index < stored.length; index++) {
+    items.push(
+      await composeLinkAddresses(
+        positionBelow(position, index, stored),
+        markers,
+        projectedItems[index],
+        implicitArrayTraversal,
+      ),
+    );
+  }
+  return items;
 }
 
 /**
@@ -1731,9 +1759,11 @@ async function storedContainer(position: WalkedPosition): Promise<unknown> {
  *
  * `implicitArrayTraversal` states that the markers came from a concise field
  * list, which names a field wherever the value holds one rather than at a
- * fixed depth. The positions below an array then belong to its elements, the
- * same way {@link projectValue} applies one field mask across them, while an
- * address asked for at the array names the array itself.
+ * fixed depth. A position holding an array is therefore asked of each of its
+ * elements — the same way {@link projectValue} applies one field mask across
+ * them, and the address included, so `notes@` answers with the note documents
+ * rather than with the slots they sit in. A JSON Schema states its own depth,
+ * and marks elements with `items`.
  */
 async function composeLinkAddresses(
   position: WalkedPosition,
@@ -1741,29 +1771,35 @@ async function composeLinkAddresses(
   projected: unknown,
   implicitArrayTraversal = false,
 ): Promise<unknown> {
+  // The container is the one the walk already holds. A marked position is
+  // never fetched, so below a crossed link there is nothing to look inside,
+  // and that link is the address.
+  const elements = implicitArrayTraversal && markers.items === undefined
+    ? position.stored?.value
+    : undefined;
+  if (Array.isArray(elements)) {
+    return await composeElementAddresses(
+      position,
+      elements,
+      markers,
+      projected,
+      implicitArrayTraversal,
+    );
+  }
+
   let composed = projected;
-  const elementMarkers = markers.items ??
-    (implicitArrayTraversal && markers.properties !== undefined
-      ? { properties: markers.properties }
-      : undefined);
-  const stored = elementMarkers === undefined
-    ? undefined
-    : await storedContainer(position);
-  if (elementMarkers !== undefined && Array.isArray(stored)) {
-    const projectedItems = Array.isArray(projected) ? projected : [];
-    const items: unknown[] = [];
-    for (let index = 0; index < stored.length; index++) {
-      items.push(
-        await composeLinkAddresses(
-          positionBelow(position, index, stored),
-          elementMarkers,
-          projectedItems[index],
-          implicitArrayTraversal,
-        ),
+  if (markers.items !== undefined) {
+    const stored = await storedContainer(position);
+    if (Array.isArray(stored)) {
+      composed = await composeElementAddresses(
+        position,
+        stored,
+        markers.items,
+        projected,
+        implicitArrayTraversal,
       );
     }
-    composed = items;
-  } else if (markers.items === undefined && markers.properties !== undefined) {
+  } else if (markers.properties !== undefined) {
     const projectedRecord = isRecord(projected) && !Array.isArray(projected)
       ? projected
       : {};

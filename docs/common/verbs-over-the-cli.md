@@ -305,16 +305,23 @@ cf piece get --piece <board> --select 'notes@,noteCount'
 ```
 
 ```json
-{ "notes": { "$link": { "id": "of:fid1:…", "…": "…" } }, "noteCount": 3 }
+{ "notes": [{ "$link": { "id": "of:fid1:…", "…": "…" } }], "noteCount": 3 }
 ```
+
+A field list applies to each element wherever it crosses an array, and an
+address is one of the things it applies: `notes@` answers with the address of
+each note rather than of the slot it sits in, which makes it the concise
+spelling of the `items` marker above. Where the marked position holds anything
+else, the address is that position's own.
 
 The suffix is special only at the end of a segment, and `\@` writes a literal
 one, so a field named `user@home` stays reachable.
 
 A path that is only `@` names the position the read is already at, which no
 field path reaches because it sits above every field. `--select '@'` returns
-the source's own address in place of its contents, and `--select '@,title'`
-returns the address beside the title.
+the source's own address in place of its contents — one per element where the
+source is an array — and `--select '@,title'` returns the address beside the
+title.
 
 A marked position is not fetched — the address is stored in the document that
 contains it, so a marked collection of a hundred notes costs the one read that
