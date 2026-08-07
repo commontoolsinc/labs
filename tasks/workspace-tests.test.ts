@@ -168,7 +168,9 @@ Deno.test("selectShardMembers expands piece and tasks into internal shards", () 
 });
 
 Deno.test("real workspace timing weights keep modeled shard loads close", async () => {
-  const members = await readWorkspaceMembers();
+  const members = await readWorkspaceMembers(
+    new URL("../deno.jsonc", import.meta.url),
+  );
   const loads = Array.from(
     { length: 6 },
     (_, offset) =>
