@@ -87,6 +87,10 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [bootstrap-performance-experiments-2026-08-07.md](bootstrap-performance-experiments-2026-08-07.md)
+  — hello-world bootstrap baseline and four prototyped fixes: verdict echo,
+  publish batching, server event-loop blocking, transport compression, August
+  2026.
 - [topics-performance-testbed-2026-08-06.md](topics-performance-testbed-2026-08-06.md)
   — Topics storage anatomy (the read-set byte pie) and WAN-testbed startup
   measurements, August 2026.
