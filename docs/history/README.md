@@ -296,6 +296,11 @@ One line per archived document; each document's header carries the fuller
 - [2026-07-binary-artifact-transfer.md](development/performance/2026-07-binary-artifact-transfer.md)
   — binary artifact file and byte transfer snapshot before the per-binary
   workflow split, July 2026.
+- [2026-08-storage-manager-construction-cost.md](development/performance/2026-08-storage-manager-construction-cost.md)
+  — the tenfold step in the immutable-cell storage-manager benchmark traced to
+  an eager default-route resolution in the constructor, why the benchmark
+  times only construction, and why the guard for it counts URL parses rather
+  than comparing values, August 2026.
 - [coverage-ratchet-noise-2026-07-28.md](development/coverage-ratchet-noise-2026-07-28.md)
   — why a rename-only pull request owed coverage debt: a wall-clock-guarded
   diagnostic and a shard re-partition each moved the `packages/runner`
