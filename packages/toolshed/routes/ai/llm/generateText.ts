@@ -64,6 +64,12 @@ export function configureJsonMode(
   // Default to using the generic JSON mode
   streamParams.mode = "json";
 
+  // Model-level options must survive JSON mode, so the provider namespace is
+  // merged rather than replaced.
+  const providerOptions = streamParams.providerOptions as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+
   // Apply provider-specific configurations
   if (modelName?.startsWith("groq:")) {
     // Groq uses response_format parameter
@@ -71,8 +77,9 @@ export function configureJsonMode(
 
     // Ensure it's also passed through providerOptions for the Vercel AI SDK
     streamParams.providerOptions = {
-      ...(streamParams.providerOptions as object | undefined),
+      ...providerOptions,
       groq: {
+        ...providerOptions?.groq,
         response_format: { type: "json_object" },
       },
     };
@@ -95,8 +102,9 @@ export function configureJsonMode(
 
     // Ensure it's also passed through providerOptions for the Vercel AI SDK
     streamParams.providerOptions = {
-      ...(streamParams.providerOptions as object | undefined),
+      ...providerOptions,
       openai: {
+        ...providerOptions?.openai,
         response_format: { type: "json_object" },
       },
     };
@@ -323,6 +331,11 @@ export async function generateText(
     // the caller, who now has a status to make it on.
     maxRetries: 0,
     stopWhen: stepCountIs(8), // TODO(bf): low limit to prevent runaway process
+    // Registry-level options for the model (reasoning effort, ZDR settings);
+    // request-specific configuration below merges on top of these.
+    ...(modelConfig.providerOptions !== undefined
+      ? { providerOptions: modelConfig.providerOptions }
+      : {}),
   };
 
   // Convert client-side tools to AI SDK format (without execute functions for client-side execution)

@@ -96,6 +96,10 @@ export async function generateObject(
       // Registering a telemetry integration turns span collection on for every
       // AI SDK call. This route has never emitted AI SDK spans, so it opts out.
       telemetry: { isEnabled: false },
+      // Registry-level options for the model (reasoning effort, ZDR settings).
+      ...(modelConfig.providerOptions !== undefined
+        ? { providerOptions: modelConfig.providerOptions }
+        : {}),
       ...(params.system && { system: params.system }),
     });
 
