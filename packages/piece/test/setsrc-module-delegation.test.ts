@@ -137,7 +137,7 @@ describe("setsrc module delegation", () => {
           storageManager,
           cfcEnforcementMode: "enforce-explicit",
         });
-        // Runtime.dispose() closes the shared emulated storage pieces, so all
+        // Runtime.dispose() closes the shared emulated storage manager, so all
         // cold-start runtimes stay alive until the assertions are complete.
         freshRuntimes.push(freshRuntime);
         return freshRuntime;

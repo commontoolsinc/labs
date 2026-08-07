@@ -164,7 +164,7 @@ export async function initialize(
     spaceDid: spaceId,
   });
 
-  // Initialize runtime and piece pieces. Shared first-party posture
+  // Initialize runtime and the pieces controller. Shared first-party posture
   // (CT-1814); `experimental` arrives as data from the main process so the
   // service has one flag decision point (see main.ts createRuntime). The
   // preset pins patternEnvironment to `apiUrl`, matching the explicit pin
@@ -291,7 +291,7 @@ export async function runPiece(data: RunData): Promise<void> {
     let runningPiece = loadedPieces.get(pieceId);
 
     if (!runningPiece) {
-      // If not loaded yet, get it from the pieces
+      // If not loaded yet, get it from the pieces controller
       console.log(`Loading piece ${pieceId} for the first time`);
       runningPiece = await pieces.getPieceCell(piecesEntryCell, true, {
         type: "object",
