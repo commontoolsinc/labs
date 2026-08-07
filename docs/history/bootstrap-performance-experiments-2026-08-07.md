@@ -5,25 +5,180 @@ archived: 2026-08-07
 reason: "Experiment record: hello-world bootstrap baseline and four prototyped fixes, the evidence behind the CT-1963 proposals."
 ---
 
-# Fresh-space bootstrap: baseline and four experiments
+# Fresh-space bootstrap: findings and proposals
 
-## Purpose
+## The takeaway
 
-One document for the owners of the storage and piece layers. It records what
-deploying and using a minimal pattern actually costs in each environment, why,
-and what four prototyping experiments established about the candidate fixes —
-including two negative results that close off approaches that looked obvious.
-Every number is reproducible on the WAN-emulation testbed
-([`topics-performance-testbed-2026-08-06.md`](topics-performance-testbed-2026-08-06.md)
-describes the instrument; `scripts/delay-proxy.ts` plus a rehearsal-clone or
-pristine toolshed).
+Even the simplest pattern is slow for reasons that have nothing to do with the
+pattern: deploying a 41-line hello world into a fresh space on Rapids takes
+44.6 s, and a single handler call takes 8.5 s. We ran four controlled
+experiments against a WAN-emulation testbed to find out why and what to do.
+The answers: **62% of a deploy's download is the server echoing the client's
+own uploads back in the transact reply** (fixable at the server response
+boundary, roughly one line); **the Rapids-specific slowness is not commit
+application** (~9 ms) **but seconds-long synchronous graph traversals
+blocking the single-threaded event loop for every connected client**; **an
+app-level compression flag cuts all wire traffic ~7× at no CPU cost** (native
+WebSocket compression does not exist in Deno — verified); and **two
+obvious-looking fixes are measured dead ends** (batching the cache publish,
+and suppressing the echo client-side). Five proposals are ready in priority
+order; five questions need owner rulings before the top two land.
 
-The experiments were run by four isolated agents, each in its own worktree
-with its own server, store, and emulated link (190 ms RTT, 600 KB/s — the
-Rapids link's measured rates). Their full uncommitted diffs are attached to
-Linear CT-1963.
+## Findings at a glance
 
-## The baseline: hello world, measured
+| Question | Answer | Evidence |
+| --- | --- | --- |
+| Why does a fresh-space deploy download ~1.6 MB after uploading ~1 MB? | The `transact` reply returns every uploaded document body verbatim; the client uses one integer of it (`applied.seq`). ~961 KB per deploy, 62% of the download. The watch system is innocent — it already suppresses self-echo. | Finding 1 |
+| Is the server slow at applying the 645 KB bootstrap commit (~17 s gap on Rapids)? | No — apply is 8.6–10.6 ms in every configuration, including beside a 2.5 GB space. The gap is queueing: `session.watch.add` on a big space runs 1.8–2.0 s of synchronous traversal that blocks the whole event loop. | Finding 2 |
+| Can the transport compress the (9–23× compressible) protocol traffic? | Not natively — Deno has no permessage-deflate on either side (verified empirically). A 174-line negotiated app-level flag works: 7.0× less upload, 7.7× less download, no measurable CPU cost. | Finding 3 |
+| Would batching the chunked cache publish into one transaction help? | No. Measured zero net wall-time on a bandwidth-capped link (the publish is bytes-bound, not round-trip-bound), and the chunking is a deliberate crash-durability fix (#5094). Abandoned. | Finding 4 |
+| Can the serial deploy preamble be overlapped? | Yes — running the home-space probe concurrently with the source fetch saves ~1.0 s (6.5%) with semantics preserved and new tests. | Finding 4 |
+
+## What to do (proposals, ranked)
+
+| # | Change | Size | Effect | Status |
+| --- | --- | --- | --- | --- |
+| P1 | Strip document bodies from the transact reply (server response boundary) | ~1 line + test | −961 KB per fresh-space deploy, deterministic | needs owner ruling (Q1) |
+| P2 | `deflateFrames` app-level WS compression | 174 lines, prototyped + tested | 7× wire reduction both ways | ready for review; scrutinize the frame-ordering queue |
+| P3 | Transact + queue-wait slow-query instrumentation | small, mostly written | turns the Rapids tail into a logged number | shippable now |
+| P4 | Yield or bound `session.watch.add` traversal on large spaces | needs design (Q3) | removes multi-second event-loop stalls for every client | the Rapids-specific fix |
+| P5 | Parallel deploy preamble (fetch mode) | small, prototyped + 3 tests | −1.0 s per fresh-space deploy; grows on real WAN | ready for review |
+| P6 | HTTP `compress()` on toolshed | ~1 line + route checks | 4.6 MB shell bundle → ~1 MB; all HTTP routes | quick independent win |
+| — | Single-transaction cache publish | — | zero net win; forfeits #5094 crash durability | **abandoned — do not revisit** |
+| — | Client-side echo suppression | — | two variants measured: no effect / net worse | **abandoned — fix is P1** |
+
+## Questions for the owners
+
+1. **P1 gate.** The protocol spec reserves a post-apply `document` on *patch*
+   revisions as the writer's channel for merge-rebased truth
+   (`docs/specs/memory-v2/04-protocol.md:1001-1003`); it is not implemented.
+   Is it planned? If yes, the verdict strip exempts patch revisions; if no,
+   the strip is unconditional and the spec line should change in the same PR.
+2. **Watches on immutable docs.** Content-addressed compile-cache entries
+   never change under their key, yet cache reads register watches (there is
+   no read-without-watch on the pull path, and no unwatch message exists —
+   watch sets are append-only per session). Should cache reads move to
+   one-shot `graph.query`, and/or should the protocol grow an unwatch or a
+   "watch without initial sync at seq" form?
+3. **P4 shape.** Is yielding inside `trackGraph` acceptable (re-entrancy and
+   consistency assumptions during traversal), or is bounding the per-call
+   batch the safer form?
+4. **Bootstrap design (parked, but the floor).** Must each space durably
+   carry its own copy of the identical compiled system pattern, uploaded by
+   each client, or can genesis be server-seeded / globally content-addressed?
+   What does CFC provenance require?
+5. **Compression rollout.** Any objection to `deflateFrames` landing
+   default-off behind its negotiation and flipping after soak, and to HTTP
+   `compress()` landing independently?
+
+---
+
+## Finding 1: the transact reply is the echo
+
+**Question.** A fresh-space deploy uploads ~1.05 MB and downloads ~1.6 MB.
+The working theory was that watched cache cells echo the client's writes
+back. What actually echoes?
+
+**Answer.** Not the watch system — the server already excludes a session's
+own accepted writes from watch fan-out (dirty-origin tracking,
+`packages/memory/v2/server.ts:3214-3225`; normative in
+`docs/specs/memory-v2/04-protocol.md:1001-1004`). The echo is the **transact
+reply**: `Server.transact` returns the whole `AppliedCommit` with every
+document body verbatim (`server.ts:2292-2296`; bodies attached at
+`packages/memory/v2/engine.ts:5404-5413`), not even schema-interned
+(`sync-schema-table.ts:183-192` only compresses `sync` frames). The client
+reads exactly one field: `applied.seq`
+(`packages/runner/src/storage/v2.ts:4465-4490`).
+
+**Evidence.** ~961 KB of reply per fresh-space deploy — 62% of the download,
+deterministic across nine runs. A further 105–548 KB comes from
+`session.watch.add`'s unconditional initial sync of docs the client just
+wrote; the 443 KB spread is a real registration-vs-apply race (adding three
+log lines flipped every run to the cheap side). Two client-side suppression
+prototypes were built and measured: a schema-less pre-sync changed nothing;
+pre-registering recursive selectors cost +15 KB upload for zero saving. The
+reply bytes are on the wire before the client can decline them — the fix is
+server-side (P1), with one spec caveat (Q1).
+
+## Finding 2: server apply is fast; the event loop is the bottleneck
+
+**Question.** On Rapids, the 645 KB bootstrap transact's round trip took
+~19.5 s, and link transport explains only ~2 s. Where do ~17 s go on the
+server?
+
+**Answer.** Not in applying the commit. With transact timing added to the
+server's slow-query recorder (a gap — it covered watch/query operations but
+not `transact`), apply measured **8.6–10.6 ms** in every configuration:
+pristine store, store also hosting a copy of the 2.5 GB Topics space, engine
+pre-loaded, and under concurrent traffic. The "big neighbor slows apply"
+hypothesis is falsified. The seconds live in **queueing ahead of transact**:
+the server is single-threaded, and `session.watch.add` on the 2.5 GB space
+runs 1.8–2.0 s of synchronous graph traversal (`trackGraph`,
+`packages/memory/v2/query.ts:283`) that blocks every connection's frames.
+
+**Evidence.** One concurrent `cf piece ls` against the big space inflated an
+unrelated fresh-space deploy from 2.2 s to 4.75 s while that deploy's own
+transact still measured 10.7 ms. Traversal cost is depth-driven, not
+watch-count-driven: a 58-watch call cost 1.8 s where a 2,295-watch call cost
+389 ms. Current instrumentation cannot see the queueing because timing starts
+after dequeue — hence P3's `queued = start − arrival` field, which on Rapids
+should account for the tail in production logs, and P4 as the fix.
+
+## Finding 3: compression — native impossible, app-level works
+
+**Question.** The payloads gzip 9–23× (bootstrap commit 645 KB → 68 KB; an
+8.8 MB read-set commit → 379 KB). Can the WebSocket compress them?
+
+**Answer.** Not natively: on Deno 2.9.4 the client never offers
+`Sec-WebSocket-Extensions`, the server ignores offers, and a byte-counting
+probe measured 1.00× raw bytes on the wire — so
+`packages/memory/v2/schema-table-links.ts:33`'s assumption that "transport
+compression absorbs" inline-schema repetition is false in production. A
+174-line app-level prototype makes it true: a `deflateFrames` flag in the
+existing `hello` negotiation; compressed frames are binary WS messages and
+plain frames stay text, so mixed-version peers fall back by construction
+(pinned by tests); `CompressionStream("deflate-raw")` keeps it browser-safe;
+a FIFO codec queue preserves commit ordering; 4 KB threshold with
+never-inflate fallback.
+
+**Evidence.** Fresh-space deploy on the capped testbed: 1.02 MB → 153 KB up,
+1.48 MB → 201 KB down (7.0× / 7.7×), reproducible to 0.3%, no measurable CPU
+delta. Review attention belongs on the frame-ordering queue. Related quick
+win: HTTP responses are entirely uncompressed today — including the 4.6 MB
+shell bundle — and hono's `compress()` slots in at
+`packages/toolshed/lib/create-app.ts:32` (P6; verify the WS upgrade route and
+static-bundle interaction).
+
+## Finding 4: publish batching is a dead end; preamble overlap is not
+
+**Question.** The compiled module set publishes as multiple serialized
+transacts, and a cross-space home probe runs serially before the source
+fetch. Collapse both?
+
+**Answer.** The chunked publish is deliberate, and batching it buys nothing.
+Chunks are 4 modules per commit with the entry module pinned last
+(`packages/runner/src/compilation-cache/cell-cache.ts:1450`, `:1519-1522`) so
+that a session killed mid-write leaves a clean cache miss — the
+all-or-nothing shape is what caused the estuary first-open outage (#5094). A
+single-transaction prototype (3 transacts → 1) removed exactly two round
+trips and delivered **zero net wall time** on the capped link: the saving was
+re-spent on downlink contention in the next commit's conflict retry, and it
+vanished only on an uncapped link. The publish is bytes-bound. Abandoned.
+The preamble overlap — home probe concurrent with fetching the default
+source, speculation discarded in the rare custom-URL case — is a clean
+**~1.0 s (6.5%) win**, semantics preserved. Speculating through the *compile*
+as well measured identical and is strictly riskier; fetch-only is the shape
+to land (P5).
+
+**Evidence.** Nine-condition measurement matrix in the batching agent's
+report (baseline n=3, each variant n≥2, flags-off control reproducing
+baseline; uncapped runs isolating the round-trip term). Three new tests cover
+the previously untested custom-URL branch, including a rejecting speculative
+fetch.
+
+---
+
+## Appendix: the baseline that motivated the experiments
 
 `packages/patterns/dice.tsx` (41 lines, one handler), fresh CLI process per
 operation, wall seconds:
@@ -35,198 +190,27 @@ operation, wall seconds:
 | `call roll` | 0.8–1.4 | 8.3–8.7 | 8.3 | 8.5 |
 | `verbs` | 0.8–2.2 | 7.9–8.2 | 8.0 | 8.3–8.8 |
 
-Identity/profile freshness is irrelevant (a fresh identity's home space is one
-420-byte commit); the cost is per *space*. The fresh-space deploy is dominated
-by `ensureDefaultPattern`
-(`packages/piece/src/ops/pieces-controller.ts:491-621`): the client fetches
-the canonical system pattern from the server, compiles it, and publishes
-source plus compiled artifacts (~1 MB) into the new space. Wire totals per
-fresh-space deploy: ~1.05 MB up, ~1.6 MB down, ~21 dependent watch waves, six
-session opens. A narrow read is structurally healthy (3 KB up / 39 KB down,
-zero commits) but pays a serial preamble (health, session, manager sync) for
-a 16 ms read. Anything that runs the piece (`call`, `verbs`) loads ~760 KB of
-graph in 16 dependent waves first.
+Profile freshness is irrelevant (a fresh identity's home space is one
+420-byte commit); the cost is per *space*: `ensureDefaultPattern`
+(`packages/piece/src/ops/pieces-controller.ts:491-621`) has each client
+fetch the canonical system pattern from the server, compile it, and publish
+~1 MB of source plus compiled artifacts into every new space. A narrow read
+is structurally healthy (3 KB up / 39 KB down, zero commits) but pays a
+serial session/manager preamble for a 16 ms read; `call` and `verbs` load
+~760 KB of graph in 16 dependent waves first. Link at measurement time:
+190 ms RTT, ~0.59 MB/s up, 1.0–1.6 MB/s down, TLS ~0.57 s per connection.
 
-Link characterization at measurement time: RTT ~190 ms, TLS ~0.57 s per
-connection, download 1.0–1.6 MB/s, upload a consistent 0.59 MB/s. Nothing on
-any route is compressed.
+## Artifacts and reproduction
 
-## What the four experiments established
-
-### 1. The transact verdict is the echo — not the watch system
-
-Question: why does a fresh-space deploy download roughly as much as it
-uploads (~1.1–1.6 MB down for ~1.05 MB up)?
-
-Finding: the watch system was presumed guilty and is innocent — the server
-already suppresses a session's own writes from watch fan-out (dirty-origin
-tracking, `packages/memory/v2/server.ts:3214-3225`, normative in
-`docs/specs/memory-v2/04-protocol.md:1001-1004`). The dominant echo is the
-**transact verdict**: `Server.transact` returns the whole `AppliedCommit`,
-document bodies verbatim (`server.ts:2292-2296`; bodies attached at
-`packages/memory/v2/engine.ts:5404-5413`), not even schema-interned
-(`sync-schema-table.ts:183-192` bails on non-`sync` frames). The client
-provably reads **one integer** from it — `applied.seq`
-(`packages/runner/src/storage/v2.ts:4465-4490`). That is ~961 KB, 62% of the
-deploy's download, deterministic. The rest of the echo is `session.watch.add`'s
-unconditional initial full sync of docs the client just wrote (105–548 KB —
-the 443 KB spread is a real registration/apply race, demonstrated by flipping
-it with three added log lines).
-
-Client-side suppression was prototyped twice and measured dead: a schema-less
-pre-sync changed nothing; pre-registering recursive selectors cost +15 KB
-upload for zero download saving. The verdict bytes are on the wire before the
-client can decline them. **The viable fix is server-side: strip document
-bodies from the transact verdict at the response boundary** (~one line plus a
-test update at `packages/memory/test/v2-server.test.ts:1458-1474`). One design
-caveat for the owners: the protocol spec reserves a post-apply `document` on
-patch revisions as the writer's channel for merge-rebased truth; it is not
-implemented in this tree, and a blanket strip would foreclose it.
-
-Secondary findings: the protocol has **no unwatch message** (watch sets are
-append-only per session, shrink only by full `session.watch.set`
-recomputation), and content-addressed compile-cache docs arguably never need
-watches — one-shot `session.queryGraph` exists and the runner already uses it
-for ACL bootstrap.
-
-### 2. Batching the publish does not pay; overlapping the preamble does
-
-Question: the compiled module set publishes as multiple serialized transacts,
-and the home-space `defaultAppUrl` probe runs serially before the source
-fetch — collapse both?
-
-Finding: the chunked publish is **deliberate** — 4 modules per commit with the
-entry module pinned last (`cell-cache.ts:1450`, `:1519-1522`), so a session
-killed mid-write leaves a clean cache miss instead of a corrupt entry; one
-all-or-nothing commit is the shape that caused the estuary first-open outage
-(#5094). A single-transaction prototype worked mechanically (3 transacts → 1)
-and delivered **zero net wall time** on the capped link: the two saved round
-trips were re-spent on downlink contention in the next commit's conflict
-retry. On a bandwidth-capped link the publish is bytes-bound, not
-round-trip-bound. **Abandoned**, and the durability property stays.
-
-The parallel preamble — running the home probe concurrently with fetching the
-default source, discarding the speculative fetch in the rare custom-URL case —
-is a clean **~1.0 s (6.5%) win** with semantics preserved and three new tests
-covering the previously untested custom-URL branch. Speculating through the
-*compile* as well measured identical and is strictly riskier; fetch-only is
-the right shape. **Proposed.**
-
-### 3. Server transact apply is exonerated; the cost is event-loop blocking
-
-Question: on Rapids, the 645 KB bootstrap transact's round trip took ~19.5 s
-of which ~17 s was attributed to the server. What is the server doing?
-
-Finding: **nothing, quickly.** With transact timing added to the server's
-slow-query recorder (it covers watch/query operations but not `transact` —
-an instrumentation gap), the 645 KB / 19-op commit applies in **8.6–10.6 ms**
-in every configuration: pristine store, store also hosting a copy of the
-2.5 GB Topics space, engine loaded, even under concurrent traffic. The
-big-neighbor hypothesis is falsified.
-
-What the experiment found instead: **head-of-line blocking on the
-single-threaded server.** `session.watch.add` on the 2.5 GB space runs
-1.8–2.0 s of synchronous graph traversal (`trackGraph`,
-`packages/memory/v2/query.ts:283`), blocking every connection's frames.
-Demonstrated directly: one concurrent `cf piece ls` against the big space
-inflated an unrelated fresh-space deploy from 2.2 s to 4.75 s while that
-deploy's own transact still measured 10.7 ms. The Rapids ~17 s is consistent
-with queueing delay ahead of transact — other sessions' multi-second
-synchronous watch work on big spaces — which current instrumentation cannot
-see because timing starts after dequeue. The proposed next increment: stamp
-frame arrival in `Connection.receive` and record `queued = start − arrival`;
-on Rapids that single number should account for the gap in production logs.
-The eventual fix target is `session.watch.add` traversal on large spaces
-(yield between traversals or bound the batch); notably a 58-watch call cost
-1.8 s while a 2,295-watch call cost 389 ms — the driver is traversal depth
-over the big graph, not watch count.
-
-### 4. Transport compression: native is unavailable; an app-level flag works
-
-Question: the payloads compress 9–23× (bootstrap commit 645 KB → 68 KB gz;
-an 8.8 MB read-set commit → 379 KB) — can the transport compress?
-
-Finding: Deno 2.9.4 has **no permessage-deflate on either side**, proven
-empirically (the client sends no `Sec-WebSocket-Extensions` offer; the server
-ignores offers; a byte-counting probe measured 1.00× raw bytes on the wire).
-The `schema-table-links.ts:33` assumption that "transport compression
-absorbs" inline-schema repetition is false in production.
-
-A 174-line app-level prototype makes it true: a `deflateFrames` flag in the
-existing `hello` negotiation, compressed frames as binary WS messages (text =
-uncompressed, so mixed-version peers fall back by construction, pinned by
-tests), `CompressionStream("deflate-raw")` so it works in browsers, a FIFO
-codec queue preserving the protocol's commit ordering, and a 4 KB threshold
-with never-inflate fallback. Measured: **7.0× less upload / 7.7× less
-download** on the fresh-space deploy (1.02 MB → 153 KB up; 1.48 MB → 201 KB
-down), reproducible to 0.3%, no measurable CPU delta. Reviewer attention
-belongs on the frame-ordering queue. Separately, HTTP responses are entirely
-uncompressed today — including the 4.6 MB shell bundle — and hono's
-`compress()` middleware slots in at `packages/toolshed/lib/create-app.ts:32`
-(verify it skips the WS upgrade route and the static bundle interaction).
-
-## The revised cost model
-
-A cold interaction's cost decomposes into four terms, now each with an owner-
-shaped fix:
-
-1. **Bytes** — uncompressed, highly repetitive payloads on a ~0.6 MB/s
-   uplink; and 62% of the download is a verdict the client discards.
-   → verdict strip + `deflateFrames` + HTTP gzip.
-2. **Structure** — serial dependent waves; the preamble serializes a
-   cross-space probe ahead of everything. → parallel preamble now; CT-1959
-   (schema-rooted sync) for the general wave count.
-3. **Server event loop** — seconds-long synchronous graph traversals block
-   every connection; this, not apply cost, is the Rapids-specific tail.
-   → queue-wait instrumentation, then yield/bound `session.watch.add`.
-4. **Bootstrap design** — every space carries its own copy of the identical
-   compiled system pattern, uploaded by each client. Untouched by the
-   experiments; the parked redesign (server-seeded genesis) remains the
-   floor-setter.
-
-## Proposals, ranked
-
-| # | Change | Size | Measured or projected effect | Status |
-| --- | --- | --- | --- | --- |
-| P1 | Strip document bodies from the transact verdict (server response boundary) | ~1 line + test | −961 KB download per fresh-space deploy, deterministic | needs owner ruling on the reserved patch-rebase channel |
-| P2 | `deflateFrames` app-level WS compression | 174 lines, prototyped + tested | 7× wire reduction both ways, no CPU cost | ready for review; scrutinize FrameOrder |
-| P3 | Transact + queue-wait slow-query instrumentation | small, mostly written | converts the Rapids tail into a logged number | shippable now |
-| P4 | Yield/bound `session.watch.add` traversal on large spaces | needs design | removes multi-second event-loop stalls for every connected client | the Rapids whale |
-| P5 | Parallel preamble (fetch mode) | small, prototyped + 3 tests | −1.0 s per fresh-space deploy (grows with real WAN) | ready for review |
-| P6 | HTTP `compress()` on toolshed | ~1 line + route checks | 4.6 MB shell bundle → ~1 MB; all HTTP routes | quick win, unwired |
-| — | Single-transaction cache publish | — | zero net win; forfeits #5094 crash durability | **abandoned, do not revisit** |
-| — | Client-side echo suppression | — | two variants measured: no effect / net worse | **abandoned; fix is server-side (P1)** |
-
-## Questions for the owners
-
-1. **P1:** is the spec's reserved post-apply `document` on patch revisions
-   (merge-rebased truth) planned? If yes, the verdict strip should exempt
-   patch revisions; if no, the strip is unconditional and the spec line
-   should be updated in the same change.
-2. **Watches on immutable docs:** content-addressed compile-cache entries
-   never change under their key. Should the cache read path move to one-shot
-   `graph.query`, and more generally, should the protocol grow an unwatch (or
-   `watch.add` without initial sync for docs the client holds at seq)?
-3. **Event loop:** is yielding inside `trackGraph` acceptable
-   (re-entrancy/consistency assumptions during traversal), or is bounding the
-   per-call batch the safer shape?
-4. **Bootstrap design (parked, but the floor):** must each space durably
-   carry its own copy of the compiled system pattern, or can genesis be
-   server-seeded / globally content-addressed? What does CFC provenance
-   require here?
-5. **Compression rollout:** any objection to negotiated `deflateFrames`
-   landing default-off, flipped after soak — and to HTTP `compress()`
-   landing independently?
-
-## Artifacts
-
-- Agent diffs (uncommitted prototypes and instrumentation): attached to
-  Linear CT-1963 as `echo.diff`, `batching.diff`, `server-timing.diff`,
-  `compression.diff`, plus `echo-failed-prototypes.diff` for the two
-  measured-dead suppression attempts.
-- Prior evidence: [`topics-performance-testbed-2026-08-06.md`](topics-performance-testbed-2026-08-06.md)
-  (storage anatomy, cost ladder, transfer composition) and
+- Prototype diffs (uncommitted) attached to Linear CT-1963: `echo.diff`,
+  `batching.diff`, `server-timing.diff`, `compression.diff`,
+  `echo-failed-prototypes.diff`.
+- Testbed: `scripts/delay-proxy.ts` (190 ms / 600 KB/s — Rapids' measured
+  rates) in front of a pristine or rehearsal-clone toolshed;
+  `CF_CLI_TRACE_TIMINGS=1` for phase splits, `CF_WS_SIZE_LOG=1` for
+  per-message wire sizes. Method detail:
+  [`topics-performance-testbed-2026-08-06.md`](topics-performance-testbed-2026-08-06.md).
+- Prior evidence:
   [`topics-performance-investigation-2026-08-06.md`](topics-performance-investigation-2026-08-06.md)
-  (the original Rapids snapshot evidence).
-- The improvement plan tracking the Topics-side stack:
+  and the Topics-side plan at
   [`../plans/topics-performance-improvement.md`](../plans/topics-performance-improvement.md).
