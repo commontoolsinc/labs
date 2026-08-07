@@ -311,7 +311,7 @@ open or close marker is _not_ on its own line, e.g. don't do this:
 
 /** 
  * Full list of all known donut styles, whether or not the system is capable of
- * constructing them. 
+ * constructing them.
  */
 ```
 
