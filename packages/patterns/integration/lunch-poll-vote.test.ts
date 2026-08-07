@@ -141,7 +141,7 @@ describe("lunch poll: two users vote on a shared option", () => {
     const view = { spaceName: SPACE_NAME, pieceId };
     const hostPage = hostShell.page();
     const guestPage = guestShell.page();
-    const spaceDid = cc.manager().getSpace();
+    const spaceDid = cc.getSpace();
 
     try {
       await timer.run(
