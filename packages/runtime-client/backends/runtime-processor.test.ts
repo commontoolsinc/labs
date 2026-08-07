@@ -2,6 +2,11 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import {
+  FabricBytes,
+  FabricEpochNsec,
+} from "@commonfabric/data-model/fabric-primitives";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -24,7 +29,6 @@ import {
   RequestType,
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
-import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { entityRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
   cellRefToSigilLink,
@@ -978,6 +982,32 @@ describe("sanitizeForPostMessage", () => {
     cyclic.self = cyclic;
     expect(sanitizeForPostMessage(cyclic))
       .toEqual({ n: 1, self: "[Circular]" });
+  });
+
+  describe("special objects", () => {
+    // A `FabricSpecialObject` keeps its state in private fields and has zero
+    // enumerable own properties, so the property walk rebuilds one as `{}` --
+    // a dump that says "empty object" about a value that is nothing of the
+    // kind. Both arms are named rather than descended.
+
+    it("names a `FabricBytes` rather than showing an empty record", () => {
+      expect(sanitizeForPostMessage(new FabricBytes(new Uint8Array([1, 2, 3]))))
+        .toBe("/Bytes(...)");
+    });
+
+    it("names a `FabricEpochNsec` nested in a record", () => {
+      expect(sanitizeForPostMessage({ when: new FabricEpochNsec(1_000n) }))
+        .toEqual({ when: "/EpochNsec(...)" });
+    });
+
+    it("names a `FabricError`, the `FabricInstance` arm", () => {
+      // A renderer names an instance too rather than refusing it: a debug dump
+      // that throws is worse than one that elides, and the value it was handed
+      // is the thing being debugged.
+      expect(
+        sanitizeForPostMessage(FabricError.fromNativeError(new Error("boom"))),
+      ).toBe("/Error(...)");
+    });
   });
 
   describe("primitives", () => {

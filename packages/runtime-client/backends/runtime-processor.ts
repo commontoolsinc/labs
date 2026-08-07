@@ -1,5 +1,7 @@
 import { DID, Identity, type Session } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { JsonCodec } from "@commonfabric/data-model/codec-json";
 import { PieceManager } from "@commonfabric/piece";
 import {
@@ -423,13 +425,18 @@ function sanitizedBody(
     );
   }
 
+  // A `FabricSpecialObject` keeps its state in private fields and has zero
+  // enumerable own properties, so the property walk below would rebuild one as
+  // `{}` -- a dump asserting "empty object" about a value that is nothing of
+  // the kind. Both arms are named instead of descended: a primitive is atomic
+  // and has nothing to descend into, and an instance's codec contents are not
+  // reachable by property name. Naming beats refusing here, because what a
+  // debug dump was handed is the very thing being debugged.
+  if (obj instanceof FabricSpecialObject) {
+    return toCompactDebugString(obj);
+  }
+
   // Plain objects - walk properties.
-  //
-  // TODO(danfuzz): a `FabricSpecialObject` lands here and is shown as `{}`,
-  // its state being in private fields rather than enumerable members. A
-  // `FabricPrimitive` wants formatting by its codec and a `FabricInstance` by
-  // its codec contents -- the same gap marked at the sibling walks, and here it
-  // makes a debug dump silently wrong rather than losing stored data.
   try {
     const result: Record<string, unknown> = {};
     for (const key of Object.keys(obj)) {
