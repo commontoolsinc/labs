@@ -3,6 +3,7 @@ import type { FabricValue } from "@commonfabric/api";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatch,
+  emptyEntityDocument,
   patchOpChangesParentKeySet,
   touchedPointerPaths,
 } from "./patch.ts";
@@ -6673,8 +6674,6 @@ const ensureActiveBranch = (engine: Engine, branch: BranchName): void => {
     throw new Error(`branch is not active: ${branch}`);
   }
 };
-
-const emptyEntityDocument = (): EntityDocument => ({});
 
 const decodeStoredDocument = (data: string | null): EntityDocument => {
   const parsed = decodeMemoryBoundary(data ?? "null");

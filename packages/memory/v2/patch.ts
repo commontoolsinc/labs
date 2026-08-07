@@ -7,7 +7,7 @@ import {
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isInstance, isObject } from "@commonfabric/utils/types";
-import type { PatchOp } from "../v2.ts";
+import type { EntityDocument, PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
 
 type PatchObject = Record<string, FabricValue>;
@@ -55,6 +55,26 @@ const cloneValue = (value: FabricValue): FabricValue => cloneIfNecessary(value);
  * `applyPatch` boundary, so callers can rely on the return value being deeply
  * frozen.
  */
+/**
+ * The base an absent document's patches replay over. Shared by the
+ * engine's revision reconstruction and the client's pending-layer replay,
+ * so both sides fold a document's very first patches identically.
+ */
+export const emptyEntityDocument = (): EntityDocument => ({});
+
+/**
+ * `applyPatch` over a possibly-absent document: an absent base normalizes
+ * to the empty envelope. The one entry point for "replay these ops over
+ * whatever this document currently is" — server-side reconstruction and
+ * client-side pending replay share it rather than each knowing the
+ * absent-base rule.
+ */
+export const applyPatchToDocument = (
+  base: EntityDocument | undefined,
+  ops: PatchOp[],
+): EntityDocument =>
+  applyPatch(base ?? emptyEntityDocument(), ops) as EntityDocument;
+
 export const applyPatch = (
   state: FabricValue,
   ops: PatchOp[],
