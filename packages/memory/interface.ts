@@ -1,42 +1,29 @@
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import type { Signer as IdentitySigner } from "@commonfabric/identity";
 import type { ClientCommit } from "./v2.ts";
 
+export type {
+  AsBytes,
+  AuthorizationError,
+  Principal,
+  Signature,
+  Verifier,
+} from "@commonfabric/identity";
+
 /**
- * Some principal identified via DID identifier.
+ * The signing half of the principal contract as the memory protocol uses it:
+ * an {@link IdentitySigner} without the `serialize()` method that hands back
+ * raw key material.
  */
-export type Principal<ID extends DID = DID> = {
-  did(): ID;
-};
-
-export interface Verifier<ID extends DID = DID> extends Principal<ID> {
-  verify(authorization: {
-    payload: Uint8Array;
-    signature: Uint8Array;
-  }): AwaitResult<Unit, AuthorizationError>;
-}
-
-export interface Signer<ID extends DID = DID> extends Principal<ID> {
-  sign<T>(payload: AsBytes<T>): AwaitResult<Signature<T>, Error>;
-
-  verifier: Verifier<ID>;
-}
-
-export interface AsBytes<T> extends Uint8Array {
-  valueOf(): this & AsBytes<T>;
-}
+export type Signer<ID extends DID = DID> = Omit<
+  IdentitySigner<ID>,
+  "serialize"
+>;
 
 export type AsString<T> = string & {
   valueOf(): AsString<T>;
 };
-
-export interface Signature<Payload> extends Uint8Array {
-  valueOf(): this & Signature<Payload>;
-}
-
-export interface AuthorizationError extends Error {
-  name: "AuthorizationError";
-}
 
 /**
  * Unique identifier for the memory space.
