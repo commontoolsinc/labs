@@ -287,26 +287,75 @@ const toModelAttempt = (
 });
 
 /**
- * Conservative serialized-input size at which model-budget discovery starts.
+ * Conservative text-byte footprint at which model-budget discovery starts.
  *
  * This is deliberately measured after Responses conversion rather than from
  * transcript text. The wire input also carries tool-call arguments, images,
  * encrypted continuation items, and tool schemas, any of which can dominate
- * the token count. UTF-8 bytes avoid pretending to know the model tokenizer;
+ * the token count. UTF-8 bytes also vary less by script than characters do;
  * the floor only decides when one cached registry request becomes worthwhile.
  */
 const BUDGET_DISCOVERY_FLOOR_BYTES = 200_000;
 
-const renderedResponsesInputByteLength = (
+/**
+ * Counts at most `limit` UTF-8 bytes without allocating an encoded copy.
+ *
+ * Unpaired surrogates follow `TextEncoder`: each becomes the three-byte
+ * replacement character. Every UTF-16 code unit contributes at least one
+ * byte, so a string already as long as the remaining limit can stop at once.
+ */
+const utf8ByteLengthUpTo = (text: string, limit: number): number => {
+  if (limit <= 0 || text.length === 0) return 0;
+  if (text.length >= limit) return limit;
+  let bytes = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const codePoint = text.codePointAt(index)!;
+    if (codePoint <= 0x7f) {
+      bytes += 1;
+    } else if (codePoint <= 0x7ff) {
+      bytes += 2;
+    } else if (codePoint <= 0xffff) {
+      bytes += 3;
+    } else {
+      bytes += 4;
+      index += 1;
+    }
+    if (bytes >= limit) return limit;
+  }
+  return bytes;
+};
+
+/**
+ * Walks the converted value graph rather than serializing it solely to
+ * measure it. String values carry messages, tool arguments, image data, and
+ * continuations; property names are included because schema keys are model
+ * input too. The walk stops as soon as discovery becomes worthwhile.
+ */
+const responsesInputReachesDiscoveryFloor = (
   instructions: string | undefined,
   input: readonly ResponsesInputItem[],
   tools: readonly ResponsesInputItem[],
-): number =>
-  new TextEncoder().encode(JSON.stringify({
-    ...(instructions !== undefined ? { instructions } : {}),
-    input,
-    ...(tools.length > 0 ? { tools } : {}),
-  })).byteLength;
+): boolean => {
+  let remaining = BUDGET_DISCOVERY_FLOOR_BYTES;
+  const pending: unknown[] = [input, tools];
+  if (instructions !== undefined) pending.push(instructions);
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (typeof value === "string") {
+      remaining -= utf8ByteLengthUpTo(value, remaining);
+    } else if (Array.isArray(value)) {
+      for (const item of value) pending.push(item);
+    } else if (typeof value === "object" && value !== null) {
+      for (const [key, child] of Object.entries(value)) {
+        remaining -= utf8ByteLengthUpTo(key, remaining);
+        if (remaining <= 0) return true;
+        pending.push(child);
+      }
+    }
+    if (remaining <= 0) return true;
+  }
+  return false;
+};
 
 export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
   readonly providerId = OPENAI_COMPATIBLE_GATEWAY_PROVIDER_ID;
@@ -352,8 +401,7 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
     }
     if (
       !this.#compactThresholds.has(request.model) &&
-      renderedResponsesInputByteLength(instructions, input, tools) >=
-        BUDGET_DISCOVERY_FLOOR_BYTES
+      responsesInputReachesDiscoveryFloor(instructions, input, tools)
     ) {
       await this.#ensureBudgets(request.signal);
     }

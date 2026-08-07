@@ -351,6 +351,30 @@ Deno.test("the default accounts for the rendered Responses input", async () => {
   }]);
 });
 
+Deno.test("multibyte input uses the UTF-8 byte discovery floor", async () => {
+  const captured: Captured[] = [];
+  const client = clientWith(captured, [
+    registry([{
+      id: MODEL,
+      capabilities: { contextWindow: 1_050_000, maxOutputTokens: 128_000 },
+    }]),
+    completed([]),
+  ]);
+
+  // This is far below 200,000 JavaScript characters but above 200,000 UTF-8
+  // bytes. Token-dense scripts need discovery before a character floor would
+  // fire or the smallest model's 204,000-token guard could already be late.
+  await client.complete(turn({
+    transcript: [{ role: "user", content: "界".repeat(70_000) }],
+  }));
+
+  assertEquals(captured[0].url, `${GATEWAY}/v1/models`);
+  assertEquals(captured[1].body.context_management, [{
+    type: "compaction",
+    compact_threshold: 691_500,
+  }]);
+});
+
 Deno.test("successful discovery is attempted once, then reused", async () => {
   const captured: Captured[] = [];
   const client = clientWith(captured, [
@@ -366,6 +390,26 @@ Deno.test("successful discovery is attempted once, then reused", async () => {
 
   const listCalls = captured.filter((c) => c.url.endsWith("/v1/models")).length;
   assertEquals(listCalls, 1, "discovery must not repeat per turn");
+});
+
+Deno.test("successful discovery is cached for an unlisted model", async () => {
+  const captured: Captured[] = [];
+  const client = clientWith(captured, [
+    registry([{
+      id: "gpt-another-model",
+      capabilities: { contextWindow: 400_000, maxOutputTokens: 128_000 },
+    }]),
+    completed([]),
+    completed([]),
+  ]);
+
+  await client.complete(turn({ transcript: toolHeavyTranscript() }));
+  await client.complete(turn({ transcript: toolHeavyTranscript() }));
+
+  const listCalls = captured.filter((c) => c.url.endsWith("/v1/models")).length;
+  assertEquals(listCalls, 1, "successful discovery must stay cached");
+  assertEquals(captured[1].body.context_management, undefined);
+  assertEquals(captured[2].body.context_management, undefined);
 });
 
 Deno.test("small turns pay no discovery round trip", async () => {
