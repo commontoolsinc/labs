@@ -1,0 +1,109 @@
+# Measures the lunch-poll card-wedge flake rate on CI runners, on both sides
+# of the list-coordinator setup-debt fix: one side builds and tests a main
+# snapshot from before the fix, the other this pull request's merge ref. Each
+# soak shard runs the lunch-poll browser test repeatedly against its side's
+# toolshed and classifies every failure by signature, so the pre-fix side is
+# the positive control (it should produce card wedges) and the current side
+# the measurement (it should produce none). Experiment only — this workflow
+# leaves with its pull request and must not land.
+
+name: Lunch Poll Flake A/B (experiment)
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: "Build toolshed (${{ matrix.side }})"
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [pre-fix, current]
+    steps:
+      - name: 📥 Checkout side ref
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.side == 'pre-fix' && '8b7a2a067af27b6751f3be7bc8740d4d33ce6e2b' || github.sha }}
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: 🏗️ Build toolshed binary
+        run: deno task build-binaries toolshed
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+
+      - name: 📤 Upload toolshed binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: toolshed-${{ matrix.side }}
+          path: ./dist/toolshed
+          if-no-files-found: error
+
+  soak:
+    name: "Soak (${{ matrix.side }} ${{ matrix.shard }}/4)"
+    needs: build
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [pre-fix, current]
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: 📥 Checkout side ref
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.side == 'pre-fix' && '8b7a2a067af27b6751f3be7bc8740d4d33ce6e2b' || github.sha }}
+
+      - name: 📥 Checkout experiment driver
+        uses: actions/checkout@v7
+        with:
+          path: _experiment
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: 📥 Download toolshed binary
+        uses: actions/download-artifact@v8
+        with:
+          name: toolshed-${{ matrix.side }}
+          path: common-binaries
+
+      # For Astral
+      # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
+      - name: 🛡️ Disable AppArmor restriction for browser tests
+        shell: bash
+        run: |
+          sysctl_path=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -e "$sysctl_path" ]]; then
+            printf '0\n' | sudo tee "$sysctl_path" >/dev/null
+          else
+            echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
+          fi
+
+      - name: 🔁 Run the soak
+        env:
+          SIDE: ${{ matrix.side }}
+          SHARD: ${{ matrix.shard }}
+          RUNS: "6"
+          TOOLSHED_BINARY: ${{ github.workspace }}/common-binaries/toolshed
+          RESULT_DIR: flake-ab-results
+        run: bash _experiment/tasks/lunch-poll-flake-ab.sh
+
+      - name: 📤 Upload failure logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: flake-ab-${{ matrix.side }}-${{ matrix.shard }}
+          path: flake-ab-results/
+          if-no-files-found: ignore
