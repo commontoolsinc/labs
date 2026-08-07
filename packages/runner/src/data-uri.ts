@@ -29,7 +29,6 @@ import {
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
-import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { type Cell, isCell } from "./cell.ts";
 import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
 import {
@@ -142,8 +141,9 @@ export function dataUriFromValueWithResolvedLinks(
  * naming a document in a space.
  *
  * A `FabricPrimitive` comes back as the same instance: a leaf holds no link to
- * inline. A `FabricInstance` is refused, since passing one through would leave
- * a link inside it un-inlined.
+ * inline. A `FabricInstance` does too, which leaves a link inside it
+ * un-inlined -- a real gap, and one this walk cannot answer by refusing; see
+ * the branch that returns it.
  *
  * @param value - The value to find and inline data: URI links in.
  * @returns The value with any data: URI links inlined.
@@ -224,22 +224,27 @@ export function findAndInlineDataUriLinks(value: any): any {
     // than an omission.
     return value;
   } else if (value instanceof FabricInstance) {
-    // NOT answered by passing through. An instance's state can carry a `data:`
-    // URI link -- a `FabricError`'s extras bag, for one -- and this walk exists
-    // to inline exactly those. Handing the value back whole hands it back
-    // _untransformed_, so the link survives as a link and the walk's purpose is
-    // defeated for everything inside the wrapper. It refuses rather than doing
-    // that quietly.
+    // Passed through, and unlike the sibling walks elsewhere in the runner this
+    // one does _not_ refuse. The gap is real -- an instance's state can carry a
+    // `data:` URI link, a `FabricError`'s extras bag being the obvious case,
+    // and passing the value through hands it back with that link un-inlined.
     //
-    // Nothing reaches this in production today, de facto rather than by
-    // construction: a `FabricError` is ungated and exposed to pattern authors,
-    // so what keeps this safe is that nothing yet routes one through a `data:`
-    // URI.
+    // A refusal here would nonetheless be wrong, because this walk is not a
+    // `data:` URI operation a caller opts into. `setRawUntyped()` runs it over
+    // every raw write, including every action result (`runner.ts`), so refusing
+    // would make a `FabricError` unstorable by that route -- and one is stored
+    // that way today, by the fetch builtins. Refusing is only ever right where
+    // nothing in production arrives; here something does.
     //
-    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
-    // at which point this becomes a walk rather than a refusal -- the same gap
-    // marked at the sibling walk in `dataUriFromValueWithResolvedLinks()`.
-    refuseFabricInstance(value, "when inlining `data:` URI links");
+    // Nor can the refusal be narrowed to instances that actually carry a
+    // `data:` URI link, which is the shape it would need: deciding that means
+    // reading the instance's codec contents, which is the very traversal whose
+    // absence causes the gap.
+    //
+    // TODO(danfuzz): descend by codec-mediated traversal into instance state.
+    // That closes this without a refusal, and is the same gap marked at the
+    // sibling walk in `dataUriFromValueWithResolvedLinks()`.
+    return value;
   } else if (isRecord(value)) {
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {
