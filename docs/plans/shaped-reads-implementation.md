@@ -153,9 +153,13 @@ is the same failure this plan has already had to fix twice — a missing `type`
 and an untyped `items` root each returned nothing and reported nothing.
 
 *Exit:* an unrecognized key is refused and the message names it; a tolerated
-keyword is accepted and ignored; a honored keyword is unaffected. This item adds
-expectations rather than moving them — nothing that passed before it may fail
-after, since every key that works today is either honored or tolerated.
+keyword is accepted and ignored; an honored keyword is unaffected.
+
+This one does change behavior, and the change is the point. No key that is
+honored or legitimately carried changes meaning. But a command that ran only
+because a key was silently dropped now fails loudly — `--select` is unaffected,
+while `--schema '{"propertys":{…}}'` exits zero with `{}` today and is refused
+after. Counting that as a regression would be counting the fix as the defect.
 
 ## Stage 2 — addresses in results
 
