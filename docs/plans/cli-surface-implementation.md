@@ -5,11 +5,17 @@ like and lays out seven steps to get there. Steps 1–3 are the read layer, and
 [shaped reads and verb results](shaped-reads-implementation.md) builds them.
 This plan is steps 4–7: the part that changes what a caller types.
 
-The split is deliberate, though not absolute. The read layer is additive with
-one exception it owns and sequences itself: scoping invocation ids to a session
-makes `--invocation` without one an error, a spelling that works today and that
-[Verbs over the CLI](../common/verbs-over-the-cli.md) teaches. That is one
-change, landing alone, ahead of anything that publishes an address. This arc
+The split is deliberate, though not absolute. The read layer breaks two things,
+both of which it owns and sequences itself. Scoping invocation ids to a session
+makes `--invocation` without one an error — a spelling that works today and that
+[Verbs over the CLI](../common/verbs-over-the-cli.md) teaches — and that lands
+alone, ahead of anything that publishes an address. Checking projection keys
+against an allowlist refuses a schema carrying a key that was silently dropped
+before, which is a command that exited zero and now does not.
+
+The second is a different kind of break from anything here: it fails a caller
+who was already getting the wrong answer, and the failure is the repair. This
+arc
 renames, aliases and merges, so its risk is different in kind — entirely in what
 breaks for someone who already learned the current spelling. The two want
 different sequencing, different tests, and different appetites for landing
