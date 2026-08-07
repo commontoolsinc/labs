@@ -35,6 +35,8 @@ export interface ChannelSummary {
   revoked?: { at: string; by: string };
   revocations?: { at: string; by: string }[];
   lastSeenAt: string | null;
+  /** The generation this summary describes; `revoke` must name it. */
+  revision: number;
 }
 
 export interface MintedChannel {
@@ -159,7 +161,7 @@ export function rotateChannel(
 
 export function revokeChannel(
   config: ChannelConfig,
-  input: { id: string; requestId: string },
+  input: { id: string; requestId: string; expectedRevision: number },
 ): Promise<{ id: string; revokedAt: string }> {
   return call<{ id: string; revokedAt: string }>(config, "revoke", input);
 }

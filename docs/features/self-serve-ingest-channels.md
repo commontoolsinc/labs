@@ -307,20 +307,35 @@ Four hazards that this change introduces or amplifies, each with its fix:
    persisted beside the registration; a repeat is a 409 no-op that returns no
    secret. Durable, no in-memory cache, no timer.
 
-   Revoke needs the same id for a different reason: it returns no secret, but
-   its signed body names only the channel, so a captured revoke stays a working
-   weapon for its whole proof window. Replayed *after* the owner notices the
-   outage and re-pairs the device, it kills the freshly minted credential — the
-   attacker gets a second kill out of one captured request. The subtle half is
-   the already-revoked leg: answering a replay with a bare 200 spends nothing,
-   so the attacker just waits for the re-mint and fires again. Revoke therefore
-   consumes its id even on the no-op, writing the registration unchanged for no
-   reason other than to spend it.
-
    In every case the id is consumed in the **same transaction** as the write it
    guards. Claiming it beforehand burns the id whenever the write then fails,
    which turns the idempotency key into the one thing that does not survive the
    failure it exists to make retryable.
+
+   **Revoke needs more than an id, and this is worth being precise about.** A
+   request id proves only "this exact request was already *delivered*". That
+   covers a captured revoke that was let through and then replayed — including
+   the subtle leg where the replay lands on an already-revoked channel, which
+   is why revoke spends its id even on that no-op rather than answering with a
+   free 200 the attacker could hold until the owner re-mints.
+
+   It does nothing for a request that is captured and **withheld**. An id that
+   was never spent looks perfectly fresh, so the request stays a live weapon
+   for the rest of the proof window and lands on whatever credential exists
+   when it is finally let through. The realistic shape is not exotic: swallow
+   the owner's revoke, let them conclude it failed and retry (a fresh id), let
+   them re-pair the device — then deliver the original. The newly paired device
+   dies.
+
+   So revoke also requires **`expectedRevision`**: the generation the caller
+   looked at, read from `list`, part of the signed body, and enforced as the
+   optimistic precondition on the write. A withheld request names a generation
+   that no longer exists, so it is refused. This is what makes revoke
+   credential-bound rather than merely at-most-once; the request id remains for
+   the delivered-and-replayed case. The cost is that `cf ingest revoke` reads
+   before it writes, and that a channel which moved in between produces a
+   conflict the caller must re-issue against — which is the correct outcome,
+   since the thing being revoked would not be the thing that was seen.
 2. **Existence oracle.** "Deployment does not host this space" and "you are not
    the owner" must be **one indistinguishable 403**. Otherwise, combined with
    derivable space DIDs, a dictionary of space names enumerates the deployment's
@@ -578,18 +593,49 @@ Durable bookkeeping is bounded rather than unbounded, on four axes:
   flat index is still read, so nothing provisioned before sharding goes
   missing.
 
-Backing all of it is a **lifetime per-owner creation quota**. Everything a mint
+Backing all of it are **two lifetime quotas, per owner and per space**. Everything a mint
 writes outlives revocation deliberately — the registration cell so a retired
 token can be told apart from an unknown one, the audit entry so the sweep can
 still find it — so mint → revoke → mint frees a live slot but frees no storage.
 Liveness was never the right bound on state one authenticated user can create.
-The quota is a monotone counter, not a list: the thing bounding unbounded growth
-must not itself be an unbounded array. It is generous (a runaway stop, not a
-product limit), it is not refunded by revoking, and its refusal says so rather
-than sending the user round a loop that cannot succeed.
+Each is a monotone counter, not a list: the thing bounding unbounded growth must
+not itself be an unbounded array. Both are generous (runaway stops, not product
+limits), neither is refunded by revoking, and their refusals say so rather than
+sending the user round a loop that cannot succeed.
+
+**Why two.** A per-owner quota bounds a *keypair*, and keypairs are free. One
+person with one space can grant `OWNER` to as many fresh DIDs as they like and
+spend a new allowance from each — and every new DID also mints its own
+permanent `by-owner`, `lifetime` and `requests` cells, so the mechanism
+introduced to bound growth would itself be an unbounded cell family in the same
+dimension. The rate limiter does not backstop this either: it is keyed by client
+address, and this document already names key churn as a reset primitive for it.
+
+The space is what a caller cannot mint for free *within this feature's reach*: a
+channel must name a space the caller holds a recorded `OWNER` grant on. Metering
+the space closes key churn, and closes the per-key cell family with it, since a
+refused mint writes nothing at all. Creating unlimited *spaces* remains an axis —
+but every space is already a memory store the deployment hosts, so that is the
+deployment's admission control, not this feature's.
+
+The owner meter charges **acquisition**, not creation: taking over a revoked
+channel that belonged to someone else adds a channel to the acquirer without
+creating one, and a meter read as a record of what an identity holds must not
+sit at zero while it holds three. The space meter charges creation only, since a
+takeover adds no new registration to the space.
 
 ## Known limits
 
+- **A revoked channel drops out of both list views until it is re-minted.** The
+  owner and space indexes hold live ids only — that is what makes the live cap
+  countable and keeps them bounded — so `cf ingest ls` shows a revoked channel
+  nothing more. The revocation *trail* is still readable: it reappears as
+  `revocations` once the channel is re-minted, and the operator audit
+  (`audit-ingest-channels`) sees it throughout. But an owner who revokes and
+  walks away cannot list what they revoked, which is weaker than "the trail
+  survives" suggests. A scoped list at least no longer answers such an owner
+  with a flat denial — that gate now consults the per-space lifetime counter,
+  which does not decrease.
 - **The 403 denial is opaque by design, which makes support harder, not
   easier.** Five states collapse into one message. The most common real cause is
   a legitimate owner signing with the wrong key — a passkey shell login owns the

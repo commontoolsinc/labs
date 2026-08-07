@@ -167,6 +167,18 @@ export class LifetimeChannelCapError extends Error {
   }
 }
 
+/**
+ * Thrown when a SPACE has had its lifetime allowance of channels created
+ * against it. This is the bound that survives key churn: a per-owner quota
+ * bounds a keypair, and keypairs are free.
+ */
+export class SpaceLifetimeChannelCapError extends Error {
+  constructor(readonly created: number) {
+    super(`space has had ${created} channels created against it`);
+    this.name = "SpaceLifetimeChannelCapError";
+  }
+}
+
 /** Bound on {@link IngestRegistration.revocations}; oldest entries drop. */
 export const MAX_REVOCATION_HISTORY = 10;
 
@@ -366,6 +378,35 @@ const lifetimeCountCell = (
   runtime.getCell<number>(
     serviceSpace as MemorySpace,
     `cf:ingest:lifetime:${owner}`,
+    CountSchema,
+  );
+
+// The SAME meter, per target space.
+//
+// A per-owner quota bounds a KEY, not a person: a DID is a freshly generated
+// keypair, so one human with one space can grant OWNER to as many keys as they
+// like and spend a fresh allowance from each. Worse, every new owner DID mints
+// its own permanent `by-owner`, `lifetime` and `requests` cells — so the
+// mechanism introduced to bound growth would itself be an unbounded cell family
+// in the same dimension.
+//
+// The space is what an attacker cannot mint for free WITHIN this feature's
+// reach: a channel must name a space the caller holds an explicit OWNER grant
+// on, and that grant is recorded in the space's own ACL. Metering the space
+// therefore bounds the whole per-key cell family too — once the space's
+// allowance is gone, a fresh key creates nothing, so it writes no cells.
+//
+// Creating unlimited SPACES is a real remaining axis, but it is the
+// deployment's admission-control problem — every space is already a memory
+// store it hosts — and not one this feature can or should solve.
+const spaceLifetimeCountCell = (
+  runtime: Runtime,
+  serviceSpace: string,
+  space: string,
+) =>
+  runtime.getCell<number>(
+    serviceSpace as MemorySpace,
+    `cf:ingest:lifetime-space:${space}`,
     CountSchema,
   );
 
@@ -578,13 +619,25 @@ export async function getRegistrationIndex(
   return [...seen];
 }
 
-/** How many channels this owner has ever created (the lifetime quota meter). */
+/** How many channels this owner has ever taken on (the lifetime quota meter). */
 export async function getLifetimeChannelCount(
   runtime: Runtime,
   serviceSpace: string,
   owner: string,
 ): Promise<number> {
   const cell = lifetimeCountCell(runtime, serviceSpace, owner);
+  await cell.sync();
+  await runtime.storageManager.synced();
+  return (cell.get() as number | undefined) ?? 0;
+}
+
+/** How many channels have ever been created against this space. */
+export async function getSpaceLifetimeChannelCount(
+  runtime: Runtime,
+  serviceSpace: string,
+  space: string,
+): Promise<number> {
+  const cell = spaceLifetimeCountCell(runtime, serviceSpace, space);
   await cell.sync();
   await runtime.storageManager.synced();
   return (cell.get() as number | undefined) ?? 0;
@@ -629,7 +682,7 @@ export async function saveRegistration(
    * the limit hold. Omitted for operator scripts, which are not the thing being
    * bounded.
    */
-  limits?: { live?: number; lifetime?: number },
+  limits?: { live?: number; lifetime?: number; spaceLifetime?: number },
 ): Promise<void> {
   // Every index is written with the registration, and none of them is
   // best-effort.
@@ -669,6 +722,11 @@ export async function saveRegistration(
   const lifetimeCell = registration.owner === undefined
     ? undefined
     : lifetimeCountCell(runtime, serviceSpace, registration.owner);
+  const spaceLifetimeCell = spaceLifetimeCountCell(
+    runtime,
+    serviceSpace,
+    registration.space,
+  );
   const indexes = [
     spaceIndexCell(runtime, serviceSpace, registration.space),
     auditIndex,
@@ -681,6 +739,7 @@ export async function saveRegistration(
       shardList,
       ...(claimsCell ? [claimsCell] : []),
       ...(lifetimeCell ? [lifetimeCell] : []),
+      spaceLifetimeCell,
     ]
   ) {
     await c.sync();
@@ -692,12 +751,14 @@ export async function saveRegistration(
   let claimsFull = false;
   let overLive: number | undefined;
   let overLifetime: number | undefined;
+  let overSpaceLifetime: number | undefined;
   const result = await runtime.editWithRetry((tx) => {
     conflicted = false;
     claimedBy = undefined;
     claimsFull = false;
     overLive = undefined;
     overLifetime = undefined;
+    overSpaceLifetime = undefined;
 
     // EVERY check runs before ANY write. `editWithRetry` commits whatever the
     // closure did to the transaction, so a write followed by an early return
@@ -746,6 +807,17 @@ export async function saveRegistration(
     // these, so a re-mint or a rotate of an existing id is free.
     const creating = current === undefined;
 
+    // What the OWNER meter charges: bringing a channel under this identity's
+    // control. Not just creation — a takeover (re-minting a revoked channel
+    // that belonged to someone else) leaves `current` defined, so charging only
+    // creation would let an identity accumulate channels with its meter pinned
+    // at zero, and the meter is read as a forensic record of what an identity
+    // holds. The SPACE meter charges creation only, since a takeover adds no
+    // new registration to the space.
+    const acquiring = creating ||
+      (registration.owner !== undefined &&
+        current?.owner !== registration.owner);
+
     if (limits !== undefined && ownerIndex !== undefined) {
       // The owner index holds LIVE ids only, so its length IS the live count —
       // no per-id resolve, and no window between counting and committing.
@@ -759,7 +831,7 @@ export async function saveRegistration(
         overLive = ownedLive.length;
         return;
       }
-      if (limits.lifetime !== undefined && creating && lifetimeCell) {
+      if (limits.lifetime !== undefined && acquiring && lifetimeCell) {
         const ever = (lifetimeCell.withTx(tx).get() as number | undefined) ?? 0;
         if (ever >= limits.lifetime) {
           overLifetime = ever;
@@ -768,13 +840,30 @@ export async function saveRegistration(
       }
     }
 
+    // Checked even when the registration carries no owner, and outside the
+    // block above: this is the bound that survives key churn, so it must not
+    // depend on there being an owner index to read.
+    if (limits?.spaceLifetime !== undefined && creating) {
+      const ever = (spaceLifetimeCell.withTx(tx).get() as number | undefined) ??
+        0;
+      if (ever >= limits.spaceLifetime) {
+        overSpaceLifetime = ever;
+        return;
+      }
+    }
+
     if (pendingClaim !== undefined && claimsCell !== undefined) {
       claimsCell.withTx(tx).set(pendingClaim);
     }
 
-    if (creating && lifetimeCell !== undefined) {
+    if (acquiring && lifetimeCell !== undefined) {
       const ever = (lifetimeCell.withTx(tx).get() as number | undefined) ?? 0;
       lifetimeCell.withTx(tx).set(ever + 1);
+    }
+
+    if (creating) {
+      const bound = spaceLifetimeCell.withTx(tx);
+      bound.set(((bound.get() as number | undefined) ?? 0) + 1);
     }
 
     // Register the month shard in the directory the sweep enumerates. A shard
@@ -814,6 +903,9 @@ export async function saveRegistration(
   if (overLive !== undefined) throw new LiveChannelCapError(overLive);
   if (overLifetime !== undefined) {
     throw new LifetimeChannelCapError(overLifetime);
+  }
+  if (overSpaceLifetime !== undefined) {
+    throw new SpaceLifetimeChannelCapError(overSpaceLifetime);
   }
   if (conflicted) throw new RegistrationConflictError();
 }

@@ -71,6 +71,7 @@ describe("Ingest channels route (authenticated)", () => {
       const res = await signedRequest(verb, {
         id: "ing_whatever",
         requestId: crypto.randomUUID(),
+        ...(verb === "revoke" ? { expectedRevision: 1 } : {}),
       });
       expect(res.status).not.toBe(401);
       expect([403, 502]).toContain(res.status);
@@ -81,7 +82,21 @@ describe("Ingest channels route (authenticated)", () => {
   // of what was signed. If the field were optional, a captured revoke would
   // carry no id to spend and the middle box could add its own.
   it("rejects a signed revoke that omits requestId", async () => {
-    const res = await signedRequest("revoke", { id: "ing_whatever" });
+    const res = await signedRequest("revoke", {
+      id: "ing_whatever",
+      expectedRevision: 1,
+    });
+    expect(res.status).toBe(422);
+  });
+
+  // The generation binding is the half that stops a captured-and-withheld
+  // revoke, so it has to be part of what was signed rather than something a
+  // middle box can supply or drop.
+  it("rejects a signed revoke that omits expectedRevision", async () => {
+    const res = await signedRequest("revoke", {
+      id: "ing_whatever",
+      requestId: crypto.randomUUID(),
+    });
     expect(res.status).toBe(422);
   });
 
