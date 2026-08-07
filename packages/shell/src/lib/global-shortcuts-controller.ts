@@ -41,7 +41,7 @@ export class GlobalShortcutsController implements ReactiveController {
   #onKeyDown = (e: KeyboardEvent) => {
     if (e.defaultPrevented) return;
     if (e.repeat) return;
-    if (isEditableTarget(e)) return;
+    if (targetsTextEntry(e)) return;
 
     const mod = this.#usesCommandKey
       ? e.metaKey && !e.ctrlKey
@@ -69,10 +69,10 @@ export class GlobalShortcutsController implements ReactiveController {
 // The root of the space the view addresses, whether it addresses that space by
 // name or by DID. A view that names no space at all is the built-in home view,
 // which falls back to the common knowledge space.
-function spaceOf(app: AppState | undefined): NavigationCommand {
-  const view = app?.view;
-  if (view && "spaceName" in view) return { spaceName: view.spaceName };
-  if (view && "spaceDid" in view) return { spaceDid: view.spaceDid };
+function spaceOf(app: AppState): NavigationCommand {
+  const view = app.view;
+  if ("spaceName" in view) return { spaceName: view.spaceName };
+  if ("spaceDid" in view) return { spaceDid: view.spaceDid };
   return { spaceName: "common-knowledge" };
 }
 
@@ -80,7 +80,7 @@ function spaceOf(app: AppState | undefined): NavigationCommand {
 // shell's views render into shadow roots, and an event that crosses a shadow
 // boundary reports the shadow host as its target, so the composed path is what
 // names the element holding focus.
-function isEditableTarget(e: KeyboardEvent): boolean {
+function targetsTextEntry(e: KeyboardEvent): boolean {
   for (const node of e.composedPath()) {
     const element = node as HTMLElement;
     if (typeof element.tagName !== "string") continue;
