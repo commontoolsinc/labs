@@ -8,7 +8,7 @@ import env from "@/env.ts";
 import { Identity } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { JsonEncodingContext } from "@commonfabric/data-model/codec-json";
+import { JsonCodec } from "@commonfabric/data-model/codec-json";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import type { URI } from "@commonfabric/memory/interface";
 import { Runtime } from "@commonfabric/runner";
@@ -25,7 +25,7 @@ const app = createApp()
 const encodeBlobPayload = (payload: { type: string; body: FabricBytes }) =>
   encodeMemoryBoundary(payload);
 
-const blobUploadEncoding = new JsonEncodingContext();
+const blobUploadCodec = new JsonCodec();
 
 describe("Blob Routes", () => {
   let server: Deno.HttpServer;
@@ -108,7 +108,7 @@ describe("Blob Routes", () => {
     const post = await app.request(`/${identity.did()}/blobs/image.gif`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: blobUploadEncoding.encode(contents),
+      body: blobUploadCodec.encode(contents),
     });
     expect(post.status).toBe(201);
     expect(await post.json()).toEqual({
