@@ -212,9 +212,9 @@ Landing order, smallest and safest first. Each is its own commit/PR.
     precisely because the gated fetch already spaces every attempt on the one-
     second grid — the explicit delay is redundant with that settlement. The
     client helpers now carry this guard (`airtable-client`, `gmail-send-client`,
-    `google-docs-client`, `google-docs-comment-orchestrator`, and the
-    `importer-prompt` template mirror `calendar-write-client`'s existing
-    `waitIfTimersAreAvailable`). Pinned by `runner/test/sandbox-timers.test.ts`
+    `google-docs-client`, and `google-docs-comment-orchestrator` mirror
+    `calendar-write-client`'s existing `waitIfTimersAreAvailable`). Pinned by
+    `runner/test/sandbox-timers.test.ts`
     (the compartment omits timers; a raw `setTimeout` call throws in it; the
     guard resolves immediately).
   - **Rejected alternative — a coarse sandbox `setTimeout`.** Endowing the

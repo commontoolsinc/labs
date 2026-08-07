@@ -16,8 +16,8 @@ import {
 import { createModuleCompartmentGlobals } from "../src/sandbox/compartment-globals.ts";
 
 // The exact backoff guard the API clients use (airtable-client, gmail-send-client,
-// google-docs-client, google-docs-comment-orchestrator, and the importer-prompt
-// template). Evaluated verbatim inside a real compartment.
+// google-docs-client, and google-docs-comment-orchestrator). Evaluated verbatim
+// inside a real compartment.
 const GUARDED_BACKOFF_SRC = `async function () {
   const sleep = (ms) => {
     if (ms <= 0) return Promise.resolve();
