@@ -1343,6 +1343,9 @@ export class CellImpl<T extends FabricValue>
     if ("error" in rowGate) throw new TypeError(rowGate.error);
     if (rowGate.policies !== undefined && rowGate.policies.length > 0) {
       this.tx.markCfcRelevant(`sqlite-row-label:${handle.id}`);
+      // TODO(danfuzz): `JSON.stringify` renders a `FabricPrimitive` bind
+      // param (a `FabricBytes` blob, say) as `{}`, so two requests differing
+      // only in such a param collapse onto one policy-input identity here.
       recordSinkRequestPolicyInput(
         this.tx,
         `sqlite:${handle.id}`,
@@ -2023,6 +2026,13 @@ export class CellImpl<T extends FabricValue>
       throw new Error("Can't remove from non-array value");
     }
     const array = got as ElemT[];
+    // TODO(danfuzz): `typeof ref === "object"` routes a `FabricPrimitive`
+    // (or `FabricInstance`) ref to `areLinksSame`, which parses both
+    // operands as links and answers `false` when either is not one — so a
+    // fabric-valued ref matches only by reference identity, never by value,
+    // and the call otherwise silently no-ops. The sibling `removeByValue`
+    // has the right shape: link comparison for cells, `valueEqual` (which
+    // has a fabric arm) for everything else.
     const index = typeof ref === "object"
       ? array.findIndex((item) =>
         areLinksSame(
@@ -2057,6 +2067,9 @@ export class CellImpl<T extends FabricValue>
       throw new Error("Can't remove from non-array value");
     }
     const array = got as ElemT[];
+    // TODO(danfuzz): same gap as `remove()` above — a fabric-valued `ref`
+    // reaches `areLinksSame` and matches only by reference identity, never
+    // by value, so the call otherwise silently no-ops.
     // Cast needed: TS can't prove ElemT[] reconstitutes to T
     const newArray = array.filter((item) =>
       typeof ref === "object"
@@ -3095,6 +3108,14 @@ function sinkHelper(
  * This is used by pull() to ensure all nested values are read,
  * which registers them as dependencies for pull-based scheduling.
  * Works with query result proxies which trigger reads on property access.
+ *
+ * TODO(danfuzz): A `FabricInstance` passes the `typeof` gate but has no
+ * enumerable own properties, so the `for..in` walk ends at it without
+ * touching its codec contents: a link nested inside one (a `FabricError`
+ * `cause`, say — live traffic via the fetch builtins) is never read, so
+ * `pull()` neither registers it as a dependency nor syncs it, and a sink
+ * never re-fires on its change. A `FabricPrimitive` ends the walk too, which
+ * is correct — it is a leaf.
  */
 function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
   if (value === null || value === undefined) return;

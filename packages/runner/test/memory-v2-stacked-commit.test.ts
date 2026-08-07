@@ -605,6 +605,7 @@ const createHarness = (
         sqliteOps?: readonly SqliteOperation[];
       },
       source?: unknown,
+      options?: { resolveAt?: "coverage" | "verdict" },
     ): Promise<
       { ok: Record<PropertyKey, never>; error?: undefined } | {
         ok?: undefined;
@@ -641,18 +642,27 @@ const createHarness = (
     source?: unknown,
   ): { localSeq: number; promise: Promise<any> } => {
     const localSeq = nextLocalSeq++;
-    const promise = replica.commitNative({
-      operations: operations.map((operation) =>
-        operation.op === "delete"
-          ? { op: "delete", id: operation.id, type: DOCUMENT_MIME }
-          : {
-            op: "set",
-            id: operation.id,
-            type: DOCUMENT_MIME,
-            value: { value: operation.value },
-          }
-      ),
-    }, source);
+    // resolveAt verdict: this harness's whole subject is the verdict /
+    // parked-application choreography, with catch-up markers delivered
+    // only by explicit pushSync. A coverage-resolving promise would wait
+    // for a marker the test has not sent yet — a deadlock the test runner
+    // abandons silently ("Promise resolution is still pending").
+    const promise = replica.commitNative(
+      {
+        operations: operations.map((operation) =>
+          operation.op === "delete"
+            ? { op: "delete", id: operation.id, type: DOCUMENT_MIME }
+            : {
+              op: "set",
+              id: operation.id,
+              type: DOCUMENT_MIME,
+              value: { value: operation.value },
+            }
+        ),
+      },
+      source,
+      { resolveAt: "verdict" },
+    );
     return { localSeq, promise };
   };
 
@@ -1288,15 +1298,19 @@ const beginPatch = (
   value: RootValue,
   source?: unknown,
 ) =>
-  harness.replica.commitNative({
-    operations: [{
-      op: "patch",
-      id,
-      type: DOCUMENT_MIME,
-      patches,
-      value: { value },
-    }],
-  }, source);
+  harness.replica.commitNative(
+    {
+      operations: [{
+        op: "patch",
+        id,
+        type: DOCUMENT_MIME,
+        patches,
+        value: { value },
+      }],
+    },
+    source,
+    { resolveAt: "verdict" },
+  );
 
 const seedAccepted = async (
   harness: Harness,

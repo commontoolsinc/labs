@@ -433,6 +433,11 @@ export default pattern(({ title }) => ({
 }));
 ```
 
+`pattern()` types these variant keys at its return position: each is a `VNode`
+or a `JSXElement` (a renderable sub-piece), or a reactive value of one, so a
+value of the wrong shape under `[UI]`, `[CHIP_UI]` or `[TILE_UI]` is a compile
+error at the pattern.
+
 See `packages/patterns/examples/ui-variants-demo.tsx` for a full example.
 
 > Note: `sidebarUI`/`fabUI`/`settingsUI` are shell composition **slots**, a
