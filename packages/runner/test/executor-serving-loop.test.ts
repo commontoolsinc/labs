@@ -97,6 +97,7 @@ const spaceSigner = await Identity.fromPassphrase("serving loop space");
 const space = spaceSigner.did() as MemorySpace;
 const serviceSigner = await Identity.fromPassphrase("serving loop service");
 const aliceSigner = await Identity.fromPassphrase("serving loop alice");
+const bobSigner = await Identity.fromPassphrase("serving loop bob");
 
 const waitUntil = async (
   predicate: () => boolean,
@@ -1176,5 +1177,223 @@ describe("stage F serving loop", () => {
       15_000,
     );
     expect(host.stats().outbox.completed).toBeGreaterThanOrEqual(1);
+  });
+
+  it("threads per-run DEMANDED identities through the production stamper seam: two runs, two instances, two carriages (M1 at cardinality 2; T7.Q4's m-4 discharge)", async () => {
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+    onServingRuntime = () => Promise.resolve();
+    openClient();
+
+    // Activation via the client's demand.
+    const kick = clientRuntime.getCell<{ n: number }>(
+      space,
+      "fanout-kick",
+      undefined,
+    );
+    await kick.sync();
+    const kickTx = clientRuntime.edit();
+    kick.withTx(kickTx).set({ n: 1 });
+    expect((await kickTx.commit()).error).toBeUndefined();
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate",
+    );
+    const engine = await server.engineForSpace(space);
+    const serving = servingRuntime!;
+
+    const identities = [
+      {
+        label: "alice",
+        identity: {
+          principal: "did:key:fanout-alice",
+          sessionId: "alice-s1" as never,
+        },
+      },
+      {
+        label: "bob",
+        identity: {
+          principal: "did:key:fanout-bob",
+          sessionId: "bob-s1" as never,
+        },
+      },
+    ] as const;
+    const waveKey = resolveScopeKey("user", serving.scopeKeyIdentity);
+
+    // TWO runs of one action, each stamped with its DEMANDED identity
+    // through the PRODUCTION seam (runtime.stampServerRun -> the
+    // SpaceServer's #stampRun -> the wave run context). Each demanded
+    // instance derives its OWN slot doc (per-instance result cells —
+    // the landed depth; same-doc replica-read instancing is the owed
+    // scheduler follow-up, and the same-doc ENGINE fold is pinned at
+    // the wave/sink level). Each run also enqueues an effect whose
+    // carriage must carry ITS identity into the completion — the
+    // register's m-4 note made real: the carriage carries a DIFFERENT
+    // key per run, never the wave identity's.
+    const docIds: string[] = [];
+    const completions: Promise<void>[] = [];
+    for (const [index, { label, identity }] of identities.entries()) {
+      const outBase = serving.getCell<{ total?: number }>(
+        space,
+        `fanout-user-result-${label}`,
+        undefined,
+      );
+      const outScoped = serving.getCellFromLink<{ total?: number }>({
+        ...outBase.getAsNormalizedFullLink(),
+        scope: "user",
+      });
+      docIds.push(outBase.getAsNormalizedFullLink().id);
+      const runTx = serving.edit();
+      serving.stampServerRun(runTx, {
+        actionId: "test/fanout-node",
+        kind: "derivation",
+        scopeKeyIdentity: identity,
+        actionScopeKey: resolveScopeKey("user", identity),
+      });
+      outScoped.withTx(runTx).set({ total: index + 1 });
+      const effectKey = `fanoutTest:${label}`;
+      const done = Promise.withResolvers<void>();
+      completions.push(done.promise);
+      runTx.enqueuePostCommitEffect({
+        id: effectKey,
+        kind: "fanoutTest-start",
+        flush: () => {
+          const work = serving.editWithRetry((tx) => {
+            markEffectCompletion(tx, effectKey);
+            outScoped.withTx(tx).set({ total: (index + 1) * 11 });
+          }).then(({ error }) => {
+            if (error !== undefined) {
+              throw new Error(`completion failed: ${error.message}`);
+            }
+            done.resolve();
+          });
+          serving.trackAsyncWork(work);
+        },
+      });
+      expect((await runTx.commit()).error).toBeUndefined();
+    }
+    await Promise.all(completions);
+
+    // Every scoped row — the wave's writes AND the completions' — lands
+    // under the RUN'S demanded instance key, never the wave/service
+    // identity's. The completion half is T7.Q4's m-4 discharge: the
+    // outbox carriage captured at each run's seal carries a DIFFERENT
+    // per-run key.
+    for (const [index, { identity }] of identities.entries()) {
+      const expectedKey = resolveScopeKey("user", identity);
+      await waitUntil(
+        () => {
+          const rows = engine.database.prepare(
+            `SELECT DISTINCT scope_key FROM revision WHERE id = :id`,
+          ).all({ id: docIds[index] }) as Array<{ scope_key: string }>;
+          return rows.some((row) => row.scope_key === expectedKey);
+        },
+        `instance ${index} to land`,
+        20_000,
+      );
+      const keys = (engine.database.prepare(
+        `SELECT DISTINCT scope_key FROM revision WHERE id = :id`,
+      ).all({ id: docIds[index] }) as Array<{ scope_key: string }>).map((
+        row,
+      ) => row.scope_key);
+      expect(keys).toEqual([expectedKey]);
+      expect(keys.includes(waveKey)).toBe(false);
+    }
+    // Basis rows keyed per (action, instance) — serving-loop.md §3b's
+    // action_scope_key from each run's demanded identity.
+    const basisKeys = new Set(
+      (engine.database.prepare(
+        `SELECT DISTINCT action_scope_key FROM scheduler_basis
+         WHERE action = :action`,
+      ).all({ action: "test/fanout-node" }) as Array<
+        { action_scope_key: string }
+      >).map((row) => row.action_scope_key),
+    );
+    for (const { identity } of identities) {
+      expect(basisKeys.has(resolveScopeKey("user", identity))).toBe(true);
+    }
+  });
+
+  it("carries the demanding session's identity into the SpaceServer's demand registry (M1 demand carriage at cardinality 2)", async () => {
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+    onServingRuntime = () => Promise.resolve();
+
+    // TWO principals, one user-scoped root each: the watch registry
+    // must carry each demander's identity, deduped per INSTANCE — the
+    // demand half of scopes.md §5's "the DEMAND supplies the identity".
+    openClient();
+    const bobManager = SharedServerStorageManager.connectTo(server, {
+      as: bobSigner,
+    });
+    const bobRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: bobManager,
+    });
+    try {
+      const aliceCellBase = clientRuntime.getCell<{ v?: number }>(
+        space,
+        "fanout-demand-root",
+        undefined,
+      );
+      const aliceScoped = clientRuntime.getCellFromLink<{ v?: number }>({
+        ...aliceCellBase.getAsNormalizedFullLink(),
+        scope: "user",
+      });
+      await aliceScoped.sync();
+      const bobCellBase = bobRuntime.getCell<{ v?: number }>(
+        space,
+        "fanout-demand-root",
+        undefined,
+      );
+      const bobScoped = bobRuntime.getCellFromLink<{ v?: number }>({
+        ...bobCellBase.getAsNormalizedFullLink(),
+        scope: "user",
+      });
+      await bobScoped.sync();
+      const rootDocId = aliceCellBase.getAsNormalizedFullLink().id;
+
+      // Activation + a demand-load pass.
+      const kick = clientRuntime.getCell<{ n: number }>(
+        space,
+        "fanout-demand-kick",
+        undefined,
+      );
+      await kick.sync();
+      const kickTx = clientRuntime.edit();
+      kick.withTx(kickTx).set({ n: 1 });
+      expect((await kickTx.commit()).error).toBeUndefined();
+      await waitUntil(
+        () => host!.spaceServer(space)?.active === true,
+        "space to activate",
+      );
+
+      // The server-side watch registry carries BOTH identities…
+      const roots = server.watchedRootsForSpace(space, {
+        excludePrincipal: serviceSigner.did(),
+      });
+      const scopedEntries = roots.filter((root) =>
+        root.id === rootDocId && root.scope === "user"
+      );
+      const principals = new Set(
+        scopedEntries.map((root) => root.identity?.principal),
+      );
+      expect(principals.has(aliceSigner.did())).toBe(true);
+      expect(principals.has(bobSigner.did())).toBe(true);
+
+      // …and the SpaceServer's demand registry records them per
+      // instance after its next demand-load pass.
+      await waitUntil(
+        () => {
+          const identities = host!.spaceServer(space)
+            ?.demandedIdentitiesOf(rootDocId) ?? [];
+          const seen = new Set(identities.map((i) => i.principal));
+          return seen.has(aliceSigner.did()) && seen.has(bobSigner.did());
+        },
+        "the demand registry to carry both principals",
+        15_000,
+      );
+    } finally {
+      await bobRuntime.dispose();
+      await bobManager.close();
+    }
   });
 });

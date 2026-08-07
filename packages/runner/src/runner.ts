@@ -66,6 +66,7 @@ import { sendValueToBinding } from "./pattern-binding.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { resolveScopeKey, type ScopeKey } from "@commonfabric/memory/v2";
+import { waveRunContextOf } from "./executor/wave.ts";
 import {
   type AddCancel,
   type Cancel,
@@ -5098,10 +5099,12 @@ export class Runner {
     ]);
     // See if the resultCell was already in this effective output INSTANCE
     // (the discovered scope name resolved against the run's acting
-    // identity — the runtime's own session in the OFF arm).
+    // identity — the runtime's own session in the OFF arm; a served
+    // run's DEMAND-SUPPLIED identity when the wave run context carries
+    // one — M1's per-run threading, server-execution v2 Phase 2).
     const effectiveOutputScopeKey = resolveScopeKey(
       effectiveOutputScope,
-      this.runtime.scopeKeyIdentity,
+      waveRunContextOf(tx)?.scopeKeyIdentity ?? this.runtime.scopeKeyIdentity,
     );
     const previousScopedResultCell = previousResultCellRef.byScope.get(
       effectiveOutputScopeKey,

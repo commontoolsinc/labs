@@ -27,6 +27,7 @@ import {
   resetCommitPreconditionsConfig,
   resetServerExecutionConfig,
   resolveScopeKey,
+  type ScopeKey,
   type ScopeKeyIdentity,
   setCommitPreconditionsConfig,
   setServerExecutionConfig,
@@ -351,6 +352,23 @@ export type ServerRunInfo = {
   kind: "derivation" | "event-handler" | "bookkeeping";
   /** The dispatched event's durable id (event-handler runs). */
   eventId?: string;
+  /**
+   * The run's PER-RUN DEMANDED identity (M1, scopes.md §5: a derivation
+   * runs per demanded instance and the DEMAND supplies the identity).
+   * Phase 2 completes the SEAM: the SpaceServer's stamper passes it
+   * through to the wave run context, the run's scoped reads resolve
+   * against it (the tx-carried identity at the traversal sites), its
+   * result cells key by it, and its seal/basis/carriage carry it. The
+   * SUPPLY — the scheduler running a scoped action once per demanded
+   * instance and filling this field per run — is the owed
+   * scheduler-instance-dimension follow-up; absent, a run resolves via
+   * the wave-level identity (Phase 1's cardinality-1 fallback).
+   */
+  scopeKeyIdentity?: ScopeKeyIdentity;
+  /** The instance key the demanded run serves (resolved from
+   * `scopeKeyIdentity` over the demanded root's scope), for basis-row
+   * keying (serving-loop.md §3b's `action_scope_key`). */
+  actionScopeKey?: ScopeKey;
 };
 
 export interface RuntimeOptions {

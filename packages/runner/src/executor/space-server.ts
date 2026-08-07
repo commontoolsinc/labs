@@ -73,7 +73,10 @@ import { readWatermarkSeq, watermarkCell } from "./watermark.ts";
 import type { ServingLoopStats } from "./stats.ts";
 import { type SealedEffectBatch, SpaceOutbox } from "./outbox.ts";
 import { effectCompletionKeyOf } from "./effect-completion.ts";
-import { resolveScopeKey } from "@commonfabric/memory/v2";
+import {
+  resolveScopeKey,
+  type ScopeKeyIdentity,
+} from "@commonfabric/memory/v2";
 import type { PostCommitSideEffect } from "../cfc/types.ts";
 
 const logger = getLogger("space-server", { enabled: true, level: "warn" });
@@ -160,6 +163,13 @@ export class SpaceServer implements TransactionSealDestination {
    * upstream"): the sink is what pulls the demanded value through the
    * scheduler's pull-based laziness. Released on park. */
   readonly #demandSinks = new Map<string, () => void>();
+  /** The demanded IDENTITY per scoped demand key (server-execution v2
+   * Phase 2, M1's demand carriage — scopes.md §5: the demand supplies
+   * the run identity). The per-instance run SUPPLY (the scheduler
+   * running a scoped action once per demanded instance, stamping each
+   * run from this registry through #stampRun's widened seam) is the
+   * owed scheduler-instance-dimension follow-up. */
+  readonly #demandedIdentities = new Map<string, ScopeKeyIdentity>();
   /** The stage-G effect channel (serving-loop.md §4–§5). */
   #outbox: SpaceOutbox | undefined;
   /** A drain left undelivered rows behind (transport-class failure):
@@ -470,6 +480,17 @@ export class SpaceServer implements TransactionSealDestination {
     return this.#pendingEffectsByWave.size;
   }
 
+  /** DIAGNOSTIC (tests): the demanded identities recorded for a root
+   * doc — M1's demand carriage at scoped cardinality (Phase 2). Two
+   * principals demanding one scoped root yield two entries. */
+  demandedIdentitiesOf(id: string): ScopeKeyIdentity[] {
+    const identities: ScopeKeyIdentity[] = [];
+    for (const [key, identity] of this.#demandedIdentities) {
+      if (key.endsWith(`\0${id}`)) identities.push(identity);
+    }
+    return identities;
+  }
+
   #openWave(): WaveAccumulator {
     if (this.#currentWave === undefined) {
       const { engine, space } = this.#options;
@@ -489,15 +510,24 @@ export class SpaceServer implements TransactionSealDestination {
   }
 
   /** serving-loop.md §3d's stamping duty: the scheduler hands every run
-   * here; per-run demanded identities (M1) plug into this seam when
-   * Phase 2 maps demand to instances — Phase 1 runs carry the durable
-   * action id and kind, and scoped addresses resolve via the wave
-   * identity (cardinality 1). */
+   * here. Per-run demanded identities (M1) PASS THROUGH this seam
+   * (Phase 2): a run whose ServerRunInfo carries a demand-supplied
+   * identity resolves its scoped reads, result cells, seal, basis rows,
+   * and outbox carriage against THAT instance; a run without one keeps
+   * the wave-level identity (the cardinality-1 fallback). The SUPPLY
+   * side — the scheduler running a scoped action once per demanded
+   * instance — is the owed scheduler-instance-dimension follow-up. */
   #stampRun(tx: IExtendedStorageTransaction, info: ServerRunInfo): void {
     stampWaveRunContext(tx, {
       actionId: info.actionId,
       kind: info.kind,
       ...(info.eventId !== undefined ? { eventId: info.eventId } : {}),
+      ...(info.scopeKeyIdentity !== undefined
+        ? { scopeKeyIdentity: info.scopeKeyIdentity }
+        : {}),
+      ...(info.actionScopeKey !== undefined
+        ? { actionScopeKey: info.actionScopeKey }
+        : {}),
     });
   }
 
@@ -839,13 +869,37 @@ export class SpaceServer implements TransactionSealDestination {
       // client demand.
       { excludePrincipal: this.#options.serviceIdentity },
     );
+    // Demand keys are PER INSTANCE (server-execution v2 Phase 2, M1's
+    // demand carriage): a scoped root demanded by two principals is two
+    // demand entries, each carrying its demander's identity — the
+    // registry the per-instance run supply (the owed scheduler
+    // follow-up) consumes, and the diagnostic the fan-out tests pin.
+    // A space root has no identity and one entry, exactly as before.
+    const keyOf = (root: {
+      id: string;
+      scope?: string;
+      identity?: { principal?: string; sessionId?: string };
+    }): string => {
+      const scope = root.scope ?? "space";
+      if (scope === "space" || root.identity === undefined) {
+        return `space\0${root.id}`;
+      }
+      try {
+        return `${
+          resolveScopeKey(scope as never, {
+            principal: root.identity.principal,
+            sessionId: root.identity.sessionId as never,
+          })
+        }\0${root.id}`;
+      } catch {
+        return `${scope}\0${root.id}`;
+      }
+    };
     // Retire demand for roots no client watches anymore: the sink is
     // the demand, so cancelling it returns the value to pull-based
     // laziness (the materialized structure stays registered — structure
     // is not a start/stop policy, serving-loop.md §1).
-    const currentKeys = new Set(
-      roots.map((root) => `${root.scope ?? "space"}\0${root.id}`),
-    );
+    const currentKeys = new Set(roots.map(keyOf));
     for (const [key, cancel] of this.#demandSinks) {
       if (currentKeys.has(key)) continue;
       try {
@@ -855,11 +909,22 @@ export class SpaceServer implements TransactionSealDestination {
       }
       this.#demandSinks.delete(key);
       this.#demandedRoots.delete(key);
+      this.#demandedIdentities.delete(key);
     }
     for (const root of roots) {
-      const key = `${root.scope ?? "space"}\0${root.id}`;
+      const key = keyOf(root);
       if (this.#demandedRoots.has(key)) continue;
       this.#demandedRoots.add(key);
+      if (root.identity !== undefined) {
+        this.#demandedIdentities.set(key, {
+          ...(root.identity.principal === undefined
+            ? {}
+            : { principal: root.identity.principal }),
+          ...(root.identity.sessionId === undefined
+            ? {}
+            : { sessionId: root.identity.sessionId as never }),
+        });
+      }
       try {
         await ensurePieceRunning(runtime, {
           space: this.#options.space,
@@ -1227,6 +1292,7 @@ export class SpaceServer implements TransactionSealDestination {
     }
     this.#demandSinks.clear();
     this.#demandedRoots.clear();
+    this.#demandedIdentities.clear();
     const wave = this.#currentWave;
     this.#currentWave = undefined;
     await this.#sealChain;

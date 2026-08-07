@@ -2219,6 +2219,17 @@ Deno.test("memory v2 stacked commits: a foreign frame shadowed by a parked own w
     assertEquals(hasPendingOverlay(harness, DOCS.A), true);
     expectVisible(harness, { A: valueFor("own") });
 
+    // The OWN ECHO first (CT-1927's mixed-provenance frame): an upsert
+    // whose seq IS the parked accept's ack seq is the durable copy of
+    // the own write, not foreign novelty — it must NOT set the floor
+    // (shadowing it would clamp W on every wave of a quiet serving
+    // loop).
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: 2, value: valueFor("own") }],
+    });
+    await clock.tick(10);
+    assertEquals(shadowFloorOf(harness), undefined);
+
     // Foreign novelty arrives WITHOUT a covering marker: it integrates
     // into the confirmed mirror but stays invisible under the pending
     // SET — the differential is empty, so nothing notified and no

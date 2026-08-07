@@ -3500,8 +3500,24 @@ export class Server {
        * reads, recursively). */
       excludePrincipal?: string;
     } = {},
-  ): Array<{ id: string; scope?: CellScope }> {
-    const roots = new Map<string, { id: string; scope?: CellScope }>();
+  ): Array<{
+    id: string;
+    scope?: CellScope;
+    /** The DEMANDING session's identity (server-execution v2 Phase 2,
+     * scopes.md §5: a derivation runs per demanded instance and the
+     * DEMAND supplies the identity). Present on SCOPED roots only —
+     * a space-scoped root needs no principal, and its entries dedupe
+     * to one. Scoped roots dedupe per RESOLVED INSTANCE, so two
+     * sessions of one user demanding a user-scoped root yield one
+     * entry while two USERS yield two (M1's demand carriage; the
+     * scheduler-side per-instance run supply is the owed follow-up). */
+    identity?: { principal?: string; sessionId?: string };
+  }> {
+    const roots = new Map<string, {
+      id: string;
+      scope?: CellScope;
+      identity?: { principal?: string; sessionId?: string };
+    }>();
     for (const session of this.#sessions.sessionsForSpace(space)) {
       if (
         options.excludePrincipal !== undefined &&
@@ -3512,11 +3528,36 @@ export class Server {
       for (const watch of session.watches) {
         for (const root of watch.query.roots) {
           const scope = root.scope ?? "space";
-          const key = `${scope}\0${root.id}`;
+          if (scope === "space") {
+            const key = `space\0${root.id}`;
+            if (!roots.has(key)) {
+              roots.set(key, { id: root.id });
+            }
+            continue;
+          }
+          const identity = {
+            ...(session.principal === undefined
+              ? {}
+              : { principal: session.principal }),
+            sessionId: session.id,
+          };
+          let instanceKey: string;
+          try {
+            instanceKey = resolveScopeKey(scope, {
+              principal: session.principal,
+              sessionId: session.id,
+            });
+          } catch {
+            // A session that cannot resolve the scope (no principal on a
+            // user-scoped root) is not demand for that instance.
+            continue;
+          }
+          const key = `${instanceKey}\0${root.id}`;
           if (!roots.has(key)) {
             roots.set(key, {
               id: root.id,
-              ...(root.scope === undefined ? {} : { scope: root.scope }),
+              scope: root.scope,
+              identity,
             });
           }
         }

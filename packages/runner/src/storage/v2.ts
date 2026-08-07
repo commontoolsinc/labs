@@ -4236,13 +4236,26 @@ class SpaceReplica implements ISpaceReplica {
       record.materialized = undefined;
       const key = docKey(upsert.id as URI, upsert.scope);
       this.#watchedIds.add(key);
-      if (record.pending.length > 0) {
-        // The settle input barrier's shadow case (Phase 2 revisit (a)):
-        // this foreign value integrated UNDER an own pending write, so
-        // the materialized view — and the change notification below —
-        // may not reflect it until the pending entry promotes or drops.
-        // Record the seq so the serving loop's W advance excludes it
-        // (`unappliedForeignSeqFloor`).
+      // The settle input barrier's shadow case (Phase 2 revisit (a)):
+      // a FOREIGN value integrating UNDER an own pending write is
+      // invisible through the materialized view — and the change
+      // notification below misses it — until the pending entry promotes
+      // or drops. Record the seq so the serving loop's W advance
+      // excludes it (`unappliedForeignSeqFloor`). Two exemptions:
+      // an OWN ECHO — an upsert whose seq IS one of the pending
+      // accepts' ack seqs is the durable copy of the own write itself
+      // (CT-1927's mixed-provenance frame), not foreign novelty — and
+      // a seq-0 ABSENT-DOC marker (the initial watch pull's "no
+      // confirmed version" answer), which carries no novelty at all.
+      // Shadowing either would clamp W forever on a quiet serving
+      // loop.
+      if (
+        upsert.seq > 0 &&
+        record.pending.length > 0 &&
+        !record.pending.some((entry) =>
+          this.#ackedSeqsByLocalSeq.get(entry.localSeq) === upsert.seq
+        )
+      ) {
         this.#shadowedForeignSeqs.set(
           key,
           Math.max(this.#shadowedForeignSeqs.get(key) ?? 0, upsert.seq),
@@ -4541,6 +4554,19 @@ class SpaceReplica implements ISpaceReplica {
     ) {
       const oldest = this.#ackedSeqsByLocalSeq.keys().next();
       if (!oldest.done) this.#ackedSeqsByLocalSeq.delete(oldest.value);
+    }
+    // The input barrier's own-echo race repair (Phase 2 revisit (a)):
+    // the frame can OUTRUN this verdict handler on the same socket, so
+    // an own-echo upsert may have been mis-recorded as shadowed foreign
+    // novelty before the ack above existed. A shadow whose seq IS this
+    // accept's seq on a doc this accept wrote is that mis-record — no
+    // foreign commit can share the seq — so lift it, or a quiet serving
+    // loop would clamp W forever against its own echo.
+    for (const operation of operations) {
+      const key = docKey(operation.id, operation.scope);
+      if (this.#shadowedForeignSeqs.get(key) === applied.seq) {
+        this.#shadowedForeignSeqs.delete(key);
+      }
     }
     // Parking requires a live marker channel: a server that stages
     // per-verdict markers AND an active sync consumer to deliver them. With
