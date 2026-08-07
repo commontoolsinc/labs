@@ -9,6 +9,7 @@ import {
   testConcurrency,
   testPackage,
 } from "./workspace-tests.ts";
+import { WORKSPACE_TEST_WEIGHTS } from "./test-timing-weights.ts";
 
 // Write a minimal workspace under `dir`: a root deno.jsonc listing the
 // members, and one directory per package whose `test` task records that it
@@ -82,17 +83,17 @@ Deno.test("selectShardMembers returns every enabled member without a shard", () 
   );
 });
 
-Deno.test("selectShardMembers splits enabled members round-robin over the sorted name list", () => {
+Deno.test("selectShardMembers balances enabled members by weight", () => {
   const members = [
     "./packages/d",
     "./packages/b",
     "./packages/a",
     "./packages/c",
-    "./tasks",
+    "./packages/e",
   ];
   assertEquals(
     unitNames(selectShardMembers(members, [], { index: 1, total: 2 })),
-    ["a", "c", "tasks"],
+    ["a", "c", "e"],
   );
   assertEquals(
     unitNames(selectShardMembers(members, [], { index: 2, total: 2 })),
@@ -122,29 +123,67 @@ Deno.test("selectShardMembers expands the cli package into internal shards when 
     { memberPath: "./packages/z", packageName: "z" },
   ]);
 
-  // Sorted units: a, cli (1/3), cli (2/3), cli (3/3), z — round-robin over
-  // two shards interleaves the cli slices across both.
   assertEquals(selectShardMembers(members, [], { index: 1, total: 2 }), [
-    { memberPath: "./packages/a", packageName: "a" },
-    {
-      memberPath: "./packages/cli",
-      packageName: "cli (2/3)",
-      env: { CLI_TEST_SHARD: "2/3" },
-    },
-    { memberPath: "./packages/z", packageName: "z" },
-  ]);
-  assertEquals(selectShardMembers(members, [], { index: 2, total: 2 }), [
     {
       memberPath: "./packages/cli",
       packageName: "cli (1/3)",
       env: { CLI_TEST_SHARD: "1/3" },
     },
+    { memberPath: "./packages/a", packageName: "a" },
+    { memberPath: "./packages/z", packageName: "z" },
+  ]);
+  assertEquals(selectShardMembers(members, [], { index: 2, total: 2 }), [
     {
       memberPath: "./packages/cli",
       packageName: "cli (3/3)",
       env: { CLI_TEST_SHARD: "3/3" },
     },
+    {
+      memberPath: "./packages/cli",
+      packageName: "cli (2/3)",
+      env: { CLI_TEST_SHARD: "2/3" },
+    },
   ]);
+});
+
+Deno.test("selectShardMembers expands piece and tasks into internal shards", () => {
+  const members = ["./packages/piece", "./tasks"];
+  const units = Array.from(
+    { length: 3 },
+    (_, offset) =>
+      selectShardMembers(members, [], { index: offset + 1, total: 3 }),
+  ).flat();
+
+  assertEquals(
+    unitNames(units).sort(),
+    [
+      "piece (1/3)",
+      "piece (2/3)",
+      "piece (3/3)",
+      "tasks (1/3)",
+      "tasks (2/3)",
+      "tasks (3/3)",
+    ],
+  );
+});
+
+Deno.test("real workspace timing weights keep modeled shard loads close", async () => {
+  const members = await readWorkspaceMembers();
+  const loads = Array.from(
+    { length: 6 },
+    (_, offset) =>
+      selectShardMembers(members, ["runner"], { index: offset + 1, total: 6 })
+        .reduce(
+          (sum, unit) => sum + (WORKSPACE_TEST_WEIGHTS[unit.packageName] ?? 1),
+          0,
+        ),
+  );
+
+  assertEquals(
+    Math.max(...loads) - Math.min(...loads) < 2,
+    true,
+    `modeled workspace shard loads: ${loads.join(", ")}`,
+  );
 });
 
 Deno.test("readWorkspaceMembers reads the workspace list from a JSONC manifest", async () => {
@@ -310,13 +349,11 @@ Deno.test("runTests passes internal shard environment to expanded packages", asy
         tasks: { test: "echo shard=$CLI_TEST_SHARD > ran.txt" },
       }),
     );
-    // Sorted units: a, cli (1/3), cli (2/3), cli (3/3), z. Shard 1 of 2
-    // selects a, cli (2/3), and z — exactly one cli slice, so the marker file
-    // is written by a single task and carries that slice's environment.
+    // Shard 1 receives the heaviest CLI slice and both lightweight packages.
     const passed = await runTests([], { index: 1, total: 2 }, dir);
     assertEquals(passed, true);
     const ran = await Deno.readTextFile(`${dir}/packages/cli/ran.txt`);
-    assertEquals(ran.trim(), "shard=2/3");
+    assertEquals(ran.trim(), "shard=1/3");
     assertEquals(await ranPackages(dir, ["a", "z"]), ["a", "z"]);
   } finally {
     await Deno.remove(dir, { recursive: true });

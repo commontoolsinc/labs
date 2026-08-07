@@ -6,6 +6,8 @@ import * as path from "@std/path";
 import { parse as parseJsonc } from "@std/jsonc";
 import { decode, encode } from "@commonfabric/utils/encoding";
 import { parseShard, type Shard } from "./shard-utils.ts";
+import { WORKSPACE_TEST_WEIGHTS } from "./test-timing-weights.ts";
+import { assignWeightedShards } from "./weighted-shards.ts";
 
 export const ALL_DISABLED: string[] = [];
 
@@ -137,11 +139,12 @@ const INTERNALLY_SHARDED_PACKAGES: Record<
 > = {
   // packages/cli/test/run-tests.ts reads CLI_TEST_SHARD.
   cli: { total: 3, envVar: "CLI_TEST_SHARD" },
+  piece: { total: 3, envVar: "PIECE_TEST_SHARD" },
+  tasks: { total: 3, envVar: "TASK_TEST_SHARD" },
 };
 
-// Enabled workspace members are split across shards by round-robin over the
-// unit list sorted by package name, matching the other shard selectors. Without
-// a shard, every enabled member is selected as a single unit.
+// Enabled workspace members are split by observed test cost. Without a shard,
+// every enabled member is selected as a single unit.
 export function selectShardMembers(
   members: string[],
   disabledPackages: string[],
@@ -174,9 +177,21 @@ export function selectShardMembers(
     }
   }
 
+  const assignments = assignWeightedShards(
+    units.map((unit) => ({
+      name: unit.packageName,
+      weight: WORKSPACE_TEST_WEIGHTS[unit.packageName] ?? 1,
+      group: unit.memberPath,
+    })),
+    shard.total,
+  );
   return units
-    .sort((a, b) => a.packageName.localeCompare(b.packageName))
-    .filter((_, i) => i % shard.total === shard.index - 1);
+    .filter((unit) => assignments.get(unit.packageName) === shard.index)
+    .sort((a, b) =>
+      (WORKSPACE_TEST_WEIGHTS[b.packageName] ?? 1) -
+        (WORKSPACE_TEST_WEIGHTS[a.packageName] ?? 1) ||
+      a.packageName.localeCompare(b.packageName)
+    );
 }
 
 // Cap on concurrently running package test tasks. Individual packages may also
