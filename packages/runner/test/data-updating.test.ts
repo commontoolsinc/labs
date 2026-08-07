@@ -1719,6 +1719,56 @@ describe("data-updating", () => {
       expect(cell.withTx(tx).get().value).toBe(42);
     });
   });
+
+  describe("writing back what a read handed out", () => {
+    /** The list shape a search index or an autocomplete list has. */
+    const list = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        label: `entry-${i}`,
+        nested: { id: `id-${i}` },
+      }));
+
+    /** Writes a list back with one element replaced, counting reads. */
+    const rewriteOneElement = (n: number) => {
+      const cell = runtime.getCell<ReturnType<typeof list>>(
+        space,
+        `write back ${n}`,
+        undefined,
+        tx,
+      );
+      cell.set(list(n));
+
+      const written = [...cell.get()];
+      written[7] = { label: "changed", nested: { id: "changed" } };
+      const before = tx.getReactivityLog!().reads.length;
+      cell.set(written);
+      const reads = tx.getReactivityLog!().reads.length - before;
+
+      return { reads, value: cell.get() };
+    };
+
+    it("records the same reads however long the list is", () => {
+      // Each element a read hands out is a query result, and the diff replaces
+      // one with the link it names rather than reading into it. Nothing ahead
+      // of the diff reads into one either, so what a write-back costs does not
+      // follow the length: a member read resolves through the transaction and
+      // is recorded on it as a dependency the commit has to check.
+      const short = rewriteOneElement(50);
+      const long = rewriteOneElement(500);
+
+      expect(long.reads).toBe(short.reads);
+      // And what it records is a handful, not a number that merely happens to
+      // match: fewer reads than the shorter list has elements.
+      expect(long.reads).toBeLessThan(50);
+    });
+
+    it("writes the changed element and leaves its neighbor", () => {
+      const { value } = rewriteOneElement(50);
+
+      expect(value[7].label).toBe("changed");
+      expect(value[8].label).toBe("entry-8");
+    });
+  });
 });
 
 /**
