@@ -1443,15 +1443,18 @@ class TransformObjectCreator
       // If we're an object, we may be missing some properties that have a
       // default.
       //
-      // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, so a fabric
-      // value under a schema that also declares `properties` with defaults
-      // enters this block: for a `FabricPrimitive`, `cloneIfNecessary`
-      // returns the frozen value by identity and the property assignment
-      // below throws a `TypeError`; for a `FabricInstance`, the assignments
-      // graft own data properties onto the (cloned) instance that its codec
-      // never reads. The `FabricPrimitive`/`FabricInstance` arms in
-      // `annotateWithBackToCellSymbols` run only after this block, so they do
-      // not guard it.
+      // TODO(danfuzz): Latent — `isRecord` admits a `FabricSpecialObject`,
+      // and the `FabricPrimitive`/`FabricInstance` arms in
+      // `annotateWithBackToCellSymbols` run only after this block, so
+      // nothing here guards a fabric value under a schema that also declares
+      // `properties` with defaults: for a `FabricPrimitive`,
+      // `cloneIfNecessary` returns the frozen value by identity and the
+      // property assignment below throws a `TypeError`; for a
+      // `FabricInstance`, the assignments graft own data properties onto the
+      // (cloned) instance that its codec never reads. Today the schema
+      // dispatch peels fabric values off ahead of this creator (the typed
+      // primitive arm returns them whole, the instance arm throws), so the
+      // gap arms only when a fabric value reaches `createObject` directly.
       if (
         isRecord(value) && !Array.isArray(value) &&
         schema.properties !== undefined

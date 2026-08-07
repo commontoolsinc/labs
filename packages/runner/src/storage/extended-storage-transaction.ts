@@ -1653,13 +1653,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             `Value at path ${address.path.join("/")} is not an object`,
           );
         }
-        // TODO(danfuzz): `isRecord` also admits a `FabricSpecialObject`, so a
-        // special-object parent slips past that rejection: for a
-        // `FabricPrimitive`, `shallowMutableClone` returns it by identity
-        // (inherently frozen) and the assignment below throws a bare
-        // `TypeError`; for a `FabricInstance`, the assignments stamp own
-        // properties onto the clone that its codec never encodes, and the
-        // write is silently lost.
+        // TODO(danfuzz): Latent — `isRecord` also admits a
+        // `FabricSpecialObject`, so a special-object parent would slip past
+        // that rejection: for a `FabricPrimitive`, `shallowMutableClone`
+        // returns it by identity (inherently frozen) and the assignment
+        // below throws a bare `TypeError`; for a `FabricInstance`, the
+        // assignments stamp own properties onto the clone that its codec
+        // never encodes, and the write is silently lost. Today the write
+        // paths that produce the not-found retry deliver only plain-record
+        // parents here; the gap arms when a fabric parent can reach it.
         // Stored objects are deep-frozen by `fabricFromNativeValueModern()`.
         // Clone before mutation to avoid `TypeError` on frozen objects: this
         // always copies (the value may be the transaction's working copy, which
