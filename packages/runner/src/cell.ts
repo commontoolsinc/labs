@@ -25,6 +25,7 @@ import {
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { refuseFabricInstance } from "./fabric-special-object.ts";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
@@ -3305,14 +3306,26 @@ function validateStaticData(value: unknown): void {
 
     ancestors.add(obj);
 
-    // A `FabricSpecialObject` reaches here and survives: it has zero
+    // A `FabricPrimitive` reaches here and survives, correctly: it has zero
     // enumerable own properties, so `Object.keys()` is empty and the descent
-    // ends -- and this walk only ever reads, never rebuilds, so ending early
-    // costs nothing it was looking for. A primitive holds no cell to find; an
-    // instance could hold one in its codec contents, which is a completeness
-    // gap rather than a corruption, and fails toward accepting data rather than
-    // rejecting it. `cell-static-methods.test.ts` pins the pass-through.
+    // ends -- and a leaf holds no cell for this validation to find.
     //
+    // A `FabricInstance` is refused instead. Its codec contents can hold a
+    // `Cell`, which is exactly what this validation exists to reject, and those
+    // contents are not reachable by property name -- so passing one through
+    // SMUGGLES a cell into static data past the check meant to stop it. That is
+    // not a completeness gap; it is the validation failing open.
+    //
+    // Nothing reaches this in production today, de facto rather than by
+    // construction: a `FabricError` is ungated and exposed to pattern authors,
+    // so what keeps this safe is that nothing yet puts one in `Cell.of()` data.
+    //
+    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
+    // at which point this becomes a walk rather than a refusal.
+    if (obj instanceof FabricInstance) {
+      refuseFabricInstance(obj, `in \`Cell.of()\` static data`);
+    }
+
     // Traverse arrays and objects
     if (Array.isArray(obj)) {
       for (let i = 0; i < obj.length; i++) {

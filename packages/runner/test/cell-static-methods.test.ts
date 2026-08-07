@@ -14,6 +14,7 @@ import {
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -219,11 +220,38 @@ describe("Cell Static Methods", () => {
       });
     });
 
-    it("should accept a `FabricError` in static data", () => {
+    it("should reject a `FabricError` in static data", () => {
+      // An instance's codec contents can hold a `Cell`, which is exactly what
+      // this validation rejects, and those contents are not reachable by
+      // property name. Passing one through SMUGGLES a cell past the check --
+      // the validation failing open -- so it refuses instead.
       withinHandlerContext(runtime, space, tx, () => {
         const failure = FabricError.fromNativeError(new Error("boom"));
 
-        expect(Cell.of({ failure }).get().failure).toBeInstanceOf(FabricError);
+        expect(() => Cell.of({ failure })).toThrow(
+          "Cannot yet handle `FabricError` (a `FabricInstance`) in " +
+            "`Cell.of()` static data.",
+        );
+      });
+    });
+
+    it("should reject a `Cell` hidden inside a `FabricError`", () => {
+      // The motivating case, stated directly: a bare `Cell` is rejected, and
+      // wrapping it must not be a way around that.
+      withinHandlerContext(runtime, space, tx, () => {
+        const held = Cell.of("hi");
+        expect(() => Cell.of({ c: held })).toThrow();
+
+        const wrapped = new FabricError({
+          type: "Error",
+          message: "boom",
+          stack: undefined,
+          cause: undefined,
+          extras: { held: held as unknown as FabricValue },
+        });
+        expect(() => Cell.of({ w: wrapped })).toThrow(
+          "(a `FabricInstance`) in `Cell.of()` static data.",
+        );
       });
     });
 
