@@ -225,12 +225,17 @@ export function findAndInlineDataUriLinks(value: any): any {
     return value;
   } else if (value instanceof FabricInstance) {
     // Passed through, and unlike the sibling walks elsewhere in the runner this
-    // one does _not_ refuse. The gap is real -- an instance's state can carry a
-    // `data:` URI link, a `FabricError`'s extras bag being the obvious case,
-    // and passing the value through hands it back with that link un-inlined.
+    // one does _not_ refuse.
     //
-    // A refusal here would nonetheless be wrong, because this walk is not a
-    // `data:` URI operation a caller opts into. `setRawUntyped()` runs it over
+    // Latent: an instance's state _can_ carry a `data:` URI link, so passing
+    // the value through hands it back with that link un-inlined. The route in
+    // exists -- `fabricFromNativeValue()` recursively converts a native
+    // `Error`'s `cause` and custom properties, so an author attaching a cell to
+    // an error would make one -- but nothing in the tree does that today, so
+    // the gap has no current producer.
+    //
+    // A refusal would be wrong regardless of that, and for an unrelated
+    // reason: this walk is not a `data:` URI operation a caller opts into. `setRawUntyped()` runs it over
     // every raw write, including every action result (`runner.ts`), so refusing
     // would make a `FabricError` unstorable by that route -- and one is stored
     // that way today, by the fetch builtins. Refusing is only ever right where

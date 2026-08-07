@@ -359,10 +359,11 @@ describe("data URI inlining", () => {
       });
 
       it("leaves a `data:` URI link inside a `FabricError` un-inlined", () => {
-        // A _known gap_, pinned as one. Passing an instance through hands it
-        // back _untransformed_: its state can carry a link this walk exists to
-        // inline, and coming back whole means coming back with that link
-        // intact.
+        // A _latent gap_, pinned as one: the shape is constructible and the
+        // behavior is wrong, but nothing in the tree produces it. A link ends
+        // up inside an error only if an author attaches a cell to one, which
+        // `fabricFromNativeValue()` would then convert -- and nothing does.
+        // So this test builds the producer it does not have.
         //
         // This walk does not refuse, where its siblings elsewhere in the runner
         // do. `setRawUntyped()` runs it over every raw write, including every
