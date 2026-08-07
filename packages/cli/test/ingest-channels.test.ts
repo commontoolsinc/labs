@@ -263,9 +263,18 @@ describe("ingest-channel verbs", () => {
     const result = await withStubbedFetch(
       { body: { id: "chan-1", revokedAt: "2026-08-04T12:00:00.000Z" } },
       async (calls) => {
-        const got = await revokeChannel(config, { id: "chan-1" });
+        const got = await revokeChannel(config, {
+          id: "chan-1",
+          requestId: "rq-1",
+        });
         expectFirstPartyProof(calls[0], "revoke");
-        expect(JSON.parse(calls[0].body)).toEqual({ id: "chan-1" });
+        // The idempotency key is part of the SIGNED body: a captured revoke is
+        // otherwise replayable for its whole proof window, and the server
+        // spends this id in the same transaction as the write.
+        expect(JSON.parse(calls[0].body)).toEqual({
+          id: "chan-1",
+          requestId: "rq-1",
+        });
         return got;
       },
     );
@@ -281,9 +290,9 @@ describe("ingest-channel error surfacing", () => {
     await withStubbedFetch(
       { status: 403, body: { error: "no OWNER grant on that space" } },
       async () => {
-        await expect(revokeChannel(config, { id: "chan-1" })).rejects.toThrow(
-          "no OWNER grant on that space",
-        );
+        await expect(
+          revokeChannel(config, { id: "chan-1", requestId: "rq-1" }),
+        ).rejects.toThrow("no OWNER grant on that space");
       },
     );
   });
