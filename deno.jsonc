@@ -37,7 +37,6 @@
     "./packages/utils",
     "./packages/leb128",
     "./packages/fuse",
-    "./packages/fs-sync-example",
     "./tasks",
     "./scripts"
   ],
