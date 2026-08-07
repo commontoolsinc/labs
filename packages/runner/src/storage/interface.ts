@@ -1055,10 +1055,11 @@ export interface IStorageTransaction {
    * Resolves with the same result as {@link commit}, but no later than the
    * moment the commit's fate is known — the server verdict or a local
    * rejection. The commit promise itself may resolve later: it additionally
-   * waits for the subscribed view to reflect the committed write. Effects
-   * gated on durability alone (commit callbacks) hook this instead of the
-   * commit promise. Optional: backends without the split fall back to the
-   * commit promise.
+   * waits for the subscribed view to reflect the committed write (or the
+   * read-repair gate on rejection). Effects gated on durability alone
+   * (verdict callbacks, the outbox flush) hook this instead of the commit
+   * promise. Optional: backends without the split fall back to the commit
+   * promise.
    */
   commitVerdict?(): Promise<Result<Unit, CommitError>>;
 
@@ -1376,7 +1377,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   hasPendingPostCommitEffects(): boolean;
 
   /**
-   * Resolves once the current commit's post-commit effect layer — commit
+   * Resolves once the current commit's post-commit effect layer — verdict
    * callbacks and the CFC outbox flush — has run. The effects run at the
    * verdict, so this may resolve before the commit promise itself, which
    * additionally waits for the subscribed view to reflect the write.

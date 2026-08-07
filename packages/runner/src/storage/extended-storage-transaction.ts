@@ -2025,15 +2025,21 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       },
     );
 
-    const result = await promise;
-    // commit() still spans the effect layer: callers that await the commit
-    // observe the outbox flushed, exactly as when the flush ran inline
-    // here. Except at resolveAt "verdict": that caller asked for fate
-    // sealing and nothing more, so a slow effect must not stretch the
-    // promise — the effect run stays tracked via postCommitEffectsSettled().
-    if (options?.resolveAt !== "verdict") {
-      await effects;
+    // resolveAt "verdict" returns at fate-sealing on BOTH paths: the
+    // verdict race resolves at the accept verdict or the rejection
+    // receipt, ahead of the coverage / read-repair waits the settlement
+    // promise sits out — and ahead of the effect run, which a slow outbox
+    // effect must not stretch (it stays tracked via
+    // postCommitEffectsSettled()). Commit callbacks and the
+    // pending-commit barrier stay on the settlement promise either way.
+    // Otherwise commit() spans the full settlement plus the effect layer:
+    // callers that await the commit observe the outbox flushed, exactly
+    // as when the flush ran inline here.
+    if (options?.resolveAt === "verdict") {
+      return await verdict;
     }
+    const result = await promise;
+    await effects;
 
     return result;
   }

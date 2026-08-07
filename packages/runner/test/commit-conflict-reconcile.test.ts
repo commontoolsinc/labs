@@ -252,4 +252,73 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     expect(commitCallbackFired, "commit callback fired at promise settlement")
       .toBe(true);
   });
+
+  it("returns a rejected resolveAt-verdict commit at rejection receipt, while its commit callback waits for repair", async () => {
+    const CAUSE = "verdict-mode-rejection-doc";
+
+    // Same choreography again: A seeds and bumps; B stages a stale write.
+    const docA = rtA.getCell<{ v: string }>(space, CAUSE, undefined);
+    {
+      const tx = rtA.edit();
+      docA.withTx(tx).set({ v: "v0" });
+      rtA.prepareTxForCommit(tx);
+      const res = await tx.commit({ resolveAt: "verdict" });
+      expect(res.error, `seed v0: ${JSON.stringify(res.error)}`)
+        .toBeUndefined();
+    }
+
+    const docB = rtB.getCell<{ v: string }>(space, CAUSE, undefined);
+    await docB.sync();
+    await docB.pull();
+    expect(docB.get()).toEqual({ v: "v0" });
+
+    const txB = rtB.edit();
+    docB.withTx(txB).get();
+    docB.withTx(txB).set({ v: "vB" });
+    rtB.prepareTxForCommit(txB);
+
+    {
+      const tx = rtA.edit();
+      docA.withTx(tx).set({ v: "v1" });
+      rtA.prepareTxForCommit(tx);
+      const res = await tx.commit({ resolveAt: "verdict" });
+      expect(res.error, `bump v1: ${JSON.stringify(res.error)}`)
+        .toBeUndefined();
+    }
+    expect(docB.get()).toEqual({ v: "v0" });
+
+    // B commits in VERDICT mode. The rejection receipt must settle the
+    // returned promise inside the held-clock drain — no read-repair wait —
+    // while the commit callback stays on the settlement timeline, gated on
+    // the repair frame the timed fan-out has not delivered yet.
+    const commitCallbackDone = Promise.withResolvers<void>();
+    let commitCallbackFired = false;
+    txB.addCommitCallback(() => {
+      commitCallbackFired = true;
+      commitCallbackDone.resolve();
+    });
+    let verdictModeResult:
+      | { error?: { name?: string } }
+      | undefined;
+    const commitP = txB.commit({ resolveAt: "verdict" }).then((result) => {
+      verdictModeResult = result as { error?: { name?: string } };
+      return result;
+    });
+
+    await clock.settle();
+    expect(
+      verdictModeResult?.error?.name,
+      "verdict-mode promise settled with the rejection at receipt",
+    ).toBe("ConflictError");
+    expect(
+      commitCallbackFired,
+      "commit callback still held by the repair gate",
+    ).toBe(false);
+
+    // Real time resumes: the repair frame arrives and the settlement
+    // timeline (and with it the commit callback) completes.
+    await commitP;
+    await commitCallbackDone.promise;
+    expect(commitCallbackFired).toBe(true);
+  });
 });

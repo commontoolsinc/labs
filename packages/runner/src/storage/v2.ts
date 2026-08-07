@@ -3860,10 +3860,10 @@ class SpaceReplica implements ISpaceReplica {
     source: IStorageTransaction | undefined,
     rejection: StorageTransactionRejected,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    // The fate is sealed here. The verdict-gated effect layer (commit
-    // callbacks, outbox clearing) fires on this notification; only the
-    // caller's commit promise waits out the read-repair gate below, because
-    // only a retry needs the repaired base.
+    // The fate is sealed here. The verdict-gated effect layer (verdict
+    // callbacks, outbox clearing) fires on this notification; the
+    // settlement promise and commit callbacks wait out the read-repair
+    // gate below, because a retry needs the repaired base.
     if (source !== undefined) {
       notifyCommitRejected(source, rejection);
     }
