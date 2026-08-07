@@ -272,7 +272,11 @@ position the read is already at, so `--select '@'` returns the source's own
 address and `--select '@,title'` returns it beside the title. `@` is otherwise
 special only at the end of a segment and `\@` writes a literal one, which keeps
 a field named `user@home` reachable; a leading `@` followed by anything else is
-the `@file` only `--schema` reads. That address is the deepest stored link
+the `@file` only `--schema` reads. A field list applies to each element wherever
+it crosses an array, an address included, so `--select 'notes@'` returns one
+address per note and is the concise spelling of
+`--schema '{"type":"array","items":{"$link":true}}'`; a marked position holding
+anything else returns its own address. That address is the deepest stored link
 crossed on the way to the marked position plus the segments below it, so marking
 a field under a linked element names that element's own document rather than a
 slot in the collection above it; a position with no link above it keeps the

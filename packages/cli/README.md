@@ -286,12 +286,28 @@ cf piece get --piece ID --select 'topic@,topic.title'
 The two paths union into the one position, and `topic@.title` says the same
 thing in one path. `@` is special only as the final character of a segment:
 `user@home` names a field, and `\@` writes a literal `@` where a trailing one
-would otherwise mark, so `a\@` names the field `a@`. A path stops where it
-stops, so `notes@` returns the address of the `notes` position itself, while
-marking a field below an array — `notes.title@` — returns an address per
-element, because that is where the field list puts a field path. Naming a
-position both ways, `topic,topic@`, returns the address beside the whole
-contents.
+would otherwise mark, so `a\@` names the field `a@`. Naming a position both
+ways, `topic,topic@`, returns the address beside the whole contents.
+
+A field list applies to each element wherever it crosses an array, and an
+address is one of the things it applies. Where the marked position holds an
+array the answer is one address per element, so `notes@` is the concise spelling
+of `{"type":"array","items":{"$link":true}}`:
+
+```bash
+cf piece get --piece ID --select 'notes@'
+```
+
+```json
+{ "notes": [{ "$link": { "id": "of:fid1:…", "…": "…" } }] }
+```
+
+Those element documents are what a caller cannot work out for themselves; the
+array position's own address is only the source address plus the path they just
+typed. Where the marked position holds anything else, `topic@` among them, the
+address is that position's own. Marking below an array — `notes.title@` — is
+element-wise for the same reason, and answers with each note's own `id` and
+`path` `["title"]`.
 
 A path that is only `@` names the position the read is already at, which no
 field path reaches because it sits above every field:
@@ -305,10 +321,10 @@ cf piece get --piece ID topic --select '@,title'
 ```
 
 It composes exactly as a suffix one level down does: `@` alone replaces the
-contents with the address, and `@` beside a field path returns both in the one
-result. A leading `@` followed by anything else is an `@file`, which `--schema`
-reads and `--select` does not, so `--select '@fields.json'` is refused and
-pointed there.
+contents with the address, `@` beside a field path returns both in the one
+result, and a source that holds an array answers with one address per element. A
+leading `@` followed by anything else is an `@file`, which `--schema` reads and
+`--select` does not, so `--select '@fields.json'` is refused and pointed there.
 
 A marked position is never fetched: it contributes a rejecting selector to the
 same path union the projection builds, and the address is composed from links
