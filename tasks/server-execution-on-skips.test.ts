@@ -134,11 +134,16 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /runner: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list is EMPTY since Phase 2 retired the two-browsers entry — no ignore flag, the full suite runs", async () => {
+Deno.test("main: the patterns list holds the Phase-2 follow-up entry (the demand-cycle starvation fork reproducer); the two-browsers gate is retired and runs", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
-  assertEquals(out, []);
-  assertMatch(err[0], /patterns: no skips — full suite runs/);
+  assertEquals(out, [
+    "--ignore=integration/sx2-serving-loop.test.ts",
+  ]);
+  assertMatch(
+    err[0],
+    /SKIP integration\/sx2-serving-loop\.test\.ts \(until phase-2-followup\)/,
+  );
 });
 
 Deno.test("main: populated lists emit the --ignore flag on stdout", async () => {

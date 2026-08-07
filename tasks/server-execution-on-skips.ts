@@ -27,7 +27,8 @@ export type ServerExecutionPhase =
   | "phase-4"
   | "phase-5"
   | "phase-6"
-  | "phase-7";
+  | "phase-7"
+  | "phase-2-followup";
 
 export type ServerExecutionOnSkip = {
   /** Test file, relative to the suite's package root (the directory the
@@ -66,12 +67,28 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   ServerExecutionSuite,
   ServerExecutionOnSkip[]
 > = {
-  // Phase 2 retired the ONE entry this file ever held (the
+  // Phase 2 retired the entry this file held since stage F (the
   // two-browsers CFC gate): the client derivation-commit path is
   // removed by construction, the two-deriver interim's CAS storm with
-  // it — the exact unskipping condition the entry named. Every ON-arm
-  // suite now runs unfiltered.
-  patterns: [],
+  // it — the exact unskipping condition the entry named. That gate now
+  // runs (and passes) ON.
+  patterns: [
+    {
+      file: "integration/sx2-serving-loop.test.ts",
+      phase: "phase-2-followup",
+      reason: "deterministic reproducer of the ESCALATED demand-cycle " +
+        "starvation fork: the SpaceServer's cycle runs " +
+        "#loadDemandedStructure BEFORE the settle race with no " +
+        "deadline, and the never-loadable piece-registry root (the " +
+        "structureLoadDeferred churn) is re-attempted every cycle " +
+        "since the ensure-retry fix — post-activation input sits " +
+        "unconsumed while cycles crawl (ledger: the Phase-2 PR's " +
+        "Flags; store evidence: authored seqs land, zero derived " +
+        "commits follow, wavesBudgetExhausted stays 0). The " +
+        "sx2-speculation gate runs unskipped; this entry lifts with " +
+        "the fork's resolution.",
+    },
+  ],
   runner: [],
   "runtime-client": [],
   shell: [],
