@@ -2661,7 +2661,13 @@ export class Runner {
     // repair the home ROOT got in startEnsuredDefaultPattern, reachable at last
     // for the nested pieces that never pass through it.
     //
-    // Gated on the systemPatternAutoUpdate experimental flag. On EXACTLY that
+    // Not gated on systemPatternAutoUpdate: that flag governs the UPDATE
+    // family (heals that move the durable identity pointer), while this is a
+    // same-identity self-REPAIR — the same posture as the root's
+    // controller-side cold-start repair (pinned at flag-off by
+    // check-update-default-pattern.test.ts). Default deployments leave the
+    // flag unset, and an aged nested piece (e.g. a profile surface reached
+    // through a wish) has no other heal there. On EXACTLY that
     // failure, re-run the pinned pattern's OWN setup state (samePattern=true:
     // materializes the missing internal cells but leaves the existing argument
     // — the piece's data — untouched; no roll-forward, no user-data rewrite),
@@ -2681,7 +2687,6 @@ export class Runner {
         if (
           useTx !== undefined ||
           ref === undefined ||
-          !this.runtime.experimental.systemPatternAutoUpdate ||
           !isMissingStreamMarkerFailure(instantiateError) ||
           // The root/default pattern is the PieceController's to repair (it has
           // the richer roll-forward + clear-error path); defer to it there.
