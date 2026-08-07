@@ -242,6 +242,11 @@ function snapshotInputsFor(
     const { mutexTimeoutMs: _mutexTimeoutMs, ...rawOptions } =
       snapshot.options ?? {};
     const body = rawOptions.body;
+    // TODO(danfuzz): the `body` schema is open (`{}`), and `JSON.stringify`
+    // renders a `FabricSpecialObject` body — a `FabricBytes`, say, the very
+    // type this file mints for binary responses — as `"{}"`, both on the
+    // wire and in the request hash, so two distinct bodies collapse to one
+    // request identity.
     const options = snapshot.options && Object.keys(rawOptions).length > 0
       ? {
         ...rawOptions,

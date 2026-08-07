@@ -203,6 +203,13 @@ function projectNode(
   }
   if (value === null || typeof value !== "object") return value;
 
+  // TODO(danfuzz): the `typeof` gate admits a `FabricSpecialObject`, so the
+  // `Object.entries` rebuild below renders one — a `FabricBytes` in a
+  // materialized wish result, which the binary fetch builtin mints today —
+  // as `{}` in the projected output. Wants a `FabricSpecialObject` test
+  // returning the value whole, plus a fabric-aware rendering in the
+  // downstream `render()`/`safeStringify` step, whose own marker in
+  // `render.ts` predates this traffic and calls the path latent.
   const cached = memo.get(value);
   if (cached === IN_PROGRESS) {
     // A genuine cycle: this node is an ancestor of itself. Break it so the walk
