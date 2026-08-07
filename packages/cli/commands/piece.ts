@@ -1570,7 +1570,7 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   .option(
     "--select <fields:string>",
     "Project output to comma-separated field paths; a trailing @ asks for a " +
-      "position's address",
+      "position's address, and @ alone for the source's own",
   )
   .option(
     "--schema <schema:string>",

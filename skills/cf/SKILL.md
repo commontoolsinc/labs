@@ -267,16 +267,20 @@ a position to get that position's address — `{"id","space","scope","path"}`, a
 four always present, no schema inlined — instead of what is behind it, or beside
 a projection to get both. A JSON `--schema` marks with `"$link": true`; a field
 list marks with a trailing `@`, so `--select 'topic@,topic.title'` returns one
-`topic` carrying its address and its title. `@` is special only at the end of a
-segment and `\@` writes a literal one, which keeps a field named `user@home`
-reachable. That address is the deepest stored link crossed on the way to the
-marked position plus the segments below it, so marking a field under a linked
-element names that element's own document rather than a slot in the collection
-above it; a position with no link above it keeps the source document's own
-address. A marked position is never fetched, so a marked collection costs one
-document read rather than one per element; the rendered `id` minus its `of:`
-prefix is what `--piece` accepts. Neither spelling composes with `--filter`. See
-`packages/cli/README.md` for the exact syntax and supported schema subset.
+`topic` carrying its address and its title. A path that is only `@` marks the
+position the read is already at, so `--select '@'` returns the source's own
+address and `--select '@,title'` returns it beside the title. `@` is otherwise
+special only at the end of a segment and `\@` writes a literal one, which keeps
+a field named `user@home` reachable; a leading `@` followed by anything else is
+the `@file` only `--schema` reads. That address is the deepest stored link
+crossed on the way to the marked position plus the segments below it, so marking
+a field under a linked element names that element's own document rather than a
+slot in the collection above it; a position with no link above it keeps the
+source document's own address. A marked position is never fetched, so a marked
+collection costs one document read rather than one per element; the rendered
+`id` minus its `of:` prefix is what `--piece` accepts. Neither spelling composes
+with `--filter`. See `packages/cli/README.md` for the exact syntax and supported
+schema subset.
 
 `piece call` takes the same three flags, before the callable name, with the same
 grammar, the same `--select`/`--schema` conflict, and the same error messages.
