@@ -1,5 +1,7 @@
 import { DID, Identity, type Session } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { JsonCodec } from "@commonfabric/data-model/codec-json";
 import { PieceManager } from "@commonfabric/piece";
 import {
@@ -200,13 +202,6 @@ function pageIdForRouting(pageId: string): string {
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   const spaceBaseUrl = new URL(`/${space}/`, apiUrl);
   return new URL(url, spaceBaseUrl).href;
-}
-
-/** Whether the home root must take the reconcile-before-start path. */
-export function shouldReconcileHomeRoot(
-  runtime: Pick<Runtime, "experimental">,
-): boolean {
-  return runtime.experimental?.systemPatternAutoUpdate === true;
 }
 
 /**
@@ -430,13 +425,18 @@ function sanitizedBody(
     );
   }
 
+  // A `FabricSpecialObject` keeps its state in private fields and has zero
+  // enumerable own properties, so the property walk below would rebuild one as
+  // `{}` -- a dump asserting "empty object" about a value that is nothing of
+  // the kind. Both arms are named instead of descended: a primitive is atomic
+  // and has nothing to descend into, and an instance's codec contents are not
+  // reachable by property name. Naming beats refusing here, because what a
+  // debug dump was handed is the very thing being debugged.
+  if (obj instanceof FabricSpecialObject) {
+    return toCompactDebugString(obj);
+  }
+
   // Plain objects - walk properties.
-  //
-  // TODO(danfuzz): a `FabricSpecialObject` lands here and is shown as `{}`,
-  // its state being in private fields rather than enumerable members. A
-  // `FabricPrimitive` wants formatting by its codec and a `FabricInstance` by
-  // its codec contents -- the same gap marked at the sibling walks, and here it
-  // makes a debug dump silently wrong rather than losing stored data.
   try {
     const result: Record<string, unknown> = {};
     for (const key of Object.keys(obj)) {
@@ -1156,28 +1156,12 @@ export class RuntimeProcessor {
     const homeSpaceCell = this.runtime.getHomeSpaceCell();
     await homeSpaceCell.sync();
 
-    const defaultPatternCell = homeSpaceCell.key("defaultPattern").get()
-      .resolveAsCell();
-    await defaultPatternCell.sync();
-
-    // Fast path: pattern already exists. When home auto-update is enabled,
-    // deliberately fall through to PiecesController.ensureDefaultPattern():
-    // it reconciles the persisted identity before starting the root. Starting
-    // here first would recreate the stale-root bootstrap dependency.
-    // (Value is a Cell itself, and pattern metadata means it's instantiated)
-    // We've followed all the links from "defaultPattern", so our cell should
-    // be the result cell for the default pattern.
-    const reconcileHome = shouldReconcileHomeRoot(this.runtime);
-    if (getMetaLink(defaultPatternCell, "pattern") && !reconcileHome) {
-      await this.runtime.start(defaultPatternCell);
-      await this.runtime.idle();
-      return {
-        cell: createCellRef(defaultPatternCell),
-      };
-    }
-
-    // Pattern is absent, or update-enabled and must be reconciled before start:
-    // use the home-space PiecesController for the complete ensure sequence.
+    // Always the PiecesController path: ensureDefaultPattern() reconciles the
+    // persisted identity and carries the cold-start setup repair that heals an
+    // aged home root. Starting the pattern directly here would skip that
+    // repair, and with systemPatternAutoUpdate unset (every default
+    // deployment) nothing else heals the root — so no fast path belongs in
+    // front of the controller.
     const homeSession: Session = {
       as: this.identity,
       space: this.runtime.userIdentityDID,
