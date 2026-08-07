@@ -17,7 +17,7 @@ shape bounds a read — has moved. A verb result is the shared read layer applie
 to the receipt cell, not a contract of its own.
 
 This continues the identity work from
-[Pattern verb contract — implementation plan](pattern-verb-contract-implementation.md)
+[Pattern verb contract — implementation plan](../history/plans/pattern-verb-contract-implementation.md)
 (WS-F). The user-facing surface it changes is
 [Verbs over the CLI](../common/verbs-over-the-cli.md).
 

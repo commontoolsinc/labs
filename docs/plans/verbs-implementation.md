@@ -1,11 +1,12 @@
 # Verbs — implementation plan
 
 Sequences the remaining work on verbs: what a verb declares, what a caller may
-ask for, and what comes back. It carries the residue of two
-implementation plans whose work is substantially landed —
-[the pattern verb contract](pattern-verb-contract-implementation.md) and
-[shaped reads and verb results](shaped-reads-implementation.md) — which are
-archived once this replaces them.
+ask for, and what comes back. It carries the residue of two implementation
+plans whose work is substantially landed, and which are archived as the record
+of what each decided:
+[the pattern verb contract](../history/plans/pattern-verb-contract-implementation.md)
+and
+[shaped reads and verb results](../history/plans/shaped-reads-implementation.md).
 
 **The designs are unchanged and are not restated here.**
 [The pattern verb contract](pattern-verb-contract.md) says what a verb is.
@@ -138,7 +139,8 @@ selection.
 **6. The read layer.** #5458, #5470, #5497, #5500, #5504, #5505, #5459 — the
 shared read step, address markers with the deepest-link rule, container
 inference, the flag split, the `@` suffix, call selection, and entity-URI
-intake. All built and restacked onto current main.
+intake. All built and restacked onto current main. The first six are one
+stack; #5459 is independent of it and of everything else here.
 
 **7. Session-scoped invocation ids.** #5469. The one address-changing commit;
 it lands alone, ahead of anything that publishes a receipt address, so no caller
@@ -155,7 +157,8 @@ gate.
 
 | Item | After | Why |
 | --- | --- | --- |
-| 6 | — | the stack merges bottom-up: #5458 → #5470 → #5497 → #5500 → {#5504, #5505} |
+| 6 (stack) | — | the stack merges bottom-up: #5458 → #5470 → #5497 → #5500 → {#5504, #5505} |
+| 6 (#5459) | — | not in the stack; entity-URI intake stands alone and merges whenever |
 | 7 | — | independent of 6; must precede 4 |
 | 8, 9 | — | independent |
 | 2 | 6 | changes what the flags accept |
@@ -200,9 +203,9 @@ earlier means resolving the same files twice. Its deprecation stage carries an
 unanswered question of its own — what "carries traffic" means, given nothing
 measures it — and that wants an answer before the stage rather than during it.
 
-**Retention and CFC execution provenance** — extracted from the verb contract
-arc into its own plan. Gated on a CFC review that has not happened. Nothing in
-this plan advances it, and nothing in it blocks this plan.
+**Retention and CFC execution provenance** —
+[its own plan](retention-and-provenance.md). Gated on a CFC review that has not
+happened. Nothing in this plan advances it, and nothing in it blocks this plan.
 
 Whoever drives this document owns that queue, not just this list. A plan that
 finishes without naming its successor is how an arc goes quiet with work left
@@ -213,7 +216,8 @@ in it.
 **Retention and CFC execution provenance** — the `AgentActor` mint, its
 propagation, metadata confidentiality, and retiring `AgentAuthoredEvent`. Gated
 on a CFC review, sized large, and not about verbs: it is a program that was
-filed under one. It moves to its own plan.
+filed under one. It is sequenced in
+[its own plan](retention-and-provenance.md).
 
 **The command surface** —
 [The CLI surface](cli-surface-implementation.md) sequences positional addresses,

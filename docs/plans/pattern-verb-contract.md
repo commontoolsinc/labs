@@ -954,9 +954,10 @@ client retry needs.
 
 ## Staging
 
-The engineering breakdown — workstreams, phases, issue graph — lives in
-[`pattern-verb-contract-implementation.md`](pattern-verb-contract-implementation.md);
-the steps below are the design-level order.
+The engineering breakdown — what remains, in what order, and what each item
+waits behind — lives in
+[`verbs-implementation.md`](verbs-implementation.md); the steps below are the
+design-level order.
 
 1. Agree this document — particularly the open questions.
 2. Finish the Part 1 rework of `topics` / `topic` — the attribution rules

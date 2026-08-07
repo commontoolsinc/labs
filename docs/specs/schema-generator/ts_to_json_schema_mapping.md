@@ -398,7 +398,8 @@ type). The verb contract wants event schemas closed-world
 ignored), but emitting that is blocked on a pattern-update-gate migration:
 the argument-role compatibility rule refuses the open→closed direction for
 verbs reachable through a piece's argument schema (plan
-`docs/plans/pattern-verb-contract-implementation.md`, WS-C and Risks). The
+`docs/history/plans/pattern-verb-contract-implementation.md`, WS-C and Risks).
+The
 open event side is pinned as a decision in `test/stream-result.test.ts`; a
 schema that declares the closure by hand is enforced at dispatch by the
 runner (C5).

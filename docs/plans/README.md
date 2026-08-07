@@ -35,9 +35,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
 - [Server-primary execution v2](server-execution-v2.md) sequences the
   greenfield rebuild that executes the server-side-execution v2 spec, with
   per-phase task and success-criteria checkboxes.
-- [Pattern verb contract implementation](pattern-verb-contract-implementation.md)
-  sequences the implementation of the
-  [pattern verb contract](pattern-verb-contract.md).
+- [Retention and CFC execution provenance](retention-and-provenance.md)
+  sequences how long an invocation record is kept and what the runtime knows
+  about who caused it — the `AgentActor` mint, trusted ingress, and metadata
+  confidentiality. Gated on a CFC review that has not happened.
 - [CFC runner implementation](runner_cfc_implementation.md) defines the
   commit-boundary enforcement workstreams and rollout.
 - [Topics migration rehearsal](topics-migration-rehearsal.md) is the concrete,
@@ -66,10 +67,6 @@ a record: archive it to `docs/history/plans/` following the procedure in
   work on verbs across both arcs that produced it: what a verb declares, what a
   caller may ask for, and what comes back. Read it for order; read the designs
   it points at for reasoning.
-- [Shaped reads and verb results — implementation plan](shaped-reads-implementation.md)
-  sequences the read layer, the calls layered on it, and the remaining
-  arrivals, ordering the address change ahead of anything that publishes an
-  address so no caller holds one that moves.
 - [The CLI surface — implementation plan](cli-surface-implementation.md) builds
   the rest of the command surface: positional addresses, the honest top-level
   names, deprecating the spellings they replace, and merging the commands that

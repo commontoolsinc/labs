@@ -1,7 +1,15 @@
+---
+status: historical
+created: 2026-07-24
+archived: 2026-08-07
+reason: "Verb-contract implementation plan; its remaining sequencing moved to the verbs plan and its retention/provenance workstream to a plan of its own."
+superseded-by: docs/plans/verbs-implementation.md
+---
+
 # Pattern verb contract — implementation plan
 
 **Status:** pending. Executes the design in
-[`pattern-verb-contract.md`](pattern-verb-contract.md) (PR #4968). Keep current
+[`pattern-verb-contract.md`](../../plans/pattern-verb-contract.md) (PR #4968). Keep current
 as work proceeds: check off exit criteria, record scope changes.
 
 **Amended 2026-07-31 (second pass)**, C5 measured outcome: dispatch-side
