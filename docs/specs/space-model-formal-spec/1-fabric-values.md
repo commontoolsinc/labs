@@ -2257,37 +2257,37 @@ they don't own the wire format. A **serialization context** owns the mapping
 between classes and wire format tags, and handles format-specific
 encoding/decoding.
 
-### 4.2 Wire Format Types
+### 4.2 Codec Value Types
 
-The JSON encoding context uses an intermediate tree representation during
-serialization and deserialization. This type is internal to the JSON
-implementation — it is not part of the public boundary interface.
+`JsonCodec` uses an intermediate tree representation during serialization
+and deserialization. This type is internal to the JSON implementation — it
+is not part of the public boundary interface.
 
 ```typescript
 // file: packages/data-model/codec-json/interface.ts
 
 /**
- * JSON-compatible wire format value. This is the intermediate tree
+ * JSON-compatible codec value. This is the intermediate tree
  * representation used during serialization tree walking -- NOT the final
  * serialized form (which is `string`). Internal to the JSON implementation.
  *
- * Deep-frozen invariant on the deserialize side: every wire tree that
+ * Deep-frozen invariant on the deserialize side: every such tree that
  * enters deserialization is deep-frozen, enforced at the two construction
  * sites that feed it (`decode()` and `fromBytes()`, unified in
  * `#parseWireText()`). This is what lets the tag-unwrap and `/quote` arms
  * hand back extracted sub-trees directly without further copying. The
- * serialize-side wire trees are transient (`JSON.stringify`-ed and
- * discarded) and are not covered by this invariant. The `readonly` on the
- * array and object arms of the union expresses the deserialize-side
- * contract at the type level. See Section 8.6.
+ * serialize-side trees are transient (`JSON.stringify`-ed and discarded)
+ * and are not covered by this invariant. The `readonly` on the array and
+ * object arms of the union expresses the deserialize-side contract at the
+ * type level. See Section 8.6.
  */
-export type JsonWireValue =
+export type JsonCodecValue =
   | null
   | boolean
   | number
   | string
-  | readonly JsonWireValue[]
-  | { readonly [key: string]: JsonWireValue };
+  | readonly JsonCodecValue[]
+  | { readonly [key: string]: JsonCodecValue };
 ```
 
 ### 4.3 Public Boundary Interface
@@ -2352,9 +2352,9 @@ Decode:  serialized form -> codec.decode(data, context) -> FabricValue
 
 Internally, `JsonCodec`'s `encode()` method calls a private encode walker
 (`#encodeValue()`) to walk the `FabricValue` tree and produce a
-`JsonWireValue` tree, then stringifies it. The `decode()` method parses
+`JsonCodecValue` tree, then stringifies it. The `decode()` method parses
 the JSON string, then calls a private decode walker (`#decodeValue()`) to
-walk the `JsonWireValue` tree and reconstruct modern runtime types. The
+walk the `JsonCodecValue` tree and reconstruct modern runtime types. The
 recursive descent and codec dispatch are entirely internal to `JsonCodec`.
 
 ### 4.5 Codecs, the Registry, and Internal Tree Walking
@@ -2495,7 +2495,7 @@ Circular references are detected via a `Set<object>` tracked during the walk.
 
 #### Private decode walker (`#decodeValue()`)
 
-`JsonCodec`'s private decode walker processes the `JsonWireValue` tree:
+`JsonCodec`'s private decode walker processes the `JsonCodecValue` tree:
 
 1. **Tag unwrapping** — checks for single-key objects with `/`-prefixed
    keys.
@@ -3665,10 +3665,10 @@ values cross from internal serialization machinery to callers:
   intentionally NOT covered by this contract; broadening the contract
   there is a separate follow-on. See Section 4.5 step 4.
 
-- **`JsonWireValue` parse boundary.** The `#parseWireText()` helper
-  (invoked by `decode()` and `fromBytes()`) deep-freezes the parsed wire
-  tree before handing it to the decode walker. This is what makes the
-  deserialize-side `JsonWireValue` invariant load-bearing: tag-unwrap and
+- **`JsonCodecValue` parse boundary.** The `#parseWireText()` helper
+  (invoked by `decode()` and `fromBytes()`) deep-freezes the parsed tree
+  before handing it to the decode walker. This is what makes the
+  deserialize-side `JsonCodecValue` invariant load-bearing: tag-unwrap and
   the `/quote` arm can hand back extracted sub-trees directly without
   further copying because the input tree is already deep-frozen.
 

@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 
 import { JsonCodec } from "@/codec-json/JsonCodec.ts";
 import { FabricInstance, type FabricValue } from "@/interface.ts";
-import type { JsonWireValue } from "@/codec-json/interface.ts";
+import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import {
@@ -68,7 +68,7 @@ class UnregisteredInstance extends BaseFabricInstance {
 /**
  * The encoding prefix tag, named once for the assertions below that pin the
  * wire form or that feed the decoder deliberately broken input. Bridging
- * between encoded strings and wire-format trees does NOT go through this --
+ * between encoded strings and codec-value trees does NOT go through this --
  * that is what `JsonCodec`'s wrap/unwrap helpers are for.
  */
 const ENCODING_PREFIX = "fvj1:";
@@ -88,22 +88,22 @@ function roundTrip(value: FabricValue): FabricValue {
 }
 
 /**
- * Helper: encode a value and return the wire-format tree (parsed JSON).
- * Used for assertions about the intermediate wire representation.
+ * Helper: encode a value and return the codec-value tree (parsed JSON).
+ * Used for assertions about the intermediate codec value.
  */
-function toWireFormat(value: FabricValue): JsonWireValue {
+function toWireFormat(value: FabricValue): JsonCodecValue {
   const { jsonCodec } = makeTestCodec();
   const encoded = jsonCodec.encode(value);
   return JSON.parse(
     JsonCodec.unwrapEncodedValueForTesting(encoded),
-  ) as JsonWireValue;
+  ) as JsonCodecValue;
 }
 
 /**
- * Helper: decode from a wire-format tree. Stringifies to JSON first (tagged as
+ * Helper: decode from a codec-value tree. Stringifies to JSON first (tagged as
  * an encoded value), then feeds through the public decode API.
  */
-function fromWireFormat(data: JsonWireValue): FabricValue {
+function fromWireFormat(data: JsonCodecValue): FabricValue {
   const { jsonCodec, runtime } = makeTestCodec();
   return jsonCodec.decode(
     JsonCodec.wrapEncodedValueForTesting(JSON.stringify(data)),
@@ -457,7 +457,7 @@ describe("JsonCodec", () => {
     it("serializes `[1,,3]` with `/hole`", () => {
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , 3];
-      const result = toWireFormat(arr) as JsonWireValue[];
+      const result = toWireFormat(arr) as JsonCodecValue[];
       expect(result.length).toBe(3);
       expect(result[0]).toBe(1);
       expect(result[1]).toEqual({ "/hole": 1 });
@@ -477,7 +477,7 @@ describe("JsonCodec", () => {
     it("serializes consecutive holes as run-length encoded", () => {
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , , , 5];
-      const result = toWireFormat(arr) as JsonWireValue[];
+      const result = toWireFormat(arr) as JsonCodecValue[];
       expect(result.length).toBe(3); // [1, {"/hole": 3}, 5]
       expect(result[0]).toBe(1);
       expect(result[1]).toEqual({ "/hole": 3 });
@@ -539,7 +539,7 @@ describe("JsonCodec", () => {
       arr[0] = 1;
       arr[2] = undefined;
       arr[4] = 3;
-      const result = toWireFormat(arr) as JsonWireValue[];
+      const result = toWireFormat(arr) as JsonCodecValue[];
       expect(result).toEqual([
         1,
         { "/hole": 1 },
@@ -584,7 +584,7 @@ describe("JsonCodec", () => {
     describe("key ordering (Section 10)", () => {
       it("emits keys in UTF-8 byte order for a bare plain object", () => {
         const obj = { c: 3, a: 1, b: 2 };
-        const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
+        const wire = toWireFormat(obj) as Record<string, JsonCodecValue>;
         expect(Object.keys(wire)).toEqual(["a", "b", "c"]);
       });
 
@@ -602,9 +602,9 @@ describe("JsonCodec", () => {
           b: { z: 1, a: 2 },
           a: 0,
         };
-        const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
+        const wire = toWireFormat(obj) as Record<string, JsonCodecValue>;
         expect(Object.keys(wire)).toEqual(["a", "b"]);
-        const inner = wire.b as Record<string, JsonWireValue>;
+        const inner = wire.b as Record<string, JsonCodecValue>;
         expect(Object.keys(inner)).toEqual(["a", "z"]);
       });
 
@@ -616,7 +616,7 @@ describe("JsonCodec", () => {
           ["\u{10000}"]: 1,
           [""]: 2,
         };
-        const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
+        const wire = toWireFormat(obj) as Record<string, JsonCodecValue>;
         expect(Object.keys(wire)).toEqual(["", "\u{10000}"]);
       });
 
@@ -632,7 +632,7 @@ describe("JsonCodec", () => {
           ["﻿"]: 3,
           a: 4,
         };
-        const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
+        const wire = toWireFormat(obj) as Record<string, JsonCodecValue>;
         expect(Object.keys(wire)).toEqual([...utf8SortedKeysOf(obj as object)]);
       });
     });
@@ -784,7 +784,7 @@ describe("JsonCodec", () => {
       it("malformed wire: multi-key object with `/`-prefixed key produces `ProblematicValue`", () => {
         // Wire data without /quote or /object wrapper — decoder must not silently
         // round-trip it as a plain object.
-        const data = { a: 1, "/b": 2 } as JsonWireValue;
+        const data = { a: 1, "/b": 2 } as JsonCodecValue;
         const result = fromWireFormat(data);
         expect(result).toBeInstanceOf(ProblematicValue);
       });
@@ -793,7 +793,7 @@ describe("JsonCodec", () => {
         // Per spec §9, a single-key object whose key is bare "/" (empty tag
         // after stripping the leading slash) is an encoding error. Decoding must
         // produce a ProblematicValue, not an UnknownValue with an empty tag.
-        const data = { "/": "x" } as JsonWireValue;
+        const data = { "/": "x" } as JsonCodecValue;
         const result = fromWireFormat(data);
         expect(result).toBeInstanceOf(ProblematicValue);
       });
@@ -804,7 +804,7 @@ describe("JsonCodec", () => {
       });
 
       it("deserializes an `/object`-wrapped multi-key object with `/`-prefixed key correctly", () => {
-        const data = { "/object": { a: 1, "/b": 2 } } as JsonWireValue;
+        const data = { "/object": { a: 1, "/b": 2 } } as JsonCodecValue;
         const result = fromWireFormat(data) as Record<string, FabricValue>;
         expect(result["a"]).toBe(1);
         expect(result["/b"]).toBe(2);
@@ -823,7 +823,7 @@ describe("JsonCodec", () => {
         // Single-key /Tag@N objects are handled by unwrapTag, not the plain-object
         // path — confirm they still produce UnknownValue (unrecognized tag), not
         // ProblematicValue from the new multi-key guard.
-        const data = { "/Future@7": { id: "x" } } as JsonWireValue;
+        const data = { "/Future@7": { id: "x" } } as JsonCodecValue;
         const result = fromWireFormat(data);
         expect(result).toBeInstanceOf(UnknownValue);
         expect((result as unknown as UnknownValue).wireTypeTag).toBe(
@@ -836,7 +836,7 @@ describe("JsonCodec", () => {
         // whose content happens to be { "/quote": "x" }. Decoding must return
         // { "/quote": "x" } as a frozen plain object — NOT recurse into it and
         // return just "x".
-        const wire = { "/quote": { "/quote": "x" } } as JsonWireValue;
+        const wire = { "/quote": { "/quote": "x" } } as JsonCodecValue;
         const result = fromWireFormat(wire) as Record<string, FabricValue>;
         expect(result["/quote"]).toBe("x");
       });
@@ -943,7 +943,7 @@ describe("JsonCodec", () => {
     it("deserializes `/quote` as literal (no inner deserialization)", () => {
       const data = {
         "/quote": { "/Link@1": { id: "abc" } },
-      } as JsonWireValue;
+      } as JsonCodecValue;
       const result = fromWireFormat(data);
       // The inner structure is returned as-is, not reconstructed.
       const obj = result as Record<string, unknown>;
@@ -953,7 +953,7 @@ describe("JsonCodec", () => {
     it("deep-freezes `/quote` result objects", () => {
       const data = {
         "/quote": { "/Link@1": { id: "abc" } },
-      } as JsonWireValue;
+      } as JsonCodecValue;
       const result = fromWireFormat(data) as Record<string, unknown>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result["/Link@1"])).toBe(true);
@@ -962,7 +962,7 @@ describe("JsonCodec", () => {
     it("deep-freezes `/quote` result arrays", () => {
       const data = {
         "/quote": [1, { nested: "obj" }, [2, 3]],
-      } as JsonWireValue;
+      } as JsonCodecValue;
       const result = fromWireFormat(data) as unknown[];
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result[1])).toBe(true);
@@ -972,7 +972,7 @@ describe("JsonCodec", () => {
     it("throws on mutation of a `/quote` result", () => {
       const data = {
         "/quote": { key: "val" },
-      } as JsonWireValue;
+      } as JsonCodecValue;
       const result = fromWireFormat(data) as Record<string, unknown>;
       expect(() => {
         result.key = "changed";
@@ -984,7 +984,7 @@ describe("JsonCodec", () => {
     it("produces `UnknownValue` for unrecognized tags via `decode()`", () => {
       const data = {
         "/FutureType@2": { some: "data" },
-      } as JsonWireValue;
+      } as JsonCodecValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(UnknownValue);
       const unknown = result as unknown as UnknownValue;
@@ -1011,7 +1011,7 @@ describe("JsonCodec", () => {
     });
 
     it("converts a `/hole` outside array context to `UnknownValue`", () => {
-      const data = { "/hole": 5 } as JsonWireValue;
+      const data = { "/hole": 5 } as JsonCodecValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(UnknownValue);
       const unknown = result as unknown as UnknownValue;
@@ -1089,7 +1089,7 @@ describe("JsonCodec", () => {
 
       // BigInt@1 with a non-string state produces ProblematicValue
       // in lenient mode because the handler validates the state type.
-      const data = { "/BigInt@1": 42 } as JsonWireValue;
+      const data = { "/BigInt@1": 42 } as JsonCodecValue;
       const result = jsonCodec.decode(
         JsonCodec.wrapEncodedValueForTesting(JSON.stringify(data)),
         runtime,
@@ -1107,7 +1107,7 @@ describe("JsonCodec", () => {
       // triggering lenient wrapping.
       const data = {
         "/Map@1": [["key", "value"]],
-      } as JsonWireValue;
+      } as JsonCodecValue;
       const result = jsonCodec.decode(
         JsonCodec.wrapEncodedValueForTesting(
           JSON.stringify(data),
@@ -1124,21 +1124,21 @@ describe("JsonCodec", () => {
   describe("freeze guarantees", () => {
     it("deserialized arrays are frozen", () => {
       const result = fromWireFormat(
-        [1, 2, 3] as JsonWireValue,
+        [1, 2, 3] as JsonCodecValue,
       );
       expect(Object.isFrozen(result)).toBe(true);
     });
 
     it("deserialized objects are frozen", () => {
       const result = fromWireFormat(
-        { a: 1 } as JsonWireValue,
+        { a: 1 } as JsonCodecValue,
       ) as Record<string, FabricValue>;
       expect(Object.isFrozen(result)).toBe(true);
     });
 
     it("mutation of deserialized array throws", () => {
       const result = fromWireFormat(
-        [1, 2, 3] as JsonWireValue,
+        [1, 2, 3] as JsonCodecValue,
       );
       expect(() => {
         (result as unknown as number[])[0] = 99;
@@ -1147,7 +1147,7 @@ describe("JsonCodec", () => {
 
     it("mutation of deserialized object throws", () => {
       const result = fromWireFormat(
-        { a: 1 } as JsonWireValue,
+        { a: 1 } as JsonCodecValue,
       ) as Record<string, FabricValue>;
       expect(() => {
         (result as Record<string, unknown>).a = 99;
@@ -1156,14 +1156,14 @@ describe("JsonCodec", () => {
 
     it("nested deserialized objects are frozen", () => {
       const result = fromWireFormat(
-        { inner: { val: 42 } } as JsonWireValue,
+        { inner: { val: 42 } } as JsonCodecValue,
       ) as Record<string, Record<string, FabricValue>>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result.inner)).toBe(true);
     });
 
     it("deserialized `/object`-unwrapped objects are frozen", () => {
-      const data = { "/object": { "/myKey": "val" } } as JsonWireValue;
+      const data = { "/object": { "/myKey": "val" } } as JsonCodecValue;
       const result = fromWireFormat(data) as Record<
         string,
         FabricValue
@@ -1183,7 +1183,7 @@ describe("JsonCodec", () => {
       // `/EpochNsec@1` dispatches through a registered codec; the
       // reconstructed FabricEpochNsec must be deep-frozen on return.
       const result = fromWireFormat(
-        { "/EpochNsec@1": "AA" } as JsonWireValue,
+        { "/EpochNsec@1": "AA" } as JsonCodecValue,
       );
       expect(result).toBeInstanceOf(FabricEpochNsec);
       expect(isDeepFrozen(result)).toBe(true);
@@ -1216,13 +1216,13 @@ describe("JsonCodec", () => {
   });
 
   describe("deep-frozen wire invariant (`decode()`/`decodeFromBytes()` symmetry)", () => {
-    // Every `JsonWireValue` handed to `deserialize()` must be deep-frozen, so
+    // Every `JsonCodecValue` handed to `deserialize()` must be deep-frozen, so
     // both `deserialize()` entry points must produce equally deep-frozen
     // results: `decode()` (string path) and `decodeFromBytes()` (bytes path
     // via `fromBytes()`).
     //
     // Regression guard: the `/quote` arm does `return state`, handing back a
-    // node lifted straight out of the parsed wire tree (see `unwrapTag`'s
+    // node lifted straight out of the parsed codec-value tree (see `unwrapTag`'s
     // contract). That shortcut is only sound because the parsed tree is
     // deep-frozen at construction. `fromBytes()` has always done this;
     // `decode()` once did NOT (it parsed inline without `deepFreeze()`), so a
@@ -1231,11 +1231,11 @@ describe("JsonCodec", () => {
     // symmetry so neither construction site can silently drop the guarantee.
 
     /**
-     * Decodes the same wire tree both ways. The string path needs the
+     * Decodes the same codec-value tree both ways. The string path needs the
      * encoding prefix; the bytes path does not (it does not strip one).
      */
     function decodeBothPaths(
-      data: JsonWireValue,
+      data: JsonCodecValue,
     ): { viaString: FabricValue; viaBytes: FabricValue } {
       const { jsonCodec, runtime } = makeTestCodec();
       const json = JSON.stringify(data);
@@ -1250,7 +1250,7 @@ describe("JsonCodec", () => {
       return { viaString, viaBytes };
     }
 
-    const cases: Array<[string, JsonWireValue]> = [
+    const cases: Array<[string, JsonCodecValue]> = [
       ["plain nested object + array", { a: { b: [1, 2, { c: 3 }] } }],
       ["/quote literal with nested object and array", {
         "/quote": { x: [1, { y: 2 }], z: { w: [3, 4] } },
@@ -1282,7 +1282,7 @@ describe("JsonCodec", () => {
     it("string path deep-freezes `/quote` content at every depth (regression for `decode()` vs `fromBytes()`)", () => {
       const wire = {
         "/quote": { outer: { inner: [1, 2] } },
-      } as JsonWireValue;
+      } as JsonCodecValue;
       const { jsonCodec, runtime } = makeTestCodec();
       const result = jsonCodec.decode(
         JsonCodec.wrapEncodedValueForTesting(JSON.stringify(wire)),
@@ -1303,7 +1303,7 @@ describe("JsonCodec", () => {
     it("bytes path deep-freezes `/quote` content at every depth", () => {
       const wire = {
         "/quote": { outer: { inner: [{ deep: 1 }] } },
-      } as JsonWireValue;
+      } as JsonCodecValue;
       const { jsonCodec, runtime } = makeTestCodec();
       const result = jsonCodec.decodeFromBytes(
         new TextEncoder().encode(JSON.stringify(wire)),

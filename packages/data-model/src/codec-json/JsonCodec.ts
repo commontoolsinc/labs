@@ -12,7 +12,7 @@ import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionCo
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { createDefaultRegistry } from "@/codec-common/createDefaultRegistry.ts";
-import type { JsonWireValue } from "./interface.ts";
+import type { JsonCodecValue } from "./interface.ts";
 import { type CodecRegistry, SELF_REP } from "@/codec-common/CodecRegistry.ts";
 import { CODEC_META_TAGS } from "@/codec-common/codec-meta-tags.ts";
 
@@ -35,23 +35,25 @@ const defaultRegistry: CodecRegistry = createDefaultRegistry();
 
 /** Returns true if `v` is a single-key object whose key starts with `/` —
  * the wire form of an encoded instance (tag-wrapped value). */
-function isEncodedInstance(v: JsonWireValue): boolean {
+function isEncodedInstance(v: JsonCodecValue): boolean {
   if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
   const keys = Object.keys(v);
   return keys.length === 1 && keys[0]!.startsWith("/");
 }
 
 /**
- * Returns true if the already-serialized wire value `v` can be embedded
+ * Returns true if the already-encoded codec value `v` can be embedded
  * inside a /quote wrap without inner deserialization: primitives, plain
  * objects/arrays free of non-/quote encoded instances, and /quote-wrapped
  * values (which `unquote()` can collapse).
  */
-function isQuoteSafe(v: JsonWireValue): boolean {
+function isQuoteSafe(v: JsonCodecValue): boolean {
   if (v === null || typeof v !== "object") return true;
   if (Array.isArray(v)) return v.every((item) => isQuoteSafe(item));
   if (!isEncodedInstance(v)) {
-    return Object.values(v).every((item) => isQuoteSafe(item as JsonWireValue));
+    return Object.values(v).every((item) =>
+      isQuoteSafe(item as JsonCodecValue)
+    );
   }
   return Object.keys(v)[0] === "/quote";
 }
@@ -61,18 +63,18 @@ function isQuoteSafe(v: JsonWireValue): boolean {
  * directly inside a parent /quote. The inner content of a /quote is already
  * literal and must not be recursed into.
  */
-function unquote(v: JsonWireValue): JsonWireValue {
+function unquote(v: JsonCodecValue): JsonCodecValue {
   if (v === null || typeof v !== "object") {
     return v;
   } else if (Array.isArray(v)) {
-    const result = v.map(unquote) as JsonWireValue;
+    const result = v.map(unquote) as JsonCodecValue;
     return Object.freeze(result);
   } else if (isEncodedInstance(v) && Object.keys(v)[0] === "/quote") {
-    return (v as Record<string, JsonWireValue>)["/quote"]!;
+    return (v as Record<string, JsonCodecValue>)["/quote"]!;
   } else {
     const result = Object.fromEntries(
-      Object.entries(v).map(([k, val]) => [k, unquote(val as JsonWireValue)]),
-    ) as JsonWireValue;
+      Object.entries(v).map(([k, val]) => [k, unquote(val as JsonCodecValue)]),
+    ) as JsonCodecValue;
     return Object.freeze(result);
   }
 }
@@ -154,8 +156,8 @@ export class JsonCodec implements SerializationContext<string> {
    * Wraps a tag and state into the `/<tag>` wire format. Prepends `/` to the
    * tag to produce the JSON key. See Section 5.2 of the formal spec.
    */
-  private wrapTag(tag: string, state: JsonWireValue): JsonWireValue {
-    return Object.freeze({ [`/${tag}`]: state } as JsonWireValue);
+  private wrapTag(tag: string, state: JsonCodecValue): JsonCodecValue {
+    return Object.freeze({ [`/${tag}`]: state } as JsonCodecValue);
   }
 
   /**
@@ -167,8 +169,8 @@ export class JsonCodec implements SerializationContext<string> {
    * See Section 5.4 of the formal spec.
    */
   private unwrapTag(
-    data: JsonWireValue,
-  ): { tag: string; state: JsonWireValue } | null {
+    data: JsonCodecValue,
+  ): { tag: string; state: JsonCodecValue } | null {
     if (!isPlainObject(data)) {
       return null;
     }
@@ -183,31 +185,31 @@ export class JsonCodec implements SerializationContext<string> {
     return { tag: key.slice(1), state: value };
   }
 
-  /** Converts a wire-format tree to UTF-8-encoded JSON bytes. */
-  private toBytes(data: JsonWireValue): Uint8Array {
+  /** Converts a codec-value tree to UTF-8-encoded JSON bytes. */
+  private toBytes(data: JsonCodecValue): Uint8Array {
     return textEncoder.encode(JSON.stringify(data));
   }
 
-  /** Parses UTF-8-encoded JSON bytes back into a wire-format tree. */
-  private fromBytes(bytes: Uint8Array): JsonWireValue {
+  /** Parses UTF-8-encoded JSON bytes back into a codec-value tree. */
+  private fromBytes(bytes: Uint8Array): JsonCodecValue {
     const json = textDecoder.decode(bytes);
     return JsonCodec.#parseWireText(json);
   }
 
   /**
-   * Encodes a fabric value into the wire-format tree. Recursively processes
+   * Encodes a fabric value into the codec-value tree. Recursively processes
    * nested values. See Section 4.5 of the formal spec.
    */
   #encodeValue(
     value: FabricValue,
     _seen?: Set<object>,
     registry: CodecRegistry = defaultRegistry,
-  ): JsonWireValue {
+  ): JsonCodecValue {
     const codec = registry.codecFromValue(value);
 
     if (codec === SELF_REP) {
       // A self-representing primitive is its own wire form.
-      return value as JsonWireValue;
+      return value as JsonCodecValue;
     } else if (codec) {
       const seen = _seen ?? new Set<object>();
       let addedToSeen = false;
@@ -228,7 +230,7 @@ export class JsonCodec implements SerializationContext<string> {
 
       const unprocessedState = codec.encode(value);
       const finalState = this.#encodeValue(unprocessedState, seen, registry);
-      const result: JsonWireValue = { [`/${tag}`]: finalState };
+      const result: JsonCodecValue = { [`/${tag}`]: finalState };
 
       if (addedToSeen) {
         seen.delete(value as object);
@@ -256,7 +258,7 @@ export class JsonCodec implements SerializationContext<string> {
       }
       seen.add(value);
 
-      const result: JsonWireValue[] = [];
+      const result: JsonCodecValue[] = [];
       let i = 0;
       while (i < value.length) {
         if (!(i in value)) {
@@ -275,7 +277,7 @@ export class JsonCodec implements SerializationContext<string> {
       }
 
       seen.delete(value);
-      return result as JsonWireValue;
+      return result as JsonCodecValue;
     }
 
     // The only legit object we can have at this point is a plain object. (The
@@ -302,7 +304,7 @@ export class JsonCodec implements SerializationContext<string> {
     // used by `value-hash.ts`, and makes JSON encoding deterministic across
     // implementations and across objects whose keys differ only in insertion
     // order. See `3-json-encoding.md` Section 10 for the spec.
-    const result: Record<string, JsonWireValue> = {};
+    const result: Record<string, JsonCodecValue> = {};
     const valueRec = value as Record<string, FabricValue>;
     for (const key of utf8SortedKeysOf(valueRec)) {
       result[key] = this.#encodeValue(valueRec[key], seen, registry);
@@ -321,16 +323,16 @@ export class JsonCodec implements SerializationContext<string> {
             Object.entries(result).map(([k, v]) => [k, unquote(v)]),
           ),
         );
-        return this.wrapTag(CODEC_META_TAGS.quote, unquoted) as JsonWireValue;
+        return this.wrapTag(CODEC_META_TAGS.quote, unquoted) as JsonCodecValue;
       }
-      return this.wrapTag(CODEC_META_TAGS.object, result) as JsonWireValue;
+      return this.wrapTag(CODEC_META_TAGS.object, result) as JsonCodecValue;
     }
 
-    return result as JsonWireValue;
+    return result as JsonCodecValue;
   }
 
   /**
-   * Decodes a wire-format tree back into fabric values. See Section 4.5 of
+   * Decodes a codec-value tree back into fabric values. See Section 4.5 of
    * the formal spec.
    *
    * Frozen-ness contract: values returned via the codec dispatch arm are
@@ -339,7 +341,7 @@ export class JsonCodec implements SerializationContext<string> {
    * intentionally NOT covered by this contract.
    */
   #decodeValue(
-    data: JsonWireValue,
+    data: JsonCodecValue,
     context: ReconstructionContext,
     registry: CodecRegistry = defaultRegistry,
   ): FabricValue {
@@ -354,7 +356,7 @@ export class JsonCodec implements SerializationContext<string> {
 
       // `CODEC_META_TAGS.object` unwrapping (Section 5.6).
       if (tag === CODEC_META_TAGS.object) {
-        const inner = rawState as Record<string, JsonWireValue>;
+        const inner = rawState as Record<string, JsonCodecValue>;
         const result: Record<string, FabricValue> = {};
         for (const [key, val] of Object.entries(inner)) {
           // Same reservation as the plain-object arm below: the assignment
@@ -613,7 +615,7 @@ export class JsonCodec implements SerializationContext<string> {
   /**
    * Parses the JSON-text wire form, _without_ a tag prefix.
    */
-  static #parseWireText(jsonText: string): JsonWireValue {
-    return deepFreeze(JSON.parse(jsonText) as JsonWireValue);
+  static #parseWireText(jsonText: string): JsonCodecValue {
+    return deepFreeze(JSON.parse(jsonText) as JsonCodecValue);
   }
 }
