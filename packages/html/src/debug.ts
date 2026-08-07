@@ -96,6 +96,15 @@ function formatTree(node: unknown, indent = 0): string {
   const name = obj.name as string | undefined;
   if (!name) {
     // Not a vdom node — try to stringify
+    //
+    // TODO(danfuzz): This is an unsafe use of `stringify()`. `node` comes from
+    // a cell, so it is a `FabricValue`, and a `FabricSpecialObject` keeps its
+    // state in private fields rather than in enumerable properties. Such a
+    // value renders as `{}` here, and does so silently: the `catch` below
+    // fires only on a throw, and `stringify()` does not throw on one. The fix
+    // is to test for a `FabricSpecialObject` before this point and render it
+    // with `toCompactDebugString()`, from
+    // `@commonfabric/data-model/value-debug`.
     try {
       return `${pad}${JSON.stringify(node)}`;
     } catch {
@@ -114,6 +123,12 @@ function formatTree(node: unknown, indent = 0): string {
       } else if (typeof value === "string") {
         propParts.push(`${key}="${value}"`);
       } else {
+        // TODO(danfuzz): This is an unsafe use of `stringify()`. `value` is a
+        // render prop read from a cell, so it is a `FabricValue`. A
+        // `FabricSpecialObject` among them renders as `{}` here, silently, for
+        // the same reason as the node case above -- and wants the same fix, a
+        // `FabricSpecialObject` test ahead of this point and
+        // `toCompactDebugString()` to render it.
         try {
           propParts.push(`${key}=${JSON.stringify(value)}`);
         } catch {
@@ -277,9 +292,7 @@ export function createVDomDebugHelpers() {
         rows.push({
           index: i++,
           container: parent,
-          cellId: entry.cell?.ref()?.id ?? "(none)",
-          path: entry.path,
-          renderer: entry.renderer ? "VDomRenderer" : "(legacy)",
+          cellId: entry.cell.ref()?.id ?? "(none)",
         });
       }
       console.table(rows);
@@ -295,10 +308,6 @@ export function createVDomDebugHelpers() {
         console.warn("No active render found.");
         return undefined;
       }
-      if (!target.cell) {
-        console.warn("No cell handle available (legacy render without cell).");
-        return undefined;
-      }
       return await readCellAsync(target.cell.asSchema(debugVDOMSchema));
     },
 
@@ -309,10 +318,6 @@ export function createVDomDebugHelpers() {
       const target = resolveTarget(el);
       if (!target) {
         console.warn("No active render found.");
-        return;
-      }
-      if (!target.cell) {
-        console.warn("No cell handle available (legacy render without cell).");
         return;
       }
       const tree = await readCellAsync(
@@ -326,7 +331,7 @@ export function createVDomDebugHelpers() {
     },
 
     /**
-     * Show node/listener counts per active renderer (worker path only).
+     * Show node/listener counts per active renderer.
      */
     stats() {
       const renders = getActiveRenders();
@@ -337,26 +342,15 @@ export function createVDomDebugHelpers() {
       const rows: Record<string, unknown>[] = [];
       let i = 0;
       for (const [parent, entry] of renders) {
-        if (entry.renderer) {
-          const info = entry.renderer.getApplicator().getDebugInfo();
-          rows.push({
-            index: i,
-            container: parent,
-            nodeCount: info.nodeCount,
-            listenerCount: info.listenerCount,
-            totalListeners: info.totalListeners,
-            rootNodeId: info.rootNodeId,
-          });
-        } else {
-          rows.push({
-            index: i,
-            container: parent,
-            nodeCount: "(legacy)",
-            listenerCount: "(legacy)",
-            totalListeners: "(legacy)",
-            rootNodeId: "(legacy)",
-          });
-        }
+        const info = entry.renderer.getApplicator().getDebugInfo();
+        rows.push({
+          index: i,
+          container: parent,
+          nodeCount: info.nodeCount,
+          listenerCount: info.listenerCount,
+          totalListeners: info.totalListeners,
+          rootNodeId: info.rootNodeId,
+        });
         i++;
       }
       console.table(rows);
@@ -367,8 +361,8 @@ export function createVDomDebugHelpers() {
      */
     nodeForId(id: number, el?: HTMLElement | number): Node | undefined {
       const target = resolveTarget(el);
-      if (!target?.renderer) {
-        console.warn("No worker-path renderer found.");
+      if (!target) {
+        console.warn("No active render found.");
         return undefined;
       }
       return target.renderer.getApplicator().getNode(id);

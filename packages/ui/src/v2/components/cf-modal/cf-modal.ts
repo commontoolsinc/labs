@@ -53,17 +53,13 @@
  */
 import { html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
-import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import { createBooleanCellController } from "../../core/cell-controller.ts";
-import {
-  MODAL_BASE_Z_INDEX,
-  modalContext,
-  type ModalManager,
-  type ModalRegistration,
-} from "../modal-context.ts";
 import { modalStyles } from "./styles.ts";
 import { CellHandle } from "@commonfabric/runtime-client";
+
+/** Z-index for an open modal: the `--cf-z-layer-overlay` token's value. */
+const MODAL_Z_INDEX = 1000;
 
 export class CFModal extends BaseElement {
   static override styles = [BaseElement.baseStyles, modalStyles];
@@ -103,14 +99,6 @@ export class CFModal extends BaseElement {
   /** Sheet snap height: content-sized, half-screen, or near-full-screen */
   @property({ type: String, reflect: true })
   accessor detent: "auto" | "half" | "full" = "auto";
-
-  /** Modal manager from context (optional - works standalone too) */
-  @consume({ context: modalContext, subscribe: false })
-  private accessor _manager: ModalManager | undefined = undefined;
-
-  /** Registration with modal manager */
-  @state()
-  private accessor _registration: ModalRegistration | undefined = undefined;
 
   /** Whether header slot has content */
   @state()
@@ -221,14 +209,7 @@ export class CFModal extends BaseElement {
     // Store currently focused element for restoration
     this._previousActiveElement = document.activeElement as HTMLElement;
 
-    // Register with modal manager if available
-    if (this._manager) {
-      this._registration = this._manager.register(this, this._isDismissible());
-      this._applyZIndex(this._registration.zIndex);
-    } else {
-      // Fallback z-index when no manager
-      this._applyZIndex(MODAL_BASE_Z_INDEX);
-    }
+    this._applyZIndex(MODAL_Z_INDEX);
 
     // Prevent body scroll
     if (this.preventScroll) {
@@ -261,12 +242,6 @@ export class CFModal extends BaseElement {
    * Handle modal closing
    */
   private _onClose() {
-    // Unregister from modal manager
-    if (this._registration && this._manager) {
-      this._manager.unregister(this._registration.id);
-      this._registration = undefined;
-    }
-
     // Restore body scroll
     if (this.preventScroll) {
       document.body.style.overflow = this._previousBodyOverflow;
@@ -290,10 +265,6 @@ export class CFModal extends BaseElement {
    * Clean up on disconnect or close
    */
   private _cleanup() {
-    if (this._registration && this._manager) {
-      this._manager.unregister(this._registration.id);
-      this._registration = undefined;
-    }
     if (this.preventScroll && document.body.style.overflow === "hidden") {
       document.body.style.overflow = this._previousBodyOverflow;
     }
@@ -351,10 +322,8 @@ export class CFModal extends BaseElement {
       this._handleTabKey(e);
     }
 
-    // Handle Escape (only if we're the top modal or no manager)
-    // Note: When using cf-modal-provider, Escape is handled globally there
-    // This is fallback for standalone usage
-    if (e.key === "Escape" && this._isDismissible() && !this._manager) {
+    // Handle Escape
+    if (e.key === "Escape" && this._isDismissible()) {
       e.preventDefault();
       this._requestClose("escape");
     }

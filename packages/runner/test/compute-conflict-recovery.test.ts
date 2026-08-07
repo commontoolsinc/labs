@@ -32,7 +32,7 @@
 // a single-replica runtime test, where the client-side whole-document
 // attestation guard short-circuits with `StorageTransactionInconsistent` before
 // the engine's path-granular matcher runs):
-//   - commit-conflict layer: packages/memory/test/v2-engine-test.ts ->
+//   - commit-conflict layer: packages/memory/test/v2-engine.test.ts ->
 //     "memory v2 engine: leaf-only commit conflict — disjoint-key writers merge".
 //     That test PASSES with #4220's leaf-only matcher and FAILS (ConflictError,
 //     validateConfirmedReads) on the parent-injecting matcher — i.e. it flips

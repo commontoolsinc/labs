@@ -35,7 +35,7 @@ Checkers referenced below:
   (`packages/state-inspector/test/engine-oracle.test.ts` proves it detects
   seeded corruption);
 - the **differential harness**:
-  `packages/memory/test/v2-differential-consistency-test.ts`, which runs
+  `packages/memory/test/v2-differential-consistency.test.ts`, which runs
   seeded random commit schedules against the engine and a naive reference
   validator (`packages/memory/test/naive-admission.ts`);
 - the **TLA+ model**: `docs/specs/memory-v2/tla/PendingStacks.tla`, which

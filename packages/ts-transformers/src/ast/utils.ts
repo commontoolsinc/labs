@@ -60,14 +60,12 @@ export function getExpressionText(expr: ts.Expression): string {
  * @param node - The node to get the type for
  * @param checker - The TypeScript type checker
  * @param typeRegistry - Optional registry of types for synthetic nodes
- * @param logger - Optional logger for error messages
  * @returns The type, or undefined if it couldn't be determined
  */
 export function getTypeAtLocationWithFallback(
   node: ts.Node,
   checker: ts.TypeChecker,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
-  logger?: (message: string) => void,
 ): ts.Type | undefined {
   // Check current node first
   if (typeRegistry?.has(node)) {
@@ -93,14 +91,7 @@ export function getTypeAtLocationWithFallback(
       }
     }
     return type;
-  } catch (error) {
-    if (logger) {
-      // Use getExpressionText to safely handle both regular and synthetic nodes
-      const nodeText = ts.isExpression(node)
-        ? getExpressionText(node)
-        : `<${ts.SyntaxKind[node.kind]}>`;
-      logger(`Warning: Could not get type for node "${nodeText}": ${error}`);
-    }
+  } catch {
     return undefined;
   }
 }

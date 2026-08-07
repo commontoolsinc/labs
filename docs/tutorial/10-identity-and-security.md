@@ -202,10 +202,10 @@ carries a strict Content-Security-Policy meta tag
 to the host); per the CSP spec, a nested `srcdoc` document *must inherit*
 those policies — so the **inner** iframe, which holds the guest code,
 cannot shed them. The guest gets no direct data access at all: reads,
-writes, subscriptions, and LLM calls cross the boundary as a postMessage
-IPC protocol mediated by the host (`src/ipc.ts`), which applies policy per
-request. The package README is candid that exfiltration hardening (e.g.
-covert channels via permitted fetches) is ongoing work.
+writes, and subscriptions cross the boundary as a postMessage IPC protocol
+mediated by the host (`src/ipc.ts`), which applies policy per request. The
+package README is candid that exfiltration hardening (e.g. covert channels
+via permitted fetches) is ongoing work.
 
 **Beyond the rings — Contextual Flow Control (CFC).** The rings bound what
 untrusted code *can do*; CFC (`packages/runner/src/cfc/`) tracks what data

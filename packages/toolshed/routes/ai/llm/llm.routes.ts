@@ -208,18 +208,6 @@ export type GetModelsRouteQueryParams = z.infer<
   typeof GetModelsRouteQueryParams
 >;
 
-export const FeedbackSchema = z.object({
-  span_id: z.string(),
-  name: z.string().default("user feedback"),
-  annotator_kind: z.enum(["HUMAN", "LLM"]).default("HUMAN"),
-  result: z.object({
-    label: z.string().optional(),
-    score: z.number().optional(),
-    explanation: z.string().optional(),
-  }),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
-
 // Route definitions
 export const getModels = createRoute({
   path: "/api/ai/llm/models",
@@ -299,45 +287,6 @@ export const generateText = createRoute({
   },
 });
 
-export const feedback = createRoute({
-  path: "/api/ai/llm/feedback",
-  method: "post",
-  tags,
-  request: {
-    body: {
-      content: {
-        "application/json": {
-          schema: FeedbackSchema.openapi({
-            example: {
-              span_id: "67f6740bbe1ddc3f",
-              name: "correctness",
-              annotator_kind: "HUMAN",
-              result: {
-                label: "correct",
-                score: 1,
-                explanation: "The response answered the question I asked",
-              },
-            },
-          }),
-        },
-      },
-    },
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      z.object({
-        success: z.boolean(),
-      }).openapi({
-        example: {
-          success: true,
-        },
-      }),
-      "Feedback submitted successfully",
-    ),
-    ...failureResponses,
-  },
-});
-
 export const generateObject = createRoute({
   path: "/api/ai/llm/generateObject",
   method: "post",
@@ -391,5 +340,4 @@ export const generateObject = createRoute({
 
 export type GetModelsRoute = typeof getModels;
 export type GenerateTextRoute = typeof generateText;
-export type FeedbackRoute = typeof feedback;
 export type GenerateObjectRoute = typeof generateObject;

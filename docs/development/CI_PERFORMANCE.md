@@ -235,12 +235,25 @@ slow package may also be running many independent test modules serially.
 Deno's `--parallel` mode can reduce that package's wall time, but only after
 checking for tests that share process-wide state.
 
+Deno runs each parallel test file on its own thread of a single process, so
+"process-wide state" means state every file shares: environment variables,
+replaced globals, and the current directory. A test that only configures a CLI
+it spawns shares nothing — `cf` in `packages/cli/test/utils.ts` takes the
+command's environment as an argument and gives it nothing else, so those tests
+stay in the parallel group.
+
 Known serial CLI tests:
 
-- `test/fuse.test.ts`, `test/inspect-remote.test.ts`,
+- `test/completion-output.test.ts`, `test/completion-providers.test.ts`,
+  `test/fuse.test.ts`, `test/inspect-remote.test.ts`,
   `test/log-level.test.ts`, `test/main-command.test.ts`,
-  `test/test-runner-compile-byte-cache.test.ts`, and
-  `test/test-runner-pattern-coverage.test.ts` mutate shared process state.
+  `test/test-runner-compile-byte-cache.test.ts`,
+  `test/test-runner-pattern-coverage.test.ts`, `test/view-commitmsg.test.ts`
+  and `test/wish-command.test.ts` set an environment variable that the test
+  process itself then reads, so another file setting the same name would
+  decide what they read.
+- `test/json-command.test.ts` and `test/runtime-creation.test.ts` replace
+  globals — the console methods and runtime prototype methods.
 - `test/view-mod-gate.test.ts` changes into a removed directory to test the
   missing-current-directory fallback.
 - `test/view-pager-pty.test.ts` drives a real pseudo-terminal, spawning a full

@@ -8,7 +8,6 @@ import type {
 import type {
   GenerationContext,
   SchemaGenerationOptions,
-  SchemaGenerator as ISchemaGenerator,
   SchemaHints,
   TypeFormatter,
 } from "./interface.ts";
@@ -34,7 +33,7 @@ import { attachDocTags, extractDocFromType } from "./doc-utils.ts";
 /**
  * Main schema generator that uses a chain of formatters
  */
-export class SchemaGenerator implements ISchemaGenerator {
+export class SchemaGenerator {
   private formatters: TypeFormatter[] = [
     new CommonFabricFormatter(this),
     new NativeTypeFormatter(),

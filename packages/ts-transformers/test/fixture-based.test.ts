@@ -2,7 +2,7 @@ import {
   createUnifiedDiff,
   defineFixtureSuite,
 } from "@commonfabric/test-support/fixture-runner";
-import { StaticCacheFS } from "@commonfabric/static";
+import { StaticCache } from "@commonfabric/static";
 import { resolve } from "@std/path";
 import ts from "typescript";
 
@@ -99,7 +99,7 @@ const configs: FixtureConfig[] = [
   },
 ];
 
-const staticCache = new StaticCacheFS();
+const staticCache = StaticCache.fromFileSystem();
 const commonfabric = await staticCache.getText("types/commonfabric.d.ts");
 const commonfabricSchema = await staticCache.getText(
   "types/commonfabric-schema.d.ts",

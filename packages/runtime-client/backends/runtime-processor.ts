@@ -1,6 +1,6 @@
 import { DID, Identity, type Session } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { JsonEncodingContext } from "@commonfabric/data-model/codec-json";
+import { JsonCodec } from "@commonfabric/data-model/codec-json";
 import { PieceManager } from "@commonfabric/piece";
 import {
   PieceController,
@@ -170,7 +170,7 @@ import {
 } from "./runtime-error.ts";
 
 const MAX_SERIALIZATION_DEPTH = 5;
-const blobUploadEncoding = new JsonEncodingContext();
+const blobUploadCodec = new JsonCodec();
 
 // Split-timing for the CFC label IPC path. Counts/timing are readable via
 // getLoggerCounts(); enabled silently so the hot path pays only the timestamp.
@@ -340,7 +340,7 @@ function formatCellLink(cell: Cell<unknown>): string {
  * Deep-walks a value and converts uncloneable parts (Cells, Proxies, functions)
  * into cloneable representations for postMessage. Preserves the structure of
  * objects so that `console.log({ self, name: "test" })` shows both the cell
- * reference AND the other properties.
+ * reference _and_ the other properties.
  *
  * Exported for testing.
  */
@@ -364,18 +364,39 @@ export function sanitizeForPostMessage(
 
   const obj = value as object;
 
-  // Circular reference protection
+  // Circular reference protection. `seen` holds the _ancestors_ of `obj`, so a
+  // value reached twice by different paths is shown at both rather than
+  // reported as a cycle it is not part of -- two identical siblings in a dump
+  // are a common shape, and calling the second one circular misdescribes the
+  // data this exists to show. Cleared on the way back out, below.
   if (seen.has(obj)) return "[Circular]";
   seen.add(obj);
 
+  try {
+    return sanitizedBody(value, obj, seen, depth);
+  } finally {
+    seen.delete(obj);
+  }
+}
+
+/**
+ * Helper for `sanitizeForPostMessage()`, which holds everything it does once
+ * the value is known to be an object it has not already entered.
+ */
+function sanitizedBody(
+  value: unknown,
+  obj: object,
+  seen: WeakSet<object>,
+  depth: number,
+): unknown {
   // Check for Cell (direct cell reference)
   if (isCell(value)) {
     return formatCellLink(value);
   }
 
-  // Check for query result proxy (has toCell symbol) - walk the data AND show the ref
-  // Wrap in try-catch since isCellResult accesses a symbol property, which can throw
-  // on hostile Proxies with throwing get traps
+  // Check for query result proxy (has toCell symbol) - walk the data _and_
+  // show the ref. Wrap in try-catch since isCellResult accesses a symbol
+  // property, which can throw on hostile Proxies with throwing get traps.
   try {
     if (isCellResult(value)) {
       const cell = getCellOrThrow(value);
@@ -409,7 +430,13 @@ export function sanitizeForPostMessage(
     );
   }
 
-  // Plain objects - walk properties
+  // Plain objects - walk properties.
+  //
+  // TODO(danfuzz): a `FabricSpecialObject` lands here and is shown as `{}`,
+  // its state being in private fields rather than enumerable members. A
+  // `FabricPrimitive` wants formatting by its codec and a `FabricInstance` by
+  // its codec contents -- the same gap marked at the sibling walks, and here it
+  // makes a debug dump silently wrong rather than losing stored data.
   try {
     const result: Record<string, unknown> = {};
     for (const key of Object.keys(obj)) {
@@ -890,6 +917,15 @@ export class RuntimeProcessor {
     // the top-level cfcLabel below). Display-only: the worker neither
     // persists nor re-imports inbound views, so the redacted copies cannot
     // round-trip into under-labeled state.
+    //
+    // TODO(danfuzz): `convertCellsToLinks` preserves a `FabricPrimitive` by
+    // identity, so despite the `as JSONValue` cast below the response can
+    // hold live fabric objects, and `postMessage`'s structured clone
+    // silently strips their prototype and private state to `{}` on the way
+    // to the main thread. The inbound direction throws instead
+    // (`CellHandle.serialize`; see the `WireCellValue` marker in
+    // `protocol/types.ts`) — this outbound direction loses silently. The
+    // subscription-update path below posts the same conversion.
     const converted = redactSigilCfcLabelViewsForDisplay(
       convertCellsToLinks(value, {
         includeSchema: true,
@@ -1579,7 +1615,7 @@ export class RuntimeProcessor {
     );
     // Blob upload payloads must preserve FabricBytes even when the wider
     // process is running with legacy memory JSON flags.
-    const body = blobUploadEncoding.encode({
+    const body = blobUploadCodec.encode({
       type: request.contentType,
       body: new FabricBytes(bytes),
     });

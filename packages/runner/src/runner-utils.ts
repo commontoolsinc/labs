@@ -303,6 +303,14 @@ function extractDefaultValuesInternal(
       canonical.properties &&
       isRecord(canonical.properties)
     ) {
+      // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, so a
+      // fabric-valued `default` under an object-with-properties schema skips
+      // this scalar return and proceeds below: `shallowMutableClone` returns
+      // a `FabricPrimitive` by identity (it is inherently frozen), so the
+      // first property-default assignment throws a `TypeError`; a
+      // `FabricInstance` gets own data properties grafted onto its clone
+      // that its codec never reads, and ships as the pattern's argument
+      // default. Wants a `FabricSpecialObject` test taking this return.
       if (
         Object.hasOwn(canonical, "default") &&
         !isRecord(canonical.default)

@@ -512,11 +512,13 @@ export const githubCiSpend: Tile = {
           spend: githubDollars,
           color: GITHUB_COLOR,
           label: githubDollars ? usd(githubDollars.mtd) : undefined,
+          lagDays: GITHUB_LAG_DAYS,
         },
         {
           spend: blacksmithValue,
           color: BLACKSMITH_COLOR,
           label: blacksmithValue ? usd(blacksmithValue.mtd) : undefined,
+          lagDays: BLACKSMITH_LAG_DAYS,
         },
       ],
       now,

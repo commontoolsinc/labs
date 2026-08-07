@@ -1021,6 +1021,22 @@ parking instead of server-side response queuing (CT-1927):
   (`finalizeRejection`, with a timeout backstop for lost connections).
   Visible state is unaffected by parking — the pending overlay already
   shows the write.
+- parking splits what an accepted commit's client observers wait for. The
+  commit PROMISE the submitting caller awaits resolves at marker coverage:
+  a resolved commit means the caller's subscribed view reflects the
+  committed write and the foreign novelty it was applied on top of.
+  Post-commit effects gated on durability alone — verdict callbacks and
+  the outbox flush — run at the VERDICT instead: delaying them to
+  coverage buys nothing (they do not read the subscribed view) and costs
+  a fan-out window on every effect-bearing commit. Commit callbacks keep
+  the promise's timeline — after coverage on accept, after the
+  read-repair gate on rejection — because their consumers act on the
+  post-commit view. The same split holds on rejection: the fate is sealed
+  at rejection receipt (verdict callbacks fire), while the promise and
+  commit callbacks wait out the read-repair gate a retry needs. A caller may opt a commit back to
+  verdict timing (`commit({ resolveAt: "verdict" })`) when it needs
+  "durably accepted" without forcing the fan-out through —
+  controlled-staleness test fixtures foremost.
 
 The server advertises this contract with the build-inherent
 `verdictCatchUpMarkers` protocol flag. A client that sees it absent (an

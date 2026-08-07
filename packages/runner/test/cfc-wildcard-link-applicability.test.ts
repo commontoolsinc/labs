@@ -1,5 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import {
+  FabricBytes,
+  FabricHash,
+} from "@commonfabric/data-model/fabric-primitives";
 import { wildcardPolicyMatchesValue } from "../src/cfc/prepare.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -72,6 +76,56 @@ describe("CFC wildcard policy applicability on unresolvable links", () => {
 
     expect(wildcardPolicyMatchesValue(tx, target, policySchema, linkValue))
       .toBe(false);
+  });
+});
+
+describe("CFC wildcard policy value conditions on fabric-primitive types", () => {
+  const space = "did:key:wildcard-fabric" as const;
+  const target = {
+    space,
+    id: "of:guarded-bytes" as const,
+    scope: "space" as const,
+  };
+  const tx = {
+    getWriteDetails: () => [],
+    readValueOrThrow: () => undefined,
+  } as unknown as IExtendedStorageTransaction;
+  const bytesCondition = { type: "FabricBytes" } as const satisfies JSONSchema;
+
+  it("applies to a value of the named fabric-primitive class", () => {
+    expect(
+      wildcardPolicyMatchesValue(
+        tx,
+        target,
+        bytesCondition,
+        new FabricBytes(new Uint8Array([1])),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not apply to other values, including other fabric primitives", () => {
+    expect(wildcardPolicyMatchesValue(tx, target, bytesCondition, { a: 1 }))
+      .toBe(false);
+    expect(
+      wildcardPolicyMatchesValue(
+        tx,
+        target,
+        bytesCondition,
+        new FabricHash(new Uint8Array(32), "fid1"),
+      ),
+    ).toBe(false);
+    expect(wildcardPolicyMatchesValue(tx, target, bytesCondition, "text"))
+      .toBe(false);
+  });
+
+  it("stays conservative on a type name outside the vocabulary", () => {
+    // The matcher's unknown-type fallthrough answers "applies" so a policy
+    // with a type this build does not know cannot be dodged.
+    const unknownCondition = {
+      type: "SomeFutureType",
+    } as unknown as JSONSchema;
+    expect(wildcardPolicyMatchesValue(tx, target, unknownCondition, { a: 1 }))
+      .toBe(true);
   });
 });
 

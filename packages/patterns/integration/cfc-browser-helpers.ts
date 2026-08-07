@@ -120,12 +120,10 @@ const activeSpaceRootReady = (
   _probe: ProbeApi,
   expectedSpace: string,
 ): boolean => {
-  const app = (globalThis as typeof globalThis & {
-    app?: { element?: () => unknown };
+  // `globalThis.app` is the shell's root element.
+  const root = (globalThis as typeof globalThis & {
+    app?: HTMLElement & { getRuntimeSpaceDID(): string | undefined };
   }).app;
-  const root = app?.element?.() as unknown as
-    | (HTMLElement & { getRuntimeSpaceDID(): string | undefined })
-    | undefined;
   const appView = root?.shadowRoot?.querySelector("x-app-view") as
     | (HTMLElement & {
       space?: string;
@@ -478,7 +476,13 @@ export async function clickTrustedAction(
     await waitForCondition(page, markTrustedAction, {
       args: [action, token, CLICK_TARGET_ATTR],
     });
-    await clickMarked(page, token);
+    await clickMarked(page, {
+      token,
+      remark: {
+        predicate: markTrustedAction,
+        args: [action, token, CLICK_TARGET_ATTR],
+      },
+    });
   } catch (cause) {
     probe ??= await readTrustedActionProbe(page, action).catch(() => undefined);
     // Indented for readable test-log output
@@ -792,7 +796,13 @@ export async function clickCfButton(
   if (token === undefined) {
     throw new Error(`Unable to mark ${selector} for click.`);
   }
-  await clickMarked(page, token);
+  await clickMarked(page, {
+    token,
+    remark: {
+      predicate: settleAndMarkClickTargets,
+      args: [[selector], [token], CLICK_TARGET_ATTR],
+    },
+  });
   await settleView(page);
 }
 
@@ -889,96 +899,241 @@ export async function clickNthCfButton(
       { cause },
     );
   }
-  await clickMarked(page, token);
+  await clickMarked(page, {
+    token,
+    remark: {
+      predicate: markNthForClick,
+      args: [selector, index, token, CLICK_TARGET_ATTR],
+    },
+  });
 }
 
-// Hold until the element carrying the click mark `selector` has a settled
-// layout box: rendered — laid out, not display:none or visibility:hidden — with
-// an unchanged bounding rect across two consecutive animation frames. Between
-// marking a control and dispatching its trusted click, the surface it sits in
-// can still be settling: a join card's profile surface toggles display through
-// its entrance, and a re-render can relayout the region. The box the click
-// measures a few round trips after the mark may therefore have moved or gone,
-// and `DOM.getBoxModel` returns nothing for an element with no box — which the
-// click reports as "Unable to get stable box model to click on". Waiting here
-// for the box to stop shifting means the click measures a box that is present
-// and where it was. The wait drives itself off the frame signal and drops its
+// Where a trusted click is about to be aimed, or why the marked control could
+// not be aimed at.
+type ClickAim =
+  | { x: number; y: number }
+  | { missing: true; sawTarget: boolean };
+
+// Resolve the marked control, hold until it has a settled layout box, scroll it
+// into view, and answer with the point to click — all inside one page turn.
+//
+// The control is settled when it is rendered (laid out, not display:none or
+// visibility:hidden) with an unchanged bounding rect across two consecutive
+// animation frames. A surface that is still settling — a join card's profile
+// surface toggling display through its entrance, a re-render relaying out the
+// region — shifts or drops the box, and the wait keeps holding; it drops its
 // baseline whenever the box disappears, so a control hidden partway through is
-// picked up once it returns rather than clicked mid-shift; the stuck-condition
-// net in `waitForCondition` bounds a box that never settles.
-const clickTargetBoxStable = async (
+// picked up once it returns rather than aimed at mid-shift.
+//
+// The point is measured here rather than by the test process because the two
+// used to be separated by several protocol round trips, and the page is free to
+// rebuild in that gap. What it rebuilt away was the very control the wait had
+// just declared settled, so the measurement found no box and the click reported
+// "Unable to get stable box model to click on". Deciding and measuring in the
+// same turn leaves nothing between them.
+//
+// A mark that is absent from the start is reported rather than waited on: the
+// caller placed it a moment ago, so its absence means the control it names was
+// replaced, which no amount of further waiting resolves. `remarkSource`, when
+// the caller supplies it, is the mark predicate's own source; running it again
+// re-establishes the mark on whatever control took the old one's place, so a
+// rebuilt surface is clicked rather than reported.
+const aimAtMarkedTarget = async (
   probe: ProbeApi,
   selector: string,
-): Promise<boolean> => {
+  remarkSource: string | null,
+  remarkArgs: readonly unknown[],
+): Promise<ClickAim | false> => {
+  type AimDiag = { phase: string; frames: number; lastBox: string };
+  const registry = ((globalThis as typeof globalThis & {
+    __cfAimDiag?: Record<string, AimDiag>;
+  }).__cfAimDiag ??= {});
+  const diag: AimDiag = { phase: "resolving", frames: 0, lastBox: "none" };
+  registry[selector] = diag;
+
+  const find = (): HTMLElement | undefined =>
+    probe.collect(selector)[0] as HTMLElement | undefined;
+  const remark = remarkSource === null ? null : new Function(
+    "return (" + remarkSource + ")",
+  )() as (
+    probe: ProbeApi,
+    ...args: readonly unknown[]
+  ) => boolean | Promise<boolean>;
+
+  // One step of page progress, after which the settle looks again.
+  //
+  // While the document is being rendered that step is a frame, which is what
+  // moves a box. A document that is not being rendered produces no frames, so
+  // waiting for one waits for something that will not arrive; the step there is
+  // one turn of the event loop, delivered through a message channel. It has to
+  // be a real turn rather than a resolved promise: a hidden control comes back
+  // when a timer or a task puts it back, and a loop that only yields to the
+  // microtask queue never lets either run, so it would spin against a control
+  // it is itself preventing from returning.
+  const nextFrame = (): Promise<void> => {
+    diag.frames++;
+    return new Promise((resolve) => {
+      if (document.visibilityState !== "hidden") {
+        requestAnimationFrame(() => resolve());
+        return;
+      }
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => resolve();
+      channel.port2.postMessage(0);
+    });
+  };
+
+  // Absent and hidden are different answers. A hidden control is coming back,
+  // so the settle keeps holding for it. A control that has left the document
+  // is not coming back — the page rebuilt the surface it was on — so the mark
+  // has to be placed again on whatever took its place.
   const measure = ():
     | { x: number; y: number; width: number; height: number }
+    | "gone"
     | null => {
-    const target = probe.collect(selector)[0] as HTMLElement | undefined;
-    if (!target || !probe.isRendered(target)) return null;
+    const target = find();
+    if (!target) return "gone";
+    if (!probe.isRendered(target)) return null;
     const { x, y, width, height } = target.getBoundingClientRect();
     return { x, y, width, height };
   };
-  const nextFrame = (): Promise<void> =>
-    new Promise((resolve) => requestAnimationFrame(() => resolve()));
 
-  let previous = measure();
-  await nextFrame();
-  let current = measure();
-  while (
-    previous === null || current === null ||
-    previous.x !== current.x || previous.y !== current.y ||
-    previous.width !== current.width || previous.height !== current.height
-  ) {
-    previous = current;
+  for (;;) {
+    if (find() === undefined) {
+      if (remark === null) {
+        diag.phase = "mark-gone";
+        return { missing: true, sawTarget: false };
+      }
+      diag.phase = "re-marking";
+      if (!await remark(probe, ...remarkArgs)) {
+        diag.phase = "no-target-to-mark";
+        return false;
+      }
+      if (find() === undefined) {
+        diag.phase = "mark-not-placed";
+        return false;
+      }
+    }
+
+    diag.phase = "settling";
+    let previous = measure();
     await nextFrame();
-    current = measure();
+    let current = measure();
+    while (
+      previous === null || current === null ||
+      previous === "gone" || current === "gone" ||
+      previous.x !== current.x || previous.y !== current.y ||
+      previous.width !== current.width || previous.height !== current.height
+    ) {
+      if (previous === "gone" || current === "gone") break;
+      diag.lastBox = JSON.stringify(current);
+      previous = current;
+      await nextFrame();
+      current = measure();
+    }
+    if (previous === "gone" || current === "gone") {
+      // Rebuilt under the settle. Take a frame so a surface rebuilding on
+      // every frame cannot spin this, then mark whatever is there now.
+      diag.phase = "rebuilt-under-settle";
+      await nextFrame();
+      continue;
+    }
+    diag.lastBox = JSON.stringify(current);
+
+    diag.phase = "aiming";
+    const target = find();
+    if (target === undefined) {
+      diag.phase = "rebuilt-before-aim";
+      await nextFrame();
+      continue;
+    }
+    // Instant, because the shell sets `scroll-behavior: smooth` and an animated
+    // scroll would still be moving the control when the point below is read.
+    target.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+      behavior: "instant",
+    });
+    const rect = target.getBoundingClientRect();
+    diag.phase = "aimed";
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
   }
-  return true;
 };
 
-// Hold until the marked control at `selector` has a settled layout box — see
-// `clickTargetBoxStable` — so the trusted click that follows measures a box
-// that is present and unmoving. Shared by every helper whose click routes
-// through `clickMarked`.
-async function waitForStableClickTarget(
-  page: Page,
-  selector: string,
-): Promise<void> {
-  try {
-    await waitForCondition(page, clickTargetBoxStable, { args: [selector] });
-  } catch (cause) {
-    const probe = await readTextProbe(page, selector).catch(() => undefined);
-    throw new Error(
-      `Marked click target ${selector} never presented a stable box. ` +
-        `Last probe: ${toIndentedDebugString(probe)}`,
-      { cause },
-    );
-  }
+/**
+ * The mark a click aims at, and how to place it again.
+ *
+ * A caller passes the predicate it used to mark its target, so a control that
+ * the page rebuilds between the mark and the click can be marked again and
+ * clicked, rather than reported as vanished. The predicate is the same one the
+ * caller ran to place the mark, so re-marking applies the caller's own
+ * readiness rules — including its settle — to whatever control took over.
+ */
+export interface ClickMark {
+  token: string;
+  remark?: {
+    predicate: (
+      probe: ProbeApi,
+      // deno-lint-ignore no-explicit-any
+      ...args: any[]
+    ) => boolean | Promise<boolean>;
+    args: readonly unknown[];
+  };
 }
 
 /**
- * Resolve the element whose click marks contain `token` and click it, then
- * clear that mark.
+ * Click the element whose click marks contain the token, then clear that mark.
  * Shared by `clickCfButton`, `clickNthCfButton`, `clickTrustedAction`, and the
  * text-matching click helpers in `note-button-helpers.ts`: each one marks its
- * target through its own predicate, and the resolve/click/untag tail is the
- * same for all of them.
+ * target through its own predicate, and the aim/click/untag tail is the same
+ * for all of them.
+ *
+ * One wait settles the control and measures where to click it; one dispatch
+ * follows. Nothing separates the measurement from the decision that produced
+ * it, so the coordinates describe the control as the wait left it.
  */
 export async function clickMarked(
   page: Page,
-  token: string,
+  mark: string | ClickMark,
 ): Promise<void> {
+  const { token, remark } = typeof mark === "string" ? { token: mark } : mark;
   const markSelector = `[${CLICK_TARGET_ATTR}~="${token}"]`;
   try {
-    const clickTarget = await page.waitForSelector(markSelector, {
-      strategy: "pierce",
-    });
-    // The mark resolves the target the instant it is laid out, but the click
-    // measures its box a few round trips later. Hold until that box has stopped
-    // shifting, so the click does not race a surface that is still settling and
-    // fail to get a stable box model.
-    await waitForStableClickTarget(page, markSelector);
-    await clickTarget.click();
+    let aim: ClickAim | undefined;
+    try {
+      aim = await waitForCondition(page, aimAtMarkedTarget, {
+        args: [
+          markSelector,
+          remark ? remark.predicate.toString() : null,
+          remark ? remark.args : [],
+        ],
+      });
+    } catch (cause) {
+      const probe = await readTextProbe(page, markSelector).catch(() =>
+        undefined
+      );
+      const progress = await readAimProgress(page, markSelector).catch(() =>
+        undefined
+      );
+      throw new Error(
+        `Marked click target ${markSelector} never presented a stable box. ` +
+          `Aim reached: ${toIndentedDebugString(progress)}. ` +
+          `Last probe: ${toIndentedDebugString(probe)}`,
+        { cause },
+      );
+    }
+    if (aim === undefined || "missing" in aim) {
+      const probe = await readTextProbe(page, markSelector).catch(() =>
+        undefined
+      );
+      throw new Error(
+        `The control marked for click was replaced before the click could be ` +
+          `aimed at it${
+            aim?.sawTarget ? " while its box was settling" : ""
+          }. Last probe: ${toIndentedDebugString(probe)}`,
+      );
+    }
+    await page.clickPoint(aim);
   } finally {
     await clearClickMark(page, token).catch(() => {});
   }
@@ -2058,6 +2213,24 @@ async function readTrustedActionProbe(
       bodyText: (document.body?.innerText ?? "").slice(0, 1_000),
     };
   }, { args: [action] });
+}
+
+/**
+ * How far the aim for `selector` got, and what it last measured. `aimAtMarkedTarget`
+ * keeps this ledger in the page as it works, so a stalled aim names the step it
+ * died in — resolving the mark, settling the box, or reading the point — rather
+ * than reporting only that no point ever arrived.
+ */
+async function readAimProgress(
+  page: Page,
+  selector: string,
+): Promise<unknown> {
+  return await page.evaluate((targetSelector: string) => ({
+    aim: (globalThis as typeof globalThis & {
+      __cfAimDiag?: Record<string, unknown>;
+    }).__cfAimDiag?.[targetSelector],
+    documentVisibility: document.visibilityState,
+  }), { args: [selector] });
 }
 
 async function readTextProbe(

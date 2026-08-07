@@ -88,6 +88,7 @@ import type {
   State,
   StorageNotification,
   StorageTransactionRejected,
+  TransactionCommitOptions,
   Unit,
 } from "./interface.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
@@ -102,6 +103,8 @@ import {
   isReadExcludedFromConflict,
   isReadIgnoredForCommit,
   isReadMarkedAsAttemptedWrite,
+  notifyCommitRejected,
+  recordCoverageWait,
 } from "./reactivity-log.ts";
 
 // A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
@@ -887,8 +890,15 @@ export class StorageManager implements IStorageManager {
   #seedHosts: Record<string, string>;
   /** Late-bound host hints; see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
-  /** WebSocket storage endpoint used by an unseeded, unhinted space. */
+  /** Base URL the default storage route is resolved from, held as text so a
+   *  caller mutating their URL object cannot move the route. */
+  #memoryHost: string;
+  /** WebSocket storage endpoint used by an unseeded, unhinted space; read it
+   *  through #resolveDefaultStorageRoute(). */
   #defaultStorageRoute?: string;
+  /** Whether #defaultStorageRoute holds the result of a resolution attempt.
+   *  Separate from the value, which is undefined when resolution failed. */
+  #defaultStorageRouteResolved = false;
   /** Late-bound marker sink (the Runtime's telemetry bus); see setTelemetry. */
   #telemetry?: TelemetrySink;
 
@@ -935,14 +945,31 @@ export class StorageManager implements IStorageManager {
     // open(), so refusal logic must see the same fixed facts — a
     // caller mutating their map object must not desynchronize them.
     this.#seedHosts = Object.freeze({ ...(options.spaceHostMap ?? {}) });
-    try {
-      const resolveDefault = createStorageAddressResolver(options.memoryHost);
-      this.#defaultStorageRoute = toWebSocketAddress(
-        resolveDefault("did:key:route-comparison" as MemorySpace),
-      ).toString();
-    } catch {
-      // A custom session factory may use a non-network memoryHost placeholder.
+    this.#memoryHost = String(options.memoryHost);
+  }
+
+  /**
+   * The WebSocket storage endpoint an unseeded, unhinted space opens against,
+   * resolved from the memory host on the first read and kept from then on.
+   * registerSpaceHost() is its only reader. A failed resolution is kept as
+   * well: a custom session factory may use a non-network memoryHost
+   * placeholder, and such a manager has no default route.
+   */
+  #resolveDefaultStorageRoute(): string | undefined {
+    if (!this.#defaultStorageRouteResolved) {
+      this.#defaultStorageRouteResolved = true;
+      try {
+        const resolveDefault = createStorageAddressResolver(
+          new URL(this.#memoryHost),
+        );
+        this.#defaultStorageRoute = toWebSocketAddress(
+          resolveDefault("did:key:route-comparison" as MemorySpace),
+        ).toString();
+      } catch {
+        // The route stays undefined; the flag above stops the retry.
+      }
     }
+    return this.#defaultStorageRoute;
   }
 
   /**
@@ -982,7 +1009,7 @@ export class StorageManager implements IStorageManager {
     }
     const provider = this.#providers.get(space);
     const replacesDefaultRoute = provider !== undefined &&
-      this.#defaultStorageRoute !==
+      this.#resolveDefaultStorageRoute() !==
         toWebSocketAddress(storageAddressForHost(normalized)).toString();
     if (replacesDefaultRoute && !provider.canReplaceProvisionalReplica()) {
       return false;
@@ -1702,6 +1729,11 @@ export class StorageManager implements IStorageManager {
       return;
     }
 
+    // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, whose
+    // `Object.keys` are empty, so a cell link held inside a `FabricInstance`
+    // reconstructed from the data URI is never found here and its target
+    // document is never synced — the later read finds it absent. (A
+    // `FabricPrimitive` ends the walk harmlessly; it is a leaf.)
     if (isRecord(value)) {
       for (const key of Object.keys(value)) {
         const child = value[key];
@@ -2158,6 +2190,10 @@ class SpaceReplica implements ISpaceReplica {
   #parkedAccepts = new Map<number, {
     operations: NativeCommitOperation[];
     applied: AppliedCommit;
+    /** Resolves when the parked application runs — the commit promise's
+     * resolution point (CT-1950): the caller may then act on its
+     * subscribed view as one reflecting the committed write. */
+    settled: PromiseWithResolvers<void>;
   }>();
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
@@ -2550,7 +2586,12 @@ class SpaceReplica implements ISpaceReplica {
     this.#staleFloor.clear();
     // Parked accepts die with the marker space: on reset the re-pull
     // re-derives durable state (which contains the accepted writes), and on
-    // close there is nothing left to promote into.
+    // close there is nothing left to promote into. Their promises RESOLVE —
+    // the commits succeeded durably; a caller must never see a durable
+    // success reported as failure (CT-1950).
+    for (const entry of this.#parkedAccepts.values()) {
+      entry.settled.resolve();
+    }
     this.#parkedAccepts.clear();
   }
 
@@ -2570,6 +2611,7 @@ class SpaceReplica implements ISpaceReplica {
         const entry = this.#parkedAccepts.get(parked)!;
         this.#parkedAccepts.delete(parked);
         this.confirmPending(parked, entry.operations, entry.applied);
+        entry.settled.resolve();
       }
     }
     const ready: PromiseWithResolvers<void>[] = [];
@@ -2789,6 +2831,7 @@ class SpaceReplica implements ISpaceReplica {
   async commitNative(
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
+    options?: TransactionCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const schedulerObservation = getPersistentSchedulerStateConfig()
       ? transaction.schedulerObservation
@@ -2842,6 +2885,7 @@ class SpaceReplica implements ISpaceReplica {
           schedulerObservation,
           preconditions,
           sqliteOps,
+          options,
         ),
     );
   }
@@ -3261,6 +3305,7 @@ class SpaceReplica implements ISpaceReplica {
     schedulerObservation?: FabricValue,
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
+    commitOptions?: TransactionCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const activePreconditions = activeCommitPreconditions(preconditions);
     if (
@@ -3369,7 +3414,7 @@ class SpaceReplica implements ISpaceReplica {
           operations,
           commit,
           source,
-          { waitForSchedulerObservations: true },
+          { waitForSchedulerObservations: true, commitOptions },
         ),
     );
     this.#commitPromises.add(promise);
@@ -3500,10 +3545,24 @@ class SpaceReplica implements ISpaceReplica {
       routeSources?: readonly IStorageTransaction[];
       prepareIssue?: (commit: ClientCommit) => boolean;
       waitForSchedulerObservations?: boolean;
+      commitOptions?: TransactionCommitOptions;
     } = {},
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const routeSources = options.routeSources ??
       (source === undefined ? [] : [source]);
+    const resolveAtVerdict = options.commitOptions?.resolveAt === "verdict";
+    // Rejection receipt seals the fate for EVERY contributing transaction —
+    // for a batched scheduler-observation commit that is each issued entry's
+    // source, which `source` (undefined for the batch wrapper) does not
+    // carry. finalizeRejection's own notify covers the cascade paths that
+    // do not come through here; the once-guard makes the overlap free.
+    const notifyRejectionSources = (
+      rejection: StorageTransactionRejected,
+    ): void => {
+      for (const routeSource of routeSources) {
+        notifyCommitRejected(routeSource, rejection);
+      }
+    };
     const schedulerObservationDependencies =
       options.waitForSchedulerObservations === true
         ? this.schedulerObservationDependenciesBefore(localSeq)
@@ -3529,6 +3588,7 @@ class SpaceReplica implements ISpaceReplica {
             `commit preempted: stale until caughtUpLocalSeq>=${threshold}`,
             { localSeq, operations: operations.length },
           ]);
+          notifyRejectionSources(rejection);
           return await this.finalizeRejection(
             localSeq,
             operations,
@@ -3611,6 +3671,7 @@ class SpaceReplica implements ISpaceReplica {
             sessionId: session.sessionId,
             error: inFlight.localRejectionValue.name ?? "TransactionError",
           });
+          notifyRejectionSources(inFlight.localRejectionValue);
           return await this.finalizeRejection(
             localSeq,
             operations,
@@ -3625,7 +3686,23 @@ class SpaceReplica implements ISpaceReplica {
             wireCommit,
             () => this.markRouteWriteIssued(routeSources),
           );
-          this.settleAccept(localSeq, operations, applied);
+          const settled = this.settleAccept(
+            localSeq,
+            operations,
+            applied,
+            resolveAtVerdict,
+          );
+          // Tx-sourced commits ALWAYS record the coverage wait: the inner
+          // settlement promise carries commit callbacks and the
+          // pending-commit barrier, which stay on the full timeline even
+          // when the caller opted its returned promise into verdict timing.
+          // Only the direct path — where the promise returned here IS the
+          // caller's promise — honors the verdict opt-out inline.
+          if (source !== undefined) {
+            recordCoverageWait(source, settled);
+          } else if (!resolveAtVerdict) {
+            await settled;
+          }
           telemetry?.submit({
             type: "storage.push.complete",
             id: pushOpId,
@@ -3655,6 +3732,7 @@ class SpaceReplica implements ISpaceReplica {
             sessionId: session.sessionId,
             error: outcome.rejection.name ?? "TransactionError",
           });
+          notifyRejectionSources(outcome.rejection);
           return await this.finalizeRejection(
             localSeq,
             operations,
@@ -3662,7 +3740,19 @@ class SpaceReplica implements ISpaceReplica {
             outcome.rejection,
           );
         }
-        this.settleAccept(localSeq, operations, outcome.applied);
+        const settledRace = this.settleAccept(
+          localSeq,
+          operations,
+          outcome.applied,
+          resolveAtVerdict,
+        );
+        // Same rule as the direct-await branch above: tx-sourced commits
+        // always record; only the direct path honors the verdict opt-out.
+        if (source !== undefined) {
+          recordCoverageWait(source, settledRace);
+        } else if (!resolveAtVerdict) {
+          await settledRace;
+        }
         telemetry?.submit({
           type: "storage.push.complete",
           id: pushOpId,
@@ -3706,6 +3796,7 @@ class SpaceReplica implements ISpaceReplica {
             { localSeq, operations: operations.length },
           ],
         );
+        notifyRejectionSources(rejection);
         return await this.finalizeRejection(
           localSeq,
           operations,
@@ -3779,6 +3870,13 @@ class SpaceReplica implements ISpaceReplica {
     source: IStorageTransaction | undefined,
     rejection: StorageTransactionRejected,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    // The fate is sealed here. The verdict-gated effect layer (verdict
+    // callbacks, outbox clearing) fires on this notification; the
+    // settlement promise and commit callbacks wait out the read-repair
+    // gate below, because a retry needs the repaired base.
+    if (source !== undefined) {
+      notifyCommitRejected(source, rejection);
+    }
     const touched = operations.map((operation) => ({
       id: operation.id,
       scope: operation.scope,
@@ -4362,7 +4460,8 @@ class SpaceReplica implements ISpaceReplica {
     localSeq: number,
     operations: NativeCommitOperation[],
     applied: AppliedCommit,
-  ): void {
+    resolveAtVerdict = false,
+  ): Promise<void> {
     // Parking requires a live marker channel: a server that stages
     // per-verdict markers AND an active sync consumer to deliver them. With
     // no subscribed watch view, no frames arrive at all — there is no
@@ -4371,11 +4470,33 @@ class SpaceReplica implements ISpaceReplica {
     const parkable =
       this.#sessionClient?.serverFlags?.verdictCatchUpMarkers === true &&
       this.#subscribedWatchView !== null;
-    if (!parkable || this.#caughtUpLocalSeq >= localSeq) {
+    // Zero-operation commits (scheduler observation batches) carry no state
+    // to apply and no view consequences — parking them would only stall
+    // synced() on the batch window for nothing.
+    if (
+      !parkable || operations.length === 0 ||
+      this.#caughtUpLocalSeq >= localSeq
+    ) {
       this.confirmPending(localSeq, operations, applied);
-      return;
+      return Promise.resolve();
     }
-    this.#parkedAccepts.set(localSeq, { operations, applied });
+    const settled = Promise.withResolvers<void>();
+    this.#parkedAccepts.set(localSeq, { operations, applied, settled });
+    // synced() holds on the parked application, not just the verdict: its
+    // contract is "storage fully settled", which under parking includes the
+    // fan-out of this replica's own accepted writes (CT-1950). The push
+    // promise resolves at the verdict, so the barrier needs its own hold.
+    // A verdict-resolving commit opts out of the hold — its premise is
+    // "accepted but not fanned out", which a synced() that forces the
+    // fan-out through would destroy — while its SETTLEMENT timeline still
+    // drains coverage; only the caller's returned promise resolves early.
+    if (!resolveAtVerdict) {
+      const hold: Promise<Result<Unit, StorageTransactionRejected>> = settled
+        .promise.then(() => ({ ok: {} }));
+      this.#commitPromises.add(hold);
+      hold.then(() => this.#commitPromises.delete(hold));
+    }
+    return settled.promise;
   }
 
   // The marker channel died (the subscribed view closed): apply everything
@@ -4392,6 +4513,7 @@ class SpaceReplica implements ISpaceReplica {
       const entry = this.#parkedAccepts.get(parked)!;
       this.#parkedAccepts.delete(parked);
       this.confirmPending(parked, entry.operations, entry.applied);
+      entry.settled.resolve();
     }
   }
 

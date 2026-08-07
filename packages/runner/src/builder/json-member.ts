@@ -41,6 +41,6 @@ import type { FabricExecValue, toEncodableForm } from "./types.ts";
  */
 export function toJSONMethod(
   this: toEncodableForm,
-): Record<string, FabricExecValue> {
+): FabricExecValue {
   return this.toEncodableForm();
 }

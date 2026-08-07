@@ -1,5 +1,5 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { encodableFormOf, hasEncodableForm } from "./encodable-form.ts";
+import { encodableFormOf } from "./encodable-form.ts";
 import { hasEntityUriScheme } from "./entity-kind.ts";
 import {
   BaseFabricPrimitive,
@@ -43,9 +43,10 @@ export function entityIdFrom(hash: string | FabricHash): EntityId {
 /**
  * Generates an entity ID.
  *
- * Derivation inputs must resolve: a Cell with no entityId or a Reactive with
- * no value throws rather than minting a random substitute, so a derived id never
- * silently becomes non-deterministic (audit S14). A missing `cause`, by
+ * Derivation inputs must resolve: a Cell with no entityId, a Reactive with no
+ * value, and a cell's method -- which names no value of its own -- each throw
+ * rather than minting a substitute, so a derived id never silently becomes
+ * non-deterministic or unresolvable (audit S14). A missing `cause`, by
  * contrast, deliberately mints a fresh random id.
  *
  * @param source - The source object.
@@ -66,16 +67,22 @@ export function createRef(
   // Unwrap query result proxies and replace docs with their ids; functions are
   // stringified, since our data model doesn't support them as values.
   function traverse(obj: any): any {
-    // Avoid cycles — only track objects/arrays/functions (not primitives).
-    // Primitives use value equality in Set, so repeated strings like
-    // "primary" would be incorrectly deduplicated, causing hash collisions
-    // for patterns that differ only in the position of repeated values.
+    // A primitive is its own preimage. Nothing below applies to one -- it
+    // carries no members to serialize, is no kind of reference, and holds
+    // nothing to descend into -- and `obj` is `any`, so `null`, `undefined` and
+    // every scalar arrive here.
     if (
-      obj !== null && (typeof obj === "object" || typeof obj === "function")
+      obj === null || (typeof obj !== "object" && typeof obj !== "function")
     ) {
-      if (seen.has(obj)) return null;
-      seen.add(obj);
+      return obj;
     }
+
+    // Avoid cycles. Primitives are not tracked, and are gone by here: they use
+    // value equality in a Set, so repeated strings like "primary" would be
+    // deduplicated and collide the hashes of patterns differing only in the
+    // position of a repeated value.
+    if (seen.has(obj)) return null;
+    seen.add(obj);
 
     // Don't traverse into atomic values or already-serialized references. A
     // `FabricPrimitive` (a `FabricHash` id, `FabricBytes`, a date, …) is an
@@ -93,12 +100,34 @@ export function createRef(
     if (obj instanceof BaseFabricPrimitive) return obj;
     if (isSigilLink(obj) || isEntityRef(obj)) return obj;
 
+    // A cell's _method_ is not a value. For a name in `cellMethods`, a
+    // `Reactive` returns a proxy that is callable and is also a projection of
+    // the cell at that name, so one object serves both the method and a data
+    // key of the same name, and its encodable form is the same link either
+    // way. A derived id therefore cannot express which of the two was meant.
+    // Failing closed says so, rather than minting an id off the ambiguity
+    // (audit S14) -- and where no data lives at the name, that id would rest on
+    // a link to a path holding nothing.
+    //
+    // A builder artifact is a function carrying the member too, and is not
+    // reactive, which is what separates the two here.
+    if (typeof obj === "function" && isReactive(obj)) {
+      throw new Error(
+        "[createRef] Cell method is not a value; cannot derive a stable id",
+      );
+    }
+
     // A builder artifact is replaced by its encodable form, then descended
     // into: what the ref is derived from is the form that gets written.
     // Functions qualify because a pattern factory is one.
-    if (hasEncodableForm(obj)) {
-      obj = encodableFormOf(obj) ?? obj;
-    }
+    //
+    // A _nullish_ form leaves the value in place, which is what the `??` is
+    // for -- a value carrying no form at all needs no fallback, since that
+    // answer is the value already. `CellImpl` is the one implementation that
+    // answers nullish, doing so for a cell whose link is not built yet, and the
+    // branches below need that cell rather than the `null`: one of them builds
+    // the link.
+    obj = encodableFormOf(obj) ?? obj;
 
     if (isReactive(obj)) {
       const val = obj.export().value;
@@ -113,12 +142,15 @@ export function createRef(
     }
 
     if (isCellResultForDereferencing(obj)) {
-      // It'll traverse this and call .toJSON on the doc in the reference.
+      // A query result stands for the cell it dereferences to, and derives what
+      // that cell derives.
       obj = getCellOrThrow(obj);
     }
 
-    // If referencing other docs, return their ids.
     if (isCell(obj)) {
+      // Reading the entity id is what materializes a link from an explicit
+      // cause, so it comes first: the link read below is available only once
+      // this has happened.
       const id = obj.entityId;
       if (id == null) {
         // A Cell referenced from a derived id must have an entityId; otherwise
@@ -128,13 +160,22 @@ export function createRef(
           "[createRef] Cell has no entityId; cannot derive a stable id",
         );
       }
-      return id;
+
+      // The path is part of what names a cell, so a cell derives from the link
+      // naming it -- the same form the encodable-form branch above gives a cell
+      // that arrives directly, which is what keeps the two routes at one
+      // answer. Two cells of one document derive two ids.
+      return traverse(encodableFormOf(obj));
     } else if (Array.isArray(obj)) return obj.map(traverse);
     else if (isRecord(obj)) {
       return Object.fromEntries(
         Object.entries(obj).map(([key, value]) => [key, traverse(value)]),
       );
     } else if (typeof obj === "function") return obj.toString();
+    // A primitive reaches here only as an encodable FORM, the reassignment above
+    // having replaced the value it came from -- a primitive INPUT is answered at
+    // the top of the walk. A form is its own preimage, and stringifying one
+    // would make the form `7` and the form `"7"` name a single document.
     else return obj;
   }
 

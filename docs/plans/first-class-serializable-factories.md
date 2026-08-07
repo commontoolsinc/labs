@@ -195,10 +195,10 @@ Expected implementation files:
 - [ ] Decode to a frozen branded callable shell whose body throws
   `factory requires runner materialization` and whose state can be re-encoded.
 - [ ] Add a dedicated callable-factory codec slot to
-  `packages/data-model/src/codec-json/CodecRegistry.ts`; do not classify all
+  `packages/data-model/src/codec-common/CodecRegistry.ts`; do not classify all
   functions as primitives or match `Function` by constructor.
 - [ ] Register the codec in
-  `packages/data-model/src/codec-json/createDefaultRegistry.ts`.
+  `packages/data-model/src/codec-common/createDefaultRegistry.ts`.
 - [ ] Route callable factories through codec lookup before the generic function
   rejection.
 - [ ] Include callable factories in JSON encoder cycle tracking.
@@ -208,14 +208,14 @@ Expected implementation files:
 Expected implementation and test files:
 
 - `packages/data-model/src/codec-common/` for the codec/state validator
-- `packages/data-model/src/codec-json/CodecRegistry.ts`
-- `packages/data-model/src/codec-json/JsonEncodingContext.ts`
-- `packages/data-model/src/codec-json/createDefaultRegistry.ts`
-- `packages/data-model/src/codec-json/json-encoding.ts`
+- `packages/data-model/src/codec-common/CodecRegistry.ts`
+- `packages/data-model/src/codec-json/JsonCodec.ts`
+- `packages/data-model/src/codec-common/createDefaultRegistry.ts`
+- `packages/data-model/src/codec-json/impl.ts`
 - `packages/data-model/test/codec-common/FactoryCodec.test.ts`
-- `packages/data-model/test/codec-json/CodecRegistry.test.ts`
-- `packages/data-model/test/codec-json/JsonEncodingContext.test.ts`
-- `packages/data-model/test/codec-json/json-encoding.test.ts`
+- `packages/data-model/test/codec-common/CodecRegistry.test.ts`
+- `packages/data-model/test/codec-json/JsonCodec.test.ts`
+- `packages/data-model/test/codec-json/impl.test.ts`
 - a focused `packages/data-model/test/fabric-factory.test.ts`
 
 ### WP1.3 — Make every Fabric operation see the same factory state
@@ -548,7 +548,7 @@ subscription, and scheduler modules under `packages/runner/src/scheduler/`.
   factory as an atomic codec value while still traversing its encoded state.
 - [ ] Cover `packages/memory/v2.ts` `encodeMemoryBoundary` /
   `decodeMemoryBoundary` with a focused
-  `packages/memory/test/v2-factory-boundary-test.ts` round trip.
+  `packages/memory/test/v2-factory-boundary.test.ts` round trip.
 - [ ] Add a fresh-runtime client/server round trip in which one runtime writes a
   factory, another decodes it, and a runner materializes/invokes it.
 - [ ] Add typed factory round trips through Cells, query-result proxies, pieces,

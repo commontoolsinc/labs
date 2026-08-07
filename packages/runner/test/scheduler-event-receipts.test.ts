@@ -119,6 +119,11 @@ async function waitForSchedulerCondition(
   const deadline = performance.now() + 1_000;
   while (!condition() && performance.now() < deadline) {
     await runtime.idle();
+    // Yield a zero-delay timer turn: an idle() that resolves through
+    // microtasks alone would otherwise starve the timer queue, and the
+    // emulated server's fan-out flush — which resolves awaited commits at
+    // marker coverage (CT-1950) — rides a zero-delay timer.
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
   if (!condition()) {
     throw new Error(message);

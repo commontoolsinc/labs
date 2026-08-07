@@ -51,7 +51,7 @@ const isPlainRecord = (value: FabricValue): value is FabricPlainObject =>
  * engine's serialized substring check still sees instance contents
  * verbatim. If this walk ever learns to descend into an instance type, the
  * validator and `containsSyncSchemaRefString` must learn it in the same
- * change — the walker-agreement test in v2-sync-schema-table-test.ts fails
+ * change — the walker-agreement test in v2-sync-schema-table.test.ts fails
  * until they do.
  */
 export const mapLinkSchemas = (

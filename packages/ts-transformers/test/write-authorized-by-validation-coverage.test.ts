@@ -16,7 +16,6 @@ async function cfcDiagnostics(
   source: string,
 ): Promise<readonly TransformationDiagnostic[]> {
   const { diagnostics } = await validateSource(source, {
-    mode: "error",
     types: COMMONFABRIC_TYPES,
   });
   return diagnostics.filter((diagnostic) =>

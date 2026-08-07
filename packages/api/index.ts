@@ -39,6 +39,15 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
 // declaration here (interface + constructor + declare-const with `new`).
 
 /**
+ * The nominal brand key declared on `FabricSpecialObject`. It exists only in
+ * the type system — a runtime instance never carries the key; `instanceof
+ * FabricSpecialObject` is its runtime form. Schema `required` presence
+ * checks must therefore treat this key as satisfied by any fabric value
+ * rather than probing for it with `in`.
+ */
+export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
+
+/**
  * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
  * single `instanceof` check for any fabric-system value type.
  *
@@ -61,6 +70,10 @@ export declare const FabricSpecialObject:
 
 /**
  * Abstract base class for values that participate in the fabric protocol.
+ *
+ * An instance holds all of its state privately and makes it reachable only
+ * through members, so it has no own properties at all. A structural view of
+ * one -- a spread, `Object.keys()`, a naive walk -- therefore sees nothing.
  */
 export interface FabricInstance extends FabricSpecialObject {
   shallowClone(frozen: boolean): FabricInstance;
@@ -231,9 +244,9 @@ export type FabricErrorState = {
  * `cause` may be an arbitrary `FabricValue`, so it is a small object graph
  * rather than a leaf.
  *
- * Like every `FabricInstance` it is mutable until frozen: the slots are plain
- * writable properties, and `setExtra()` / `deleteExtra()` are gated on the
- * frozen state.
+ * Like every `FabricInstance` it is mutable until frozen, and every mutator --
+ * the slot setters along with `setExtra()` and `deleteExtra()` -- throws once
+ * the instance is frozen.
  */
 export interface FabricError extends FabricInstance {
   type: string;
@@ -1697,34 +1710,40 @@ export interface Module extends FabricExecPlainObject {
  * function-valued member without a word.
  *
  * Its return stays `unknown`, unlike its sibling below: this is a public
- * protocol whose contract permits any return, and outside values (notably a
- * `Cell`, which answers with a link or `null`) match this type without being
- * builder artifacts at all.
+ * protocol whose contract permits any return, and outside values match this
+ * type without being builder artifacts at all.
  */
 export type toJSON = {
   toJSON(): unknown;
 };
 
 /**
- * The member by which a builder artifact produces the form in which it gets
- * encoded. Distinct from `toJSON` in saying nothing about JSON: what it
- * answers is a value the data model can represent, which reaches storage
- * without being stringified on the way.
+ * The member by which a value produces the form in which it gets encoded.
+ * Distinct from `toJSON` in saying nothing about JSON: what it returns is a
+ * value the data model can represent, which reaches storage without being
+ * stringified on the way.
  *
- * Always a RECORD. An artifact's encodable form is built by
- * `moduleToEncodableForm` or `patternToEncodableForm`, and both answer a record by
- * construction -- there is no artifact whose serialized form is a primitive,
- * an array, or `null`.
+ * Two kinds of value carry it, and the type spans both rather than describing
+ * only the one that composes into the factory types below. A `Cell` returns the
+ * link that stands for it, or `null` for a cell that has no link yet, and a
+ * record-shaped bound would exclude both of those -- `null` plainly, and the
+ * link because one arm of it is a class, which carries no index signature.
  *
- * Its members are {@link FabricExecValue}, NOT {@link FabricValue}: a form can
- * still hold live functions. A module whose implementation is a nested pattern
- * with no entry ref answers with that pattern's graph embedded, and such a
- * graph holds live modules. That is precisely why the artifact walk descends
- * into what this returns rather than treating it as finished -- typing it as
- * durable would assert the very thing the walk cannot assume.
+ * An artifact's form is always a record even so, and says so where it is built:
+ * `moduleToEncodableForm` and `patternToEncodableForm` declare
+ * {@link FabricExecPlainObject}. The narrower promise belongs at the producer,
+ * which can keep it, rather than at a name two unrelated kinds of value share.
+ *
+ * {@link FabricExecValue}, NOT {@link FabricValue}: a form can still hold live
+ * functions. A module whose implementation is a nested pattern with no entry ref
+ * returns that pattern's graph embedded, and such a graph holds live
+ * modules -- so the module form's `implementation` admits a `Pattern` and the
+ * pattern form's `result` admits a function. That is precisely why the artifact
+ * walk descends into what this returns rather than treating it as finished:
+ * typing it as durable would assert the very thing the walk cannot assume.
  */
 export type toEncodableForm = {
-  toEncodableForm(): Record<string, FabricExecValue>;
+  toEncodableForm(): FabricExecValue;
 };
 
 /**
@@ -1798,6 +1817,38 @@ export interface JSONObject extends Readonly<Record<string, JSONValue>> {}
  */
 export type MutableJSONValue = Mutable<JSONValue>;
 
+/**
+ * Fabric-primitive validation types -- a non-standard addition to the JSON
+ * Schema `type` vocabulary. Each name identifies a concrete `FabricPrimitive`
+ * class from the data-model, and a value matches by prototype (`instanceof`),
+ * not by structure. `"object"` also accepts these values -- every fabric
+ * primitive is a subtype of `"object"` the way an `"integer"` value satisfies
+ * a `"number"` schema -- so schemas that predate this vocabulary keep working.
+ */
+export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
+  [
+    "FabricBytes",
+    "FabricEpochDays",
+    "FabricEpochNsec",
+    "FabricHash",
+    "FabricRegExp",
+  ] as const,
+);
+
+export type FabricPrimitiveSchemaType =
+  typeof FABRIC_PRIMITIVE_SCHEMA_TYPES[number];
+
+const FABRIC_PRIMITIVE_SCHEMA_TYPE_SET: ReadonlySet<string> = new Set(
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+);
+
+/** Whether the given schema type names a `FabricPrimitive` class. */
+export function isFabricPrimitiveSchemaType(
+  type: string,
+): type is FabricPrimitiveSchemaType {
+  return FABRIC_PRIMITIVE_SCHEMA_TYPE_SET.has(type);
+}
+
 // Valid values for the "type" property of a JSONSchema
 export type JSONSchemaTypes =
   | "object"
@@ -1808,7 +1859,8 @@ export type JSONSchemaTypes =
   | "boolean"
   | "null"
   | "undefined" // undefined is a non-standard addition
-  | "unknown"; // unknown is a non-standard addition
+  | "unknown" // unknown is a non-standard addition
+  | FabricPrimitiveSchemaType; // non-standard; see FABRIC_PRIMITIVE_SCHEMA_TYPES
 
 // We can use a more complex asCell specifier to handle things like
 // `Cell<Cell<T>>` with `{ asCell: ["cell", "cell"] }`.
@@ -2337,35 +2389,76 @@ export interface BuiltInCompileAndRunState<T> {
 // derived from these types, so it would silently downgrade live cells to dead
 // values. (`SELF` and the consumer-facing factory result deliberately use the
 // same unstripped `R`.)
+/**
+ * The reserved output fields the runtime reads off a pattern's result, each
+ * typed so a value of the wrong shape under a reserved key is a compile error.
+ * `[NAME]` names the piece; `[UI]`, `[TILE_UI]` and `[CHIP_UI]` are its
+ * renderings; `[FS]` is its filesystem projection. Each is `FactoryInput`-
+ * wrapped so a reactive value (a `computed()`, a cell) is accepted alongside a
+ * plain one.
+ */
+type ReservedOutput = {
+  [NAME]?: FactoryInput<string>;
+  [TYPE]?: FactoryInput<string>;
+  [UI]?: FactoryInput<VNode> | JSXElement;
+  [TILE_UI]?: FactoryInput<VNode> | JSXElement;
+  [CHIP_UI]?: FactoryInput<VNode> | JSXElement;
+  [FS]?: FactoryInput<FsProjection>;
+};
+
+/**
+ * Attach the reserved fields to an object return, so a reserved key is typed
+ * in the return position without disturbing the author's own output shape: a
+ * pattern that omits them is unaffected. A pattern that returns a bare value
+ * or `undefined` (not an object) is passed through untouched — there is no
+ * reserved field to type there.
+ */
+type WithReservedOutput<R> = R extends object ? R & ReservedOutput : R;
+
+/**
+ * Values a pattern can return that are not objects, and so carry no reserved
+ * fields to check. Unioned into the explicit-`<T>` overloads' return so a
+ * pattern that returns a bare value (e.g. `string | undefined`) still type-
+ * checks there, where the output type is not a constrained parameter.
+ */
+type NonObjectOutput =
+  | string
+  | number
+  | bigint
+  | boolean
+  | symbol
+  | null
+  | undefined;
+
 export interface PatternFunction {
   // Function-only overload: T and R inferred from function
   <T, R>(
     fn: (
       input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
-    ) => FactoryInput<R>,
+    ) => WithReservedOutput<FactoryInput<R>>,
   ): PatternFactory<StripCell<T>, R>;
 
   // Function-only overload: T explicit, R inferred
   <T>(
     fn: (
       input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<any> },
-    ) => any,
-  ): PatternFactory<StripCell<T>, ReturnType<typeof fn>>;
+    ) => (object & ReservedOutput) | NonObjectOutput,
+  ): PatternFactory<StripCell<T>, any>;
 
   // Function + schema overload: T explicit, R inferred
   <T>(
     fn: (
       input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<any> },
-    ) => any,
+    ) => (object & ReservedOutput) | NonObjectOutput,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
-  ): PatternFactory<StripCell<T>, ReturnType<typeof fn>>;
+  ): PatternFactory<StripCell<T>, any>;
 
   // Function + schema overload: T and R explicit
   <T, R>(
     fn: (
       input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
-    ) => FactoryInput<R>,
+    ) => WithReservedOutput<FactoryInput<R>>,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
   ): PatternFactory<StripCell<T>, R>;

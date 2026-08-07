@@ -5,7 +5,7 @@
 //
 // Reading ROWS from a seeded on-disk file end to end (register -> query ->
 // rows, and the unregistered cell-db fallback) is proven against the real
-// client/server transport in packages/memory/test/v2-sqlite-disk-source-test.ts
+// client/server transport in packages/memory/test/v2-sqlite-disk-source.test.ts
 // (loopback). That test owns the `@db/sqlite` file-seeding dependency; here we
 // stay dependency-free and prove only the runner-specific delta: the provider
 // delegates register/execute to the session, and the server's read-only

@@ -20,7 +20,7 @@ import {
   glyphFor,
 } from "./display.ts";
 import { overlaySpanStyle, spanStyle } from "./highlight.ts";
-import { lineBg, ui } from "./theme.ts";
+import { lineBg, styleFor, ui } from "./theme.ts";
 import {
   buildWrapPlan,
   fitViewLayout,
@@ -86,12 +86,71 @@ export function diffAnnotationDecoration(
   };
 }
 
+/** Whole-diff added and removed line totals. */
+export interface DiffTotals {
+  readonly adds: number;
+  readonly dels: number;
+}
+
+/** One right-edge annotation cell: its glyph, and its style when it differs
+ * from the wrap-marker style. */
+interface SuffixCell {
+  readonly ch: string;
+  readonly style?: Style;
+}
+
+function plainSuffix(text: string): SuffixCell[] {
+  return [...text].map((ch) => ({ ch }));
+}
+
+/** The two segments of the corner label for the whole-diff totals, e.g.
+ * `+345 ` and `−12`: the added count and the removed count. */
+function diffTotalsSegments(totals: DiffTotals): [string, string] {
+  return [`+${totals.adds} `, `−${totals.dels}`];
+}
+
+/** The corner label's cells: the added count in the addition colour, the
+ * removed count in the removal colour. */
+function diffTotalsCells(totals: DiffTotals): SuffixCell[] {
+  const [add, del] = diffTotalsSegments(totals);
+  return [
+    ...[...add].map((ch) => ({ ch, style: styleFor("diffAdd") })),
+    ...[...del].map((ch) => ({ ch, style: styleFor("diffDel") })),
+  ];
+}
+
+/** Columns the whole-diff totals label occupies. */
+export function diffTotalsWidth(totals: DiffTotals): number {
+  const [add, del] = diffTotalsSegments(totals);
+  return cpLen(add) + cpLen(del);
+}
+
+/** Wrapped source widths reserved by the totals label on the first line,
+ * layered over any annotation decoration that line already carries. */
+export function diffTotalsDecoration(
+  labelWidth: number,
+  width: number,
+  annotation?: WrapDecoration,
+): WrapDecoration {
+  const available = Math.max(0, width - 1);
+  return {
+    firstWidth: Math.min(
+      (annotation?.firstWidth ?? 0) + labelWidth,
+      available,
+    ),
+    firstContinuationWidth: annotation?.firstContinuationWidth ??
+      annotation?.continuationWidth ?? 0,
+    continuationWidth: annotation?.continuationWidth ?? 0,
+  };
+}
+
 /** The metadata line that carries the Ctrl-L label in this wrapped layout. */
 export function labeledDiffMetadataLine(
   lines: readonly Line[],
   mode: DisplayMode,
   width: number,
   annotations: readonly DiffAnnotation[],
+  totalsWidth = 0,
 ): number | null {
   const metadata = annotations.find((annotation) =>
     annotation.kind === "diffMetadata"
@@ -103,7 +162,10 @@ export function labeledDiffMetadataLine(
   if (!downward || metadata.line !== downward.line + 1) return metadata.line;
   const line = lines[downward.line];
   if (!line) return metadata.line;
-  const firstWidth = diffAnnotationDecoration("expandDown", width).firstWidth;
+  const decoration = diffAnnotationDecoration("expandDown", width);
+  const firstWidth = downward.line === 0 && totalsWidth > 0
+    ? diffTotalsDecoration(totalsWidth, width, decoration).firstWidth
+    : decoration.firstWidth;
   return displayWidth(line, mode) > Math.max(1, width) - firstWidth
     ? null
     : metadata.line;
@@ -164,6 +226,9 @@ export interface ViewState {
   expandMargin?: boolean;
   /** Per-line annotations drawn against the right edge. */
   diffAnnotations?: readonly DiffAnnotation[];
+  /** Whole-diff added/removed totals, drawn at the top right corner of the
+   * first line. */
+  diffTotals?: DiffTotals | null;
   /** Absolute display row of the diff edge the next Ctrl-L will expand. */
   expandRow?: number | null;
   /** Whether the marked edge expands upward. False means downward. */
@@ -341,6 +406,15 @@ function clipConnectorAnnotation(text: string, width: number): string {
   return capacity === 0 ? "" : [...text].slice(-capacity).join("");
 }
 
+/** Keep at least one source cell when a styled suffix meets a narrow view. */
+function clipSuffixCells(
+  cells: readonly SuffixCell[],
+  width: number,
+): SuffixCell[] {
+  const capacity = Math.max(0, width - 1);
+  return capacity === 0 ? [] : cells.slice(-capacity);
+}
+
 const MATCH_BLOCK_SIZE = 64;
 
 /** The contiguous slice of document-ordered matches on one visible line. */
@@ -387,12 +461,14 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
       annotation.kind,
     ]),
   );
+  const totalsCells = view.diffTotals ? diffTotalsCells(view.diffTotals) : [];
   const metadataLabelLine = view.wrapMode !== "off"
     ? labeledDiffMetadataLine(
       doc.lines,
       view.displayMode,
       contentWidth,
       view.diffAnnotations ?? [],
+      totalsCells.length,
     )
     : view.diffAnnotations?.find((annotation) =>
       annotation.kind === "diffMetadata"
@@ -405,6 +481,16 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
         kind,
         contentWidth,
         kind !== "diffMetadata" || line === metadataLabelLine,
+      ),
+    );
+  }
+  if (totalsCells.length > 0) {
+    decorations.set(
+      0,
+      diffTotalsDecoration(
+        totalsCells.length,
+        contentWidth,
+        decorations.get(0),
       ),
     );
   }
@@ -456,9 +542,11 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
     const rowIdx = view.top + r;
     const endMark = endRows[rowIdx - endMarkStart] ?? null;
     if (endMark !== null) {
-      const suffix = hasDiffEndConnector && rowIdx === diffEndRow
-        ? diffEndSuffix(view.width)
-        : "";
+      const suffix = plainSuffix(
+        hasDiffEndConnector && rowIdx === diffEndRow
+          ? diffEndSuffix(view.width)
+          : "",
+      );
       rows.push(
         composeContent(
           undefined,
@@ -500,14 +588,17 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
       wrapPlan !== null &&
       wrappedRow !== undefined &&
       rowIdx === wrapPlan.firstRow[lineIdx] + 1;
+    // Row 0 reserves the leading cells of its suffix for the totals label, so
+    // the plain block marker only marks a width reserved beyond the label.
+    const reservedTotals = rowIdx === 0 ? totalsCells.length : 0;
     const marginMarker: MarginMarker = firstOfLine && annotation
       ? annotation
-      : wrappedRow && wrappedRow.suffixWidth > 0
+      : wrappedRow && wrappedRow.suffixWidth > reservedTotals
       ? "diffMetadata"
       : hasDiffEndConnector && rowIdx === diffEndRow
       ? "diffEnd"
       : null;
-    const suffix = firstOfLine && annotation === "diffMetadata" &&
+    const annotationSuffix = firstOfLine && annotation === "diffMetadata" &&
         lineIdx === metadataLabelLine
       ? clipAnnotation("^L█", contentWidth)
       : labelsWrappedExpansion
@@ -515,6 +606,12 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
       : hasDiffEndConnector && rowIdx === diffEndRow
       ? diffEndSuffix(contentWidth)
       : marginAnnotation(marginMarker, contentWidth);
+    const suffix = reservedTotals > 0
+      ? clipSuffixCells(
+        [...totalsCells, ...plainSuffix(annotationSuffix)],
+        contentWidth,
+      )
+      : plainSuffix(annotationSuffix);
     const sourceWidth = wrappedRow?.sourceWidth ??
       Math.max(1, contentWidth - suffix.length);
     rows.push(
@@ -574,7 +671,7 @@ function renderContentRow(
   guideWidth: number,
   contentWidth: number,
   wrapPlan: WrapPlan | null,
-  suffix: string,
+  suffix: readonly SuffixCell[],
 ): string {
   const line: Line | undefined = doc.lines[lineIdx];
   const inSelRange = !!view.selected &&
@@ -765,7 +862,7 @@ function composeContent(
   display: readonly DisplayCell[] | undefined,
   lineMatches: LineMatches | null,
   endMark: string | null,
-  suffix: string,
+  suffix: readonly SuffixCell[],
 ): string {
   const { color } = view;
   // Every content cell sits on the blue editor background; a diff line carries a
@@ -815,11 +912,10 @@ function composeContent(
       style: color ? mergeBg(ui.wrapMarker, rowBg) : EMPTY_STYLE,
     };
   }
-  const suffixCells = [...suffix];
   if (endMark !== null) {
     const ornament = [...endMark];
     const centeredStart = Math.floor((width - ornament.length) / 2);
-    const suffixStart = cells.length - suffixCells.length;
+    const suffixStart = cells.length - suffix.length;
     const start = centeredStart + ornament.length <= suffixStart
       ? centeredStart
       : Math.floor((suffixStart - ornament.length) / 2);
@@ -832,12 +928,14 @@ function composeContent(
       }
     }
   }
-  if (suffixCells.length > 0) {
-    const start = cells.length - suffixCells.length;
-    for (let i = 0; i < suffixCells.length; i++) {
+  if (suffix.length > 0) {
+    const start = cells.length - suffix.length;
+    for (let i = 0; i < suffix.length; i++) {
       cells[start + i] = {
-        ch: suffixCells[i],
-        style: color ? mergeBg(ui.wrapMarker, rowBg) : EMPTY_STYLE,
+        ch: suffix[i].ch,
+        style: color
+          ? mergeBg(suffix[i].style ?? ui.wrapMarker, rowBg)
+          : EMPTY_STYLE,
       };
     }
   }

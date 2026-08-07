@@ -1385,31 +1385,7 @@ jobs:
           fi
           echo "::endgroup::"
 
-  # Automatic deployment to staging (toolshed)
-  deploy-toolshed:
-    name: "Deploy to Toolshed (Staging)"
-    if: github.ref == 'refs/heads/main'
-    needs: ["attest-binaries"]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    environment: toolshed
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v7
-
-      - name: 🦕 Setup Deno
-        uses: ./.github/actions/deno-setup
-        with:
-          cache: false
-
-      - name: 🚀 Deploy application to Toolshed (Staging)
-        uses: appleboy/ssh-action@1530429296e979861824d74fb800013190b5dee0
-        with:
-          host: ${{ secrets.BASTION_HOST }}
-          username: bastion
-          key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
-          script: /opt/cf/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.sha }}
-
-  # Automatic deployment to rapids during toolshed migration
+  # Automatic deployment to staging (rapids)
   deploy-rapids:
     name: "Deploy to Rapids (Staging)"
     if: github.ref == 'refs/heads/main'
@@ -1459,7 +1435,7 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      # STAGING_SHELL_API_URL names the toolshed this shell talks to, which is
+      # STAGING_SHELL_API_URL names the API host this shell talks to, which is
       # the host the deploy-rapids job above keeps current. It is a variable
       # rather than a secret because it is served in plaintext inside the
       # bundle, and because the checks below can then name it when they fail.

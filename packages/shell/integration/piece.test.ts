@@ -469,10 +469,7 @@ describe("shell piece tests", () => {
           global.__ctRuntimeDisposed = disposeInternals();
           return global.__ctRuntimeDisposed;
         };
-        await globalThis.app.apply({
-          type: "set-identity",
-          identity: undefined,
-        });
+        await globalThis.app.setIdentity(undefined);
       });
       // The swap clears the global only after it has called the wrapped
       // dispose(), so once the runtime is gone the disposal promise is stashed.

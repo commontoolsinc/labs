@@ -21,6 +21,10 @@ line. Recognized shebangs and transformed compiler headers remain explicit
 selectors. JSON-, YAML-, Markdown-, Python-, and other language-shaped source is
 not guessed from its syntax.
 
+A diff shows its whole-diff change totals at the top right corner of its first
+line: the added line count and the removed line count, coloured like additions
+and removals.
+
 Markdown files can switch between the source and a rendered terminal view with
 `V`. The rendered view formats headings, emphasis, links, quotes, lists, task
 markers, tables, rules, and code. The same view is available for Markdown files
@@ -163,11 +167,19 @@ remains the ordinary successful `null` CLI response, as does a valid projected
 null.
 
 Both transforms run as a short-lived computed pattern in the caller's session.
-The runtime's list filter/map builtins therefore handle CFC exactly as authored
-pattern expressions do: predicate observations label array membership,
-projection reads propagate labels, and filtered elements retain their source
-links. Projection map/lift nodes construct the requested shape from a
-source-schema-selected read rather than returning a widening identity alias.
+When the declared source schema fixes the root container shape, the pattern
+constructs its first storage read from the union of predicate-observed and
+projected paths. Structurally declared properties, including local `$ref` item
+schemas, are pruned to that union: predicate-only fields can decide membership
+without appearing in the result, and omitted linked subgraphs are not hydrated.
+Schema-less or root-union sources retain a value-shape read before the transform
+because their array/object projection semantics cannot be established from the
+declaration. Ambiguous source-schema compositions remain intact and can retain a
+wider selector. The runtime's list filter/map builtins therefore handle CFC
+exactly as authored pattern expressions do: predicate observations label array
+membership, projection reads propagate labels, and filtered elements retain
+their source links. Projection map/lift nodes construct the requested shape from
+a source-schema-selected read rather than returning a widening identity alias.
 Nested non-stream Cell handles are materialized before the predicate/projection
 JavaScript runs; stream handles remain capabilities. The source cell's schema
 remains authoritative for Common Fabric metadata. A caller cannot introduce or

@@ -14,7 +14,7 @@ import {
   replaceNavigation,
   updatePageTitle,
 } from "../../shared/mod.ts";
-import { KeyboardController } from "../lib/keyboard-router.ts";
+import { GlobalShortcutsController } from "../lib/global-shortcuts-controller.ts";
 import { type Cancel, NAME, PageHandle } from "@commonfabric/runtime-client";
 import { prepareNamedSpace } from "../lib/named-space.ts";
 
@@ -79,7 +79,7 @@ export class XAppView extends BaseView {
   private slugTargetKey: string | undefined = undefined;
 
   private debuggerController = new DebuggerController(this);
-  private _keyboard = new KeyboardController(this);
+  private _keyboard = new GlobalShortcutsController(this);
 
   _spaceRootPattern = new Task(this, {
     task: async (
