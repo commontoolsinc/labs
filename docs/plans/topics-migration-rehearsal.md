@@ -10,7 +10,7 @@ Three documents already exist and none of them is this one:
   pieces to migrate or what to assert.
 - [`space-clone-rehearsal.md`](space-clone-rehearsal.md) is the **design** of
   that tooling.
-- [`pattern-verb-contract-implementation.md`](pattern-verb-contract-implementation.md)
+- [`pattern-verb-contract-implementation.md`](../history/plans/pattern-verb-contract-implementation.md)
   holds the **live-acceptance checklist** and the **write-storm gate**, spread
   across its Testing and Risks sections.
 

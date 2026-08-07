@@ -7,7 +7,7 @@
 // exercises only the raw trusted-builder `handler`) with the api's declared-
 // result authoring surface. This is the readback half of WS-C's exit
 // criterion, pinned at the runner in addition to the end-to-end fixture
-// (pattern-verb-contract-implementation.md, D4).
+// (docs/history/plans/pattern-verb-contract-implementation.md, D4).
 //
 // The incidental-cell-return case pins the receipt write's conversion: `set()`
 // returns its cell for chaining, so an expression-body

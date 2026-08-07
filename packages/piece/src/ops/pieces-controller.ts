@@ -726,10 +726,21 @@ export class PiecesController<T = unknown> {
         visited = new Set<unknown>(), // Track objects directly, not string representations
         depth = 0,
       ) => {
-        // TODO(danfuzz): The argument value here is `argumentCell.getRaw()`, a
-        // raw `FabricValue`; this `isRecord`/`Object.keys` walk (guards only
-        // `isLink`) decomposes a `FabricPrimitive` and walks a `FabricInstance`
-        // by internal slots rather than codec contents.
+        // The argument here is `argumentCell.getRaw()`, a raw `FabricValue`.
+        // A `FabricPrimitive` is not decomposed by this walk -- nothing is
+        // rebuilt, and a leaf holds no link to find, so the empty `Object.keys`
+        // ends the descent with nothing lost.
+        //
+        // TODO(danfuzz): a link nested in a `FabricInstance`'s codec contents
+        // is missed, so a piece referenced only from inside a wrapper does not
+        // appear in the result. Unlike the sibling walks in the runner, this
+        // one does _not_ refuse such a value: every path out of here is wrapped
+        // in a `catch` that reports to `diagnosticConsole` and returns an empty
+        // result by design (the outer handler says so in as many words), so a
+        // throw would be swallowed rather than surfaced. A tripwire that cannot
+        // fire is worse than a marker that says so, because it reads as a guard
+        // while being incapable of acting as one. Refusing here needs that
+        // error handling changed first.
         if (!isRecord(value) || depth > maxDepth) return;
 
         // Prevent cycles in our traversal by tracking object references directly
@@ -864,9 +875,12 @@ export class PiecesController<T = unknown> {
       visited = new Set<unknown>(), // Track objects directly, not string representations
       depth = 0,
     ): boolean => {
-      // TODO(danfuzz): Same as `processValue` above — walks a raw `FabricValue`
-      // (`getRaw()`) by enumerable own-props with no `FabricSpecialObject`
-      // guard, mishandling `FabricPrimitive` and `FabricInstance`.
+      // Same shape as `processValue` above, and the same account applies: a
+      // `FabricPrimitive` costs this walk nothing, while a link inside a
+      // `FabricInstance` is missed.
+      //
+      // TODO(danfuzz): refusing one here waits on the same thing -- this walk's
+      // `catch` swallows, so a throw would not surface.
       if (!isRecord(value) || depth > maxDepth) return false;
 
       // Prevent cycles in our traversal by tracking object references directly

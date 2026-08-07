@@ -148,7 +148,7 @@ propagate](#how-flags-propagate).
   default in place), so the opt-out while the flag exists is an explicit
   `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false`.
 - **Added by.** Mike Salisbury, verb-contract WS-C
-  (`docs/plans/pattern-verb-contract-implementation.md`).
+  (`docs/history/plans/pattern-verb-contract-implementation.md`).
 - **Purpose.** A handler's return value containing reactives/cells projects
   into its per-event receipt cell via the result-pattern path, but a **plain
   JSON return is discarded** — the receipt-only branch writes `{}`. Under this
