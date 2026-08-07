@@ -1,9 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { JsonEncodingContext } from "@/codec-json/JsonEncodingContext.ts";
+import { JsonCodec } from "@/codec-json/JsonCodec.ts";
 import { FabricInstance, type FabricValue } from "@/interface.ts";
-import type { JsonWireValue } from "@/codec-json/interface.ts";
+import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import {
@@ -68,60 +68,60 @@ class UnregisteredInstance extends BaseFabricInstance {
 /**
  * The encoding prefix tag, named once for the assertions below that pin the
  * wire form or that feed the decoder deliberately broken input. Bridging
- * between encoded strings and wire-format trees does NOT go through this --
- * that is what `JsonEncodingContext`'s wrap/unwrap helpers are for.
+ * between encoded strings and codec-value trees does NOT go through this --
+ * that is what `JsonCodec`'s wrap/unwrap helpers are for.
  */
 const ENCODING_PREFIX = "fvj1:";
 
-/** Creates a standard test context (non-lenient) and a mock runtime. */
-function makeTestContext() {
-  const context = new JsonEncodingContext();
+/** Creates a standard test codec (non-lenient) and a mock runtime. */
+function makeTestCodec() {
+  const jsonCodec = new JsonCodec();
   const runtime = new TestReconstructionContext();
-  return { context, runtime };
+  return { jsonCodec, runtime };
 }
 
 /** Helper: encode then decode (round-trip) through the public API. */
 function roundTrip(value: FabricValue): FabricValue {
-  const { context, runtime } = makeTestContext();
-  const encoded = context.encode(value);
-  return context.decode(encoded, runtime);
+  const { jsonCodec, runtime } = makeTestCodec();
+  const encoded = jsonCodec.encode(value);
+  return jsonCodec.decode(encoded, runtime);
 }
 
 /**
- * Helper: encode a value and return the wire-format tree (parsed JSON).
- * Used for assertions about the intermediate wire representation.
+ * Helper: encode a value and return the codec-value tree (parsed JSON).
+ * Used for assertions about the intermediate codec value.
  */
-function toWireFormat(value: FabricValue): JsonWireValue {
-  const { context } = makeTestContext();
-  const encoded = context.encode(value);
+function toWireFormat(value: FabricValue): JsonCodecValue {
+  const { jsonCodec } = makeTestCodec();
+  const encoded = jsonCodec.encode(value);
   return JSON.parse(
-    JsonEncodingContext.unwrapEncodedValueForTesting(encoded),
-  ) as JsonWireValue;
+    JsonCodec.unwrapEncodedValueForTesting(encoded),
+  ) as JsonCodecValue;
 }
 
 /**
- * Helper: decode from a wire-format tree. Stringifies to JSON first (tagged as
+ * Helper: decode from a codec-value tree. Stringifies to JSON first (tagged as
  * an encoded value), then feeds through the public decode API.
  */
-function fromWireFormat(data: JsonWireValue): FabricValue {
-  const { context, runtime } = makeTestContext();
-  return context.decode(
-    JsonEncodingContext.wrapEncodedValueForTesting(JSON.stringify(data)),
+function fromWireFormat(data: JsonCodecValue): FabricValue {
+  const { jsonCodec, runtime } = makeTestCodec();
+  return jsonCodec.decode(
+    JsonCodec.wrapEncodedValueForTesting(JSON.stringify(data)),
     runtime,
   );
 }
 
-describe("JsonEncodingContext", () => {
+describe("JsonCodec", () => {
   describe("`encodeToBytes()` / `decodeFromBytes()` (bytes entry points)", () => {
     it("returns `Uint8Array` from `encodeToBytes()`", () => {
-      const { context } = makeTestContext();
-      const result = context.encodeToBytes(42);
+      const { jsonCodec } = makeTestCodec();
+      const result = jsonCodec.encodeToBytes(42);
       expect(result).toBeInstanceOf(Uint8Array);
     });
 
     it("produces valid JSON bytes from `encodeToBytes()`", () => {
-      const { context } = makeTestContext();
-      const bytes = context.encodeToBytes(
+      const { jsonCodec } = makeTestCodec();
+      const bytes = jsonCodec.encodeToBytes(
         { a: 1 },
       );
       const json = new TextDecoder().decode(bytes);
@@ -129,9 +129,9 @@ describe("JsonEncodingContext", () => {
     });
 
     it("accepts `Uint8Array` in `decodeFromBytes()`", () => {
-      const { context, runtime } = makeTestContext();
+      const { jsonCodec, runtime } = makeTestCodec();
       const bytes = new TextEncoder().encode(JSON.stringify({ a: 1 }));
-      const result = context.decodeFromBytes(
+      const result = jsonCodec.decodeFromBytes(
         bytes,
         runtime,
       ) as Record<string, FabricValue>;
@@ -139,13 +139,13 @@ describe("JsonEncodingContext", () => {
     });
 
     it("round-trips through `Uint8Array`", () => {
-      const { context, runtime } = makeTestContext();
+      const { jsonCodec, runtime } = makeTestCodec();
       const value = {
         name: "test",
         count: 42,
       };
-      const bytes = context.encodeToBytes(value);
-      const result = context.decodeFromBytes(
+      const bytes = jsonCodec.encodeToBytes(value);
+      const result = jsonCodec.decodeFromBytes(
         bytes,
         runtime,
       ) as Record<string, FabricValue>;
@@ -154,10 +154,10 @@ describe("JsonEncodingContext", () => {
     });
 
     it("round-trips `FabricError` through `Uint8Array`", () => {
-      const { context, runtime } = makeTestContext();
+      const { jsonCodec, runtime } = makeTestCodec();
       const err = FabricError.fromNativeError(new TypeError("oops"));
-      const bytes = context.encodeToBytes(err);
-      const result = context.decodeFromBytes(
+      const bytes = jsonCodec.encodeToBytes(err);
+      const result = jsonCodec.decodeFromBytes(
         bytes,
         runtime,
       );
@@ -168,21 +168,21 @@ describe("JsonEncodingContext", () => {
     });
 
     it("round-trips `undefined` through `Uint8Array`", () => {
-      const { context, runtime } = makeTestContext();
-      const bytes = context.encodeToBytes(undefined);
-      const result = context.decodeFromBytes(bytes, runtime);
+      const { jsonCodec, runtime } = makeTestCodec();
+      const bytes = jsonCodec.encodeToBytes(undefined);
+      const result = jsonCodec.decodeFromBytes(bytes, runtime);
       expect(result).toBe(undefined);
     });
 
     it("round-trips complex structure through `Uint8Array`", () => {
-      const { context, runtime } = makeTestContext();
+      const { jsonCodec, runtime } = makeTestCodec();
       const value = {
         users: [{ name: "Alice" }, { name: "Bob" }],
         error: FabricError.fromNativeError(new Error("fail")),
         nothing: undefined,
       };
-      const bytes = context.encodeToBytes(value);
-      const result = context.decodeFromBytes(
+      const bytes = jsonCodec.encodeToBytes(value);
+      const result = jsonCodec.decodeFromBytes(
         bytes,
         runtime,
       ) as Record<string, FabricValue>;
@@ -338,10 +338,11 @@ describe("JsonEncodingContext", () => {
 
     it("loudly fails to encode an unencodable value (unique / uninterned `Symbol`)", () => {
       // `SymbolCodec.canEncode()` returns false for unique symbols (no
-      // registry key), so no codec claims them. A default-configured context
-      // must then fail loudly rather than silently flatten the symbol to `{}`.
-      const { context } = makeTestContext();
-      expect(() => context.encode(Symbol("nope"))).toThrow(
+      // registry key), so no codec claims them. A default-configured
+      // `JsonCodec` must then fail loudly rather than silently flatten the
+      // symbol to `{}`.
+      const { jsonCodec } = makeTestCodec();
+      expect(() => jsonCodec.encode(Symbol("nope"))).toThrow(
         "no applicable codec",
       );
     });
@@ -406,16 +407,16 @@ describe("JsonEncodingContext", () => {
 
   describe("un-registered instance types", () => {
     it("throws when encoding a `FabricInstance` with no registered codec", () => {
-      const { context } = makeTestContext();
-      expect(() => context.encode(new UnregisteredInstance()))
+      const { jsonCodec } = makeTestCodec();
+      expect(() => jsonCodec.encode(new UnregisteredInstance()))
         .toThrow("No codec registered");
     });
 
     it("throws on a non-plain object with no codec (e.g. a raw `Map`)", () => {
       // A non-plain object that is neither a FabricInstance nor codec-handled
       // must fail loudly, not be mis-encoded as a plain object.
-      const { context } = makeTestContext();
-      expect(() => context.encode(new Map() as unknown as FabricValue))
+      const { jsonCodec } = makeTestCodec();
+      expect(() => jsonCodec.encode(new Map() as unknown as FabricValue))
         .toThrow("no applicable codec");
     });
   });
@@ -456,7 +457,7 @@ describe("JsonEncodingContext", () => {
     it("serializes `[1,,3]` with `/hole`", () => {
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , 3];
-      const result = toWireFormat(arr) as JsonWireValue[];
+      const result = toWireFormat(arr) as JsonCodecValue[];
       expect(result.length).toBe(3);
       expect(result[0]).toBe(1);
       expect(result[1]).toEqual({ "/hole": 1 });
@@ -476,7 +477,7 @@ describe("JsonEncodingContext", () => {
     it("serializes consecutive holes as run-length encoded", () => {
       // deno-lint-ignore no-sparse-arrays
       const arr = [1, , , , 5];
-      const result = toWireFormat(arr) as JsonWireValue[];
+      const result = toWireFormat(arr) as JsonCodecValue[];
       expect(result.length).toBe(3); // [1, {"/hole": 3}, 5]
       expect(result[0]).toBe(1);
       expect(result[1]).toEqual({ "/hole": 3 });
@@ -538,7 +539,7 @@ describe("JsonEncodingContext", () => {
       arr[0] = 1;
       arr[2] = undefined;
       arr[4] = 3;
-      const result = toWireFormat(arr) as JsonWireValue[];
+      const result = toWireFormat(arr) as JsonCodecValue[];
       expect(result).toEqual([
         1,
         { "/hole": 1 },
@@ -583,7 +584,7 @@ describe("JsonEncodingContext", () => {
     describe("key ordering (Section 10)", () => {
       it("emits keys in UTF-8 byte order for a bare plain object", () => {
         const obj = { c: 3, a: 1, b: 2 };
-        const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
+        const wire = toWireFormat(obj) as Record<string, JsonCodecValue>;
         expect(Object.keys(wire)).toEqual(["a", "b", "c"]);
       });
 
@@ -591,9 +592,9 @@ describe("JsonEncodingContext", () => {
         const obj1 = { x: 1, y: 2, z: 3 };
         const obj2 = { z: 3, x: 1, y: 2 };
         const obj3 = { y: 2, z: 3, x: 1 };
-        const ctx = new JsonEncodingContext();
-        expect(ctx.encode(obj1)).toBe(ctx.encode(obj2));
-        expect(ctx.encode(obj1)).toBe(ctx.encode(obj3));
+        const jsonCodec = new JsonCodec();
+        expect(jsonCodec.encode(obj1)).toBe(jsonCodec.encode(obj2));
+        expect(jsonCodec.encode(obj1)).toBe(jsonCodec.encode(obj3));
       });
 
       it("sorts keys in nested plain objects", () => {
@@ -601,9 +602,9 @@ describe("JsonEncodingContext", () => {
           b: { z: 1, a: 2 },
           a: 0,
         };
-        const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
+        const wire = toWireFormat(obj) as Record<string, JsonCodecValue>;
         expect(Object.keys(wire)).toEqual(["a", "b"]);
-        const inner = wire.b as Record<string, JsonWireValue>;
+        const inner = wire.b as Record<string, JsonCodecValue>;
         expect(Object.keys(inner)).toEqual(["a", "z"]);
       });
 
@@ -615,7 +616,7 @@ describe("JsonEncodingContext", () => {
           ["\u{10000}"]: 1,
           [""]: 2,
         };
-        const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
+        const wire = toWireFormat(obj) as Record<string, JsonCodecValue>;
         expect(Object.keys(wire)).toEqual(["", "\u{10000}"]);
       });
 
@@ -631,7 +632,7 @@ describe("JsonEncodingContext", () => {
           ["﻿"]: 3,
           a: 4,
         };
-        const wire = toWireFormat(obj) as Record<string, JsonWireValue>;
+        const wire = toWireFormat(obj) as Record<string, JsonCodecValue>;
         expect(Object.keys(wire)).toEqual([...utf8SortedKeysOf(obj as object)]);
       });
     });
@@ -783,7 +784,7 @@ describe("JsonEncodingContext", () => {
       it("malformed wire: multi-key object with `/`-prefixed key produces `ProblematicValue`", () => {
         // Wire data without /quote or /object wrapper — decoder must not silently
         // round-trip it as a plain object.
-        const data = { a: 1, "/b": 2 } as JsonWireValue;
+        const data = { a: 1, "/b": 2 } as JsonCodecValue;
         const result = fromWireFormat(data);
         expect(result).toBeInstanceOf(ProblematicValue);
       });
@@ -792,7 +793,7 @@ describe("JsonEncodingContext", () => {
         // Per spec §9, a single-key object whose key is bare "/" (empty tag
         // after stripping the leading slash) is an encoding error. Decoding must
         // produce a ProblematicValue, not an UnknownValue with an empty tag.
-        const data = { "/": "x" } as JsonWireValue;
+        const data = { "/": "x" } as JsonCodecValue;
         const result = fromWireFormat(data);
         expect(result).toBeInstanceOf(ProblematicValue);
       });
@@ -803,7 +804,7 @@ describe("JsonEncodingContext", () => {
       });
 
       it("deserializes an `/object`-wrapped multi-key object with `/`-prefixed key correctly", () => {
-        const data = { "/object": { a: 1, "/b": 2 } } as JsonWireValue;
+        const data = { "/object": { a: 1, "/b": 2 } } as JsonCodecValue;
         const result = fromWireFormat(data) as Record<string, FabricValue>;
         expect(result["a"]).toBe(1);
         expect(result["/b"]).toBe(2);
@@ -822,7 +823,7 @@ describe("JsonEncodingContext", () => {
         // Single-key /Tag@N objects are handled by unwrapTag, not the plain-object
         // path — confirm they still produce UnknownValue (unrecognized tag), not
         // ProblematicValue from the new multi-key guard.
-        const data = { "/Future@7": { id: "x" } } as JsonWireValue;
+        const data = { "/Future@7": { id: "x" } } as JsonCodecValue;
         const result = fromWireFormat(data);
         expect(result).toBeInstanceOf(UnknownValue);
         expect((result as unknown as UnknownValue).wireTypeTag).toBe(
@@ -835,7 +836,7 @@ describe("JsonEncodingContext", () => {
         // whose content happens to be { "/quote": "x" }. Decoding must return
         // { "/quote": "x" } as a frozen plain object — NOT recurse into it and
         // return just "x".
-        const wire = { "/quote": { "/quote": "x" } } as JsonWireValue;
+        const wire = { "/quote": { "/quote": "x" } } as JsonCodecValue;
         const result = fromWireFormat(wire) as Record<string, FabricValue>;
         expect(result["/quote"]).toBe("x");
       });
@@ -942,7 +943,7 @@ describe("JsonEncodingContext", () => {
     it("deserializes `/quote` as literal (no inner deserialization)", () => {
       const data = {
         "/quote": { "/Link@1": { id: "abc" } },
-      } as JsonWireValue;
+      } as JsonCodecValue;
       const result = fromWireFormat(data);
       // The inner structure is returned as-is, not reconstructed.
       const obj = result as Record<string, unknown>;
@@ -952,7 +953,7 @@ describe("JsonEncodingContext", () => {
     it("deep-freezes `/quote` result objects", () => {
       const data = {
         "/quote": { "/Link@1": { id: "abc" } },
-      } as JsonWireValue;
+      } as JsonCodecValue;
       const result = fromWireFormat(data) as Record<string, unknown>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result["/Link@1"])).toBe(true);
@@ -961,7 +962,7 @@ describe("JsonEncodingContext", () => {
     it("deep-freezes `/quote` result arrays", () => {
       const data = {
         "/quote": [1, { nested: "obj" }, [2, 3]],
-      } as JsonWireValue;
+      } as JsonCodecValue;
       const result = fromWireFormat(data) as unknown[];
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result[1])).toBe(true);
@@ -971,7 +972,7 @@ describe("JsonEncodingContext", () => {
     it("throws on mutation of a `/quote` result", () => {
       const data = {
         "/quote": { key: "val" },
-      } as JsonWireValue;
+      } as JsonCodecValue;
       const result = fromWireFormat(data) as Record<string, unknown>;
       expect(() => {
         result.key = "changed";
@@ -983,7 +984,7 @@ describe("JsonEncodingContext", () => {
     it("produces `UnknownValue` for unrecognized tags via `decode()`", () => {
       const data = {
         "/FutureType@2": { some: "data" },
-      } as JsonWireValue;
+      } as JsonCodecValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(UnknownValue);
       const unknown = result as unknown as UnknownValue;
@@ -1010,7 +1011,7 @@ describe("JsonEncodingContext", () => {
     });
 
     it("converts a `/hole` outside array context to `UnknownValue`", () => {
-      const data = { "/hole": 5 } as JsonWireValue;
+      const data = { "/hole": 5 } as JsonCodecValue;
       const result = fromWireFormat(data);
       expect(result).toBeInstanceOf(UnknownValue);
       const unknown = result as unknown as UnknownValue;
@@ -1021,42 +1022,42 @@ describe("JsonEncodingContext", () => {
 
   describe("circular reference detection", () => {
     it("throws on object referencing itself", () => {
-      const { context } = makeTestContext();
+      const { jsonCodec } = makeTestCodec();
       const obj: Record<string, unknown> = {};
       obj.self = obj;
-      expect(() => context.encode(obj as FabricValue)).toThrow(
+      expect(() => jsonCodec.encode(obj as FabricValue)).toThrow(
         "Circular reference",
       );
     });
 
     it("throws on array referencing itself", () => {
-      const { context } = makeTestContext();
+      const { jsonCodec } = makeTestCodec();
       const arr: unknown[] = [];
       arr.push(arr);
-      expect(() => context.encode(arr as FabricValue)).toThrow(
+      expect(() => jsonCodec.encode(arr as FabricValue)).toThrow(
         "Circular reference",
       );
     });
 
     it("throws on indirect circular reference (A -> B -> A)", () => {
-      const { context } = makeTestContext();
+      const { jsonCodec } = makeTestCodec();
       const a: Record<string, unknown> = {};
       const b: Record<string, unknown> = {};
       a.ref = b;
       b.ref = a;
-      expect(() => context.encode(a as FabricValue)).toThrow(
+      expect(() => jsonCodec.encode(a as FabricValue)).toThrow(
         "Circular reference",
       );
     });
 
     it("throws on `FabricInstance` whose state references itself", () => {
-      const { context } = makeTestContext();
+      const { jsonCodec } = makeTestCodec();
       // Create an instance with a circular reference in its state.
       const state = { eek: [] as FabricValue[] };
       state.eek.push(state);
 
       const us = new UnknownValue("Test@1", state);
-      expect(() => context.encode(us))
+      expect(() => jsonCodec.encode(us))
         .toThrow(
           "Circular reference",
         );
@@ -1083,14 +1084,14 @@ describe("JsonEncodingContext", () => {
     });
 
     it("lenient mode wraps failed handler reconstruction", () => {
-      const context = new JsonEncodingContext({ lenient: true });
+      const jsonCodec = new JsonCodec({ lenient: true });
       const runtime = new TestReconstructionContext();
 
       // BigInt@1 with a non-string state produces ProblematicValue
       // in lenient mode because the handler validates the state type.
-      const data = { "/BigInt@1": 42 } as JsonWireValue;
-      const result = context.decode(
-        JsonEncodingContext.wrapEncodedValueForTesting(JSON.stringify(data)),
+      const data = { "/BigInt@1": 42 } as JsonCodecValue;
+      const result = jsonCodec.decode(
+        JsonCodec.wrapEncodedValueForTesting(JSON.stringify(data)),
         runtime,
       );
       expect(result).toBeInstanceOf(ProblematicValue);
@@ -1099,16 +1100,16 @@ describe("JsonEncodingContext", () => {
     });
 
     it("lenient mode wraps failed class-registry reconstruction", () => {
-      const context = new JsonEncodingContext({ lenient: true });
+      const jsonCodec = new JsonCodec({ lenient: true });
       const runtime = new TestReconstructionContext();
 
       // Map@1's codec always throws on decode ("not yet implemented"),
       // triggering lenient wrapping.
       const data = {
         "/Map@1": [["key", "value"]],
-      } as JsonWireValue;
-      const result = context.decode(
-        JsonEncodingContext.wrapEncodedValueForTesting(
+      } as JsonCodecValue;
+      const result = jsonCodec.decode(
+        JsonCodec.wrapEncodedValueForTesting(
           JSON.stringify(data),
           true, // Undecodable on purpose; that is what this test is about.
         ),
@@ -1123,21 +1124,21 @@ describe("JsonEncodingContext", () => {
   describe("freeze guarantees", () => {
     it("deserialized arrays are frozen", () => {
       const result = fromWireFormat(
-        [1, 2, 3] as JsonWireValue,
+        [1, 2, 3] as JsonCodecValue,
       );
       expect(Object.isFrozen(result)).toBe(true);
     });
 
     it("deserialized objects are frozen", () => {
       const result = fromWireFormat(
-        { a: 1 } as JsonWireValue,
+        { a: 1 } as JsonCodecValue,
       ) as Record<string, FabricValue>;
       expect(Object.isFrozen(result)).toBe(true);
     });
 
     it("mutation of deserialized array throws", () => {
       const result = fromWireFormat(
-        [1, 2, 3] as JsonWireValue,
+        [1, 2, 3] as JsonCodecValue,
       );
       expect(() => {
         (result as unknown as number[])[0] = 99;
@@ -1146,7 +1147,7 @@ describe("JsonEncodingContext", () => {
 
     it("mutation of deserialized object throws", () => {
       const result = fromWireFormat(
-        { a: 1 } as JsonWireValue,
+        { a: 1 } as JsonCodecValue,
       ) as Record<string, FabricValue>;
       expect(() => {
         (result as Record<string, unknown>).a = 99;
@@ -1155,14 +1156,14 @@ describe("JsonEncodingContext", () => {
 
     it("nested deserialized objects are frozen", () => {
       const result = fromWireFormat(
-        { inner: { val: 42 } } as JsonWireValue,
+        { inner: { val: 42 } } as JsonCodecValue,
       ) as Record<string, Record<string, FabricValue>>;
       expect(Object.isFrozen(result)).toBe(true);
       expect(Object.isFrozen(result.inner)).toBe(true);
     });
 
     it("deserialized `/object`-unwrapped objects are frozen", () => {
-      const data = { "/object": { "/myKey": "val" } } as JsonWireValue;
+      const data = { "/object": { "/myKey": "val" } } as JsonCodecValue;
       const result = fromWireFormat(data) as Record<
         string,
         FabricValue
@@ -1182,7 +1183,7 @@ describe("JsonEncodingContext", () => {
       // `/EpochNsec@1` dispatches through a registered codec; the
       // reconstructed FabricEpochNsec must be deep-frozen on return.
       const result = fromWireFormat(
-        { "/EpochNsec@1": "AA" } as JsonWireValue,
+        { "/EpochNsec@1": "AA" } as JsonCodecValue,
       );
       expect(result).toBeInstanceOf(FabricEpochNsec);
       expect(isDeepFrozen(result)).toBe(true);
@@ -1193,10 +1194,10 @@ describe("JsonEncodingContext", () => {
       // lenient catch produces a ProblematicValue -- still a codec-arm return,
       // so the contract deep-freezes it (not a crash: it is the value
       // lenient mode produces precisely to avoid crashing).
-      const ctx = new JsonEncodingContext({ lenient: true });
+      const jsonCodec = new JsonCodec({ lenient: true });
       const runtime = new TestReconstructionContext();
-      const result = ctx.decode(
-        JsonEncodingContext.wrapEncodedValueForTesting(
+      const result = jsonCodec.decode(
+        JsonCodec.wrapEncodedValueForTesting(
           JSON.stringify({ "/BigInt@1": 42 }),
         ),
         runtime,
@@ -1215,13 +1216,13 @@ describe("JsonEncodingContext", () => {
   });
 
   describe("deep-frozen wire invariant (`decode()`/`decodeFromBytes()` symmetry)", () => {
-    // Every `JsonWireValue` handed to `deserialize()` must be deep-frozen, so
+    // Every `JsonCodecValue` handed to `deserialize()` must be deep-frozen, so
     // both `deserialize()` entry points must produce equally deep-frozen
     // results: `decode()` (string path) and `decodeFromBytes()` (bytes path
     // via `fromBytes()`).
     //
     // Regression guard: the `/quote` arm does `return state`, handing back a
-    // node lifted straight out of the parsed wire tree (see `unwrapTag`'s
+    // node lifted straight out of the parsed codec-value tree (see `unwrapTag`'s
     // contract). That shortcut is only sound because the parsed tree is
     // deep-frozen at construction. `fromBytes()` has always done this;
     // `decode()` once did NOT (it parsed inline without `deepFreeze()`), so a
@@ -1230,26 +1231,26 @@ describe("JsonEncodingContext", () => {
     // symmetry so neither construction site can silently drop the guarantee.
 
     /**
-     * Decodes the same wire tree both ways. The string path needs the
+     * Decodes the same codec-value tree both ways. The string path needs the
      * encoding prefix; the bytes path does not (it does not strip one).
      */
     function decodeBothPaths(
-      data: JsonWireValue,
+      data: JsonCodecValue,
     ): { viaString: FabricValue; viaBytes: FabricValue } {
-      const { context, runtime } = makeTestContext();
+      const { jsonCodec, runtime } = makeTestCodec();
       const json = JSON.stringify(data);
-      const viaString = context.decode(
-        JsonEncodingContext.wrapEncodedValueForTesting(json),
+      const viaString = jsonCodec.decode(
+        JsonCodec.wrapEncodedValueForTesting(json),
         runtime,
       );
-      const viaBytes = context.decodeFromBytes(
+      const viaBytes = jsonCodec.decodeFromBytes(
         new TextEncoder().encode(json),
         runtime,
       );
       return { viaString, viaBytes };
     }
 
-    const cases: Array<[string, JsonWireValue]> = [
+    const cases: Array<[string, JsonCodecValue]> = [
       ["plain nested object + array", { a: { b: [1, 2, { c: 3 }] } }],
       ["/quote literal with nested object and array", {
         "/quote": { x: [1, { y: 2 }], z: { w: [3, 4] } },
@@ -1281,10 +1282,10 @@ describe("JsonEncodingContext", () => {
     it("string path deep-freezes `/quote` content at every depth (regression for `decode()` vs `fromBytes()`)", () => {
       const wire = {
         "/quote": { outer: { inner: [1, 2] } },
-      } as JsonWireValue;
-      const { context, runtime } = makeTestContext();
-      const result = context.decode(
-        JsonEncodingContext.wrapEncodedValueForTesting(JSON.stringify(wire)),
+      } as JsonCodecValue;
+      const { jsonCodec, runtime } = makeTestCodec();
+      const result = jsonCodec.decode(
+        JsonCodec.wrapEncodedValueForTesting(JSON.stringify(wire)),
         runtime,
       ) as Record<string, Record<string, FabricValue[]>>;
 
@@ -1302,9 +1303,9 @@ describe("JsonEncodingContext", () => {
     it("bytes path deep-freezes `/quote` content at every depth", () => {
       const wire = {
         "/quote": { outer: { inner: [{ deep: 1 }] } },
-      } as JsonWireValue;
-      const { context, runtime } = makeTestContext();
-      const result = context.decodeFromBytes(
+      } as JsonCodecValue;
+      const { jsonCodec, runtime } = makeTestCodec();
+      const result = jsonCodec.decodeFromBytes(
         new TextEncoder().encode(JSON.stringify(wire)),
         runtime,
       ) as Record<string, Record<string, Array<Record<string, FabricValue>>>>;
@@ -1330,47 +1331,47 @@ describe("JsonEncodingContext", () => {
     });
   });
 
-  describe("JsonEncodingContext", () => {
+  describe("JsonCodec", () => {
     it("`encode()` returns a prefixed JSON string", () => {
-      const ctx = new JsonEncodingContext();
-      const result = ctx.encode(42);
+      const jsonCodec = new JsonCodec();
+      const result = jsonCodec.encode(42);
       expect(typeof result).toBe("string");
-      expect(JsonEncodingContext.seemsLikeEncoded(result)).toBe(true);
+      expect(JsonCodec.seemsLikeEncoded(result)).toBe(true);
       expect(
-        JSON.parse(JsonEncodingContext.unwrapEncodedValueForTesting(result)),
+        JSON.parse(JsonCodec.unwrapEncodedValueForTesting(result)),
       ).toBe(42);
     });
 
     it("`decode()` parses a prefixed JSON string back to a value", () => {
-      const ctx = new JsonEncodingContext();
+      const jsonCodec = new JsonCodec();
       const runtime = new TestReconstructionContext();
-      const result = ctx.decode(
-        JsonEncodingContext.wrapEncodedValueForTesting("42"),
+      const result = jsonCodec.decode(
+        JsonCodec.wrapEncodedValueForTesting("42"),
         runtime,
       );
       expect(result).toBe(42);
     });
 
     it("`encode()`/`decode()` round-trip for tagged types", () => {
-      const ctx = new JsonEncodingContext();
+      const jsonCodec = new JsonCodec();
       const runtime = new TestReconstructionContext();
       const se = FabricError.fromNativeError(new Error("test"));
-      const encoded = ctx.encode(se);
-      const decoded = ctx.decode(encoded, runtime);
+      const encoded = jsonCodec.encode(se);
+      const decoded = jsonCodec.decode(encoded, runtime);
       expect(decoded).toBeInstanceOf(FabricError);
       expect((decoded as unknown as FabricError).message).toBe("test");
     });
 
     it("`encodeToBytes()`/`decodeFromBytes()` round-trip", () => {
-      const ctx = new JsonEncodingContext();
+      const jsonCodec = new JsonCodec();
       const runtime = new TestReconstructionContext();
       const data = {
         name: "test",
         error: FabricError.fromNativeError(new Error("fail")),
       };
-      const bytes = ctx.encodeToBytes(data);
+      const bytes = jsonCodec.encodeToBytes(data);
       expect(bytes).toBeInstanceOf(Uint8Array);
-      const decoded = ctx.decodeFromBytes(bytes, runtime) as Record<
+      const decoded = jsonCodec.decodeFromBytes(bytes, runtime) as Record<
         string,
         FabricValue
       >;
@@ -1379,13 +1380,13 @@ describe("JsonEncodingContext", () => {
     });
 
     it("`.lenient` defaults to `false`", () => {
-      const ctx = new JsonEncodingContext();
-      expect(ctx.lenient).toBe(false);
+      const jsonCodec = new JsonCodec();
+      expect(jsonCodec.lenient).toBe(false);
     });
 
     it("`.lenient` can be set to `true`", () => {
-      const ctx = new JsonEncodingContext({ lenient: true });
-      expect(ctx.lenient).toBe(true);
+      const jsonCodec = new JsonCodec({ lenient: true });
+      expect(jsonCodec.lenient).toBe(true);
     });
   });
 
@@ -1457,29 +1458,29 @@ describe("JsonEncodingContext", () => {
   describe("test-only prefix helpers", () => {
     describe("`unwrapEncodedValueForTesting()`", () => {
       it("yields the JSON text under the tag", () => {
-        const encoded = new JsonEncodingContext().encode(42);
-        expect(JsonEncodingContext.unwrapEncodedValueForTesting(encoded))
+        const encoded = new JsonCodec().encode(42);
+        expect(JsonCodec.unwrapEncodedValueForTesting(encoded))
           .toBe("42");
       });
 
       it("round-trips with `wrapEncodedValueForTesting()`", () => {
-        const encoded = new JsonEncodingContext().encode(
+        const encoded = new JsonCodec().encode(
           { b: 1, a: [true, null] },
         );
-        const json = JsonEncodingContext.unwrapEncodedValueForTesting(encoded);
-        expect(JsonEncodingContext.wrapEncodedValueForTesting(json))
+        const json = JsonCodec.unwrapEncodedValueForTesting(encoded);
+        expect(JsonCodec.wrapEncodedValueForTesting(json))
           .toBe(encoded);
       });
 
       it("preserves a value plain JSON could not carry", () => {
         // The case that motivates having a golden format at all: these survive
         // the trip only as tagged forms.
-        const encoded = new JsonEncodingContext().encode(
+        const encoded = new JsonCodec().encode(
           { z: -0, n: NaN, i: -Infinity },
         );
-        const rebuilt = new JsonEncodingContext().decode(
-          JsonEncodingContext.wrapEncodedValueForTesting(
-            JsonEncodingContext.unwrapEncodedValueForTesting(encoded),
+        const rebuilt = new JsonCodec().decode(
+          JsonCodec.wrapEncodedValueForTesting(
+            JsonCodec.unwrapEncodedValueForTesting(encoded),
           ),
           new TestReconstructionContext(),
         ) as Record<string, number>;
@@ -1491,27 +1492,25 @@ describe("JsonEncodingContext", () => {
       it("rejects a string carrying no tag", () => {
         // The whole point of the tag: untagged JSON is not one of ours, however
         // well-formed it happens to be.
-        expect(() => JsonEncodingContext.unwrapEncodedValueForTesting("42"))
+        expect(() => JsonCodec.unwrapEncodedValueForTesting("42"))
           .toThrow();
       });
 
       it("rejects an empty string", () => {
-        expect(() => JsonEncodingContext.unwrapEncodedValueForTesting(""))
+        expect(() => JsonCodec.unwrapEncodedValueForTesting(""))
           .toThrow();
       });
 
       it("rejects a tag with nothing after it", () => {
         // `seemsLikeEncoded()` accepts this, so only the throwaway decode
         // catches it.
-        expect(() =>
-          JsonEncodingContext.unwrapEncodedValueForTesting(ENCODING_PREFIX)
-        )
+        expect(() => JsonCodec.unwrapEncodedValueForTesting(ENCODING_PREFIX))
           .toThrow();
       });
 
       it("rejects a tag followed by text that will not parse", () => {
         expect(() =>
-          JsonEncodingContext.unwrapEncodedValueForTesting(
+          JsonCodec.unwrapEncodedValueForTesting(
             `${ENCODING_PREFIX}{nope`,
           )
         ).toThrow();
@@ -1520,18 +1519,18 @@ describe("JsonEncodingContext", () => {
 
     describe("`wrapEncodedValueForTesting()`", () => {
       it("produces something the codec accepts", () => {
-        const { runtime } = makeTestContext();
-        const encoded = JsonEncodingContext.wrapEncodedValueForTesting(
+        const { runtime } = makeTestCodec();
+        const encoded = JsonCodec.wrapEncodedValueForTesting(
           JSON.stringify({ a: 1 }),
         );
-        expect(JsonEncodingContext.seemsLikeEncoded(encoded)).toBe(true);
-        expect(new JsonEncodingContext().decode(encoded, runtime))
+        expect(JsonCodec.seemsLikeEncoded(encoded)).toBe(true);
+        expect(new JsonCodec().decode(encoded, runtime))
           .toEqual({ a: 1 });
       });
 
       it("returns the body unaltered beneath the tag", () => {
         const body = JSON.stringify({ b: 2, a: 1 });
-        expect(JsonEncodingContext.wrapEncodedValueForTesting(body))
+        expect(JsonCodec.wrapEncodedValueForTesting(body))
           .toBe(`${ENCODING_PREFIX}${body}`);
       });
 
@@ -1539,27 +1538,27 @@ describe("JsonEncodingContext", () => {
         // The re-encoded form is not compared against the input, so whitespace
         // is immaterial -- which is what lets a golden file be readable.
         const pretty = JSON.stringify({ a: 1, b: [2, 3] }, null, 2);
-        const encoded = JsonEncodingContext.wrapEncodedValueForTesting(pretty);
-        const { runtime } = makeTestContext();
-        expect(new JsonEncodingContext().decode(encoded, runtime))
+        const encoded = JsonCodec.wrapEncodedValueForTesting(pretty);
+        const { runtime } = makeTestCodec();
+        expect(new JsonCodec().decode(encoded, runtime))
           .toEqual({ a: 1, b: [2, 3] });
       });
 
       it("rejects text that will not parse", () => {
-        expect(() => JsonEncodingContext.wrapEncodedValueForTesting("{nope"))
+        expect(() => JsonCodec.wrapEncodedValueForTesting("{nope"))
           .toThrow();
       });
 
       it("rejects an empty body", () => {
-        expect(() => JsonEncodingContext.wrapEncodedValueForTesting(""))
+        expect(() => JsonCodec.wrapEncodedValueForTesting(""))
           .toThrow();
       });
 
       it("rejects an already-tagged string", () => {
         // Double-tagging is a mistake worth catching: the tag is not part of
         // the JSON, so the result would not parse.
-        const encoded = new JsonEncodingContext().encode(42);
-        expect(() => JsonEncodingContext.wrapEncodedValueForTesting(encoded))
+        const encoded = new JsonCodec().encode(42);
+        expect(() => JsonCodec.wrapEncodedValueForTesting(encoded))
           .toThrow();
       });
     });
@@ -1570,21 +1569,19 @@ describe("JsonEncodingContext", () => {
       const undecodable = JSON.stringify({ "/Map@1": [["key", "value"]] });
 
       it("refuses an undecodable payload by default", () => {
-        expect(() =>
-          JsonEncodingContext.wrapEncodedValueForTesting(undecodable)
-        )
+        expect(() => JsonCodec.wrapEncodedValueForTesting(undecodable))
           .toThrow();
       });
 
       it("accepts an undecodable payload when told it is deliberate", () => {
         expect(
-          JsonEncodingContext.wrapEncodedValueForTesting(undecodable, true),
+          JsonCodec.wrapEncodedValueForTesting(undecodable, true),
         ).toBe(`${ENCODING_PREFIX}${undecodable}`);
       });
 
       it("unwraps an undecodable payload when told it is deliberate", () => {
         expect(
-          JsonEncodingContext.unwrapEncodedValueForTesting(
+          JsonCodec.unwrapEncodedValueForTesting(
             `${ENCODING_PREFIX}${undecodable}`,
             true,
           ),
@@ -1595,13 +1592,13 @@ describe("JsonEncodingContext", () => {
         // Malformed means malformed: the flag is a caller saying the payload is
         // broken on purpose, so nothing is checked and the tag simply goes on
         // the front.
-        expect(JsonEncodingContext.wrapEncodedValueForTesting("{nope", true))
+        expect(JsonCodec.wrapEncodedValueForTesting("{nope", true))
           .toBe(`${ENCODING_PREFIX}{nope`);
       });
 
       it("unwraps text that will not parse at all", () => {
         expect(
-          JsonEncodingContext.unwrapEncodedValueForTesting(
+          JsonCodec.unwrapEncodedValueForTesting(
             `${ENCODING_PREFIX}{nope`,
             true,
           ),
@@ -1611,9 +1608,7 @@ describe("JsonEncodingContext", () => {
       it("still requires the tag on unwrap, however deliberate", () => {
         // Not a judgment about the payload: stripping a prefix that is not
         // there yields nonsense, not the body.
-        expect(() =>
-          JsonEncodingContext.unwrapEncodedValueForTesting("42", true)
-        )
+        expect(() => JsonCodec.unwrapEncodedValueForTesting("42", true))
           .toThrow();
       });
     });
