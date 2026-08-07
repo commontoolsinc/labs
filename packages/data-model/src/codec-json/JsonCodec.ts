@@ -78,8 +78,8 @@ function unquote(v: JsonWireValue): JsonWireValue {
 }
 
 /**
- * JSON encoding context implementing the `/<Type>@<Version>` wire format
- * from the formal spec (Section 5).
+ * Whole-value JSON codec implementing the `/<Type>@<Version>` wire format from
+ * the formal spec (Section 5).
  *
  * Public interface: `SerializationContext<string>`
  * - `encode(value)` -- full pipeline: tree-encode + stringify
@@ -89,7 +89,7 @@ function unquote(v: JsonWireValue): JsonWireValue {
  * private. Per-type encoding/decoding is delegated to the `FabricCodec`s in
  * the `CodecRegistry`.
  */
-export class JsonEncodingContext implements SerializationContext<string> {
+export class JsonCodec implements SerializationContext<string> {
   /** Whether failed reconstructions produce `ProblematicValue` instead of
    *  throwing. */
   readonly lenient: boolean;
@@ -119,7 +119,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
    * then deserializes tagged forms back into runtime types.
    */
   decode(data: string, context: ReconstructionContext): FabricValue {
-    if (!JsonEncodingContext.seemsLikeEncoded(data)) {
+    if (!JsonCodec.seemsLikeEncoded(data)) {
       const excerpt = (data.length <= 50) ? data : `${data.slice(0, 50)}...`;
       throw new Error(
         `Not a JSON-encoded \`FabricValue\` string: \`${excerpt}\``,
@@ -127,7 +127,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     }
 
     const json = data.slice(ENCODING_PREFIX_TAG.length);
-    const parsed = JsonEncodingContext.#parseWireText(json);
+    const parsed = JsonCodec.#parseWireText(json);
     return this.#decodeValue(parsed, context);
   }
 
@@ -191,7 +191,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
   /** Parses UTF-8-encoded JSON bytes back into a wire-format tree. */
   private fromBytes(bytes: Uint8Array): JsonWireValue {
     const json = textDecoder.decode(bytes);
-    return JsonEncodingContext.#parseWireText(json);
+    return JsonCodec.#parseWireText(json);
   }
 
   /**
@@ -545,7 +545,7 @@ export class JsonEncodingContext implements SerializationContext<string> {
     isMalformed = false,
   ): string {
     if (isMalformed) {
-      if (!JsonEncodingContext.seemsLikeEncoded(encoded)) {
+      if (!JsonCodec.seemsLikeEncoded(encoded)) {
         throw new Error(
           `Not a JSON-encoded \`FabricValue\` string: \`${encoded}\``,
         );
@@ -555,9 +555,9 @@ export class JsonEncodingContext implements SerializationContext<string> {
       // establish that `encoded` really is one of ours, rather than a string
       // that happens to begin with the right few characters. (`decode()` checks
       // the tag first, so the malformed branch above loses nothing.)
-      new JsonEncodingContext().decode(
+      new JsonCodec().decode(
         encoded,
-        JsonEncodingContext.#testingReconstructionContext,
+        JsonCodec.#testingReconstructionContext,
       );
     }
 
@@ -598,11 +598,11 @@ export class JsonEncodingContext implements SerializationContext<string> {
 
     if (!isMalformed) {
       // Throwaway decode and re-encode; both results are discarded. See above.
-      const context = new JsonEncodingContext();
-      context.encode(
-        context.decode(
+      const jsonCodec = new JsonCodec();
+      jsonCodec.encode(
+        jsonCodec.decode(
           encoded,
-          JsonEncodingContext.#testingReconstructionContext,
+          JsonCodec.#testingReconstructionContext,
         ),
       );
     }

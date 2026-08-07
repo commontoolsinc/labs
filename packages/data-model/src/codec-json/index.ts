@@ -10,8 +10,8 @@ export {
   valueFromJson,
 } from "./json-encoding.ts";
 
-// Encoding context.
-export { JsonEncodingContext } from "./JsonEncodingContext.ts";
+// Whole-value codec for the wire format.
+export { JsonCodec } from "./JsonCodec.ts";
 
 // Shared wire-format vocabulary.
 export type { JsonWireValue } from "./interface.ts";

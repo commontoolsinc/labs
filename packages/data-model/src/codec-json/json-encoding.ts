@@ -3,10 +3,10 @@ import { isInstance } from "@commonfabric/utils/types";
 import type { FabricValue } from "@/fabric-value.ts";
 import type { ReconstructionContext } from "@/codec-common/interface.ts";
 import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionContext.ts";
-import { JsonEncodingContext } from "./JsonEncodingContext.ts";
+import { JsonCodec } from "./JsonCodec.ts";
 
-/** Shared JSON encoding context. */
-const jsonEncodingContext = new JsonEncodingContext();
+/** Shared JSON codec. */
+const jsonCodec = new JsonCodec();
 
 /**
  * Shared empty `ReconstructionContext` used when a JSON decode is requested
@@ -29,7 +29,7 @@ const JSON_DECODE_EMPTY_CONTEXT = Object.freeze(
  * JSON-embedded encoding, prefixed with the format-identifying tag `fvj1:`.
  */
 export function jsonFromValue(value: FabricValue): string {
-  return jsonEncodingContext.encode(value);
+  return jsonCodec.encode(value);
 }
 
 /**
@@ -67,7 +67,7 @@ export function plainObjectFromJson<T extends object = object>(
  * JSON as defined by this module.
  */
 export function seemsLikeJsonEncodedFabricValue(value: string): boolean {
-  return JsonEncodingContext.seemsLikeEncoded(value);
+  return JsonCodec.seemsLikeEncoded(value);
 }
 
 /**
@@ -80,7 +80,7 @@ export function valueFromJson(
   json: string,
   context?: ReconstructionContext | undefined,
 ): FabricValue {
-  return jsonEncodingContext.decode(
+  return jsonCodec.decode(
     json,
     context ?? JSON_DECODE_EMPTY_CONTEXT,
   );
