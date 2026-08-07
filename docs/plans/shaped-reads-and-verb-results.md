@@ -195,6 +195,14 @@ The cost is worth naming: on a marked collection those bytes repeat per element,
 which is the case this design otherwise calls cheap. If that becomes the
 constraint, it is the windowing trigger already recorded under Deferred work.
 
+**`$link` in the output shares a namespace with the fields beside it**, so a
+document holding a field genuinely named `$link` renders ambiguously. That is
+accepted rather than solved. The request side has position to disambiguate — a
+marker sits beside `properties`, where a property name cannot — but the response
+side has no escape story, and inventing one costs every consumer a rule to apply
+on every read for a field name nothing in the system produces. A caller who hits
+it can read the position without the marker and address it a level up.
+
 `cf inspect` remains the route to the raw stored form. A second output contract
 would undo the stability the first one exists to provide.
 
@@ -460,8 +468,10 @@ result holding anything reactive does not have one at the moment the receipt is
 written. So a verb returning a child piece — the case this design exists to
 serve — gets a receipt with no schema, and a selection over it matches a runtime
 value rather than a declaration. What that costs is bounded: a `$link` marker
-still renders an address and still suppresses the fetch, because a rejecting
-selector short-circuits before a source schema is consulted. What is lost is
+*on a link position* still renders an address and still suppresses the fetch,
+because a rejecting selector short-circuits before a source schema is consulted.
+A marker below a link is a separate matter — the rejection has to propagate up
+through the containers holding it, which is its own piece of work. What is lost is
 narrowing on field selection, and any check of a selection before the call. The
 open question below is how that gap closes.
 
