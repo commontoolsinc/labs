@@ -377,6 +377,171 @@ describe("stage F serving loop", () => {
     ).toBeGreaterThanOrEqual(authored2);
   });
 
+  it("retries a demanded root the loader could not start YET: demand precedes the instantiation commit (the creation race), the deferred ensure re-attempts on a later cycle, and the piece serves", async () => {
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+    // NO onServingRuntime pattern run: unlike the tests above, the
+    // demanded structure must come up through the DEMAND LOADER
+    // (`ensurePieceRunning`) — the production path they side-step.
+
+    openClient();
+    const engine = await server.engineForSpace(space);
+
+    // The client's DEMAND, registered before the piece exists ANYWHERE:
+    // the session open activates the space, and the demand cycle's
+    // ensure runs against a result doc that carries no patternIdentity
+    // meta yet — the false return this test pins the retry of.
+    const clientResult = clientRuntime.getCell<{ total: number }>(
+      space,
+      "race-result",
+      undefined,
+    );
+    await clientResult.sync();
+
+    // A pre-instantiation authored input: the argument doc commits
+    // BEFORE any patternIdentity exists anywhere. The wave cycle that
+    // covers it runs the demand loader with the result root already
+    // listed (the watch above predates this commit) — the ensure
+    // attempt this test is about, guaranteed to find no meta.
+    const clientArg = clientRuntime.getCell<{ n: number }>(
+      space,
+      "race-arg",
+      undefined,
+    );
+    await clientArg.sync();
+    const argTx = clientRuntime.edit();
+    clientArg.withTx(argTx).set({ n: 41 });
+    expect((await argTx.commit()).error).toBeUndefined();
+    const preInstantiationSeq = Engine.serverSeq(engine);
+
+    // Barrier (engine-side, deterministic): W covering that commit
+    // proves the demand cycle that drained it COMPLETED — its
+    // structure-load pass listed the result root and attempted the
+    // ensure, which found no pattern identity. Everything below runs
+    // strictly AFTER that failed first attempt.
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= preInstantiationSeq,
+      "the pre-instantiation demand cycle to cover the authored input",
+    );
+
+    // The race's second half: the piece is instantiated by a separate,
+    // short-lived SERVICE-principal session — deliberately. An ordinary
+    // client that runs a piece also WATCHES the piece's sibling docs
+    // (source, internals, the computed), and each of those watches is a
+    // NEW demanded root whose own first ensure attempt — made after the
+    // meta exists — follows the result chain back to the result cell
+    // and starts the piece, healing the very terminal state this test
+    // pins. The demand loop excludes service-principal sessions from
+    // demand (serving-loop.md §1: the loop's own reads are not client
+    // demand), so this instantiator leaves the demand set exactly as
+    // the client built it: the result root and the argument root, both
+    // first-attempted before any meta existed. Its instantiation
+    // commit is an ordinary authored input on the feed.
+    const instantiatorManager = SharedServerStorageManager.connectTo(
+      server,
+      { as: serviceSigner },
+    );
+    const instantiator = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: instantiatorManager,
+    });
+    try {
+      const compiled = await instantiator.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { computed, pattern } from 'commonfabric';",
+            "export default pattern<{ n: number }, { total: number }>(",
+            "  ({ n }) => ({ total: computed(() => n + 1) }),",
+            ");",
+          ].join("\n"),
+        }],
+      }, { space });
+      const instArg = instantiator.getCell<{ n: number }>(
+        space,
+        "race-arg",
+        undefined,
+      );
+      const instResult = instantiator.getCell<{ total: number }>(
+        space,
+        "race-result",
+        compiled.resultSchema,
+      );
+      // Presync and retry a stale-read conflict, as the loader
+      // machinery itself would (the same idiom as the tests above).
+      for (let attempt = 0;; attempt++) {
+        await instArg.sync();
+        await instResult.sync();
+        const tx = instantiator.edit();
+        instantiator.run(tx, compiled, instArg, instResult);
+        const committed = await tx.commit();
+        if (committed.error === undefined) break;
+        if (attempt >= 4) {
+          throw new Error(
+            `instantiation run failed: ${committed.error.message}`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await instantiator.idle();
+    } finally {
+      // The instantiator leaves; its local run dies with it. From here
+      // on, only a SERVER-started piece can derive anything.
+      await instantiator.dispose();
+      await instantiatorManager.close();
+    }
+
+    // The wave input whose demanded derivation only a server-side
+    // piece can produce: the instantiator computed 42 for n=41 before
+    // it left, so a derivation for n=99 cannot come from anything but
+    // the serving loop.
+    const pokeTx = clientRuntime.edit();
+    clientArg.withTx(pokeTx).set({ n: 99 });
+    expect((await pokeTx.commit()).error).toBeUndefined();
+
+    // The convergence this test exists for, gated ENGINE-side: a
+    // computed revision riding a DERIVED-class commit can only be the
+    // serving loop's piece (waves without a running piece are
+    // watermark-only, and no effect completions exist here).
+    // Deliberately NOT a client-side value read first: reading through
+    // the result link would sync the computed doc and mint a fresh
+    // demanded root — the same heal path the instantiator's principal
+    // closes. Without the retry, the loader attempted both roots once
+    // before the meta existed and never re-attempts: no piece, no
+    // derived computed revision, this wait times out. With the retry,
+    // the instantiation commit fires a demand cycle, the pending root
+    // re-attempts once the meta is readable on the serving replica,
+    // the piece starts, and the poke derives 100.
+    const newestComputed = () =>
+      engine.database.prepare(
+        `SELECT c.class AS class, c.holder AS holder FROM revision r
+         JOIN "commit" c ON c.seq = r.commit_seq
+         WHERE r.id LIKE 'computed:%' ORDER BY r.seq DESC LIMIT 1`,
+      ).get() as { class: string; holder: string } | undefined;
+    await waitUntil(
+      () => newestComputed()?.class === "derived",
+      "the server-started piece to commit the demanded derivation",
+      15_000,
+    );
+    expect(newestComputed()?.holder).toBe(host.spaceServer(space)!.holder);
+
+    // Only now read through the client: the derived value reached the
+    // demanding subscriber (M4 push + link traversal).
+    await waitUntil(
+      () => clientResult.key("total").get() === 100,
+      "the derived value to reach the demanding client",
+      15_000,
+    );
+
+    // §7: the not-loadable-yet attempts were COUNTED, not silent — at
+    // least the pre-instantiation one — and none of them THREW (false
+    // returns are deferrals, not failures; the two counters stay
+    // distinct).
+    const stats = host.stats();
+    expect(stats.structureLoadDeferred).toBeGreaterThanOrEqual(1);
+    expect(stats.structureLoadFailures).toBe(0);
+  });
+
   it("holds W until loopback frames deliver at a REAL refresh cadence: the settle's server.idle() drain is load-bearing (protocol.md §4)", async () => {
     // The other tests run `subscriptionRefreshDelayMs: 0`, which masks
     // the settle's `server.idle()` drain: the refresh timer fires

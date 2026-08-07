@@ -158,6 +158,18 @@ export class SpaceServer implements TransactionSealDestination {
   readonly #parked = Promise.withResolvers<void>();
   #idleSince: number | undefined;
   #demandedRoots = new Set<string>();
+  /** Demanded roots whose `ensurePieceRunning` has not yet SUCCEEDED —
+   * it returned false (typically the creation race: the demand cycle
+   * ran before the piece's `patternIdentity` meta applied to the
+   * serving replica) or threw. Re-attempted once per demand cycle
+   * until the load lands: cycles are input-driven, and the missing
+   * meta arrives as an input (the instantiation commit), which fires
+   * the cycle that retries — bounded, no timers. Without this set a
+   * root attempted once before its meta existed stayed in
+   * `#demandedRoots` forever and the piece never started server-side
+   * (waves committed watermark-only while `waitForSettled` claimed
+   * the derivation current). */
+  readonly #pendingStructureLoads = new Set<string>();
   /** Live readers per demanded root — DEMAND ITSELF (serving-loop.md
    * §1: "a subscription to a value recomputes that value and its
    * upstream"): the sink is what pulls the demanded value through the
@@ -857,9 +869,14 @@ export class SpaceServer implements TransactionSealDestination {
    * the server-side watch registry names what clients demand; each
    * demanded root's owning piece is ensured running (the sanctioned
    * auto-load prior art) so the scheduler can pull the demanded value
-   * and its upstream. Failures are counted and logged — the ON-arm
-   * bring-up posture: a value the server cannot serve stays
-   * client-derived until Phase 2 hardens the load path. */
+   * and its upstream. An ensure that does not land is COUNTED and
+   * RETRIED: a false return (structure not loadable yet — the creation
+   * race, where demand precedes the instantiation commit's arrival on
+   * the serving replica) counts toward §7's structureLoadDeferred, a
+   * throw toward structureLoadFailures, and either leaves the root in
+   * `#pendingStructureLoads` for the next input-driven cycle — the
+   * missing meta arrives as a commit, and that commit fires the cycle
+   * that retries. */
   async #loadDemandedStructure(): Promise<void> {
     const runtime = this.#runtime;
     if (runtime === undefined) return;
@@ -911,34 +928,64 @@ export class SpaceServer implements TransactionSealDestination {
       this.#demandedRoots.delete(key);
       this.#demandedIdentities.delete(key);
     }
+    // A pending load whose demand retired stops retrying (pruned
+    // directly against the demanded keys, not via the sink loop above:
+    // a root whose SINK creation failed has no sink entry to retire
+    // through).
+    for (const key of this.#pendingStructureLoads) {
+      if (!currentKeys.has(key)) this.#pendingStructureLoads.delete(key);
+    }
     for (const root of roots) {
       const key = keyOf(root);
-      if (this.#demandedRoots.has(key)) continue;
-      this.#demandedRoots.add(key);
-      if (root.identity !== undefined) {
-        this.#demandedIdentities.set(key, {
-          ...(root.identity.principal === undefined
-            ? {}
-            : { principal: root.identity.principal }),
-          ...(root.identity.sessionId === undefined
-            ? {}
-            : { sessionId: root.identity.sessionId as never }),
-        });
+      const firstDemand = !this.#demandedRoots.has(key);
+      // A known root re-enters this loop ONLY while its structure load
+      // is still owed (the retry arm); its identity entry and demand
+      // sink were installed on first demand and are not re-created.
+      if (!firstDemand && !this.#pendingStructureLoads.has(key)) continue;
+      if (firstDemand) {
+        this.#demandedRoots.add(key);
+        if (root.identity !== undefined) {
+          this.#demandedIdentities.set(key, {
+            ...(root.identity.principal === undefined
+              ? {}
+              : { principal: root.identity.principal }),
+            ...(root.identity.sessionId === undefined
+              ? {}
+              : { sessionId: root.identity.sessionId as never }),
+          });
+        }
       }
       try {
-        await ensurePieceRunning(runtime, {
+        const started = await ensurePieceRunning(runtime, {
           space: this.#options.space,
           id: root.id as never,
           scope: root.scope ?? "space",
           path: [],
         });
+        if (started) {
+          this.#pendingStructureLoads.delete(key);
+        } else {
+          // A false return is a load that cannot land YET — most often
+          // the creation race, where this cycle ran before the piece's
+          // `patternIdentity` meta applied to the serving replica.
+          // Counted per attempt (§7 structureLoadDeferred) and left
+          // pending: the next input-driven cycle retries.
+          this.#pendingStructureLoads.add(key);
+          this.#options.stats.structureLoadDeferred += 1;
+          logger.debug?.("structure-load-deferred", () => [
+            `demanded root ${root.id} not loadable yet; ` +
+            "retrying next demand cycle",
+          ]);
+        }
       } catch (error) {
+        this.#pendingStructureLoads.add(key);
         this.#options.stats.structureLoadFailures += 1;
         logger.warn("structure-load-failed", () => [
           `demanded root ${root.id} did not load`,
           error,
         ]);
       }
+      if (!firstDemand) continue;
       try {
         // The demand itself: a live reader per demanded root. Without
         // it the materialized graph's computeds stay
@@ -1293,6 +1340,7 @@ export class SpaceServer implements TransactionSealDestination {
     this.#demandSinks.clear();
     this.#demandedRoots.clear();
     this.#demandedIdentities.clear();
+    this.#pendingStructureLoads.clear();
     const wave = this.#currentWave;
     this.#currentWave = undefined;
     await this.#sealChain;
