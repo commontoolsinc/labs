@@ -18,9 +18,9 @@ import { action, assert, computed, pattern, UI, wish } from "commonfabric";
 import {
   findNodeById,
   findNodeByProp,
-  nodeIncludesText,
+  hasText,
   propValue,
-} from "../../test-ui-helpers.ts";
+} from "../../test/vnode-helpers.ts";
 import ParkingCoordinator, { DEFAULT_SPOTS } from "./main.tsx";
 import type { ParkingSpot, Person, SpotRequest, Vehicle } from "./main.tsx";
 
@@ -71,7 +71,7 @@ export default pattern(() => {
 
   const assert_s1_manager_can_start_people_flow = assert(() =>
     s1.currentUserCanManageAdmins === true &&
-    nodeIncludesText(
+    hasText(
       findNodeById(s1[UI], "parking-admin-add-person-open"),
       "+ Add Person",
     )
@@ -580,8 +580,11 @@ export default pattern(() => {
       "data-parking-admin-toggle",
       "Alice",
     );
-    return nodeIncludesText(adminAccess, "Cannot manage admins") &&
-      nodeIncludesText(aliceAdminToggle, "Make admin") &&
+    // The access chip carries its text in a `label` prop, so this looks for
+    // the prop rather than for rendered text.
+    return findNodeByProp(adminAccess, "label", "Cannot manage admins") !==
+        undefined &&
+      hasText(aliceAdminToggle, "Make admin") &&
       propValue(enableManager, "disabled") === false &&
       propValue(aliceAdminToggle, "disabled") === true &&
       propValue(adminToggle, "disabled") === true &&
@@ -601,8 +604,9 @@ export default pattern(() => {
       "data-parking-admin-toggle",
       "Alice",
     );
-    return nodeIncludesText(adminAccess, "Can manage admins") &&
-      nodeIncludesText(aliceAdminToggle, "Make admin") &&
+    return findNodeByProp(adminAccess, "label", "Can manage admins") !==
+        undefined &&
+      hasText(aliceAdminToggle, "Make admin") &&
       propValue(enableManager, "disabled") === true &&
       propValue(aliceAdminToggle, "disabled") === false;
   });
@@ -621,22 +625,24 @@ export default pattern(() => {
       "data-parking-admin-toggle",
       "Alice",
     );
-    return nodeIncludesText(aliceRow, "Admin") &&
-      nodeIncludesText(aliceAdminToggle, "Remove admin") &&
+    // Alice's role chip carries its text in a `label` prop, so this looks for
+    // the prop rather than for rendered text.
+    return findNodeByProp(aliceRow, "label", "Admin") !== undefined &&
+      hasText(aliceAdminToggle, "Remove admin") &&
       propValue(adminToggle, "disabled") === false &&
-      nodeIncludesText(adminToggle, "Admin: OFF");
+      hasText(adminToggle, "Admin: OFF");
   });
   const assert_s8_admin_on = assert(() => s8.adminMode === true);
   const assert_s8_admin_view_admin_mode_visible = assert(() =>
-    nodeIncludesText(
+    hasText(
       findNodeById(s8[UI], "parking-admin-mode-toggle"),
       "Admin: ON",
     ) &&
-    nodeIncludesText(
+    hasText(
       findNodeById(s8[UI], "parking-admin-people-section"),
       "People",
     ) &&
-    nodeIncludesText(
+    hasText(
       findNodeById(s8[UI], "parking-admin-add-person-open"),
       "+ Add Person",
     )
