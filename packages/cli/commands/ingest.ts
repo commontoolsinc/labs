@@ -213,9 +213,22 @@ export const ingest = new Command()
   .usage(`${commonUsage} <id>`)
   .action(async (options, id: string) => {
     const config = parseConfig(options);
+    // Read before write, deliberately. `revoke` binds to the generation the
+    // caller looked at, which is what stops a captured-and-withheld revoke from
+    // landing on a credential minted after it was signed. If the channel moved
+    // in between, the server refuses and says so — the correct outcome, since
+    // the thing being revoked would not be the thing that was seen.
+    const found = (await listChannels(config)).find((c) => c.id === id);
+    if (!found) {
+      throw new Error(
+        `No ingest channel ${id} among the ones you own. ` +
+          `Run 'cf ingest ls' to see them.`,
+      );
+    }
     const { revokedAt } = await revokeChannel(config, {
       id,
       requestId: newRequestId(),
+      expectedRevision: found.revision,
     });
     // The registration is kept deliberately — it is the only record of who was
     // authorized to write provenance-marked data into the space.

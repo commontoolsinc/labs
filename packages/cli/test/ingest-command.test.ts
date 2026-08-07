@@ -124,6 +124,7 @@ function channel(overrides: Record<string, unknown>) {
     createdAt: "2026-08-01T00:00:00.000Z",
     enabled: true,
     lastSeenAt: null,
+    revision: 3,
     ...overrides,
   };
 }
@@ -383,18 +384,34 @@ describe("cf ingest revoke", () => {
       keyPath,
       "--api-url",
       API_URL,
-    ], { revoke: { id: "chan-1", revokedAt: "2026-08-04T12:00:00.000Z" } });
+    ], {
+      list: { channels: [channel({ revision: 7 })] },
+      revoke: { id: "chan-1", revokedAt: "2026-08-04T12:00:00.000Z" },
+    });
 
-    expect(calls[0].verb).toBe("revoke");
-    expect(calls[0].body.id).toBe("chan-1");
-    // A revoke carries a fresh idempotency key, spent server-side in the same
-    // transaction as the write. Without it a captured revoke stays replayable
-    // for its whole proof window, and firing it after the owner re-pairs kills
-    // the new credential.
-    expect(calls[0].body.requestId).toMatch(
+    // Read before write: revoke names the generation the caller looked at.
+    expect(calls.map((c) => c.verb)).toEqual(["list", "revoke"]);
+    expect(calls[1].body.id).toBe("chan-1");
+    expect(calls[1].body.expectedRevision).toBe(7);
+    // Plus a fresh idempotency key, spent server-side in the same transaction
+    // as the write, so a revoke that WAS delivered cannot be replayed.
+    expect(calls[1].body.requestId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
     expect(output).toContain("Revoked chan-1 at 2026-08-04T12:00:00.000Z.");
     expect(output).toContain("retained as an audit record");
+  });
+
+  it("refuses to revoke an id that is not among the caller's channels", async () => {
+    await expect(
+      run([
+        "revoke",
+        "chan-missing",
+        "--identity",
+        keyPath,
+        "--api-url",
+        API_URL,
+      ], { list: { channels: [channel({})] } }),
+    ).rejects.toThrow("No ingest channel chan-missing");
   });
 });

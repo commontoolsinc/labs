@@ -31,6 +31,7 @@ import {
   getLastSeen,
   getOwnerRegistrationIndex,
   getRegistration,
+  getSpaceLifetimeChannelCount,
   getSpaceRegistrationIndex,
   type IngestRegistration,
   isValidRequestId,
@@ -42,6 +43,7 @@ import {
   RegistrationConflictError,
   RequestAlreadyClaimedError,
   saveRegistration,
+  SpaceLifetimeChannelCapError,
 } from "@/routes/ingest/ingest.utils.ts";
 
 const DEFAULT_CAUSE_PREFIX = "location";
@@ -80,6 +82,22 @@ export const MAX_CHANNELS_PER_OWNER = 200;
  */
 export const MAX_LIFETIME_CHANNELS_PER_OWNER = 1_000;
 
+/**
+ * How many channels may ever be created against one SPACE.
+ *
+ * The per-owner quota above bounds a KEYPAIR, and keypairs are free: one person
+ * with one space can grant OWNER to as many fresh DIDs as they like and spend a
+ * new allowance from each, while every new DID also mints its own permanent
+ * `by-owner`, `lifetime` and `requests` cells. A per-owner bound alone is
+ * therefore not a bound at all.
+ *
+ * A space is the thing a channel must name and hold a recorded ACL grant on, so
+ * metering it closes key churn — and closes the per-key cell family with it,
+ * since a refused mint writes nothing. Creating unlimited spaces remains an
+ * axis, but that is the deployment's admission control, not this feature's.
+ */
+export const MAX_LIFETIME_CHANNELS_PER_SPACE = 500;
+
 export interface ControlDeps {
   runtime: Runtime;
   /** The toolshed's own space — where registrations live. */
@@ -92,6 +110,7 @@ export interface ControlDeps {
   /** Overridable so a test can reach the cap without minting the whole limit. */
   maxChannelsPerOwner?: number;
   maxLifetimeChannelsPerOwner?: number;
+  maxLifetimeChannelsPerSpace?: number;
   apiUrl: string;
   logger?: {
     warn: (obj: unknown, msg: string) => void;
@@ -125,6 +144,12 @@ export interface ChannelView {
   revoked?: { at: string; by: string };
   revocations?: { at: string; by: string }[];
   lastSeenAt: string | null;
+  /**
+   * The generation of this registration. Surfaced because `revoke` requires
+   * it: it is what binds a revoke to the credential the caller actually looked
+   * at, so a captured request cannot land on a later one.
+   */
+  revision: number;
 }
 
 /**
@@ -219,6 +244,7 @@ export const channelSummary = (
   // than webhooks' hard delete is that the trail survives. A trail the owner
   // cannot read would not have justified anything.
   ...(r.revocations !== undefined ? { revocations: r.revocations } : {}),
+  revision: r.revision ?? 0,
 });
 
 /** Mint a fresh secret, persist, and build the ONE-TIME response. */
@@ -324,6 +350,8 @@ const persist = async (
         live: deps.maxChannelsPerOwner ?? MAX_CHANNELS_PER_OWNER,
         lifetime: deps.maxLifetimeChannelsPerOwner ??
           MAX_LIFETIME_CHANNELS_PER_OWNER,
+        spaceLifetime: deps.maxLifetimeChannelsPerSpace ??
+          MAX_LIFETIME_CHANNELS_PER_SPACE,
       },
     );
   } catch (error) {
@@ -338,6 +366,13 @@ const persist = async (
         `You already hold ${error.live} active ingest channels (limit ` +
           `${deps.maxChannelsPerOwner ?? MAX_CHANNELS_PER_OWNER}). Revoke ` +
           `some before minting more.`,
+      );
+    }
+    if (error instanceof SpaceLifetimeChannelCapError) {
+      return conflict(
+        `${error.created} ingest channels have been created against this ` +
+          `space, its lifetime limit. Revoking does not free capacity, and ` +
+          `neither does using a different key — contact an operator.`,
       );
     }
     if (error instanceof LifetimeChannelCapError) {
@@ -582,52 +617,81 @@ export async function processRotate(
 export async function processRevoke(
   deps: ControlDeps,
   callerDid: string,
-  input: { id: string; requestId: string },
+  input: { id: string; requestId: string; expectedRevision: number },
 ): Promise<ControlResult<{ id: string; revokedAt: string }>> {
   if (!isValidRequestId(input.requestId)) return bad("Invalid requestId");
 
   const existing = await loadOwned(deps, callerDid, input.id);
   if (!existing.ok) return existing.result;
 
+  // The caller must name the generation they looked at. This is enforced again
+  // inside the write transaction — checking it here only buys a better message.
+  const current = existing.registration.revision ?? 0;
+  if (input.expectedRevision !== current) {
+    return conflict(
+      `Channel ${input.id} is at revision ${current}, not ` +
+        `${input.expectedRevision}. It changed since you looked at it — list ` +
+        `it again and re-issue the revoke against what you see.`,
+    );
+  }
+
   const replay = await peekReplay(deps, callerDid, input.requestId);
   if (replay) return replay;
 
+  return await writeRevocation(deps, callerDid, input, existing.registration, {
+    claim: true,
+  });
+}
+
+/**
+ * The revocation write itself, separated so it can be retried without the
+ * idempotency claim when the claim store is full (see the handler below).
+ */
+const writeRevocation = async (
+  deps: ControlDeps,
+  callerDid: string,
+  input: { id: string; requestId: string; expectedRevision: number },
+  registration: IngestRegistration,
+  opts: { claim: boolean },
+): Promise<ControlResult<{ id: string; revokedAt: string }>> => {
   // Already revoked: report the original revocation rather than overwriting it.
   // Any owner of the space may revoke, so an overwrite would let a later caller
   // replace an operator retirement's attribution with their own.
   //
-  // The request id is consumed even here. A captured revoke is otherwise a
-  // stored weapon: replayed against an already-revoked channel it is a no-op
-  // that spends nothing, so the attacker simply waits for the owner to re-mint
-  // and replays again, killing the newly paired device. Spending the id on the
-  // no-op closes that.
-  const alreadyRevoked = existing.registration.revoked !== undefined;
+  // The request id is spent even on this no-op. Answering a replay with a bare
+  // 200 spends nothing, so a captured request that has already been delivered
+  // once could simply be held until the owner re-mints and fired again. (What
+  // stops a request captured and NEVER delivered is `expectedRevision`, not
+  // this — an id that was never spent cannot be detected as reused.)
+  const alreadyRevoked = registration.revoked !== undefined;
   const revokedAt = alreadyRevoked
-    ? existing.registration.revoked!.at
+    ? registration.revoked!.at
     : new Date().toISOString();
   try {
-    const history = plainRevocations(existing.registration.revocations);
+    const history = plainRevocations(registration.revocations);
     await saveRegistration(
       deps.runtime,
       deps.serviceSpace,
       alreadyRevoked
-        // Unchanged, at the same revision: the write exists only to consume the
+        // Unchanged, at the same revision: the write exists only to spend the
         // request id in the same transaction.
         ? {
-          ...existing.registration,
+          ...registration,
           ...(history !== undefined ? { revocations: history } : {}),
         }
         : {
-          ...existing.registration,
+          ...registration,
           enabled: false,
           revoked: { at: revokedAt, by: callerDid },
-          revision: (existing.registration.revision ?? 0) + 1,
+          revision: (registration.revision ?? 0) + 1,
           // Rebuilt, not carried through the spread: see plainRevocations.
           // Without this the history vanishes on the SECOND revoke.
           ...(history !== undefined ? { revocations: history } : {}),
         },
-      existing.registration.revision ?? 0,
-      { owner: callerDid, requestId: input.requestId, channel: input.id },
+      input.expectedRevision,
+      opts.claim
+        ? { owner: callerDid, requestId: input.requestId, channel: input.id }
+        : undefined,
     );
   } catch (error) {
     if (error instanceof RequestAlreadyClaimedError) {
@@ -636,15 +700,29 @@ export async function processRevoke(
           `fresh requestId.`,
       );
     }
-    if (error instanceof ClaimStoreFullError) {
-      return {
-        status: 429,
-        body: { error: "Too many recent requests — retry in a few minutes" },
-      };
+    if (error instanceof ClaimStoreFullError && opts.claim) {
+      // NOT a 429 on this verb. Refusing a revoke because a bookkeeping cell is
+      // full fails OPEN with respect to the credential: the token the caller is
+      // trying to kill stays live. Mint and rotate can be refused safely —
+      // nothing dangerous happens if they do not run — but revoke is the one
+      // verb where "try again later" is the wrong answer.
+      //
+      // Safe to proceed without the claim because the request id is no longer
+      // what binds a revoke to its target: `expectedRevision` is, and that is
+      // enforced in the write transaction either way. Dropping at-most-once
+      // delivery here costs a redundant no-op write, never a wrong revocation.
+      deps.logger?.warn(
+        { id: input.id, owner: callerDid },
+        "ingest-channels: claim store full; revoking without idempotency",
+      );
+      return await writeRevocation(deps, callerDid, input, registration, {
+        claim: false,
+      });
     }
     if (error instanceof RegistrationConflictError) {
       return conflict(
-        `Channel ${input.id} changed while this request was in flight. Retry.`,
+        `Channel ${input.id} changed while this request was in flight. List ` +
+          `it again and re-issue the revoke against what you see.`,
       );
     }
     deps.logger?.error(
@@ -654,7 +732,7 @@ export async function processRevoke(
     return { status: 502, body: { error: "Storage failure" } };
   }
   return { status: 200, body: { id: input.id, revokedAt } };
-}
+};
 
 export async function processList(
   deps: ControlDeps,
@@ -687,18 +765,30 @@ export async function processList(
       // one space at a time, and `synced()` is a global barrier over all of
       // them.
       //
-      // A space with no channels answers with the same opaque denial as one the
-      // caller does not own. Returning an empty list instead would say "this
-      // space is hosted and has none", which is exactly the existence oracle
-      // the denials are collapsed to avoid.
+      // A space that has NEVER had a channel answers with the same opaque
+      // denial as one the caller does not own. Returning an empty list instead
+      // would say "this space is hosted and has none", which is exactly the
+      // existence oracle the denials are collapsed to avoid.
+      //
+      // Gated on the lifetime counter, not on the live index. The index holds
+      // live ids only, so gating on it told a legitimate owner who had just
+      // revoked their last channel "not authorized for that space" — a denial
+      // that is simply false, on the path they would walk to confirm the
+      // revoke worked. The counter never decreases, so "has ever had a
+      // channel" survives revocation while leaking no more than before.
+      const everHadChannels = await getSpaceLifetimeChannelCount(
+        deps.runtime,
+        deps.serviceSpace,
+        input.space!,
+      );
+      if (everHadChannels === 0) return forbidden();
+      const authority = await authorize(deps, input.space!, callerDid);
+      if (!authority.ok) return fromAuthority(authority);
       ids = await getSpaceRegistrationIndex(
         deps.runtime,
         deps.serviceSpace,
         input.space!,
       );
-      if (ids.length === 0) return forbidden();
-      const authority = await authorize(deps, input.space!, callerDid);
-      if (!authority.ok) return fromAuthority(authority);
     } else {
       ids = await getOwnerRegistrationIndex(
         deps.runtime,

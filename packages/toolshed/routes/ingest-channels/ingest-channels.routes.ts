@@ -51,6 +51,7 @@ const channelSummary = z.object({
   revoked: z.object({ at: z.string(), by: z.string() }).optional(),
   revocations: z.array(z.object({ at: z.string(), by: z.string() })).optional(),
   lastSeenAt: z.string().nullable(),
+  revision: z.number(),
 });
 
 const jsonError = {
@@ -191,7 +192,17 @@ export const revoke = createRoute({
     body: {
       content: {
         "application/json": {
-          schema: z.object({ id: z.string(), requestId: requestIdField }),
+          schema: z.object({
+            id: z.string(),
+            requestId: requestIdField,
+            // REQUIRED, and the actual defence. The request id only makes a
+            // revoke at-most-once-DELIVERED; it does nothing for one that is
+            // captured and withheld, because an id that was never spent is
+            // still live for the whole proof window. Naming the generation the
+            // caller looked at is what stops a withheld revoke from landing on
+            // a credential minted after it was signed. Read it from `list`.
+            expectedRevision: z.number().int().nonnegative(),
+          }),
         },
       },
     },
