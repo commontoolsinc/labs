@@ -1,6 +1,10 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
-import { detectCallKind, registerSyntheticCallType } from "../../ast/mod.ts";
+import {
+  declaredVerbResultTypeNode,
+  detectCallKind,
+  registerSyntheticCallType,
+} from "../../ast/mod.ts";
 import { CaptureCollector } from "../capture-collector.ts";
 import {
   createActionEventSchema,
@@ -124,6 +128,13 @@ export function transformActionCall(
     context,
   );
 
+  // `action<Event, Result>`'s second type argument is the verb's declared
+  // result. Lowering to `handler` is where it would otherwise be lost — the
+  // rewritten call carries schemas, not the authored type arguments — so it
+  // rides into `handler`'s third type-argument slot, which SchemaInjection
+  // lowers to the module's result schema.
+  const resultTypeNode = declaredVerbResultTypeNode(actionCall, "action");
+
   const finalCall = buildCapturedHandlerClosureCall(
     actionCall,
     callback,
@@ -135,6 +146,7 @@ export function transformActionCall(
     {
       eventParamName,
       paramsParamName: "__cf_action_params",
+      ...(resultTypeNode ? { resultTypeNode } : {}),
     },
   );
 

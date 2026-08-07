@@ -84,6 +84,68 @@ const DECLARED_RESULT_PROGRAM: RuntimeProgram = {
   }],
 };
 
+// A verb whose declared result CONTAINS a reactive value: `Note(...)`
+// instantiates a child pattern, so the returned record carries a builder
+// artifact and the receipt takes the launch branch of
+// `handleJavaScriptHandlerResult` rather than the settled-value one. The
+// declared `R` is the only description of that receipt's shape, since a
+// launched result is a link whose target the receipt cell cannot infer.
+const REACTIVE_RESULT_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      'import { action, cell, pattern, Stream } from "commonfabric";',
+      "",
+      "interface NoteInput {",
+      "  title: string;",
+      "}",
+      "",
+      "interface NoteView {",
+      "  title: string;",
+      "}",
+      "",
+      "const Note = pattern<NoteInput, NoteView>((input) => ({",
+      "  title: input.title,",
+      "}));",
+      "",
+      "interface CreateNote {",
+      "  title: string;",
+      "}",
+      "",
+      "interface CreateNoteResult {",
+      "  note: NoteView;",
+      "}",
+      "",
+      "interface Verbs {",
+      "  createNote: Stream<CreateNote, CreateNoteResult>;",
+      "  createUndeclared: Stream<CreateNote>;",
+      "  count: number;",
+      "}",
+      "",
+      "export default pattern<Record<string, never>, Verbs>(() => {",
+      "  const count = cell(0);",
+      "",
+      "  const createNote = action<CreateNote, CreateNoteResult>((event) => {",
+      "    count.set(count.get() + 1);",
+      "    return { note: Note({ title: event.title }) };",
+      "  });",
+      "",
+      "  // The same launch with no declared result. It returns the child",
+      "  // bare rather than in a record because an object literal returned by",
+      "  // an undeclared verb is a compile error (verb-return validation) —",
+      "  // returning a freshly created piece is the exempt idiom.",
+      "  const createUndeclared = action((event: CreateNote) => {",
+      "    count.set(count.get() + 1);",
+      "    return Note({ title: event.title });",
+      "  });",
+      "",
+      "  return { createNote, createUndeclared, count };",
+      "});",
+    ].join("\n"),
+  }],
+};
+
 // Same shape as scheduler-event-receipts.test.ts's file-local helper.
 async function waitForSchedulerCondition(
   runtime: Runtime,
@@ -136,17 +198,15 @@ describe("compiled CTS action<E, R> results in receipts", () => {
     await disposeSchedulerTestRuntime({ storageManager, runtime, tx });
   });
 
-  async function instantiate(rootName: string) {
+  async function instantiate(
+    rootName: string,
+    program: RuntimeProgram = DECLARED_RESULT_PROGRAM,
+  ) {
     const compiled = await runtime.patternManager.compilePattern(
-      DECLARED_RESULT_PROGRAM,
+      program,
       { space, tx },
     );
-    const rootCell = runtime.getCell<{
-      addTopic: unknown;
-      touch: unknown;
-      bump: unknown;
-      count: number;
-    }>(
+    const rootCell = runtime.getCell<Record<string, unknown>>(
       space,
       rootName,
       undefined,
@@ -306,5 +366,92 @@ describe("compiled CTS action<E, R> results in receipts", () => {
       outcomes[0].receiptLink!,
     );
     expect(await receipt.pull()).toEqual({});
+  });
+
+  it("writes the declared result as the receipt's durable schema when the result launches a child piece", async () => {
+    const root = await instantiate(
+      "reactive declared result root",
+      REACTIVE_RESULT_PROGRAM,
+    );
+    const outcomes: Outcome[] = [];
+
+    dispatch(
+      root.key("createNote") as Cell<unknown>,
+      { title: "schema-proof" },
+      "evt:declared-result:4:create-note",
+      outcomes,
+    );
+    await waitForSchedulerCondition(
+      runtime,
+      () => outcomes.length === 1,
+      "reactive declared-result verb event did not settle",
+    );
+    await runtime.scheduler.idleWithPendingCommits();
+
+    expect(outcomes[0].status).toBe("done");
+    expect(await root.key("count").pull()).toBe(1);
+
+    // The receipt carries the verb's declared `R` as its durable `schema`
+    // meta — the description of a launched result, which the settled value
+    // (a link to the child) cannot supply. `CreateNoteResult` reaches the
+    // runtime whole, named definitions included.
+    const receipt = runtime.getCellFromLink<Record<string, unknown>>(
+      outcomes[0].receiptLink!,
+    );
+    await receipt.pull();
+    expect(receipt.getMetaRaw("schema")).toEqual({
+      type: "object",
+      properties: { note: { $ref: "#/$defs/NoteView" } },
+      required: ["note"],
+      $defs: {
+        NoteView: {
+          type: "object",
+          properties: { title: { type: "string" } },
+          required: ["title"],
+        },
+      },
+    });
+
+    // The schema describes what the receipt actually holds: the launched
+    // child, reachable through the receipt address.
+    expect(await receipt.pull()).toEqual({ note: { title: "schema-proof" } });
+  });
+
+  it("leaves the receipt schema unconstrained for a verb that declares no result", async () => {
+    const root = await instantiate(
+      "undeclared reactive result root",
+      REACTIVE_RESULT_PROGRAM,
+    );
+    const outcomes: Outcome[] = [];
+
+    dispatch(
+      root.key("createUndeclared") as Cell<unknown>,
+      { title: "no-declaration" },
+      "evt:declared-result:5:create-undeclared",
+      outcomes,
+    );
+    await waitForSchedulerCondition(
+      runtime,
+      () => outcomes.length === 1,
+      "undeclared reactive-result verb event did not settle",
+    );
+    await runtime.scheduler.idleWithPendingCommits();
+
+    expect(outcomes[0].status).toBe("done");
+    expect(await root.key("count").pull()).toBe(1);
+
+    // Same launch, no declaration: the receipt keeps the empty schema every
+    // frame-synthesized pattern carries, which constrains nothing. A declared
+    // result is opt-in, so its absence must not become an error or a guess.
+    const receipt = runtime.getCellFromLink<Record<string, unknown>>(
+      outcomes[0].receiptLink!,
+    );
+    await receipt.pull();
+    expect(receipt.getMetaRaw("schema")).toEqual({});
+
+    // The value still reads back. Receipt readback is schema-free
+    // (`packages/cli/lib/callable.ts` pulls the link with no schema), so what
+    // the declaration buys is the durable description above, not the value.
+    expect(await receipt.pull()).toEqual({ title: "no-declaration" });
   });
 });
