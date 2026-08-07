@@ -66,3 +66,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
   sequences the read layer, the calls layered on it, and the remaining
   arrivals, ordering the address change ahead of anything that publishes an
   address so no caller holds one that moves.
+- [The CLI surface — implementation plan](cli-surface-implementation.md) builds
+  the rest of the command surface: positional addresses, the honest top-level
+  names, deprecating the spellings they replace, and merging the commands that
+  do one job under two names. Separate from the read-layer plan because it
+  renames rather than adds, so its risk is what breaks for a caller who already
+  learned the current spelling.
