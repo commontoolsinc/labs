@@ -235,9 +235,14 @@ describe("Cell Static Methods", () => {
       });
     });
 
-    it("should reject a `Cell` hidden inside a `FabricError`", () => {
-      // The motivating case, stated directly: a bare `Cell` is rejected, and
-      // wrapping it must not be a way around that.
+    it("should reject a wrapped `Cell` on the wrapper, not by finding it", () => {
+      // Wrapping a `Cell` is not a way around the rejection -- but note WHERE
+      // the refusal comes from. `validateStaticData()` stops at the
+      // `FabricInstance` and never reads its codec contents, so the cell
+      // inside is never inspected: this passes with an empty extras bag just
+      // as well. What it pins is that the escape route is closed, and the
+      // asserted message names the wrapper so the reason cannot drift to
+      // something this test would not actually detect.
       withinHandlerContext(runtime, space, tx, () => {
         const held = Cell.of("hi");
         expect(() => Cell.of({ c: held })).toThrow();
