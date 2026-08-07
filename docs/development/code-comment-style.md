@@ -276,7 +276,9 @@ indentation and comment markers, then it should be written on a single line,
 e.g.:
 
 ```ts
-/** Desired fryer temperature, in Kelvin. */
+// Indented as if it were a doc comment on an inner declaration.
+
+    /** Desired fryer temperature, in Kelvin. */
 ```
 
 For any other doc comment, the opener and closer go on their own lines, with
