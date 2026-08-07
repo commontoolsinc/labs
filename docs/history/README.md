@@ -107,6 +107,9 @@ One line per archived document; each document's header carries the fuller
   — command-by-command audit of `cf --json` behavior, July 2026.
 - [cts-docs-audit-2026-07.md](cts-docs-audit-2026-07.md) —
   ts-transformers/schema-generator documentation audit, July 2026.
+- [library-comparison.md](scripts/benchmark-object-hashing/library-comparison.md)
+  — the stable-object-hashing library comparison that chose a per-environment
+  SHA-256 implementation and pointed away from a full Merkle tree, March 2026.
 - [cfc-spec-audit.md](cfc-spec-audit.md) — the CFC spec versus the
   packages/runner implementation, June 2026.
 - [invalid-state-representations-report.md](future-tasks/code-quality-tasks/invalid-state-representations-report.md)
