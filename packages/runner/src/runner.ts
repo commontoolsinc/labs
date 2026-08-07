@@ -4744,10 +4744,16 @@ export class Runner {
       // could let an asCell marker escape tracking; over-collection is this
       // walker's safe direction (mirrors joinSchema's `not` union).
       //
-      // TODO(danfuzz): The properties/additionalProperties cases descend
-      // live `FabricValue` action inputs with no `FabricSpecialObject`
-      // guard, decomposing `FabricPrimitive` values and walking
-      // `FabricInstance` values by internal slots.
+      // A `FabricSpecialObject` standing where a schema names a container is
+      // INDEXED rather than rebuilt, so nothing is decomposed: it has zero
+      // enumerable own properties, every keyed read yields `undefined`, and the
+      // descent contributes nothing. For a `FabricPrimitive` that is the right
+      // answer -- a leaf holds no link to collect.
+      //
+      // TODO(danfuzz): a write-redirect link nested in a `FabricInstance`'s
+      // codec contents is missed, those contents not being reachable by
+      // property name. Over-collection is this walker's safe direction, so a
+      // miss is the unsafe one.
       forEachSubschema(schema as JSONSchema, (child, keyword, key, index) => {
         switch (keyword) {
           case "properties":
@@ -4857,10 +4863,14 @@ export class Runner {
       seenValues.add(currentValue);
       seen.set(schema, seenValues);
 
-      // TODO(danfuzz): This descends live `FabricValue` action inputs via
-      // `Object.entries` (guards only `isWriteRedirectLink`/`isCellLink`, not
-      // `FabricSpecialObject`), so `FabricPrimitive`/`FabricInstance` values are
-      // mishandled.
+      // A `FabricSpecialObject` here is indexed, not rebuilt: it has zero
+      // enumerable own properties, so a keyed read yields `undefined` and the
+      // descent contributes nothing. Right for a `FabricPrimitive`, which holds
+      // no link to collect.
+      //
+      // TODO(danfuzz): a write-redirect link nested in a `FabricInstance`'s
+      // codec contents is missed, for the same reason as the sibling walk in
+      // `collectWritableCellArgumentLinks()`.
       if (isRecord(schema.properties) && isRecord(currentValue)) {
         for (const [key, propertySchema] of Object.entries(schema.properties)) {
           visit(propertySchema, currentValue[key]);
