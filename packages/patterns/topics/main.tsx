@@ -30,6 +30,7 @@ import Topic, {
   type TopicNavigationLink,
   type TopicPiece,
   TOPICS_THEME,
+  type TopicScan,
   whenLabel,
 } from "./topic.tsx";
 
@@ -157,9 +158,20 @@ export interface TopicIndexRow {
  * cannot see through (`topicCorpus`, `crossrefJoin`), and an inferred input
  * schema would fall back to reading every topic whole — verbs, thread, and
  * rendered UI included.
+ *
+ * HACK: the parameter reads `TopicScan` but the rows publish `TopicPiece`, via
+ * an `as` on each reference. A reference the lift passes through is a link, and
+ * a link resolves to the whole topic no matter how little of it this lift
+ * declared — so the cast describes what a consumer actually receives, and the
+ * narrow parameter still bounds what this derivation reads. TypeScript cannot
+ * express that on its own here: a lift's parameter and result are one type, so
+ * without the cast, narrowing the read would also narrow the published
+ * `crossrefs` edge targets and remove result fields consumers were promised
+ * (`deno task pattern-compat` rejects exactly that). Generic lifts that carry
+ * an input reference type through to the output would remove the need for it.
  */
 const crossrefRows = lift(
-  (topics: Writable<TopicPiece[] | Default<[]>>): TopicCrossref[] => {
+  (topics: Writable<TopicScan[] | Default<[]>>): TopicCrossref[] => {
     const list = topics.get();
     // Each entry's own fid payload ("" while unresolved, e.g. mid-sync — such
     // entries simply hold no edges this render). resolveAsCell/entityId are
@@ -179,14 +191,14 @@ const crossrefRows = lift(
       if (!t) return;
       rows.push({
         fid: payloads[i] ? `fid1:${payloads[i]}` : "",
-        topic: t,
+        topic: t as TopicPiece,
         title: t.title,
         createdAt: t.createdAt,
         createdBy: t.createdBy,
         commentCount: t.commentCount ?? 0,
         lastActivityAt: t.lastActivityAt ?? 0,
-        refsOut: refsOut[i].map((j) => list[j]),
-        referencedBy: referencedBy[i].map((j) => list[j]),
+        refsOut: refsOut[i].map((j) => list[j] as TopicPiece),
+        referencedBy: referencedBy[i].map((j) => list[j] as TopicPiece),
         refsOutLinks: refsOut[i].map((j) => ({
           fid: payloads[j] ? `fid1:${payloads[j]}` : "",
           title: list[j].title,
@@ -201,12 +213,64 @@ const crossrefRows = lift(
   },
 );
 
-/** The board's cards, most recently active first. Separate from `crossrefRows`
- * so the published rows keep the board's own order, and declared over the row
- * type so re-ordering them expands nothing: a row's reference fields are links,
- * and sorting re-emits the links it was given. */
-const rowsByActivity = lift((rows: TopicCrossref[]): TopicCrossref[] =>
-  rows.toSorted((a, b) => b.lastActivityAt - a.lastActivityAt)
+/** Exactly what one board card renders. Carries no piece reference at all: the
+ * cards navigate through the durable fid/title snapshots, so they never need
+ * the reference itself. Private to the board — nothing published is shaped by
+ * it, which is what leaves it free to be this narrow. */
+interface TopicCard {
+  // Every field carries a default. The board's card list is lowered to a
+  // mapped sub-pattern, so this is the argument schema a piece holding rows
+  // written by an older version of this pattern gets updated against — and a
+  // required property that its stored rows lack refuses the update outright
+  // (`deno task pattern-vintage` catches exactly that).
+  fid: string | Default<"">;
+  title: string | Default<"">;
+  body: string | Default<"">;
+  createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
+  createdByName: string | Default<"">;
+  commentCount: number | Default<0>;
+  lastActivityAt: number | Default<0>;
+  refsOutLinks: TopicNavigationLink[] | Default<[]>;
+  referencedByLinks: TopicNavigationLink[] | Default<[]>;
+}
+
+/** The fields of a crossref row that a card is built from. `TopicCrossref`
+ * satisfies this structurally; declaring the parameter this way is what stops
+ * ordering the board from carrying a reference-bearing row schema. */
+interface TopicCardSource {
+  fid: string;
+  title: string;
+  topic: { body: string; createdByName: string };
+  createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
+  commentCount: number;
+  lastActivityAt: number;
+  refsOutLinks: TopicNavigationLink[];
+  referencedByLinks: TopicNavigationLink[];
+}
+
+/**
+ * The board's cards, most recently active first.
+ *
+ * Separate from `crossrefRows` so the published rows keep the board's own
+ * order, and declared over `TopicCardSource`/`TopicCard` rather than over
+ * `TopicCrossref` so neither the sort nor the render carries a schema that can
+ * expand a sibling. `TopicCrossref`'s reference fields exist for consumers of
+ * the published result; a card reads prose and scalars and never follows one.
+ */
+const cardsByActivity = lift((rows: TopicCardSource[]): TopicCard[] =>
+  rows
+    .toSorted((a, b) => b.lastActivityAt - a.lastActivityAt)
+    .map((row) => ({
+      fid: row.fid,
+      title: row.title,
+      body: row.topic.body,
+      createdBy: row.createdBy,
+      createdByName: row.topic.createdByName,
+      commentCount: row.commentCount,
+      lastActivityAt: row.lastActivityAt,
+      refsOutLinks: row.refsOutLinks,
+      referencedByLinks: row.referencedByLinks,
+    }))
 );
 
 /**
@@ -346,7 +410,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   // puts the whole board back in the read.
   const topicCount = topics.get().length;
   const rows = crossrefRows(topics);
-  const ordered = rowsByActivity(rows);
+  const cards = cardsByActivity(rows);
   const hasNoTopics = rows.length === 0;
 
   return {
@@ -378,30 +442,30 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
           </cf-vstack>
 
           <cf-vstack gap="2" padding="4">
-            {ordered.map((row) => (
+            {cards.map((card) => (
               <cf-card>
                 <cf-hstack gap="3" align="center">
                   <cf-vstack gap="0" style="flex: 1; min-width: 0;">
                     <cf-text block style="font-weight: 600;">
-                      {row.title || "(untitled topic)"}
+                      {card.title || "(untitled topic)"}
                     </cf-text>
-                    {row.topic.body
+                    {card.body
                       ? (
                         <cf-text tone="muted" block truncate>
-                          {snippet(row.topic.body, 120)}
+                          {snippet(card.body, 120)}
                         </cf-text>
                       )
                       : null}
                     <cf-text variant="caption" tone="muted">
-                      {row.commentCount} comments · by{" "}
-                      {topicAuthorLabel(row.createdBy, row.topic.createdByName)}
+                      {card.commentCount} comments · by{" "}
+                      {topicAuthorLabel(card.createdBy, card.createdByName)}
                       {" · "}
-                      {whenLabel(row.lastActivityAt)}
+                      {whenLabel(card.lastActivityAt)}
                     </cf-text>
-                    {crossrefLinkRow("references →", row.refsOutLinks)}
-                    {crossrefLinkRow("← referenced by", row.referencedByLinks)}
+                    {crossrefLinkRow("references →", card.refsOutLinks)}
+                    {crossrefLinkRow("← referenced by", card.referencedByLinks)}
                   </cf-vstack>
-                  {topicCellLink(row.fid, "Open")}
+                  {topicCellLink(card.fid, "Open")}
                 </cf-hstack>
               </cf-card>
             ))}

@@ -146,10 +146,9 @@ export interface TopicInput {
  * describe its siblings without traversing the whole board.
  */
 export interface TopicScan {
-  /** Like the other derived display fields, a cold retained sibling may not
-   * have produced this path yet. Its persisted title remains authoritative.
-   * Carried here rather than only on `TopicReference` because crossref edges
-   * are declared through this type, and the deployed result exposes it. */
+  /** The topic's display name. Like the other derived display fields, a cold
+   * retained sibling may not have produced this path yet; its persisted title
+   * remains authoritative until it does. */
   [NAME]: string | Default<""> | undefined;
   title: string;
   body: string;
@@ -574,10 +573,18 @@ export const submitProfileLink = handler<void, {
 /** This topic's own place in the board's prose graph, derived read-side from
  * the mentionable siblings — the same join the board's cards use, reduced to
  * this piece's row. Nothing persisted; a topic without `mentionable` derives
- * empty sets. */
+ * empty sets.
+ *
+ * HACK: reads `TopicScan`, publishes `TopicReference`, via an `as` on each
+ * sibling. A reference passed through a lift is a link and resolves to the
+ * whole topic regardless of how little the lift declared, so the cast matches
+ * what a consumer receives while the narrow parameter bounds what this reads.
+ * See the same note on `crossrefRows` in main.tsx. */
 const topicCrossrefView = lift((
   { mentionable, title }: {
-    mentionable: Writable<TopicReference[] | Default<[]>>;
+    // Reads `TopicScan`; the row below republishes each sibling as the
+    // deployed `TopicReference` (see the HACK note).
+    mentionable: Writable<TopicScan[] | Default<[]>>;
     title: Writable<string | Default<"">>;
   },
 ): TopicCrossrefs => {
@@ -607,8 +614,8 @@ const topicCrossrefView = lift((
   );
   if (me < 0) return empty;
   return {
-    refsOut: joined.refsOut[me].map((j) => sibs[j]),
-    referencedBy: joined.referencedBy[me].map((j) => sibs[j]),
+    refsOut: joined.refsOut[me].map((j) => sibs[j] as TopicReference),
+    referencedBy: joined.referencedBy[me].map((j) => sibs[j] as TopicReference),
     refsOutLinks: joined.refsOut[me].map((j) => ({
       fid: payloads[j] ? `fid1:${payloads[j]}` : "",
       title: sibs[j].title,
