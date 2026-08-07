@@ -1,7 +1,9 @@
 import {
+  FabricInstance,
   FabricPrimitive,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import { refuseFabricInstance } from "../fabric-special-object.ts";
 import type { CfcConfClause } from "../cfc/clause.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import {
@@ -531,9 +533,6 @@ function observationLinkForValue(
   return undefined;
 }
 
-// TODO(danfuzz): This `isRecord`-gated walk over cell-resolved values has no
-// `FabricSpecialObject` guard; a `FabricPrimitive` is decomposed and a
-// `FabricInstance` is walked by internal slots rather than codec contents.
 function serializeForLLMObservation(
   {
     value,
@@ -644,6 +643,35 @@ function serializeForLLMObservation(
       value: { "@link": createLLMFriendlyLink(link, contextSpace) },
       observedConfidentiality: [],
     };
+  }
+
+  // A `FabricPrimitive` is an atomic value whose state lives in private fields
+  // (zero enumerable own-props), so the `Object.fromEntries(Object.entries(
+  // ...))` rebuild below would hand the model a bare `{}` in place of its
+  // contents. It leaves whole, and it leaves ahead of the `seen` check: being a
+  // leaf it cannot participate in a cycle, and one reachable at two positions
+  // would otherwise trip the already-seen refusal.
+  if (value instanceof FabricPrimitive) {
+    return { value, observedConfidentiality: nodeConfidentiality };
+  }
+
+  // A `FabricInstance` is NOT a leaf. It is a container reached by its codec
+  // contents rather than by property name, which this walk cannot do, so the
+  // rebuild below would flatten it to `{}` and the model would be shown an
+  // empty record where its contents should be. It refuses instead.
+  //
+  // Nothing reaches this in production today, de facto rather than by
+  // construction: a `FabricError` is exposed to pattern authors and ungated, so
+  // what keeps this safe is that nothing yet puts one where a model observes
+  // it.
+  //
+  // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
+  // point this becomes a walk rather than a refusal.
+  if (value instanceof FabricInstance) {
+    refuseFabricInstance(
+      value,
+      "when serializing a value for a language model",
+    );
   }
 
   if (seen.has(value)) {
@@ -776,14 +804,6 @@ function traverseAndSerialize(
  * @param space - The space to use to get the cells
  * @param value - The value to traverse and cellify
  * @returns The cellified value
- *
- * TODO(danfuzz): A `FabricPrimitive` is now returned atomically, but the other
- * special-object type, `FabricInstance` (a container), still reaches the
- * `Object.fromEntries(Object.entries(...))` walk and is flattened by its
- * internal slots (zero enumerable own-props) instead of its codec contents.
- * Unlike a primitive it *does* need descending into — but by its actual
- * contents, which this walk won't do correctly. This site will need attention
- * once FabricInstances see real use.
  */
 function traverseAndCellify(
   runtime: Runtime,
@@ -827,6 +847,27 @@ function traverseAndCellify(
   // Object.entries(...))` rebuild below would flatten it to `{}`; leave it
   // intact as an atomic leaf, like any string or number.
   if (value instanceof FabricPrimitive) return value;
+
+  // A `FabricInstance` is NOT a leaf. It is a container reached by its codec
+  // contents rather than by property name, which this walk cannot do, so the
+  // rebuild below would flatten it to `{}` -- and a cell nested in its state
+  // would go unmade, which is the whole of what this walk is for. It refuses
+  // instead.
+  //
+  // Nothing reaches this in production today, de facto rather than by
+  // construction: what this walks is a model's response, parsed from JSON, and
+  // no class instance survives that. A caller handing over a value assembled
+  // some other way would reach it.
+  //
+  // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
+  // point this becomes a walk rather than a refusal.
+  if (value instanceof FabricInstance) {
+    refuseFabricInstance(
+      value,
+      "when converting a language model's response to cells",
+    );
+  }
+
   if (isRecord(value)) {
     return Object.fromEntries(
       Object.entries(value).map((
