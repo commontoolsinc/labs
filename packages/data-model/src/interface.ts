@@ -148,10 +148,8 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
  * across realms and processes via their registry key. Unique symbols
  * (`Symbol(desc)`) are not portable and are rejected at the fabric boundary.
  * TypeScript's `symbol` type cannot distinguish the two, so the gate is a
- * runtime one. Note also that the fabric-value path separately rejects all
- * symbols at its entrance, so this union is wider than what that gate admits:
- * the lower layers (hashing, JSON encoding) accept a registry-interned symbol
- * even though the entrance does not.
+ * runtime one, and it is the same gate at every point a symbol is admitted or
+ * refused: `Symbol.keyFor(value) !== undefined`.
  *
  * **Deep-frozen honesty (mandatory).** A `FabricValue` must report its frozen
  * state truthfully and permanently. In particular, a fabric record or array is
