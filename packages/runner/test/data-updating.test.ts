@@ -1758,7 +1758,11 @@ describe("data-updating", () => {
 
       expect(long.reads).toBe(short.reads);
       // And what it records is a handful, not a number that merely happens to
-      // match: fewer reads than the shorter list has elements.
+      // match at both lengths: fewer reads than the shorter list has
+      // elements, and more than none. A write-back records the dependencies
+      // its commit is checked against, so a count of zero is a write that
+      // conflicts with nothing, which two equal counts alone would accept.
+      expect(long.reads).toBeGreaterThan(0);
       expect(long.reads).toBeLessThan(50);
     });
 
