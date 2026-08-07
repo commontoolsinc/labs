@@ -45,6 +45,15 @@ export function setValueAtPath(
     // `ownSegment`, not `parent[key]`: an absent segment named after a
     // prototype member would otherwise look like an existing non-object and
     // get descended into rather than created.
+    //
+    // TODO(danfuzz): a `FabricSpecialObject` at a spine slot passes this
+    // test — it is its parent's own value and `typeof` "object" — so the
+    // walk descends into it; the next segment then reads `undefined` off
+    // its empty own surface, and the assignment writes the intermediate
+    // onto the special object itself: a `TypeError` on a frozen value, a
+    // codec-invisible graft on an unfrozen instance. (`getValueAtPath` and
+    // `hasValueAtPath` below answer `undefined`/`false` for any path into
+    // a `FabricInstance`'s codec contents.)
     if (typeof ownSegment(parent, key) !== "object") {
       parent[key] = typeof path[i + 1] === "number" ? [] : {};
     }

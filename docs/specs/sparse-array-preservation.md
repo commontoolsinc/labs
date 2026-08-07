@@ -198,10 +198,13 @@ It pre-allocates `new Array(list.length)` and uses indexed assignment instead of
 identity keys, or result cells are created for hole indices. When the input list
 changes reactively:
 
-- **Value becomes hole:** The output gets a hole at that index. The pattern run
-  is kept in `elementRuns` for potential reuse if the same key reappears.
-- **Hole becomes value:** A new pattern run is created (or reused from
-  `elementRuns` if the identity key matches a previous run).
+- **Value becomes hole:** The output gets a hole at that index. The element is
+  no longer one the list holds, so its entry leaves `elementRuns` and its
+  pattern run is released.
+- **Hole becomes value:** A pattern run is created, reused from `elementRuns`
+  when the identity key matches an element the list still holds elsewhere. A
+  value returning after its entry was released is set up again on the same
+  result cell, whose id is deterministic, so it recovers what it persisted.
 
 ### Hashing boundary (`packages/data-model/src/value-hash.ts`)
 

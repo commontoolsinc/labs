@@ -34,19 +34,22 @@ import { outputSpotFromBinding } from "./scope-policy.ts";
 import { listResultSchema } from "./list-result-schema.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
-import {
-  cellIdentityKey,
-  exposedResultCell,
-  scopedCell,
-} from "./scope-policy.ts";
+import { exposedResultCell, scopedCell } from "./scope-policy.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { listElementLink } from "./list-element-link.ts";
+import {
+  listElementKeys,
+  releaseRemovedElements,
+} from "./list-element-keys.ts";
 import {
   linkResolutionProbe,
   machineryRead,
 } from "../storage/reactivity-log.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
-import { trackListSetupRollback } from "./list-element-rollback.ts";
+import {
+  type ElementRun,
+  trackListSetupRollback,
+} from "./list-element-rollback.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("runner.map", { enabled: true, level: "warn" });
@@ -95,10 +98,17 @@ export function map(
   // Identity-based tracking: maps element address key → { resultCell, lastIndex }
   // for reuse across position changes. We pass list[i] directly each time, so
   // there's no need to store the element cell separately.
-  const elementRuns = new Map<
-    string,
-    { resultCell: Cell<any>; lastIndex: number }
-  >();
+  const elementRuns = new Map<string, ElementRun>();
+
+  // Cleared when the coordinator is torn down, so the asynchronous resume work
+  // below stops writing to a container nothing owns any more. The same teardown
+  // releases the children the coordinator still holds; the ones whose elements
+  // left the list were released when they left.
+  let active = true;
+  addCancel(() => {
+    active = false;
+    releaseRemovedElements(runtime, elementRuns, new Set());
+  });
 
   // Only the initial (resume) reconcile should defer its per-element sub-pattern
   // runs until storage sync completes. This coordinator registers as
@@ -120,8 +130,8 @@ export function map(
     runtime.storageManager.trackUntilSettled(
       inputListCell.sync()
         .then(() =>
-          runtime.editWithRetry((settleTx) => {
-            if (!result) return;
+          !active ? undefined : runtime.editWithRetry((settleTx) => {
+            if (!active || !result) return;
             const raw = inputsCell.key("list").withTx(settleTx).resolveAsCell()
               .withTx(settleTx).getRaw();
             if (raw === undefined || (Array.isArray(raw) && raw.length === 0)) {
@@ -285,7 +295,8 @@ export function map(
       // re-trigger — seed [] once the pull settles, so the coordinator is not
       // left wedged waiting for a value that will never arrive.
       const seedIfStillAbsent = () =>
-        runtime.editWithRetry((seedTx) => {
+        !active ? Promise.resolve() : runtime.editWithRetry((seedTx) => {
+          if (!active) return;
           const container = result!.withTx(seedTx);
           if (container.getRaw() === undefined) container.set([]);
         }).then(({ error }) => {
@@ -337,10 +348,7 @@ export function map(
     // distinguish empty inputs from undefined inputs?
     if (list === undefined) {
       probeScoped(() => resultWithLog.set([]));
-      for (const entry of elementRuns.values()) {
-        runtime.runner.releaseChild(entry.resultCell, undefined);
-      }
-      elementRuns.clear();
+      releaseRemovedElements(runtime, elementRuns, new Set());
       return;
     }
 
@@ -351,21 +359,29 @@ export function map(
     // The resume batch has now been observed; later reconciles are post-resume.
     if (list.length > 0) resumeBatchAwaitSync = false;
 
-    const keyCounts = new Map<string, number>();
+    // The whole current key set has to exist before any element is touched:
+    // it is what says which children the list has stopped holding.
+    const elementKeys = listElementKeys(list);
+    releaseRemovedElements(
+      runtime,
+      elementRuns,
+      new Set(elementKeys.values()),
+    );
+
     const newArrayValue = new Array<any>(list.length);
     for (let i = 0; i < list.length; i++) {
       // Skip sparse holes — don't create pattern runs for them
       if (!(i in list)) continue;
 
-      const { dedupKey, linkKey } = cellIdentityKey(list[i]);
-      const occurrence = keyCounts.get(dedupKey) ?? 0;
-      keyCounts.set(dedupKey, occurrence + 1);
-      const elementKey = JSON.stringify([...linkKey, occurrence]);
+      const elementKey = elementKeys.get(i)!;
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
         const previousIndex = existing.lastIndex;
-        if (argumentUsage.usesIndex && existing.lastIndex !== i) {
+        if (
+          existing.needsSetup ||
+          (argumentUsage.usesIndex && existing.lastIndex !== i)
+        ) {
           runtime.runner.run(
             tx,
             opPattern,
@@ -376,6 +392,7 @@ export function map(
               awaitSyncBeforeInitialRun: elementAwaitSync,
             },
           );
+          rollback.setupIssued(existing);
         }
         existing.lastIndex = i;
         if (previousIndex !== i) rollback.indexChanged(existing, previousIndex);
@@ -406,22 +423,13 @@ export function map(
         setResultCell(boundResultCell, parentCell);
         // Link the new result cells to the pattern cell too
         setPatternCell(boundResultCell, parentCell.key("pattern"));
-        addCancel(() => runtime.runner.releaseChild(resultCell, undefined));
-        const entry = { resultCell, lastIndex: i };
+        const entry = { resultCell, lastIndex: i, needsSetup: false };
         elementRuns.set(elementKey, entry);
         rollback.created(elementKey, entry);
         newArrayValue[i] = exposedResultCell(runtime, tx, resultCell);
       }
     }
     probeScoped(() => resultWithLog.set(newArrayValue));
-
-    // NOTE: We leave prior results in elementRuns for now, so they reuse
-    // prior runs when items reappear. This means elementRuns grows
-    // unboundedly when elements are removed — the runner is stopped via
-    // addCancel when the parent is disposed, but the Map entries (and their
-    // resultCell references) are not pruned. TODO: Consider pruning entries
-    // not present in the current list if this becomes a problem for
-    // long-lived maps with high element churn.
   };
 
   // Child-starting coordinator: never rehydrates clean on resume — the

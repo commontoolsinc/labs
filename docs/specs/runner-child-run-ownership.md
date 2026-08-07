@@ -41,8 +41,12 @@ Each rule below is one of these two authorities applied to a case.
 ## Releasing a child
 
 A pattern that launches a child registers a *release* for it, which runs when
-the launching pattern is torn down. A release stops the child's registration
-only when both of these hold:
+the launching pattern is torn down. A list coordinator releases a child
+earlier than that: when the list no longer holds the element that child
+belongs to. The child would otherwise run, and hold a result nothing reads,
+for as long as the coordinator lives.
+
+A release stops the child's registration only when both of these hold:
 
 - The registration is the one this launch installed. A later attempt that
   replaced it owns itself, so a release that no longer recognises what it

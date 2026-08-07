@@ -92,7 +92,7 @@ export function updatePageTitle(title: string) {
 //
 // Navigation can occur in the following scenarios:
 // * Browser back/forward buttons/shortcuts
-// * Clicking on a `<x-piece-link>`
+// * A link or control calling `navigate()`
 //
 // On instantiation, parses the current URL and applies app state as needed.
 export class Navigation {

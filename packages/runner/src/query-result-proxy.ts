@@ -804,6 +804,11 @@ export function isCellResult(value: any): value is CellResult<any> {
 export function snapshotQueryResult<T>(value: T): T {
   const seen = new WeakMap<object, unknown>();
   const snapshot = (current: unknown): unknown => {
+    // TODO(danfuzz): the leaf test covers `FabricPrimitive` but not
+    // `FabricInstance`, so an instance (live traffic — the fetch builtins
+    // store a `FabricError` result) falls to the `Object.keys` rebuild below
+    // and snapshots as `{}`, its codec contents lost. It wants the same
+    // leaf-through treatment until a codec-contents walk exists.
     if (
       current === null || typeof current !== "object" ||
       current instanceof FabricPrimitive
