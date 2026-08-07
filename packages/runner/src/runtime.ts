@@ -2026,7 +2026,9 @@ export class Runtime {
     // artifact's encodable form is walked in turn, so a cell inside one is
     // reached as well.
     const asDataURI = dataUriFromValue(
-      fabricFromNativeValue(flattenBuilderArtifacts(data, cellAsLink)),
+      fabricFromNativeValue(
+        flattenBuilderArtifacts(data, { replaceOther: cellAsLink }),
+      ),
     );
     return createCell(
       this,

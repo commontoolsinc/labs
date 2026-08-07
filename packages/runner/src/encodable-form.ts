@@ -110,13 +110,40 @@ type OnCopy = (copy: unknown, original: unknown) => void;
  */
 type ReplaceOther = (value: object | AnyFunction) => unknown;
 
+/**
+ * Asked about each container the walk is about to descend into, and answers
+ * whether the caller holds it to be a leaf -- a value whose members the walk
+ * must not read.
+ *
+ * A live query-result view is what the hook is for: its members resolve
+ * through the transaction behind it as they are asked for, and each read is
+ * recorded there as a dependency. A caller supplies this when what receives
+ * the result does not read inside such a value either, so the reading would
+ * buy nothing. A caller that goes on to serialize the whole value does not,
+ * since those members have to be read either way.
+ */
+type IsLeaf = (value: object) => boolean;
+
+/**
+ * The two questions the walk puts to its caller, about values it cannot settle
+ * on its own. Each defaults to the answer that leaves the walk to its own
+ * judgment.
+ */
+export type WalkHooks = {
+  replaceOther?: ReplaceOther;
+  isLeaf?: IsLeaf;
+};
+
+/** The same pair with both answers in hand, which is what the walk carries. */
+type Hooks = Required<WalkHooks>;
+
 /** Shorthand for the callable shape the walk reaches. */
 type AnyFunction = (...args: never[]) => unknown;
 
 /**
  * Replaces every builder artifact reachable from `value` with its encodable
- * form, yielding a value the data model can represent. `replaceOther` extends
- * that to values the walk does not descend into (see `ReplaceOther`).
+ * form, yielding a value the data model can represent. The hooks are the two
+ * questions a caller answers for it (see `WalkHooks`).
  *
  * A builder artifact carries its serializer as a `toEncodableForm` method (see
  * `builder/module.ts` and `builder/pattern.ts`). A method is a function-valued
@@ -148,9 +175,12 @@ type AnyFunction = (...args: never[]) => unknown;
 export function replaceArtifacts<T>(
   value: T,
   onCopy: OnCopy,
-  replaceOther: ReplaceOther = (value) => value,
+  hooks: WalkHooks = {},
 ): T {
-  return replace(value, new Map(), onCopy, replaceOther) as T;
+  return replace(value, new Map(), onCopy, {
+    replaceOther: hooks.replaceOther ?? ((value) => value),
+    isLeaf: hooks.isLeaf ?? (() => false),
+  }) as T;
 }
 
 /**
@@ -167,7 +197,7 @@ function replace(
   value: unknown,
   seen: Map<object, unknown>,
   onCopy: OnCopy,
-  replaceOther: ReplaceOther,
+  hooks: Hooks,
 ): unknown {
   if (value === null) return value;
   const isFunction = typeof value === "function";
@@ -185,15 +215,22 @@ function replace(
   if (isFunction) {
     const method = ownEncodableFormMethod(value);
     if (method === undefined) {
-      return replaced(value, replaceOther, seen, onCopy);
+      return replaced(value, hooks, seen, onCopy);
     }
     seen.set(value, IN_PROGRESS);
     return copied(
-      replace(encodableFormFrom(method, value), seen, onCopy, replaceOther),
+      replace(encodableFormFrom(method, value), seen, onCopy, hooks),
       value,
       seen,
       onCopy,
     );
+  }
+
+  // A value the caller holds to be a leaf is settled ahead of the shape
+  // questions below, whatever shape it reports. It still goes to
+  // `replaceOther`, which is what stands something in its place.
+  if (hooks.isLeaf(value)) {
+    return replaced(value, hooks, seen, onCopy);
   }
 
   // The array rule applies whatever an array carries, so an array is only ever
@@ -210,13 +247,13 @@ function replace(
     // walk's to rewrite. That is not the same as the conversion refusing one:
     // `native-type-tags.ts` reports it as `Object`. Whether to accept it is the
     // conversion's question, asked of the value as it stands.
-    return replaced(value, replaceOther, seen, onCopy);
+    return replaced(value, hooks, seen, onCopy);
   }
 
   seen.set(value, IN_PROGRESS);
   let flattened: unknown;
   if (isArray) {
-    flattened = replaceInElements(value, seen, onCopy, replaceOther);
+    flattened = replaceInElements(value, seen, onCopy, hooks);
   } else {
     // The artifact's _own_ method is what gets read and called, rather than the
     // serializer it delegates to: the method a copy carries is closed over the
@@ -228,9 +265,9 @@ function replace(
         value as Record<string, unknown>,
         seen,
         onCopy,
-        replaceOther,
+        hooks,
       )
-      : replace(encodableFormFrom(method, value), seen, onCopy, replaceOther);
+      : replace(encodableFormFrom(method, value), seen, onCopy, hooks);
   }
   return copied(flattened, value, seen, onCopy);
 }
@@ -244,11 +281,11 @@ function replace(
  */
 function replaced(
   value: object | AnyFunction,
-  replaceOther: ReplaceOther,
+  hooks: Hooks,
   seen: Map<object, unknown>,
   onCopy: OnCopy,
 ): unknown {
-  const replacement = replaceOther(value);
+  const replacement = hooks.replaceOther(value);
   if (replacement === value) return value;
   return copied(replacement, value, seen, onCopy);
 }
@@ -285,7 +322,7 @@ function replaceInElements(
   value: readonly unknown[],
   seen: Map<object, unknown>,
   onCopy: OnCopy,
-  replaceOther: ReplaceOther,
+  hooks: Hooks,
 ): readonly unknown[] {
   // Read each element _once_, and build any copy from what was read -- the
   // array counterpart of the entries `replaceInEntries` materializes, for the
@@ -306,7 +343,7 @@ function replaceInElements(
     // a hole here too.
     if (!(i in value)) continue;
     const element = value[i];
-    const flattened = replace(element, seen, onCopy, replaceOther);
+    const flattened = replace(element, seen, onCopy, hooks);
     replaced[i] = flattened;
     if (flattened !== element) changed = true;
   }
@@ -321,7 +358,7 @@ function replaceInEntries(
   value: Record<string, unknown>,
   seen: Map<object, unknown>,
   onCopy: OnCopy,
-  replaceOther: ReplaceOther,
+  hooks: Hooks,
 ): Record<string, unknown> {
   // Read each member _once_, and build any copy from what was read: reading a
   // second time to copy would run an accessor twice and keep the second
@@ -331,7 +368,7 @@ function replaceInEntries(
   let result: Record<string, unknown> | undefined;
   for (let i = 0; i < entries.length; i++) {
     const [key, element] = entries[i];
-    const flattened = replace(element, seen, onCopy, replaceOther);
+    const flattened = replace(element, seen, onCopy, hooks);
     if (flattened === element) continue;
     result ??= Object.fromEntries(entries);
     result[key] = flattened;

@@ -73,6 +73,7 @@ import {
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { sendValueToBinding } from "./pattern-binding.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
+import { isCellResultForDereferencing } from "./query-result-proxy.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
   type AddCancel,
@@ -1445,8 +1446,12 @@ export class Runner {
     // A sub-pattern's argument can carry a builder artifact -- a pattern
     // handed to another pattern as an input. This is a storage boundary like
     // any other, so the artifact is replaced on the way in, once, for every
-    // write below: they must agree on what was stored.
-    const storable = flattenBuilderArtifacts(argument);
+    // write below: they must agree on what was stored. A query result is a
+    // leaf here for the same reason it is one to the writes below, which each
+    // replace such a value with the sigil link it names.
+    const storable = flattenBuilderArtifacts(argument, {
+      isLeaf: isCellResultForDereferencing,
+    });
     argumentCell.set(storable);
     // The policy recorder sees the RAW argument, as its sibling in
     // `updateResultProjection` does. Handing it the flattened one would walk
