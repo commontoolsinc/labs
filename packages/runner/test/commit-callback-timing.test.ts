@@ -127,4 +127,60 @@ describe("commit callback timing", () => {
     expect(commitCallbackFired, "commit callback fired at coverage").toBe(true);
     expect(cell.get()).toEqual({ v: "v1" });
   });
+
+  it("settles an accepted resolveAt-verdict promise at the verdict, while its commit callback waits for coverage", async () => {
+    const cell = runtime.getCell<{ v: string }>(
+      space,
+      "accept-verdict-mode-doc",
+      undefined,
+    );
+    {
+      const tx = runtime.edit();
+      cell.withTx(tx).set({ v: "v0" });
+      runtime.prepareTxForCommit(tx);
+      const res = await tx.commit({ resolveAt: "verdict" });
+      expect(res.error, `seed: ${JSON.stringify(res.error)}`).toBeUndefined();
+    }
+
+    await cell.sync();
+    await cell.pull();
+    expect(cell.get()).toEqual({ v: "v0" });
+
+    const tx = runtime.edit();
+    cell.withTx(tx).set({ v: "v1" });
+    runtime.prepareTxForCommit(tx);
+
+    const commitCallbackDone = Promise.withResolvers<void>();
+    let commitCallbackFired = false;
+    tx.addCommitCallback(() => {
+      commitCallbackFired = true;
+      commitCallbackDone.resolve();
+    });
+    let verdictModeResult: { error?: unknown } | undefined;
+    const commitP = tx.commit({ resolveAt: "verdict" }).then((result) => {
+      verdictModeResult = result;
+      return result;
+    });
+
+    // Held-clock fixpoint: the verdict-mode promise has settled with the
+    // accept, but the commit callback — on the full settlement timeline —
+    // is still gated on the coverage marker the timed fan-out has not
+    // delivered.
+    await clock.settle();
+    expect(verdictModeResult, "verdict-mode promise settled at the verdict")
+      .toBeDefined();
+    expect(verdictModeResult?.error, "the accept reached the caller")
+      .toBeUndefined();
+    expect(
+      commitCallbackFired,
+      "commit callback still waiting for coverage",
+    ).toBe(false);
+
+    // Real time resumes: the marker arrives and the settlement timeline —
+    // and with it the commit callback — completes.
+    await commitP;
+    await commitCallbackDone.promise;
+    expect(commitCallbackFired).toBe(true);
+    expect(cell.get()).toEqual({ v: "v1" });
+  });
 });

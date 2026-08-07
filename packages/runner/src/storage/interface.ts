@@ -719,8 +719,10 @@ export interface TransactionCommitOptions {
    *   read-repair wait, the synced() hold, or the post-commit effect run
    *   (still tracked via postCommitEffectsSettled()). For callers whose
    *   premise is "durably decided but not yet fanned out":
-   *   controlled-staleness test fixtures foremost. State application still
-   *   parks; only what the caller observes changes.
+   *   controlled-staleness test fixtures foremost. Only the RETURNED
+   *   promise changes: state application still parks, and commit
+   *   callbacks and the pending-commit barrier remain on the full
+   *   settlement timeline (coverage on accept, read repair on rejection).
    */
   resolveAt?: "coverage" | "verdict";
 }

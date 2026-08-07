@@ -3686,12 +3686,16 @@ class SpaceReplica implements ISpaceReplica {
             applied,
             resolveAtVerdict,
           );
-          if (!resolveAtVerdict) {
-            if (source === undefined) {
-              await settled;
-            } else {
-              recordCoverageWait(source, settled);
-            }
+          // Tx-sourced commits ALWAYS record the coverage wait: the inner
+          // settlement promise carries commit callbacks and the
+          // pending-commit barrier, which stay on the full timeline even
+          // when the caller opted its returned promise into verdict timing.
+          // Only the direct path — where the promise returned here IS the
+          // caller's promise — honors the verdict opt-out inline.
+          if (source !== undefined) {
+            recordCoverageWait(source, settled);
+          } else if (!resolveAtVerdict) {
+            await settled;
           }
           telemetry?.submit({
             type: "storage.push.complete",
@@ -3736,12 +3740,12 @@ class SpaceReplica implements ISpaceReplica {
           outcome.applied,
           resolveAtVerdict,
         );
-        if (!resolveAtVerdict) {
-          if (source === undefined) {
-            await settledRace;
-          } else {
-            recordCoverageWait(source, settledRace);
-          }
+        // Same rule as the direct-await branch above: tx-sourced commits
+        // always record; only the direct path honors the verdict opt-out.
+        if (source !== undefined) {
+          recordCoverageWait(source, settledRace);
+        } else if (!resolveAtVerdict) {
+          await settledRace;
         }
         telemetry?.submit({
           type: "storage.push.complete",
@@ -4476,9 +4480,10 @@ class SpaceReplica implements ISpaceReplica {
     // contract is "storage fully settled", which under parking includes the
     // fan-out of this replica's own accepted writes (CT-1950). The push
     // promise resolves at the verdict, so the barrier needs its own hold.
-    // A verdict-resolving commit opts out of the hold as it does of the
-    // promise timing: its premise is "accepted but not fanned out", which
-    // a synced() that forces the fan-out through would destroy.
+    // A verdict-resolving commit opts out of the hold — its premise is
+    // "accepted but not fanned out", which a synced() that forces the
+    // fan-out through would destroy — while its SETTLEMENT timeline still
+    // drains coverage; only the caller's returned promise resolves early.
     if (!resolveAtVerdict) {
       const hold: Promise<Result<Unit, StorageTransactionRejected>> = settled
         .promise.then(() => ({ ok: {} }));
