@@ -1,22 +1,21 @@
 import { describe, it } from "@std/testing/bdd";
 import {
-  App,
-  AppElement,
-  applyCommand,
   AppState,
   AppStateSerialized,
   appViewToUrlPath,
-  Command,
+  assertIdentityChangeAllowed,
   deserialize,
+  isAppStateConfigKey,
   isAppView,
   isEmbeddedView,
   isViewingDefaultPatternView,
   preserveAppViewMode,
+  resolveIdentity,
   serialize,
   urlToAppView,
 } from "@commonfabric/shell/shared";
 import { Identity, serializeKeyPairRaw } from "@commonfabric/identity";
-import { assert, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 
 const API_URL = "http://common.test/";
 const SPACE_NAME = "common-knowledge";
@@ -25,24 +24,40 @@ describe("AppState", () => {
   it("requires logout before switching identities", async () => {
     const first = await Identity.generate({ implementation: "noble" });
     const second = await Identity.generate({ implementation: "noble" });
-    const element = new TestAppElement({
-      apiUrl: new URL(API_URL),
-      view: { spaceName: SPACE_NAME },
-      config: {},
-      identity: first,
-    });
-    const app = new App(element);
 
-    await assertRejects(
-      () => app.setIdentity(second),
+    assertThrows(
+      () => assertIdentityChangeAllowed(first, second),
       Error,
       "Cannot change identity while logged in",
     );
 
-    await app.apply({ type: "set-identity", identity: undefined });
-    await app.setIdentity(second);
+    // Clearing an identity, and re-establishing one from nothing, are both
+    // allowed; so is re-establishing the identity already in place.
+    assertIdentityChangeAllowed(first, undefined);
+    assertIdentityChangeAllowed(undefined, second);
+    assertIdentityChangeAllowed(first, first);
+  });
 
-    assert(app.state().identity?.did() === second.did());
+  it("accepts only the four display toggles as config keys", () => {
+    assert(isAppStateConfigKey("showShellPieceListView"));
+    assert(isAppStateConfigKey("showDebuggerView"));
+    assert(isAppStateConfigKey("showQuickJumpView"));
+    assert(isAppStateConfigKey("showSidebar"));
+    assert(!isAppStateConfigKey("identity"));
+    assert(!isAppStateConfigKey("__proto__"));
+    assert(!isAppStateConfigKey(""));
+    assert(!isAppStateConfigKey(undefined));
+    assert(!isAppStateConfigKey(0));
+  });
+
+  it("resolves an identity from either an Identity or a raw key pair", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const raw = serializeKeyPairRaw(identity.serialize());
+    assert(raw, "Insecure keys are serializable.");
+
+    assertEquals(await resolveIdentity(undefined), undefined);
+    assert(await resolveIdentity(identity) === identity);
+    assertEquals((await resolveIdentity(raw))?.did(), identity.did());
   });
 
   it("serialize", async () => {
@@ -105,26 +120,6 @@ describe("AppState", () => {
     assert(state.apiUrl.toString() === API_URL.toString());
     assert((state.view as { spaceName: string }).spaceName === SPACE_NAME);
     assert(state.identity?.did() === identity.did(), "deserializes identity.");
-  });
-
-  it("clears piece list view when activating a piece", () => {
-    const initial: AppState = {
-      apiUrl: new URL(API_URL),
-      view: { builtin: "home" },
-      config: {
-        showShellPieceListView: true,
-      },
-    };
-
-    const next = applyCommand(initial, {
-      type: "set-view",
-      view: {
-        spaceName: SPACE_NAME,
-        pieceId: "example",
-      },
-    });
-
-    assert(next.config.showShellPieceListView === false);
   });
 
   it("parses and serializes slug piece routes", () => {
@@ -258,26 +253,3 @@ describe("AppState", () => {
     );
   });
 });
-
-class TestAppElement extends EventTarget implements AppElement {
-  keyStore = undefined as never;
-
-  constructor(private appState: AppState) {
-    super();
-  }
-
-  state(): AppState {
-    return this.appState;
-  }
-
-  apply(command: Command): Promise<void> {
-    this.appState = applyCommand(this.appState, command);
-    return Promise.resolve();
-  }
-
-  requestUpdate(): void {}
-
-  getRuntimeSpaceDID(): undefined {
-    return undefined;
-  }
-}

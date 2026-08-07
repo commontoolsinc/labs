@@ -120,12 +120,10 @@ const activeSpaceRootReady = (
   _probe: ProbeApi,
   expectedSpace: string,
 ): boolean => {
-  const app = (globalThis as typeof globalThis & {
-    app?: { element?: () => unknown };
+  // `globalThis.app` is the shell's root element.
+  const root = (globalThis as typeof globalThis & {
+    app?: HTMLElement & { getRuntimeSpaceDID(): string | undefined };
   }).app;
-  const root = app?.element?.() as unknown as
-    | (HTMLElement & { getRuntimeSpaceDID(): string | undefined })
-    | undefined;
   const appView = root?.shadowRoot?.querySelector("x-app-view") as
     | (HTMLElement & {
       space?: string;

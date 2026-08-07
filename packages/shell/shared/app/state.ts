@@ -1,10 +1,10 @@
 import {
   deserializeKeyPairRaw,
+  DID,
   Identity,
   serializeKeyPairRaw,
   TransferrableInsecureCryptoKeyPair,
 } from "@commonfabric/identity";
-import { Command } from "./commands.ts";
 import { AppView } from "./view.ts";
 
 // Primary application state.
@@ -24,11 +24,9 @@ export interface AppStateConfig {
 
 export type AppStateConfigKey = keyof AppStateConfig;
 
-export type AppStateSerialized = Omit<AppState, "identity" | "apiUrl"> & {
-  identity?: TransferrableInsecureCryptoKeyPair | null;
-  apiUrl: string;
-};
-
+// A config key names a field the display toggles record actually has. A
+// `shell-command` event arrives as an untyped DOM event, so the key it carries
+// is checked here before it reaches the record.
 export function isAppStateConfigKey(
   value: unknown,
 ): value is AppStateConfigKey {
@@ -41,6 +39,52 @@ export function isAppStateConfigKey(
       return true;
   }
   return false;
+}
+
+export type AppStateSerialized = Omit<AppState, "identity" | "apiUrl"> & {
+  identity?: TransferrableInsecureCryptoKeyPair | null;
+  apiUrl: string;
+};
+
+// The application root, as everything outside the root element sees it.
+// `Navigation` reads and writes the view through this, and the shell publishes
+// its root element on `globalThis.app` under this type so integration tests
+// can drive the page from outside. `XRootView` implements it. Declaring it
+// here keeps these shared sources, which the `ui` package compiles too, clear
+// of the root element's import graph.
+export interface ShellApp {
+  state(): AppState;
+  serialize(): AppStateSerialized;
+  getRuntimeSpaceDID(): DID | undefined;
+  setView(view: AppView): Promise<void>;
+  setIdentity(
+    id: Identity | TransferrableInsecureCryptoKeyPair | undefined,
+  ): Promise<void>;
+  setConfig(key: AppStateConfigKey, value: boolean): Promise<void>;
+}
+
+// Turns either form an identity arrives in — a live `Identity`, or the raw key
+// pair that crosses the integration-test page boundary — into the `Identity`
+// application state holds.
+export async function resolveIdentity(
+  id: Identity | TransferrableInsecureCryptoKeyPair | undefined,
+): Promise<Identity | undefined> {
+  if (id === undefined) return undefined;
+  if (id instanceof Identity) return id;
+  return await Identity.fromRaw(deserializeKeyPairRaw(id).privateKey);
+}
+
+// One identity replaces another only by way of a logged-out state. Clearing
+// the identity is always allowed.
+export function assertIdentityChangeAllowed(
+  current: Identity | undefined,
+  next: Identity | undefined,
+): void {
+  if (next && current && current.did() !== next.did()) {
+    throw new Error(
+      "Cannot change identity while logged in. Clear identity first.",
+    );
+  }
 }
 
 export function createAppState(
@@ -58,38 +102,6 @@ export function clone(state: AppState): AppState {
       ? Object.assign({}, state.view)
       : state.view,
   });
-}
-
-export function applyCommand(
-  state: AppState,
-  command: Command,
-): AppState {
-  const next = clone(state);
-  switch (command.type) {
-    case "set-identity": {
-      next.identity = command.identity;
-      break;
-    }
-    case "set-view": {
-      next.view = command.view;
-      if (
-        ("pieceId" in command.view && command.view.pieceId) ||
-        ("pieceSlug" in command.view && command.view.pieceSlug)
-      ) {
-        next.config.showShellPieceListView = false;
-      }
-      break;
-    }
-    case "set-config": {
-      if (!isAppStateConfigKey(command.key)) {
-        throw new Error(`Invalid config key: ${command.key}`);
-      }
-      next.config[command.key] = command.value;
-      break;
-    }
-  }
-
-  return next;
 }
 
 export function serialize(
