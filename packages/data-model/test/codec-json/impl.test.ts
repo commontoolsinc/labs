@@ -6,7 +6,7 @@ import {
   plainObjectFromJson,
   seemsLikeJsonEncodedFabricValue,
   valueFromJson,
-} from "@/codec-json/json-encoding.ts";
+} from "@/codec-json/impl.ts";
 import { JsonCodec } from "@/codec-json/JsonCodec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import type { FabricValue } from "@/fabric-value.ts";
@@ -41,7 +41,7 @@ function expectWireFormat(value: FabricValue, expected: unknown): void {
   ).toEqual(expected);
 }
 
-describe("json-encoding", () => {
+describe("impl", () => {
   it("round-trips `undefined`", () => {
     expect(roundTrip(undefined)).toBe(undefined);
   });

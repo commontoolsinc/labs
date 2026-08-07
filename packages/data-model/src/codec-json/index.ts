@@ -8,7 +8,7 @@ export {
   plainObjectFromJson,
   seemsLikeJsonEncodedFabricValue,
   valueFromJson,
-} from "./json-encoding.ts";
+} from "./impl.ts";
 
 // Whole-value codec for the wire format.
 export { JsonCodec } from "./JsonCodec.ts";

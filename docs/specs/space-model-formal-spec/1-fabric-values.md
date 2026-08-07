@@ -2583,11 +2583,11 @@ version requirements.
 The storage boundary routes through functions that bridge between the
 storage layer (JSON strings) and the runtime layer (`FabricValue`). These
 functions live in a dedicated module
-(`packages/data-model/codec-json/json-encoding.ts`).
+(`packages/data-model/codec-json/impl.ts`).
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/codec-json/json-encoding.ts
+// file: packages/data-model/codec-json/impl.ts
 
 /**
  * Encodes a fabric value to a JSON string in the standard `FabricValue`
