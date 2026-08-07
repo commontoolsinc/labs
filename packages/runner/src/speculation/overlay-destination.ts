@@ -199,8 +199,7 @@ export class SpeculationOverlayDestination
           return Promise.resolve({
             error: {
               name: "StorageTransactionAborted",
-              message:
-                `space replica for ${space} does not support sealing; ` +
+              message: `space replica for ${space} does not support sealing; ` +
                 "speculative derivations cannot commit (speculation.md §6)",
               reason: new Error("speculation-seal-unsupported"),
             },

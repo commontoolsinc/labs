@@ -2262,9 +2262,7 @@ Deno.test("memory v2 stacked commits: a foreign frame shadowed by a parked own w
     const flips = harness.notifications.notifications.slice(before)
       .filter((notification) =>
         notification.type === "integrate" && "changes" in notification &&
-        [...notification.changes].some((change) =>
-          change.address.id === DOCS.A
-        )
+        [...notification.changes].some((change) => change.address.id === DOCS.A)
       );
     assertEquals(
       flips.length >= 1,

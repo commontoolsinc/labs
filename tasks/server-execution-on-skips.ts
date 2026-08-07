@@ -66,18 +66,12 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   ServerExecutionSuite,
   ServerExecutionOnSkip[]
 > = {
-  patterns: [
-    {
-      file: "integration/cfc-group-chat-demo-two-browsers.test.ts",
-      phase: "phase-2",
-      reason: "two-deriver interim: two real browser shells boot against " +
-        "a toolshed whose serving loop also derives, and the trusted-" +
-        "profile UI never becomes fillable under the CAS storming the " +
-        "plan documents as expected until Phase 2 removes the client " +
-        "derivation-commit path (this exact test is a named Phase 2 " +
-        "gate). The single-browser and multi-runtime variants pass ON.",
-    },
-  ],
+  // Phase 2 retired the ONE entry this file ever held (the
+  // two-browsers CFC gate): the client derivation-commit path is
+  // removed by construction, the two-deriver interim's CAS storm with
+  // it — the exact unskipping condition the entry named. Every ON-arm
+  // suite now runs unfiltered.
+  patterns: [],
   runner: [],
   "runtime-client": [],
   shell: [],

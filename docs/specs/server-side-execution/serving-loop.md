@@ -917,10 +917,13 @@ escalate.
 Exposed via the existing `/api/health/stats` shape, replacing v1's pool
 block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
 supersededWrites, authoredSeen, effectAcks, derivedCommits,
-watermarkLag, events:
+watermarkClamped, watermarkLag, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent}, memo:
 {hits, misses, inflight}, outbox: {queued, completed, failed}, lease:
-{held, lost} }` (`effectAcks` counts effect-channel ack writes, so the
+{held, lost} }` (`watermarkClamped` counts waves whose W advance was
+clamped below the input batch head by the Phase-2 settle input
+barrier — inbound foreign novelty still shadowed by a parked own
+write; the clamp is honesty, not failure, and lifts by itself) (`effectAcks` counts effect-channel ack writes, so the
 §3 amplification metric is computable from counters alone). Every
 Phase gate in the plan reads these counters; tests MUST assert on
 counters, not logs.

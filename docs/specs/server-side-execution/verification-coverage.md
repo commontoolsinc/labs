@@ -501,6 +501,97 @@ population):
   socket-transact paths, where CT-1927's marker machinery
   guarantees eventual promotion. No test forced; recorded here.
 
+Delta 2026-08-07 — Phase 2 lands (flag ON: the server derives, the
+client does not; this PR):
+
+- speculation §1/§2/§4/§6's impl-gate rows: → COVERED. The overlay is
+  the runtime's DEFAULT seal destination under the flag for every
+  non-serving runtime (`packages/runner/src/speculation/
+  overlay-destination.ts`): stamped derivation-kind runs redirect into
+  the replica's pending layer (`sealNative` speculative — outside the
+  `synced()` barrier), handler runs keep committing authored (F10),
+  unstamped/binding writes untouched, egress effect kinds dropped
+  with `navigateTo` enacting (the egress rule), `compile-and-run`
+  gated (not speculable), retirement on watermark coverage of the
+  entry's read basis + acked origins via success-shaped `superseded`
+  withdrawals that cascade nothing. Pinned end to end in
+  `packages/runner/test/speculation-overlay.test.ts` (echo with zero
+  client commits; the store-attribution query — zero derived-class
+  commits from any client session; retirement; F10; egress
+  suppression) and live in `packages/patterns/integration/
+  sx2-speculation.test.ts`.
+- The Phase-2 revisit (a) — the settle input barrier: RESOLVED by the
+  plan's sanctioned exclusion alternative.
+  `ISpaceReplica.unappliedForeignSeqFloor` reports inbound foreign
+  seqs still shadowed by parked own writes; the SpaceServer clamps
+  its W advance below them (`watermarkClamped` counter, serving-loop
+  §7 — edited with this delta) and the shadow-flip notification in
+  `confirmPending` (flag ON) registers the dirtiness the moment the
+  overlay leaves, so the next wave derives over the foreign value
+  before W claims it. Two exemptions the serving loop's own frames
+  forced, both pinned: an own-echo upsert (its seq IS a pending
+  accept's ack seq, with the verdict-race repair) and the seq-0
+  absent-doc marker never shadow. Pinned in
+  `packages/runner/test/memory-v2-stacked-commit.test.ts` (flag-ON
+  shadow + flip notification; flag-OFF silent-flip byte-identity;
+  own-echo exemption). The stage-F residual comment at `inputSynced`
+  is rewritten to the resolved posture.
+- The Phase-2 revisit (b) — the pattern-updater CHECK half:
+  machinery-covered in the `sx2-serving-loop` integration surface
+  (`packages/patterns/integration/sx2-serving-loop.test.ts`): the
+  serving loop settles to watermark-covered quiescence with
+  `systemPatternAutoUpdate` flipped ON server-side against toolshed's
+  real routes — the environment the stage-F unit fixture could not
+  provide. A full stale-pointer roll-forward journey remains the
+  named follow-up.
+- M1's Phase-2 seam — per-run demanded identities: the demand
+  carriage (watchedRootsForSpace per-instance entries + the
+  SpaceServer's demanded-identity registry), the widened
+  `ServerRunInfo` (`scopeKeyIdentity`/`actionScopeKey`) passed
+  through `#stampRun`, and the tx-carried identity consulted at the
+  traversal-context and result-cell sites. Cardinality 2 pinned at
+  three levels (`executor-wave.test.ts`: the sink/engine same-doc
+  two-instance fold and two stamped runs folding into one wave with
+  per-run keys; `executor-serving-loop.test.ts`: the production-seam
+  journey whose per-run outbox carriages carry two DIFFERENT keys
+  into the completions — the m-4 note's "arrives with Phase 2's
+  stamper" DISCHARGED). The per-run SUPPLY — the scheduler running a
+  scoped action once per demanded instance (per-(action × instance)
+  read-set/dirtiness state) and the replica-level per-instance read
+  keying — is the owed scheduler-instance-dimension follow-up,
+  reported to the plan as a proposed train cut (OW17 below).
+- The ON-arm skip list is EMPTY: Phase 2 retired the two-browsers
+  entry (its named unskipping condition — the client
+  derivation-commit path removed — is this PR).
+- testing §4's single-deriver envelope gate: impl-covered — the
+  store-attribution query pinned in `speculation-overlay.test.ts`
+  (every derived commit's holder is the service identity; none from a
+  client session).
+- The standing rule's trigger has FIRED: Phase 2 flips ON, so the
+  next full mapping pass is DUE — owed as a follow-up alongside the
+  Phase-3 pre-flight, not carried in this PR.
+
+**Phase 2 pre-gate — LANDED with Phase 2 (2026-08-07):**
+
+- OW3 — LANDED as the model's narrowing/fan-out sub-model
+  (`packages/spec-model/server-execution/model.ts`, C11a–C11c in
+  `properties.test.ts`): instance sets stay clean products (never
+  ragged, exhaustively), the fan-out unit is the RUN
+  (`action × instance`, never merged), and W never forks — one
+  integer whose ADVANCE waits on demanded siblings only (protocol
+  §4's fresh-demand-after-W allowance modeled explicitly), undemanded
+  instances never holding it back.
+- OW4 — LANDED as trace T15 (scenario-traces §3/§4, count 14 → 15)
+  plus the impl witnesses (`speculation-overlay.test.ts`,
+  `sx2-speculation.test.ts`): unreplicated-doc reads pending,
+  input-origin retirement (acked AND W ≥ seq), overlay never
+  serialized to any server.
+- OW12 — LANDED: the discovered-narrowing eager via-user hop now has
+  its direct test (`packages/runner/test/eager-via-user-hop.test.ts`,
+  the OW12 case — a compiled pattern whose run READS a `PerSession`
+  cell and discovers session narrowing at its result binding;
+  space→user→session chain pinned, value at session).
+
 ## 3. The owed register (every genuine orphan, with its trigger)
 
 Nothing here blocks Phase 1. Each item names the instrument
@@ -521,17 +612,11 @@ extension owed and WHEN it earns its cost:
   rebase-arm extension (commuting-patch merge plus the
   re-CAS-at-the-observed-head rule).
 
-**Phase 2 pre-gate (when fan-out/speculation semantics go live —
-extend the model with narrowing, and the traces with a client-side
-journey):**
+**Phase 2 pre-gate — LANDED with Phase 2 (2026-08-07; the delta
+above carries the coverage):**
 
-- OW3 — instance sets never RAGGED across principals (scopes §2);
-  CFC unit `action × instance` under fan-out (serving-loop §3c);
-  no per-instance watermark forks (scopes §9). One narrowing/fan-out
-  model extension covers all three.
-- OW4 — speculation client-side trio: unreplicated-doc reads go
-  pending; input-origin overlay retirement (ack + W ≥ seq); overlay
-  never serialized to any server (speculation §2/§4/§6).
+- OW3 — LANDED (the C11 narrowing/fan-out model family).
+- OW4 — LANDED (trace T15 + the speculation impl witnesses).
 
 **Stage F pre-gate — LANDED with stage F (2026-08-05):**
 
@@ -560,13 +645,9 @@ journey):**
   commit; parking policy and the testing §4 gate need the ruling
   before builtins §1 ships `wish` as "port cost: none". T13.Q8
   holds the trace cell open.
-- OW12 — a direct test of the eager via-user hop at the
-  DISCOVERED-narrowing site (`pattern-binding.ts`, scopes §2): the
-  gated chain is implemented there identically to the two tested
-  `data-updating.ts` shapes, but driving it needs a pattern run
-  whose output scope is DISCOVERED session-narrow — a
-  fixture the Phase 2 fan-out work builds anyway. Trigger: the
-  Phase 2 pre-gate.
+- OW12 — LANDED with Phase 2 (2026-08-07): the discovered-narrowing
+  fixture exists (`eager-via-user-hop.test.ts`'s OW12 case) and pins
+  the `pattern-binding.ts` chain directly.
 - OW13 — delegated-grant RESOLUTION (protocol §2's delegated row,
   carved out 2026-08-05): admission today validates carriage
   PRESENCE + COMPLETENESS (class, non-empty actor + grant, the
@@ -615,6 +696,21 @@ pre-flight):**
   ruling in comments (llm-dialog.ts — awaited and surfaced since
   the stage-G review batch); the stamping/classing itself is
   Phase-3 events territory. Trigger: Phase 3's pre-flight.
+
+**Phase 2 follow-up (reported to the plan as a proposed train cut —
+the coordinator owns PR structure):**
+
+- OW17 — the scheduler instance dimension: per-(action × instance)
+  read-set/dirtiness state, the N-run settle loop over demanded
+  identities (consuming the SpaceServer's demanded-identity
+  registry through the widened `#stampRun` seam), and the
+  replica-level per-instance READ keying (one doc, N instances read
+  locally — today's replica keys scoped docs by scope NAME, the
+  cardinality-1 collapse the sink-level fold test documents). Until
+  it lands, a scoped node's runs resolve via the wave-level identity
+  (the Phase-1 fallback) unless a caller supplies per-run identities
+  through the seam. Trigger: the next Phase-2-arc PR; no later than
+  Phase 3's events (handler runs already carry per-run actors).
 
 **Phase 6 (the contract is fixed now, the check lands with
 hardening):**

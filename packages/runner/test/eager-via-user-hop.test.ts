@@ -181,3 +181,105 @@ Deno.test("flag ON: an OMITTED session-scoped property gets the chained eager re
     assertEquals(userSlot?.scope, "session");
   });
 });
+
+Deno.test("flag ON: a pattern run whose output scope is DISCOVERED session-narrow writes the chained redirects at the result binding (pattern-binding.ts's narrowestReadScope branch — OW12)", async () => {
+  await run(true, async (runtime) => {
+    // The run's READS discover the narrowing: the computed reads a
+    // PerSession cell, the tx's narrowestReadScope ratchet lands on
+    // "session", and the RESULT binding write — a space-declared slot —
+    // takes pattern-binding.ts's discovered-narrowing branch (the third
+    // eager-hop site; the two data-updating.ts shapes are pinned
+    // above).
+    const compiled = await runtime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: [
+          "import { computed, Default, pattern, PerSession, Writable } from 'commonfabric';",
+          "type DraftCell = Writable<string | Default<''>>;",
+          "export default pattern<",
+          "  { draft: PerSession<DraftCell> },",
+          "  { echo: string }",
+          ">(({ draft }) => ({",
+          "  echo: computed(() => (draft.get() as string | undefined) ?? ''),",
+          "}));",
+        ].join("\n"),
+      }],
+    }, { space });
+    const argument = runtime.getCell<{ draft: string }>(
+      space,
+      "ow12-arg",
+      compiled.argumentSchema,
+    );
+    const result = runtime.getCell<{ echo: string }>(
+      space,
+      "ow12-result",
+      compiled.resultSchema,
+    );
+    {
+      const tx = runtime.edit();
+      argument.withTx(tx).set({ draft: "narrow me" });
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+    }
+    {
+      const tx = runtime.edit();
+      runtime.run(tx, compiled, argument, result);
+      await tx.commit();
+    }
+    const cancel = result.sink(() => {});
+    await runtime.idle();
+    cancel();
+
+    // The run's output landed on the COMPUTED's result cell; the
+    // pattern result doc's `echo` slot links there at space scope. The
+    // discovered-narrowing chain lives at THAT doc: its space slot
+    // redirects to the USER instance, the user instance to the SESSION
+    // instance, and the value sits at session (scopes.md §2's MUST —
+    // ALWAYS via user, even when discovery jumps straight to session).
+    const resultLink = result.getAsNormalizedFullLink();
+    const schemaless = createCell<{ echo: unknown }>(
+      runtime,
+      { ...resultLink, schema: undefined },
+    );
+    const echoLink = parseLink(
+      schemaless.key("echo").getRaw(),
+      schemaless.key("echo"),
+    );
+    assertEquals(typeof echoLink?.id, "string");
+    const computedLink = {
+      space: resultLink.space,
+      id: echoLink!.id,
+      path: [],
+    };
+    const computedSpace = createCell<unknown>(
+      runtime,
+      { ...computedLink, schema: undefined },
+    );
+    const spaceSlot = parseLink(
+      computedSpace.getRaw(),
+      computedSpace,
+    );
+    assertEquals(spaceSlot?.scope, "user");
+    // A same-doc redirect may omit the id; when present it names the
+    // same doc.
+    assertEquals(spaceSlot?.id ?? echoLink!.id, echoLink!.id);
+    const userInstance = createCell<unknown>(
+      runtime,
+      { ...computedLink, schema: undefined, scope: "user" },
+    );
+    const userSlot = parseLink(
+      userInstance.getRaw(),
+      userInstance,
+    );
+    assertEquals(userSlot?.scope, "session");
+    assertEquals(userSlot?.id ?? echoLink!.id, echoLink!.id);
+    const sessionInstance = createCell<unknown>(
+      runtime,
+      { ...computedLink, schema: undefined, scope: "session" },
+    );
+    assertEquals(sessionInstance.getRaw(), "narrow me");
+    // Reading through the chain resolves the derived value.
+    assertEquals(result.key("echo").get() as unknown, "narrow me");
+  });
+});

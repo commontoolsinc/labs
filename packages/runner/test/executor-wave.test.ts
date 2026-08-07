@@ -42,10 +42,7 @@ import {
   executionLeaseHolder,
 } from "@commonfabric/memory/v2/execution-lease";
 import { selectSchedulerBasisRows } from "@commonfabric/memory/v2/scheduler-basis";
-import {
-  decodeMemoryBoundary,
-  resolveScopeKey,
-} from "@commonfabric/memory/v2";
+import { decodeMemoryBoundary, resolveScopeKey } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";

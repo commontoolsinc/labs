@@ -99,7 +99,7 @@ const waitUntil = async (
 describe("Phase 2 speculation overlay", () => {
   let server: MemoryV2Server.Server;
   let host: ExecutorHost | undefined;
-  let servingRuntime: Runtime | undefined;
+  let _servingRuntime: Runtime | undefined;
   let clientManager: SharedServerStorageManager;
   let clientRuntime: Runtime;
 
@@ -120,7 +120,7 @@ describe("Phase 2 speculation overlay", () => {
             systemPatternAutoUpdate: false,
           },
         });
-        servingRuntime = runtime;
+        _servingRuntime = runtime;
         await onServingRuntime?.(runtime);
         return {
           runtime,
@@ -137,7 +137,7 @@ describe("Phase 2 speculation overlay", () => {
 
   beforeEach(() => {
     server = newSharedServer();
-    servingRuntime = undefined;
+    _servingRuntime = undefined;
     onServingRuntime = undefined;
   });
 

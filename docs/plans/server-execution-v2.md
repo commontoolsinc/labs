@@ -396,34 +396,69 @@ derivation interim, and stays (protocol.md §1).
 
 Tasks:
 
-- [ ] Remove the client's derivation-commit path under the flag (by
-      construction, not firewall).
-- [ ] Speculation overlay: run the derived graph locally, render
+- [x] Remove the client's derivation-commit path under the flag (by
+      construction, not firewall). LANDED 2026-08-07: the speculation
+      overlay is the DEFAULT seal destination of every non-serving
+      flag-ON runtime (`packages/runner/src/speculation/
+      overlay-destination.ts`) — a stamped derivation-kind run's
+      writes redirect into the replica's pending layer and no code
+      path from a derivation run to the wire exists; serving runtimes
+      are marked `servingPosture` at construction and never default
+      to it (the SpaceServer refuses activation without the mark).
+- [x] Speculation overlay: run the derived graph locally, render
       immediately, replace on authoritative arrival (drop authority,
-      never the ability to run).
-- [ ] Effectful nodes read through to last committed results — never
+      never the ability to run). LANDED 2026-08-07: overlay entries
+      apply through `sealNative` (speculative — outside the
+      `synced()` barrier), render through the ordinary pending
+      materialization, and retire on watermark coverage of the
+      entry's read basis + acked origins via success-shaped
+      `superseded` withdrawals (no cascade — an authored commit that
+      read the echo is decided by CAS); chained entries re-sweep on
+      settlement.
+- [x] Effectful nodes read through to last committed results — never
       speculated. Result-as-pattern children may instantiate
       overlay-locally, converging by cause-derived identity
-      (speculation.md §2, owner 2026-08-02).
-- [ ] UI bindings untouched: authored writes under existing ACL + CAS.
+      (speculation.md §2, owner 2026-08-02). LANDED 2026-08-07: a
+      speculative run's egress effect kinds are OWNED AND DROPPED at
+      the destination (memo hits keep reading through; misses render
+      pending), `navigateTo` stays enactable (reversible),
+      `compile-and-run` is gated (not speculable — its floating
+      compile launch cannot be intercepted at the destination);
+      result-as-pattern children ride the derivation run's overlay
+      writes.
+- [x] UI bindings untouched: authored writes under existing ACL + CAS
+      (unstamped transactions never divert; pinned in
+      `speculation-overlay.test.ts` with the store-attribution query
+      — the client's committed footprint grows by exactly the
+      authored write).
 
 Carried-in revisits (stage-F residual, accepted for Phase 1 — owner,
 2026-08-05; both must be resolved before this phase's gates rely on
 W):
 
-- [ ] The settle input-barrier distinction: `inputSynced` cannot tell
+- [x] The settle input-barrier distinction: `inputSynced` cannot tell
       a frame parked on the loop's OWN sealed commit from foreign
       novelty, so a foreign authored frame in that position can be
       claimed by W one wave early (self-healing next wave — the
       documented residual at `packages/runner/src/storage/v2.ts`,
       `inputSynced`). Either distinguish parked-on-own-seal frames
       from foreign novelty, or exclude unapplied frames' seqs from
-      the wave's `batchHead`.
-- [ ] The pattern-updater CHECK-half bring-up verification (the
+      the wave's `batchHead`. RESOLVED 2026-08-07 via the exclusion
+      alternative: `ISpaceReplica.unappliedForeignSeqFloor` +
+      the SpaceServer's W-advance clamp (`watermarkClamped`,
+      serving-loop.md §7) + the flag-gated shadow-flip notification
+      in `confirmPending`, with the own-echo and seq-0 exemptions
+      pinned both arms (verification-coverage.md's Phase-2 delta).
+- [x] The pattern-updater CHECK-half bring-up verification (the
       network source-check the unit fixture cannot serve — the
       stage-F flagged residual in `executor-serving-loop.test.ts`):
       verify it in the integration environment's `sx2-serving-loop`
-      surface, not a unit fixture.
+      surface, not a unit fixture. MACHINERY-VERIFIED 2026-08-07 in
+      `packages/patterns/integration/sx2-serving-loop.test.ts` (the
+      serving loop reaches watermark-covered quiescence with the
+      server-side updater posture live against toolshed's real
+      routes); a full stale-pointer roll-forward journey stays the
+      named follow-up.
 
 Success criteria (the old Phase-1 ON gates land here, merged):
 
