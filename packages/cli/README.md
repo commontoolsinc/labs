@@ -147,24 +147,29 @@ missing value and is also falsey. Filtering happens before schema projection.
 
 For an array result, the concise form describes each item. An inline/file JSON
 Schema describes the complete returned value, so a schema combined with
-`--filter` must have an array root. Object `properties` are a whitelist by
+`--filter` must have an array root. Object `properties` are an allowlist by
 default; use `"additionalProperties": true` to retain unspecified properties.
 Projection schemas support structural `properties`, `items`, and scalar leaf
-schemas. In an array-item projection, a scalar leaf whose declared type does not
-match the stored value is omitted by the runtime rather than reported as an
-error; prefer `true` leaves unless that type filtering is intentional. Schema
-combinators and references are rejected in caller-supplied projection schemas.
-Concise dotted paths follow the declared source schema through nested arrays, so
-`comments.body` selects `body` from every comment without retaining comment
-siblings. The projection preserves source-declared nullable items and
-properties, including `type` arrays and `anyOf` unions. When the source schema
-does not identify a nested container, the concise form applies the same field
-mask across arrays encountered in the value so siblings still cannot leak; use
-an explicit JSON Schema when the output schema itself must be fixed. If a
-present source value cannot materialize the transform, the command exits nonzero
-and states that the failure is not JSON `null`. An absent optional source
-remains the ordinary successful `null` CLI response, as does a valid projected
-null.
+schemas. A position that names an object keyword (`properties`,
+`additionalProperties`, `required`) projects an object and one that names
+`items` projects an array, at every level of nesting and whether or not it also
+states `type` — `{"properties":{"topic":{"properties":{"title":true}}}}` returns
+`topic.title`. Neither `true` nor `{}` names a container, and both keep
+everything at the position they sit at. In an array-item projection, a scalar
+leaf whose declared type does not match the stored value is omitted by the
+runtime rather than reported as an error; prefer `true` leaves unless that type
+filtering is intentional. Schema combinators and references are rejected in
+caller-supplied projection schemas. Concise dotted paths follow the declared
+source schema through nested arrays, so `comments.body` selects `body` from
+every comment without retaining comment siblings. The projection preserves
+source-declared nullable items and properties, including `type` arrays and
+`anyOf` unions. When the source schema does not identify a nested container, the
+concise form applies the same field mask across arrays encountered in the value
+so siblings still cannot leak; use an explicit JSON Schema when the output
+schema itself must be fixed. If a present source value cannot materialize the
+transform, the command exits nonzero and states that the failure is not JSON
+`null`. An absent optional source remains the ordinary successful `null` CLI
+response, as does a valid projected null.
 
 Both transforms run as a short-lived computed pattern in the caller's session.
 When the declared source schema fixes the root container shape, the pattern
