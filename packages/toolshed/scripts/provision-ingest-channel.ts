@@ -33,6 +33,8 @@ import {
   generateIngestSecret,
   getRegistration,
   isValidSegment,
+  MAX_REVOCATION_HISTORY,
+  RegistrationConflictError,
   saveRegistration,
 } from "@/routes/ingest/ingest.utils.ts";
 import { DEFAULT_TTL_DAYS } from "@/routes/ingest-channels/ingest-channels.utils.ts";
@@ -117,35 +119,54 @@ try {
     ? existing.expiresAt
     : new Date(now.getTime() + DEFAULT_TTL_DAYS * 86_400_000).toISOString();
 
-  await saveRegistration(runtime, identity.did(), {
-    id,
-    name,
-    space,
-    causePrefix,
-    installId,
-    sink: "journal",
-    secretHash,
-    createdBy: identity.did(),
-    createdAt: existing?.createdAt ?? now.toISOString(),
-    enabled: true,
-    expiresAt,
-    revision: (existing?.revision ?? 0) + 1,
-    ...(existing?.owner !== undefined ? { owner: existing.owner } : {}),
-    // Re-provisioning is an operator re-authorizing the channel, so the live
-    // revocation clears; the record of it does not.
-    ...(existing?.revoked !== undefined
-      ? {
-        revocations: [
-          ...(existing.revocations ?? []).map((r) => ({ at: r.at, by: r.by })),
-          { at: existing.revoked.at, by: existing.revoked.by },
-        ],
-      }
-      : existing?.revocations !== undefined
-      ? {
-        revocations: existing.revocations.map((r) => ({ at: r.at, by: r.by })),
-      }
-      : {}),
-  });
+  try {
+    await saveRegistration(runtime, identity.did(), {
+      id,
+      name,
+      space,
+      causePrefix,
+      installId,
+      sink: "journal",
+      secretHash,
+      createdBy: identity.did(),
+      createdAt: existing?.createdAt ?? now.toISOString(),
+      enabled: true,
+      expiresAt,
+      revision: (existing?.revision ?? 0) + 1,
+      ...(existing?.owner !== undefined ? { owner: existing.owner } : {}),
+      // Re-provisioning is an operator re-authorizing the channel, so the live
+      // revocation clears; the record of it does not.
+      ...(existing?.revoked !== undefined
+        ? {
+          revocations: [
+            ...(existing.revocations ?? []).map((r) => ({
+              at: r.at,
+              by: r.by,
+            })),
+            { at: existing.revoked.at, by: existing.revoked.by },
+          ].slice(-MAX_REVOCATION_HISTORY),
+        }
+        : existing?.revocations !== undefined
+        ? {
+          revocations: existing.revocations
+            .map((r) => ({ at: r.at, by: r.by }))
+            .slice(-MAX_REVOCATION_HISTORY),
+        }
+        : {}),
+    }, existing === null ? null : (existing.revision ?? 0));
+  } catch (error) {
+    if (error instanceof RegistrationConflictError) {
+      // Admin is trusted, but a trusted action should conflict visibly rather
+      // than silently undo a security action someone else just took. A revoke
+      // landing between the read above and this write is exactly that case.
+      console.error(
+        `\nChannel ${id} changed while this command was running — most likely ` +
+          `revoked. Nothing was written.\nRe-run to act on the current state.`,
+      );
+      Deno.exit(1);
+    }
+    throw error;
+  }
   await runtime.storageManager.synced();
 
   const url = `${env.API_URL}/api/ingest/${id}`;

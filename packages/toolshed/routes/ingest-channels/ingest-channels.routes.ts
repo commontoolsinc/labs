@@ -190,7 +190,9 @@ export const revoke = createRoute({
   request: {
     body: {
       content: {
-        "application/json": { schema: z.object({ id: z.string() }) },
+        "application/json": {
+          schema: z.object({ id: z.string(), requestId: requestIdField }),
+        },
       },
     },
   },

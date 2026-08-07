@@ -35,6 +35,8 @@ import {
   type IngestRegistration,
   isValidRequestId,
   isValidSegment,
+  LifetimeChannelCapError,
+  LiveChannelCapError,
   MAX_REVOCATION_HISTORY,
   peekMintRequest,
   RegistrationConflictError,
@@ -63,6 +65,21 @@ export const DEFAULT_TTL_DAYS = 90;
 /** Bounds `processList`'s serial resolves — see `ownerIndexCell` for why. */
 export const MAX_CHANNELS_PER_OWNER = 200;
 
+/**
+ * How many channels one owner may ever CREATE. Revoking does not refund it.
+ *
+ * The live cap bounds only what is currently active, and everything a mint
+ * writes outlives revocation on purpose: the registration cell stays so a
+ * retired token can be told apart from an unknown one, and the audit entry
+ * stays so a trust-condition sweep can still enumerate it. Mint → revoke →
+ * mint is therefore unbounded growth of deployment-wide state driven by a
+ * single authenticated user. This is the bound on it.
+ *
+ * Generous by design — it is a runaway stop, not a product limit. An owner who
+ * legitimately reaches it has a story worth an operator conversation.
+ */
+export const MAX_LIFETIME_CHANNELS_PER_OWNER = 1_000;
+
 export interface ControlDeps {
   runtime: Runtime;
   /** The toolshed's own space — where registrations live. */
@@ -74,6 +91,7 @@ export interface ControlDeps {
   aclMode?: "off" | "observe" | "enforce";
   /** Overridable so a test can reach the cap without minting the whole limit. */
   maxChannelsPerOwner?: number;
+  maxLifetimeChannelsPerOwner?: number;
   apiUrl: string;
   logger?: {
     warn: (obj: unknown, msg: string) => void;
@@ -302,12 +320,34 @@ const persist = async (
         requestId: params.requestId,
         channel: params.id,
       },
+      {
+        live: deps.maxChannelsPerOwner ?? MAX_CHANNELS_PER_OWNER,
+        lifetime: deps.maxLifetimeChannelsPerOwner ??
+          MAX_LIFETIME_CHANNELS_PER_OWNER,
+      },
     );
   } catch (error) {
     if (error instanceof RequestAlreadyClaimedError) {
       return conflict(
         `requestId already used for channel ${error.channel}. A replay never ` +
           `returns a token; retry with a fresh requestId.`,
+      );
+    }
+    if (error instanceof LiveChannelCapError) {
+      return conflict(
+        `You already hold ${error.live} active ingest channels (limit ` +
+          `${deps.maxChannelsPerOwner ?? MAX_CHANNELS_PER_OWNER}). Revoke ` +
+          `some before minting more.`,
+      );
+    }
+    if (error instanceof LifetimeChannelCapError) {
+      // Deliberately NOT phrased as "revoke some": revoking frees nothing here,
+      // and telling the user otherwise sends them round a loop that cannot
+      // succeed.
+      return conflict(
+        `You have created ${error.created} ingest channels, the lifetime ` +
+          `limit for one identity. Revoking does not free capacity — contact ` +
+          `an operator.`,
       );
     }
     if (error instanceof ClaimStoreFullError) {
@@ -431,44 +471,12 @@ export async function processMint(
     }
   }
 
-  // Checked whenever this write would ADD a live channel — that is, for a new
-  // channel or one that is currently revoked. Gating on `!existing` alone let a
-  // single owner loop mint → revoke → re-mint past the cap without limit, since
-  // a re-mint clears `revoked` and sets `enabled`.
-  if (
-    existing === null || existing.revoked !== undefined || !existing.enabled
-  ) {
-    let owned: string[];
-    try {
-      owned = await getOwnerRegistrationIndex(
-        deps.runtime,
-        deps.serviceSpace,
-        callerDid,
-      );
-    } catch (error) {
-      deps.logger?.error(
-        { error, callerDid },
-        "ingest-channels: index read failed",
-      );
-      return { status: 502, body: { error: "Storage failure" } };
-    }
-    // Count LIVE channels, not index entries. The owner index is append-only —
-    // `saveRegistration` never shrinks it and revocation is a soft disable — so
-    // capping on its length would make "revoke some" a no-op and the limit
-    // permanent. Same reachable-remedy rule as the takeover guard above.
-    let live = 0;
-    for (const ownedId of owned) {
-      const r = await getRegistration(deps.runtime, deps.serviceSpace, ownedId);
-      if (r && r.enabled && !r.revoked) live++;
-    }
-    const cap = deps.maxChannelsPerOwner ?? MAX_CHANNELS_PER_OWNER;
-    if (live >= cap) {
-      return conflict(
-        `You already hold ${live} active ingest channels (limit ${cap}). ` +
-          `Revoke some before minting more.`,
-      );
-    }
-  }
+  // The live-channel and lifetime caps are NOT checked here. They are enforced
+  // inside `saveRegistration`'s transaction, where the owner index and the
+  // lifetime counter join the read set. A pre-transaction count is advisory:
+  // N concurrent mints all read the same under-cap number and all commit, so
+  // the cap is exceeded by the width of the burst. It was also O(live) resolves
+  // per mint, each an awaited global `synced()` barrier.
 
   // AFTER authorization (a stranger must not be able to burn or probe request
   // ids) and BEFORE minting (a replay must never reach generateIngestSecret).
@@ -574,43 +582,66 @@ export async function processRotate(
 export async function processRevoke(
   deps: ControlDeps,
   callerDid: string,
-  input: { id: string },
+  input: { id: string; requestId: string },
 ): Promise<ControlResult<{ id: string; revokedAt: string }>> {
+  if (!isValidRequestId(input.requestId)) return bad("Invalid requestId");
+
   const existing = await loadOwned(deps, callerDid, input.id);
   if (!existing.ok) return existing.result;
 
+  const replay = await peekReplay(deps, callerDid, input.requestId);
+  if (replay) return replay;
+
   // Already revoked: report the original revocation rather than overwriting it.
   // Any owner of the space may revoke, so an overwrite would let a later caller
-  // replace an operator retirement's attribution with their own — and repeated
-  // revokes would churn the revision, 409-ing legitimate in-flight rotates.
-  if (existing.registration.revoked !== undefined) {
-    return {
-      status: 200,
-      body: {
-        id: input.id,
-        revokedAt: existing.registration.revoked.at,
-      },
-    };
-  }
-
-  const revokedAt = new Date().toISOString();
+  // replace an operator retirement's attribution with their own.
+  //
+  // The request id is consumed even here. A captured revoke is otherwise a
+  // stored weapon: replayed against an already-revoked channel it is a no-op
+  // that spends nothing, so the attacker simply waits for the owner to re-mint
+  // and replays again, killing the newly paired device. Spending the id on the
+  // no-op closes that.
+  const alreadyRevoked = existing.registration.revoked !== undefined;
+  const revokedAt = alreadyRevoked
+    ? existing.registration.revoked!.at
+    : new Date().toISOString();
   try {
     const history = plainRevocations(existing.registration.revocations);
     await saveRegistration(
       deps.runtime,
       deps.serviceSpace,
-      {
-        ...existing.registration,
-        enabled: false,
-        revoked: { at: revokedAt, by: callerDid },
-        revision: (existing.registration.revision ?? 0) + 1,
-        // Rebuilt, not carried through the spread: see plainRevocations.
-        // Without this the history vanishes on the SECOND revoke of a channel.
-        ...(history !== undefined ? { revocations: history } : {}),
-      },
+      alreadyRevoked
+        // Unchanged, at the same revision: the write exists only to consume the
+        // request id in the same transaction.
+        ? {
+          ...existing.registration,
+          ...(history !== undefined ? { revocations: history } : {}),
+        }
+        : {
+          ...existing.registration,
+          enabled: false,
+          revoked: { at: revokedAt, by: callerDid },
+          revision: (existing.registration.revision ?? 0) + 1,
+          // Rebuilt, not carried through the spread: see plainRevocations.
+          // Without this the history vanishes on the SECOND revoke.
+          ...(history !== undefined ? { revocations: history } : {}),
+        },
       existing.registration.revision ?? 0,
+      { owner: callerDid, requestId: input.requestId, channel: input.id },
     );
   } catch (error) {
+    if (error instanceof RequestAlreadyClaimedError) {
+      return conflict(
+        `requestId already used for channel ${error.channel}. Retry with a ` +
+          `fresh requestId.`,
+      );
+    }
+    if (error instanceof ClaimStoreFullError) {
+      return {
+        status: 429,
+        body: { error: "Too many recent requests — retry in a few minutes" },
+      };
+    }
     if (error instanceof RegistrationConflictError) {
       return conflict(
         `Channel ${input.id} changed while this request was in flight. Retry.`,
@@ -642,6 +673,9 @@ export async function processList(
   // the only party entitled to revoke it could not discover its id. The
   // resource is the space, not the minting key; list has to agree with that.
   const scoped = input.space !== undefined;
+  // Shape-checked before it reaches storage, so an arbitrary string never
+  // becomes a cell cause. Shares the ownership denial, as mint does.
+  if (scoped && !isValidSpaceDid(input.space!)) return forbidden();
 
   let ids: string[];
   try {

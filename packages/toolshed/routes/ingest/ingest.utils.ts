@@ -147,6 +147,26 @@ export class RegistrationConflictError extends Error {
   }
 }
 
+/** Thrown when a mint would push an owner past their live-channel limit. */
+export class LiveChannelCapError extends Error {
+  constructor(readonly live: number) {
+    super(`owner already holds ${live} live channels`);
+    this.name = "LiveChannelCapError";
+  }
+}
+
+/**
+ * Thrown when an owner has created their lifetime allowance of channels.
+ * Revoking does not refund it: the registration and its audit entry are kept
+ * forever, so what this bounds is state the owner can never release.
+ */
+export class LifetimeChannelCapError extends Error {
+  constructor(readonly created: number) {
+    super(`owner has created ${created} channels`);
+    this.name = "LifetimeChannelCapError";
+  }
+}
+
 /** Bound on {@link IngestRegistration.revocations}; oldest entries drop. */
 export const MAX_REVOCATION_HISTORY = 10;
 
@@ -213,6 +233,8 @@ const IndexSchema = {
   type: "array",
   items: { type: "string" },
 } as const satisfies JSONSchema;
+
+const CountSchema = { type: "number" } as const satisfies JSONSchema;
 const TimestampSchema = { type: "string" } as const satisfies JSONSchema;
 
 function randomBase62(length: number): string {
@@ -277,14 +299,74 @@ const registrationCell = (runtime: Runtime, serviceSpace: string, id: string) =>
     RegistrationSchema,
   );
 
-// A service-space index of all channel ids, so channels are enumerable/auditable
-// (content-addressed registration cells have no listing otherwise). Mirrors the
-// webhook service index.
-const indexCell = (runtime: Runtime, serviceSpace: string) =>
+// The service-space audit inventory: every channel id ever provisioned, so
+// channels are enumerable (content-addressed registration cells have no listing
+// otherwise) and a trust-condition sweep has something to enumerate.
+//
+// SHARDED BY UTC MONTH, because unlike the owner and space indexes this one is
+// never pruned — a revoked channel stays in the audit forever, which is the
+// point. A single array would then be an unbounded document that every
+// provision rewrites in full: one authenticated owner minting in a loop grows a
+// deployment-wide cell without limit, and each write costs the whole array. The
+// shard key comes from the registration's `createdAt`, so it is stable across
+// re-mints of the same id and membership is decidable against one shard.
+//
+// This mirrors the data plane, where records live in per-UTC-day partition
+// cells for the same reason.
+const auditMonth = (createdAt: string): string => {
+  const at = new Date(createdAt);
+  // A registration whose createdAt does not parse still has to be auditable.
+  // "unknown" is a real shard, enumerated like any other.
+  if (Number.isNaN(at.getTime())) return "unknown";
+  return at.toISOString().slice(0, 7);
+};
+
+const auditShardCell = (
+  runtime: Runtime,
+  serviceSpace: string,
+  month: string,
+) =>
+  runtime.getCell<string[]>(
+    serviceSpace as MemorySpace,
+    `cf:ingest:index:${month}`,
+    IndexSchema,
+  );
+
+// The shard directory: which months have a shard. Grows by one entry per month
+// in which anything was minted, so it is bounded by calendar time rather than
+// by traffic — the property the flat index lacked.
+const auditShardListCell = (runtime: Runtime, serviceSpace: string) =>
+  runtime.getCell<string[]>(
+    serviceSpace as MemorySpace,
+    "cf:ingest:index:months",
+    IndexSchema,
+  );
+
+// The pre-sharding flat index. Read, never written: channels provisioned before
+// sharding must stay enumerable, and a sweep that silently skipped them would
+// report a live channel as retired.
+const legacyIndexCell = (runtime: Runtime, serviceSpace: string) =>
   runtime.getCell<string[]>(
     serviceSpace as MemorySpace,
     "cf:ingest:index",
     IndexSchema,
+  );
+
+// A monotone per-owner count of channel ids ever created. The live cap alone
+// bounds nothing durable: revoking frees a live slot but leaves the registration
+// cell and its audit entry behind forever, so mint/revoke in a loop is unbounded
+// growth of deployment-wide state by one authenticated user. This is the
+// lifetime quota that actually stops it. A counter, not a list — the thing being
+// bounded must not itself be an unbounded array.
+const lifetimeCountCell = (
+  runtime: Runtime,
+  serviceSpace: string,
+  owner: string,
+) =>
+  runtime.getCell<number>(
+    serviceSpace as MemorySpace,
+    `cf:ingest:lifetime:${owner}`,
+    CountSchema,
   );
 
 // Per-channel last-seen timestamp, in its OWN cell (not a registration field) so
@@ -466,15 +548,46 @@ export async function getRegistration(
   return (cell.get() as IngestRegistration | undefined) ?? null;
 }
 
-/** All provisioned channel ids in this service space (for audit / future list). */
+/**
+ * Every provisioned channel id in this service space: the audit inventory a
+ * trust-condition sweep enumerates. Reads the pre-sharding flat index as well
+ * as every month shard, so nothing provisioned before sharding goes missing.
+ */
 export async function getRegistrationIndex(
   runtime: Runtime,
   serviceSpace: string,
 ): Promise<string[]> {
-  const cell = indexCell(runtime, serviceSpace);
+  const legacy = legacyIndexCell(runtime, serviceSpace);
+  const list = auditShardListCell(runtime, serviceSpace);
+  await legacy.sync();
+  await list.sync();
+  await runtime.storageManager.synced();
+
+  const months = (list.get() as string[] | undefined) ?? [];
+  const shards = months.map((m) => auditShardCell(runtime, serviceSpace, m));
+  for (const shard of shards) await shard.sync();
+  await runtime.storageManager.synced();
+
+  // Deduped: an id appears in at most one shard, but a channel provisioned
+  // before sharding and re-minted after it appears in both the flat index and
+  // its month shard.
+  const seen = new Set<string>((legacy.get() as string[] | undefined) ?? []);
+  for (const shard of shards) {
+    for (const id of (shard.get() as string[] | undefined) ?? []) seen.add(id);
+  }
+  return [...seen];
+}
+
+/** How many channels this owner has ever created (the lifetime quota meter). */
+export async function getLifetimeChannelCount(
+  runtime: Runtime,
+  serviceSpace: string,
+  owner: string,
+): Promise<number> {
+  const cell = lifetimeCountCell(runtime, serviceSpace, owner);
   await cell.sync();
   await runtime.storageManager.synced();
-  return (cell.get() as string[] | undefined) ?? [];
+  return (cell.get() as number | undefined) ?? 0;
 }
 
 /** The last time a channel successfully ingested, or null if never. */
@@ -507,6 +620,16 @@ export async function saveRegistration(
    * exists to make retryable.
    */
   claim?: ClaimRequest,
+  /**
+   * Admission limits, enforced INSIDE the transaction that updates the owner
+   * index and the lifetime counter. Checking either beforehand is advisory
+   * only: concurrent distinct mints all read the same pre-transaction count and
+   * all pass, so the cap is exceeded by however many requests are in flight.
+   * Reading them in the closure joins them to the read set, which is what makes
+   * the limit hold. Omitted for operator scripts, which are not the thing being
+   * bounded.
+   */
+  limits?: { live?: number; lifetime?: number },
 ): Promise<void> {
   // Every index is written with the registration, and none of them is
   // best-effort.
@@ -534,18 +657,32 @@ export async function saveRegistration(
   // read set, which is what makes the precondition enforced rather than
   // advisory.
   const cell = registrationCell(runtime, serviceSpace, registration.id);
-  const auditIndex = indexCell(runtime, serviceSpace);
+  const month = auditMonth(registration.createdAt);
+  const auditIndex = auditShardCell(runtime, serviceSpace, month);
+  const shardList = auditShardListCell(runtime, serviceSpace);
   const claimsCell = claim === undefined
     ? undefined
     : mintRequestCell(runtime, serviceSpace, claim.owner);
+  const ownerIndex = registration.owner === undefined
+    ? undefined
+    : ownerIndexCell(runtime, serviceSpace, registration.owner);
+  const lifetimeCell = registration.owner === undefined
+    ? undefined
+    : lifetimeCountCell(runtime, serviceSpace, registration.owner);
   const indexes = [
     spaceIndexCell(runtime, serviceSpace, registration.space),
     auditIndex,
-    ...(registration.owner !== undefined
-      ? [ownerIndexCell(runtime, serviceSpace, registration.owner)]
-      : []),
+    ...(ownerIndex ? [ownerIndex] : []),
   ];
-  for (const c of [cell, ...indexes, ...(claimsCell ? [claimsCell] : [])]) {
+  for (
+    const c of [
+      cell,
+      ...indexes,
+      shardList,
+      ...(claimsCell ? [claimsCell] : []),
+      ...(lifetimeCell ? [lifetimeCell] : []),
+    ]
+  ) {
     await c.sync();
   }
   await runtime.storageManager.synced();
@@ -553,10 +690,14 @@ export async function saveRegistration(
   let conflicted = false;
   let claimedBy: string | undefined;
   let claimsFull = false;
+  let overLive: number | undefined;
+  let overLifetime: number | undefined;
   const result = await runtime.editWithRetry((tx) => {
     conflicted = false;
     claimedBy = undefined;
     claimsFull = false;
+    overLive = undefined;
+    overLifetime = undefined;
 
     // EVERY check runs before ANY write. `editWithRetry` commits whatever the
     // closure did to the transaction, so a write followed by an early return
@@ -598,9 +739,49 @@ export async function saveRegistration(
         return;
       }
     }
+    // Live now, or being made live by this write.
+    const live = registration.enabled && registration.revoked === undefined;
+
+    // Creating a channel id that has never existed. The lifetime meter counts
+    // these, so a re-mint or a rotate of an existing id is free.
+    const creating = current === undefined;
+
+    if (limits !== undefined && ownerIndex !== undefined) {
+      // The owner index holds LIVE ids only, so its length IS the live count —
+      // no per-id resolve, and no window between counting and committing.
+      const ownedLive = (ownerIndex.withTx(tx).get() as string[] | undefined) ??
+        [];
+      if (
+        limits.live !== undefined && live &&
+        !ownedLive.includes(registration.id) &&
+        ownedLive.length >= limits.live
+      ) {
+        overLive = ownedLive.length;
+        return;
+      }
+      if (limits.lifetime !== undefined && creating && lifetimeCell) {
+        const ever = (lifetimeCell.withTx(tx).get() as number | undefined) ?? 0;
+        if (ever >= limits.lifetime) {
+          overLifetime = ever;
+          return;
+        }
+      }
+    }
+
     if (pendingClaim !== undefined && claimsCell !== undefined) {
       claimsCell.withTx(tx).set(pendingClaim);
     }
+
+    if (creating && lifetimeCell !== undefined) {
+      const ever = (lifetimeCell.withTx(tx).get() as number | undefined) ?? 0;
+      lifetimeCell.withTx(tx).set(ever + 1);
+    }
+
+    // Register the month shard in the directory the sweep enumerates. A shard
+    // that exists but is not listed is a set of channels no audit can see.
+    const boundList = shardList.withTx(tx);
+    const months = (boundList.get() as string[] | undefined) ?? [];
+    if (!months.includes(month)) boundList.set([...months, month]);
 
     // The owner and space indexes track what is LIVE; the global index is the
     // permanent audit inventory. Revoking therefore removes the id from the
@@ -611,7 +792,6 @@ export async function saveRegistration(
     // serially — each entry costing a global `synced()` barrier — while the
     // live-channel cap never engages, leaving "revoke some before minting
     // more" a remedy that frees nothing.
-    const live = registration.enabled && registration.revoked === undefined;
     for (const index of indexes) {
       const boundIndex = index.withTx(tx);
       const ids = (boundIndex.get() as string[] | undefined) ?? [];
@@ -631,6 +811,10 @@ export async function saveRegistration(
   }
   if (claimedBy !== undefined) throw new RequestAlreadyClaimedError(claimedBy);
   if (claimsFull) throw new ClaimStoreFullError();
+  if (overLive !== undefined) throw new LiveChannelCapError(overLive);
+  if (overLifetime !== undefined) {
+    throw new LifetimeChannelCapError(overLifetime);
+  }
   if (conflicted) throw new RegistrationConflictError();
 }
 

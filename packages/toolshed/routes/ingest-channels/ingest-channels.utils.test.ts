@@ -20,6 +20,8 @@ import {
 } from "./ingest-channels.utils.ts";
 import {
   channelId,
+  getLifetimeChannelCount,
+  getOwnerRegistrationIndex,
   getRegistration,
   getRegistrationIndex,
   processIngest,
@@ -262,7 +264,10 @@ describe("ingest-channels control plane", () => {
     expect(rot.status).toBe(403);
     expect("token" in rot.body).toBe(false);
 
-    const rev = await processRevoke(deps, mallory.did(), { id });
+    const rev = await processRevoke(deps, mallory.did(), {
+      id,
+      requestId: "rv-1",
+    });
     expect(rev.status).toBe(403);
 
     // Alice's token still works — Mallory changed nothing.
@@ -280,9 +285,11 @@ describe("ingest-channels control plane", () => {
     const first = await mint(alice, "req-u1");
     const unowned = await processRevoke(deps, mallory.did(), {
       id: ok(first).id,
+      requestId: "rv-2",
     });
     const unknown = await processRevoke(deps, mallory.did(), {
       id: "ing_nosuchchannel",
+      requestId: "rv-3",
     });
     expect(unknown.status).toBe(unowned.status);
     expect(unknown.body).toEqual(unowned.body);
@@ -292,7 +299,10 @@ describe("ingest-channels control plane", () => {
     const first = await mint(alice, "req-v1");
     const id = ok(first).id;
 
-    const revoked = await processRevoke(deps, alice.did(), { id });
+    const revoked = await processRevoke(deps, alice.did(), {
+      id,
+      requestId: "rv-4",
+    });
     expect(revoked.status).toBe(200);
 
     const after = await processIngest(
@@ -368,7 +378,10 @@ describe("ingest-channels control plane", () => {
   it("re-minting a revoked channel yields a token that actually works", async () => {
     const first = await mint(alice, "req-rm1");
     const id = ok(first).id;
-    expect((await processRevoke(deps, alice.did(), { id })).status).toBe(200);
+    expect(
+      (await processRevoke(deps, alice.did(), { id, requestId: "rv-5" }))
+        .status,
+    ).toBe(200);
 
     const reminted = await mint(alice, "req-rm2");
     expect(reminted.status).toBe(200);
@@ -473,7 +486,10 @@ describe("ingest-channels control plane", () => {
     });
     const id = ok(first).id;
 
-    expect((await processRevoke(deps, mallory.did(), { id })).status).toBe(200);
+    expect(
+      (await processRevoke(deps, mallory.did(), { id, requestId: "rv-6" }))
+        .status,
+    ).toBe(200);
 
     const taken = await processMint(deps, mallory.did(), {
       space: shared,
@@ -507,18 +523,72 @@ describe("ingest-channels control plane", () => {
   it("keeps the revocation history across repeated revoke/mint cycles", async () => {
     const first = await mint(alice, "req-h1");
     const id = ok(first).id;
-    await processRevoke(deps, alice.did(), { id });
+    await processRevoke(deps, alice.did(), { id, requestId: "rv-7" });
     await mint(alice, "req-h2");
-    await processRevoke(deps, alice.did(), { id });
+    await processRevoke(deps, alice.did(), { id, requestId: "rv-8" });
     await mint(alice, "req-h3");
 
     const stored = await getRegistration(runtime, operator.did(), id);
     expect(stored?.revocations?.length).toBe(2);
   });
 
+  // A revoke request is a durable weapon unless its request id is spent. The
+  // signed body names only the channel, so a captured revoke stays replayable
+  // for its whole proof window — long enough for the owner to notice the
+  // outage, re-pair the device, and have the replay kill the NEW credential.
+  //
+  // The no-op leg is the load-bearing one: if a replay against an
+  // already-revoked channel returns 200 without spending the id, the attacker
+  // just waits for the re-mint and fires the same request again.
+  it("refuses a captured revoke replayed after the channel is re-minted", async () => {
+    const first = await mint(alice, "req-w1a");
+    const id = ok(first).id;
+    const captured = "rv-captured";
+
+    expect(
+      (await processRevoke(deps, alice.did(), { id, requestId: captured }))
+        .status,
+    ).toBe(200);
+
+    // Replayed while still revoked: refused, not a silent 200.
+    const early = await processRevoke(deps, alice.did(), {
+      id,
+      requestId: captured,
+    });
+    expect(early.status).toBe(409);
+
+    // Alice re-pairs the device.
+    const second = await mint(alice, "req-w1b");
+    expect(second.status).toBe(200);
+
+    // The captured request fired at the fresh credential.
+    const replay = await processRevoke(deps, alice.did(), {
+      id,
+      requestId: captured,
+    });
+    expect(replay.status).toBe(409);
+
+    // The re-minted token still ingests: the replay changed nothing.
+    const stored = await getRegistration(runtime, operator.did(), id);
+    expect(stored?.revoked).toBeUndefined();
+    expect(stored?.enabled).toBe(true);
+    expect(
+      (await processIngest(
+        runtime,
+        operator.did(),
+        id,
+        ok(second).token,
+        JSON.stringify({ partition: "2026-08-04", records: [{ x: 1 }] }),
+      )).status,
+    ).toBe(200);
+  });
+
   it("exposes the revocation history to the owner via list", async () => {
     const first = await mint(alice, "req-x1");
-    await processRevoke(deps, alice.did(), { id: ok(first).id });
+    await processRevoke(deps, alice.did(), {
+      id: ok(first).id,
+      requestId: "rv-9",
+    });
     await mint(alice, "req-x2");
 
     const listed = await processList(deps, alice.did(), {});
@@ -664,7 +734,7 @@ describe("ingest-channels control plane", () => {
       const id = ok(first).id;
       const res = await withFault(
         "cf:ingest:by-owner:",
-        (d) => processRevoke(d, alice.did(), { id }),
+        (d) => processRevoke(d, alice.did(), { id, requestId: "rv-10" }),
       );
       expect(res.status).toBe(502);
     });
@@ -692,7 +762,10 @@ describe("ingest-channels control plane", () => {
         })).status,
       ).toBe(502);
       expect(
-        (await processRevoke(brokenDeps(), alice.did(), { id: WELL_FORMED_ID }))
+        (await processRevoke(brokenDeps(), alice.did(), {
+          id: WELL_FORMED_ID,
+          requestId: "rv-11",
+        }))
           .status,
       ).toBe(502);
     });
@@ -747,7 +820,12 @@ describe("ingest-channels control plane", () => {
 
     // The cap counts LIVE channels, so the remedy it prescribes has to work.
     const first = channelId(space, "phone-1");
-    expect((await processRevoke(capped, alice.did(), { id: first })).status)
+    expect(
+      (await processRevoke(capped, alice.did(), {
+        id: first,
+        requestId: "rv-12",
+      })).status,
+    )
       .toBe(200);
     expect(
       (await processMint(capped, alice.did(), {
@@ -756,6 +834,110 @@ describe("ingest-channels control plane", () => {
         requestId: "req-c3",
       })).status,
     ).toBe(200);
+  });
+
+  // The cap used to be counted before the write, from a separate read. Every
+  // request in a burst then read the same under-cap number and every one of
+  // them committed, so the limit was exceeded by the width of the burst — the
+  // easiest bound in the system to walk straight through. The count now comes
+  // off the owner index inside the transaction that updates it.
+  it("holds the live cap against a burst of concurrent mints", async () => {
+    const capped = { ...deps, maxChannelsPerOwner: 2 };
+    const results = await Promise.all(
+      ["a", "b", "c", "d", "e"].map((n) =>
+        processMint(capped, alice.did(), {
+          space,
+          installId: `phone-${n}`,
+          requestId: `req-burst-${n}`,
+        })
+      ),
+    );
+    expect(results.filter((r) => r.status === 200).length).toBe(2);
+    // Every refusal is the cap, not a crash or a lost precondition.
+    for (const r of results.filter((r) => r.status !== 200)) {
+      expect(r.status).toBe(409);
+    }
+    const owned = await getOwnerRegistrationIndex(
+      runtime,
+      operator.did(),
+      alice.did(),
+    );
+    expect(owned.length).toBe(2);
+  });
+
+  // Revoking frees a live slot but frees no storage: the registration cell and
+  // the audit entry are kept on purpose. Without a lifetime bound, mint/revoke
+  // in a loop is one authenticated user growing deployment-wide state forever.
+  it("bounds how many channels one owner can ever create", async () => {
+    const capped = {
+      ...deps,
+      maxChannelsPerOwner: 1,
+      maxLifetimeChannelsPerOwner: 2,
+    };
+    for (const n of ["a", "b"]) {
+      expect(
+        (await processMint(capped, alice.did(), {
+          space,
+          installId: `life-${n}`,
+          requestId: `req-life-${n}`,
+        })).status,
+      ).toBe(200);
+      expect(
+        (await processRevoke(capped, alice.did(), {
+          id: channelId(space, `life-${n}`),
+          requestId: `rv-life-${n}`,
+        })).status,
+      ).toBe(200);
+    }
+
+    // No live channels at all now, so the live cap is wide open — and it still
+    // refuses, because the thing being bounded is not liveness.
+    const third = await processMint(capped, alice.did(), {
+      space,
+      installId: "life-c",
+      requestId: "req-life-c",
+    });
+    expect(third.status).toBe(409);
+    expect(err(third)).toContain("lifetime limit");
+    expect(err(third)).not.toContain("Revoke some");
+
+    // Re-minting an ALREADY created channel is free: the meter counts distinct
+    // channels, not writes, or re-pairing a device would burn the allowance.
+    expect(
+      (await processMint(capped, alice.did(), {
+        space,
+        installId: "life-a",
+        requestId: "req-life-a2",
+      })).status,
+    ).toBe(200);
+    expect(
+      await getLifetimeChannelCount(runtime, operator.did(), alice.did()),
+    ).toBe(2);
+  });
+
+  // The audit inventory is the one index that is never pruned, so it is the one
+  // that must not be a single array. Sharding is only correct if a sweep still
+  // sees everything through the one function that enumerates it.
+  it("enumerates revoked channels through the sharded audit index", async () => {
+    const first = await mint(alice, "req-au1");
+    const id = ok(first).id;
+    await processRevoke(deps, alice.did(), { id, requestId: "rv-au1" });
+    const second = await processMint(deps, alice.did(), {
+      space,
+      installId: "audit-2",
+      requestId: "req-au2",
+    });
+
+    const all = await getRegistrationIndex(runtime, operator.did());
+    // Revoked, therefore gone from the owner index — and still in the audit.
+    expect(all).toContain(id);
+    expect(all).toContain(ok(second).id);
+    expect(
+      await getOwnerRegistrationIndex(runtime, operator.did(), alice.did()),
+    )
+      .not.toContain(id);
+    // No duplicates: a re-mint must not append a second entry.
+    expect(new Set(all).size).toBe(all.length);
   });
 
   it("list skips an index entry whose registration now belongs to someone else", async () => {
@@ -767,7 +949,7 @@ describe("ingest-channels control plane", () => {
     });
     const id = ok(minted).id;
     // Mallory takes it over after a revoke, so alice's index keeps a stale id.
-    await processRevoke(deps, alice.did(), { id });
+    await processRevoke(deps, alice.did(), { id, requestId: "rv-13" });
     await processMint(deps, mallory.did(), {
       space: shared,
       installId: "phone-1",
@@ -786,7 +968,7 @@ describe("ingest-channels control plane", () => {
   it("drops a revoked channel from the list but keeps it in the audit index", async () => {
     const first = await mint(alice, "req-lr1");
     const id = ok(first).id;
-    await processRevoke(deps, alice.did(), { id });
+    await processRevoke(deps, alice.did(), { id, requestId: "rv-14" });
 
     expect(ok(await processList(deps, alice.did(), {})).channels.length).toBe(
       0,
@@ -807,7 +989,10 @@ describe("ingest-channels control plane", () => {
       requestId: "req-cap1",
     });
     expect(first.status).toBe(200);
-    await processRevoke(capped, alice.did(), { id: ok(first).id });
+    await processRevoke(capped, alice.did(), {
+      id: ok(first).id,
+      requestId: "rv-15",
+    });
 
     // One live channel again...
     expect(
@@ -852,7 +1037,10 @@ describe("ingest-channels control plane", () => {
       expect(bobsScoped.channels.map((c) => c.id)).toEqual([id]);
       expect(bobsScoped.channels[0].owner).toBe(alice.did());
 
-      expect((await processRevoke(deps, mallory.did(), { id })).status).toBe(
+      expect(
+        (await processRevoke(deps, mallory.did(), { id, requestId: "rv-16" }))
+          .status,
+      ).toBe(
         200,
       );
       const after = await processIngest(
@@ -914,7 +1102,10 @@ describe("ingest-channels control plane", () => {
       const stale = await getRegistration(runtime, operator.did(), id);
 
       // Something else advances the channel.
-      expect((await processRevoke(deps, alice.did(), { id })).status).toBe(200);
+      expect(
+        (await processRevoke(deps, alice.did(), { id, requestId: "rv-17" }))
+          .status,
+      ).toBe(200);
 
       // A write based on the pre-revoke snapshot must be refused, not applied.
       await expect(
