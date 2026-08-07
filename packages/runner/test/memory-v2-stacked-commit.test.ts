@@ -2230,6 +2230,24 @@ Deno.test("memory v2 stacked commits: a foreign frame shadowed by a parked own w
     await clock.tick(10);
     assertEquals(shadowFloorOf(harness), undefined);
 
+    // A SAME-SEQ re-upsert (a watch-refresh replay; the F1a sealed-echo
+    // shape on a serving loop) carries no novelty either: confirmed
+    // does not move forward, so no shadow may be recorded even with a
+    // pending write standing.
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: 2, value: valueFor("own") }],
+    });
+    await clock.tick(10);
+    assertEquals(shadowFloorOf(harness), undefined);
+
+    // And a seq-0 absent-doc marker (the initial pull's "no confirmed
+    // version") never shadows.
+    harness.pushSync({
+      upserts: [{ id: DOCS.B, seq: 0, value: valueFor("absent") }],
+    });
+    await clock.tick(10);
+    assertEquals(shadowFloorOf(harness), undefined);
+
     // Foreign novelty arrives WITHOUT a covering marker: it integrates
     // into the confirmed mirror but stays invisible under the pending
     // SET — the differential is empty, so nothing notified and no

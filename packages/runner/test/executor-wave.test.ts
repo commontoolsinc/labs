@@ -1881,6 +1881,18 @@ describe("stage D seal-into-wave", () => {
 
   it("stage F+2: two stamped runs with two demanded identities fold into one wave — per-run keys on writes and basis rows (M1 at cardinality 2)", async () => {
     const lease = liveLease();
+
+    // A shared space-scoped doc BOTH runs read, so each run's basis
+    // rows have real content to pin per (action, instance).
+    const seed = runtime.getCell<{ value: number }>(
+      space,
+      "wave-m1-fanout-seed",
+      undefined,
+    );
+    const seedTx = runtime.edit();
+    seed.withTx(seedTx).set({ value: 5 });
+    expect((await seedTx.commit()).error).toBeUndefined();
+
     const wave = newWave({ lease });
     runtime.installSealDestination(wave);
 
@@ -1912,7 +1924,8 @@ describe("stage D seal-into-wave", () => {
         scopeKeyIdentity: identity,
         actionScopeKey: resolveScopeKey("user", identity),
       });
-      cells[index].withTx(tx).set({ value: index + 1 });
+      const base = seed.withTx(tx).get();
+      cells[index].withTx(tx).set({ value: (base?.value ?? 0) + index + 1 });
       const committed = await tx.commit();
       if (committed.error !== undefined) {
         throw new Error(
@@ -1939,14 +1952,17 @@ describe("stage D seal-into-wave", () => {
       ]);
     }
     // ONE wave commit carried both runs; basis rows keyed per
-    // (action, instance) — §3b's overwrite unit at cardinality 2.
+    // (action, instance) — §3b's overwrite unit at cardinality 2. Each
+    // instance's rows carry the run's REAL read of the shared seed.
+    const seedId = seed.getAsNormalizedFullLink().id;
     for (const identity of identities) {
       const basis = selectSchedulerBasisRows(engine, {
         branch: "",
         action: "derive-fanout",
         actionScopeKey: resolveScopeKey("user", identity),
       });
-      expect(Array.isArray(basis)).toBe(true);
+      expect(basis.length).toBeGreaterThanOrEqual(1);
+      expect(basis.some((row) => row.entity === seedId)).toBe(true);
     }
   });
 

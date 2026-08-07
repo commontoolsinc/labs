@@ -87,6 +87,16 @@ describe("sx2 speculation (Phase 2 gates)", () => {
     const space = piece.getCell().getAsNormalizedFullLink()
       .space as MemorySpace;
 
+    // Observe W BEFORE the edit: the edit advances the space head by at
+    // least one, so settled-for-this-edit means W reached past the
+    // pre-edit watermark.
+    const { watermarkCell } = await import(
+      "@commonfabric/runner/executor/watermark"
+    );
+    const watermarkBefore =
+      (watermarkCell(runtime, space).get() as { seq?: number } | undefined)
+        ?.seq ?? 0;
+
     // The ECHO: the authored edit's local render does not gate on the
     // serving round trip. The result sink observes the value through
     // the overlay-reading path as soon as the local run lands.
@@ -99,12 +109,17 @@ describe("sx2 speculation (Phase 2 gates)", () => {
     const echoMs = performance.now() - echoStart;
     assertEquals(latestValue, 7);
 
-    // RETIREMENT: settle via the watermark, then the overlay must
-    // drain — the authoritative values replaced every echo entry
-    // (speculation.md §4; the diagnostic is the client-side witness of
-    // "commits nothing for derivations").
+    // RETIREMENT: settle via the watermark — the target derives from
+    // the OBSERVED watermark before the edit (testing.md §3's settled
+    // is `W >= seq(my last authored commit)`; a literal target a busy
+    // creation window already passed would resolve vacuously), then
+    // the overlay must drain — the authoritative values replaced every
+    // echo entry (speculation.md §4; the diagnostic is the client-side
+    // witness of "commits nothing for derivations").
     await runtime.storageManager.synced();
-    await waitForSettled(runtime, space, 1, { timeoutMs: 30_000 });
+    await waitForSettled(runtime, space, watermarkBefore + 1, {
+      timeoutMs: 30_000,
+    });
     const overlay = runtime.speculationOverlay;
     const drainDeadline = Date.now() + 20_000;
     while (

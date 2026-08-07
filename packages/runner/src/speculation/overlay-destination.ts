@@ -375,7 +375,14 @@ export class SpeculationOverlayDestination
         // CURRENT confirmed seq of a doc is deliberately NOT the floor:
         // the server's own derived write bumps it ABOVE any reachable W
         // on a quiet space (W covers inputs, never the derived commit's
-        // own seq), which would strand the entry forever.
+        // own seq), which would strand the entry forever. The SEAL-TIME
+        // read basis has a milder cousin of the same trap, accepted:
+        // a re-speculation whose run READ a pushed derived value
+        // carries that derived commit's seq in its confirmed basis, so
+        // its floor exceeds every reachable W until the NEXT authored
+        // input — the entry lingers on a then-quiet space (values
+        // converge, rendering stays correct; each new input lifts the
+        // previous generation).
         let floor = entry.confirmedFloor;
         let blocked = false;
         for (const origin of entry.originLocalSeqs) {

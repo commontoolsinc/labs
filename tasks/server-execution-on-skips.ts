@@ -76,17 +76,20 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     {
       file: "integration/sx2-serving-loop.test.ts",
       phase: "phase-2-followup",
-      reason: "deterministic reproducer of the ESCALATED demand-cycle " +
-        "starvation fork: the SpaceServer's cycle runs " +
-        "#loadDemandedStructure BEFORE the settle race with no " +
-        "deadline, and the never-loadable piece-registry root (the " +
-        "structureLoadDeferred churn) is re-attempted every cycle " +
-        "since the ensure-retry fix — post-activation input sits " +
-        "unconsumed while cycles crawl (ledger: the Phase-2 PR's " +
-        "Flags; store evidence: authored seqs land, zero derived " +
-        "commits follow, wavesBudgetExhausted stays 0). The " +
+      reason: "reproducer of the ESCALATED demand-cycle starvation " +
+        "fork: the SpaceServer's cycle runs #loadDemandedStructure " +
+        "BEFORE the settle race with no deadline, and never-loadable " +
+        "demanded roots are re-attempted every cycle since the " +
+        "ensure-retry fix, throttling input consumption. The RULED " +
+        "id-class exclusion (2026-08-07: computed:/cid:/watermark " +
+        "roots register no piece demand) REDUCED it — post-exclusion " +
+        "the loop consumes input again — but of:-class roots without " +
+        "pattern meta (registry/home/argument docs) still churn per " +
+        "cycle pending the owed terminal-state design " +
+        "(verification-coverage.md §3's demand-cycle row), and under " +
+        "load the gate's settle window sees too few cycles. The " +
         "sx2-speculation gate runs unskipped; this entry lifts with " +
-        "the fork's resolution.",
+        "the terminal-state follow-up.",
     },
   ],
   runner: [],

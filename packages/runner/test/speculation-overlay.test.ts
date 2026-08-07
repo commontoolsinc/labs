@@ -317,7 +317,13 @@ describe("Phase 2 speculation overlay", () => {
     const derived = all.filter((record) => record.class === "derived");
     expect(derived.length).toBeGreaterThanOrEqual(1);
     for (const record of derived) {
-      expect(record.holder).toBeDefined();
+      // testing.md §4's single-deriver envelope, BOTH halves: the
+      // holder IS the lease-holding SpaceServer's service identity
+      // (the DR1 holder is minted from the service DID), and no
+      // client session produced it.
+      expect(String(record.holder).startsWith(serviceSigner.did())).toBe(
+        true,
+      );
       expect(clientSessions.has(record.sessionId)).toBe(false);
     }
     cancelDemand();
@@ -491,9 +497,18 @@ describe("Phase 2 speculation overlay", () => {
     const tx = clientRuntime.edit();
     argument.withTx(tx).set({ url: "https://phase-2.test/never" });
     expect((await tx.commit()).error).toBeUndefined();
+    const cancelDemand = result.sink(() => {});
     await clientRuntime.idle();
     // Give any (wrong) floating egress every chance to fire.
     await new Promise((resolve) => setTimeout(resolve, 250));
     expect(calls).toEqual([]);
+    // And the branch RENDERS PENDING (speculation.md §2: on a memo
+    // miss the node reads as pending — the ordinary loading state —
+    // until the server's result arrives).
+    const rendered = result.key("fetch").get() as
+      | { pending?: boolean; result?: unknown }
+      | undefined;
+    expect(rendered?.result).toBeUndefined();
+    cancelDemand();
   });
 });

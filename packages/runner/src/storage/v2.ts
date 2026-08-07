@@ -2655,7 +2655,14 @@ class SpaceReplica implements ISpaceReplica {
         .filter((parked) => parked <= this.#caughtUpLocalSeq)
         .sort((left, right) => left - right);
       for (const parked of due) {
-        const entry = this.#parkedAccepts.get(parked)!;
+        // Re-entrancy guard (Phase 2): confirmPending's flag-ON
+        // shadow-flip notification runs subscriber callbacks
+        // synchronously, and a callback that re-enters the replica
+        // (reset, applyParkedAcceptsNow via a closing watch view) can
+        // consume parked entries out from under this loop — so the
+        // lookup tolerates an entry another frame already applied.
+        const entry = this.#parkedAccepts.get(parked);
+        if (entry === undefined) continue;
         this.#parkedAccepts.delete(parked);
         this.confirmPending(parked, entry.operations, entry.applied);
       }
@@ -4254,6 +4261,7 @@ class SpaceReplica implements ISpaceReplica {
       if (upsert.seq < record.confirmed.seq) {
         continue;
       }
+      const previousConfirmedSeq = record.confirmed.seq;
       record.confirmed = confirmedVersion(
         upsert.seq,
         upsert.deleted === true ? undefined : upsert.doc,
@@ -4266,16 +4274,23 @@ class SpaceReplica implements ISpaceReplica {
       // invisible through the materialized view — and the change
       // notification below misses it — until the pending entry promotes
       // or drops. Record the seq so the serving loop's W advance
-      // excludes it (`unappliedForeignSeqFloor`). Two exemptions:
-      // an OWN ECHO — an upsert whose seq IS one of the pending
-      // accepts' ack seqs is the durable copy of the own write itself
-      // (CT-1927's mixed-provenance frame), not foreign novelty — and
-      // a seq-0 ABSENT-DOC marker (the initial watch pull's "no
-      // confirmed version" answer), which carries no novelty at all.
-      // Shadowing either would clamp W forever on a quiet serving
-      // loop.
+      // excludes it (`unappliedForeignSeqFloor`). Three exemptions,
+      // each a non-novelty shape that would otherwise clamp W forever
+      // (or one wave behind) on a serving loop:
+      // - GENUINE NOVELTY ONLY — the upsert must move confirmed
+      //   FORWARD past what was already visible
+      //   (`upsert.seq > previousConfirmedSeq`): a same-seq re-upsert
+      //   (a watch-refresh replay, or the frame echo of a SEALED
+      //   commit that F1a already confirmed at verdict time) carries
+      //   nothing the replica has not integrated;
+      // - an OWN ECHO — an upsert whose seq IS one of the pending
+      //   accepts' ack seqs is the durable copy of the own write
+      //   itself (CT-1927's mixed-provenance frame);
+      // - a seq-0 ABSENT-DOC marker (the initial watch pull's "no
+      //   confirmed version" answer), which carries no novelty at all.
       if (
         upsert.seq > 0 &&
+        upsert.seq > previousConfirmedSeq &&
         record.pending.length > 0 &&
         !record.pending.some((entry) =>
           this.#ackedSeqsByLocalSeq.get(entry.localSeq) === upsert.seq

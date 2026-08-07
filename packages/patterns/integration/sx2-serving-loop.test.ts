@@ -32,7 +32,10 @@ import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { waitForSettled } from "@commonfabric/runner/executor/watermark";
+import {
+  waitForSettled,
+  watermarkCell,
+} from "@commonfabric/runner/executor/watermark";
 import type { MemorySpace } from "@commonfabric/runner";
 import {
   initializePiecesController,
@@ -138,6 +141,10 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
     const space = piece.getCell().getAsNormalizedFullLink()
       .space as MemorySpace;
 
+    const watermarkBefore =
+      (watermarkCell(runtime, space).get() as { seq?: number } | undefined)
+        ?.seq ?? 0;
+
     // Three authored inputs — the steady-state interaction window the
     // §4 budget is measured over. Written as DIRECT cell writes (the
     // UI-binding shape — an ordinary authored commit to the value
@@ -157,14 +164,21 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
     }
     await runtime.storageManager.synced();
 
-    // Settle via the WATERMARK, never text-polling: W must cover the
-    // authored inputs (each advanced the space head by at least one).
-    // waitForSettled subscribes the watermark doc — the same replicated
-    // signal sync indicators read.
-    const settledSeq = await waitForSettled(runtime, space, 3, {
-      timeoutMs: 30_000,
-    });
-    assert(settledSeq >= 3, `W=${settledSeq} must cover the inputs`);
+    // Settle via the WATERMARK, never text-polling: the target derives
+    // from the OBSERVED pre-write watermark (a literal target the
+    // creation window already passed would resolve vacuously) — the
+    // three authored inputs each advanced the space head by at least
+    // one, so W must reach past watermarkBefore + 3.
+    const settledSeq = await waitForSettled(
+      runtime,
+      space,
+      watermarkBefore + 3,
+      { timeoutMs: 30_000 },
+    );
+    assert(
+      settledSeq >= watermarkBefore + 3,
+      `W=${settledSeq} must cover the inputs past ${watermarkBefore}`,
+    );
 
     // The value is authoritative AFTER settle (one-shot assertion — the
     // watermark answered "when", this answers "what").
@@ -219,6 +233,9 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
     const runtime = cc.manager().runtime;
     const space = piece.getCell().getAsNormalizedFullLink()
       .space as MemorySpace;
+    const watermarkBefore =
+      (watermarkCell(runtime, space).get() as { seq?: number } | undefined)
+        ?.seq ?? 0;
     {
       const resultCell = cc.manager().getResult(piece.getCell());
       const tx = runtime.edit();
@@ -229,10 +246,13 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
       }
     }
     await runtime.storageManager.synced();
-    const settledSeq = await waitForSettled(runtime, space, 4, {
-      timeoutMs: 30_000,
-    });
-    assert(settledSeq >= 4);
+    const settledSeq = await waitForSettled(
+      runtime,
+      space,
+      watermarkBefore + 1,
+      { timeoutMs: 30_000 },
+    );
+    assert(settledSeq >= watermarkBefore + 1);
     assertEquals(latestValue, 41);
     const after = await fetchServingLoopStats();
     assert(after !== undefined);

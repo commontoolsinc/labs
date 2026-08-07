@@ -25,6 +25,7 @@ import {
   insertExecutionOutboxRows,
   selectPendingExecutionOutboxRows,
 } from "@commonfabric/memory/v2/execution-outbox";
+import { liveExecutionLeaseHolder } from "@commonfabric/memory/v2/execution-lease";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -172,6 +173,48 @@ describe("stage G SpaceServer recovery seams", () => {
       `the ${probeName} wave to commit`,
     );
   };
+
+  it("refuses to activate on a runtime without servingPosture: the Phase-2 speculation default would divert factory-time loads (serving-loop.md §3)", async () => {
+    const stats = emptyServingLoopStats();
+    const rejecting = new SpaceServer({
+      space,
+      server,
+      engine,
+      serviceIdentity: serviceSigner.did(),
+      createRuntime: () => {
+        const manager = SharedServerStorageManager.connectTo(server, {
+          as: serviceSigner,
+        });
+        // Deliberately NOT servingPosture: under the flag this runtime's
+        // default seal destination is the client speculation overlay,
+        // and its factory-time structure loads would divert instead of
+        // committing through the loopback plane — the loud refusal is
+        // the guard.
+        const runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager: manager,
+          experimental: { serverExecution: true },
+        });
+        return Promise.resolve({
+          runtime,
+          dispose: async () => {
+            await runtime.dispose();
+            await manager.close();
+          },
+        });
+      },
+      localSeqRef: { value: 0 },
+      stats,
+      policy: { flushDeadlineMs: 2_000, idleParkMs: 600_000 },
+    });
+    await expect(rejecting.activate()).rejects.toThrow(
+      /servingPosture/,
+    );
+    // The refused activation released the lease (no stranded row).
+    expect(
+      liveExecutionLeaseHolder(engine, space),
+    ).toBeUndefined();
+  });
 
   it("re-sends pending durable append rows on ACTIVATION (serving-loop.md §6 step 5): park-stranded rows deliver, then retire", async () => {
     // The crash/park window: a wave committed its append rows, the

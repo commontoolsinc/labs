@@ -69,13 +69,14 @@ import {
   type WaveWriteAnnotation,
 } from "./wave.ts";
 import { EngineWaveCommitSink } from "./engine-wave-sink.ts";
-import { readWatermarkSeq, watermarkCell } from "./watermark.ts";
+import { readWatermarkSeq, watermarkDocLink } from "./watermark.ts";
 import type { ServingLoopStats } from "./stats.ts";
 import { type SealedEffectBatch, SpaceOutbox } from "./outbox.ts";
 import { effectCompletionKeyOf } from "./effect-completion.ts";
 import {
   resolveScopeKey,
   type ScopeKeyIdentity,
+  SERVER_EXECUTION_WATERMARK_DOC_ID,
 } from "@commonfabric/memory/v2";
 import type { PostCommitSideEffect } from "../cfc/types.ts";
 
@@ -123,6 +124,19 @@ export type SpaceServerOptions = {
 
 const DEFAULT_FLUSH_DEADLINE_MS = 100;
 const DEFAULT_IDLE_PARK_MS = 30_000;
+
+/** The well-known never-a-piece id classes excluded from piece demand
+ * (RULED 2026-08-07): a `computed:` doc is a derivation result, a
+ * `cid:` doc is a content-addressed bundle, and the watermark doc is
+ * the settledness subscription — none can ever carry `patternIdentity`
+ * meta, so an `ensurePieceRunning` attempt (and its retry churn) is
+ * structurally futile. Remaining `of:` ids are NOT distinguishable by
+ * id class (a not-yet-created piece and a never-a-piece value doc look
+ * alike) — the complete terminal-state design is the owed follow-up. */
+const neverAPieceRootId = (id: string): boolean =>
+  id === SERVER_EXECUTION_WATERMARK_DOC_ID ||
+  id.startsWith("computed:") ||
+  id.startsWith("cid:");
 
 /**
  * One space's serving loop. The SpaceServer IS the seal destination — a
@@ -955,37 +969,58 @@ export class SpaceServer implements TransactionSealDestination {
           });
         }
       }
-      try {
-        const started = await ensurePieceRunning(runtime, {
-          space: this.#options.space,
-          id: root.id as never,
-          scope: root.scope ?? "space",
-          path: [],
-        });
-        if (started) {
-          this.#pendingStructureLoads.delete(key);
-        } else {
-          // A false return is a load that cannot land YET — most often
-          // the creation race, where this cycle ran before the piece's
-          // `patternIdentity` meta applied to the serving replica.
-          // Counted per attempt (§7 structureLoadDeferred) and left
-          // pending: the next input-driven cycle retries.
+      // Id-class exclusion (RULED 2026-08-07): well-known never-a-piece
+      // ids register NO piece demand — no `ensurePieceRunning` attempt,
+      // no retry, no `structureLoadDeferred` increment (the counter
+      // stays meaningful for genuinely not-yet-loadable pieces).
+      // `computed:` docs are derivation results, `cid:` docs are
+      // content-addressed bundles, and the watermark doc is the
+      // settledness subscription every waitForSettled/overlay client
+      // holds — none can ever carry `patternIdentity` meta. The demand
+      // SINK below still registers where applicable: value-granular
+      // pull is not piece demand. The COMPLETE terminal-state design —
+      // terminal-on-loaded-doc-without-pattern-meta with
+      // commit-triggered re-arm — is the named owed follow-up
+      // (verification-coverage.md's owed register): id classes cannot
+      // distinguish a not-yet-created piece from a never-a-piece doc
+      // for the remaining `of:` ids, so the general fix needs the
+      // meta-observing re-arm, not a bigger blocklist.
+      if (neverAPieceRootId(root.id)) {
+        this.#pendingStructureLoads.delete(key);
+        if (!firstDemand) continue;
+      } else {
+        try {
+          const started = await ensurePieceRunning(runtime, {
+            space: this.#options.space,
+            id: root.id as never,
+            scope: root.scope ?? "space",
+            path: [],
+          });
+          if (started) {
+            this.#pendingStructureLoads.delete(key);
+          } else {
+            // A false return is a load that cannot land YET — most
+            // often the creation race, where this cycle ran before the
+            // piece's `patternIdentity` meta applied to the serving
+            // replica. Counted per attempt (§7 structureLoadDeferred)
+            // and left pending: the next input-driven cycle retries.
+            this.#pendingStructureLoads.add(key);
+            this.#options.stats.structureLoadDeferred += 1;
+            logger.debug?.("structure-load-deferred", () => [
+              `demanded root ${root.id} not loadable yet; ` +
+              "retrying next demand cycle",
+            ]);
+          }
+        } catch (error) {
           this.#pendingStructureLoads.add(key);
-          this.#options.stats.structureLoadDeferred += 1;
-          logger.debug?.("structure-load-deferred", () => [
-            `demanded root ${root.id} not loadable yet; ` +
-            "retrying next demand cycle",
+          this.#options.stats.structureLoadFailures += 1;
+          logger.warn("structure-load-failed", () => [
+            `demanded root ${root.id} did not load`,
+            error,
           ]);
         }
-      } catch (error) {
-        this.#pendingStructureLoads.add(key);
-        this.#options.stats.structureLoadFailures += 1;
-        logger.warn("structure-load-failed", () => [
-          `demanded root ${root.id} did not load`,
-          error,
-        ]);
+        if (!firstDemand) continue;
       }
-      if (!firstDemand) continue;
       try {
         // The demand itself: a live reader per demanded root. Without
         // it the materialized graph's computeds stay
@@ -1131,7 +1166,9 @@ export class SpaceServer implements TransactionSealDestination {
       ? this.#watermark
       : Math.max(this.#watermark, inputVisibleHead);
     const shouldAdvance = !exhausted && advanceTo > this.#watermark;
-    if (!exhausted && inputVisibleHead < batchHead) {
+    if (!exhausted && advanceTo < batchHead && advanceTo > this.#watermark) {
+      // Counted only when the clamp CHANGED the advance (a floor below
+      // an advance that would not have happened anyway is not a clamp).
       this.#options.stats.watermarkClamped += 1;
       logger.info?.("watermark-clamped", () => [
         `space ${this.#options.space}: W advance clamped to ` +
@@ -1185,7 +1222,22 @@ export class SpaceServer implements TransactionSealDestination {
         actionId: WATERMARK_ACTION_ID,
         kind: "bookkeeping",
       });
-      watermarkCell(runtime, this.#options.space).withTx(tx).key("seq").set(
+      // BLIND key-path write (RULED 2026-08-07): the cell route's
+      // read-before-write synced the watermark doc over the loopback
+      // SESSION plane under the service principal — DENIED on
+      // owner-only-ACL spaces (a harmless but noisy AuthorizationError
+      // per run). The loop's own bookkeeping write needs no
+      // session-plane read: it stays a key-path write inside the wave
+      // transaction (protocol.md §4's same-transaction invariant and
+      // §3d's bookkeeping REBASE arm both keyed off the path shape,
+      // unchanged), consistent with watermark.ts's engine-direct READ
+      // posture — clients keep reading the doc through their ordinary
+      // subscription.
+      tx.writeValueOrThrow(
+        {
+          ...watermarkDocLink(this.#options.space),
+          path: ["seq"],
+        },
         advanceTo,
       );
       const committed = await tx.commit();

@@ -42,6 +42,7 @@ import {
   readWatermarkSeq,
   waitForSettled,
   watermarkCell,
+  watermarkDocLink,
 } from "../src/executor/watermark.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { getArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
@@ -539,6 +540,65 @@ describe("stage F serving loop", () => {
     // distinct).
     const stats = host.stats();
     expect(stats.structureLoadDeferred).toBeGreaterThanOrEqual(1);
+    expect(stats.structureLoadFailures).toBe(0);
+  });
+
+  it("registers NO piece demand for never-a-piece id classes: computed:/watermark roots neither retry nor count as deferred (RULED 2026-08-07)", async () => {
+    host = newHost({ flushDeadlineMs: 2_000, idleParkMs: 600_000 });
+    onServingRuntime = () => Promise.resolve();
+    openClient();
+    const engine = await server.engineForSpace(space);
+
+    // The client demands ONLY never-a-piece roots: the watermark doc
+    // (every settledness subscription's watch) and a `computed:` doc.
+    // Neither can ever carry `patternIdentity` meta, so a piece-demand
+    // attempt on them is structurally futile churn — the ruled
+    // exclusion. The demand SINKs still register (value-granular pull
+    // is not piece demand).
+    const wmCell = clientRuntime.getCellFromLink<{ seq?: number }>(
+      watermarkDocLink(space),
+    );
+    await wmCell.sync();
+    const computedProbe = clientRuntime.getCellFromLink<unknown>({
+      space,
+      id: "computed:fid1:r2-exclusion-probe" as never,
+      path: [],
+    });
+    await computedProbe.sync();
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "session-open activation",
+    );
+
+    // Drive several demand cycles with UNWATCHED authored input: an
+    // address-level blind write mints no watch root (the cell route
+    // registers a watch), so the demanded-root set stays exactly the
+    // two never-a-piece ids.
+    for (const n of [1, 2, 3]) {
+      const tx = clientRuntime.edit();
+      tx.writeValueOrThrow(
+        {
+          space,
+          id: "of:r2-exclusion-kick" as never,
+          scope: "space",
+          path: ["n"],
+        },
+        n,
+      );
+      expect((await tx.commit()).error).toBeUndefined();
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= 1,
+      "the loop to cycle over the input",
+      15_000,
+    );
+
+    // The ruled counter behavior: excluded roots produce ZERO deferral
+    // churn (the counter stays meaningful for genuinely
+    // not-yet-loadable pieces) and no failures.
+    const stats = host.stats();
+    expect(stats.structureLoadDeferred).toBe(0);
     expect(stats.structureLoadFailures).toBe(0);
   });
 

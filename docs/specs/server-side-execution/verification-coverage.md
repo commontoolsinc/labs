@@ -539,14 +539,20 @@ client does not; this PR):
   shadow + flip notification; flag-OFF silent-flip byte-identity;
   own-echo exemption). The stage-F residual comment at `inputSynced`
   is rewritten to the resolved posture.
-- The Phase-2 revisit (b) — the pattern-updater CHECK half:
-  machinery-covered in the `sx2-serving-loop` integration surface
-  (`packages/patterns/integration/sx2-serving-loop.test.ts`): the
+- The Phase-2 revisit (b) — the pattern-updater CHECK half: the
+  `sx2-serving-loop` integration surface is AUTHORED
+  (`packages/patterns/integration/sx2-serving-loop.test.ts`) and the
+  machinery observation was made in the live bring-up runs (the
   serving loop settles to watermark-covered quiescence with
   `systemPatternAutoUpdate` flipped ON server-side against toolshed's
   real routes — the environment the stage-F unit fixture could not
-  provide. A full stale-pointer roll-forward journey remains the
-  named follow-up.
+  provide). Stated honestly: that surface is currently SKIP-LISTED in
+  the ON arm (it deterministically reproduces the demand-cycle
+  starvation fork — the owed row below), so its gates are witnessed
+  by the live bring-up evidence and the serving-loop unit suite, not
+  yet by CI; the row un-skips with the terminal-state follow-up. A
+  full stale-pointer roll-forward journey remains the named
+  follow-up.
 - M1's Phase-2 seam — per-run demanded identities: the demand
   carriage (watchedRootsForSpace per-instance entries + the
   SpaceServer's demanded-identity registry), the widened
@@ -563,9 +569,13 @@ client does not; this PR):
   read-set/dirtiness state) and the replica-level per-instance read
   keying — is the owed scheduler-instance-dimension follow-up,
   reported to the plan as a proposed train cut (OW17 below).
-- The ON-arm skip list is EMPTY: Phase 2 retired the two-browsers
-  entry (its named unskipping condition — the client
-  derivation-commit path removed — is this PR).
+- The ON-arm skip list: Phase 2 RETIRED the two-browsers entry (its
+  named unskipping condition — the client derivation-commit path
+  removed — is this PR; that gate now runs and passes ON) and ADDED
+  one entry, `sx2-serving-loop`, under `phase-2-followup` — the
+  demand-cycle starvation fork's reproducer (the owed row below
+  carries the durable record; the skip reason carries the mechanism
+  and the ruled id-class exclusion that reduced it).
 - testing §4's single-deriver envelope gate: impl-covered — the
   store-attribution query pinned in `speculation-overlay.test.ts`
   (every derived commit's holder is the service identity; none from a
@@ -585,10 +595,14 @@ client does not; this PR):
   §4's fresh-demand-after-W allowance modeled explicitly), undemanded
   instances never holding it back.
 - OW4 — LANDED as trace T15 (scenario-traces §3/§4, count 14 → 15)
-  plus the impl witnesses (`speculation-overlay.test.ts`,
-  `sx2-speculation.test.ts`): unreplicated-doc reads pending,
-  input-origin retirement (acked AND W ≥ seq), overlay never
-  serialized to any server.
+  plus impl witnesses, scoped precisely: input-origin RETIREMENT
+  (acked AND W ≥ seq — the retire-after-coverage half) and
+  never-serialized are pinned in `speculation-overlay.test.ts` /
+  `sx2-speculation.test.ts`; unreplicated-doc-reads-pending and the
+  KEEP half of §4 step 3 (an unacked origin holds the echo) are
+  covered by T15's cited answers and speculation §2's normative text,
+  with direct pins owed alongside the Phase-3 offline machinery
+  (which builds the origin-queue fixtures they need).
 - OW12 — LANDED: the discovered-narrowing eager via-user hop now has
   its direct test (`packages/runner/test/eager-via-user-hop.test.ts`,
   the OW12 case — a compiled pattern whose run READS a `PerSession`
@@ -728,8 +742,8 @@ pre-flight):**
   the stage-G review batch); the stamping/classing itself is
   Phase-3 events territory. Trigger: Phase 3's pre-flight.
 
-**Phase 2 follow-up (reported to the plan as a proposed train cut —
-the coordinator owns PR structure):**
+**Phase 2 follow-up (APPROVED as its own follow-on stage — owner
+nod, 2026-08-07; recorded in the plan's stage list):**
 
 - OW17 — the scheduler instance dimension: per-(action × instance)
   read-set/dirtiness state, the N-run settle loop over demanded
@@ -740,8 +754,25 @@ the coordinator owns PR structure):**
   cardinality-1 collapse the sink-level fold test documents). Until
   it lands, a scoped node's runs resolve via the wave-level identity
   (the Phase-1 fallback) unless a caller supplies per-run identities
-  through the seam. Trigger: the next Phase-2-arc PR; no later than
-  Phase 3's events (handler runs already carry per-run actors).
+  through the seam. Trigger: the approved follow-on stage (the plan's
+  Phase 2 tail); no later than Phase 3's events (handler runs
+  already carry per-run actors).
+- OW19 — the demand-cycle terminal state (RULED direction,
+  2026-08-07; the durable record for the starvation fork the
+  `sx2-serving-loop` skip reproduces): the COMPLETE design is
+  terminal-on-loaded-doc-without-pattern-meta with COMMIT-TRIGGERED
+  re-arm — a loaded doc whose meta is absent stops retrying until a
+  commit touches it — plus moving the demanded-structure load pass
+  under the wave's flush deadline (today it runs before the settle
+  race, unbounded, so a slow ensure throttles input consumption).
+  The ruled id-class exclusion (computed:/cid:/watermark — landed
+  with Phase 2, counter-exempt) removed the structurally-futile
+  classes; the conflation hazard that makes the rest non-trivial:
+  a not-yet-created piece and a never-a-piece `of:` value doc are
+  indistinguishable by id, so a terminal state without the
+  commit-triggered re-arm would break the creation race the
+  ensure-retry fix exists for. Trigger: the Phase-2 follow-on PR
+  (with OW17 or before it); the skip-list entry lifts with it.
 
 - OW18 — the ensurer move (owner direction, 2026-08-07; recorded with
   the scheduler-tell batch, NOT implemented by it):

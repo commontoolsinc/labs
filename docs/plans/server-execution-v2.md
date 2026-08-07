@@ -453,12 +453,33 @@ W):
       network source-check the unit fixture cannot serve — the
       stage-F flagged residual in `executor-serving-loop.test.ts`):
       verify it in the integration environment's `sx2-serving-loop`
-      surface, not a unit fixture. MACHINERY-VERIFIED 2026-08-07 in
-      `packages/patterns/integration/sx2-serving-loop.test.ts` (the
-      serving loop reaches watermark-covered quiescence with the
-      server-side updater posture live against toolshed's real
-      routes); a full stale-pointer roll-forward journey stays the
-      named follow-up.
+      surface, not a unit fixture. The surface is AUTHORED
+      (`packages/patterns/integration/sx2-serving-loop.test.ts`) and
+      the machinery observation was made in the live bring-up runs
+      (quiescence with the server-side updater posture against
+      toolshed's real routes); stated honestly, that surface is
+      currently ON-skip-listed as the demand-cycle starvation fork's
+      reproducer (verification-coverage.md OW19 — it un-skips with
+      the terminal-state follow-on below), so CI witness rides the
+      serving-loop unit suite until then. A full stale-pointer
+      roll-forward journey stays the named follow-up.
+
+**Follow-on stage (APPROVED — owner nod, 2026-08-07; its own PR
+after this phase's, the way stage C's train was cut):**
+
+- [ ] **P2-F — the scheduler instance dimension + demand-cycle
+      terminal state**: per-(action × instance) read-set/dirtiness
+      state and the N-run settle loop over demanded identities
+      (consuming the SpaceServer's demanded-identity registry through
+      the widened `#stampRun` seam — verification-coverage.md OW17,
+      approved), the replica-level per-instance READ keying, AND the
+      demand-cycle terminal state with commit-triggered re-arm plus
+      the load pass moved under the flush deadline
+      (verification-coverage.md OW19 — lifts the `sx2-serving-loop`
+      ON-skip). Until it lands, scoped runs resolve via the
+      wave-level identity unless per-run identities arrive through
+      the seam (the Phase-1 fallback, cardinality-2-pinned at the
+      seam level in this phase's PR).
 
 Success criteria (the old Phase-1 ON gates land here, merged):
 
