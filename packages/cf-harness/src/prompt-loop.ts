@@ -2710,6 +2710,7 @@ export class CfHarnessPromptLoop {
       delegateInput.profile,
     );
     const childModel = resolveSubagentModel(options.model, profileConfig);
+    const inheritsParentModel = childModel.source === "parent";
     const maxModelTurns = delegateInput.maxModelTurns ??
       profileConfig.maxModelTurns;
     const parentRunState = this.engine.getRunState();
@@ -2816,19 +2817,19 @@ export class CfHarnessPromptLoop {
       engine: childEngine,
       modelClient: this.modelClient,
       cacheAffinityKey: childRunId,
-      // A positive threshold is calibrated to the parent model's input
-      // budget, so it follows only a child that inherits that model; a
-      // profile-overridden child keeps its own model's derived default (and a
-      // chat-routed override like web_search could not honour it at all).
-      // `0` is model-independent — the off-switch stays run-wide.
+      // Provider controls follow only a child that inherits the parent model.
+      // A profile-overridden child keeps its model's own reasoning/cache
+      // defaults, and a chat-routed override like web_search cannot honour the
+      // parent model's controls at all. `compactThreshold: 0` is the exception:
+      // the model-independent off-switch stays run-wide.
       ...(this.#compactThreshold !== undefined &&
-          (this.#compactThreshold === 0 || childModel.source === "parent")
+          (this.#compactThreshold === 0 || inheritsParentModel)
         ? { compactThreshold: this.#compactThreshold }
         : {}),
-      ...(this.#promptCacheMode !== undefined
+      ...(this.#promptCacheMode !== undefined && inheritsParentModel
         ? { promptCacheMode: this.#promptCacheMode }
         : {}),
-      ...(this.#reasoningEffort !== undefined
+      ...(this.#reasoningEffort !== undefined && inheritsParentModel
         ? { reasoningEffort: this.#reasoningEffort }
         : {}),
       maxModelTurns,
