@@ -103,9 +103,12 @@ describe("stale linked read across two clients", () => {
         cellB1.key("isAdmin").getAsLink(),
       );
       rtA.prepareTxForCommit(tx);
-      const res = await tx.commit();
+      // Verdict-marked, no synced(): the barrier would hold on the parked
+      // accept and force the shared fan-out through, destroying the
+      // controlled staleness this test is built on. The awaited verdict is
+      // durably accepted, which is all the peer's explicit sync/pull needs.
+      const res = await tx.commit({ resolveAt: "verdict" });
       expect(res.error, `seed: ${JSON.stringify(res.error)}`).toBeUndefined();
-      await storageA.synced();
     }
 
     // Client 1 reads the linked value -> { isAdmin: true }
@@ -120,9 +123,8 @@ describe("stale linked read across two clients", () => {
       const tx = rtB.edit();
       cellB2.withTx(tx).key("isAdmin").set(false);
       rtB.prepareTxForCommit(tx);
-      const res = await tx.commit();
+      const res = await tx.commit({ resolveAt: "verdict" });
       expect(res.error, `flip: ${JSON.stringify(res.error)}`).toBeUndefined();
-      await storageB.synced();
     }
 
     // --- Client 1, NOT synced, opens ONE transaction that both READS isAdmin

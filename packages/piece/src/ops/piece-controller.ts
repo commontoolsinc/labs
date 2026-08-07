@@ -62,7 +62,15 @@ interface PieceCellIo {
 
 type PiecePropIoType = "result" | "input";
 
-/** Copy only a materialized value's path spine and replace its leaf. */
+/**
+ * Copy only a materialized value's path spine and replace its leaf.
+ *
+ * TODO(danfuzz): a spine node that is neither an array nor plain-prototyped
+ * — a `FabricInstance`, whose contents live behind its codec — is rebuilt
+ * here as a bare `{}`/`[]` carrying only the addressed child, and everything
+ * else it held is discarded; the result reaches durable writes. (The same
+ * clone selector appears in `replaceMaterializedCellValueAtPath` below.)
+ */
 function replaceMaterializedValueAtPath(
   current: unknown,
   path: readonly (string | number)[],
@@ -1413,6 +1421,9 @@ export function durableSourceContract(
         return;
       }
       seen.add(value);
+      // TODO(danfuzz): a `FabricInstance` passes the `typeof` gate with zero
+      // `Object.keys`, so an alias nested in its codec contents is never
+      // projected and the durable-source contract silently omits it.
       for (const key of Object.keys(value)) {
         const segment = Array.isArray(value) ? Number(key) : key;
         visit(
@@ -1448,6 +1459,10 @@ function suppliedLinks(
   if (value === null || typeof value !== "object" || seen.has(value)) return [];
 
   const prototype = Object.getPrototypeOf(value);
+  // TODO(danfuzz): the prototype gate treats a `FabricInstance` as a leaf,
+  // so a link envelope inside one is never recorded here — it then skips
+  // `assertSuppliedLinkSchemasCompatible` entirely and flows to the durable
+  // write as an unchecked raw envelope.
   if (
     !Array.isArray(value) && prototype !== Object.prototype &&
     prototype !== null
@@ -1547,6 +1562,11 @@ function linkMatchesCommittedState(
     ...basePath,
     ...suppliedLink.path,
   ]);
+  // TODO(danfuzz): `deepEqual` compares class instances by enumerable
+  // own-props, of which a `FabricLink` has none — under the modern cell rep
+  // any two `FabricLink`s compare equal, so a link pointing somewhere else
+  // entirely passes as "restoring committed bytes" and skips the rebuild
+  // rules. Fails open; `valueEqual` is the fabric-aware comparison.
   return deepEqual(committed, suppliedLink.value);
 }
 
@@ -2164,6 +2184,12 @@ export function omitMissingProjectionAliases(
     raw === null || typeof raw !== "object"
   ) return materialized;
 
+  // TODO(danfuzz): the `typeof` gate admits a `FabricSpecialObject` on
+  // either side, and the spread copies zero properties from one — a fabric
+  // `materialized` becomes `{}` in the validation root built for a
+  // non-stream result write that redirects through a terminal, and a fabric
+  // `raw`'s contents are never reconciled. Wants a `FabricSpecialObject`
+  // test returning `materialized` whole.
   const result =
     (Array.isArray(materialized)
       ? materialized.slice()

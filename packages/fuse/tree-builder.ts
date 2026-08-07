@@ -29,6 +29,13 @@ function encodeJsonEntryName(
 
 /**
  * JSON.stringify that replaces circular references with "[Circular]".
+ *
+ * TODO(danfuzz): this is an unsafe use of `stringify()` for fabric values:
+ * the piece prop values this file renders are live in-process cell reads,
+ * and a `FabricSpecialObject` among them (a `FabricBytes`, a `FabricError`)
+ * serializes as `{}` in the mounted `.json` file contents, silently. Wants a
+ * `FabricSpecialObject` arm in the replacer — its codec's encoded form, or
+ * `toCompactDebugString()` from `@commonfabric/data-model/value-debug`.
  */
 export function safeStringify(value: unknown, indent = 2): string {
   const ancestors: object[] = [];
@@ -390,6 +397,13 @@ function buildJsonTreeWithAncestors(
     depth === 0 ? internalRootName : undefined,
   );
 
+  // TODO(danfuzz): the `typeof` gate treats a `FabricSpecialObject` as a
+  // container, so a fabric prop value projects as an empty DIRECTORY (its
+  // `Object.entries` are empty) with a `{}` aggregate sibling — a
+  // `FabricBytes` in a piece result mounts as an empty folder. The async
+  // twin `buildJsonTreeAsync` below shares the shape. Wants a
+  // `FabricSpecialObject` test taking the scalar-entry arm with a rendered
+  // form of the value.
   if (value === null || value === undefined || typeof value !== "object") {
     return addJsonScalarEntry(tree, parentIno, fsName, value, annotation);
   }
