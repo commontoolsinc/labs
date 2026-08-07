@@ -40,5 +40,9 @@ installFakeClock({
     // interval and flush deadline), one level down: the stage-G
     // recovery-seam tests drive a real SpaceServer directly.
     "executor-space-server",
+    // The Phase-2 speculation-overlay journeys run a live ExecutorHost
+    // (the serving side of the client-loses-derivation-commit journey)
+    // under the same wall-clock policies.
+    "speculation-overlay",
   ],
 });

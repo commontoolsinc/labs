@@ -57,6 +57,10 @@ import {
 } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
 import { createSession, Identity } from "@commonfabric/identity";
+import {
+  SpeculationOverlayDestination,
+  stampSpeculationRunContext,
+} from "./speculation/overlay-destination.ts";
 import { Action, Scheduler } from "./scheduler.ts";
 import {
   type CommitBackpressurePolicy,
@@ -369,6 +373,20 @@ export interface RuntimeOptions {
   telemetry?: RuntimeTelemetry;
   /** Optional feature flags for experimental space-model data-layer changes. */
   experimental?: ExperimentalOptions;
+  /**
+   * Server-execution v2 (serving-loop.md §3): mark THIS runtime as the
+   * SERVING posture — the SpaceServer's own runtime, whose seal
+   * destination is the wave machinery installed at activation. A serving
+   * runtime NEVER defaults to the Phase-2 client speculation overlay:
+   * its pre-activation structure loads and factory-time runs must commit
+   * through the loopback plane (the wave destination takes over at
+   * activation, and stage F's unstamped-seal refusal guards the gap).
+   * Every OTHER runtime under the flag — clients, and non-serving
+   * server-side utilities — defaults to the speculation overlay and
+   * thereby loses the derivation-commit path by construction
+   * (speculation.md; the Phase 2 posture). Ignored in the OFF arm.
+   */
+  servingPosture?: boolean;
   /** Rollout mode for commit-boundary CFC enforcement. Defaults to `enforce-explicit`. */
   cfcEnforcementMode?: CfcEnforcementMode;
   /**
@@ -723,6 +741,13 @@ export class Runtime {
   #serverRunStamper:
     | ((tx: IExtendedStorageTransaction, info: ServerRunInfo) => void)
     | undefined;
+  // The client speculation overlay (server-execution v2 Phase 2,
+  // speculation.md): the DEFAULT seal destination of every runtime under
+  // the flag that has no wave destination installed. Created lazily on
+  // the first edit(); derivation-kind runs redirect their writes into
+  // the replica's pending overlay through it — the structural removal of
+  // the client derivation-commit path. Never created in the OFF arm.
+  #speculationOverlay: SpeculationOverlayDestination | undefined;
   // Whether THIS runtime explicitly set the serverExecution flag at
   // construction (the only case its dispose participates in the
   // process-global ambient lifecycle — see the constructor's propagation
@@ -734,6 +759,10 @@ export class Runtime {
   // space's dispose must not un-claim `derived` for every other space's
   // in-flight wave commit (the admission plane reads the ambient value).
   static #liveServerExecutionEnablers = 0;
+  /** Serving posture (RuntimeOptions.servingPosture): true only for the
+   * SpaceServer's own runtime. Gates the Phase-2 speculation-overlay
+   * default (a serving runtime never speculates). */
+  readonly servingPosture: boolean;
   readonly userIdentityDID: DID;
 
   /**
@@ -1082,6 +1111,7 @@ export class Runtime {
       setServerExecutionConfig(this.experimental.serverExecution);
     }
     this.experimental.serverExecution = getServerExecutionConfig();
+    this.servingPosture = options.servingPosture === true;
     // Unlike the flags above, only propagate when EXPLICITLY set: the ambient
     // flag is also a test seam (tests toggle `setEagerSourceAnnotation`
     // directly around runtime construction), and an unconditional
@@ -1492,6 +1522,13 @@ export class Runtime {
     // Stop all running docs
     this.runner.stopAll();
 
+    // The speculation overlay dies with the runtime (speculation.md §1:
+    // process-memory only): withdraw its live entries and release the
+    // watermark sinks BEFORE the storage sessions they read through
+    // close.
+    this.#speculationOverlay?.close();
+    this.#speculationOverlay = undefined;
+
     // Background source checks are deliberately outside the scheduler. Abort
     // and settle them before the storage sessions they may write through close.
     await this.patternUpdater.dispose();
@@ -1645,8 +1682,32 @@ export class Runtime {
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
     wrapped.setCfcModuleDelegations(this.moduleDelegationSnapshot());
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
-    wrapped.configureSealDestination(this.#transactionSealDestination);
+    wrapped.configureSealDestination(
+      this.#transactionSealDestination ?? this.#speculationDestination(),
+    );
     return wrapped;
+  }
+
+  /**
+   * The default seal destination under EXPERIMENTAL_SERVER_EXECUTION
+   * (server-execution v2 Phase 2): a runtime with NO wave destination
+   * installed — every client, and any non-serving server-side runtime —
+   * seals its stamped derivation-kind runs into the speculation overlay
+   * instead of committing them (speculation.md; the by-construction
+   * removal of the client derivation-commit path). OFF arm: undefined —
+   * transactions commit exactly as today.
+   */
+  #speculationDestination(): SpeculationOverlayDestination | undefined {
+    if (this.experimental.serverExecution !== true) return undefined;
+    if (this.servingPosture) return undefined;
+    this.#speculationOverlay ??= new SpeculationOverlayDestination(this);
+    return this.#speculationOverlay;
+  }
+
+  /** DIAGNOSTIC (tests): the lazily-created speculation overlay, if this
+   * runtime has one. */
+  get speculationOverlay(): SpeculationOverlayDestination | undefined {
+    return this.#speculationOverlay;
   }
 
   /**
@@ -1698,19 +1759,31 @@ export class Runtime {
 
   /**
    * Stamp a scheduler-driven run's wave context (serving-loop.md §3d).
-   * A no-op with no destination installed — the OFF arm, and ON-arm
-   * client speculation, pay one undefined check. The scheduler calls
-   * this at exactly its two transaction-minting choke points (the
-   * reactive-action run and the event dispatch), so an installed
-   * destination sees every scheduler run stamped and the seal-time
-   * unstamped refusal is reserved for genuinely undeclared commit
-   * paths.
+   * With a wave destination installed, the stamper (the SpaceServer)
+   * attaches the wave run context. With NONE installed but the flag ON —
+   * client speculation (Phase 2) — the run's kind is recorded on the
+   * SPECULATION stamp instead, so the overlay destination can route
+   * derivation-kind runs into the overlay while handler and bookkeeping
+   * runs keep committing (speculation.md; the wave stamp stays a
+   * server-only signal). The OFF arm pays one undefined check and
+   * stamps nothing. The scheduler calls this at exactly its
+   * transaction-minting choke points, so a destination sees every
+   * scheduler run stamped and the seal-time unstamped refusal is
+   * reserved for genuinely undeclared commit paths.
    */
   stampServerRun(
     tx: IExtendedStorageTransaction,
     info: ServerRunInfo,
   ): void {
-    this.#serverRunStamper?.(tx, info);
+    if (this.#serverRunStamper !== undefined) {
+      this.#serverRunStamper(tx, info);
+      return;
+    }
+    if (
+      this.experimental.serverExecution === true && !this.servingPosture
+    ) {
+      stampSpeculationRunContext(tx, info);
+    }
   }
 
   // (space, scope, id) triples for which a missing-link-target load has been

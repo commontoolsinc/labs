@@ -32,6 +32,10 @@ import type {
   PendingRead,
 } from "@commonfabric/memory/v2";
 import {
+  resetServerExecutionConfig,
+  setServerExecutionConfig,
+} from "@commonfabric/memory/v2";
+import {
   parentPath,
   parsePointer,
   pathsOverlap,
@@ -2168,6 +2172,139 @@ Deno.test("memory v2 stacked commits: whenApplied resolves at the parked accept'
     await barrier;
     assertEquals(applied, true);
     assertEquals(hasPendingOverlay(harness, DOCS.A), false);
+  } finally {
+    await harness.close();
+  }
+});
+
+// ---- The settle input barrier (server-execution v2 Phase 2 revisit (a)) ----
+//
+// A foreign frame integrating UNDER a parked own write is SHADOWED: the
+// materialized view (and therefore the change notification) reflects the
+// own overlay, not the foreign value, until the marker promotes the parked
+// accept. `unappliedForeignSeqFloor` reports the shadowed seqs so the
+// serving loop's W advance can exclude them, and — flag ON — the
+// promotion fires the shadow-flip notification the moment the foreign
+// value becomes visible.
+
+const shadowFloorOf = (harness: Harness): number | undefined =>
+  (harness.provider.replica as unknown as {
+    unappliedForeignSeqFloor(): number | undefined;
+  }).unappliedForeignSeqFloor();
+
+Deno.test("memory v2 stacked commits: a foreign frame shadowed by a parked own write is reported by unappliedForeignSeqFloor and notifies at the shadow flip (Phase 2 input barrier, flag ON)", async () => {
+  setServerExecutionConfig(true);
+  const harness = await markerHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+    assertEquals(shadowFloorOf(harness), undefined);
+
+    // An accepted-and-PARKED own whole-doc write: the overlay fully
+    // masks the doc.
+    harness.model.setOutcome(2, { kind: "accept" });
+    const own = beginSet(harness, DOCS.A, valueFor("own"));
+    await assertResultOk(own.promise);
+    assertEquals(hasPendingOverlay(harness, DOCS.A), true);
+    expectVisible(harness, { A: valueFor("own") });
+
+    // Foreign novelty arrives WITHOUT a covering marker: it integrates
+    // into the confirmed mirror but stays invisible under the pending
+    // SET — the differential is empty, so nothing notified and no
+    // dirtiness registered. The floor reports its seq.
+    const before = harness.notifications.notifications.length;
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: 3, value: valueFor("foreign") }],
+    });
+    await clock.tick(10);
+    assertEquals(shadowFloorOf(harness), 3);
+    expectVisible(harness, { A: valueFor("own") });
+    assertEquals(
+      harness.notifications.notifications.length,
+      before,
+      "the shadowed integration must not notify (nothing became visible)",
+    );
+
+    // The marker arrives: the parked accept promotes, confirmed had
+    // advanced PAST the accept, so the own overlay is removed and the
+    // FOREIGN value becomes visible — the shadow flip. Flag ON, the
+    // replica fires the ordinary change notification for exactly this
+    // doc, and the floor lifts.
+    harness.pushSync({ caughtUpLocalSeq: 2 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "parked promotion at the marker",
+    );
+    expectVisible(harness, { A: valueFor("foreign") });
+    assertEquals(shadowFloorOf(harness), undefined);
+    const flips = harness.notifications.notifications.slice(before)
+      .filter((notification) =>
+        notification.type === "integrate" && "changes" in notification &&
+        [...notification.changes].some((change) =>
+          change.address.id === DOCS.A
+        )
+      );
+    assertEquals(
+      flips.length >= 1,
+      true,
+      "the shadow flip must fire a change notification for the doc",
+    );
+  } finally {
+    await harness.close();
+    resetServerExecutionConfig();
+  }
+});
+
+Deno.test("memory v2 stacked commits: the shadow flip stays silent with the flag OFF (byte-identical OFF arm), while the floor still reports and clears", async () => {
+  const harness = await markerHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+
+    harness.model.setOutcome(2, { kind: "accept" });
+    const own = beginSet(harness, DOCS.A, valueFor("own"));
+    await assertResultOk(own.promise);
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: 3, value: valueFor("foreign") }],
+    });
+    await clock.tick(10);
+    assertEquals(shadowFloorOf(harness), 3);
+
+    const before = harness.notifications.notifications.length;
+    harness.pushSync({ caughtUpLocalSeq: 2 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "parked promotion at the marker",
+    );
+    // Same silent flip as before this change: the foreign value is
+    // visible, the floor clears, and NO notification fired (the OFF arm
+    // keeps today's behavior byte-for-byte; the serving loop is the
+    // only consumer of the floor).
+    expectVisible(harness, { A: valueFor("foreign") });
+    assertEquals(shadowFloorOf(harness), undefined);
+    assertEquals(harness.notifications.notifications.length, before);
   } finally {
     await harness.close();
   }

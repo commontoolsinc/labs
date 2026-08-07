@@ -1965,12 +1965,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     const result = await promise;
     if (result.ok && !readOnly) {
       // The effect handoff (server-execution v2 stage G, serving-loop.md
-      // §3/§5): a SEALED transaction's "ok" means accepted into a wave,
-      // not durable — so a seal destination that owns an outbox takes
-      // the effects here and flushes them only after the wave commit
-      // landed the contribution. Everything else (the OFF arm's store
-      // commit, ON-arm client speculation, bare test accumulators)
-      // keeps today's inline flush.
+      // §3/§5; Phase 2 speculation.md §2): a SEALED transaction's "ok"
+      // means accepted into a wave — or into the speculation overlay —
+      // not durable. A seal destination that owns an outbox takes the
+      // effects here and flushes them only after the wave commit landed
+      // the contribution; the Phase-2 speculation overlay takes a
+      // derivation run's effects to enact the reversible kinds and DROP
+      // egress (the client never performs external effects under the
+      // flag). Everything else (the OFF arm's store commit, non-diverted
+      // ON-arm runs, bare test accumulators) keeps today's inline flush.
       const deferred = this.#sealDestination !== undefined &&
         this.#cfcState.outbox.length > 0 &&
         this.#sealDestination.deferSealedEffects?.(

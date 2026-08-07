@@ -40,6 +40,13 @@ export type ServingLoopStats = {
    * client-derived until Phase 2 hardens the load path — counted AND
    * surfaced here, not just logged). */
   structureLoadFailures: number;
+  /** Waves whose W advance was CLAMPED below the input batch head
+   * because inbound foreign novelty was still shadowed by a parked own
+   * write (the settle input barrier, Phase 2 revisit (a):
+   * `ISpaceReplica.unappliedForeignSeqFloor`). The clamp is honesty,
+   * not a failure — W catches up the wave after the shadow clears — but
+   * a count that grows without settling flags a wedged marker channel. */
+  watermarkClamped: number;
   /** max over active spaces of (store head seq − W). */
   watermarkLag: number;
   events: {
@@ -62,6 +69,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   effectAcks: 0,
   derivedCommits: 0,
   structureLoadFailures: 0,
+  watermarkClamped: 0,
   watermarkLag: 0,
   events: {
     appended: 0,

@@ -90,6 +90,11 @@
  * |                            | shrink the backoff window)                       |
  * | debug                      | core-default everywhere                          |
  * | hideInternalStackFrames    | core-default everywhere                          |
+ * | servingPosture             | core-default (false) — NEVER set by a preset:    |
+ * |                            | only the SpaceServer's runtime factory (the      |
+ * |                            | toolshed ExecutorHost wiring and the executor    |
+ * |                            | test harnesses) marks the serving posture, and   |
+ * |                            | it hand-rolls its options deliberately           |
  */
 
 import type {
@@ -155,6 +160,7 @@ export const RUNTIME_OPTION_KEYS = [
   "patternCoverage",
   "onPatternInstantiated",
   "fetch",
+  "servingPosture",
 ] as const satisfies readonly (keyof RuntimeOptions)[];
 
 export type RuntimeOptionKey = (typeof RUNTIME_OPTION_KEYS)[number];

@@ -258,6 +258,18 @@ export class SpaceServer implements TransactionSealDestination {
           "(serving-loop.md §3: flag ON, server posture)",
       );
     }
+    if (runtime.servingPosture !== true) {
+      await dispose();
+      lease.release();
+      this.#lease = undefined;
+      throw new Error(
+        "SpaceServer runtime must be constructed with servingPosture " +
+          "(serving-loop.md §3): without it the Phase-2 speculation " +
+          "overlay is the runtime's default seal destination and its " +
+          "factory-time structure loads would divert instead of " +
+          "committing through the loopback plane",
+      );
+    }
     this.#runtime = runtime;
     this.#disposeRuntime = dispose;
     this.#sink = new EngineWaveCommitSink({
@@ -955,8 +967,9 @@ export class SpaceServer implements TransactionSealDestination {
             // synchronously on send, but their application schedules
             // work; the yield lets it register dirtiness so the
             // isIdle() probe below sees it. (An application parked
-            // behind one of our own sealed commits stays the
-            // documented inputSynced residual.)
+            // behind one of our own sealed commits is excluded from
+            // the W advance below via unappliedForeignSeqFloor — the
+            // settle input barrier, Phase 2 revisit (a).)
             await new Promise((resolve) => setTimeout(resolve, 0));
             return "settled" as const;
           })(),
@@ -985,8 +998,36 @@ export class SpaceServer implements TransactionSealDestination {
     // carries no watermark movement. The advance is input-driven (the
     // batch head only moves when commits arrive), so a quiet space
     // commits nothing.
-    const advanceTo = exhausted ? this.#watermark : batchHead;
+    //
+    // The settle input barrier (Phase 2 revisit (a)): the settle above
+    // proves frames were SENT and pulls settled — not that every
+    // frame's novelty is VISIBLE. A foreign frame integrating under one
+    // of the loop's own parked commits (CT-1927) stays shadowed until
+    // the marker promotes it, and its dirtiness registers only then
+    // (the replica's shadow-flip notification). Excluding those seqs
+    // from the advance — the plan's sanctioned alternative to awaiting
+    // them, which would deadlock — keeps W honest: it never claims a
+    // seq whose demanded derivations could not have run. The clamp
+    // lifts by itself: promotion fires the notification, the next wave
+    // derives over the foreign value, and W catches up.
+    const shadowFloor = runtime.storageManager
+      .open(this.#options.space).replica.unappliedForeignSeqFloor?.();
+    const inputVisibleHead = shadowFloor === undefined
+      ? batchHead
+      : Math.min(batchHead, shadowFloor - 1);
+    const advanceTo = exhausted
+      ? this.#watermark
+      : Math.max(this.#watermark, inputVisibleHead);
     const shouldAdvance = !exhausted && advanceTo > this.#watermark;
+    if (!exhausted && inputVisibleHead < batchHead) {
+      this.#options.stats.watermarkClamped += 1;
+      logger.info?.("watermark-clamped", () => [
+        `space ${this.#options.space}: W advance clamped to ` +
+        `${advanceTo} (batchHead ${batchHead}, shadow floor ` +
+        `${shadowFloor}) — foreign novelty parked behind an own ` +
+        "sealed commit (settle input barrier)",
+      ]);
+    }
 
     if (!haveContributions && !shouldAdvance) {
       // Nothing sealed and no watermark movement: no commit (the

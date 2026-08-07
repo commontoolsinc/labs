@@ -176,10 +176,14 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
-  /** INBOUND settlement only (server-execution v2 stage F): watch
-   * refreshes + update processing, excluding commit settlement — the
-   * serving loop's wave-settle barrier (a sealed commit settles at the
-   * wave commit itself, so the full synced() would deadlock there). */
+  /** INBOUND settlement only (server-execution v2 stage F): outstanding
+   * watch refreshes/pulls, EXCLUDING commit settlement AND update
+   * processing — the serving loop's wave-settle barrier (a sealed
+   * commit settles at the wave commit itself, and update processing can
+   * park behind that same sealed commit, so awaiting either would
+   * deadlock). Novelty still shadowed by a parked own commit is instead
+   * EXCLUDED from the wave's W advance — see
+   * `ISpaceReplica.unappliedForeignSeqFloor` (Phase 2 revisit (a)). */
   inputSynced?(): Promise<void>;
 
   /**
@@ -359,10 +363,14 @@ export interface IStorageProvider {
    * @returns Promise that resolves when all pending syncs are complete.
    */
   synced(): Promise<void>;
-  /** INBOUND settlement only (server-execution v2 stage F): watch
-   * refreshes + update processing, excluding commit settlement — the
-   * serving loop's wave-settle barrier (a sealed commit settles at the
-   * wave commit itself, so the full synced() would deadlock there). */
+  /** INBOUND settlement only (server-execution v2 stage F): outstanding
+   * watch refreshes/pulls, EXCLUDING commit settlement AND update
+   * processing — the serving loop's wave-settle barrier (a sealed
+   * commit settles at the wave commit itself, and update processing can
+   * park behind that same sealed commit, so awaiting either would
+   * deadlock). Novelty still shadowed by a parked own commit is instead
+   * EXCLUDED from the wave's W advance — see
+   * `ISpaceReplica.unappliedForeignSeqFloor` (Phase 2 revisit (a)). */
   inputSynced?(): Promise<void>;
 
   /**
@@ -1735,6 +1743,19 @@ export interface ISpaceReplica extends ISpace {
     transaction: NativeStorageCommit,
     source: IStorageTransaction | undefined,
     verdict: Promise<SealedCommitVerdict>,
+    options?: {
+      /** Server-execution v2 Phase 2 (speculation.md §1, §6): the sealed
+       * commit is a CLIENT SPECULATION overlay entry — process-memory
+       * only, never durable, retired by the overlay destination when the
+       * authoritative derivation covers it. It stays OUT of the
+       * `synced()` durability barrier (`#commitPromises`) and the
+       * ordered-push outcome map: a client settle must never wait on a
+       * speculation's retirement, and nothing ever pushes it. Everything
+       * else — optimistic apply, notifications, in-flight registration
+       * (reset sweeps and origin-drop cascades reach it) — is the
+       * ordinary sealed-commit machinery. */
+      readonly speculative?: boolean;
+    },
   ): SealedNativeCommit;
 
   /**
@@ -1752,6 +1773,54 @@ export interface ISpaceReplica extends ISpace {
    * inside settlement.
    */
   whenApplied?(localSeq: number): Promise<void>;
+
+  /**
+   * The lowest server seq among inbound FOREIGN novelty whose visibility
+   * is still shadowed by this replica's own pending (unpromoted) writes —
+   * or `undefined` when nothing is shadowed (server-execution v2
+   * Phase 2's settle input barrier; the plan's Phase 2 revisit (a)).
+   *
+   * The shadow case: an upsert/remove integrates into `confirmed` while
+   * an own sealed commit's pending entry still overlays the same doc
+   * (CT-1927 parks the promotion until a catch-up marker covers it). The
+   * materialized view — and therefore the change notification that
+   * registers scheduler dirtiness — does not (fully) reflect the foreign
+   * value until the pending entry leaves. The serving loop MUST NOT
+   * advance W past a seq this method still reports: `inputSynced` cannot
+   * await the application (it settles only after the wave commit the
+   * loop performs AFTER settling — a deadlock by construction), so the
+   * wave EXCLUDES unapplied frames' seqs from its advance instead, per
+   * the plan's sanctioned alternative. A shadowed REMOVE carries no seq
+   * on the wire and reports the sentinel floor 1 — W holds entirely
+   * until it clears (rare, self-clearing at promotion).
+   */
+  unappliedForeignSeqFloor?(): number | undefined;
+
+  /**
+   * The retirement inputs for one doc of a speculation overlay entry
+   * (server-execution v2 Phase 2, speculation.md §4): the doc's current
+   * CONFIRMED seq (the authoritative basis a covering watermark is
+   * compared against) and the localSeqs of every pending (unpromoted)
+   * write layered on it. The overlay destination retires an entry only
+   * when no pending layer BELOW it remains on any doc it read through —
+   * an unacked authored origin (the user mid-typing) or a parked
+   * promotion keeps the echo alive, exactly speculation.md §4 step 3's
+   * "acked AND W ≥ that commit's seq" condition, evaluated on replica
+   * state instead of tracked acks.
+   */
+  speculationRetirementView?(
+    id: URI,
+    scope?: CellScope,
+  ): { confirmedSeq: number; pendingLocalSeqs: number[] };
+
+  /**
+   * The store seq a local commit's accept committed at (speculation.md
+   * §4's "acked AND W ≥ that commit's seq" retirement floor), or
+   * undefined while unsettled / rejected / pruned from the bounded
+   * record. Undefined reads as "no ack floor" — a rejected or retired
+   * origin's echo falls back to its confirmed read basis.
+   */
+  ackedSeqOf?(localSeq: number): number | undefined;
 }
 
 /**
@@ -1763,10 +1832,18 @@ export interface ISpaceReplica extends ISpace {
  * consequence), or the wave never committed (lease lost, abandon). The
  * replica shapes the withdrawal into its own rejection type; the wave
  * supplies only the reason.
+ *
+ * `superseded: true` (server-execution v2 Phase 2, speculation.md §4)
+ * marks a SUCCESS-shaped withdrawal: a client speculation overlay entry
+ * retiring because the authoritative derivation now covers it. The
+ * replica drops the pending writes and notifies the visible flip like
+ * any withdrawal, but it does NOT cascade-reject dependants (an
+ * authored commit that read the echo is fine — the store's CAS decides
+ * it) and the sealed commit settles `ok`, not error.
  */
 export type SealedCommitVerdict =
   | { committed: { seq: number } }
-  | { withdrawn: { message: string } };
+  | { withdrawn: { message: string; superseded?: true } };
 
 /** A replica's handle for one sealed native commit. */
 export interface SealedNativeCommit {

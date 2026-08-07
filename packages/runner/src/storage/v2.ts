@@ -28,6 +28,7 @@ import {
   type EntityIdListOptions,
   type EntityIdListResult,
   getCommitPreconditionsConfig,
+  getServerExecutionConfig,
   type PatchOp,
   resolveScopeKey,
   type ScopeKeyIdentity,
@@ -2157,6 +2158,21 @@ class SpaceReplica implements ISpaceReplica {
   // dies with the parked set (reset/close — the re-pull re-derives the
   // durable state, so "applied" is moot and the waiter must not hang).
   #appliedWaiters = new Map<number, PromiseWithResolvers<void>>();
+  // Foreign novelty whose VISIBILITY is still shadowed by own pending
+  // writes (server-execution v2 Phase 2's settle input barrier — see
+  // `unappliedForeignSeqFloor` on ISpaceReplica): docKey -> highest
+  // shadowed inbound seq (a shadowed REMOVE records the sentinel 1 — the
+  // wire carries no seq for removes, so the floor holds W entirely until
+  // the shadow clears). Entries are pruned lazily when the doc's pending
+  // set empties (promotion, drop, rollback); cleared whole on reset.
+  readonly #shadowedForeignSeqs = new Map<string, number>();
+  // localSeq -> the store seq its accept committed at (server-execution
+  // v2 Phase 2, speculation.md §4): the overlay destination's retirement
+  // floor is "the origin ACKED and W ≥ that commit's seq", and the ack
+  // seq is otherwise consumed by promotion. Bounded (insertion-ordered,
+  // oldest pruned) — the overlay only ever asks about recent origins.
+  readonly #ackedSeqsByLocalSeq = new Map<number, number>();
+  static readonly #MAX_RETAINED_ACK_SEQS = 4096;
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
     pending: PromiseWithResolvers<void>;
@@ -2295,14 +2311,14 @@ class SpaceReplica implements ISpaceReplica {
    * burst flushing at T_flush). Client code keeps `synced()`:
    * durability is exactly what a client barrier means.
    *
-   * Residual, deliberate: an inbound frame whose processing is parked
-   * behind a sealed commit settles AFTER the wave commit, so a foreign
-   * authored frame in exactly that position can be claimed by W one
-   * wave early; its dirtiness re-enters as the next wave's input and
-   * the derived correction lands there (self-healing, flagged for the
-   * Phase 2 gate hardening). Accepted for Phase 1 (owner, 2026-08-05);
-   * revisit before Phase 2's gates — the named revisit items live in
-   * docs/plans/server-execution-v2.md's Phase 2 section.
+   * The stage-F residual — a foreign authored frame parked behind an
+   * own sealed commit could be claimed by W one wave early — is CLOSED
+   * as of Phase 2 (the plan's revisit (a)), by exclusion rather than by
+   * awaiting: this barrier still never waits on parked applications
+   * (the deadlock above), and the wave instead EXCLUDES still-shadowed
+   * seqs from its W advance via `unappliedForeignSeqFloor`, with the
+   * shadow-flip notification in `confirmPending` registering the
+   * dirtiness the moment the parked overlay leaves.
    */
   async inputSynced(): Promise<void> {
     await Promise.all([...this.#syncPromises]);
@@ -2457,6 +2473,35 @@ class SpaceReplica implements ISpaceReplica {
     return record !== undefined && record.pending.length > 0;
   }
 
+  /** ISpaceReplica.speculationRetirementView (server-execution v2
+   * Phase 2, speculation.md §4): the doc's confirmed seq plus every
+   * pending layer's localSeq — the overlay destination's retirement
+   * inputs. */
+  speculationRetirementView(
+    id: URI,
+    scope?: CellScope,
+  ): { confirmedSeq: number; pendingLocalSeqs: number[] } {
+    const record = this.#docs.get(docKey(id, scope));
+    if (record === undefined) {
+      return { confirmedSeq: 0, pendingLocalSeqs: [] };
+    }
+    return {
+      confirmedSeq: record.confirmed.seq,
+      pendingLocalSeqs: [
+        ...new Set(record.pending.map((entry) => entry.localSeq)),
+      ],
+    };
+  }
+
+  /** ISpaceReplica.ackedSeqOf (server-execution v2 Phase 2,
+   * speculation.md §4): the store seq a local commit's accept committed
+   * at, or undefined while it is unsettled — or if it was rejected, or
+   * pruned from the bounded record (both read as "no ack floor": the
+   * entry falls back to its confirmed read basis). */
+  ackedSeqOf(localSeq: number): number | undefined {
+    return this.#ackedSeqsByLocalSeq.get(localSeq);
+  }
+
   /**
    * Resolves when the accepted commit at `localSeq` has been APPLIED to
    * this replica's settled view — immediately when its accept was
@@ -2495,6 +2540,29 @@ class SpaceReplica implements ISpaceReplica {
       this.#appliedWaiters.delete(localSeq);
       waiter.resolve();
     }
+  }
+
+  /**
+   * ISpaceReplica.unappliedForeignSeqFloor (server-execution v2 Phase 2's
+   * settle input barrier): the lowest inbound seq still shadowed by an
+   * own pending write, or `undefined` when nothing is. Prunes lazily —
+   * an entry whose doc no longer has pending writes has become visible
+   * (promotion fired the shadow-flip notification; a drop re-exposes the
+   * confirmed value through the rejection path's own re-runs), so it no
+   * longer bounds the wave's advance.
+   */
+  unappliedForeignSeqFloor(): number | undefined {
+    if (this.#shadowedForeignSeqs.size === 0) return undefined;
+    let floor: number | undefined;
+    for (const [key, seq] of this.#shadowedForeignSeqs) {
+      const record = this.#docs.get(key);
+      if (record === undefined || record.pending.length === 0) {
+        this.#shadowedForeignSeqs.delete(key);
+        continue;
+      }
+      if (floor === undefined || seq < floor) floor = seq;
+    }
+    return floor;
   }
 
   async close(): Promise<void> {
@@ -2566,6 +2634,10 @@ class SpaceReplica implements ISpaceReplica {
       waiter.resolve();
     }
     this.#appliedWaiters.clear();
+    // Shadowed-foreign floors die with the marker space too: the re-pull
+    // re-derives the durable state, so nothing stays invisible.
+    this.#shadowedForeignSeqs.clear();
+    this.#ackedSeqsByLocalSeq.clear();
   }
 
   private noteCaughtUpLocalSeq(localSeq: number | undefined): void {
@@ -2874,6 +2946,7 @@ class SpaceReplica implements ISpaceReplica {
     transaction: NativeStorageCommit,
     source: IStorageTransaction | undefined,
     verdict: Promise<SealedCommitVerdict>,
+    options?: { readonly speculative?: boolean },
   ): SealedNativeCommit {
     const preconditions = activeCommitPreconditions(transaction.preconditions);
     const operations = transaction.operations
@@ -2906,6 +2979,7 @@ class SpaceReplica implements ISpaceReplica {
       preconditions,
       transaction.sqliteOps ?? [],
       verdict,
+      options,
     );
   }
 
@@ -2915,6 +2989,7 @@ class SpaceReplica implements ISpaceReplica {
     preconditions: readonly CommitPrecondition[],
     sqliteOps: readonly SqliteOperation[],
     verdict: Promise<SealedCommitVerdict>,
+    options?: { readonly speculative?: boolean },
   ): SealedNativeCommit {
     const localSeq = this.#nextLocalSeq++;
     if (source !== undefined) {
@@ -2996,16 +3071,26 @@ class SpaceReplica implements ISpaceReplica {
       source,
       verdict,
     );
-    this.#commitPromises.add(settled);
-    this.#commitOutcomeBySeq.set(
-      localSeq,
-      settled.catch(() => {}).finally(() => {
-        this.#commitOutcomeBySeq.delete(localSeq);
-      }),
-    );
-    settled.finally(() => {
-      this.#commitPromises.delete(settled);
-    });
+    if (options?.speculative !== true) {
+      // Durable sealed commits (the wave's) join the synced() barrier
+      // and the ordered-push outcome map as any commit does. A CLIENT
+      // SPECULATION entry joins NEITHER (speculation.md §1: the overlay
+      // is process-memory only, never synced, never committed): a
+      // client settle must not wait on the echo's retirement, and no
+      // push ordering ever involves it. Its in-flight registration
+      // (inside settleSealedCommit) still happens, so reset sweeps and
+      // origin-drop cascades reach the echo.
+      this.#commitPromises.add(settled);
+      this.#commitOutcomeBySeq.set(
+        localSeq,
+        settled.catch(() => {}).finally(() => {
+          this.#commitOutcomeBySeq.delete(localSeq);
+        }),
+      );
+      settled.finally(() => {
+        this.#commitPromises.delete(settled);
+      });
+    }
     return { localSeq, commit, settled };
   }
 
@@ -3071,6 +3156,22 @@ class SpaceReplica implements ISpaceReplica {
       }
       const v = outcome.verdict;
       if ("withdrawn" in v) {
+        if (
+          (v.withdrawn as { superseded?: true }).superseded === true
+        ) {
+          // Speculation retirement (server-execution v2 Phase 2,
+          // speculation.md §4): a SUCCESS-shaped withdrawal — the
+          // authoritative derivation covers the echo, the store wins by
+          // construction. Drop the pending writes and notify the
+          // visible flip, but do NOT cascade-reject dependants (an
+          // authored commit that read the echo is decided by the
+          // store's CAS, not by the echo's lifecycle) and settle OK.
+          return this.finalizeSupersededSpeculation(
+            localSeq,
+            operations,
+            source,
+          );
+        }
         return await this.finalizeRejection(
           localSeq,
           operations,
@@ -3787,6 +3888,57 @@ class SpaceReplica implements ISpaceReplica {
     });
   }
 
+  /**
+   * Speculation retirement (server-execution v2 Phase 2, speculation.md
+   * §4): drop a speculative sealed commit's pending writes and notify
+   * the visible flip to the authoritative value. finalizeRejection minus
+   * two deliberate absences — no conflict-read-repair wait (nothing
+   * conflicted) and NO dependency cascade (retirement is success-shaped:
+   * an authored commit that read the echo is decided by the store's CAS,
+   * and a downstream speculation retires on its own floor). The
+   * notification is an ordinary `integrate` (authoritative state became
+   * visible), not a `revert` (nothing failed).
+   */
+  private finalizeSupersededSpeculation(
+    localSeq: number,
+    operations: NativeCommitOperation[],
+    _source: IStorageTransaction | undefined,
+  ): Result<Unit, StorageTransactionRejected> {
+    const touched = operations.map((operation) => ({
+      id: operation.id,
+      scope: operation.scope,
+    }));
+    const hasSemanticOperations = operations.length > 0;
+    const shouldNotifySubscribers = hasSemanticOperations &&
+      this.hasNotificationSubscribers();
+    const shouldNotifySinks = hasSemanticOperations &&
+      this.hasSinkSubscribers(touched);
+    const before = shouldNotifySubscribers
+      ? Differential.checkout(
+        this,
+        touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+        this.#scopeKeyIdentity(),
+      )
+      : undefined;
+    this.dropPending(localSeq);
+    if (before !== undefined) {
+      const changes = before.compare(this);
+      if ([...changes].length > 0) {
+        this.#subscription.next({
+          type: "integrate",
+          space: this.#space,
+          changes,
+        } as StorageNotification);
+        if (shouldNotifySinks) {
+          this.notifySinks(changes);
+        }
+      }
+    } else if (shouldNotifySinks) {
+      this.notifySinksForIds(touched);
+    }
+    return { ok: {} };
+  }
+
   // Shared rejection tail for both real conflicts and pre-empted commits: wait
   // for the caught-up read-repair, drop the optimistic pending write, and emit
   // the revert notification reflecting repaired confirmed state.
@@ -4082,14 +4234,33 @@ class SpaceReplica implements ISpaceReplica {
         upsert.deleted === true ? undefined : upsert.doc,
       );
       record.materialized = undefined;
-      this.#watchedIds.add(docKey(upsert.id as URI, upsert.scope));
+      const key = docKey(upsert.id as URI, upsert.scope);
+      this.#watchedIds.add(key);
+      if (record.pending.length > 0) {
+        // The settle input barrier's shadow case (Phase 2 revisit (a)):
+        // this foreign value integrated UNDER an own pending write, so
+        // the materialized view — and the change notification below —
+        // may not reflect it until the pending entry promotes or drops.
+        // Record the seq so the serving loop's W advance excludes it
+        // (`unappliedForeignSeqFloor`).
+        this.#shadowedForeignSeqs.set(
+          key,
+          Math.max(this.#shadowedForeignSeqs.get(key) ?? 0, upsert.seq),
+        );
+      }
     }
     for (const remove of sync.removes) {
       const id = remove.id as URI;
       const record = this.record(id, remove.scope);
       record.confirmed = confirmedVersion(0, undefined);
       record.materialized = undefined;
-      this.#watchedIds.delete(docKey(id, remove.scope));
+      const key = docKey(id, remove.scope);
+      this.#watchedIds.delete(key);
+      if (record.pending.length > 0) {
+        // A shadowed remove carries no seq on the wire: the sentinel 1
+        // holds W entirely until the shadow clears (see the field doc).
+        this.#shadowedForeignSeqs.set(key, 1);
+      }
     }
 
     // Parked accepts apply BEFORE the differential compare: when the frame
@@ -4361,6 +4532,16 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     applied: AppliedCommit,
   ): void {
+    // The retirement floor's ack record (speculation.md §4): known at
+    // VERDICT time, before any parking — a parked promotion changes when
+    // the value becomes visible, not that the origin acked.
+    this.#ackedSeqsByLocalSeq.set(localSeq, applied.seq);
+    if (
+      this.#ackedSeqsByLocalSeq.size > SpaceReplica.#MAX_RETAINED_ACK_SEQS
+    ) {
+      const oldest = this.#ackedSeqsByLocalSeq.keys().next();
+      if (!oldest.done) this.#ackedSeqsByLocalSeq.delete(oldest.value);
+    }
     // Parking requires a live marker channel: a server that stages
     // per-verdict markers AND an active sync consumer to deliver them. With
     // no subscribed watch view, no frames arrive at all — there is no
@@ -4407,6 +4588,34 @@ class SpaceReplica implements ISpaceReplica {
         { id: operation.id, scope: operation.scope },
       ]),
     );
+    // The settle input barrier's SHADOW FLIP (Phase 2 revisit (a), flag
+    // ON only): when confirmed advanced PAST this accept while it was
+    // pending — foreign novelty integrated under the own overlay — the
+    // removal below makes the foreign value visible where the overlay
+    // was, and NO other path notifies (applySessionSync's differential
+    // ran while the overlay still masked the change). Fire the ordinary
+    // change notification for exactly the shadowed docs, so scheduler
+    // dirtiness registers BEFORE `unappliedForeignSeqFloor` lifts and
+    // the serving loop's next wave derives over the foreign value.
+    // Flag-gated: the OFF arm keeps today's silent flip byte-for-byte
+    // (the residual is self-healing there and the timing delta is not a
+    // recorded acceptance — see the Phase-2 PR's Flags).
+    const shadowTouched = getServerExecutionConfig()
+      ? [...keys.entries()]
+        .filter(([key]) => this.#shadowedForeignSeqs.has(key))
+        .map(([, address]) => address)
+      : [];
+    const shouldNotifyShadowSubscribers = shadowTouched.length > 0 &&
+      this.hasNotificationSubscribers();
+    const shouldNotifyShadowSinks = shadowTouched.length > 0 &&
+      this.hasSinkSubscribers(shadowTouched);
+    const shadowBefore = shouldNotifyShadowSubscribers
+      ? Differential.checkout(
+        this,
+        shadowTouched.map(({ id, scope }) => snapshotState(this, id, scope)),
+        this.#scopeKeyIdentity(),
+      )
+      : undefined;
     for (const { id, scope } of keys.values()) {
       const record = this.record(id, scope);
       const pendingIndexes = record.pending.flatMap((entry, index) =>
@@ -4469,6 +4678,26 @@ class SpaceReplica implements ISpaceReplica {
       }
 
       dropMaterializedSuffix(record, firstPendingIndex);
+    }
+
+    // The shadow-flip notification (see the checkout above): compare the
+    // post-removal view and notify exactly the docs whose foreign value
+    // just became visible. Same pattern as applySessionSync's integrate
+    // notification.
+    if (shadowBefore !== undefined) {
+      const changes = shadowBefore.compare(this);
+      if ([...changes].length > 0) {
+        this.#subscription.next({
+          type: "integrate",
+          space: this.#space,
+          changes,
+        } as StorageNotification);
+        if (shouldNotifyShadowSinks) {
+          this.notifySinks(changes);
+        }
+      }
+    } else if (shouldNotifyShadowSinks) {
+      this.notifySinksForIds(shadowTouched);
     }
   }
 

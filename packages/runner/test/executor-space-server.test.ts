@@ -132,6 +132,7 @@ describe("stage G SpaceServer recovery seams", () => {
         const runtime = new Runtime({
           apiUrl: new URL(import.meta.url),
           storageManager: manager,
+          servingPosture: true,
           experimental: { serverExecution: true },
         });
         servingRuntime = runtime;

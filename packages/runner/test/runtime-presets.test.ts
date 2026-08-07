@@ -107,6 +107,11 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   patternCoverage: { treat: "absent" },
   onPatternInstantiated: { treat: "absent" },
   fetch: { treat: "absent" },
+  // Server-execution v2 Phase 2: only the SpaceServer's hand-rolled
+  // runtime factory marks the serving posture; no preset ever sets it —
+  // a preset-built runtime under the flag is a speculating client by
+  // construction.
+  servingPosture: { treat: "absent" },
 };
 
 describe("runtimePresets conformance (CT-1814)", () => {

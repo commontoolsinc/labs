@@ -144,6 +144,7 @@ describe("stage F serving loop", () => {
         const runtime = new Runtime({
           apiUrl: new URL(import.meta.url),
           storageManager: manager,
+          servingPosture: true,
           ...(servingFetch !== undefined ? { fetch: servingFetch } : {}),
           experimental: {
             serverExecution: true,

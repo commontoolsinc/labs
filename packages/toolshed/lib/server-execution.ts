@@ -51,6 +51,11 @@ export function startServerExecutionHost(options: {
       const runtime = new Runtime({
         apiUrl: options.apiUrl,
         storageManager,
+        // The SpaceServer's own runtime (serving-loop.md §3): never the
+        // Phase-2 speculation-overlay default — its factory-time loads
+        // commit through the loopback plane, and the wave destination
+        // takes over at activation.
+        servingPosture: true,
         experimental: {
           ...experimental,
           serverExecution: true,
