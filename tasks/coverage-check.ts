@@ -64,7 +64,6 @@ import {
 import {
   fillMissingFamiliesFromFingerprint,
   inferCurrentRunFallbackState,
-  recordUnstampedBaselineRunState,
 } from "./compile-cache-state.ts";
 import { walk } from "@std/fs/walk";
 import * as path from "@std/path";
@@ -110,10 +109,35 @@ function isGitHubRateLimitError(error: unknown): boolean {
   return /\b(rate limit|rate-limited|ratelimit)\b/i.test(message);
 }
 
+/**
+ * The perf-metrics artifact this run publishes: its coverage metrics, and the
+ * compile cache states that stamp them. A later run reads the stamp to decide
+ * whether this run was cold, so every path that writes the artifact writes
+ * both halves.
+ */
+export interface PerfMetricsArtifact {
+  metrics: Map<string, BaselineSample>;
+  compileCacheStates?: CompileCacheStates;
+}
+
+/** Writes the artifact to {@link PERF_METRICS_FILE}, and says so. */
+async function writePerfMetricsArtifact(
+  artifact: PerfMetricsArtifact,
+): Promise<void> {
+  await writeCoverageBaselineFile(
+    PERF_METRICS_FILE,
+    artifact.metrics,
+    artifact.compileCacheStates,
+  );
+  console.log(
+    `Wrote ${PERF_METRICS_FILE} with ${artifact.metrics.size} metrics.`,
+  );
+}
+
 export async function githubApiOrSkip<T>(
   description: string,
   operation: () => Promise<T>,
-  metricsForArtifact: Map<string, BaselineSample>,
+  artifact: PerfMetricsArtifact,
 ): Promise<T> {
   try {
     return await operation();
@@ -123,10 +147,7 @@ export async function githubApiOrSkip<T>(
     console.warn(
       `  Warning: GitHub API rate limit while ${description}: ${error}`,
     );
-    await writeCoverageBaselineFile(PERF_METRICS_FILE, metricsForArtifact);
-    console.log(
-      `Wrote ${PERF_METRICS_FILE} with ${metricsForArtifact.size} metrics.`,
-    );
+    await writePerfMetricsArtifact(artifact);
     console.log(
       "Skipping coverage check because GitHub API rate limits prevent collecting the baseline data.",
     );
@@ -716,7 +737,7 @@ export async function fetchArtifactsForRunBestEffort(
 }
 
 export async function fetchBaselineRunsForCheck(
-  metricsForArtifact: Map<string, BaselineSample>,
+  artifact: PerfMetricsArtifact,
   baselineRunCount = BASELINE_RUNS,
   log: (message: string) => void = console.log,
 ): Promise<{ mainHeadSha: string; baselineRuns: WorkflowRun[] }> {
@@ -724,7 +745,7 @@ export async function fetchBaselineRunsForCheck(
   const mainHeadSha = await githubApiOrSkip(
     "fetching current main branch head",
     () => fetchMainHeadSha(),
-    metricsForArtifact,
+    artifact,
   );
   log(`Current main head is ${mainHeadSha}.`);
   log("Fetching recent main-branch runs for baseline...");
@@ -734,7 +755,7 @@ export async function fetchBaselineRunsForCheck(
       githubGet<{ workflow_runs: WorkflowRun[] }>(
         workflowRunsPathForBaseline(baselineRunCount),
       ),
-    metricsForArtifact,
+    artifact,
   );
   return { mainHeadSha, baselineRuns: baselineData.workflow_runs };
 }
@@ -1638,6 +1659,15 @@ export async function main() {
   });
   fillMissingFamiliesFromFingerprint(currentCacheStates, inferredRunState);
 
+  // Both halves of the artifact travel together from here on: every GitHub
+  // call is wrapped so a rate limit writes this same stamped payload before
+  // skipping the check. `metrics` and `compileCacheStates` are the live
+  // objects, so later additions to either are picked up.
+  const perfArtifact: PerfMetricsArtifact = {
+    metrics: currentMetrics,
+    compileCacheStates: currentCacheStates,
+  };
+
   // Extract coverage debt metrics from coverage profile artifacts.
   let coverageDataError: unknown;
   let coverageLcov = "";
@@ -1663,14 +1693,7 @@ export async function main() {
     );
   }
 
-  await writeCoverageBaselineFile(
-    PERF_METRICS_FILE,
-    currentMetrics,
-    currentCacheStates,
-  );
-  console.log(
-    `Wrote ${PERF_METRICS_FILE} with ${currentMetrics.size} metrics.`,
-  );
+  await writePerfMetricsArtifact(perfArtifact);
 
   if (coverageDataError && !informationalOnly) {
     console.error(
@@ -1692,7 +1715,7 @@ export async function main() {
 
   // 3. Fetch recent main-branch push runs for baseline
   const { mainHeadSha, baselineRuns } = await fetchBaselineRunsForCheck(
-    currentMetrics,
+    perfArtifact,
   );
   reportBaselineRunAvailability(baselineRuns, mainHeadSha);
 
@@ -1708,20 +1731,9 @@ export async function main() {
     b.created_at.localeCompare(a.created_at) || b.id - a.id
   );
 
-  // For each baseline run, its predecessor in the newest-first list — the run
-  // whose saved compile cache it would have restored. Fuels retro-
-  // classification of a run whose perf-metrics artifact carries no recorded
-  // cache state.
-  const predecessorShaByRunId = new Map<number, string>();
-  for (let i = 0; i < runsNewestFirst.length - 1; i++) {
-    predecessorShaByRunId.set(
-      runsNewestFirst[i].id,
-      runsNewestFirst[i + 1].head_sha,
-    );
-  }
-
   // Compile cache states per baseline run, from tagged perf-metrics
-  // artifacts. Runs with no artifact stay absent (unknown).
+  // artifacts. A run whose artifact is missing or carries no stamp stays
+  // absent, which the ratchet reads as not-cold.
   const cacheStatesByRunId = new Map<number, CompileCacheStates>();
   const isRunCold = (runId: number): boolean => {
     const states = cacheStatesByRunId.get(runId);
@@ -1742,17 +1754,6 @@ export async function main() {
       );
       if (baseline?.compileCacheStates) {
         cacheStatesByRunId.set(run.id, baseline.compileCacheStates);
-      } else {
-        // A run whose perf-metrics artifact is missing or carries no recorded
-        // cache state: retro-classify it from the compile fingerprint against
-        // its predecessor, so a cold main run is not picked as the coverage
-        // ratchet baseline (see recordUnstampedBaselineRunState).
-        await recordUnstampedBaselineRunState(
-          cacheStatesByRunId,
-          run,
-          predecessorShaByRunId.get(run.id),
-          context.pr ? `PR #${context.pr.number}` : run.head_sha.slice(0, 8),
-        );
       }
 
       const overrides = context.pr
@@ -1770,7 +1771,7 @@ export async function main() {
         overrides,
         cold: isRunCold(run.id),
       };
-    }, currentMetrics);
+    }, perfArtifact);
 
   // 5. Compare the current run's coverage debt against the ratchet baseline.
 
@@ -1782,7 +1783,7 @@ export async function main() {
     readRun: readBaselineRun,
     isPullRequest: prNumber !== null,
     guard: (description, operation) =>
-      githubApiOrSkip(description, operation, currentMetrics),
+      githubApiOrSkip(description, operation, perfArtifact),
   }).finally(() => reportBaselineContextResults(visitedContexts));
 
   if (acceptingRuns > 0) {

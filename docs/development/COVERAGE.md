@@ -358,16 +358,22 @@ current. The ratchet skips a cold sample when choosing among the
 base-branch commit and its ancestors, so a cold `main` run cannot lower the
 baseline that warm PRs are held to.
 
-A run without a recorded cache state — an artifact carrying no stamp, or a run
-whose cache-state artifact failed to upload — is retro-classified from the
-compile fingerprint (`tasks/compile-cache-state.ts` mirrors the `cc-*` key globs,
-drift-guarded by a test that parses the workflow): if the fingerprint paths
-changed against the run's predecessor, every family is treated as cold; if
-unchanged, warm. The same fingerprint inference backstops the current run when
-its cache-state artifact is missing. Fingerprint inference cannot see
-non-fingerprint cold causes (cache eviction, cache-service outages): a run cold
-for those reasons and lacking a recorded state stays unknown, so it is treated
-as not-cold and may still be used as a baseline.
+Every run stamps its own `perf-metrics.json`, so a baseline run's coldness is
+read straight off the artifact that run published. Before writing the stamp, a
+run fills in any family whose cache-state artifact did not arrive, using the
+compile fingerprint: `tasks/compile-cache-state.ts` mirrors the `cc-*` key globs
+(drift-guarded by a test that parses the workflow) and compares the run's commit
+against the commit whose cache it would have restored — the pull request's own
+changed files, or the previous `main` run for a push. A family with no recorded
+state is filled cold when those paths changed. Recorded states are ground truth
+and always win. The rate-limit skip path writes the same stamped artifact, so a
+run cut short still tells later runs whether it was cold.
+
+Neither source is complete. Fingerprint inference cannot see non-fingerprint
+cold causes (cache eviction, cache-service outages), and a run whose cache-state
+artifacts and fingerprint comparison both failed publishes no stamp at all. A
+run with no recorded state is treated as not-cold and may still be used as a
+baseline.
 
 ## Which `main` run the ratchet compares against
 
