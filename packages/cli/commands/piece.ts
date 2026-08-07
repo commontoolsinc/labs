@@ -426,10 +426,10 @@ export function pieceCallInvocation(
 
 /**
  * Resolve what names a handler call's invocation: the id for this dispatch
- * and the session it was chosen within (`--session`, or `CF_SESSION`). Both
- * reach the durable event id the handling's receipt is filed under, so a
- * later call settles on that receipt only by naming the same pair (verb
- * contract WS-D).
+ * and the session it was chosen within (`CF_INVOCATION_SESSION`, or
+ * `--invocation-session`). Both reach the durable event id the handling's
+ * receipt is filed under, so a later call settles on that receipt only by
+ * naming the same pair (verb contract WS-D).
  *
  * A caller that names neither gets both minted for this one request. The id
  * is random, so it names an outcome nothing else will ask for; scoping it to
@@ -457,14 +457,15 @@ export function resolveInvocationIdentity(
     throw new ValidationError("--invocation requires a non-blank id");
   }
   if (rawSession !== undefined && !rawSession.trim()) {
-    throw new ValidationError("--session requires a non-blank id");
+    throw new ValidationError("--invocation-session requires a non-blank id");
   }
   if (rawSession === undefined) {
     if (rawInvocation !== undefined) {
       throw new ValidationError(
         "--invocation names an id to replay, and an id is replayable only " +
           "within the session it was chosen in. Mint a session with " +
-          "`cf session new` and pass it as --session <id>, or set CF_SESSION.",
+          "`cf invocation-session new` and set `CF_INVOCATION_SESSION`, or " +
+          "pass it as `--invocation-session <id>`.",
       );
     }
     return { id: mintInvocationId(), session: mintSession() };
@@ -620,11 +621,16 @@ export function renderPieceCallOutcome(
     // prose stays on stderr via hint().
     renderOut(JSON.stringify(invocationJson(result.invocation), null, 2));
     hintOut(
+      // The readback names its session through the environment rather than
+      // `--invocation-session`, because a session is what keeps an outcome's
+      // address out of reach of anyone who can guess a piece, a verb and an
+      // id — and an argument is readable in a process listing where an
+      // environment variable is not.
       opts.detached
         ? cliText(`NEXT STEPS:
-  → Read the outcome: cf piece call --piece ${piece} --session ${
+  → Read the outcome: CF_INVOCATION_SESSION=${
           opts.invocation?.session ?? "<session>"
-        } --invocation ${
+        } cf piece call --piece ${piece} --invocation ${
           opts.invocation?.id ?? "<id>"
         } ${callableName} ... (the commit is durable; a call naming this same pair deduplicates and returns the settled outcome)
   → Verify state:     cf piece get --piece ${piece} <path> ...`)
@@ -1628,23 +1634,28 @@ after --. Handlers interpret piped input when no input argument is present.`,
   .option(
     "--invocation <id:string>",
     "Idempotency key for a handler call (before the callable name), and " +
-      "requires --session. A retry naming the same pair cannot commit " +
-      "twice — it settles on the original outcome — but the handler body " +
-      "does re-run, so effects outside the transaction repeat. Both are " +
-      "minted for the one call when neither is given.",
+      "requires an invocation session. A retry naming the same pair cannot " +
+      "commit twice — it settles on the original outcome — but the " +
+      "handler body does re-run, so effects outside the transaction " +
+      "repeat. Both are minted for the one call when neither is given.",
   )
-  .env("CF_SESSION=<id:string>", "Session that invocation ids belong to.", {
-    prefix: "CF_",
-  })
+  .env(
+    "CF_INVOCATION_SESSION=<id:string>",
+    "Invocation session that this run's invocation ids belong to. The form " +
+      "to reach for: a session is what makes an outcome's address " +
+      "unguessable, and an environment variable stays out of the process " +
+      "listing an argument shows up in.",
+    { prefix: "CF_" },
+  )
   .option(
-    "--session <id:string>",
-    "Session this call's invocation id was chosen within (before the " +
-      "callable name): the caller that chose it, since an invocation id is " +
-      "the caller's own word and another caller can pick the same one. The " +
-      "pair decides which outcome a replay reads, so the same id under " +
-      "another session is another invocation. Mint a session per agent run " +
-      "with `cf session new`, and pass that one session with every call of " +
-      "the run.",
+    "--invocation-session <id:string>",
+    "Override CF_INVOCATION_SESSION for this one call (before the callable " +
+      "name): the session this call's invocation id was chosen within, " +
+      "since an invocation id is the caller's own word and another caller " +
+      "can pick the same one. The pair decides which outcome a replay " +
+      "reads, so the same id under another session is another invocation. " +
+      "Mint a session per agent run with `cf invocation-session new`, and " +
+      "carry that one session on every call of the run.",
   )
   .option(
     "--verbose",
@@ -1670,7 +1681,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
     "--no-wait",
     "Exit once this handling's commit is acknowledged (before the callable " +
       "name), skipping only the receipt readback: stdout reports status " +
-      '"committed", and a later call naming the same --session and ' +
+      '"committed", and a later call naming the same invocation session and ' +
       "--invocation reads the outcome back. The handler still executes here " +
       "and its commit is durable. Handler invocations only.",
   )
@@ -1689,7 +1700,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
   .action(async function (options, callableName, ...tail) {
     const identity = resolveInvocationIdentity(
       options.invocation,
-      options.session,
+      options.invocationSession,
     );
     const invocationId = identity.id;
     const waitControl = resolveWaitControl(options);

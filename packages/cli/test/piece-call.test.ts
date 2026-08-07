@@ -1645,7 +1645,7 @@ describe("piece call stdin payloads", () => {
     expect(() => resolveInvocationIdentity("add-comment-1", undefined))
       .toThrow(ValidationError);
     expect(() => resolveInvocationIdentity("add-comment-1", undefined))
-      .toThrow(/Mint a session with `cf session new` and pass it as --session/);
+      .toThrow(/`cf invocation-session new` and set `CF_INVOCATION_SESSION`/);
   });
 
   it("rejects a blank id or a blank session", () => {
@@ -1659,10 +1659,10 @@ describe("piece call stdin payloads", () => {
       /--invocation requires a non-blank id/,
     );
     expect(() => resolveInvocationIdentity("inv-1", "")).toThrow(
-      /--session requires a non-blank id/,
+      /--invocation-session requires a non-blank id/,
     );
     expect(() => resolveInvocationIdentity("inv-1", "   ")).toThrow(
-      /--session requires a non-blank id/,
+      /--invocation-session requires a non-blank id/,
     );
   });
 
@@ -3724,8 +3724,14 @@ describe("renderPieceCallOutcome", () => {
     );
     // The hint is a command the caller runs to collect the outcome it chose
     // not to wait for, and an id reaches that outcome only within the
-    // session it was chosen in — so the hint has to carry both.
-    assertStringIncludes(hinted[0], "--session ses-7 --invocation inv-1");
+    // session it was chosen in — so the hint has to carry both. The session
+    // travels in the environment because it is what makes that outcome's
+    // address unguessable, and an argument is readable in a process listing.
+    assertStringIncludes(
+      hinted[0],
+      "CF_INVOCATION_SESSION=ses-7 cf piece call",
+    );
+    assertStringIncludes(hinted[0], "--invocation inv-1");
   });
 
   it("confirmations route to stderr under JSON input, stdout otherwise", () => {

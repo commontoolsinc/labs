@@ -56,7 +56,7 @@ echo "SPACE=$SPACE"
 # One session for the whole walkthrough, the way an agent run carries one: an
 # invocation id names an outcome within the session it was chosen in, so the
 # replay in step 7 has to be made from the session its original call was.
-export CF_SESSION=$($CF session new)
+export CF_INVOCATION_SESSION=$($CF invocation-session new)
 
 # A plain-JSON result rides the plainResultReceipts option, on by default.
 # Set it explicitly anyway so the walkthrough asserts the same thing whatever a
@@ -162,7 +162,8 @@ check "$BEFORE" "$($CF piece get --quiet --piece "$BOARD" $ARGS noteCount --step
 # its first create, and nothing stops a second agent picking it: that agent is
 # calling for itself, and must get its own call rather than a report that
 # someone else's had settled.
-OTHER=$(CF_SESSION=$($CF session new) $CF piece call --quiet --piece "$BOARD" \
+OTHER=$(CF_INVOCATION_SESSION=$($CF invocation-session new) $CF piece call \
+  --quiet --piece "$BOARD" \
   $ARGS --invocation create-1 \
   createNote '{"title":"Another agent"}' 2>/dev/null)
 check "Another agent" "$(echo "$OTHER" | jq -r '.result.note["$NAME"] // empty')" \
@@ -226,14 +227,15 @@ step "13. An invocation id without a session is refused"
 # The id is the replay handle, and a session minted for this one request
 # would put that id on a different outcome next time — so the call cannot be
 # honored as it was asked, and the refusal says how to ask again.
-NO_SESSION=$(env -u CF_SESSION $CF piece call --quiet --piece "$BOARD" $ARGS \
+NO_SESSION=$(env -u CF_INVOCATION_SESSION $CF piece call --quiet \
+  --piece "$BOARD" $ARGS \
   --invocation lonely-1 createNote '{"title":"No session"}' 2>&1)
 rc=$?
 check "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)" "the call exits nonzero"
-echo "$NO_SESSION" | grep -q -- "--session" &&
-  ok "the refusal names --session" ||
-  bad "the refusal does not name --session"
-echo "$NO_SESSION" | grep -q "session new" &&
+echo "$NO_SESSION" | grep -q -- "CF_INVOCATION_SESSION" &&
+  ok "the refusal names CF_INVOCATION_SESSION" ||
+  bad "the refusal does not name CF_INVOCATION_SESSION"
+echo "$NO_SESSION" | grep -q "invocation-session new" &&
   ok "and the command that mints one" ||
   bad "the refusal does not say how to mint a session"
 
