@@ -8,7 +8,6 @@ import { navigate } from "../../shared/mod.ts";
 import { Task } from "@lit/task";
 import { type CellHandle } from "@commonfabric/runtime-client";
 import type { FavoriteEntry } from "@commonfabric/home-schemas";
-import "../components/Flex.ts";
 import "../components/PieceList.ts";
 import { type PieceItem } from "../components/PieceList.ts";
 import {

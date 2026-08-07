@@ -272,6 +272,13 @@ function resolveRefsForLLM(
     }
 
     // Recurse into object properties (does not increment refDepth)
+    //
+    // TODO(danfuzz): this rebuild recurses into every object-valued key, so
+    // it also descends into `default`/`examples` VALUES — and a fabric value
+    // there comes out as `{}` (`Object.entries` sees none of its state). The
+    // sibling `simplifySchemaForContext` carries `default` by reference via
+    // `PRESERVE_KEYS`; this walk wants the same treatment for value-bearing
+    // keys.
     const result: any = {};
     for (const [key, value] of Object.entries(nodeObj)) {
       if (key === "$defs") continue; // strip $defs from output
@@ -1624,6 +1631,11 @@ function buildAvailableCellsDocumentationWithObservation(
       });
       observedConfidentiality = serialized.observedConfidentiality;
 
+      // TODO(danfuzz): this is an unsafe use of `stringify()`: a
+      // `FabricSpecialObject` in the serialized value renders as `{}` in the
+      // documentation the model reads. It is a second, independent loss
+      // point — `serializeForLLMObservation` above carries its own marker,
+      // and fixing that walk alone still leaves this render.
       let valueJson = JSON.stringify(serialized.value ?? null, null, 2);
 
       const MAX_VALUE_LENGTH = 2000;

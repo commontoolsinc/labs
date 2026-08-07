@@ -89,15 +89,23 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     const CAUSE = "strand-doc";
 
     // A seeds the doc at v0 and publishes it to the shared server.
+    // A's commits carry the verdict-resolution mark: this test's premise is
+    // controlled staleness (B must NOT have received A's writes yet), and
+    // awaiting a coverage-resolving commit forces the batched fan-out
+    // through — which is shared with B's session and would destroy the
+    // premise. B's convergence to v0 is an explicit sync/pull.
     const docA = rtA.getCell<{ v: string }>(space, CAUSE, undefined);
     {
       const tx = rtA.edit();
       docA.withTx(tx).set({ v: "v0" });
       rtA.prepareTxForCommit(tx);
-      const res = await tx.commit();
+      const res = await tx.commit({ resolveAt: "verdict" });
       expect(res.error, `seed v0: ${JSON.stringify(res.error)}`)
         .toBeUndefined();
-      await storageA.synced();
+      // No synced(): the barrier holds on A's parked accept, which forces
+      // the shared fan-out batch through — to B too, destroying the
+      // staleness premise. The awaited verdict-marked commit is already
+      // durably accepted, which is all B's explicit pull needs.
     }
 
     // B converges to v0.
@@ -118,10 +126,10 @@ describe("read-repair: stale read after cross-replica conflict", () => {
       const tx = rtA.edit();
       docA.withTx(tx).set({ v: "v1" });
       rtA.prepareTxForCommit(tx);
-      const res = await tx.commit();
+      const res = await tx.commit({ resolveAt: "verdict" });
       expect(res.error, `bump v1: ${JSON.stringify(res.error)}`)
         .toBeUndefined();
-      await storageA.synced();
+      // No synced() here either — same premise-preservation as the seed.
     }
 
     // B's `confirmed` is provably stale here: it still views v0, because the
@@ -168,5 +176,149 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     // Read with NO intervening await so a fire-and-forget sync cannot mask the
     // strand — the assertion sees B's post-commit `confirmed` directly.
     expect(docB.get()).toEqual({ v: "v1" });
+  });
+
+  it("fires verdict callbacks at rejection receipt, while commit callbacks and the promise wait for read repair", async () => {
+    const CAUSE = "verdict-before-repair-doc";
+
+    // Same choreography as above: A seeds and bumps with verdict-resolving
+    // commits; B stages a write over a provably stale read.
+    const docA = rtA.getCell<{ v: string }>(space, CAUSE, undefined);
+    {
+      const tx = rtA.edit();
+      docA.withTx(tx).set({ v: "v0" });
+      rtA.prepareTxForCommit(tx);
+      const res = await tx.commit({ resolveAt: "verdict" });
+      expect(res.error, `seed v0: ${JSON.stringify(res.error)}`)
+        .toBeUndefined();
+    }
+
+    const docB = rtB.getCell<{ v: string }>(space, CAUSE, undefined);
+    await docB.sync();
+    await docB.pull();
+    expect(docB.get()).toEqual({ v: "v0" });
+
+    const txB = rtB.edit();
+    docB.withTx(txB).get();
+    docB.withTx(txB).set({ v: "vB" });
+    rtB.prepareTxForCommit(txB);
+
+    {
+      const tx = rtA.edit();
+      docA.withTx(tx).set({ v: "v1" });
+      rtA.prepareTxForCommit(tx);
+      const res = await tx.commit({ resolveAt: "verdict" });
+      expect(res.error, `bump v1: ${JSON.stringify(res.error)}`)
+        .toBeUndefined();
+    }
+    expect(docB.get()).toEqual({ v: "v0" });
+
+    // B's commit will be REJECTED. The rejection response arrives over the
+    // microtask loopback, but the read-repair frame that releases the commit
+    // promise rides the server's timed fan-out — which a held-clock drain
+    // never fires. So at the settle() fixpoint the fate is sealed and the
+    // VERDICT callback must have run, while the promise — and with it the
+    // COMMIT callbacks, whose consumers act on the repaired base — is still
+    // held by the repair gate.
+    let verdictResult: { error?: unknown } | undefined;
+    txB.addVerdictCallback((_tx, result) => {
+      verdictResult = result;
+    });
+    let commitCallbackFired = false;
+    txB.addCommitCallback(() => {
+      commitCallbackFired = true;
+    });
+    let promiseSettled = false;
+    const commitP = txB.commit().then((result) => {
+      promiseSettled = true;
+      return result;
+    });
+
+    await clock.settle();
+    expect(
+      (verdictResult?.error as { name?: string } | undefined)?.name,
+      "verdict callback fired with the rejection at rejection receipt",
+    ).toBe("ConflictError");
+    expect(commitCallbackFired, "commit callback still held by the repair gate")
+      .toBe(false);
+    expect(promiseSettled, "commit promise still held by the repair gate")
+      .toBe(false);
+
+    // Real time resumes: the fan-out delivers the repair frame; the promise
+    // resolves with the same rejection the verdict callback saw, and the
+    // commit callback fires with it.
+    const resB = await commitP;
+    expect(resB.error?.name).toBe("ConflictError");
+    expect(commitCallbackFired, "commit callback fired at promise settlement")
+      .toBe(true);
+  });
+
+  it("returns a rejected resolveAt-verdict commit at rejection receipt, while its commit callback waits for repair", async () => {
+    const CAUSE = "verdict-mode-rejection-doc";
+
+    // Same choreography again: A seeds and bumps; B stages a stale write.
+    const docA = rtA.getCell<{ v: string }>(space, CAUSE, undefined);
+    {
+      const tx = rtA.edit();
+      docA.withTx(tx).set({ v: "v0" });
+      rtA.prepareTxForCommit(tx);
+      const res = await tx.commit({ resolveAt: "verdict" });
+      expect(res.error, `seed v0: ${JSON.stringify(res.error)}`)
+        .toBeUndefined();
+    }
+
+    const docB = rtB.getCell<{ v: string }>(space, CAUSE, undefined);
+    await docB.sync();
+    await docB.pull();
+    expect(docB.get()).toEqual({ v: "v0" });
+
+    const txB = rtB.edit();
+    docB.withTx(txB).get();
+    docB.withTx(txB).set({ v: "vB" });
+    rtB.prepareTxForCommit(txB);
+
+    {
+      const tx = rtA.edit();
+      docA.withTx(tx).set({ v: "v1" });
+      rtA.prepareTxForCommit(tx);
+      const res = await tx.commit({ resolveAt: "verdict" });
+      expect(res.error, `bump v1: ${JSON.stringify(res.error)}`)
+        .toBeUndefined();
+    }
+    expect(docB.get()).toEqual({ v: "v0" });
+
+    // B commits in VERDICT mode. The rejection receipt must settle the
+    // returned promise inside the held-clock drain — no read-repair wait —
+    // while the commit callback stays on the settlement timeline, gated on
+    // the repair frame the timed fan-out has not delivered yet.
+    const commitCallbackDone = Promise.withResolvers<void>();
+    let commitCallbackFired = false;
+    txB.addCommitCallback(() => {
+      commitCallbackFired = true;
+      commitCallbackDone.resolve();
+    });
+    let verdictModeResult:
+      | { error?: { name?: string } }
+      | undefined;
+    const commitP = txB.commit({ resolveAt: "verdict" }).then((result) => {
+      verdictModeResult = result as { error?: { name?: string } };
+      return result;
+    });
+
+    await clock.settle();
+    expect(
+      verdictModeResult?.error?.name,
+      "verdict-mode promise settled with the rejection at receipt",
+    ).toBe("ConflictError");
+    expect(
+      commitCallbackFired,
+      "commit callback still held by the repair gate",
+    ).toBe(false);
+
+    // Real time resumes: the repair frame arrives and the settlement
+    // timeline (and with it the commit callback) completes.
+    await commitP;
+    await commitCallbackDone.promise;
+    expect(commitCallbackFired).toBe(true);
   });
 });

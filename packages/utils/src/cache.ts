@@ -12,15 +12,6 @@ export interface WeightedCacheOptions<K, V> extends CacheOptions {
   maxWeight?: number;
 }
 
-export interface Cache<K, V> {
-  readonly size: number;
-  has(key: K): boolean;
-  get(key: K): V | undefined;
-  put(key: K, value: V): void;
-  delete(key: K): boolean;
-  clear(): void;
-}
-
 /**
  * A Map that drops its oldest key once it holds `limit` of them. Insertion
  * order is the eviction order, and re-setting a key refreshes its place, so
@@ -101,55 +92,6 @@ export class BoundedKeyMap<K, V> implements ReadonlyMap<K, V> {
   }
 }
 
-export class LRUCacheNaive<K, V> implements Cache<K, V> {
-  #map = new Map<K, V>();
-  #capacity: number;
-
-  constructor(options: CacheOptions = {}) {
-    this.#capacity = Math.max(options.capacity ?? 1000, 1);
-  }
-
-  get size(): number {
-    return this.#map.size;
-  }
-
-  has(key: K): boolean {
-    return this.#map.has(key);
-  }
-
-  get(key: K): V | undefined {
-    const value = this.#map.get(key);
-    if (value !== undefined) {
-      this.#map.delete(key);
-      this.#map.set(key, value);
-    }
-    return value;
-  }
-
-  put(key: K, value: V): void {
-    if (this.#map.has(key)) {
-      this.#map.delete(key);
-      this.#map.set(key, value);
-      return;
-    }
-    if (this.#map.size >= this.#capacity) {
-      const oldestKey = this.#map.keys().next().value;
-      if (oldestKey !== undefined) {
-        this.#map.delete(oldestKey);
-      }
-    }
-    this.#map.set(key, value);
-  }
-
-  delete(key: K): boolean {
-    return this.#map.delete(key);
-  }
-
-  clear(): void {
-    this.#map.clear();
-  }
-}
-
 interface LRUNode<K, V> {
   key: K;
   value: V;
@@ -158,7 +100,7 @@ interface LRUNode<K, V> {
   next: LRUNode<K, V> | null;
 }
 
-export class LRUCache<K, V> implements Cache<K, V> {
+export class LRUCache<K, V> {
   #map = new Map<K, LRUNode<K, V>>();
   #head: LRUNode<K, V> | null = null;
   #tail: LRUNode<K, V> | null = null;
