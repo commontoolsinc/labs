@@ -4,6 +4,7 @@ import {
   selectRunnerTestFiles,
 } from "./select-runner-test-files.ts";
 import { parseShard } from "./shard-utils.ts";
+import { RUNNER_TEST_WEIGHTS } from "./test-timing-weights.ts";
 
 const TOTAL_SHARDS = 5;
 
@@ -23,17 +24,34 @@ Deno.test("parseShard rejects invalid shard notation", () => {
   }
 });
 
-Deno.test("runner test round-robin keeps shard counts even", () => {
-  const files = Array.from({ length: 30 }, (_, i) => ({
-    name: `t${String(i).padStart(2, "0")}.test.ts`,
+Deno.test("runner test weighting spreads expensive files across shards", () => {
+  const files = ["a", "b", "c", "d", "e", "f"].map((name) => ({
+    name: `${name}.test.ts`,
   }));
-  const counts = [1, 2, 3, 4, 5].map((index) =>
-    selectRunnerTestFiles(files, { index, total: TOTAL_SHARDS }).length
+  const weights = Object.fromEntries(
+    files.map((file, index) => [file.name, 6 - index]),
+  );
+  const loads = [1, 2, 3].map((index) =>
+    selectRunnerTestFiles(files, { index, total: 3 }, weights)
+      .reduce((sum, name) => sum + weights[name], 0)
+  );
+  assertEquals(loads, [7, 7, 7]);
+});
+
+Deno.test("real runner timing weights keep modeled shard loads close", async () => {
+  const files = await listRunnerTests();
+  const loads = Array.from(
+    { length: TOTAL_SHARDS },
+    (_, offset) =>
+      selectRunnerTestFiles(files, {
+        index: offset + 1,
+        total: TOTAL_SHARDS,
+      }).reduce((sum, name) => sum + (RUNNER_TEST_WEIGHTS[name] ?? 1), 0),
   );
   assertEquals(
-    Math.max(...counts) - Math.min(...counts) <= 1,
+    Math.max(...loads) - Math.min(...loads) < 2,
     true,
-    `${counts}`,
+    `modeled runner shard loads: ${loads.join(", ")}`,
   );
 });
 
@@ -73,6 +91,14 @@ Deno.test("every real runner test file is covered exactly once across shards", a
       names.includes(name),
       true,
       `selected ${name} is not a real runner test file`,
+    );
+  }
+
+  for (const name of Object.keys(RUNNER_TEST_WEIGHTS)) {
+    assertEquals(
+      names.includes(name),
+      true,
+      `profiled ${name} is not a real runner test file`,
     );
   }
 });
