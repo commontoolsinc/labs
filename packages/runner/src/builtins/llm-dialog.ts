@@ -668,7 +668,7 @@ function serializeForLLMObservation(
   // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
   // point this becomes a walk rather than a refusal.
   if (value instanceof FabricInstance) {
-    throw refuseFabricInstance(
+    refuseFabricInstance(
       value,
       "when serializing a value for a language model",
     );
@@ -862,7 +862,7 @@ function traverseAndCellify(
   // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
   // point this becomes a walk rather than a refusal.
   if (value instanceof FabricInstance) {
-    throw refuseFabricInstance(
+    refuseFabricInstance(
       value,
       "when converting a language model's response to cells",
     );
