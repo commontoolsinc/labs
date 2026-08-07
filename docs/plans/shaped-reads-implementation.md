@@ -214,6 +214,49 @@ exists — including under `--no-wait`, which today returns none.
 the same selection, and the walkthrough's `jq | sed` address extraction is
 replaced by reading the rendered address.
 
+## Stage 5 — the remaining arrivals
+
+`get` and `call` are two of four ways to arrive at a cell. The surface shape this
+plan serves gives the same read options to every arrival that returns data, so a
+caller learns one vocabulary rather than one per command. Two arrivals are left,
+and leaving them out is worse than never having started: a vocabulary that works
+from two starting points and silently does nothing from the other two teaches a
+rule that is false half the time.
+
+**W1. `cf wish` gains the read options.** *(S)* `--select`, `--schema`,
+`--filter`, routed through the same step. A wish resolves to whatever satisfies
+it rather than to an address, but it still terminates in a cell, and that is the
+part being shaped.
+
+*Ordering against handle-stripping.* `projectWishValue` walks the resolved value
+and replaces every cell, stream and function with a marker, breaking cycles and
+collapsing diamonds on the way — it is what makes the result renderable at all.
+A `$link` marker needs a live cell to read an address from, so the selection runs
+**before** that walk, on the value that still holds handles. Applying it after
+would leave a marked position with nothing to render and no way to say so. The
+two are not alternatives: the selection decides what is returned, the walk
+decides how what remains is written down.
+
+*A wish may match nothing, and may match many.* Both are ordinary outcomes, not
+errors, and a selection must not turn either into one. Whether a selection
+applies to each match or to the collection of them is the question this stage
+settles; the answer follows whatever `--filter` already means against a wish
+result, and should not be invented fresh.
+
+**W2. `cf exec` gains the read options.** *(S)* Same three flags, same step.
+
+*And the address it already prints.* `exec` reports its result cell on stderr as
+`Tool result cell: <id> (space <space>, scope <scope>)` — prose, in a spelling
+that is neither the rendered `$link` shape nor what `--show-links` emits, and
+that a caller cannot pass to another command without reshaping it. This stage is
+where that becomes the declared shape, because it is the one time the code is
+open for this reason. Keeping the stderr line is fine; keeping a third spelling
+of an address is not.
+
+*Exit:* the same cell, reached by `get`, by `call`, by `wish` and by `exec`,
+renders identically under the same selection, and an address emitted by any of
+them is accepted by the next command unchanged.
+
 ## Dependencies
 
 Stages are ordered, but not everything in them is blocked.
@@ -231,6 +274,8 @@ Stages are ordered, but not everything in them is blocked.
 | C1 | — | independent; ordered before C2 for the bound |
 | C2 | F1, A1 | A1 for marked positions in call results |
 | C3 | S2 | the ordering this plan exists to get right |
+| W1 | F1, A1, C2 | C2 not for code, but so the second host sets the pattern the third follows |
+| W2 | F1, A1, C2 | same, and independent of W1 |
 
 ## Test strategy
 
@@ -256,6 +301,12 @@ session replaying an id must still deduplicate.
 
 **C2's test is symmetry.** The same note read through `piece get` and read out of
 a `piece call` result produce the same rendering under the same selection.
+
+**W1 and W2 extend that symmetry to the other two arrivals**, which is the whole
+claim: one cell, four ways in, one rendering. Worth its own assertion rather than
+folding into C2's, because the failure it catches is a command quietly ignoring
+a flag it accepted. A wish additionally wants its two ordinary outcomes pinned —
+no match, and many matches — since a selection must leave both intact.
 
 **Waiting.** Anything that needs a receipt to exist subscribes rather than polls
 (`docs/development/waiting-in-tests.md`).
@@ -283,6 +334,13 @@ persists rather than something a human types.
 in the design; changing them after callers read them is the breakage the
 declared shape exists to prevent.
 
+**A partially-shaped surface is worse than an unshaped one.** Between C2 and
+Stage 5 the read options work from two arrivals and not the other two, and
+nothing in the CLI says which. That window is the argument for treating Stage 5
+as part of this plan rather than as follow-up work: the cost of stopping after
+C3 is not a missing feature, it is a rule that a caller learns and then finds
+false. Sequencing it last is fine; dropping it is not.
+
 ## Documentation owed
 
 Each step carries its own, rather than a sweep at the end.
@@ -295,3 +353,4 @@ Each step carries its own, rather than a sweep at the end.
 | S1, S2 | `cf session new`, `CF_SESSION`, and what an absent session means; the CLI README and the agent-facing skills that teach invocation ids |
 | C1 | What a receipt declares, in the design document's open-question slot |
 | C2, C3 | `piece call`'s section, and the envelope's fields |
+| W1, W2 | `wish` and `exec` in `packages/cli/README.md`, and the read options stated once where all four arrivals can point at them rather than four times |
