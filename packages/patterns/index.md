@@ -109,9 +109,6 @@ follow: `address.tsx`, `age-category.tsx`, `birthday.tsx`, `custom-field.tsx`,
 `rating.tsx`, `relationship.tsx`, `social.tsx`, `status.tsx`, `tags.tsx`,
 `text-import.tsx`, `timeline.tsx`, `timing.tsx`, `type-picker.tsx`.
 
-**`deprecated/`** — already explicitly deprecated; ignored by tooling and agents
-(see AGENTS.md).
-
 **`factory-outputs/`** (+ its support files `vehicles.ts`, `vehicles.test.ts`) —
 machine-generated pattern-factory outputs kept with their eval scores; never
 intended as style references.
