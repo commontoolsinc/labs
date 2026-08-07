@@ -227,7 +227,7 @@ export function findAndInlineDataUriLinks(value: any): any {
     // NOT answered by passing through. An instance's state can carry a `data:`
     // URI link -- a `FabricError`'s extras bag, for one -- and this walk exists
     // to inline exactly those. Handing the value back whole hands it back
-    // UNTRANSFORMED, so the link survives as a link and the walk's purpose is
+    // _untransformed_, so the link survives as a link and the walk's purpose is
     // defeated for everything inside the wrapper. It refuses rather than doing
     // that quietly.
     //

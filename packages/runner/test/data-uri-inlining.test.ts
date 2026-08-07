@@ -348,7 +348,7 @@ describe("data URI inlining", () => {
       // fact -- is pinned so that giving one an enumerable property turns this
       // red.
       //
-      // For a `FabricInstance` it is NOT the answer, so the walk refuses one:
+      // For a `FabricInstance` it is _not_ the answer, so the walk refuses one:
       // not being flattened is not the same as being handled.
 
       it("returns a `FabricBytes` as the same instance", () => {
@@ -358,7 +358,7 @@ describe("data URI inlining", () => {
       });
 
       it("throws for a `FabricError` rather than passing it through", () => {
-        // Passing an instance through would hand it back UNTRANSFORMED: its
+        // Passing an instance through would hand it back _untransformed_: its
         // state can carry a `data:` URI link that this walk exists to inline,
         // and coming back whole means coming back with that link intact.
         //
