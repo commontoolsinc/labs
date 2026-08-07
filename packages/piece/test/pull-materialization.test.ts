@@ -7158,7 +7158,7 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
     await writerPieces.synced();
     const slotId = entityRefToString(r.entityId);
 
-    // Fresh reader replica: a NEW storage pieces on the SAME server, so it has
+    // Fresh reader replica: a NEW storage manager on the SAME server, so it
     // never pulled K. Reading the slot by its fid must canonicalize R -> K (a
     // VALUE link) AND cold-fetch K's docs from the server — the end-to-end
     // behavior the local-toolshed run confirmed, now repeatable in-process.

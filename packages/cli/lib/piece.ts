@@ -1494,7 +1494,8 @@ async function tryResolveLivePieceToolCallable(
   return callableKind === "tool" ? callableCell : null;
 }
 
-/** Load the target piece and its pieces for callable resolution/listing —
+/** Load the target piece and its pieces controller for callable
+ * resolution/listing —
  * one shared path so `cf piece call` and `cf piece verbs` always see the same
  * piece state. */
 async function loadPieceForCallables(

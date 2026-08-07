@@ -126,7 +126,7 @@ export async function resolveWish(
   };
 }
 
-/** What {@link readWish} needs from a connected pieces. */
+/** What {@link readWish} needs from a connected pieces controller. */
 export interface WishRuntimeHost {
   runtime: Runtime;
   getSpace(): MemorySpace;
