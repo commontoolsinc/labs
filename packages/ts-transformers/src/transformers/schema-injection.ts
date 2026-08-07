@@ -24,6 +24,7 @@ import {
   isAnyOrUnknownType,
   isCellLikeType,
   isFunctionLikeExpression,
+  isSyntheticNode,
   isUnresolvedSchemaType,
   preserveSourceMapRange,
   registerSyntheticCallType,
@@ -298,7 +299,7 @@ function applyCapabilitySummaryToArgument(
     fn,
     0,
     context,
-    (argumentNode.pos < 0 || argumentNode.end < 0) &&
+    isSyntheticNode(argumentNode) &&
       context?.isSyntheticComputeCallback?.(fnNode ?? fn)
       ? {
         checker,
@@ -3542,7 +3543,9 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             // reconstruction; this one catches the structural re-entry case
             // (synthetic Cell-family / Stream wrapper as toSchema arg) for
             // nodes whose mark did not.
-            if (argumentType.pos < 0 && isCellLikeTypeNode(argumentType)) {
+            if (
+              isSyntheticNode(argumentType) && isCellLikeTypeNode(argumentType)
+            ) {
               context.markSchemaInjected(node);
               return ts.visitEachChild(node, visit, transformation);
             }

@@ -51,6 +51,7 @@ Allowed inside patterns:
 | nested computed with outer-scope reactive vars | Pre-compute with lift or an outer computed |
 | `lift()` closing over reactive deps | Pass dependencies as explicit parameters |
 | cells from composed patterns in `ifElse` | Wrap in a local `computed()` bridge |
+| reactive computation inline in builder-call args, e.g. `join({ x: a ?? b.result })` | Hoist to a body-level const or `computed()` and bind that (the compiler rejects the inline form) |
 
 ### 3. Conditional Rendering
 
