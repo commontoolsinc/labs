@@ -18,6 +18,7 @@ import {
   getTypeFromTypeNodeWithFallback,
   isAnyOrUnknownType,
   isCellLikeType,
+  isSyntheticNode,
   typeToSchemaTypeNode,
   unwrapCellLikeType,
 } from "../ast/mod.ts";
@@ -401,10 +402,6 @@ export function containsAnyOrUnknownTypeNode(node: ts.TypeNode): boolean {
   };
   visit(node);
   return found;
-}
-
-function isSyntheticTypeNode(node: ts.TypeNode): boolean {
-  return node.pos < 0 || node.end < 0;
 }
 
 function getRequestedPropertyNameText(
@@ -3159,7 +3156,7 @@ export function applyShrinkAndWrap(
   ) {
     const shrinkBaseTypeNode = next;
     const hasDirectAccess = retainedPaths.some((path) => path.length === 0);
-    const preferTypeDriven = !!baseType && isSyntheticTypeNode(
+    const preferTypeDriven = !!baseType && isSyntheticNode(
       shrinkBaseTypeNode,
     );
     if (preferTypeDriven) {
