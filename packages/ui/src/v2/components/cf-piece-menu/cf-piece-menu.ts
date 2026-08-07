@@ -944,7 +944,9 @@ export class CFPieceMenu extends BaseElement {
     const cell = this.cell;
     if (!cell || this.#dispatching) return;
     this.dispatchNote = undefined;
-    let payload: unknown = {};
+    // What `JSON.parse()` yields, which is what a cell's value may be minus
+    // the handles this menu never puts in one.
+    let payload: JSONValue = {};
     const text = this.payloadText.trim();
     if (text.length > 0) {
       try {
@@ -965,7 +967,7 @@ export class CFPieceMenu extends BaseElement {
       await cell.runtime()[$conn]().request<RequestType.CellSend>({
         type: RequestType.CellSend,
         cell: action.handle.ref(),
-        event: CellHandle.serialize(payload) as JSONValue,
+        event: CellHandle.serialize(payload),
       });
       if (generation !== this.#dataGeneration) return;
       this.dispatchNote = {
