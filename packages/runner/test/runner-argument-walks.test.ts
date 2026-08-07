@@ -7,6 +7,11 @@
 // schema names (`currentValue[key]`). So a `FabricPrimitive` standing where the
 // schema expects a container yields `undefined` per key and contributes
 // nothing, which is the right answer: a leaf holds no link to find.
+//
+// A `FabricInstance` is a different case and both walks refuse one. A link in
+// its codec contents is unreachable by property name, so passing it through
+// MISSES that link -- and over-collection is these walkers' safe direction,
+// which makes a miss the unsafe one.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -14,6 +19,8 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -98,7 +105,46 @@ describe("runner-argument-walks", () => {
     };
   }
 
+  /** The same link, wrapped where a schema expects a container. */
+  function wrapped(link: unknown) {
+    return new FabricError({
+      type: "Error",
+      message: "boom",
+      stack: undefined,
+      cause: undefined,
+      extras: { inner: link as FabricValue },
+    });
+  }
+
   describe("collectArgumentSchedulerReadLinks", () => {
+    it("throws for a `FabricError` rather than missing a link inside it", () => {
+      // The control is the point: the same link IS collected at the same
+      // schema position when it sits in a plain record, so what changes the
+      // outcome is the wrapper.
+      const { resultCell, value } = fixture();
+      const walks = runtime.runner as unknown as WalkAccess;
+      const nested = { payload: { inner: value.ref } };
+
+      expect(
+        walks.collectArgumentSchedulerReadLinks(
+          argumentSchema,
+          nested,
+          resultCell,
+        ).length,
+      ).toBe(1);
+
+      expect(() =>
+        walks.collectArgumentSchedulerReadLinks(
+          argumentSchema,
+          { payload: wrapped(value.ref) },
+          resultCell,
+        )
+      ).toThrow(
+        "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
+          "collecting scheduler read links from an argument.",
+      );
+    });
+
     it("collects a sibling write-redirect link past a `FabricBytes`", () => {
       // The discriminating shape: the schema tells the walk to descend into
       // `payload`, where a `FabricBytes` stands. The walk must index it, find
@@ -113,6 +159,30 @@ describe("runner-argument-walks", () => {
   });
 
   describe("collectWritableCellArgumentLinks", () => {
+    it("throws for a `FabricError` rather than missing a link inside it", () => {
+      const { resultCell, value } = fixture();
+      const walks = runtime.runner as unknown as WalkAccess;
+
+      expect(
+        walks.collectWritableCellArgumentLinks(
+          argumentSchema,
+          { payload: { inner: value.ref } },
+          resultCell,
+        ).length,
+      ).toBe(1);
+
+      expect(() =>
+        walks.collectWritableCellArgumentLinks(
+          argumentSchema,
+          { payload: wrapped(value.ref) },
+          resultCell,
+        )
+      ).toThrow(
+        "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
+          "collecting writable cell links from an argument.",
+      );
+    });
+
     it("collects a sibling write-redirect link past a `FabricBytes`", () => {
       const { resultCell, value } = fixture();
 

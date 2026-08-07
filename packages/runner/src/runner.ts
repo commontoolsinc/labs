@@ -1,9 +1,11 @@
 import {
   fabricFromNativeValue,
+  FabricInstance,
   type FabricValue,
   nativeFromFabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   getPersistentSchedulerStateConfig,
@@ -4763,15 +4765,29 @@ export class Runner {
       // walker's safe direction (mirrors joinSchema's `not` union).
       //
       // A `FabricSpecialObject` standing where a schema names a container is
-      // INDEXED rather than rebuilt, so nothing is decomposed: it has zero
-      // enumerable own properties, every keyed read yields `undefined`, and the
-      // descent contributes nothing. For a `FabricPrimitive` that is the right
-      // answer -- a leaf holds no link to collect.
+      // INDEXED rather than rebuilt, so nothing is decomposed. For a
+      // `FabricPrimitive` that settles it: it has zero enumerable own
+      // properties, every keyed read yields `undefined`, and a leaf holds no
+      // link to collect anyway.
       //
-      // TODO(danfuzz): a write-redirect link nested in a `FabricInstance`'s
-      // codec contents is missed, those contents not being reachable by
-      // property name. Over-collection is this walker's safe direction, so a
-      // miss is the unsafe one.
+      // A `FabricInstance` is refused. A write-redirect link nested in its
+      // codec contents is unreachable by property name, so passing one through
+      // MISSES that link -- and over-collection is this walker's safe
+      // direction, which makes a miss the unsafe one.
+      //
+      // Nothing reaches this in production today, de facto rather than by
+      // construction: a `FabricError` is ungated and exposed to pattern
+      // authors, so what keeps this safe is that no action argument yet
+      // carries one.
+      //
+      // TODO(danfuzz): descend by codec-mediated traversal into instance
+      // state, at which point this becomes a walk rather than a refusal.
+      if (currentValue instanceof FabricInstance) {
+        refuseFabricInstance(
+          currentValue,
+          "when collecting writable cell links from an argument",
+        );
+      }
       forEachSubschema(schema as JSONSchema, (child, keyword, key, index) => {
         switch (keyword) {
           case "properties":
@@ -4881,14 +4897,25 @@ export class Runner {
       seenValues.add(currentValue);
       seen.set(schema, seenValues);
 
-      // A `FabricSpecialObject` here is indexed, not rebuilt: it has zero
-      // enumerable own properties, so a keyed read yields `undefined` and the
-      // descent contributes nothing. Right for a `FabricPrimitive`, which holds
-      // no link to collect.
+      // Indexed, not rebuilt. Right for a `FabricPrimitive`: zero enumerable
+      // own properties, and a leaf holds no link to collect.
       //
-      // TODO(danfuzz): a write-redirect link nested in a `FabricInstance`'s
-      // codec contents is missed, for the same reason as the sibling walk in
-      // `collectWritableCellArgumentLinks()`.
+      // A `FabricInstance` is refused, for the same reason as the sibling walk
+      // in `collectWritableCellArgumentLinks()`: a link in its codec contents
+      // is unreachable by property name, so passing one through misses it, and
+      // a miss is the unsafe direction here.
+      //
+      // Nothing reaches this in production today, de facto rather than by
+      // construction.
+      //
+      // TODO(danfuzz): descend by codec-mediated traversal into instance
+      // state, at which point this becomes a walk rather than a refusal.
+      if (currentValue instanceof FabricInstance) {
+        refuseFabricInstance(
+          currentValue,
+          "when collecting scheduler read links from an argument",
+        );
+      }
       if (isRecord(schema.properties) && isRecord(currentValue)) {
         for (const [key, propertySchema] of Object.entries(schema.properties)) {
           visit(propertySchema, currentValue[key]);
