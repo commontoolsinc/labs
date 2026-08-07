@@ -198,6 +198,22 @@ export function findAndInlineDataUriLinks(value: any): any {
         }
       }
 
+      // The decoded payload gets the same dispatch the walk applies anywhere
+      // else. Without it the refusal below has a bypass: an instance handed
+      // over directly is refused, while the same one decoded out of a `data:`
+      // URI leaves silently, and a guard with a way around it is worse than no
+      // guard, since it reads as covering the case.
+      //
+      // Only the payload itself is checked, because a decoded payload is
+      // returned rather than walked -- nothing here descends one, so there is
+      // no descent for a nested instance to be caught by.
+      if (dataValue instanceof FabricInstance) {
+        refuseFabricInstance(
+          dataValue,
+          "when inlining a `data:` URI whose content is a `FabricInstance`",
+        );
+      }
+
       return dataValue;
     } else {
       return value;

@@ -390,6 +390,30 @@ describe("data URI inlining", () => {
         );
       });
 
+      it("throws for a `FabricError` decoded from a root `data:` URI", () => {
+        // The bypass this closes: an instance handed over directly is refused,
+        // and before this the same one decoded out of a `data:` URI left
+        // silently, because a decoded payload is returned rather than walked.
+        // A guard with a way around it is worse than none, since it reads as
+        // covering the case.
+        const failure = new FabricError({
+          type: "Error",
+          message: "boom",
+          stack: undefined,
+          cause: undefined,
+          extras: { attachment: "held" as unknown as FabricValue },
+        });
+        const uri = dataUriFromValueWithResolvedLinks(
+          failure as unknown as FabricValue,
+        );
+        const link = { "/": { [LINK_V1_TAG]: { id: uri, path: [] } } };
+
+        expect(() => findAndInlineDataUriLinks(link)).toThrow(
+          "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
+            "inlining a `data:` URI whose content is a `FabricInstance`.",
+        );
+      });
+
       it("keeps a special object whole while inlining a sibling", () => {
         // The discriminating case. A sibling that does inline forces the
         // record branch to clone, and the clone is a `{ ...value }` spread --
