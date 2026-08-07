@@ -339,12 +339,29 @@ const recordOutputSchemaPolicyInputs = (
     return;
   }
 
-  // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, whose enumerable
-  // properties are empty, so descent stops here rather than reaching a
-  // `FabricInstance`'s codec contents. What is lost is not data but a policy
-  // input: a write-redirect link nested inside one records no `kind: "schema"`
-  // entry. It fails _closed_ -- a later write is refused rather than allowed
-  // -- so this is a completeness gap, not a hole.
+  // A `FabricInstance` is refused. `isRecord` admits one, and its enumerable
+  // properties are empty, so descent would stop without reaching its codec
+  // contents -- and a write-redirect link nested inside one would record no
+  // `kind: "schema"` entry.
+  //
+  // Unlike the argument walks below, what that costs is not a hole: these
+  // entries GRANT, so a missing one leaves a later write refused rather than
+  // wrongly allowed, and the gap fails _closed_. The refusal is here because a
+  // write refused far away for a reason nothing names is worse to diagnose
+  // than a throw at the site that owes the work.
+  //
+  // Nothing reaches this in production today, de facto rather than by
+  // construction.
+  //
+  // TODO(danfuzz): descend by codec-mediated traversal into instance state, at
+  // which point this becomes a walk rather than a refusal.
+  if (outputBinding instanceof FabricInstance) {
+    refuseFabricInstance(
+      outputBinding,
+      "when recording output-schema policy inputs",
+    );
+  }
+
   if (isRecord(outputBinding) && !isCellLink(outputBinding)) {
     for (const [key, child] of Object.entries(outputBinding)) {
       recordOutputSchemaPolicyInputs(
@@ -645,12 +662,21 @@ const recordSetupProjectionPolicyInputs = (
     return;
   }
 
-  // TODO(danfuzz): same gap as `recordOutputSchemaPolicyInputs()` above, and
-  // more reachable here: `projection` is the _raw_ pattern argument, so a
-  // `FabricSpecialObject` a pattern actually wrote is what arrives. `isRecord`
-  // admits one and its empty entries end the descent, so a link inside a
-  // `FabricInstance`'s codec contents records no structural-provenance input.
-  // Fails closed, as above.
+  // Refused for the same reason as `recordOutputSchemaPolicyInputs()` above,
+  // and this site is the more reachable of the two: `projection` is the _raw_
+  // pattern argument, so a `FabricSpecialObject` a pattern actually wrote is
+  // what arrives here. Fails _closed_ as well, so the throw buys diagnosis
+  // rather than safety.
+  //
+  // TODO(danfuzz): descend by codec-mediated traversal into instance state, at
+  // which point this becomes a walk rather than a refusal.
+  if (projection instanceof FabricInstance) {
+    refuseFabricInstance(
+      projection,
+      "when recording setup-projection policy inputs",
+    );
+  }
+
   if (isRecord(projection) && !isCellLink(projection)) {
     for (const [key, child] of Object.entries(projection)) {
       recordSetupProjectionPolicyInputs(
