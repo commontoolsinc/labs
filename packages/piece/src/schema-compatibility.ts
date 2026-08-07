@@ -844,6 +844,14 @@ const FABRIC_EVOLUTION_TARGET_KEYS = new Set([
  * member the source requires must exist on the class the target names, and
  * the caller gates it to pattern evolution (`allowEvolutionPolicy`) --
  * durable-link subset proofs stay strict.
+ *
+ * The member check cannot distinguish every class pair (the legacy shapes do
+ * not either -- a required `length` is satisfied by `FabricHash` as well as
+ * `FabricBytes`, and the epoch types are structurally identical), so a
+ * cross-class transition can pass here. That acceptance is backstopped at the
+ * value level: pattern setup re-validates the piece's stored argument against
+ * the incoming schema (see {@link assertPatternSchemasBackwardCompatible}),
+ * and a stored primitive of the wrong class fails its prototype check there.
  */
 function fabricPrimitiveEvolutionAccepts(
   source: SchemaObject,

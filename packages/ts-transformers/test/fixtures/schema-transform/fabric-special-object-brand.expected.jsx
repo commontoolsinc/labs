@@ -20,7 +20,7 @@ export default pattern((state: {
     blob: FabricBytes;
 }) => {
     return {
-        [UI]: <div>has bytes</div>,
+        [UI]: <div>{state.key("blob")}</div>,
     };
 }, {
     type: "object",

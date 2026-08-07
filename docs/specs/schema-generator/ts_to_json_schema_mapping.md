@@ -247,8 +247,10 @@ through `BigUint64Array`, and `RegExp`) is claimed only when declared in a defau
 `@types/node` file (`hasLibraryDeclaration`), so a user-defined
 `interface Date {…}` is not swallowed. The fabric-primitive names are claimed
 only when the type carries the `FabricSpecialObject` nominal brand
-(`declaresFabricSpecialObjectBrand`), so an unrelated user type named e.g.
-`FabricBytes` keeps its structural schema.
+(`declaresFabricSpecialObjectBrand`), and named-type hoisting
+(`getNamedTypeKey`, `type-utils.ts`) classifies by the same test, so an
+unrelated user type named e.g. `FabricBytes` keeps its structural schema AND
+its normal `$defs` hoisting (fixture `fabric-primitive-name-collision`).
 `VNode`/`JSONSchemaObj`/`JSONSchema`
 have **no** such guard (untested collision). Native resolution also pierces
 type-parameter constraints/defaults and intersection constituents

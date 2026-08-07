@@ -95,11 +95,8 @@ export class NativeTypeFormatter implements TypeFormatter {
     ) {
       return NativeTypeFormatter.hasLibraryDeclaration(type, context);
     }
-    if (typeName !== undefined && FABRIC_PRIMITIVE_TYPE_NAMES.has(typeName)) {
-      return NativeTypeFormatter.declaresFabricSpecialObjectBrand(
-        type,
-        context,
-      );
+    if (NativeTypeFormatter.isFabricPrimitiveTypeName(typeName)) {
+      return NativeTypeFormatter.declaresFabricSpecialObjectBrand(type);
     }
     return true;
   }
@@ -170,20 +167,24 @@ export class NativeTypeFormatter implements TypeFormatter {
     return type.aliasSymbol;
   }
 
+  /** Whether the name is one of the fabric-primitive schema-vocabulary names. */
+  public static isFabricPrimitiveTypeName(
+    typeName: string | undefined,
+  ): boolean {
+    return typeName !== undefined && FABRIC_PRIMITIVE_TYPE_NAMES.has(typeName);
+  }
+
   /**
    * Whether the type carries the `FabricSpecialObject` nominal brand
    * (directly or by inheritance). This is what makes a type named e.g.
    * `FabricBytes` actually BE the fabric-primitive class rather than an
-   * unrelated user type that happens to share the name.
+   * unrelated user type that happens to share the name. Both this formatter's
+   * `supportsType` and named-type hoisting (`getNamedTypeKey`,
+   * `type-utils.ts`) classify by it, so an unbranded name-sharer keeps its
+   * structural schema AND its normal `$defs` hoisting.
    */
-  private static declaresFabricSpecialObjectBrand(
-    type: ts.Type,
-    context: GenerationContext,
-  ): boolean {
-    return context.typeChecker.getPropertyOfType(
-      type,
-      FABRIC_SPECIAL_OBJECT_BRAND,
-    ) !== undefined;
+  public static declaresFabricSpecialObjectBrand(type: ts.Type): boolean {
+    return type.getProperty(FABRIC_SPECIAL_OBJECT_BRAND) !== undefined;
   }
 
   private static hasLibraryDeclaration(

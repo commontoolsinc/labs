@@ -1,0 +1,32 @@
+{
+  "$defs": {
+    "FabricBytes": {
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "length": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "label",
+        "length"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "first": {
+      "$ref": "#/$defs/FabricBytes"
+    },
+    "second": {
+      "$ref": "#/$defs/FabricBytes"
+    }
+  },
+  "required": [
+    "first",
+    "second"
+  ],
+  "type": "object"
+}

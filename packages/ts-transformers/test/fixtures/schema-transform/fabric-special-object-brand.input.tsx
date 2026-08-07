@@ -7,6 +7,6 @@ import { type FabricBytes, pattern, UI } from "commonfabric";
 // -- a type-system-only key -- never reaches a generated schema.
 export default pattern((state: { blob: FabricBytes }) => {
   return {
-    [UI]: <div>has bytes</div>,
+    [UI]: <div>{state.blob}</div>,
   };
 });
