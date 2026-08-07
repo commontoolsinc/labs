@@ -5,7 +5,13 @@ like and lays out seven steps to get there. Steps 1–3 are the read layer, and
 [shaped reads and verb results](shaped-reads-implementation.md) builds them.
 This plan is steps 4–7: the part that changes what a caller types.
 
-The split is deliberate. The read layer adds capability and removes nothing;
+The split is deliberate, though not absolute. The read layer is additive with
+one exception it owns and sequences itself: scoping invocation ids to a session
+makes `--invocation` without one an error, a spelling that works today and that
+[Verbs over the CLI](../common/verbs-over-the-cli.md) teaches. That is one
+change, landing alone, ahead of anything that publishes an address. This arc's
+risk is different in kind — every step of it renames or merges something a
+caller already learned;
 this arc renames, aliases and merges, so its risk is entirely in what breaks for
 someone who already learned the current spelling. The two want different
 sequencing, different tests, and different appetites for landing quickly.
@@ -123,7 +129,8 @@ Each of these is a decision, not a refactor. Sizes are for the code once the
 decision is made; the decision is the expensive part.
 
 **M1. Two `inspect`s.** `cf inspect piece` and `cf piece inspect`. Top-level
-`inspect` is offline forensics over stored state, twenty-two subcommands wide.
+`inspect` is forensics over stored state, twenty-two subcommands wide and
+offline but for `inspect pull`, which fetches from a remote.
 `piece inspect` reports on a live piece. Whether these are the same operation is
 the question — if they are not, the fix is naming rather than merging.
 
@@ -185,6 +192,12 @@ is where an aliasing seam usually shows first.
 
 **D1 is that the warning does not reach stdout.** A deprecation notice on stdout
 corrupts the JSON an agent parses. It goes to stderr, and a test pins that.
+
+*And whether `--quiet` silences it.* The CLI's convention is that `--quiet`
+suppresses hints but not warnings, and a deprecation notice can be read as
+either. Deciding it when the notice is written costs a sentence; deciding it
+after a script depends on the answer costs a behavior change. The plan does not
+prejudge which — only that D1 does not ship without an answer.
 
 **The merges want characterization tests before the decision.** For each pair,
 what each command does today, captured, so the merge can be judged against
