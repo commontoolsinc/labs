@@ -239,13 +239,15 @@ JSON literals, comparisons, `and`/`or`/`not`, and parentheses. Only `false` and
 also falsey. Non-array inputs are rejected. `--schema` projects output from a
 comma-separated field list, an inline JSON Schema, or `@schema.json`; concise
 fields apply per item for arrays, while JSON Schema describes the whole output.
-In an array-item projection, a typed scalar leaf that does not match stored data
-is omitted rather than reported as an error; prefer `true` leaves unless type
-filtering is intentional. Concise dotted paths follow declared source schemas
-through nested arrays: `comments.body` selects `body` from every comment and
-drops its siblings. Source-declared nullable items and properties remain null.
-If a present source cannot materialize the transform, the command exits nonzero
-with an explicit "not JSON null" error; an absent optional source retains the
+In a JSON Schema, `properties` projects an object and `items` projects an array
+at every level of nesting, with or without a matching `type`. In an array-item
+projection, a typed scalar leaf that does not match stored data is omitted
+rather than reported as an error; prefer `true` leaves unless type filtering is
+intentional. Concise dotted paths follow declared source schemas through nested
+arrays: `comments.body` selects `body` from every comment and drops its
+siblings. Source-declared nullable items and properties remain null. If a
+present source cannot materialize the transform, the command exits nonzero with
+an explicit "not JSON null" error; an absent optional source retains the
 ordinary successful `null` response. If the source schema does not identify a
 nested container, concise projection still applies its field mask across
 encountered arrays to prevent sibling disclosure; use an explicit schema for a
