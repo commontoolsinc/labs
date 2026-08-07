@@ -682,9 +682,58 @@ async function aimAtElement(
             height: rect.height,
           };
         }
-        return offsetX === null || offsetY === null
-          ? { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
-          : { x: rect.x + offsetX, y: rect.y + offsetY };
+        if (offsetX === null || offsetY === null) {
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+        }
+
+        // Astral defines an offset from the content quad's top-left point, not
+        // from the border box returned by getBoundingClientRect(). Reconstruct
+        // that point from the element's own 2D transform so the one-turn aim
+        // preserves published ElementHandle.click({ offset }) behavior without
+        // returning to the stale DOM-agent handle path.
+        const pixels = (value: string) => Number.parseFloat(value) || 0;
+        const insetX = pixels(style.borderLeftWidth) +
+          pixels(style.paddingLeft);
+        const insetY = pixels(style.borderTopWidth) +
+          pixels(style.paddingTop);
+        let matrix = new DOMMatrixReadOnly();
+        try {
+          if (style.transform !== "none") {
+            matrix = new DOMMatrixReadOnly(style.transform);
+          }
+        } catch {
+          // A browser that exposes an unparsable transform still gets the
+          // untransformed content-box correction below.
+        }
+
+        if (el instanceof HTMLElement && matrix.is2D) {
+          const width = el.offsetWidth;
+          const height = el.offsetHeight;
+          const corners = [
+            { x: 0, y: 0 },
+            { x: width, y: 0 },
+            { x: width, y: height },
+            { x: 0, y: height },
+          ].map(({ x, y }) => ({
+            x: matrix.a * x + matrix.c * y,
+            y: matrix.b * x + matrix.d * y,
+          }));
+          const borderOrigin = {
+            x: rect.x - Math.min(...corners.map(({ x }) => x)),
+            y: rect.y - Math.min(...corners.map(({ y }) => y)),
+          };
+          return {
+            x: borderOrigin.x + matrix.a * insetX + matrix.c * insetY +
+              offsetX,
+            y: borderOrigin.y + matrix.b * insetX + matrix.d * insetY +
+              offsetY,
+          };
+        }
+
+        return {
+          x: rect.x + insetX + offsetX,
+          y: rect.y + insetY + offsetY,
+        };
       },
       { args: [offset?.x ?? null, offset?.y ?? null] },
     );
