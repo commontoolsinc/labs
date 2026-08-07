@@ -125,12 +125,19 @@ function attachCfcToOutputs(
     }
     return;
   } else if (isRecord(outputs)) {
-    // Descend into objects and arrays
-    // TODO(danfuzz): This `isRecord`-gated `Object.entries` descent has no
-    // `FabricSpecialObject` guard; a `FabricPrimitive` output is decomposed
-    // (its state is private) and a `FabricInstance` is walked by internal
-    // slots, so CFC labels are not attached to the special object's actual
-    // contents.
+    // Descend into objects and arrays.
+    //
+    // A `FabricSpecialObject` among them is inert here rather than damaged:
+    // this walk only reads and labels in place, and such a value has zero
+    // enumerable own properties, so the descent ends at it having done
+    // nothing. A `FabricPrimitive` needs nothing more -- a leaf holds no cell
+    // to label. `node-utils.test.ts` pins that a labellable cell BESIDE one
+    // still gets its label.
+    //
+    // TODO(danfuzz): a cell nested in a `FabricInstance`'s codec contents gets
+    // no label, since those contents are not reachable by property name. That
+    // is under-labelling, which is the unsafe direction here, unlike the
+    // policy-input walks in `runner.ts` that fail closed.
     for (const [_, value] of Object.entries(outputs)) {
       attachCfcToOutputs(value, lubConfidentiality);
     }
