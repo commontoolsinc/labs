@@ -13,7 +13,6 @@ import {
   renderMembershipProviderFor,
   RuntimeProcessor,
   sanitizeForPostMessage,
-  shouldReconcileHomeRoot,
 } from "./runtime-processor.ts";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
@@ -1412,17 +1411,13 @@ describe("RuntimeProcessor blob upload IPC", () => {
 });
 
 describe("RuntimeProcessor home pattern IPC", () => {
-  it("reconciles the home root when the update flag is enabled", () => {
-    expect(shouldReconcileHomeRoot({ experimental: {} })).toBe(false);
-    expect(shouldReconcileHomeRoot({
-      experimental: { systemPatternAutoUpdate: false },
-    })).toBe(false);
-    expect(shouldReconcileHomeRoot({
-      experimental: { systemPatternAutoUpdate: true },
-    })).toBe(true);
-  });
-
-  it("uses the default-pattern metadata fast path when the home pattern is already instantiated", async () => {
+  it("routes the home root through ensureDefaultPattern even when the legacy pattern meta is present", async () => {
+    // The sharpest pin of the always-controller contract: even with a legacy
+    // `pattern` meta present and the update flag unset, the handler reaches
+    // ensureDefaultPattern — the leg carrying the cold-start setup repair —
+    // and never starts the pattern directly. A metadata shortcut in front of
+    // the controller would skip that repair, and with the flag unset (every
+    // default deployment) nothing else heals an aged home root.
     const defaultPatternRef: CellRef = {
       id: "of:default-pattern-result" as CellRef["id"],
       space: "did:key:test-home" as CellRef["space"],
@@ -1435,73 +1430,10 @@ describe("RuntimeProcessor home pattern IPC", () => {
       scope: "space",
       path: [],
     };
-    let startedCell: unknown;
-    let idleCalled = false;
-    let defaultPatternSynced = false;
-
     const defaultPatternCell = {
       ...defaultPatternRef,
       getAsLink: () => cellRefToSigilLink(defaultPatternRef),
       getAsNormalizedFullLink: () => defaultPatternRef,
-      getMetaRaw: (metaField: string) =>
-        defaultPatternSynced && metaField === "pattern"
-          ? cellRefToSigilLink(patternRef)
-          : undefined,
-      sync: () => {
-        defaultPatternSynced = true;
-        return Promise.resolve();
-      },
-    };
-    const processor = {
-      runtime: {
-        getHomeSpaceCell: () => ({
-          sync: () => Promise.resolve(),
-          key: (key: string) => {
-            expect(key).toBe("defaultPattern");
-            return {
-              get: () => ({
-                resolveAsCell: () => defaultPatternCell,
-              }),
-            };
-          },
-        }),
-        start: (cell: unknown) => {
-          startedCell = cell;
-          return Promise.resolve();
-        },
-        idle: () => {
-          idleCalled = true;
-          return Promise.resolve();
-        },
-      },
-    } as unknown as RuntimeProcessor;
-
-    await expect(
-      RuntimeProcessor.prototype.handleEnsureHomePatternRunning.call(
-        processor,
-        { type: RequestType.EnsureHomePatternRunning },
-      ),
-    ).resolves.toEqual({ cell: defaultPatternRef });
-    expect(startedCell).toBe(defaultPatternCell);
-    expect(idleCalled).toBe(true);
-  });
-
-  it("routes an update-enabled home root through ensure before start", async () => {
-    const defaultPatternRef: CellRef = {
-      id: "of:update-enabled-home-root" as CellRef["id"],
-      space: "did:key:test-home" as CellRef["space"],
-      scope: "space",
-      path: [],
-    };
-    const patternRef: CellRef = {
-      id: "of:update-enabled-home-pattern" as CellRef["id"],
-      space: "did:key:test-home" as CellRef["space"],
-      scope: "space",
-      path: [],
-    };
-    const defaultPatternCell = {
-      ...defaultPatternRef,
-      getAsLink: () => cellRefToSigilLink(defaultPatternRef),
       getMetaRaw: (metaField: string) =>
         metaField === "pattern" ? cellRefToSigilLink(patternRef) : undefined,
       sync: () => Promise.resolve(),
@@ -1509,7 +1441,7 @@ describe("RuntimeProcessor home pattern IPC", () => {
     let startedDirectly = false;
     const runtime = {
       userIdentityDID: "did:key:test-home",
-      experimental: { systemPatternAutoUpdate: true },
+      experimental: {},
       getHomeSpaceCell: () => ({
         sync: () => Promise.resolve(),
         key: () => ({

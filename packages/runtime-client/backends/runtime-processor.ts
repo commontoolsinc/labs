@@ -202,13 +202,6 @@ function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   return new URL(url, spaceBaseUrl).href;
 }
 
-/** Whether the home root must take the reconcile-before-start path. */
-export function shouldReconcileHomeRoot(
-  runtime: Pick<Runtime, "experimental">,
-): boolean {
-  return runtime.experimental?.systemPatternAutoUpdate === true;
-}
-
 /**
  * Map host-decided `InitializationData` onto `runtimePresets.browserWorker`
  * params (CT-1814): the shared first-party posture (CFC pins,
@@ -1156,28 +1149,12 @@ export class RuntimeProcessor {
     const homeSpaceCell = this.runtime.getHomeSpaceCell();
     await homeSpaceCell.sync();
 
-    const defaultPatternCell = homeSpaceCell.key("defaultPattern").get()
-      .resolveAsCell();
-    await defaultPatternCell.sync();
-
-    // Fast path: pattern already exists. When home auto-update is enabled,
-    // deliberately fall through to PiecesController.ensureDefaultPattern():
-    // it reconciles the persisted identity before starting the root. Starting
-    // here first would recreate the stale-root bootstrap dependency.
-    // (Value is a Cell itself, and pattern metadata means it's instantiated)
-    // We've followed all the links from "defaultPattern", so our cell should
-    // be the result cell for the default pattern.
-    const reconcileHome = shouldReconcileHomeRoot(this.runtime);
-    if (getMetaLink(defaultPatternCell, "pattern") && !reconcileHome) {
-      await this.runtime.start(defaultPatternCell);
-      await this.runtime.idle();
-      return {
-        cell: createCellRef(defaultPatternCell),
-      };
-    }
-
-    // Pattern is absent, or update-enabled and must be reconciled before start:
-    // use the home-space PiecesController for the complete ensure sequence.
+    // Always the PiecesController path: ensureDefaultPattern() reconciles the
+    // persisted identity and carries the cold-start setup repair that heals an
+    // aged home root. Starting the pattern directly here would skip that
+    // repair, and with systemPatternAutoUpdate unset (every default
+    // deployment) nothing else heals the root — so no fast path belongs in
+    // front of the controller.
     const homeSession: Session = {
       as: this.identity,
       space: this.runtime.userIdentityDID,
