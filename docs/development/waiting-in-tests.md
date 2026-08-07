@@ -278,6 +278,35 @@ probe is such a client. It disposes its controller once the wait returns, which
 also keeps a finished wait from holding the loop open for the rest of the
 suite.
 
+### Naming the arrival, across runtimes
+
+A wait for state a *different* runtime wrote takes the same `defer()`-from-a-sink
+shape, once the arrival it waits on is named. `cf test`'s multi-user mode
+(`packages/cli/lib/multi-user-test-runner.ts`) runs each participant in its own
+worker realm against one shared space, and its `{ label }` / `{ await }` markers
+are writes to a marker document in that space — one per participant, so no
+document has two writers. Announcing a marker commits it after everything the
+announcing participant has already committed, and the orchestrator announces
+only once that commit is confirmed. Crossing a marker resolves a `defer()` from
+that document's sink in the awaiting worker.
+
+By the time the marker arrives, the server holds what the announcing participant
+wrote before it, so the reads that follow resolve against a server that has it.
+Two mechanisms deliver it and both are ordered behind the marker. A document
+already in the awaiting replica's watch set arrives in a fan-out frame the
+server computes by diffing current storage, so a frame carrying the marker
+cannot omit an earlier write it has not yet sent. A document outside that set is
+fetched on demand by the assertion's own `pull()`, and the response reflects
+current server state. The assertion is therefore read once, at quiescence, with
+no convergence loop around it: a false value is a failure.
+
+Reach for this rather than a settle-and-retry loop whenever the write is
+something the test can name — name the arrival, wait on it, then read. What the
+awaiting side gets in place of the Deno fail-fast above is the orchestrator's
+worker RPC deadline, which is the ambient limit the previous paragraph
+describes: a marker that never arrives is reported against the participant,
+marker, and announcer rather than fast.
+
 ### Browser-hosted unit tests have a harness backstop
 
 That fail-fast is Deno's, and the browser-hosted unit tests that
@@ -777,7 +806,13 @@ control, and there is no single "it converged" promise to await.
 `packages/patterns/integration/multi-runtime-harness.ts`), a different method
 that settles several in-process Deno-worker runtimes and reads durable cells
 across them. It is not the `@commonfabric/integration` `waitFor`, has no page,
-and its cross-runtime convergence poll is the honest mechanism.
+and its cross-runtime convergence poll is the honest mechanism for a caller
+that names only the state it wants and not the write that produces it.
+
+A caller that can name the write does better, and the multi-user `cf test`
+markers are that shape: a marker committed after the writes it stands for turns
+"has it converged yet" into "has this arrived", which a sink answers. [Naming
+the arrival, across runtimes](#naming-the-arrival-across-runtimes) describes it.
 
 ### Cross-page joint condition
 
