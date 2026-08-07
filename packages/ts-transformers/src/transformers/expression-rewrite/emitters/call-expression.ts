@@ -5,6 +5,7 @@ import {
   classifyArrayMethodResultSinkCall,
   classifyArrayMethodResultSinkReceiverChainCall,
   detectCallKind,
+  isSyntheticNode,
 } from "../../../ast/mod.ts";
 import { getCellKind } from "../../cell-type.ts";
 import { classifyOpaquePathTerminalCall } from "../../opaque-roots.ts";
@@ -272,7 +273,7 @@ export const emitCallExpression: Emitter = ({
   const callKind = detectCallKind(expression, context.checker);
   // Synthetic when/unless/ifElse calls created by earlier lowering passes
   // already own their argument rewriting decisions and must not be reprocessed.
-  const isAuthoredCall = expression.pos >= 0;
+  const isAuthoredCall = !isSyntheticNode(expression);
   const conditionalHelperName: "ifElse" | "when" | "unless" | undefined =
     hint?.kind === "call-if-else" ? "ifElse" : (
         callKind?.kind === "ifElse" ||
