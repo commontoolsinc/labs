@@ -2027,8 +2027,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
     const result = await promise;
     // commit() still spans the effect layer: callers that await the commit
-    // observe the outbox flushed, exactly as when the flush ran inline here.
-    await effects;
+    // observe the outbox flushed, exactly as when the flush ran inline
+    // here. Except at resolveAt "verdict": that caller asked for fate
+    // sealing and nothing more, so a slow effect must not stretch the
+    // promise — the effect run stays tracked via postCommitEffectsSettled().
+    if (options?.resolveAt !== "verdict") {
+      await effects;
+    }
 
     return result;
   }

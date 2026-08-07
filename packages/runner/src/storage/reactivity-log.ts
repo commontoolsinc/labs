@@ -121,12 +121,13 @@ export function isReadIgnoredForCommit(meta?: Metadata): boolean {
 // rejected commit's promise resolves only after finalizeRejection's
 // read-repair gate — the caller's retry needs the repaired base — but the
 // commit's FATE is sealed the moment the rejection is received, and the
-// verdict-gated effect layer (commit callbacks, outbox clearing) must not
-// wait out the repair round trip. The transaction registers its verdict
-// resolver at commit() entry; finalizeRejection notifies it before the
-// gate. Rejections only: an accept does not seal a multi-space commit's
-// aggregate fate, so accepts keep resolving the verdict with the final
-// result.
+// verdict-gated effect layer (verdict callbacks, outbox clearing) must not
+// wait out the repair round trip; commit callbacks ride the promise and DO
+// wait. The transaction registers its verdict resolver at commit() entry;
+// the push path notifies every contributing source at rejection receipt,
+// and finalizeRejection covers the cascade paths. Rejections only: an
+// accept does not seal a multi-space commit's aggregate fate, so accepts
+// keep resolving the verdict with the final result.
 const commitRejectionListeners = new WeakMap<
   object,
   (rejection: StorageTransactionRejected) => void
@@ -155,8 +156,8 @@ export function notifyCommitRejected(
 // application's promise here; the transaction layer drains the record so
 // that its commit() promise resolves only once the subscribed view reflects
 // the committed write. The split exists so post-commit effects gated on
-// durability alone (commit callbacks) can hook the verdict instead of
-// inheriting the fan-out window.
+// durability alone (verdict callbacks, the outbox flush) can hook the
+// verdict instead of inheriting the fan-out window.
 const coverageWaits = new WeakMap<object, Promise<void>[]>();
 
 export function recordCoverageWait(tx: object, wait: Promise<void>): void {

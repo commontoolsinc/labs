@@ -583,7 +583,7 @@ function finalizeReactiveActionCommit(
     state.runtime.trackAsyncWork(args.tx.postCommitEffectsSettled());
   }
   const committedLog = log;
-  watchReactiveActionCommit({
+  const handled = watchReactiveActionCommit({
     action: args.action,
     tx: args.tx,
     log: committedLog,
@@ -606,6 +606,13 @@ function finalizeReactiveActionCommit(
       }
     },
   });
+  // The barrier entry commit() registered settles with the commit promise,
+  // but the disposition above — a conflict's catch-up-then-requeue in
+  // particular — runs afterwards. Register the handled chain too, so
+  // idleWithPendingCommits cannot release in the window between a
+  // rejection settling and its retry being requeued (the event path in
+  // events.ts registers the same way).
+  state.runtime.storageManager.trackPendingCommit(handled);
 
   logger.debug("schedule-run-complete", () => [
     `[RUN] Action completed: ${args.actionId}`,

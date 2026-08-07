@@ -3545,6 +3545,18 @@ class SpaceReplica implements ISpaceReplica {
     const routeSources = options.routeSources ??
       (source === undefined ? [] : [source]);
     const resolveAtVerdict = options.commitOptions?.resolveAt === "verdict";
+    // Rejection receipt seals the fate for EVERY contributing transaction —
+    // for a batched scheduler-observation commit that is each issued entry's
+    // source, which `source` (undefined for the batch wrapper) does not
+    // carry. finalizeRejection's own notify covers the cascade paths that
+    // do not come through here; the once-guard makes the overlap free.
+    const notifyRejectionSources = (
+      rejection: StorageTransactionRejected,
+    ): void => {
+      for (const routeSource of routeSources) {
+        notifyCommitRejected(routeSource, rejection);
+      }
+    };
     const schedulerObservationDependencies =
       options.waitForSchedulerObservations === true
         ? this.schedulerObservationDependenciesBefore(localSeq)
@@ -3570,6 +3582,7 @@ class SpaceReplica implements ISpaceReplica {
             `commit preempted: stale until caughtUpLocalSeq>=${threshold}`,
             { localSeq, operations: operations.length },
           ]);
+          notifyRejectionSources(rejection);
           return await this.finalizeRejection(
             localSeq,
             operations,
@@ -3652,6 +3665,7 @@ class SpaceReplica implements ISpaceReplica {
             sessionId: session.sessionId,
             error: inFlight.localRejectionValue.name ?? "TransactionError",
           });
+          notifyRejectionSources(inFlight.localRejectionValue);
           return await this.finalizeRejection(
             localSeq,
             operations,
@@ -3708,6 +3722,7 @@ class SpaceReplica implements ISpaceReplica {
             sessionId: session.sessionId,
             error: outcome.rejection.name ?? "TransactionError",
           });
+          notifyRejectionSources(outcome.rejection);
           return await this.finalizeRejection(
             localSeq,
             operations,
@@ -3771,6 +3786,7 @@ class SpaceReplica implements ISpaceReplica {
             { localSeq, operations: operations.length },
           ],
         );
+        notifyRejectionSources(rejection);
         return await this.finalizeRejection(
           localSeq,
           operations,

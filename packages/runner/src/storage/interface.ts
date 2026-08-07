@@ -707,18 +707,20 @@ export type StorageTransactionStatus =
  */
 export interface TransactionCommitOptions {
   /**
-   * When the returned promise resolves for an ACCEPTED commit.
+   * When the returned promise resolves.
    *
-   * - `"coverage"` (default): once the caller's subscribed view reflects
-   *   the committed write and the foreign novelty it was applied on top of
-   *   (marker coverage, spec §4.11.2).
-   * - `"verdict"`: once the commit is durably accepted, without waiting
-   *   for the fan-out — and without synced() holding on it. For callers
-   *   whose premise is "accepted but not yet fanned out": controlled-
-   *   staleness test fixtures foremost. State application still parks;
-   *   only what the caller observes changes.
-   *
-   * Rejections resolve at the verdict either way.
+   * - `"coverage"` (default): on accept, once the caller's subscribed view
+   *   reflects the committed write, its watch-set consequences, and the
+   *   foreign novelty it was applied on top of (marker coverage, spec
+   *   §4.11.2); on rejection, after the read-repair gate, so a retry runs
+   *   against the repaired base.
+   * - `"verdict"`: as soon as the commit's fate is sealed — the accept
+   *   verdict or the rejection receipt — without the coverage wait, the
+   *   read-repair wait, the synced() hold, or the post-commit effect run
+   *   (still tracked via postCommitEffectsSettled()). For callers whose
+   *   premise is "durably decided but not yet fanned out":
+   *   controlled-staleness test fixtures foremost. State application still
+   *   parks; only what the caller observes changes.
    */
   resolveAt?: "coverage" | "verdict";
 }
@@ -1033,8 +1035,17 @@ export interface IStorageTransaction {
    * error. Commit is NOT idempotent — it does not replay the original result.
    *
    * When this method returns, the changes will have been committed locally,
-   * but may not be visible to another runtime. When the returned promise
-   * resolves, the data is fully committed and available to other processes.
+   * but may not be visible to another runtime. The commit is fully durable
+   * and available to other processes at the VERDICT; the returned promise
+   * (by default) resolves later, at coverage — once the server's first
+   * subscription update after the write has been integrated, so the
+   * caller's view reflects the write, any docs it made newly reachable,
+   * and the foreign novelty it was applied on top of. On rejection the
+   * promise resolves after the read-repair gate, so a retry runs against
+   * the repaired base. {@link TransactionCommitOptions.resolveAt}
+   * `"verdict"` resolves at fate-sealing instead; effects gated on
+   * durability alone hook {@link IExtendedStorageTransaction.addVerdictCallback}
+   * or {@link commitVerdict} rather than this promise.
    */
   commit(
     options?: TransactionCommitOptions,
