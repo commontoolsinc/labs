@@ -12,7 +12,7 @@ mapping pass is due.
 
 ## 1. The map
 
-295 binding rules. Instruments: the scenario traces (T1–T12), the
+297 binding rules. Instruments: the scenario traces (T1–T12), the
 field-provenance chains, the executable model (C1–C10 property
 families), the Phase 1 dry-run, and the doc-review panels
 (weak — counted only where nothing else applies).
@@ -20,17 +20,20 @@ families), the Phase 1 dry-run, and the doc-review panels
 | doc | rules | instrument-covered | impl-gate | deferral | derivable | owed |
 | --- | --- | --- | --- | --- | --- | --- |
 | README | 31 | 17 | 9 | 1 | 2 | 2* |
-| protocol | 58 | 44 | 6 | 3 | 4 | 1* |
+| protocol | 59 | 45 | 6 | 3 | 4 | 1* |
 | events | 34 | 25 | 4 | 2 | 2 | 1 |
 | scopes | 25 | 17 | 3 | 1 | 2 | 2 |
 | builtins | 15 | 6 | 3 | 1 | 4 | 1 |
 | serving-loop | 77 | 45 | 20 | 1 | 5 | 6 |
 | key-vocabulary | 9 | 5 | 3 | 0 | 0 | 1 |
-| speculation | 15 | 10 | 2 | 0 | 1 | 2 |
+| speculation | 16 | 11 | 2 | 0 | 1 | 2 |
 | testing | 14 | 4 | 10 | 0 | 0 | 0 |
 | runtime-mapping | 17 | 5 | 3 | 1 | 5 | 3 |
 
-(*push-priority appears in two docs — counted once in §3.)
+(*push-priority appears in two docs — counted once in §3. The
+scheduler-tell classification rule likewise appears in two docs —
+protocol §1 primary, speculation §2 cross-reference — and is counted
+once, under protocol.)
 
 **Adjudication notes on the three big buckets:**
 
@@ -592,6 +595,34 @@ client does not; this PR):
   cell and discovers session narrowing at its result binding;
   space→user→session chain pinned, value at session).
 
+Delta 2026-08-07 — the scheduler-tell classification batch (owner
+ruling 2026-08-07; this PR):
+
+- protocol §1's scheduler-tell rule (+1 rule, map edited with this
+  delta; speculation §2 carries the cross-reference, counted once):
+  → COVERED by the existing stamping-boundary pins — the ruling NAMES
+  the landed boundary rather than changing it, and the boundary is
+  already witnessed end to end in
+  `packages/runner/test/speculation-overlay.test.ts` (stamped
+  derivation-kind runs divert; handler runs commit authored — F10;
+  UNSTAMPED setup/binding transactions commit as today; the
+  store-attribution query — zero derived-class commits from any
+  client session) and live in
+  `packages/patterns/integration/sx2-speculation.test.ts`. The
+  no-creation-carve-out corollary rides the same pins (a lift
+  instantiation's run is stamped derivation-kind by construction);
+  the imperative-creation `.pull`-for-round-one flow is exercised by
+  the serving-loop demand path
+  (`packages/runner/test/executor-serving-loop.test.ts`).
+- speculation §4's retirement honesty sentence (+1 rule, map edited
+  with this delta): → COVERED — the retirement trigger (watermark
+  coverage of basis + acked origins, value arrival NOT awaited) is
+  pinned in `speculation-overlay.test.ts`, and the safety machinery
+  the sentence names — the demand-cycle ensure-retry on deferred
+  structure loads — is pinned red-first in
+  `packages/runner/test/executor-serving-loop.test.ts` (the
+  demand-cycle ensure-retries test, c766ef453).
+
 ## 3. The owed register (every genuine orphan, with its trigger)
 
 Nothing here blocks Phase 1. Each item names the instrument
@@ -711,6 +742,19 @@ the coordinator owns PR structure):**
   (the Phase-1 fallback) unless a caller supplies per-run identities
   through the seam. Trigger: the next Phase-2-arc PR; no later than
   Phase 3's events (handler runs already carry per-run actors).
+
+- OW18 — the ensurer move (owner direction, 2026-08-07; recorded with
+  the scheduler-tell batch, NOT implemented by it):
+  `ensure-default-app-is-running` and pattern updating are
+  outside-scheduler CLIENT acts today — authored under the scheduler
+  tell, protocol §1 — and under the flag they can move server-side,
+  triggered by a pull on a qualifying pattern (in the current setup:
+  a system pattern from `/api/patterns`), after which flag-ON clients
+  simply STOP calling those ensurers/updaters. Owed when it lands:
+  the trigger's coverage (pull on a qualifying pattern ensures/
+  updates server-side; flag-ON clients make no ensurer calls) beside
+  the §3e watcher surface in `sx2-serving-loop`. Trigger: a Phase-2
+  follow-on PR, no later than Phase 3.
 
 **Phase 6 (the contract is fixed now, the check lands with
 hardening):**

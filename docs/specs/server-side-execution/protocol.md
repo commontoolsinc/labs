@@ -27,6 +27,46 @@ FORBIDDEN: a fourth class; per-class subtypes that alter admission;
 clients producing `derived` (there must be no client code path that can
 even construct one).
 
+**Which work moves to the server — the scheduler tell (RULED, owner
+2026-08-07; the classification that closes the instantiation-write
+question).** ONLY scheduler-driven work moves to the server:
+scheduler-stamped runs — the derivation and event-handler kinds — are
+server work under the flag, and their writes DIVERT on clients
+(speculation.md §2 carries the overlay half of this rule). Commits
+made OUTSIDE the scheduler are the client's authored acts and commit
+as today: the setup/instantiation transactions, imperative creation —
+a `cf piece new`-style client writing the result doc with its links
+and the pattern metadata IS the creation act; it may do nothing else
+and `.pull` on that result to have the server run round one — UI
+bindings, and widget edits. In the owner's words:
+
+> a pattern instantiated within a lift (or a map/filter/etc for that
+> matter) is reactive in nature, just a derived computation like any
+> other. you can tell because the causes are all pre-determined, so
+> the server will eventually do the same thing. but a client like the
+> `cf` binary (which acts as client here) can instantiate a new piece
+> (`cf piece new`) and that should create the piece including
+> probably writing the initial result, as writing that doc with the
+> result and the meta data about which pattern it runs is what
+> creates the piece. it might not do anything else than that and then
+> .pull on that result to get the server to actually run it for one
+> round. one big tell: those are commits that happen outside the
+> scheduler. only scheduler-driven work can move to the server, the
+> rest stays on the client. — owner, 2026-08-07
+
+Ratified corollaries, stated so none is inferred: there is NO
+creation carve-out — a pattern instantiated within a lift (or a
+map/filter) is a derived computation like any other, so its first run
+stays diverted even at instantiation (the server converges because
+the causes are pre-determined); README §1's "never computation
+results" sentence stands UNQUALIFIED; and the
+pull-then-server-runs-round-one flow above is the SANCTIONED
+imperative-creation shape. The code's existing stamping boundary
+already implements the rule — an unstamped setup transaction is
+authored, and the scheduler's stamping choke points are exactly where
+derivation-kind runs divert (speculation.md §2's posture rows) — so
+this ruling NAMES the landed boundary rather than changing it.
+
 **The `system` class is PRODUCER-defined, its contents exemplary
 (RULED 2026-08-05).** The stamp rides the memory server's generic
 direct-write path (`Server.writeDocument`,
