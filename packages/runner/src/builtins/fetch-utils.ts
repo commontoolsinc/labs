@@ -5,6 +5,7 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { markEffectCompletion } from "../executor/effect-completion.ts";
 
 /**
  * How long a claimed request mutex is believed before another replica may take
@@ -118,13 +119,18 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   runtime: Runtime,
   inputsCell: Cell<T>,
   pending: Cell<boolean>,
-  _result: Cell<any>,
-  _error: Cell<any>,
+  result: Cell<any>,
+  error: Cell<any>,
   internal: Cell<Schema<typeof internalSchema>>,
   requestId: string,
   snapshotInputs: (cell: Cell<T>) => T,
   expectedInputHash?: string,
   timeout: number = MUTEX_STALE_AFTER,
+  /** The served-effect id this claim belongs to (`${kind}:${hash}` —
+   * the memo/outbox key). Marks the write as an effect-completion-class
+   * transaction under the serving posture (server-execution v2 stage G,
+   * serving-loop.md §4); inert everywhere else. */
+  effectKey?: string,
 ): Promise<{
   claimed: boolean;
   inputs: T;
@@ -140,9 +146,33 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   await runtime.idle();
 
   await runtime.editWithRetry((tx) => {
+    if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
     const currentInternal = internal.withTx(tx).get();
     const isPending = pending.withTx(tx).get();
     const now = Date.now();
+    // A completed request needs no claim: when the stored hash already
+    // matches the expected inputs AND a result (or error-shaped result)
+    // landed, the memo hit rule makes the stored value THE value
+    // (server-execution v2 stage G, serving-loop.md §4). This closes
+    // the deferred-flush window the serving posture opens: effects fire
+    // POST-wave-commit there, so an action re-run reading a stale
+    // snapshot can re-enqueue a key whose first effect has ALREADY
+    // completed and retired from the outbox's in-flight set — without
+    // this check the late claim would clear the result and re-fetch.
+    // Client-side the same check only skips a redundant cross-tab
+    // refetch in a race corner (inline flushing makes the in-process
+    // ordering already safe there).
+    if (
+      expectedInputHash !== undefined &&
+      currentInternal.inputHash === expectedInputHash &&
+      (result.withTx(tx).get() !== undefined ||
+        error.withTx(tx).get() !== undefined)
+    ) {
+      claimed = false;
+      inputs = snapshotInputs(inputsCell.withTx(tx));
+      inputHash = computeInputHashFromValue(inputs);
+      return;
+    }
 
     // The caller-provided snapshotInputs receives the cell with the active
     // transaction attached. It uses cell.asSchema(...).get() to materialize
@@ -188,9 +218,12 @@ export async function tryWriteResult<T extends Record<string, any>>(
   expectedHash: string,
   action: (tx: IExtendedStorageTransaction) => void,
   snapshotInputs?: (cell: Cell<T>) => T,
+  /** See {@link tryClaimMutex}'s `effectKey`. */
+  effectKey?: string,
 ): Promise<boolean> {
   let success = false;
   await runtime.editWithRetry((tx) => {
+    if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
     const inputs = snapshotInputs
       ? snapshotInputs(inputsCell.withTx(tx))
       : inputsCell.getAsQueryResult([], tx);

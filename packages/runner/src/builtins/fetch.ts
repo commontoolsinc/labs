@@ -28,6 +28,7 @@ import {
   tryClaimMutex,
   tryWriteResult,
 } from "./fetch-utils.ts";
+import { markEffectCompletion } from "../executor/effect-completion.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
 
@@ -453,6 +454,16 @@ function fetchBuiltin(kind: FetchKind) {
       // If we have a result OR error for these inputs, we're done
       const hasValidResult = inputsMatch && currentResult !== undefined;
       const hasError = inputsMatch && currentError !== undefined;
+      if (hasValidResult || hasError) {
+        // The §4 memo hit (server-execution v2): the stored request hash
+        // matches, so the committed result (or error-shaped result) IS
+        // the node's value — no effect fires, which is what makes
+        // restart-recovery safe (serving-loop.md §4, §6 step 3).
+        runtime.effectMemoObserver?.({
+          kind: "hit",
+          id: `${kind.name}:${inputHash}`,
+        });
+      }
 
       // If we're already fetching these inputs, wait
       const alreadyFetching = inputsMatch && currentPending &&
@@ -478,6 +489,7 @@ function fetchBuiltin(kind: FetchKind) {
             // runtime.settled() and runtime.settledFor(parentCell) both wait
             // for the fetch and its writeback; idle() does not, so the
             // post-commit handler never blocks on network I/O.
+            const effectKey = `${kind.name}:${inputHash}`;
             const work = tryClaimMutex(
               runtime,
               inputsCell,
@@ -493,6 +505,7 @@ function fetchBuiltin(kind: FetchKind) {
               snapshotInputs,
               inputHash,
               mutexTimeoutMs,
+              effectKey,
             ).then(
               async ({ claimed }) => {
                 if (!claimed) {
@@ -503,6 +516,7 @@ function fetchBuiltin(kind: FetchKind) {
                 // Clear any previous result/error when starting a new fetch
                 // This ensures observers see a clean pending state
                 runtime.editWithRetry((tx) => {
+                  markEffectCompletion(tx, effectKey);
                   result.withTx(tx).set(undefined);
                   error.withTx(tx).set(undefined);
                 });
@@ -512,6 +526,7 @@ function fetchBuiltin(kind: FetchKind) {
                   // Release the lock and clear state
                   myRequestId = undefined;
                   runtime.editWithRetry((tx) => {
+                    markEffectCompletion(tx, effectKey);
                     pending.withTx(tx).set(false);
                     result.withTx(tx).set(undefined);
                     error.withTx(tx).set(undefined);
@@ -644,6 +659,7 @@ async function startFetch(
         error.withTx(tx).set(undefined);
       },
       snapshotInputs,
+      `${kind.name}:${inputHash}`,
     );
   } catch (err) {
     // Don't write errors if request was aborted
@@ -653,6 +669,7 @@ async function startFetch(
 
     // Write error - but only update inputHash if inputs haven't changed
     await runtime.editWithRetry((tx) => {
+      markEffectCompletion(tx, `${kind.name}:${inputHash}`);
       const currentHash = computeInputHashFromValue(
         snapshotInputs(inputsCell.withTx(tx)),
       );

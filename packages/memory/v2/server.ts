@@ -1557,6 +1557,12 @@ export class Server {
    * applyCommit (ATTACH can't run in a transaction); the caller detaches after.
    * Enforces ≤1 cell-db per commit so unqualified names stay unambiguous
    * (decision 1.3.A in plans/atomic-writes.md).
+   *
+   * The transact-path entry: the db file's scope key resolves from the
+   * COMMITTING SESSION (the client-commit identity model, protocol.md §1).
+   * The wave path enters through {@link attachWaveCommitSqliteDbs}, whose
+   * keys were resolved per RUN by the wave accumulator — the shared core
+   * below carries every validation either way.
    */
   #attachCommitSqliteDbs(
     engine: Engine.Engine,
@@ -1564,12 +1570,79 @@ export class Server {
     operations: readonly Operation[],
     scopeContext: { principal?: string; sessionId: string },
   ): Map<string, string> {
+    return this.#attachSqliteDbsWithScopeKeys(
+      engine,
+      space,
+      operations,
+      (op) =>
+        Engine.resolveScopeKey(op.db.scope, {
+          principal: scopeContext.principal,
+          sessionId: scopeContext.sessionId,
+        }),
+    );
+  }
+
+  /**
+   * The wave-path entry (server-execution v2 stage G, discharging the
+   * stage-D sqlite bound at engine-wave-sink.ts): attach the cell-db(s)
+   * a WAVE batch's folded `sqlite` ops target, keyed by the scope keys
+   * the wave accumulator resolved per RUN (M1 — the run's identity, not
+   * any committing session's; the wave envelope has no session to
+   * resolve scoped files from). Same validations, caps, and ≤1-db rule
+   * as the transact path — one core, two identity sources. The caller
+   * MUST invoke `detach` after its (synchronous) apply, before any
+   * await: the engine connection is shared per space, and a held
+   * attachment across an await breaks the ≤1-attached invariant
+   * unqualified-name resolution relies on.
+   */
+  attachWaveCommitSqliteDbs(
+    engine: Engine.Engine,
+    space: string,
+    operations: readonly Operation[],
+    scopeKeyByOpIndex: ReadonlyMap<number, string>,
+  ): { attachments: Map<string, string>; detach: () => void } {
+    const attachments = this.#attachSqliteDbsWithScopeKeys(
+      engine,
+      space,
+      operations,
+      (op, opIndex) => {
+        const key = scopeKeyByOpIndex.get(opIndex);
+        if (key === undefined) {
+          throw new Engine.ProtocolError(
+            `wave sqlite op ${opIndex} (db ${op.db.id}) carries no ` +
+              "resolved scope key: the wave accumulator resolves every " +
+              "sqlite op's db scope against its run's identity " +
+              "(serving-loop.md §3d; scopes.md §5)",
+          );
+        }
+        return key;
+      },
+    );
+    return {
+      attachments,
+      detach: () => {
+        for (const alias of attachments.values()) {
+          detachDatabase(engine.database, alias);
+        }
+      },
+    };
+  }
+
+  #attachSqliteDbsWithScopeKeys(
+    engine: Engine.Engine,
+    space: string,
+    operations: readonly Operation[],
+    scopeKeyForOp: (
+      op: Extract<Operation, { op: "sqlite" }>,
+      opIndex: number,
+    ) => string,
+  ): Map<string, string> {
     const map = new Map<string, string>();
     const tablesById = new Map<string, Record<string, unknown> | undefined>();
     // The db's scope qualifies its on-disk file the same way the read path does
     // (so a write and a read of a user/session-scoped db hit the same file).
     const scopeKeyById = new Map<string, string>();
-    for (const op of operations) {
+    for (const [opIndex, op] of operations.entries()) {
       if (op.op !== "sqlite") continue;
       const id = op.db.id;
       // Resource caps for the WRITE path. `sqlite.query` enforces these at parse
@@ -1605,10 +1678,7 @@ export class Server {
       ) {
         throw new Engine.ProtocolError("sqlite op declares an invalid scope");
       }
-      const scopeKey = Engine.resolveScopeKey(op.db.scope, {
-        principal: scopeContext.principal,
-        sessionId: scopeContext.sessionId,
-      });
+      const scopeKey = scopeKeyForOp(op, opIndex);
       if (map.has(id)) {
         // Same db id appears twice in one commit: it must resolve to the same
         // scoped file. A differing scope key would mean the second op silently
@@ -1696,6 +1766,136 @@ export class Server {
       return Path.join(dir, `cell-${tag}.sqlite`);
     }
     return Path.join(Deno.env.get("TMPDIR") ?? "/tmp", `cf-cell-${tag}.sqlite`);
+  }
+
+  /**
+   * Deliver one durable outbox append row to its target space
+   * (server-execution v2 stage G; serving-loop.md §5 FP1, protocol.md
+   * §2's server-produced authored row, §2b): an authored-class commit
+   * under the DELEGATED admission row — the carried acting identity +
+   * `capabilityRef` ride the commit metadata and the engine's delegated
+   * admission validates completeness. The entry's `firedAt` derives
+   * from that SAME carriage the admission validates (events.md §2: the
+   * event runs as the session it originated from; deriving it from the
+   * delivering envelope would be the silent-empty-instance trap), so a
+   * carriage/stamp mismatch is structurally impossible here. The
+   * commit's ENVELOPE session is the delivering SpaceServer's service
+   * identity (LT5) — admissibility comes from the carriage, never the
+   * envelope.
+   *
+   * Dedupe at the eventId horizon (events.md §4, the spec model's
+   * `admitDelegatedAppend`): a duplicate whose eventId already exists
+   * ABOVE the stream's `eventWatermark` is acked WITHOUT a commit (the
+   * admission-uniqueness CAS); an at-or-below duplicate ADMITS as a new
+   * entry and is skipped at processing time — admission must not bless
+   * a stronger, permanent dedupe than the contract. Entries this dark
+   * stage writes carry no `seq` (Phase 3 owns entry-seq semantics when
+   * event processing lands); a seq-less entry counts as above-horizon —
+   * conservative exactly where every stream's watermark is still 0.
+   * PHASE-3 OBLIGATION, stated so it cannot rot silently: when event
+   * processing stamps entry seqs and advances `eventWatermark`, this
+   * check must honor the horizon for seq-BEARING entries (it already
+   * does) AND the seq-less arm must retire with the last seq-less
+   * entries — otherwise stage-G-era entries would dedupe forever, a
+   * stronger permanent dedupe than events.md §4 permits.
+   *
+   * Deterministic admission rejections THROW `Engine.ProtocolError`
+   * (LT4: the outbox does not retry those); the caller deletes the row
+   * either way it returns.
+   */
+  async commitDelegatedAppend(entry: {
+    targetSpace: string;
+    targetStream: string;
+    eventId: string;
+    payload: unknown;
+    actingPrincipal?: string;
+    actingSession?: string;
+    capabilityRef: string;
+    /** The delivering SpaceServer's service session — the commit's
+     * envelope identity (LT5). */
+    sessionId: string;
+    /** From the delivering host's process-lifetime counter (the same
+     * replay-keying discipline as the wave sink — engine-wave-sink.ts):
+     * unique per (sessionId, localSeq) on the target engine. NOTE: a
+     * RE-SENT row arrives under a FRESH localSeq (the outbox bumps the
+     * shared counter per delivery attempt), so the engine's commit
+     * replay check never dedupes re-sends — the eventId horizon below
+     * is the one and only re-send dedupe. */
+    localSeq: number;
+  }): Promise<{ seq?: number; deduped: boolean }> {
+    const engine = await this.openEngine(entry.targetSpace);
+    // Read-check-append runs synchronously from here (no await), so the
+    // horizon check and the commit are atomic on the single-threaded
+    // co-hosted engine.
+    const doc = Engine.read(engine, { id: entry.targetStream });
+    const value = (doc?.value ?? {}) as {
+      entries?: Array<{ eventId?: string; seq?: number }>;
+      eventWatermark?: number;
+    };
+    const entries = Array.isArray(value.entries) ? value.entries : [];
+    const horizon = typeof value.eventWatermark === "number"
+      ? value.eventWatermark
+      : 0;
+    const duplicate = entries.some((existing) =>
+      existing?.eventId === entry.eventId &&
+      (typeof existing.seq === "number" ? existing.seq > horizon : true)
+    );
+    if (duplicate) {
+      return { deduped: true };
+    }
+    const streamEntry = {
+      eventId: entry.eventId,
+      payload: entry.payload,
+      // events.md §2: the inherited actor; a sessionless chain stamps
+      // session "server". Derived from the SAME carriage the delegated
+      // admission below validates — one source, no mismatch possible.
+      firedAt: {
+        ...(entry.actingPrincipal === undefined
+          ? {}
+          : { user: entry.actingPrincipal }),
+        session: entry.actingSession ?? "server",
+      },
+    };
+    const applied = Engine.applyCommit(engine, {
+      sessionId: entry.sessionId,
+      space: entry.targetSpace,
+      commit: {
+        localSeq: entry.localSeq,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: entry.targetStream as never,
+          value: {
+            ...(doc ?? {}),
+            value: { ...value, entries: [...entries, streamEntry] },
+          } as never,
+        }],
+      },
+      commitClass: "authored",
+      delegated: {
+        actingPrincipal: entry.actingPrincipal ?? "",
+        ...(entry.actingSession === undefined
+          ? {}
+          : { actingSession: entry.actingSession }),
+        capabilityRef: entry.capabilityRef,
+      },
+    });
+    // The delivered append is an ordinary authored admission for every
+    // observer: push dirtiness (M4 instance keys — the stream doc is
+    // space-scoped) and the plane-(b) hook fire exactly as a transact
+    // would have fired them.
+    this.markSpaceDirty(entry.targetSpace, [toDirtyKey(entry.targetStream)], {
+      sessionId: entry.sessionId,
+      seq: applied.seq,
+    });
+    this.#notifyCommitAdmitted({
+      space: entry.targetSpace,
+      seq: applied.seq,
+      class: "authored",
+      sessionId: entry.sessionId,
+      writes: [{ id: entry.targetStream, scopeKey: "space" }],
+    });
+    return { seq: applied.seq, deduped: false };
   }
 
   async sqliteQuery(

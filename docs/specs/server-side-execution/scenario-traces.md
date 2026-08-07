@@ -2,7 +2,7 @@
 
 **Verification instrument, NON-NORMATIVE.** The detail docs govern;
 a trace never overrides them. What a trace does is force the
-composition question the doc-by-doc organization hides: twelve
+composition question the doc-by-doc organization hides: fourteen
 canonical end-to-end journeys, each traced hop by hop, with every
 load-bearing value — identity, `scope_key`, commit class, envelope,
 stamp source — written down explicitly WITH A CITATION. A cell that
@@ -387,6 +387,32 @@ pattern-pointer; finally S1 disconnects and the space idles.
 - T13.Q8 — Wish `#now` interval timers: what does this trace NOT
   answer about them, and why?
 
+### T14 — Effect failure and retry: input-driven, never timers (stage G; OW7)
+
+Purpose: the §4 failure contract end to end — an error-shaped result
+is a memoized completion, nothing in the loop retries on a timer,
+and a retry happens exactly when the inputs change.
+Setup: a space-scoped `fetchData` node, demanded by S1. The request
+for url₁ fails (a transport error). Later U1 edits the argument to
+url₂, which succeeds. The host also crashes once, in Q5's window.
+
+- T14.Q1 — The failed request's completion: what commits, in what
+  class, and what carries the memo key?
+- T14.Q2 — After the error result lands, the node's action re-runs
+  (its result cells changed): does the effect re-fire? What rule
+  prevents it?
+- T14.Q3 — What, if anything, in the serving loop may schedule a
+  RETRY of the failed request on its own? Cite the FORBIDDEN list.
+  Distinguish the durable rows that DO re-send.
+- T14.Q4 — U1 writes url₂: walk the retry — what makes it fire
+  (which rule), and what happens to url₁'s stored error result?
+- T14.Q5 — The crash window: the host crashes after url₁'s request
+  left the process but BEFORE its error result committed. On
+  recovery, what happens — and how does that differ from the
+  committed-error case?
+- T14.Q6 — Which §7 counters move across the journey (the miss, the
+  suppressed re-fire, the input-driven retry)?
+
 ## 4. Reference answers
 
 **Run 2026-08-03** — six Sonnet trace runners (two traces each),
@@ -740,6 +766,39 @@ these.
   quiesces, and every tick is a derived commit against the
   amplification budget's spirit). This trace does not answer it;
   the owed register carries the ruling. [runtime-mapping N50]
+
+### T14 (COMPLETE — authored with stage G, 2026-08-06; OW7's impl witness is `executor-serving-loop.test.ts`'s effectful-node journey)
+
+- Q1: an error-shaped result (the existing builtin error-cell
+  conventions) WITH the request key, in ONE derived-class completion
+  commit — the same carriage as a success ("Failures commit an
+  error-shaped result … with the key"). [serving-loop §4]
+- Q2: no — the recomputed key equals the stored key and the stored
+  result IS the node's value; the hit rule does not distinguish
+  success-shaped from error-shaped results, which is exactly what
+  makes retries input-driven. [serving-loop §4]
+- Q3: nothing — "effect retry timers inside the loop" are FORBIDDEN,
+  and the outbox holds no effect-retry machinery: at-least-once
+  re-sending exists ONLY for the durable APPEND rows (activation's
+  §6 step 5), which carry events, never effect state ("the durable
+  rows of §5 carry APPENDS, never effect state"). [serving-loop §4,
+  §5, §6]
+- Q4: the input change re-derives the memo key; recomputed ≠ stored
+  ⇒ the miss rule fires the effect (the input-driven retry). url₁'s
+  stored error is superseded on the node's cells by the new key's
+  pending/result state — retries are "input-driven (inputs change →
+  new key), never timer-driven loops". [serving-loop §4]
+- Q5: the completion never committed, so recovery finds NO stored
+  key for the recomputed request: the first wave re-misses and
+  re-fires — the external request may thereby run twice
+  (at-least-once across crash, RULED and accepted; the fired-marker
+  was considered and REJECTED). With a COMMITTED error the recovery
+  run memo-HITS instead and nothing re-fires (Q2). [serving-loop §4,
+  §6 step 3]
+- Q6: the miss counts `memo.misses` and `outbox.queued`; the
+  post-completion re-run's suppressed re-fire counts `memo.hits`;
+  the input-driven retry counts a second `memo.misses` +
+  `outbox.queued`. [serving-loop §4, §7]
 
 ## 5. Findings routing
 

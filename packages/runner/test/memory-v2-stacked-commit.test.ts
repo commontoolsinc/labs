@@ -2116,6 +2116,63 @@ Deno.test("memory v2 stacked commits: a marker applies parked accepts even when 
   }
 });
 
+Deno.test("memory v2 stacked commits: whenApplied resolves at the parked accept's promotion, immediately when nothing is parked (stage G's effect-retirement read barrier)", async () => {
+  const harness = await markerHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, { items: ["a"] });
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+    const replica = harness.provider.replica as unknown as {
+      whenApplied(localSeq: number): Promise<void>;
+    };
+    // An accept long applied (the seed): resolves immediately.
+    let seedApplied = false;
+    await replica.whenApplied(1).then(() => {
+      seedApplied = true;
+    });
+    assertEquals(seedApplied, true);
+
+    // An accepted-and-PARKED commit: the barrier is held open.
+    harness.model.setOutcome(2, { kind: "accept" });
+    const patch = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "add", path: "/value/items/-", value: "X" }],
+      { items: ["a", "X"] },
+    );
+    await assertResultOk(patch);
+    assertEquals(hasPendingOverlay(harness, DOCS.A), true);
+    let applied = false;
+    const barrier = replica.whenApplied(2).then(() => {
+      applied = true;
+    });
+    // Give resolution every chance short of the marker: the barrier
+    // must still be held (this is what keeps a served effect's
+    // in-flight entry deduping re-admits across the absorption window).
+    await clock.tick(20);
+    assertEquals(applied, false);
+
+    // The marker arrives: the parked accept promotes and the barrier
+    // resolves.
+    harness.pushSync({ caughtUpLocalSeq: 2 });
+    await barrier;
+    assertEquals(applied, true);
+    assertEquals(hasPendingOverlay(harness, DOCS.A), false);
+  } finally {
+    await harness.close();
+  }
+});
+
 Deno.test("memory v2 stacked commits: rejection round trip — verdict, repair frame, regenerate against the repaired base (CT-1927)", async () => {
   const harness = await markerHarness();
   try {

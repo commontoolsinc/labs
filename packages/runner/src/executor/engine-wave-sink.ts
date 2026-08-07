@@ -8,8 +8,7 @@
 // itself. Stage F's SpaceServer wires this sink under the serving loop;
 // until then tests drive it.
 //
-// Of stage D's three documented bounds, stage F discharged two and one
-// remains:
+// Stage D's three documented bounds are all discharged:
 // - DISCHARGED (stage F): foreign provisioning batches now apply WITH
 //   protocol.md §2's delegated-identity admission row — the batch's
 //   `delegated` carriage (originating chain actor + capabilityRef) rides
@@ -21,8 +20,19 @@
 // - DISCHARGED (stage F): the seal handoff carries read-only spaces'
 //   read sets (ITransactionSealSink.sealSpaceReads), and the
 //   accumulator's withdrawn-read closure folds them by doc identity.
-// - REMAINING (stage G): sqlite ops in wave batches need cell-db
-//   attachments the effect channel owns; this sink passes none.
+// - DISCHARGED (stage G): sqlite ops in HOME wave batches attach their
+//   cell-db file(s) through the `sqliteAttachmentsFor` hook (the memory
+//   server's attachWaveCommitSqliteDbs — same validations and ≤1-db
+//   rule as the transact path, keyed by the accumulator's per-RUN scope
+//   keys), attached before and detached after the synchronous apply. A
+//   sink constructed WITHOUT the hook still refuses such a batch
+//   loudly. Sqlite ops in FOREIGN batches stay refused — no Phase-1
+//   producer folds sqlite into provisioning, and the attachment
+//   identity for a foreign run is Phase 5's cross-space design.
+//
+// Stage G also forwards the wave's durable outbound-append rows
+// (serving-loop.md §5, FP1): `batch.outboxAppends` land INSIDE the same
+// engine transaction as the wave commit, via applyWaveCommit.
 
 import type { Engine } from "@commonfabric/memory/v2/engine";
 import {
@@ -34,6 +44,7 @@ import {
   WavePreconditionError,
 } from "@commonfabric/memory/v2/engine";
 import type { CellScope } from "@commonfabric/api";
+import type { Operation } from "@commonfabric/memory/v2";
 import type { MemorySpace, Result } from "../storage/interface.ts";
 import type {
   WaveCommitRejection,
@@ -46,6 +57,13 @@ export class EngineWaveCommitSink implements WaveCommitSink {
   readonly #sessionId: string;
   readonly #principal: string | undefined;
   readonly #localSeq: { value: number };
+  readonly #sqliteAttachmentsFor:
+    | ((
+      space: MemorySpace,
+      operations: readonly Operation[],
+      scopeKeyByOpIndex: ReadonlyMap<number, string>,
+    ) => { attachments: Map<string, string>; detach: () => void })
+    | undefined;
 
   /**
    * Replay keying — the stage-F choice, made and enforced here: the
@@ -77,11 +95,24 @@ export class EngineWaveCommitSink implements WaveCommitSink {
     /** The shared, process-lifetime localSeq counter (see the
      * constructor doc). Mutated in place. */
     localSeqRef?: { value: number };
+    /** The sqlite attachment hook (stage G — the memory server's
+     * `attachWaveCommitSqliteDbs`): attach the cell-db file(s) a home
+     * batch's folded `sqlite` ops target, keyed by the accumulator's
+     * per-run scope keys. The sink calls it synchronously around the
+     * apply — attach, apply, detach, no await between — preserving the
+     * ≤1-attached invariant. Without it, a batch carrying sqlite ops is
+     * refused loudly (the pre-stage-G bound's behavior, now stated). */
+    sqliteAttachmentsFor?: (
+      space: MemorySpace,
+      operations: readonly Operation[],
+      scopeKeyByOpIndex: ReadonlyMap<number, string>,
+    ) => { attachments: Map<string, string>; detach: () => void };
   }) {
     this.#engineFor = options.engineFor;
     this.#sessionId = options.sessionId;
     this.#principal = options.principal;
     this.#localSeq = options.localSeqRef ?? { value: 0 };
+    this.#sqliteAttachmentsFor = options.sqliteAttachmentsFor;
   }
 
   currentHeads(
@@ -123,8 +154,24 @@ export class EngineWaveCommitSink implements WaveCommitSink {
         ? { preconditions: [...batch.preconditions] }
         : {}),
     };
+    const hasSqliteOps = batch.operations.some((op) => op.op === "sqlite");
     try {
       if (!batch.home) {
+        if (hasSqliteOps) {
+          // No Phase-1 producer folds sqlite into a foreign provisioning
+          // batch, and the attachment identity for a foreign run is
+          // Phase 5's cross-space design — refused, never silently
+          // applied against a mis-keyed file.
+          return Promise.resolve({
+            error: {
+              name: "WaveCommitRejected",
+              message: "sqlite ops in a FOREIGN wave batch are refused: " +
+                "cross-space sqlite attachment lands with Phase 5's " +
+                "cross-space serving (protocol.md §2b; the stage-G " +
+                "discharge covers home batches only)",
+            },
+          });
+        }
         // Foreign provisioning commit (protocol.md §2b): authored-class
         // under the DELEGATED admission row — the batch's carried acting
         // identity + capabilityRef ride the commit metadata, admission
@@ -168,33 +215,78 @@ export class EngineWaveCommitSink implements WaveCommitSink {
         });
         return Promise.resolve({ ok: { seq: applied.seq } });
       }
-      const applied = applyWaveCommit(engine, {
-        sessionId: this.#sessionId,
-        space: batch.space,
-        principal: this.#principal,
-        commit,
-        commitClass: "derived",
-        holder: batch.holder,
-        annotations: batch.annotations,
-        consequenceOf: batch.consequenceOf,
-        ...(batch.derivedThrough === undefined
-          ? {}
-          : { derivedThrough: batch.derivedThrough }),
-        waveBasis: {
-          basisSeq: batch.basisSeq,
-          rebasedHeads: batch.rebasedHeads,
-        },
-        basisInstances: batch.basisInstances.map((instance) => ({
-          action: instance.action,
-          actionScopeKey: instance.actionScopeKey,
-          rows: instance.rows.map((row) => ({
-            entitySpace: row.entitySpace,
-            entity: row.entity,
-            entityScopeKey: row.entityScopeKey,
-            seq: row.seq,
+      // The sqlite bound's discharge (stage G): attach the cell-db
+      // file(s) the batch's folded sqlite ops target BEFORE the engine
+      // transaction (ATTACH cannot run inside one), detach in finally
+      // — synchronously around the apply, no await between, so the
+      // ≤1-attached invariant on the shared per-space connection holds.
+      let sqliteAttachments: ReadonlyMap<string, string> | undefined;
+      let detachSqlite: (() => void) | undefined;
+      if (hasSqliteOps) {
+        if (this.#sqliteAttachmentsFor === undefined) {
+          return Promise.resolve({
+            error: {
+              name: "WaveCommitRejected",
+              message: "wave batch carries sqlite ops but this sink has " +
+                "no attachment hook: construct the sink with " +
+                "sqliteAttachmentsFor (the memory server's " +
+                "attachWaveCommitSqliteDbs) — the engine cannot execute " +
+                "a folded sqlite op without its cell-db attached",
+            },
+          });
+        }
+        const scopeKeyByOpIndex = new Map<number, string>(
+          (batch.sqliteScopeKeys ?? []).map((
+            entry,
+          ) => [entry.op, entry.scopeKey]),
+        );
+        const attached = this.#sqliteAttachmentsFor(
+          batch.space,
+          batch.operations,
+          scopeKeyByOpIndex,
+        );
+        sqliteAttachments = attached.attachments;
+        detachSqlite = attached.detach;
+      }
+      let applied;
+      try {
+        applied = applyWaveCommit(engine, {
+          sessionId: this.#sessionId,
+          space: batch.space,
+          principal: this.#principal,
+          commit,
+          ...(sqliteAttachments === undefined ? {} : { sqliteAttachments }),
+          commitClass: "derived",
+          holder: batch.holder,
+          annotations: batch.annotations,
+          consequenceOf: batch.consequenceOf,
+          ...(batch.derivedThrough === undefined
+            ? {}
+            : { derivedThrough: batch.derivedThrough }),
+          waveBasis: {
+            basisSeq: batch.basisSeq,
+            rebasedHeads: batch.rebasedHeads,
+          },
+          basisInstances: batch.basisInstances.map((instance) => ({
+            action: instance.action,
+            actionScopeKey: instance.actionScopeKey,
+            rows: instance.rows.map((row) => ({
+              entitySpace: row.entitySpace,
+              entity: row.entity,
+              entityScopeKey: row.entityScopeKey,
+              seq: row.seq,
+            })),
           })),
-        })),
-      });
+          ...(batch.outboxAppends === undefined
+            ? {}
+            : { outboxAppends: batch.outboxAppends }),
+        });
+      } finally {
+        // Detach BEFORE any later await: applyWaveCommit is synchronous
+        // and is the only step that needs the attachments (the same B1
+        // discipline as the transact path).
+        detachSqlite?.();
+      }
       return Promise.resolve({ ok: { seq: applied.seq } });
     } catch (error) {
       if (error instanceof WaveCommitConflictError) {

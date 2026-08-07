@@ -53,6 +53,14 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  * deriving until Phase 2 removes the client path) is a real posture, not
  * a hypothesis. Entries name their unskipping phase — never silent
  * filtering anywhere else.
+ *
+ * Stage-G re-justification (2026-08-06, per the phase-completing pass):
+ * the ONE entry below was re-examined and STANDS on its original
+ * Phase-2 reason — a two-browser CAS-storm bring-up failure of the
+ * two-deriver interim, unrelated to effect serving. Stage G landed the
+ * effect channel and added NO skips: the effectful builtins served in
+ * the ON arm are exercised by the runner suite's serving-loop tests,
+ * and the ON-arm integration suites run unfiltered but for this entry.
  */
 export const SERVER_EXECUTION_ON_SKIPS: Record<
   ServerExecutionSuite,

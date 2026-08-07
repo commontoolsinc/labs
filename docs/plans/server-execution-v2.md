@@ -326,12 +326,31 @@ Stages, one PR each except C, which is a three-PR train (below):
       serves. Server-side hot-swap verified end to end; the updater's
       network CHECK half against a fully-local store is the flagged
       residual.
-- [ ] **G — effectful + outbox**: serve `fetch*`, `generate*`,
+- [x] **G — effectful + outbox**: serve `fetch*`, `generate*`,
       `sqlite*` behind request-hash memoization; the outbox; egress
       performed only here (effect authority per README §3.8; quota
       attribution deferred); recovery = basis-index re-marking,
       recompute pure nodes, reuse memoized effect results, no replay
-      (serving-loop.md §4–§6).
+      (serving-loop.md §4–§6). LANDED 2026-08-06: sealed post-commit
+      effects defer to the per-space outbox and fire POST-wave-commit;
+      the builtins' writebacks — marked with their effect key — commit
+      as their OWN derived-class COMPLETION commits (never through
+      §3d's sealing), annotations sourced from the outbox carriage
+      captured at the original run's seal; the builtins' existing
+      request-hash memo IS §4's hit rule (recovery re-runs memo-hit,
+      no re-fire — pinned across park/re-activate with one external
+      call per key); failures commit error-shaped results and retry
+      only on input change (OW7 → T14); the DURABLE outbox rows (FP1)
+      land inside the wave's engine transaction, deliver under the
+      delegated row (`firedAt` from the carried actor, LT5 service
+      envelope), delete on delivery-ack, and re-send on activation
+      (§6 step 5) with eventId-horizon dedupe at the target; the
+      stage-D sqlite bound is discharged (per-run scope keys +
+      `attachWaveCommitSqliteDbs`, atomic in the wave tx); §7's
+      memo/outbox counters are live. LLM partial-token writes stay
+      un-marked by design — refused under the flag, which IS protocol
+      §6's settled-results-only baseline (the OFF arm commits them as
+      today).
 
 M1, M2 and M4 (scopes.md §7) are therefore all landed BEFORE the
 first ON gate, by name: M2 is stage E, M1 and M4 are stage F tasks.
@@ -340,9 +359,16 @@ per-instance machinery — never on scope-NAME-keyed machinery.
 
 Success criteria (flag OFF — the ON gates are Phase 2's):
 
-- [ ] Every stage lands with the OFF arm byte-identical to today
-      (testing.md §2); the ON arm runs in CI from stage A with
-      explicit skip lists, never silent filtering.
+- [x] Every stage lands with the OFF arm byte-identical to today
+      (testing.md §2, as amended — byte-identical up to the recorded
+      acceptances: key-vocabulary §5's, and stage G's claim-guard
+      delta recorded in verification-coverage §2, all RATIFIED
+      2026-08-05); the ON arm
+      runs in CI from stage A with explicit skip lists, never silent
+      filtering (ticked with stage G, the phase's last stage,
+      2026-08-06: every stage's PR carried its OFF-arm witness — the
+      full runner + memory suites — and the ON-arm skip list holds
+      ONE entry, the two-browsers Phase 2 gate).
 - [x] Stage C leaves no `completeSchedulerScopeSummary` or
       `completeActionScopeSummary` reference on
       main, no full-JSON observation payload tables, and no

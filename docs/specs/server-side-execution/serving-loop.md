@@ -111,8 +111,11 @@ SpaceServer outbox ──(e)──► network; results re-enter via (a)
   reconciling protocol.md §2b's "activates later" with this hook
   (trace finding T11.Q7).
 - **(c) ExecutorHost → engine tables**: lease acquire and renew by
-  direct table update — the direct-engine plane's ONLY traffic, and
-  a renewal is NEVER a commit (§2).
+  direct table update, and — since Phase 1 stage G — the outbox's
+  delivery-acked row retirement (§5's deleted-on-delivery-ack; the
+  rows were WRITTEN inside the wave's own plane-(a) transaction, so
+  only the delete rides here) — the direct-engine plane's ONLY
+  traffic, none of it ever a commit (§2).
 - **(d) memory server → runtime**: the space subscription delivers
   accepted commits from the activation scan's head (§3, §6); the
   loop's own derived commits return here too and are skipped by
@@ -629,10 +632,15 @@ entering the wave.
 **The sanctioned internal stamp kinds (stage F, discharging the
 ruling's naming duty): exactly one — `bookkeeping`.** It marks the
 serving loop's OWN writes — the watermark-doc advance today, the
-pattern-swap setup write (§3e), and acked-effect retirement when
-stage G lands it — declared at the three stamping choke points the
-scheduler and runner own (the reactive-action run, the event
-dispatch, the pattern swap). Its conflict class: bookkeeping writes
+pattern-swap setup write (§3e), and the acked-effect retirement
+write when Phase 4 lands the client-effect channel (protocol.md §5
+— a bookkeeping-stamped wave WRITE, one of protocol.md §1's
+service-identity writes; earlier drafts mis-attributed it to
+stage G). Stage G's own retirement — the outbox's delivery-acked
+ROW delete — is no stamped write at all: it rides the direct-engine
+plane (c) as an engine-table delete, never a commit (§1). Declared
+at the three stamping choke points the scheduler and runner own
+(the reactive-action run, the event dispatch, the pattern swap). Its conflict class: bookkeeping writes
 are advances that commute, so they REBASE like other
 non-re-derivable writes; a rebase that conflicts semantically DROPS
 the contribution whole — there is no event to requeue, and the loop
@@ -835,9 +843,35 @@ the durable rows of §5 carry APPENDS, never effect state).
   a crash between the halves leaves the event unconsequenced and
   the deterministic replay converges. Outbox carriage is its
   sharded-future form only (§2b's closing note).
-- At-least-once; idempotence comes from the memo hit rule (a duplicate
-  completion writes an identical key and is a CAS no-op) for
-  effects, and from the `eventId` dedupe horizon for appends.
+- At-least-once; for effects, idempotence comes from the builtins'
+  request-hash guards — the claim-time completed-request check (a
+  stored hash matching with a result/error present is never
+  re-claimed) and the write-time hash re-check — plus the completion
+  committer's all-no-op short-circuit (RULED 2026-08-05; the earlier
+  "a duplicate completion writes an identical key and is a CAS
+  no-op" wording described a mechanism the completion path does not
+  have). Completion commits deliberately carry `basisSeq = NOW` — no
+  per-doc CAS re-verification; a concurrent intrusion on the result
+  docs surfaces through the hash guards re-reading current state —
+  and the outbox's READABILITY-GATED in-flight retirement closes the
+  race the guards alone cannot see: the effect's key retires only
+  when every completion commit's writes are readable by the serving
+  runtime, so a stale re-admit of the key dedupes instead of
+  re-claiming against unabsorbed state. Readability is IMMEDIATE:
+  sealed commits — waves and completions alike — confirm on the
+  serving replica at verdict time, never parked (an engine-plane
+  commit's catch-up marker can never arrive, so parking one wedges
+  retirement permanently — the completion-visibility wedge; the
+  retirement barrier stays as the belt over that structural
+  guarantee). And completion writebacks commit AUTHORITATIVELY:
+  their memo-state writes go through even where the replica's
+  optimistic view — possibly a doomed sealed overlay a later wave
+  supersede-drops (§3d) — calls them no-ops, so a drop can never
+  tear the stored hash from the result it serves; the all-no-op
+  short-circuit above accordingly fires only for genuinely
+  write-free writebacks, and identical re-asserts are idempotent at
+  the store. For appends, idempotence is the `eventId` dedupe
+  horizon.
 - Authority: the capability handle bound at wiring time (README §3.8);
   the outbox holds provider credentials via the existing broker; the
   SpaceServer's runtime never sees raw secrets.

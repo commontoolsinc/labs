@@ -284,6 +284,223 @@ acceptances only — no rule counts move):
   key-vocabulary §5 acceptances", and the recorded-acceptance row
   above names both deltas.
 
+Delta 2026-08-06 — stage G lands (effect serving + the outbox; this
+PR):
+
+- serving-loop §4's memoization contract: impl-gate → COVERED. The
+  hit rule, in-flight dedupe, error-shaped results, and the
+  no-re-fire-on-recovery property are pinned end to end in
+  `packages/runner/test/executor-serving-loop.test.ts` (the effectful
+  node journey: one external call per key across park/re-activate;
+  the failure leg retries only on input change) and
+  `packages/runner/test/executor-outbox.test.ts` (dedupe + counters).
+  The builtins' own memo checks now REPORT hits (`effectMemoObserver`
+  — fetch*, generate*, sqliteQuery; fetchProgram and llmDialog count
+  misses via the outbox and report no hit events yet, recorded in
+  stats.ts).
+- serving-loop §4's completion-commit clarification (2026-08-05,
+  was DERIVABLE): now impl-covered — the completion commits as its
+  OWN derived-class commit (never through §3d's sealing), its
+  annotations sourced from the outbox carriage captured at the
+  original run's seal, pinned with a scoped write + acting identity
+  in `executor-serving-loop.test.ts` (T7.Q4's impl witness). Stated
+  for Phase 1: T7.Q4's carriage-sourced `scope_key` is STRUCTURAL —
+  the E2E pins the cardinality-1 fallback (carriage identity ==
+  wave identity), and the per-run demanded identity that makes the
+  carriage carry a DIFFERENT key arrives with Phase 2's stamper.
+- serving-loop §5's FP1 rows: impl-gate → COVERED. Durable rows
+  land INSIDE the wave's engine transaction (surviving contributions
+  only — a dependency-dropped contribution's appends are excluded, a
+  per-doc-superseded survivor's still ride, matching §3d's
+  drop-re-arms-nothing ruling), delivery admits at the target under
+  the delegated row with `firedAt` from the CARRIED actor (LT5's
+  service envelope), the row deletes on delivery-ack
+  (admit-before-delete), a re-sent duplicate dedupes at the eventId
+  horizon, and an LT4 deterministic rejection deletes without
+  retrying (`executor-outbox.test.ts`; the model's C2/FP1 closure
+  stays the oracle).
+- serving-loop §1 plane (c): CHANGED sentence — the direct-engine
+  plane now also carries the outbox's delivery-acked row retirement
+  (the rows are WRITTEN on plane (a) inside the wave transaction;
+  only the delete rides plane (c)). This row is its coverage; the
+  retirement behavior is pinned by the delivery tests above.
+- serving-loop §7's memo/outbox counters: structurally-zero note
+  retired — the counters are live and asserted by the stage-G tests
+  (stats.ts documents the exact semantics, including that
+  `outbox.failed` counts INFRASTRUCTURE failures while effect-level
+  failures commit error-shaped results per §4).
+- stage D's last documented bound (sqlite ops in wave batches):
+  DISCHARGED for HOME batches — the accumulator resolves each folded
+  op's db scope against its RUN's identity (M1), the sink attaches
+  through the memory server's `attachWaveCommitSqliteDbs` (same
+  validations as the transact path) and applies atomically inside
+  the wave transaction; hook-less sinks, key-less ops, and FOREIGN
+  batches with sqlite ops are refused loudly (`executor-outbox.
+  test.ts`). Foreign-batch sqlite lands with Phase 5's cross-space
+  design.
+- OW7 → LANDED as trace T14 (scenario-traces §3/§4) plus the
+  serving-loop failure-leg test above; the owed entry below is
+  flipped.
+- The stage-G adversarial review's fix batch (2026-08-06), coverage
+  where it added binding behavior: (i) the deferred-flush window the
+  serving posture opens — a stale action re-run re-admitting a key
+  whose first effect already completed — is closed by TWO mechanisms
+  in series, stated truthfully after the independent review's
+  captured double-fire showed the claim guard alone does NOT close
+  it: `tryClaimMutex`'s completed-request guard (skip the claim when
+  the stored hash matches and a result/error is READABLE —
+  unit-pinned in `fetch-claim-takeover.test.ts`) plus the
+  READABILITY-GATED in-flight retirement (serving-loop §5's ruled
+  idempotence sentence): the outbox holds the key until every
+  completion commit's writes are applied to the serving replica
+  (`ISpaceReplica.whenApplied` over CT-1927's parked accepts), so
+  the stale re-admit that used to arrive inside the ~15 ms
+  absorption window — reading a view without the completion, where
+  the guard structurally passes — now DEDUPES. Pinned by the
+  `whenApplied` unit (`memory-v2-stacked-commit.test.ts`), the
+  deterministic hold-absorption/re-admit/dedupe interleave
+  (`executor-outbox.test.ts`), and the E2E's exactly-once
+  external-call pins under repeated load runs; (ii) the sqliteQuery
+  memo decision distinguishes a SETTLED result (a hit) from a bare
+  claim marker — an orphaned claim re-issues under the serving
+  posture only (`sqliteQueryMemoDecision`, unit-pinned), restoring
+  §6 step 3's re-miss premise for the one builtin whose key commits
+  ahead of its result; (iii) userless/grantless outbound appends
+  are refused at the SOURCE (`enqueueOutboundAppend`), fail-closed
+  ahead of the delegated floor that would deterministically destroy
+  them at delivery — the Phase-3 floor carve-out for sessionless
+  space-scope emissions is now SHAPE-RULED (2026-08-05, protocol §2;
+  implementation is Phase 3's, owed below); (iv) admit-before-delete
+  is now pinned by a transport-failure test (the row survives a
+  non-deterministic delivery failure; the next drain delivers
+  exactly one entry).
+
+Delta 2026-08-06 — the stage-G INDEPENDENT review's fix batch, plus
+the owner's 2026-08-05 ruling batch (five rulings recorded; changed
+sentences, one recorded acceptance, three owed entries):
+
+- serving-loop §5's effect-idempotence sentence: AMENDED (RULED
+  2026-08-05). The old "a duplicate completion writes an identical
+  key and is a CAS no-op" described a mechanism the completion path
+  does not have; the section now states the true one — the
+  builtins' request-hash guards plus the all-no-op short-circuit,
+  completion commits deliberately at `basisSeq = NOW` (no per-doc
+  CAS), and the readability-gated in-flight retirement closing the
+  absorption-window race. CHANGED sentence; its coverage is the
+  fix-batch row above.
+- serving-loop §3d's sanctioned-stamp-kinds sentence: the
+  "acked-effect retirement when stage G lands it" clause was a
+  MIS-ATTRIBUTION (reviewer-verified): the write it describes is
+  Phase 4's client-effect retirement (protocol §5 — a
+  bookkeeping-stamped wave write among protocol §1's
+  service-identity writes). §3d now attributes it to Phase 4 and
+  notes stage G's own retirement is plane (c)'s unstamped
+  engine-table ROW delete (§1 already said so). CHANGED sentence,
+  same rows.
+- ONE RECORDED OFF-arm acceptance rides stage G (RATIFIED
+  2026-08-05; testing §2's gate clause widened the same day to name
+  this register's recorded-acceptance rows alongside
+  key-vocabulary §5's): `tryClaimMutex`'s completed-request guard
+  changes the OFF arm's cross-writer race corner. Old behavior:
+  a claimant racing another writer's completed result for the SAME
+  inputs claimed anyway, transiently cleared result/error, and
+  re-fetched (a redundant refetch plus a visible clearing blip).
+  New behavior: the claim is skipped — the stored value stands.
+  Post-B-1 shape, stated precisely: the guard reads the claimant's
+  view, so it engages exactly when the completed writeback is
+  READABLE there; the serving posture's unreadable-window case is
+  closed by the retirement gate (above), not by this guard, and
+  client-side the guard only removes the redundant-refetch corner
+  (inline flushing already made in-process ordering safe).
+- FP6's register row (field-provenance.md): the label basis is
+  STRUCTURAL, not frozen (RULED 2026-08-05) — tightening mid-flight
+  yields the stricter label, loosening matches the OFF arm's
+  write-time derivation, a frozen snapshot would write stale labels
+  over a re-labeled basis. Recorded on the row; no mechanism moved.
+- protocol §2: the Phase-3 floor carve-out for sessionless
+  space-scope emissions is SHAPE-RULED (2026-08-05) and recorded in
+  the delegated-row region — absent acting principal admitted iff
+  declared sessionless-space-scope (`firedAt = { session: "server"
+  }`, no user key), grant presence still mandatory. events §2 and
+  the model already carry the semantics; implementation is owed
+  (Phase 3, below).
+- builtins §2's fetch row: the "migrate requestHash onto the result
+  doc" prescription now carries its deferral note (the
+  internal-cell hash is functionally equivalent committed state per
+  T10.Q1; the migration is an OFF-arm cell-shape change waiting for
+  an OFF-arm ruling batch that wants it — plausibly never).
+  CHANGED sentence, same row.
+- stats.ts's memo.hits note now states the hit unit (a
+  re-evaluation touching a settled effect node, NOT a suppressed
+  fire) so Phase 2's gate arithmetic cannot read hits as "avoided
+  calls". Code-comment clarification; no counter moved.
+- FP1 fold completeness (the review's M-A): appends and consequence
+  coverage now fold for EVERY surviving contribution — the
+  foreign-only-seal survivor and the zero-seal emitter (minted as a
+  zero-write contribution, the model's committed-`writes: []`
+  shape) both land their appends and `consequenceOf`; both shapes
+  red-first pinned in `executor-outbox.test.ts`.
+- The SpaceServer's recovery seams (the review's M-B): the §6-step-5
+  activation re-send and the owed post-wave drain are now pinned at
+  the SpaceServer level (`executor-space-server.test.ts` — deleting
+  the activation re-send call turns the test red), and a
+  transport-failed ACTIVATION re-send now arms the owed re-drain so
+  surviving rows ride the next wave instead of waiting for the next
+  appends-carrying wave or re-activation.
+
+Delta 2026-08-07 — the completion-visibility wedge fix batch (F1a +
+F2, mechanism-triaged from the serving-loop soak's ~11%-red wedge
+population):
+
+- Retirement LIVENESS (F1a): sealed commits — waves and effect
+  completions alike — now CONFIRM on the serving replica at verdict
+  time (`settleSealedCommit` → `confirmPending`) instead of taking
+  the parkable path. Parking guards a REMOTE mirror against
+  promoting over missing foreign novelty, but engine-plane commits
+  bypass the transact path — the only place catch-up marker
+  obligations are staged — so a parked sealed accept could NEVER
+  promote: `whenApplied` waiters never resolved, every served
+  effect leaked one permanently-in-flight outbox entry, and any
+  A→B→A input cycle starved deduping against the dead entry.
+  CT-1927 parking for pushed (socket) commits is untouched. The
+  earlier fix-batch row's "whenApplied over CT-1927's parked
+  accepts" mechanism reads accordingly: readability is now
+  immediate for completions and the retirement barrier is the BELT
+  over the structural guarantee (its hold/re-admit/dedupe pins are
+  unchanged and still green). Red-first pinned by the deterministic
+  A→B→A starvation test and the N-effects in-flight-baseline test
+  (`executor-serving-loop.test.ts`).
+- Completion writebacks are AUTHORITATIVE (F2): a completion-marked
+  transaction's writes commit even where the replica's optimistic
+  view calls them no-ops — that view can layer a DOOMED sealed
+  overlay (a derivation write a later wave-commit supersede-drops,
+  §3d), and eliding the completion's `inputHash`/`pending` writes
+  against it durably landed `result present + inputHash stale`,
+  which the next run's memo guard read as "inputs changed" and
+  destroyed the just-served value (the observed ~30 ms
+  arrive-then-wipe). Mechanism: `markEffectCompletion` flips the
+  transaction into authoritative-writes mode
+  (`markAuthoritativeWrites`, gated on the serving posture's seal
+  destination so the OFF arm stays byte-identical), which is
+  honored at every elision layer — the value-diff leaf
+  (`normalizeAndDiff`), the transaction write paths, the doc-level
+  no-op skip and the initial-vs-current patch diff
+  (`getNativeCommit`/`buildPatchOperation`, which emits forced
+  full-cover `replace` asserts). All effectful builtins already
+  route their writebacks through `markEffectCompletion`
+  (fetch/fetch-program/llm/llm-dialog/sqlite), so the audit
+  reduces to that single seam. Ordinary transactions keep the
+  elision everywhere. Red-first pinned by the torn-hash
+  supersede-drop interleave (`executor-wave.test.ts`).
+- The parked-overlay stale-read machine (the triage's independent
+  observation — a never-promoted sealed overlay replaying over
+  advancing confirmed state until a later drop flips visible
+  state): structurally unreachable post-F1a — sealed verdicts
+  either confirm immediately or withdraw-and-roll-back, and
+  `settleAccept`'s parking branch is reachable only from the
+  socket-transact paths, where CT-1927's marker machinery
+  guarantees eventual promotion. No test forced; recorded here.
+
 ## 3. The owed register (every genuine orphan, with its trigger)
 
 Nothing here blocks Phase 1. Each item names the instrument
@@ -362,10 +579,42 @@ journey):**
   grant-scoped checks) — no later than the outbox/provisioning
   producers going live (Phase 3 events; Phase 5 cross-space).
 
-**Stage G pre-gate:**
+**Stage G pre-gate — LANDED with stage G (2026-08-06):**
 
-- OW7 — effect failure retries are input-driven, never
-  timer-driven (serving-loop §4); one failure-path trace question.
+- OW7 — LANDED as trace T14 (effect failure and retry: input-driven,
+  never timers — scenario-traces §3/§4) plus the impl witness in
+  `executor-serving-loop.test.ts` (the failure leg: an error-shaped
+  result commits with the key, no timer retry fires, and only an
+  input change re-fires).
+
+**Phase 3 pre-gate (when events land; pulled by Phase 3's
+pre-flight):**
+
+- OW14 — the LT4 arm's source-side notice ORDER: when Phase 3 lands
+  events.md §5's failure-notice machinery, the deterministic-
+  rejection arm must write the events §5 notice BEFORE deleting the
+  refused outbox row — today the delete discards
+  `eventId`/`target`/`reason` except a warn log, and the obligation
+  lives only in outbox.ts's LT4 comment. Owed: the write-then-delete
+  ordering plus its test (a crash between the two must re-send and
+  re-notice, deduped, never lose the notice). Trigger: Phase 3's
+  events §5 machinery landing.
+- OW15 — the sessionless space-scope floor carve-out's
+  IMPLEMENTATION (SHAPE-RULED 2026-08-05, protocol §2): lift the
+  source refusal in `enqueueOutboundAppend` for declared
+  sessionless-space-scope entries, fix the delivery path's `?? ""`
+  acting-principal mapping, land the floor negatives BOTH ways
+  (userless space-scope-declared admitted with
+  `firedAt = { session: "server" }`; userless without the
+  declaration still refused) and the model pin. Trigger: Phase 3's
+  event producers going live.
+- OW16 — the llm-dialog tool mutations' RULED classifications
+  (2026-08-05), implemented: pin and unpin commit as
+  COMPLETION-CLASS turn-lifecycle state; updateArgument commits as
+  a HANDLER-CLASS consequence. The three call sites carry the
+  ruling in comments (llm-dialog.ts — awaited and surfaced since
+  the stage-G review batch); the stamping/classing itself is
+  Phase-3 events territory. Trigger: Phase 3's pre-flight.
 
 **Phase 6 (the contract is fixed now, the check lands with
 hardening):**

@@ -22,10 +22,18 @@
 //   wave machinery; this loop has no producers to drain), so
 //   `events.*` counters stay 0 and the activation criterion
 //   "undelivered events" has no instances yet;
-// - no effect channel until stage G (`memo.*`/`outbox.*` stay 0);
 // - demand at OFF-arm cardinality: per-run demanded identities plug in
 //   at `#stampRun` (M1's seam); in Phase 1 the loop serves the graph
 //   under its wave identity.
+//
+// Stage G lands the effect channel (serving-loop.md §4–§5): sealed
+// post-commit effects defer to the per-space outbox and fire after the
+// wave commit; effectful builtins' writebacks — marked with their
+// effect key — commit as their OWN derived-class COMPLETION commits
+// (never through the wave: §4's "never passes through §3d's sealing"),
+// annotated from the outbox carriage captured at the original run's
+// seal; the durable outbound-append rows deliver and retire through
+// the outbox; `memo.*`/`outbox.*` counters are live.
 
 import {
   type AdmittedCommitNotice,
@@ -42,17 +50,31 @@ import { getLogger } from "@commonfabric/utils/logger";
 import type { Runtime, ServerRunInfo } from "../runtime.ts";
 import type {
   IExtendedStorageTransaction,
+  IStorageTransaction,
+  ITransactionSealSink,
   MemorySpace,
+  NativeStorageCommit,
   Result,
+  SealedCommitVerdict,
+  SealedNativeCommit,
   TransactionSealDestination,
   Unit,
 } from "../storage/interface.ts";
 import type { CommitError } from "../storage/interface.ts";
 import { ensurePieceRunning } from "../ensure-piece-running.ts";
-import { stampWaveRunContext, WaveAccumulator } from "./wave.ts";
+import {
+  stampWaveRunContext,
+  WaveAccumulator,
+  waveRunContextOf,
+  type WaveWriteAnnotation,
+} from "./wave.ts";
 import { EngineWaveCommitSink } from "./engine-wave-sink.ts";
 import { readWatermarkSeq, watermarkCell } from "./watermark.ts";
 import type { ServingLoopStats } from "./stats.ts";
+import { type SealedEffectBatch, SpaceOutbox } from "./outbox.ts";
+import { effectCompletionKeyOf } from "./effect-completion.ts";
+import { resolveScopeKey } from "@commonfabric/memory/v2";
+import type { PostCommitSideEffect } from "../cfc/types.ts";
 
 const logger = getLogger("space-server", { enabled: true, level: "warn" });
 
@@ -138,6 +160,24 @@ export class SpaceServer implements TransactionSealDestination {
    * upstream"): the sink is what pulls the demanded value through the
    * scheduler's pull-based laziness. Released on park. */
   readonly #demandSinks = new Map<string, () => void>();
+  /** The stage-G effect channel (serving-loop.md §4–§5). */
+  #outbox: SpaceOutbox | undefined;
+  /** A drain left undelivered rows behind (transport-class failure):
+   * the next wave cycle re-drains even without fresh appends. */
+  #outboxDrainOwed = false;
+  /** Post-commit effects of sealed transactions, deferred per wave
+   * (serving-loop.md §3: effects hand to the outbox POST-commit, never
+   * at seal). Admitted to the outbox after the wave's commit step;
+   * discarded when the wave is abandoned (the park path — the runtime
+   * dies with it, the crash-equivalent covered by memo re-miss). */
+  readonly #pendingEffectsByWave = new Map<
+    WaveAccumulator,
+    SealedEffectBatch[]
+  >();
+  /** Which wave each sealed tx closed into — set at seal, consumed by
+   * deferSealedEffects (which runs after the seal resolved, when the
+   * wave may already have rotated). */
+  readonly #waveByTx = new WeakMap<object, WaveAccumulator>();
 
   constructor(options: SpaceServerOptions) {
     this.#options = options;
@@ -224,7 +264,31 @@ export class SpaceServer implements TransactionSealDestination {
       engineFor: (s) => s === space ? engine : this.#foreignEngineFor(s),
       sessionId: this.#holder,
       localSeqRef: this.#options.localSeqRef,
+      // The stage-G sqlite discharge: folded sqlite ops in wave batches
+      // attach their cell-db file(s) through the memory server's own
+      // machinery (same validations as the transact path), keyed by the
+      // accumulator's per-run scope keys.
+      sqliteAttachmentsFor: (s, operations, scopeKeyByOpIndex) =>
+        this.#options.server.attachWaveCommitSqliteDbs(
+          s === space ? engine : this.#foreignEngineFor(s),
+          s,
+          operations,
+          scopeKeyByOpIndex,
+        ),
     });
+    // The effect channel (stage G, serving-loop.md §4–§5).
+    const outbox = new SpaceOutbox({
+      stats: this.#options.stats,
+      server: this.#options.server,
+      engine,
+      sessionId: this.#holder,
+      localSeqRef: this.#options.localSeqRef,
+    });
+    this.#outbox = outbox;
+    runtime.asyncWorkObserver = (work) => outbox.observeAsyncWork(work);
+    runtime.effectMemoObserver = () => {
+      this.#options.stats.memo.hits += 1;
+    };
 
     // W = read watermark doc (0 if absent).
     this.#watermark = readWatermarkSeq(engine);
@@ -258,6 +322,27 @@ export class SpaceServer implements TransactionSealDestination {
     this.#feed = this.#feed.filter((record) => record.seq > scanHead);
     this.#inputHead = Math.max(this.#inputHead, scanHead, this.#watermark);
     this.#coverageHead = Math.max(this.#coverageHead, scanHead);
+
+    // serving-loop.md §6 step 5: RE-SEND pending durable outbound-append
+    // rows — a crash between a wave commit (which wrote the rows) and
+    // their delivery re-sends here; duplicates dedupe at the target's
+    // eventId horizon. Co-hosted delivery is an engine commit, not a
+    // network await.
+    try {
+      const drained = await outbox.deliverPendingAppends();
+      this.#outboxDrainOwed = drained.remaining > 0;
+    } catch (error) {
+      // Arm the owed re-drain (the stage-G review's M-B): rows a failed
+      // activation re-send leaves behind must ride the NEXT wave's
+      // drain, not wait for the next appends-carrying wave or another
+      // re-activation.
+      this.#outboxDrainOwed = true;
+      logger.warn("activation-resend-failed", () => [
+        "outbox re-send on activation failed; rows kept for the next " +
+        "drain (serving-loop.md §6 step 5)",
+        error,
+      ]);
+    }
 
     // The seal destination + the §3d run stamper (stage F names the
     // sanctioned internal stamp kinds when installing the destination:
@@ -303,7 +388,22 @@ export class SpaceServer implements TransactionSealDestination {
   // ---- TransactionSealDestination ----
 
   seal(tx: IExtendedStorageTransaction): Promise<Result<Unit, CommitError>> {
+    // Effect-COMPLETION routing (stage G, serving-loop.md §4): a marked
+    // writeback of a served effect commits as its OWN derived-class
+    // commit — it never enters a wave (§4's "never passes through §3d's
+    // sealing"; the run is long over when the response arrives, so no
+    // stamp exists to seal under). Serialized on the same chain as wave
+    // seals: both mutate the replica overlay through sealNative.
+    const completionKey = effectCompletionKeyOf(tx);
+    if (completionKey !== undefined) {
+      const committed = this.#sealChain.then(() =>
+        this.#commitEffectCompletion(tx, completionKey)
+      );
+      this.#sealChain = committed.then(() => undefined, () => undefined);
+      return committed;
+    }
     const wave = this.#openWave();
+    this.#waveByTx.set(tx, wave);
     const sealed = this.#sealChain.then(() => wave.seal(tx));
     this.#sealChain = sealed.then(() => undefined, () => undefined);
     // The scheduler runs autonomously off storage notifications: a seal
@@ -311,6 +411,51 @@ export class SpaceServer implements TransactionSealDestination {
     // must be committed — wake the loop.
     this.#feedArrived?.resolve();
     return sealed;
+  }
+
+  /**
+   * TransactionSealDestination (stage G): take ownership of a sealed
+   * transaction's post-commit effects — the loop hands external effects
+   * to the outbox POST-wave-commit (serving-loop.md §3), never at seal,
+   * where "ok" only means accepted into a wave. Effects of an abandoned
+   * wave are discarded with it (park — the runtime dies, the
+   * crash-equivalent path memo re-miss covers).
+   */
+  deferSealedEffects(
+    tx: IExtendedStorageTransaction,
+    effects: readonly PostCommitSideEffect[],
+  ): boolean {
+    const wave = this.#waveByTx.get(tx);
+    if (wave === undefined) return false;
+    if (!this.#active || this.#outbox === undefined || wave.closed) {
+      // The park-race straggler (the stage-G review's m-3): a tx that
+      // sealed into a wave this server has since abandoned — or whose
+      // commit resolves while the space is parking/parked — hands its
+      // effects over AFTER the park cleared #pendingEffectsByWave,
+      // possibly after a REACTIVATION rebuilt the outbox. OWN AND DROP
+      // them (return true, store nothing): the abandoned wave's
+      // effects are the intended crash-equivalent path §4/§6 already
+      // cover (the effect re-misses from its memo key on demand), an
+      // inline flush here would fire network work for a contribution
+      // that never committed, and the pre-fix re-created map entry —
+      // keyed by a wave no cycle will ever consume — leaked the wave
+      // and its transactions for the server's lifetime.
+      return true;
+    }
+    let pending = this.#pendingEffectsByWave.get(wave);
+    if (pending === undefined) {
+      pending = [];
+      this.#pendingEffectsByWave.set(wave, pending);
+    }
+    pending.push({ tx, effects, context: waveRunContextOf(tx) });
+    return true;
+  }
+
+  /** DIAGNOSTIC (tests): how many waves currently hold deferred effect
+   * batches — the m-3 leak pin (a park-race straggler must not
+   * re-create an entry nothing consumes). */
+  get deferredEffectWaveCount(): number {
+    return this.#pendingEffectsByWave.size;
   }
 
   #openWave(): WaveAccumulator {
@@ -342,6 +487,223 @@ export class SpaceServer implements TransactionSealDestination {
       kind: info.kind,
       ...(info.eventId !== undefined ? { eventId: info.eventId } : {}),
     });
+  }
+
+  /**
+   * The effect-COMPLETION commit (stage G, serving-loop.md §4's miss
+   * rule): a served effect's writeback — result + `requestHash`, the
+   * claim/pending markers, error-shaped results — commits as ONE
+   * derived-class commit of its own. It never passes §3d's sealing (no
+   * wave, no basis rows, no run stamp — the run is long over when the
+   * response arrives); its identity annotations are sourced from the
+   * OUTBOX CARRIAGE captured at the original run's seal (necessarily
+   * stamped, so completion commits inherit stamped provenance
+   * transitively — the 2026-08-05 clarification), falling back to the
+   * wave-level identity where no entry is live (Phase 1's cardinality-1
+   * posture, where the two are the same identity). The commit carries
+   * `derivedThrough = W` (protocol.md §4: every derived commit carries
+   * it; a completion advances nothing) and empty `consequenceOf`.
+   * Result-cell dirtiness is injected IN-PROCESS by the sealNative
+   * overlay promotion + the executor-commit report below; the
+   * subscription's copy is an ordinary self-echo the loop skips.
+   *
+   * FP6's label carriage rides STRUCTURALLY: the writeback transaction
+   * re-reads the request inputs (the hash guard), so the CFC ladder
+   * derives the completion write's labels from the request basis
+   * through the same per-transaction machinery as the OFF arm.
+   *
+   * A completion transaction that itself enqueues a post-commit effect
+   * would flush INLINE at this seal (deferSealedEffects keys off the
+   * wave a tx sealed into, and completions seal into none): no such
+   * producer exists — the builtins' completions only write — and one
+   * appearing should route through the outbox deliberately, not by
+   * accident of this note going stale.
+   */
+  async #commitEffectCompletion(
+    tx: IExtendedStorageTransaction,
+    effectKey: string,
+  ): Promise<Result<Unit, CommitError>> {
+    const runtime = this.#runtime;
+    const sink = this.#sink;
+    const refuse = (message: string): Result<Unit, CommitError> => ({
+      error: {
+        name: "StorageTransactionAborted",
+        message,
+        reason: new Error("effect-completion-refused"),
+      },
+    });
+    if (!this.#active || runtime === undefined || sink === undefined) {
+      return refuse(
+        "effect completion arrived while the space is parked; the " +
+          "effect re-misses from its memo key on re-activation " +
+          "(serving-loop.md §4, §6)",
+      );
+    }
+    const inner = tx.tx;
+    if (inner.sealInto === undefined) {
+      return refuse("storage transaction does not support sealing");
+    }
+    const carriage = this.#outbox?.carriageFor(effectKey);
+    const identity = carriage?.scopeKeyIdentity ?? runtime.scopeKeyIdentity;
+    const sealedSpaces: Array<{
+      space: MemorySpace;
+      sealed: SealedNativeCommit;
+      resolveVerdict: (verdict: SealedCommitVerdict) => void;
+    }> = [];
+    const collector: ITransactionSealSink = {
+      sealSpaceCommit: (
+        space: MemorySpace,
+        native: NativeStorageCommit,
+        source: IStorageTransaction,
+      ): Promise<Result<Unit, CommitError>> => {
+        const replica = runtime.storageManager.open(space).replica;
+        if (replica.sealNative === undefined) {
+          return Promise.resolve({
+            error: {
+              name: "StorageTransactionAborted",
+              message: `space replica for ${space} does not support sealing`,
+              reason: new Error("seal-unsupported"),
+            },
+          });
+        }
+        const { promise, resolve } = Promise.withResolvers<
+          SealedCommitVerdict
+        >();
+        const sealed = replica.sealNative(native, source, promise);
+        sealedSpaces.push({ space, sealed, resolveVerdict: resolve });
+        return Promise.resolve({ ok: {} });
+      },
+    };
+    const result = await inner.sealInto(collector);
+    const withdrawAll = (message: string) => {
+      for (const space of sealedSpaces) {
+        space.resolveVerdict({ withdrawn: { message } });
+      }
+    };
+    if (result.error) {
+      withdrawAll(`effect completion seal failed: ${result.error.message}`);
+      return result;
+    }
+    if (sealedSpaces.length === 0) {
+      // Nothing to commit (all-no-op writeback) — done.
+      return { ok: {} };
+    }
+    if (
+      sealedSpaces.length > 1 ||
+      sealedSpaces[0].space !== this.#options.space
+    ) {
+      withdrawAll(
+        "effect completion may write only the serving space " +
+          "(serving-loop.md §4; cross-space consequences leave only " +
+          "as outbox appends — protocol.md §2b)",
+      );
+      return refuse(
+        "effect completion wrote a foreign space; refused " +
+          "(serving-loop.md §4)",
+      );
+    }
+    const sealed = sealedSpaces[0];
+    const operations = [...sealed.sealed.commit.operations];
+    if (operations.some((operation) => operation.op === "sqlite")) {
+      withdrawAll("effect completion carries folded sqlite ops; refused");
+      return refuse(
+        "effect completion transactions must not fold sqlite ops " +
+          "(sqlite writes ride scheduler runs' wave batches)",
+      );
+    }
+    const annotations: WaveWriteAnnotation[] = [];
+    for (const [opIndex, operation] of operations.entries()) {
+      // Unreachable after the refusal above; narrows the op type.
+      if (operation.op === "sqlite") continue;
+      const scoped = operation.scope !== undefined &&
+        operation.scope !== "space";
+      if (scoped || carriage?.acting !== undefined) {
+        annotations.push({
+          op: opIndex,
+          ...(scoped
+            ? { scopeKey: resolveScopeKey(operation.scope, identity) }
+            : {}),
+          ...(carriage?.acting !== undefined
+            ? {
+              actingUser: carriage.acting.user,
+              ...(carriage.acting.session !== undefined
+                ? { actingSession: carriage.acting.session }
+                : {}),
+            }
+            : {}),
+        });
+      }
+    }
+    const outcome = await sink.commitWave({
+      space: this.#options.space,
+      home: true,
+      // The completion's CAS basis is NOW: it writes only its own
+      // result/claim docs, and a concurrent intrusion on them surfaces
+      // as a conflict the writeback's retry loop re-decides against
+      // fresh state (the hash guard re-reads inputs each attempt).
+      basisSeq: Engine.serverSeq(this.#options.engine),
+      rebasedHeads: [],
+      operations,
+      preconditions: [...sealed.sealed.commit.preconditions ?? []],
+      annotations,
+      consequenceOf: [],
+      basisInstances: [],
+      holder: this.#holder,
+      derivedThrough: this.#watermark,
+    });
+    if (outcome.error) {
+      withdrawAll(
+        `effect completion commit rejected: ${outcome.error.message}`,
+      );
+      return refuse(
+        `effect completion commit rejected: ${outcome.error.message}`,
+      );
+    }
+    sealed.resolveVerdict({ committed: { seq: outcome.ok.seq } });
+    // The B-1 read-consistency gate (serving-loop.md §4): hold the
+    // effect's in-flight entry until THIS completion commit's writes
+    // are READABLE by the serving runtime. The verdict above resolves
+    // inline, but under parked accepts (CT-1927) the replica applies
+    // the promotion only when a frame's catch-up marker covers it — a
+    // window where a fresh transaction's reads can miss the
+    // completion. Retiring the key inside that window let a stale
+    // re-run's re-admit re-claim and egress a second time (the
+    // captured double-fire); deferring retirement makes the re-admit
+    // dedupe instead. Sequenced after `settled` — the park-or-confirm
+    // decision runs inside the sealed commit's settlement.
+    const replica = runtime.storageManager.open(this.#options.space).replica;
+    if (replica.whenApplied !== undefined) {
+      const localSeq = sealed.sealed.localSeq;
+      this.#outbox?.deferRetirement(
+        effectKey,
+        // A locally-rejected settle (a route replacement racing the
+        // verdict) still consults whenApplied on this replica —
+        // benign: a replaced replica re-pulls durable state.
+        sealed.sealed.settled
+          .catch(() => undefined)
+          .then(() => replica.whenApplied!(localSeq)),
+      );
+    }
+    this.#options.stats.derivedCommits += 1;
+    // In-process dirtiness + push (the §4 injection): report like a
+    // wave commit — subscribers get the derived rows, the feed carries
+    // the record, and the loop skips its own echo by class + holder.
+    const records = Engine.selectCommitsSince(this.#options.engine, {
+      fromSeq: outcome.ok.seq - 1,
+      limit: 1,
+    });
+    const record = records.find((entry) => entry.seq === outcome.ok.seq);
+    if (record !== undefined) {
+      this.#options.server.noteExecutorCommit({
+        space: this.#options.space,
+        seq: record.seq,
+        class: "derived",
+        holder: this.#holder,
+        sessionId: record.sessionId,
+        writes: record.writes as AdmittedCommitNotice["writes"],
+      });
+    }
+    return { ok: {} };
   }
 
   #renew(): void {
@@ -633,6 +995,11 @@ export class SpaceServer implements TransactionSealDestination {
       // is exactly what §7's wavesBudgetExhausted exists to surface.
       if (exhausted) {
         this.#options.stats.wavesBudgetExhausted += 1;
+        logger.debug?.("wave-budget-exhausted", () => [
+          `space ${this.#options.space} exhausted the flush deadline on ` +
+          `a zero-delta cycle: batchHead ${batchHead}, ` +
+          `total ${this.#options.stats.wavesBudgetExhausted}`,
+        ]);
       }
       return;
     }
@@ -692,11 +1059,41 @@ export class SpaceServer implements TransactionSealDestination {
       : this.#watermark;
     const outcome = await closing.commitWave(this.#sink!, { derivedThrough });
     await closing.settled();
+    // The effect handoff (stage G, serving-loop.md §3): external effects
+    // go to the outbox POST-commit. Taken off the map here either way;
+    // the lease-lost branch below parks, so its batches are simply
+    // dropped — the runtime dies with the wave (crash-equivalent, memo
+    // re-miss covers the effect on re-activation).
+    const pendingEffects = this.#pendingEffectsByWave.get(closing);
+    this.#pendingEffectsByWave.delete(closing);
 
     const stats = this.#options.stats;
     stats.waves += 1;
-    if (exhausted) stats.wavesBudgetExhausted += 1;
+    if (exhausted) {
+      stats.wavesBudgetExhausted += 1;
+      logger.debug?.("wave-budget-exhausted", () => [
+        `space ${this.#options.space} exhausted the flush deadline: ` +
+        `batchHead ${batchHead}, wave seq ${outcome.seq}, ` +
+        `total ${stats.wavesBudgetExhausted}`,
+      ]);
+    }
     stats.supersededWrites += outcome.supersededWrites;
+    // Stage G, post-commit: hand the wave's sealed effects to the
+    // outbox BEFORE anything below can throw (a failed commit-record
+    // fetch must not leak effects with the runtime still alive) — but
+    // never on the lease-lost arm, whose park below discards them with
+    // the dying runtime (the crash-equivalent path memo re-miss
+    // covers). Fired for every other outcome — a withdrawn
+    // contribution's action re-runs and re-enqueues (deduped in
+    // flight), and completion writes are hash-guarded against current
+    // inputs, so a superseded request's writeback is inert
+    // (at-least-once, serving-loop.md §4).
+    if (
+      outcome.aborted !== "lease-lost" &&
+      pendingEffects !== undefined && pendingEffects.length > 0
+    ) {
+      this.#outbox?.admitSealedEffects(pendingEffects);
+    }
     if (outcome.aborted === "lease-lost") {
       // PARK, never continue (W-soundness): the abort WITHDREW the
       // wave's sealed derivations, nothing re-arms their producers in
@@ -741,6 +1138,27 @@ export class SpaceServer implements TransactionSealDestination {
         });
       }
     }
+
+    // Drain the durable append rows (FP1): after a wave that landed
+    // appends, and after any earlier drain left rows behind (a
+    // transport-failed delivery on a long-lived active space must not
+    // wait for the next appends-carrying wave or a re-activation).
+    // Co-hosted delivery is an engine commit, not a network await.
+    if (
+      (closing.hasOutboundAppends && outcome.seq !== undefined) ||
+      this.#outboxDrainOwed
+    ) {
+      try {
+        const drained = await this.#outbox?.deliverPendingAppends();
+        this.#outboxDrainOwed = (drained?.remaining ?? 0) > 0;
+      } catch (error) {
+        this.#outboxDrainOwed = true;
+        logger.warn("append-drain-failed", () => [
+          "post-wave outbox drain failed; rows kept for re-send",
+          error,
+        ]);
+      }
+    }
   }
 
   /** Park (serving-loop.md §1): release the lease, dispose the runtime.
@@ -772,7 +1190,19 @@ export class SpaceServer implements TransactionSealDestination {
     this.#currentWave = undefined;
     await this.#sealChain;
     wave?.abandon(`parked: ${reason}`);
+    // Stage G: an abandoned wave's deferred effects are DISCARDED with
+    // it — the runtime below is disposed, so this is the
+    // crash-equivalent path §4/§6 already cover (the effect re-misses
+    // from memo keys on re-activation). In-flight effect work is not
+    // awaited (park never awaits the network); its writebacks fail
+    // against the disposed runtime and are caught by the builtins.
+    this.#pendingEffectsByWave.clear();
+    this.#outbox = undefined;
     try {
+      if (this.#runtime !== undefined) {
+        this.#runtime.asyncWorkObserver = undefined;
+        this.#runtime.effectMemoObserver = undefined;
+      }
       this.#runtime?.clearSealDestination();
       await this.#disposeRuntime?.();
     } catch (error) {

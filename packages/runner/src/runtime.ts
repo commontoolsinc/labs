@@ -1258,6 +1258,27 @@ export class Runtime {
   #pendingAsyncWork = new Map<Promise<unknown>, string | undefined>();
 
   /**
+   * Serving-loop observer of async builtin work (server-execution v2
+   * stage G): the SpaceServer's outbox installs one on the serving
+   * runtime so effect work registered during a flush's synchronous
+   * prefix counts toward the §7 outbox counters. Undefined everywhere
+   * else — the OFF arm and client runtimes pay one undefined check.
+   */
+  asyncWorkObserver: ((work: Promise<unknown>) => void) | undefined;
+
+  /**
+   * Serving-loop observer of effect-memo hits (server-execution v2
+   * stage G, serving-loop.md §4's hit rule / §7's `memo.hits`): the
+   * effectful builtins report an evaluation that resolved from the
+   * stored request hash — no effect fired. Installed by the
+   * SpaceServer on the serving runtime; undefined everywhere else (the
+   * OFF arm pays one optional call).
+   */
+  effectMemoObserver:
+    | ((event: { kind: "hit"; id: string }) => void)
+    | undefined;
+
+  /**
    * Register an in-flight async builtin operation so `settled()` waits for it
    * instead of racing the post-commit flush. The scheduler registers an
    * effect-bearing commit's promise here (a race-free barrier — the flush runs
@@ -1272,6 +1293,7 @@ export class Runtime {
    * runtime. Omit it only for work that belongs to no single run.
    */
   trackAsyncWork(promise: Promise<unknown>, owner?: Cell<any>): void {
+    this.asyncWorkObserver?.(promise);
     const tracked = promise.then(() => {}, () => {});
     const ownerKey = owner === undefined
       ? undefined

@@ -388,6 +388,32 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#sealDestination = destination;
   }
 
+  /**
+   * Authoritative writes for effect-COMPLETION transactions (F2, the
+   * completion-visibility wedge; serving-loop.md §4): gated on a
+   * configured seal destination, i.e. the serving posture — that is
+   * where the replica's optimistic view layers sealed wave overlays a
+   * later wave-commit can supersede-drop, making the ordinary no-op
+   * elision destructive (a completion that diffs its `inputHash` write
+   * against a doomed overlay durably lands `result present + inputHash
+   * stale`; the next run's memo guard then wipes the served value). On
+   * every client and in the OFF arm this is a no-op, so
+   * `markEffectCompletion` keeps its documented byte-identical
+   * behavior there — the accepted client-side corner (a completion
+   * eliding against an in-flight optimistic overlay that later
+   * rejects) costs one redundant refetch and self-heals, per the
+   * recorded OFF-arm acceptance in verification-coverage.md.
+   */
+  markAuthoritativeWrites(): void {
+    if (this.#sealDestination !== undefined) {
+      this.tx.markAuthoritativeWrites?.();
+    }
+  }
+
+  isAuthoritativeWrites(): boolean {
+    return this.tx.isAuthoritativeWrites?.() === true;
+  }
+
   noteCfcSinkReleaseReject(
     info: { sink: string; effectId: string; detail: string },
   ): void {
@@ -1964,6 +1990,23 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
     const result = await promise;
     if (result.ok && !readOnly) {
+      // The effect handoff (server-execution v2 stage G, serving-loop.md
+      // §3/§5): a SEALED transaction's "ok" means accepted into a wave,
+      // not durable — so a seal destination that owns an outbox takes
+      // the effects here and flushes them only after the wave commit
+      // landed the contribution. Everything else (the OFF arm's store
+      // commit, ON-arm client speculation, bare test accumulators)
+      // keeps today's inline flush.
+      const deferred = this.#sealDestination !== undefined &&
+        this.#cfcState.outbox.length > 0 &&
+        this.#sealDestination.deferSealedEffects?.(
+            this,
+            [...this.#cfcState.outbox],
+          ) === true;
+      if (deferred) {
+        this.clearPostCommitOutbox();
+        return result;
+      }
       for (const effect of this.#cfcState.outbox) {
         try {
           await effect.flush(this);

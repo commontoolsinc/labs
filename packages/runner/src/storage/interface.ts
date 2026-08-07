@@ -768,6 +768,35 @@ export interface IStorageTransaction {
   ): void;
 
   /**
+   * Make this transaction's writes AUTHORITATIVE: every value write is
+   * recorded and committed even when it equals the currently-visible
+   * state, instead of being elided as a no-op (deletes of absent slots
+   * stay no-ops — there is nothing to assert). One-way; there is no
+   * un-mark.
+   *
+   * Exists for effect-COMPLETION writebacks under the serving posture
+   * (server-execution v2 stage G, serving-loop.md §4): the ordinary
+   * no-op elision diffs against the replica's OPTIMISTIC view, which
+   * layers not-yet-settled sealed overlays over confirmed state. A
+   * completion that diffs its `inputHash`/`pending` writes against a
+   * DOOMED overlay (a sealed derivation write a later wave-commit
+   * supersede-drops, §3d) elides the very write that makes its result
+   * durable-consistent — leaving `result present + inputHash stale`,
+   * which the next run's memo guard reads as "inputs changed" and
+   * destroys the just-served value. Authoritative mode makes the
+   * completion assert its full memo state unconditionally; ordinary
+   * transactions keep the elision (it exists to shrink the conflict
+   * surface, and for them the optimistic view is the right diff base).
+   */
+  markAuthoritativeWrites?(): void;
+
+  /** Whether {@link markAuthoritativeWrites} was applied to this
+   * transaction. Consulted by the value-diff write path
+   * (`normalizeAndDiff`), whose equal-leaf elision sits ABOVE the
+   * transaction layer and must yield for the same reason. */
+  isAuthoritativeWrites?(): boolean;
+
+  /**
    * Record one mergeable-write delta against the document at `address` (see
    * {@link MergeableOpDelta}): elements appended at the array's tail or set-added
    * by identity, a numeric increment, or a value removed by identity. The commit
@@ -1037,6 +1066,24 @@ export interface ITransactionSealSink {
  */
 export interface TransactionSealDestination {
   seal(tx: IExtendedStorageTransaction): Promise<Result<Unit, CommitError>>;
+
+  /**
+   * Take ownership of a sealed transaction's post-commit effects
+   * (server-execution v2 stage G, serving-loop.md §3/§5): the loop hands
+   * external effects to the OUTBOX post-wave-commit — never at seal
+   * time, where "committed" only means accepted into a wave whose
+   * disposition is still open. A destination that returns `true` OWNS
+   * the effects: it flushes them only after the wave commit landed the
+   * contribution (and discards them when the contribution was withdrawn
+   * — the action re-runs and re-enqueues; at-least-once, serving-loop.md
+   * §4). When absent, or returning `false`, the transaction flushes
+   * inline at seal exactly as commit does today (bare wave accumulators
+   * in tests, and any destination predating the outbox).
+   */
+  deferSealedEffects?(
+    tx: IExtendedStorageTransaction,
+    effects: readonly PostCommitSideEffect[],
+  ): boolean;
 }
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
@@ -1718,6 +1765,22 @@ export interface ISpaceReplica extends ISpace {
     source: IStorageTransaction | undefined,
     verdict: Promise<SealedCommitVerdict>,
   ): SealedNativeCommit;
+
+  /**
+   * Resolves when the accepted commit at `localSeq` has been APPLIED to
+   * this replica's settled view — immediately when the accept confirmed
+   * at verdict time, else when its parked accept promotes (catch-up
+   * marker coverage) or dies with the parked set (reset/close).
+   *
+   * Server-execution v2 stage G's effect-retirement read barrier
+   * (serving-loop.md §4): the outbox holds an effect's in-flight entry
+   * until every completion commit's writes are readable by the serving
+   * runtime, so a stale re-admit of the same key dedupes instead of
+   * re-claiming against unabsorbed state. Sequence after the sealed
+   * commit's `settled` promise — the park-or-confirm decision runs
+   * inside settlement.
+   */
+  whenApplied?(localSeq: number): Promise<void>;
 }
 
 /**

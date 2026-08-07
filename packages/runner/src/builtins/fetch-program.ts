@@ -8,6 +8,7 @@ import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { markEffectCompletion } from "../executor/effect-completion.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
@@ -411,6 +412,7 @@ async function startFetch(
 
     // Only write into an entry that is still marked `fetching`.
     await runtime.editWithRetry((tx) => {
+      markEffectCompletion(tx, `fetchProgram:${inputHash}`);
       const allEntries = cache.withTx(tx).get();
       const entry = allEntries[inputHash];
       if (entry?.state.type === "fetching") {
@@ -433,6 +435,7 @@ async function startFetch(
 
     // Only write into an entry that is still marked `fetching`.
     await runtime.editWithRetry((tx) => {
+      markEffectCompletion(tx, `fetchProgram:${inputHash}`);
       const allEntries = cache.withTx(tx).get();
       const entry = allEntries[inputHash];
       if (entry?.state.type === "fetching") {

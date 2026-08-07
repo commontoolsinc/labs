@@ -30,6 +30,8 @@ import {
   releaseExecutionLease,
 } from "@commonfabric/memory/v2/execution-lease";
 import { stampWaveRunContext } from "../src/executor/wave.ts";
+import { markEffectCompletion } from "../src/executor/effect-completion.ts";
+import { decodeMemoryBoundary, resolveScopeKey } from "@commonfabric/memory/v2";
 import { SessionRegistry } from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
@@ -117,6 +119,11 @@ describe("stage F serving loop", () => {
   let clientRuntime: Runtime;
   let servingRuntime: Runtime | undefined;
   let onServingRuntime: ((runtime: Runtime) => Promise<void>) | undefined;
+  /** Stage G: the serving runtime's injected fetch (egress stub) —
+   * effectful builtins served by the loop call THIS, never the network. */
+  let servingFetch:
+    | ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>)
+    | undefined;
   // serving-loop.md §3e: the pattern-update posture flips server-side.
   // The updater's source CHECK fetches over the network, which this
   // fully-local harness cannot serve — the posture flip is asserted by
@@ -137,6 +144,7 @@ describe("stage F serving loop", () => {
         const runtime = new Runtime({
           apiUrl: new URL(import.meta.url),
           storageManager: manager,
+          ...(servingFetch !== undefined ? { fetch: servingFetch } : {}),
           experimental: {
             serverExecution: true,
             systemPatternAutoUpdate: autoUpdate,
@@ -159,6 +167,7 @@ describe("stage F serving loop", () => {
     server = newSharedServer();
     servingRuntime = undefined;
     onServingRuntime = undefined;
+    servingFetch = undefined;
     autoUpdate = false;
   });
 
@@ -805,5 +814,589 @@ describe("stage F serving loop", () => {
     releaseExecutionLease(engine, { space, holder }); // no-op if released
     const rival = executionLeaseHolder("did:key:idle-rival");
     expect(acquireExecutionLease(engine, { space, holder: rival })).toBe(true);
+  });
+
+  it("serves an effectful node behind request-hash memoization: miss fires ONCE via the outbox; recovery memo-hits; retries are input-driven (serving-loop.md §4–§6; T7.Q5, T10.Q4, OW7)", async () => {
+    // The egress stub: the serving loop performs the effect (README
+    // §3.8's server half); calls are counted per URL, and one URL
+    // fails deterministically — the OW7 journey's failure leg.
+    const calls: string[] = [];
+    servingFetch = (input) => {
+      const url = String(input instanceof Request ? input.url : input);
+      calls.push(url);
+      if (url.includes("/fails")) {
+        return Promise.reject(new Error("stubbed egress failure"));
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ from: url }), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    };
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+
+    onServingRuntime = async (runtime) => {
+      const compiled = await runtime.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { fetchJsonUnchecked, pattern } from 'commonfabric';",
+            "export default pattern<{ url: string }, { fetch: any }>(",
+            "  ({ url }) => ({ fetch: fetchJsonUnchecked({ url }) }),",
+            ");",
+          ].join("\n"),
+        }],
+      }, { space });
+      const argument = runtime.getCell<{ url: string }>(
+        space,
+        "effect-arg",
+        undefined,
+      );
+      const result = runtime.getCell<{ fetch: unknown }>(
+        space,
+        "effect-result",
+        compiled.resultSchema,
+      );
+      for (let attempt = 0;; attempt++) {
+        await argument.sync();
+        await result.sync();
+        const tx = runtime.edit();
+        runtime.run(tx, compiled, argument, result);
+        const committed = await tx.commit();
+        if (committed.error === undefined) break;
+        if (attempt >= 4) {
+          throw new Error(
+            `serving pattern run failed: ${committed.error.message}`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await runtime.idle();
+    };
+
+    openClient();
+    const engine = await server.engineForSpace(space);
+    const clientResult = clientRuntime.getCell<
+      { fetch: { result?: unknown; error?: unknown } }
+    >(
+      space,
+      "effect-result",
+      undefined,
+    );
+    await clientResult.sync();
+
+    // Wait for ACTIVATION before writing the url: the harness's
+    // factory-time pattern run predates the seal destination (the
+    // stage-F "the run here IS the loaded structure" trick), so a url
+    // visible at factory time would fire OUTSIDE the outbox. With the
+    // url arriving as an authored wave input, the fetch node's miss
+    // runs the stage-G path: seal -> defer -> outbox -> completion.
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate before the url write",
+    );
+    const clientArg = clientRuntime.getCell<{ url: string }>(
+      space,
+      "effect-arg",
+      undefined,
+    );
+    await clientArg.sync();
+    const tx = clientRuntime.edit();
+    clientArg.withTx(tx).set({ url: "https://stage-g.test/one" });
+    expect((await tx.commit()).error).toBeUndefined();
+
+    // The miss fires exactly once; the completion commits its OWN
+    // derived-class commit and the next wave serves the value — the
+    // client observes it through ordinary push.
+    // 30 s here and on this step's two later observation waits: this
+    // file is deliberately real-clock, and under load the wave cycle
+    // degrades to deadline-paced waves (flushDeadlineMs 5_000), so a
+    // multi-wave leg legitimately overruns 15 s while still
+    // progressing (the soak flake signature: rare timeout reds, zero
+    // double-egress). Matches the recovery leg's 30 s "loaded box"
+    // budget below.
+    await waitUntil(
+      () =>
+        (clientResult.key("fetch").key("result").get() as {
+          from?: string;
+        } | undefined)?.from === "https://stage-g.test/one",
+      "client to observe the served fetch result",
+      30_000,
+    );
+    expect(calls.filter((url) => url.endsWith("/one")).length).toBe(1);
+    const stats1 = host.stats();
+    // At least one miss/queued/completed (>=, not ===: a stale action
+    // re-run may legitimately re-ADMIT the key — the claim-time
+    // result-present guard makes the re-admit's flush a no-op, so the
+    // EXTERNAL call count above is the exactly-once being pinned).
+    expect(stats1.memo.misses).toBeGreaterThanOrEqual(1);
+    expect(stats1.outbox.queued).toBeGreaterThanOrEqual(1);
+    expect(stats1.outbox.completed).toBeGreaterThanOrEqual(1);
+    // The post-completion re-run of the fetch action (its result-cell
+    // dirtiness re-arms it in the next wave) resolves from the stored
+    // key: the SS4 memo hit, counted live.
+    await waitUntil(
+      () => host!.stats().memo.hits >= 1,
+      "the post-completion re-run to memo-hit",
+    );
+
+    // Crash/park equivalence (T10.Q4, §6 step 3): park, then
+    // re-activate on fresh input — the recovered runtime re-runs the
+    // action against COMMITTED state; a first evaluation that sees the
+    // stored requestHash memo-hits and re-fires nothing, and one that
+    // raced its cell sync re-misses (the accepted at-least-once
+    // duplicate). The assertions below pin exactly that contract.
+    await host.spaceServer(space)!.park("test-recovery");
+    await waitUntil(
+      () => host!.spaceServer(space)?.active !== true,
+      "space to park for the recovery leg",
+    );
+    const poke = clientRuntime.getCell<{ n: number }>(
+      space,
+      "effect-poke",
+      undefined,
+    );
+    const pokeTx = clientRuntime.edit();
+    poke.withTx(pokeTx).set({ n: 1 });
+    expect((await pokeTx.commit()).error).toBeUndefined();
+    // Captured AT the poke commit: a read after re-activation could
+    // capture the recovered loop's own derived commit's seq, which W
+    // never covers (self-echo is not coverage-owed input — the
+    // anti-storm rule; serving-loop.md §3).
+    const pokeSeq = Engine.serverSeq(engine);
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to re-activate",
+    );
+    // Let the recovered loop claim the poke input before measuring —
+    // the recovery churn (structure re-load, a possible re-miss) must
+    // be over, or the bound below races it. Generous: recovery on a
+    // loaded box legitimately takes several waves.
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= pokeSeq,
+      "the recovered loop to claim the poke input",
+      30_000,
+    );
+    // T10.Q4's ruled contract across recovery: memo hits suppress
+    // re-firing COMPLETED effects, and the external call MAY duplicate
+    // (at-least-once across crash/park — RULED and accepted; the
+    // fired-marker was considered and REJECTED; a recovered runtime
+    // whose first evaluation raced its cell sync re-misses once). The
+    // pin is therefore BOUNDED, never unbounded growth — the
+    // no-timer-retry property is pinned deterministically on the
+    // failure leg below.
+    expect(calls.filter((url) => url.endsWith("/one")).length)
+      .toBeLessThanOrEqual(2);
+
+    // OW7's failure leg: new inputs → new key → the miss fires and
+    // FAILS; the failure commits an error-shaped RESULT with the key
+    // (§4: retries are input-driven, never timer loops), so the call
+    // count stays put until the inputs change again.
+    const failTx = clientRuntime.edit();
+    clientArg.withTx(failTx).set({ url: "https://stage-g.test/fails" });
+    expect((await failTx.commit()).error).toBeUndefined();
+    await waitUntil(
+      () => clientResult.key("fetch").key("error").get() !== undefined,
+      "client to observe the error-shaped result",
+      30_000,
+    );
+    expect(calls.filter((url) => url.endsWith("/fails")).length).toBe(1);
+    // No timer retry: give any (forbidden) retry loop time to betray
+    // itself, then re-check the count.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(calls.filter((url) => url.endsWith("/fails")).length).toBe(1);
+
+    // The input-driven retry: a THIRD url re-fires (fresh key), and the
+    // effectful node recovers.
+    const retryTx = clientRuntime.edit();
+    clientArg.withTx(retryTx).set({ url: "https://stage-g.test/two" });
+    expect((await retryTx.commit()).error).toBeUndefined();
+    await waitUntil(
+      () =>
+        (clientResult.key("fetch").key("result").get() as {
+          from?: string;
+        } | undefined)?.from === "https://stage-g.test/two",
+      "client to observe the retried fetch result",
+      30_000,
+    );
+    expect(calls.filter((url) => url.endsWith("/two")).length).toBe(1);
+    // FINAL stability re-check, after every later leg's waves and
+    // writebacks have run: the steady-state legs stay exactly-once (a
+    // broken memo-hit rule or a timer retry landing late would surface
+    // here), and the recovery leg stays within its at-least-once bound.
+    expect(calls.filter((url) => url.endsWith("/one")).length)
+      .toBeLessThanOrEqual(2);
+    expect(calls.filter((url) => url.endsWith("/fails")).length).toBe(1);
+  });
+
+  it("survives the deterministic A→B→A input cycle: the returning input re-fires instead of starving on a dead in-flight entry (completion-visibility F1a)", async () => {
+    // The no-race wedge this pins closed: pre-F1a, a served effect's
+    // completion resolved its verdict inline but the serving replica's
+    // accept PARKED awaiting a catch-up marker that engine-plane commits
+    // never stage — so the whenApplied retirement barrier never
+    // resolved and the effect's in-flight entry never retired. An input
+    // cycle A→B→A re-admits key A while the DEAD entry still holds it:
+    // the re-admit dedupes forever, no effect fires, and the client's
+    // value never arrives (starvation, no timing required).
+    const calls: string[] = [];
+    servingFetch = (input) => {
+      const url = String(input instanceof Request ? input.url : input);
+      calls.push(url);
+      return Promise.resolve(
+        new Response(JSON.stringify({ from: url }), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    };
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+
+    onServingRuntime = async (runtime) => {
+      const compiled = await runtime.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { fetchJsonUnchecked, pattern } from 'commonfabric';",
+            "export default pattern<{ url: string }, { fetch: any }>(",
+            "  ({ url }) => ({ fetch: fetchJsonUnchecked({ url }) }),",
+            ");",
+          ].join("\n"),
+        }],
+      }, { space });
+      const argument = runtime.getCell<{ url: string }>(
+        space,
+        "cycle-arg",
+        undefined,
+      );
+      const result = runtime.getCell<{ fetch: unknown }>(
+        space,
+        "cycle-result",
+        compiled.resultSchema,
+      );
+      for (let attempt = 0;; attempt++) {
+        await argument.sync();
+        await result.sync();
+        const tx = runtime.edit();
+        runtime.run(tx, compiled, argument, result);
+        const committed = await tx.commit();
+        if (committed.error === undefined) break;
+        if (attempt >= 4) {
+          throw new Error(
+            `serving pattern run failed: ${committed.error.message}`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await runtime.idle();
+    };
+
+    openClient();
+    const clientResult = clientRuntime.getCell<
+      { fetch: { result?: unknown; error?: unknown } }
+    >(
+      space,
+      "cycle-result",
+      undefined,
+    );
+    await clientResult.sync();
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate before the url write",
+    );
+    const clientArg = clientRuntime.getCell<{ url: string }>(
+      space,
+      "cycle-arg",
+      undefined,
+    );
+    await clientArg.sync();
+    const observes = (leg: string) =>
+      (clientResult.key("fetch").key("result").get() as {
+        from?: string;
+      } | undefined)?.from === `https://stage-g.test/${leg}`;
+    const writeUrl = async (leg: string) => {
+      const tx = clientRuntime.edit();
+      clientArg.withTx(tx).set({ url: `https://stage-g.test/${leg}` });
+      expect((await tx.commit()).error).toBeUndefined();
+    };
+
+    // A: served and observed (30 s legs: real-clock file — under load
+    // the wave cycle degrades to deadline-paced waves, see the memo
+    // test's budget note).
+    await writeUrl("a");
+    await waitUntil(() => observes("a"), "client to observe leg A", 30_000);
+    // B: a fresh key, served and observed; the memo state now holds B.
+    await writeUrl("b");
+    await waitUntil(() => observes("b"), "client to observe leg B", 30_000);
+    // Back to A — the primary regression pin: at the pre-fix tree this
+    // starves (the re-admit of key A dedupes against the never-retired
+    // first entry; no effect fires; this wait times out).
+    await writeUrl("a");
+    await waitUntil(() => observes("a"), "client to re-observe leg A", 30_000);
+
+    // The returning leg is a genuine re-miss (B's completion overwrote
+    // the stored request hash), so A fired exactly twice and B exactly
+    // once — bounded, never zero (starvation) and never runaway.
+    expect(calls.filter((url) => url.endsWith("/a")).length).toBe(2);
+    expect(calls.filter((url) => url.endsWith("/b")).length).toBe(1);
+
+    // And the served value STAYS: no post-arrival destroyer wipe (the
+    // F2 half — a torn hash would wipe it on the next wave). The
+    // scheduler settles, then the value is still there.
+    await waitUntil(
+      () => host!.stats().memo.inflight === 0,
+      "in-flight effects to drain after the cycle",
+      15_000,
+    );
+    expect(observes("a")).toBe(true);
+  });
+
+  it("retires every served effect: the in-flight count returns to baseline after each completion settles — no monotonic leak (completion-visibility F1a)", async () => {
+    // Pre-F1a, EVERY served effect leaked one permanently-in-flight
+    // outbox entry and one unresolved whenApplied waiter (the parked
+    // accept's marker never arrives for engine-plane commits). The pin:
+    // across N sequential served effects, memo.inflight returns to 0
+    // after each settles — not monotone growth.
+    const calls: string[] = [];
+    servingFetch = (input) => {
+      const url = String(input instanceof Request ? input.url : input);
+      calls.push(url);
+      return Promise.resolve(
+        new Response(JSON.stringify({ from: url }), {
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    };
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+
+    onServingRuntime = async (runtime) => {
+      const compiled = await runtime.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { fetchJsonUnchecked, pattern } from 'commonfabric';",
+            "export default pattern<{ url: string }, { fetch: any }>(",
+            "  ({ url }) => ({ fetch: fetchJsonUnchecked({ url }) }),",
+            ");",
+          ].join("\n"),
+        }],
+      }, { space });
+      const argument = runtime.getCell<{ url: string }>(
+        space,
+        "liveness-arg",
+        undefined,
+      );
+      const result = runtime.getCell<{ fetch: unknown }>(
+        space,
+        "liveness-result",
+        compiled.resultSchema,
+      );
+      for (let attempt = 0;; attempt++) {
+        await argument.sync();
+        await result.sync();
+        const tx = runtime.edit();
+        runtime.run(tx, compiled, argument, result);
+        const committed = await tx.commit();
+        if (committed.error === undefined) break;
+        if (attempt >= 4) {
+          throw new Error(
+            `serving pattern run failed: ${committed.error.message}`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await runtime.idle();
+    };
+
+    openClient();
+    const clientResult = clientRuntime.getCell<
+      { fetch: { result?: unknown; error?: unknown } }
+    >(
+      space,
+      "liveness-result",
+      undefined,
+    );
+    await clientResult.sync();
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate before the url writes",
+    );
+    const clientArg = clientRuntime.getCell<{ url: string }>(
+      space,
+      "liveness-arg",
+      undefined,
+    );
+    await clientArg.sync();
+
+    for (const leg of ["n1", "n2", "n3"]) {
+      const tx = clientRuntime.edit();
+      clientArg.withTx(tx).set({ url: `https://stage-g.test/${leg}` });
+      expect((await tx.commit()).error).toBeUndefined();
+      await waitUntil(
+        () =>
+          (clientResult.key("fetch").key("result").get() as {
+            from?: string;
+          } | undefined)?.from === `https://stage-g.test/${leg}`,
+        `client to observe leg ${leg}`,
+        30_000,
+      );
+      // The retirement-liveness pin: the completion settled (the value
+      // is client-visible), so the whenApplied barrier resolved and the
+      // entry retired. Pre-fix this stays at 1, 2, 3 — the leak.
+      await waitUntil(
+        () => host!.stats().memo.inflight === 0,
+        `in-flight to return to baseline after leg ${leg}`,
+        15_000,
+      );
+    }
+    expect(host.stats().outbox.completed).toBeGreaterThanOrEqual(3);
+  });
+
+  it("commits an effect completion as its OWN derived-class commit, annotations sourced from the outbox carriage captured at the original run's seal (serving-loop.md §4; T7.Q4)", async () => {
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+    onServingRuntime = () => Promise.resolve();
+    openClient();
+
+    // Activation via the client's demand.
+    const watched = clientRuntime.getCell<{ value?: number }>(
+      space,
+      "completion-target",
+      undefined,
+    );
+    await watched.sync();
+    const kick = clientRuntime.getCell<{ n: number }>(
+      space,
+      "completion-kick",
+      undefined,
+    );
+    const kickTx = clientRuntime.edit();
+    kick.withTx(kickTx).set({ n: 1 });
+    expect((await kickTx.commit()).error).toBeUndefined();
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "space to activate",
+    );
+    const engine = await server.engineForSpace(space);
+    const spaceServer = host.spaceServer(space)!;
+
+    // The ORIGINAL run: a stamped tx with an ACTING identity (the
+    // carriage's attribution source — in Phase 2+ the stamper supplies
+    // it; here the test does) enqueues the effect and seals into the
+    // loop's wave. Its post-commit effect defers to the outbox and runs
+    // AFTER the wave commit; the writeback — marked with the effect
+    // key — commits as the §4 completion.
+    const effectKey = "fetchTest:completion-e2e";
+    const completed = Promise.withResolvers<void>();
+    const serving = servingRuntime!;
+    const target = serving.getCell<{ value?: number }>(
+      space,
+      "completion-target",
+      undefined,
+    );
+    const scopedBase = serving.getCell<{ note?: string }>(
+      space,
+      "completion-scoped",
+      undefined,
+    );
+    const scoped = serving.getCellFromLink<{ note?: string }>({
+      ...scopedBase.getAsNormalizedFullLink(),
+      scope: "user",
+    });
+    await target.sync();
+    const originalTx = serving.edit();
+    stampWaveRunContext(originalTx, {
+      actionId: "test/fetch-node",
+      kind: "derivation",
+      acting: { user: "user:alice", session: "sess-9" },
+    });
+    target.withTx(originalTx).set({});
+    originalTx.enqueuePostCommitEffect({
+      id: effectKey,
+      kind: "fetchTest-start",
+      flush: () => {
+        const work = serving.editWithRetry((tx) => {
+          markEffectCompletion(tx, effectKey);
+          target.withTx(tx).set({ value: 7 });
+          scoped.withTx(tx).set({ note: "scoped completion" });
+        }).then(({ error }) => {
+          if (error !== undefined) {
+            throw new Error(`completion write failed: ${error.message}`);
+          }
+          completed.resolve();
+        });
+        serving.trackAsyncWork(work);
+      },
+    });
+    expect((await originalTx.commit()).error).toBeUndefined();
+    await completed.promise;
+
+    // The completion commit: derived-class under the holder, carrying
+    // derivedThrough (protocol.md §4: every derived commit carries
+    // it), EMPTY consequenceOf, and the annotation pair sourced from
+    // the outbox carriage — the acting identity of the ORIGINAL run
+    // and the scope_key resolved against the carriage identity. It is
+    // its OWN commit: the wave that carried the original run's write
+    // committed separately.
+    const rows = engine.database.prepare(
+      `SELECT seq, class, holder, derived_through, annotations,
+              consequence_of
+       FROM "commit" WHERE class = 'derived' ORDER BY seq`,
+    ).all() as Array<{
+      seq: number;
+      class: string;
+      holder: string;
+      derived_through: number | null;
+      annotations: string | null;
+      consequence_of: string | null;
+    }>;
+    // BOTH the wave commit (the original stamped run's write, acting
+    // attribution) and the completion carry annotations; the completion
+    // is the one holding the SCOPED op's addressing half.
+    const annotated = rows.filter((row) => row.annotations !== null).map(
+      (row) => ({
+        row,
+        decoded: decodeMemoryBoundary(row.annotations!) as Array<
+          Record<string, unknown>
+        >,
+      }),
+    );
+    const withScoped = annotated.filter(({ decoded }) =>
+      decoded.some((annotation) => annotation.scopeKey !== undefined)
+    );
+    expect(withScoped.length).toBe(1);
+    const completion = withScoped[0].row;
+    expect(completion.holder).toBe(spaceServer.holder);
+    expect(completion.derived_through).not.toBeNull();
+    const annotations = withScoped[0].decoded;
+    const expectedScopeKey = resolveScopeKey("user", {
+      principal: serviceSigner.did(),
+      sessionId: "unused",
+    });
+    // Every op carries the carriage's acting identity; the scoped op
+    // additionally carries its scope_key (protocol.md §1's
+    // addressing/attribution pair).
+    expect(annotations.length).toBe(2);
+    for (const annotation of annotations) {
+      expect(annotation.actingUser).toBe("user:alice");
+      expect(annotation.actingSession).toBe("sess-9");
+    }
+    expect(
+      annotations.some((annotation) =>
+        annotation.scopeKey === expectedScopeKey
+      ),
+    ).toBe(true);
+    // The wave's own commit (the original run's write) is separate —
+    // the completion never passed §3d's sealing.
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+
+    // In-process dirtiness + push: the client observes the completion
+    // value through its ordinary subscription.
+    await waitUntil(
+      () => watched.key("value").get() === 7,
+      "client to observe the completion write",
+      15_000,
+    );
+    expect(host.stats().outbox.completed).toBeGreaterThanOrEqual(1);
   });
 });
