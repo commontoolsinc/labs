@@ -5,7 +5,7 @@
 // container reached by its codec contents, which neither walk can do, so each
 // refuses rather than flattening one.
 
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
@@ -14,9 +14,18 @@ import {
 } from "@commonfabric/data-model/fabric-primitives";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+
+import { FabricInstance } from "@commonfabric/data-model/fabric-value";
 import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
+import { Runtime } from "../src/runtime.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const { serializeForLLMObservation, traverseAndCellify } = llmDialogTestHelpers;
+
+const signer = await Identity.fromPassphrase("llm dialog special objects");
+const space = signer.did();
 
 /** A runtime stand-in: neither walk should ask it for a cell here. */
 const noCellRuntime = {
@@ -60,6 +69,84 @@ describe("llm-dialog-special-objects", () => {
           "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
             "serializing a value for a language model.",
         );
+    });
+  });
+
+  // The tests above hand the walk a value built in place. What this function
+  // actually serializes is a value read back out of a cell, and the read path
+  // does not hand back what was written: `getAsQueryResult()` returns a
+  // `FabricPrimitive` raw but wraps everything else in a proxy. So the two arms
+  // arrive differently, and only driving them from a real cell shows it.
+  describe("reading back through a cell", () => {
+    let runtime: Runtime;
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let tx: IExtendedStorageTransaction;
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+    });
+
+    afterEach(async () => {
+      await tx.commit();
+      await runtime?.dispose();
+      await storageManager?.close();
+    });
+
+    function readBack(written: unknown): Record<string, unknown> {
+      const cell = runtime.getCell<Record<string, unknown>>(
+        space,
+        "llm-special-objects",
+        undefined,
+        tx,
+      );
+      cell.set(written as Record<string, unknown>);
+      return serializeForLLMObservation({ value: cell.get() })
+        .value as Record<string, unknown>;
+    }
+
+    it("returns a cell-resolved `FabricBytes` with its bytes intact", () => {
+      // The leaf guard has to hold for the value as the READ PATH delivers it,
+      // not only for one built in place -- this is the shape a model actually
+      // observes.
+      const value = readBack({
+        bytes: new FabricBytes(new Uint8Array([1, 2, 3])),
+      });
+
+      expect(value.bytes).toBeInstanceOf(FabricBytes);
+      expect((value.bytes as FabricBytes).slice()).toEqual(
+        new Uint8Array([1, 2, 3]),
+      );
+    });
+
+    it("flattens a cell-resolved `FabricError`, which the refusal misses", () => {
+      // A KNOWN BLIND SPOT, pinned so it cannot widen unnoticed, and so that
+      // closing it turns this red rather than passing silently.
+      //
+      // `getAsQueryResult()` hands back a `FabricPrimitive` raw but wraps a
+      // `FabricInstance` in a proxy, and that proxy's prototype is
+      // `Object.prototype` -- there is no `getPrototypeOf` trap. So
+      // `instanceof FabricInstance` is false, the refusal above cannot fire,
+      // and the record branch rebuilds the value as a bare `{}`.
+      //
+      // The refusal is not wrong, it is blind: it covers a value handed over
+      // directly and cannot see one arriving this way. Every
+      // `instanceof FabricInstance` tripwire in the runner shares that blind
+      // spot. Closing it is the `TODO` at `query-result-proxy.ts`, where the
+      // primitive already gets the exemption an instance does not.
+      const value = readBack({
+        failure: FabricError.fromNativeError(new Error("boom")),
+      });
+
+      // `FabricInstance` is abstract, so `toBeInstanceOf` will not take it;
+      // the prototype check below is the same assertion, stated directly.
+      expect(value.failure instanceof FabricInstance).toBe(false);
+      expect(Object.getPrototypeOf(value.failure)).toBe(Object.prototype);
+      expect(Object.keys(value.failure as object)).toEqual([]);
     });
   });
 

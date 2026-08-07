@@ -53,8 +53,8 @@ export type CellAliasResolver = (
  * TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
  * point this becomes a walk rather than a refusal.
  */
-function refuseBoundFabricInstance(value: FabricInstance): Error {
-  return refuseFabricInstance(value, "in a pattern binding");
+function refuseBoundFabricInstance(value: FabricInstance): never {
+  refuseFabricInstance(value, "in a pattern binding");
 }
 
 export function withAliasBindings(
@@ -156,7 +156,7 @@ export function withAliasBindings(
   // contents rather than by property name, which this walk cannot do, so the
   // `for...in` copy would rebuild it from zero enumerable own properties as
   // `{}`. It refuses instead of doing that quietly.
-  if (value instanceof FabricInstance) throw refuseBoundFabricInstance(value);
+  if (value instanceof FabricInstance) refuseBoundFabricInstance(value);
 
   // Whatever reaches here goes to the sanctioned conversion, which mints its
   // fabric form or rejects it. Three kinds arrive: a native carrying a
@@ -183,7 +183,7 @@ export function withAliasBindings(
     // The conversion mints either arm: a `Uint8Array` becomes a `FabricBytes`,
     // an `Error` a `FabricError`.
     if (value instanceof FabricPrimitive) return value;
-    if (value instanceof FabricInstance) throw refuseBoundFabricInstance(value);
+    if (value instanceof FabricInstance) refuseBoundFabricInstance(value);
   }
 
   // If this is an object or a pattern, process each key recursively.
