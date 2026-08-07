@@ -7,9 +7,10 @@ import {
   assertThrows,
 } from "@std/assert";
 import {
+  acceptsCoverageDebt,
   aggregateCacheStates,
-  applyBaselineOverrides,
   type Artifact,
+  type BaselineSample,
   buildCoverageDebtSuggestionComment,
   buildCoverageResolvedComment,
   type CompileCacheStates,
@@ -26,64 +27,103 @@ import {
   githubGet,
   githubPatch,
   githubPost,
-  latestNonColdSample,
   newestArtifactsByName,
   parseAddedLinesFromPatch,
   parseBaselineOverrides,
   parseCacheStateFiles,
-  parseCoverageBaseline,
   parseCoverageBaselineDetailed,
+  REPO,
   serializeCoverageBaseline,
   shouldGateCoverageDebtMetric,
-  type TimingSample,
 } from "./ci-check-lib.ts";
 
 Deno.test("coverage baseline files round-trip stable metric samples", () => {
-  const metrics = new Map([
-    [
-      "step: Type check",
-      {
-        runId: 123,
-        runUrl: "https://example.test/run/123",
-        sha: "abc123",
-        createdAt: "2026-01-01T00:00:00Z",
-        durationSeconds: 42.5,
-      },
-    ],
-    [
-      "job: Check",
-      {
-        runId: 123,
-        runUrl: "https://example.test/run/123",
-        sha: "abc123",
-        createdAt: "2026-01-01T00:00:00Z",
-        durationSeconds: 60,
-      },
-    ],
+  const metrics = new Map<string, BaselineSample>([
+    ["coverage-debt: packages/runner uncovered lines", {
+      runId: 123,
+      sha: "abc123",
+      createdAt: "2026-01-01T00:00:00Z",
+      uncoveredLines: 42,
+    }],
+    ["coverage-debt: packages/memory uncovered lines", {
+      runId: 123,
+      sha: "abc123",
+      createdAt: "2026-01-01T00:00:00Z",
+      uncoveredLines: 60,
+    }],
   ]);
 
   const serialized = serializeCoverageBaseline(metrics);
   assertEquals(
     serialized.metrics.map((metric) => metric.name),
-    ["job: Check", "step: Type check"],
+    [
+      "coverage-debt: packages/memory uncovered lines",
+      "coverage-debt: packages/runner uncovered lines",
+    ],
+  );
+
+  // The file keeps the keys it has always carried, so a run whose checkout
+  // predates the in-memory rename still reads a file this run writes.
+  assertEquals(serialized.metrics[0].durationSeconds, 60);
+  assertEquals(
+    serialized.metrics[0].runUrl,
+    `https://github.com/${REPO}/actions/runs/123`,
   );
 
   assertEquals(
-    parseCoverageBaseline(JSON.stringify(serialized)),
+    parseCoverageBaselineDetailed(JSON.stringify(serialized)).metrics,
     metrics,
   );
 });
 
+Deno.test("coverage baseline files read a file the performance gate wrote", () => {
+  // Written when the artifact also carried CI timing metrics: the file names
+  // the run's page, and the uncovered-line count sits under `durationSeconds`.
+  const legacy = JSON.stringify({
+    version: 1,
+    generatedAt: "2026-01-01T00:00:00Z",
+    metrics: [
+      {
+        name: "coverage-debt: packages/runner uncovered lines",
+        runId: 7,
+        runUrl: "https://example.test/run/7",
+        sha: "abc123",
+        createdAt: "2026-01-01T00:00:00Z",
+        durationSeconds: 5740,
+      },
+      {
+        name: "job: Check",
+        runId: 7,
+        runUrl: "https://example.test/run/7",
+        sha: "abc123",
+        createdAt: "2026-01-01T00:00:00Z",
+        durationSeconds: 61.5,
+      },
+    ],
+  });
+
+  const parsed = parseCoverageBaselineDetailed(legacy);
+  assertEquals(
+    parsed.metrics.get("coverage-debt: packages/runner uncovered lines"),
+    {
+      runId: 7,
+      sha: "abc123",
+      createdAt: "2026-01-01T00:00:00Z",
+      uncoveredLines: 5740,
+    },
+  );
+  assertEquals(parsed.compileCacheStates, null);
+});
+
 Deno.test("coverage baseline files round-trip compile cache states", () => {
-  const metrics = new Map<string, TimingSample>([
+  const metrics = new Map<string, BaselineSample>([
     [
       "job: Check",
       {
         runId: 123,
-        runUrl: "https://example.test/run/123",
         sha: "abc123",
         createdAt: "2026-01-01T00:00:00Z",
-        durationSeconds: 60,
+        uncoveredLines: 60,
       },
     ],
   ]);
@@ -97,9 +137,6 @@ Deno.test("coverage baseline files round-trip compile cache states", () => {
   const detailed = parseCoverageBaselineDetailed(serialized);
   assertEquals(detailed.metrics, metrics);
   assertEquals(detailed.compileCacheStates, states);
-
-  // The tagged file stays version 1, so the legacy parser still accepts it.
-  assertEquals(parseCoverageBaseline(serialized), metrics);
 });
 
 Deno.test("parseCoverageBaselineDetailed treats legacy files as untagged", () => {
@@ -204,27 +241,6 @@ Deno.test("cache state parsing keeps valid unknown-family records inert", () => 
   });
 });
 
-Deno.test("latestNonColdSample skips trailing cold runs and falls back when all are cold", () => {
-  const sample = (runId: number): TimingSample => ({
-    runId,
-    runUrl: `https://example.test/run/${runId}`,
-    sha: `sha${runId}`,
-    createdAt: `2026-01-0${runId}T00:00:00Z`,
-    durationSeconds: runId,
-  });
-  const samples = [sample(1), sample(2), sample(3)];
-  const coldRuns = new Set([2, 3]);
-
-  assertEquals(
-    latestNonColdSample(samples, (runId) => coldRuns.has(runId))?.runId,
-    1,
-  );
-  // All-cold: fall back to the last sample so override-truncation resets
-  // still take effect.
-  assertEquals(latestNonColdSample(samples, () => true)?.runId, 3);
-  assertEquals(latestNonColdSample([], () => false), undefined);
-});
-
 Deno.test("coverage debt metrics format and parse line units", () => {
   const metric = "coverage-debt: workspace uncovered lines";
   assertEquals(formatOverrideSuggestion(12.2), "13 lines");
@@ -301,57 +317,32 @@ Deno.test("coverage baseline reset marker parses from PR body", () => {
   assertEquals(overrides.metrics.size, 0);
 });
 
-Deno.test("coverage baseline reset truncates coverage timelines only", () => {
-  const coverageMetric = "coverage-debt: workspace uncovered lines";
-  const jobMetric = "job: Check";
-  const sample = (
-    sha: string,
-    day: number,
-    durationSeconds: number,
-  ): TimingSample => ({
-    runId: day,
-    runUrl: `https://example.test/run/${day}`,
-    sha,
-    createdAt: `2026-01-0${day}T00:00:00Z`,
-    durationSeconds,
-  });
-  const oldCoverage = sample("old", 1, 9);
-  const resetCoverage = sample("reset", 2, 12);
-  const newCoverage = sample("new", 3, 10);
-  const oldJob = sample("old", 1, 20);
-  const resetJob = sample("reset", 2, 21);
-  const newJob = sample("new", 3, 22);
-  const timelines = new Map([
-    [
-      coverageMetric,
-      {
-        name: coverageMetric,
-        samples: [oldCoverage, resetCoverage, newCoverage],
-      },
-    ],
-    [
-      jobMetric,
-      { name: jobMetric, samples: [oldJob, resetJob, newJob] },
-    ],
-  ]);
-
-  applyBaselineOverrides(
-    timelines,
-    new Map([
-      [
-        "reset",
-        { metrics: new Map(), coverageBaselineReset: true },
-      ],
-    ]),
-  );
+Deno.test("a merged reset accepts coverage-debt metrics only", () => {
+  const reset = { metrics: new Map(), coverageBaselineReset: true };
 
   assertEquals(
-    timelines.get(coverageMetric)?.samples.map((s) => s.sha),
-    ["reset", "new"],
+    acceptsCoverageDebt(reset, "coverage-debt: workspace uncovered lines"),
+    true,
+  );
+  assertEquals(acceptsCoverageDebt(reset, "job: Check"), false);
+
+  const perMetric = {
+    metrics: new Map([["coverage-debt: packages/runner uncovered lines", 12]]),
+    coverageBaselineReset: false,
+  };
+  assertEquals(
+    acceptsCoverageDebt(
+      perMetric,
+      "coverage-debt: packages/runner uncovered lines",
+    ),
+    true,
   );
   assertEquals(
-    timelines.get(jobMetric)?.samples.map((s) => s.sha),
-    ["old", "reset", "new"],
+    acceptsCoverageDebt(
+      perMetric,
+      "coverage-debt: packages/memory uncovered lines",
+    ),
+    false,
   );
 });
 
