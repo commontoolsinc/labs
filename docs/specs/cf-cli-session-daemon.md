@@ -33,6 +33,8 @@ replays a mutation.
   visible to the caller.
 - Prevent overlapping daemon requests from introducing new runtime or storage
   races.
+- Make observation distinct from execution: inspection and completion never
+  start a piece or trigger reactive work implicitly.
 - Detect loaded code and identity material becoming stale and fail closed.
 
 ## Non-goals
@@ -52,6 +54,26 @@ replays a mutation.
 
 ## Use cases and command scope
 
+### Observation and execution boundary
+
+Daemon command classification follows behavior rather than command naming. An
+observational request may synchronize and read persisted Fabric state, but it
+must not start a piece, schedule reactive execution, invoke a handler or
+builtin, or cause a write. A command or option that can do any of those things
+is effectful even when its primary purpose is to display information.
+
+The default inspection forms are cold in both direct and daemon execution.
+Existing implementations that start pieces while listing metadata, discovering
+callables, building maps, or completing a command must be refactored before
+those forms can enter daemon scope. The daemon does not create a second set of
+inspection semantics merely to make routing safe.
+
+Callers that want computation use an explicit execution operation such as
+`piece step`, `piece get --step`, `piece call`, or `piece render`. If a future
+inspection command needs a combined start-and-observe form, its name or option
+must identify that execution explicitly. Such a form enters the effectful
+request class and is not enabled merely because its cold form is supported.
+
 ### Repeated inspection
 
 Humans and agents repeatedly inspect one space through:
@@ -63,21 +85,30 @@ Humans and agents repeatedly inspect one space through:
 - `cf piece search`
 - `cf piece map`
 
-These commands form the first implementation scope. They reuse the synchronized
-replica while receiving fresh request execution state.
+These commands form the first implementation scope after their implementations
+satisfy the observational boundary. A command remains unsupported until it has
+a cold implementation; in particular, the current start-on-read behavior of
+listing, callable discovery, mapping, or completion cannot be routed unchanged.
+The commands reuse the synchronized replica while receiving fresh request
+state.
 
-### Live shell completion
+### Fabric-backed shell completion
 
-`cf completion complete` uses the daemon for live piece, callable, and cell-path
-candidates when the half-typed command line contains `--daemon <name>`. The
-completion parser resolves that option from the line it is completing; the
-shell script does not carry a daemon setting of its own. Completion script
-generation remains direct.
+`cf completion complete` uses the daemon for Fabric piece, callable, and
+cell-path candidates when the half-typed command line contains
+`--daemon <name>`. The completion parser resolves that option from the line it
+is completing; the shell script does not carry a daemon setting of its own.
+Completion script generation remains direct.
+
+Completion reads persisted metadata and never starts a piece. A callable or
+other candidate that cannot be discovered without execution is absent until an
+explicit execution operation has materialized the necessary state. Pressing
+Tab must not execute user code or produce Fabric writes.
 
 Completion keeps its existing silent-empty failure contract. An absent, busy,
-stale, or incompatible daemon produces no live candidates and no diagnostic in
-the candidate stream. This is the deliberate exception to the normal routed-
-command rule that daemon failures are reported to the caller.
+stale, or incompatible daemon produces no Fabric candidates and no diagnostic
+in the candidate stream. This is the deliberate exception to the normal
+routed-command rule that daemon failures are reported to the caller.
 
 ### Fine-grained mutation
 
@@ -274,25 +305,28 @@ but one daemon context executes exactly one request at a time. Accepted requests
 enter a bounded FIFO queue.
 
 The short-lived client completely materializes any stdin input before queue
-admission. It reads through end of stream, parses and validates the input under
-the direct command's existing rules, and retains the normalized value until the
-request reaches the execution lane. Invalid or interrupted input therefore
-fails before daemon dispatch, and a producer that has not closed its stream
-keeps only its client waiting rather than occupying the daemon queue. Once the
-request reaches the head, the daemon grants a backpressured transfer of the
-explicit value and does not begin command execution until that transfer is
-complete.
+admission. It reads through end of stream, performs validation that does not
+require Fabric state, and retains the resulting value until the request reaches
+the execution lane. Context-free parse errors and interrupted input therefore
+fail before daemon dispatch, and a producer that has not closed its stream
+keeps only its client waiting rather than occupying the daemon queue. Validation
+that depends on synchronized Fabric state, such as interpreting `piece call`
+input against a callable schema, occurs inside the serialized execution lane.
+Once the request reaches the head, the daemon grants a backpressured transfer
+of the explicit value and does not begin command execution until that transfer
+is complete.
 
 This serialization protects shared runtime configuration, one authenticated
-memory session, request output attribution, and request cleanup. Nominally
-read-only commands are not initially parallel because they can start pieces,
-establish watches, pull linked data, and trigger reactive computation.
+memory session, request output attribution, and request cleanup. Observational
+commands are not initially parallel even though they do not start execution:
+they can establish request-owned subscriptions, pull linked data, and interact
+with the retained replica while it synchronizes.
 
 The queue has a request-count bound and stores only bounded request metadata;
 queued input values remain in their client processes. A full queue rejects
 admission immediately with `DAEMON_BUSY`; callers do not retry automatically. A
-queued request is cancellable. Once a mutation begins, client disconnection does
-not cancel or replay it.
+queued request is cancellable. Once an effectful request begins, client
+disconnection does not cancel or replay it.
 
 Serialization only orders requests through this daemon. Browsers, other
 daemons, servers, and direct CLI invocations remain concurrent Fabric actors.
@@ -300,7 +334,7 @@ Memory's optimistic commit, precondition, path-conflict, and conflict-retry
 semantics remain authoritative. The daemon adds no distributed lock and does
 not make separate commands atomic.
 
-## Request identity and mutation outcomes
+## Request identity and effectful outcomes
 
 Every admitted request has an instance-qualified request ID and advances
 through explicit states:
@@ -316,11 +350,12 @@ queued -> executing -> completed
 The daemon retains a bounded, in-memory-only result ledger for reconnecting
 clients. It is never persisted and its payloads are excluded from default logs.
 A queued request whose client disconnects is removed. A disconnected read may
-be canceled or allowed to finish with its output discarded. An executing
-mutation finishes and records its result while the daemon remains alive.
+be canceled or allowed to finish with its output discarded because a read is
+observational by definition. An executing effectful request finishes and
+records its result while the daemon remains alive.
 
-If the daemon crashes after mutation dispatch without recording a terminal
-result, the client reports `outcome-unknown`. Neither side repeats the mutation.
+If the daemon crashes after effectful dispatch without recording a terminal
+result, the client reports `outcome-unknown`. Neither side repeats the request.
 Durable exactly-once behavior requires a server-recognized idempotency contract
 and is separate work.
 
@@ -329,12 +364,14 @@ and is separate work.
 The execution protocol keeps stdout, stderr, and exit status distinct and
 ordered. It applies backpressure rather than accumulating unbounded output.
 The daemon never reads or inherits a caller's stdin. The client owns terminal
-and pipe detection and converts caller input into an explicit normalized request
-payload before admission. Thus piped `piece set`, `piece apply`, and `piece call`
+and pipe detection and converts caller input into an explicit request payload
+before admission. Thus piped `piece set`, `piece apply`, and `piece call`
 retain their direct behavior without multiplexing ambient stdin through a
-long-lived process. The daemon command handlers accept an explicit input value
-and have no stdin reader available. Client cancellation and signals are explicit
-protocol events.
+long-lived process. Syntax errors that require no Fabric context fail in the
+client; schema-dependent errors retain the direct command's diagnostics but are
+reported from the execution lane. The daemon command handlers accept an
+explicit input value and have no stdin reader available. Client cancellation
+and signals are explicit protocol events.
 
 The client sends its original working directory, absolute forms of recognized
 file arguments, and an allowlisted command environment. The daemon never
@@ -370,8 +407,19 @@ caller to use the owning client, choose another daemon, or restart it.
 Git commit identity is insufficient for dirty worktrees. Before announcing
 readiness, a source daemon installs filesystem watchers over a conservative
 manifest containing its implementation sources, workspace configuration, and
-lock inputs. Any relevant event advances the source epoch and permanently marks
-the loaded process stale, even if the file is later changed back.
+lock inputs. It also records a content fingerprint of that manifest and
+revalidates it immediately before request admission. A mismatch, watcher error
+or overflow, or relevant watcher event advances the source epoch and
+permanently marks the loaded process stale, even if the file is later changed
+back. The watcher provides prompt invalidation; admission-time revalidation
+catches changes whose event has not yet been delivered.
+
+Mutable filesystems do not provide an atomic transaction spanning fingerprint
+validation and command dispatch. A file can change in that interval, so a
+request already being admitted may execute the daemon's loaded generation. The
+next admission detects the mismatch and fails closed. Callers requiring a
+strict guarantee that no request can race a source edit must use an immutable
+build identity rather than a source daemon.
 
 Pattern files supplied as command inputs are not daemon implementation. They
 are read fresh per request and use content identity for any retained cache.
@@ -390,10 +438,10 @@ Staleness changes the daemon from `running` to `draining-stale`:
 4. Drain confirmed writes and tear down request and retained state.
 5. Exit and require an explicit restart.
 
-If staleness is detected during an active mutation, its actual result remains
-authoritative. A successful result is not converted into a generic failure that
-would invite replay. The response adds a stderr warning that the daemon became
-stale and cannot accept another request.
+If staleness is detected during an active effectful request, its actual result
+remains authoritative. A successful result is not converted into a generic
+failure that would invite replay. The response adds a stderr warning that the
+daemon became stale and cannot accept another request.
 
 ## Lifecycle and crash recovery
 
@@ -405,7 +453,7 @@ endpoint is unreachable and the recorded owner is proven dead.
 Graceful stop rejects new admission, rejects queued work, lets the active
 request finish, drains confirmed writes, closes storage sessions, and exits.
 Forced termination is a separately named explicit operation and warns when an
-active mutation can be left outcome-unknown.
+active effectful request can be left outcome-unknown.
 
 The daemon has no automatic idle shutdown. Resource bounds and explicit
 management, rather than a sleep or timeout, govern its lifetime.
@@ -435,27 +483,39 @@ shutdown across execution versions. A separately versioned execution protocol
 carries commands, streams, cancellation, and results. Control compatibility
 does not imply permission to execute.
 
+Direct and routed commands share one parser that produces a normalized request
+envelope. Daemon routing is selected before importing Fabric session and runtime
+implementation modules, so the short-lived client does not pay the setup cost
+that it is delegating. The implementation does not duplicate command parsing or
+validation rules in a daemon-only client path.
+
 ## Implementation stages
 
 1. Use the existing `CF_CLI_TRACE_TIMINGS=1` phase instrumentation and an outer
    process measurement to define representative direct and warm-workload
    baselines. Compare the daemon against the compiled CLI and simpler direct-
-   startup optimizations. This is a go/no-go gate: do not build the daemon when
-   the measured reusable cost does not justify its lifecycle and security
-   surface.
+   startup optimizations. Measure the routed client's module-loading cost and
+   source-manifest revalidation separately. This is a go/no-go gate: do not
+   build the daemon when the measured reusable cost does not justify its
+   lifecycle and security surface.
 2. Start from `Runtime.dispose({ closeStorage: false })` and prove request-
    runtime teardown over a retained storage manager. Add the missing
    scheduler/runner storage unsubscription and demonstrate no live piece,
    scheduler, subscription, collector, process-global cross-contamination, or
-   background-work leakage.
+   background-work leakage. Separately prove that every observational command
+   reaches cleanup without starting execution or waiting for effectful tracked
+   work; a command that cannot meet that invariant leaves the read scope.
 3. Implement the private namespace, stable control protocol, explicit lifecycle,
    compatibility handshake, and source/identity invalidation.
-4. Implement bounded serialized request transport and read-only MVP commands.
-5. Route explicitly selected live completion through the read path.
+4. Refactor the MVP inspection commands so their direct and routed forms are
+   cold, then implement bounded serialized request transport for those commands.
+5. Route explicitly selected Fabric-backed completion through the cold read
+   path.
 6. Add mutation request IDs, terminal-result lookup, confirmed completion, and
    outcome-unknown handling before enabling mutation commands. Refactor stdin-
-   accepting commands so the client materializes and validates their normalized
-   input and daemon handlers can consume it without ambient stdin access.
+   accepting commands so the client materializes their input, performs
+   context-free validation, and lets daemon handlers perform schema-dependent
+   validation without ambient stdin access.
 7. Add filesystem and compiler commands only after cwd, input freshness, and
    content-cache boundaries are validated.
 
@@ -464,15 +524,18 @@ does not imply permission to execute.
 The implementation must demonstrate:
 
 - exact stdout, stderr, JSON, and exit-status parity with direct commands;
+- no observational command or completion request starting a piece, scheduling
+  reactive execution, invoking a handler or builtin, or producing a write;
 - no request-owned live execution after request cleanup;
 - confirmed writes before the next queued request begins;
 - no automatic replay under disconnect or daemon crash;
 - deterministic rejection of incompatible, foreign, and stale daemons;
-- source and identity changes preventing all later dispatch;
+- detected source and identity changes preventing all later dispatch, with
+  admission-time source revalidation and the source-mode race documented above;
 - bounded queue, result-ledger, provider, cache, and memory growth;
 - no cross-request diagnostic or output contamination;
 - piped-input parity with direct commands, including client-side failure before
-  dispatch for malformed, interrupted, or incomplete input;
+  dispatch for context-free parse errors and interrupted input;
 - no daemon handler access to process stdin;
 - fresh-state failure rather than implicit offline reads; and
 - a material warm-latency improvement on repeated supported commands.
@@ -487,5 +550,7 @@ The implementation must demonstrate:
 - What queue, input-transfer, output, and result-ledger bounds fit agent and
   completion workloads without imposing a smaller value limit than direct
   commands?
+- Which persisted metadata and cold controller seams support `piece ls`,
+  `piece verbs`, `piece map`, and completion without starting pieces?
 - Which read commands can later prove safe parallel execution without changing
   their Fabric or output semantics?
