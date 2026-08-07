@@ -438,47 +438,71 @@ unless noted.
   `{"/": {"link@1": …}}` — faithful, but the internal form rather than a
   declared one.
 
-## Open questions
+## What a receipt declares
 
-**What a receipt's schema should record.** The root container kind alone is
-enough for narrowing to engage; a verb's result is a record, so
-`{"type": "object"}` would do — assuming a non-record return is impossible,
-which the contract has not been checked for.
+A receipt carries a **descriptive** schema: the root container kind and the
+property names, derived from the value the runtime has just written and stored
+in the durable schema metadata in the same create-only transaction. That is what
+narrowing needs — a selector cannot be built without the root container kind —
+and it is the least a receipt can say and still be readable like any other cell.
 
-Recording the full structure — including which positions hold links — is what
-makes a reader's selection match a declaration rather than coincide with a
-runtime value, which is the second reason for giving receipts a schema at all.
-The cost is deriving it from the value at write time rather than writing a
-constant.
+It records nothing about which positions hold links. A link position in a source
+schema is spelled `asCell`, and `["cell"]` asserts a writable handle; writing
+that onto a document nothing can be written through would be a claim the receipt
+cannot honour.
 
-One detail either way: a link position in a source schema is spelled `asCell`,
-and `["cell"]` asserts a writable handle on a document nothing can be written
-through. Whether a receipt should say that, something narrower, or nothing about
-link positions, is open.
+Descriptive is not the end state. A schema derived from a value matches what
+happened to be written, where a schema derived from a declaration matches what
+the verb promises — and only the second lets a reader's selection be checked
+before the call rather than after. The declared source is a verb's own result
+type, which reaches the runtime on `module.resultSchema`; the receipt's schema
+slot then takes a better-sourced value rather than a migration.
 
-**What an invocation id is scoped to.** Nothing in a receipt's address
-identifies who called: a supplied id is hashed together with the stream link, so
-it is namespaced per verb binding but not by caller. An invocation id is
-therefore a read key shared by everyone using that verb in that space. Two
-callers picking the same id read one receipt, and a guessed id reads someone
-else's result.
+## An invocation id is scoped to a session
 
-The scope should be a **session**, not a principal. An identity separates
-nothing here — agents are directed to work under their human user's key rather
-than mint their own, so the collision that actually happens is two agents under
-one key. A session distinguishes them; a DID does not. A minted, unguessable
-session also closes the second half of the problem, which an identity cannot: a
-DID is public, so scoping by one would still leave an outcome's address
-computable by anyone who knows the piece, the verb, and a conventional id.
+Nothing in a receipt's address would otherwise identify who called: a supplied id
+is hashed together with the stream link, so it is namespaced per verb binding but
+not by caller. Unscoped, an invocation id is a read key shared by everyone using
+that verb in that space — two callers picking the same id read one receipt, and a
+guessed id reads someone else's result.
 
-Sharing an outcome deliberately is then done by passing its address, not by two
+The scope is a **session**, not a principal. An identity separates nothing here:
+agents are directed to work under their human user's key rather than mint their
+own, so the collision that actually happens is two agents under one key. A
+session distinguishes them; a DID does not. A minted, unguessable session also
+closes the second half of the problem, which an identity cannot — a DID is
+public, so scoping by one would still leave an outcome's address computable by
+anyone who knows the piece, the verb, and a conventional id.
+
+The session is minted explicitly rather than managed implicitly, so a caller
+always knows which session an outcome belongs to. Neither session identifier
+already in the tree serves: the storage session is minted per process and
+re-minted on close, so scoping by it would break same-id replay, which is the
+property the id exists for.
+
+Sharing an outcome deliberately is done by passing its address, not by two
 callers deriving the same id from a convention — which is unambiguous, and
 removes the only reason the shared key looked useful.
 
-What remains open is the mechanism. Neither session identifier in the tree
-serves: the storage session is minted per process and re-minted on close, so
-scoping by it would break same-id replay, which is the property the id exists
-for. That points at a new, caller-supplied session identity — minted explicitly
-rather than managed implicitly, so a caller always knows which session an
-outcome belongs to — and at the question of what an absent one means, since
-unscoped preserves today's behavior and today's collision.
+## Open questions
+
+**Whether a receipt's schema becomes declared-sourced.** The mechanism exists —
+a verb's declared result type can reach `module.resultSchema`, and the runtime
+already writes a result cell's schema from there. What is unsettled is whether
+that road is the one to take, given that an earlier attempt at result-schema
+emission was withdrawn for reasons that still hold about durable schemas and the
+compatibility gate.
+
+Until it is settled, a receipt for a verb returning anything reactive — which
+includes every verb returning a child piece — carries no schema at all, because
+the descriptive derivation runs only where the result is plain.
+
+**Whether a reactive compute needs an invocation id.** A pattern tool, unlike a
+handler, is a function of its inputs: the same inputs and the same action yield
+the same output by definition, so its outcome could be addressed by what it
+computed rather than by a name the caller chose. That would make deduplication a
+property of the computation instead of a convention the caller has to keep, and
+would leave the invocation id serving only the caller's own bookkeeping.
+
+Whether the two cases should share one mechanism or stay separate is open, and
+the answer decides whether a session scopes both or only handler calls.
