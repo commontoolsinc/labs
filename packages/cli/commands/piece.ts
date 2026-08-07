@@ -480,10 +480,14 @@ export function resolveInvocationIdentity(
  * of executing a second time. Announcing once matters: a caller scraping
  * stderr for its id should not have to decide which of several to trust.
  *
- * The id is half of what a retry names: it deduplicates under the session the
- * call was made in, which is the caller's to keep. A caller that named no
- * session was given one for that call alone, and so has an id it can read
- * here and no invocation to return to.
+ * The id is half of what a retry names: it deduplicates only under the session
+ * it was chosen in. So the session is announced beside it, on its own line —
+ * a caller that named no session was minted one for this call, and without
+ * reading it here would hold an id that names nothing it can return to.
+ *
+ * Two lines rather than one because `invocation: <id> phase: <phase>` below is
+ * a parsed shape: appending to the id line would change what a scenario
+ * blocking on a phase reads.
  *
  * `announcePhases` is a test-harness hook (reached via the
  * `CF_TEST_ANNOUNCE_INVOCATION_PHASES` env var at the call site): every phase
@@ -496,7 +500,7 @@ export function resolveInvocationIdentity(
  * byte-identical with the hook absent.
  */
 export function invocationPhaseReporter(
-  invocationId: string,
+  invocation: InvocationIdentity,
   onAdvance: (phase: InvocationPhase) => void,
   announce: (message: string) => void = console.error,
   announcePhases = false,
@@ -505,10 +509,11 @@ export function invocationPhaseReporter(
   return (next) => {
     if (next === "dispatched" && !announced) {
       announced = true;
-      announce(`invocation: ${invocationId}`);
+      announce(`invocation: ${invocation.id}`);
+      announce(`session: ${invocation.session}`);
     }
     if (announcePhases) {
-      announce(`invocation: ${invocationId} phase: ${next}`);
+      announce(`invocation: ${invocation.id} phase: ${next}`);
     }
     onAdvance(next);
   };
@@ -1713,7 +1718,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
             skipReadback: waitControl.mode === "commit",
             showLinks: !!options.showLinks,
             onPhase: invocationPhaseReporter(
-              invocationId,
+              identity,
               observer.onPhase,
               undefined,
               Boolean(Deno.env.get("CF_TEST_ANNOUNCE_INVOCATION_PHASES")),

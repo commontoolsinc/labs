@@ -1666,11 +1666,11 @@ describe("piece call stdin payloads", () => {
     );
   });
 
-  it("announces the invocation id once, at dispatch", () => {
+  it("announces the invocation id and its session once, at dispatch", () => {
     const announced: string[] = [];
     const seen: string[] = [];
     const report = invocationPhaseReporter(
-      "inv-9",
+      { id: "inv-9", session: "ses-9" },
       (p) => seen.push(p),
       (m) => announced.push(m),
     );
@@ -1679,13 +1679,15 @@ describe("piece call stdin payloads", () => {
     report("initial_sync");
     expect(announced).toEqual([]);
     report("dispatched");
-    expect(announced).toEqual(["invocation: inv-9"]);
+    // Both halves, because an id deduplicates only under its session: a caller
+    // holding one without the other holds nothing it can retry with.
+    expect(announced).toEqual(["invocation: inv-9", "session: ses-9"]);
     // Later phases, and a second dispatch, must not re-announce — a caller
     // scraping stderr should not have to pick among several ids.
     report("committed");
     report("dispatched");
     report("readback");
-    expect(announced).toEqual(["invocation: inv-9"]);
+    expect(announced).toEqual(["invocation: inv-9", "session: ses-9"]);
     expect(seen).toEqual([
       "initial_sync",
       "dispatched",
@@ -1914,17 +1916,17 @@ describe("piece call stdin payloads", () => {
 
   it("announces per-phase lines only under the test hook", () => {
     // Disabled (the default): no phase lines — normal output stays exactly
-    // the single dispatch announcement.
+    // the dispatch announcement and its session.
     const silent: string[] = [];
     const off = invocationPhaseReporter(
-      "inv-10",
+      { id: "inv-10", session: "ses-10" },
       () => {},
       (m) => silent.push(m),
     );
     off("initial_sync");
     off("dispatched");
     off("committed");
-    expect(silent).toEqual(["invocation: inv-10"]);
+    expect(silent).toEqual(["invocation: inv-10", "session: ses-10"]);
 
     // Enabled: every advance also carries `invocation: <id> phase: <phase>`,
     // the shape failure exits already print. The `committed` line is the one
@@ -1933,7 +1935,7 @@ describe("piece call stdin payloads", () => {
     const announced: string[] = [];
     const seen: string[] = [];
     const on = invocationPhaseReporter(
-      "inv-11",
+      { id: "inv-11", session: "ses-11" },
       (p) => seen.push(p),
       (m) => announced.push(m),
       true,
@@ -1946,6 +1948,7 @@ describe("piece call stdin payloads", () => {
     expect(announced).toEqual([
       "invocation: inv-11 phase: initial_sync",
       "invocation: inv-11",
+      "session: ses-11",
       "invocation: inv-11 phase: dispatched",
       "invocation: inv-11 phase: committed",
       "invocation: inv-11 phase: readback",
