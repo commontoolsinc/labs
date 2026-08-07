@@ -802,15 +802,16 @@ export class Logger {
   // ============================================================
 
   /**
-   * Starts a timer for the given key path. Hierarchical keys are supported:
-   * passing multiple segments records stats at each level when `timeEnd()` is
-   * called.
+   * Starts a timer for the given key path. Multiple segments name one path,
+   * joined with `/`; they are not a hierarchy that gets rolled up, so
+   * `timeEnd()` records against that single joined path and against nothing
+   * shorter.
    *
    * @example
    * logger.timeStart("cell", "get", "user-data");
    * // ... operation ...
    * logger.timeEnd("cell", "get", "user-data");
-   * // Records to: "cell", "cell/get", "cell/get/user-data"
+   * // Records to `cell/get/user-data`, and not to `cell` or `cell/get`.
    */
   timeStart(...keys: string[]): void {
     const keyPath = keys.join("/");
@@ -819,9 +820,8 @@ export class Logger {
 
   /**
    * Ends a timer and records the elapsed time, returning it in milliseconds,
-   * or `undefined` if there is no matching timer.
-   *
-   * Stats are recorded to all levels of the hierarchical key path.
+   * or `undefined` if there is no matching timer. The time is recorded against
+   * the full joined key path only; see `timeStart()`.
    */
   timeEnd(...keys: string[]): number | undefined {
     const keyPath = keys.join("/");
