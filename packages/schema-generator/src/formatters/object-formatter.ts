@@ -1,7 +1,8 @@
 import ts from "typescript";
-import type {
-  MutableJSONSchema,
-  MutableJSONSchemaObj,
+import {
+  FABRIC_SPECIAL_OBJECT_BRAND,
+  type MutableJSONSchema,
+  type MutableJSONSchemaObj,
 } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import {
@@ -157,6 +158,13 @@ function shouldSkipInternalProperty(
   context: GenerationContext,
 ): boolean {
   if (propName.startsWith("__@")) {
+    return true;
+  }
+
+  // The FabricSpecialObject nominal brand exists only in the type system —
+  // no runtime value carries the key, so it must never appear in a schema's
+  // `properties` or `required`.
+  if (propName === FABRIC_SPECIAL_OBJECT_BRAND) {
     return true;
   }
 
