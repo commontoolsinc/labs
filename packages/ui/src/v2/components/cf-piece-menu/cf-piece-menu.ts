@@ -132,6 +132,16 @@ function toDisplay(
   if (Array.isArray(value)) {
     return value.map((item) => toDisplay(item, depth + 1));
   }
+  // TODO(danfuzz): a `FabricSpecialObject` reaches this branch and is rebuilt
+  // from enumerable properties it does not have, so a `FabricBytes` in an
+  // argument or result renders as `{}`. The guard wants to be a shape test
+  // (`isPlainObject`) with the special objects named by
+  // `toCompactDebugString()` instead of descended.
+  //
+  // Note this is the second place such a value is lost, not the first: it
+  // reaches the client through `postMessage`, and structured clone drops the
+  // prototype and private fields on the way. Fixing this alone changes a `{}`
+  // into a `{}` until the wire carries one.
   if (typeof value === "object" && value !== null) {
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
