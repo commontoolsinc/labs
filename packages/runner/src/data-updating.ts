@@ -1708,8 +1708,24 @@ export function normalizeAndDiff(
     } // else, i.e. parent is not an array: fall through to the primitive case
   }
 
-  // Handle primitive values and other cases (Object.is handles NaN and -0)
-  if (!Object.is(currentValue, newValue)) {
+  // Handle primitive values and other cases (Object.is handles NaN and -0).
+  //
+  // Authoritative transactions (markAuthoritativeWrites — effect-completion
+  // writebacks under the serving posture) emit equal-value leaves TOO:
+  // `currentValue` was read through the replica's optimistic view, which can
+  // layer a DOOMED sealed overlay (a derivation write a later wave-commit
+  // supersede-drops) over confirmed state — so "already equal" is not
+  // evidence the store holds the value. Eliding a completion's
+  // `inputHash`/`pending` write against such an overlay durably lands
+  // `result present + inputHash stale`, and the next run's memo guard
+  // destroys the just-served value (the completion-visibility wedge, F2).
+  // One nuance this accepts: an authoritative write of `undefined` to an
+  // ABSENT slot materializes it as present-but-undefined instead of
+  // eliding — reads see `undefined` either way.
+  if (
+    !Object.is(currentValue, newValue) ||
+    tx.isAuthoritativeWrites?.() === true
+  ) {
     changes.push({ location: link, value: newValue as FabricValue });
   }
 

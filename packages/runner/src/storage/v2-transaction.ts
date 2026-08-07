@@ -837,6 +837,13 @@ export class V2StorageTransaction implements IStorageTransaction {
   // transaction rejects writes to a second space; when enabled commit() splits
   // into one per-space commit.
   #multiSpaceWrites = false;
+  // Authoritative-writes mode (see IStorageTransaction.markAuthoritativeWrites
+  // and the F2 rationale there): value writes are recorded and committed even
+  // when equal to the currently-visible state — the no-op elision in
+  // writeWithinBranch/writeBatchRun and the initial-vs-current diff in
+  // buildPatchOperation both yield to an unconditional full-cover assert.
+  // Set by effect-completion writebacks under the serving posture; one-way.
+  #authoritativeWrites = false;
   #commitOrder?: readonly MemorySpace[];
   // Spaces written to, in first-write order. Used as the default commit order.
   #writtenSpaces: MemorySpace[] = [];
@@ -894,6 +901,15 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (order !== undefined) {
       this.#commitOrder = order;
     }
+  }
+
+  markAuthoritativeWrites(): void {
+    this.assertWritable("markAuthoritativeWrites()");
+    this.#authoritativeWrites = true;
+  }
+
+  isAuthoritativeWrites(): boolean {
+    return this.#authoritativeWrites;
   }
 
   static create(manager: IStorageManager): IStorageTransaction {
@@ -1138,7 +1154,16 @@ export class V2StorageTransaction implements IStorageTransaction {
       if (doc.writeDetails.size === 0) {
         continue;
       }
-      if (valueEqual(doc.current.value, doc.initial.value)) {
+      // Doc-level no-op elision — except for authoritative transactions
+      // (markAuthoritativeWrites): `doc.initial` is the transaction-START
+      // view, which may extrapolate over a DOOMED sealed overlay, so a
+      // written doc that "ends where it started" may still differ from
+      // the store — the completion asserts it anyway (the forced
+      // full-cover path in buildPatchOperation).
+      if (
+        !this.#authoritativeWrites &&
+        valueEqual(doc.current.value, doc.initial.value)
+      ) {
         continue;
       }
 
@@ -1515,8 +1540,14 @@ export class V2StorageTransaction implements IStorageTransaction {
       const present = hasValueAtPath(current.value, address.path, {
         allowArrayLength: true,
       });
+      // Authoritative mode (markAuthoritativeWrites) disables the
+      // equal-VALUE elision only: the visible state being diffed against
+      // may be an extrapolation over a doomed sealed overlay, so "already
+      // equal" is not evidence the store holds the value. Deletes of
+      // absent slots stay no-ops — there is nothing to assert.
       if (
-        isDelete ? !present : (present && valueEqual(previous.value, value))
+        isDelete ? !present : (present && valueEqual(previous.value, value) &&
+          !this.#authoritativeWrites)
       ) {
         return { ok: current };
       }
@@ -1574,7 +1605,10 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (result.error) {
       return { error: result.error.from(space) };
     }
-    if (!result.ok.changed) {
+    // Authoritative mode records the (value-unchanged) write anyway so it
+    // reaches the commit as a full-cover re-assert; delete no-ops still
+    // return (see above).
+    if (!result.ok.changed && (isDelete || !this.#authoritativeWrites)) {
       return { ok: current };
     }
 
@@ -1667,13 +1701,16 @@ export class V2StorageTransaction implements IStorageTransaction {
       // Presence-aware no-op detection (also keeps no-op deletes from
       // reaching `applyMutablePathWrite`, which would materialize
       // intermediates into `nextRoot` before the changed check).
+      // Authoritative mode records equal-VALUE writes anyway (see
+      // `writeWithinBranch`); delete no-ops still skip.
       const present = hasValueAtPath(nextRoot, address.path, {
         allowArrayLength: true,
       });
       if (
         isDelete
           ? !present
-          : (present && valueEqual(previousValue, isolatedValue))
+          : (present && valueEqual(previousValue, isolatedValue) &&
+            !this.#authoritativeWrites)
       ) {
         continue;
       }
@@ -1722,7 +1759,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         return { error: result.error.from(space) };
       }
       nextRoot = result.ok.root;
-      if (!result.ok.changed) {
+      if (!result.ok.changed && (isDelete || !this.#authoritativeWrites)) {
         continue;
       }
       changed = true;
@@ -2498,6 +2535,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       previousPresent: boolean;
     }>();
     const arrayGroups = new Map<string, readonly string[]>();
+    // Authoritative full-cover re-asserts (markAuthoritativeWrites);
+    // merged into fullCoverCandidates below.
+    const forcedAsserts: PatchDraftCandidate[] = [];
     for (const detail of details) {
       const value = readValueAtPath(
         doc.current.value,
@@ -2525,6 +2565,42 @@ export class V2StorageTransaction implements IStorageTransaction {
       if (
         valuePresent === previousPresent && valueEqual(value, previousValue)
       ) {
+        if (!this.#authoritativeWrites || !valuePresent) {
+          continue;
+        }
+        // Authoritative full-cover re-assert (markAuthoritativeWrites —
+        // effect-completion writebacks): `doc.initial` is the
+        // transaction-START view, an extrapolation that may layer a
+        // DOOMED sealed overlay over confirmed state, so "initial
+        // already equals current" is not evidence the STORE holds the
+        // value — the completion asserts it unconditionally. Emitted as
+        // a non-structural `replace` (upsert on object members, never
+        // shifts array siblings — the §"Array writes" invariant holds).
+        // Arrays anywhere on the path collapse to a whole-array replace
+        // at the deepest array prefix: per-index/splice diffing of two
+        // EQUAL arrays would emit nothing, and the whole-array replace
+        // is the always-legal fallback shape. The equal-and-both-ABSENT
+        // case still skips — there is no value to assert.
+        const arrayAssertPath = findDeepestArrayPath(
+          doc.initial.value,
+          doc.current.value,
+          detail.address.path,
+        );
+        const assertPath = arrayAssertPath ?? detail.address.path;
+        const assertValue = arrayAssertPath === null
+          ? value
+          : readValueAtPath(doc.current.value, arrayAssertPath, {
+            allowArrayLength: true,
+          });
+        forcedAsserts.push({
+          patch: {
+            op: "replace",
+            path: encodePointer(assertPath),
+            value: assertValue,
+          },
+          path: assertPath,
+          coversDescendants: true,
+        });
         continue;
       }
 
@@ -2547,7 +2623,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       });
     }
 
-    const fullCoverCandidates: PatchDraftCandidate[] = [];
+    const fullCoverCandidates: PatchDraftCandidate[] = [...forcedAsserts];
     for (const detail of patchDetails.values()) {
       const candidate = buildValuePatchCandidate(
         detail.path,

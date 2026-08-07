@@ -49,7 +49,14 @@ import {
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { MemorySpace, Result } from "../src/storage/interface.ts";
+import type {
+  ITransactionSealSink,
+  MemorySpace,
+  Result,
+  SealedCommitVerdict,
+  SealedNativeCommit,
+  TransactionSealDestination,
+} from "../src/storage/interface.ts";
 import {
   stampWaveRunContext,
   WaveAccumulator,
@@ -57,6 +64,10 @@ import {
   type WaveCommitSink,
 } from "../src/executor/wave.ts";
 import { EngineWaveCommitSink } from "../src/executor/engine-wave-sink.ts";
+import {
+  effectCompletionKeyOf,
+  markEffectCompletion,
+} from "../src/executor/effect-completion.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 // Shared-server helper (modelled after cell-cache.test.ts): the test needs
@@ -312,6 +323,163 @@ describe("stage D seal-into-wave", () => {
     ).toBe(0);
     const stored = Engine.readState(engine, { id: xLink.id });
     expect(stored?.document).toEqual({ value: { value: 99 } });
+  });
+
+  it("commits a completion's memo-state writes authoritatively: a doomed sealed overlay masking the hash doc cannot elide them, so a supersede-drop never tears hash from result (completion-visibility F2)", async () => {
+    // The torn-hash interleave this pins closed (the completion-visibility
+    // wedge, Link 1 + Link 2):
+    //
+    //   1. an input-transition run's memo-state wipe rewrites the memo
+    //      doc's `inputHash` and SEALS into an open wave — the replica's
+    //      visible state now shows the new hash through the sealed
+    //      overlay while the engine still holds the stale one;
+    //   2. the effect's COMPLETION writeback commits engine-plane at
+    //      `basisSeq = NOW` (racing the open wave), writing the result
+    //      AND re-asserting the same `inputHash`. Diffed against the
+    //      overlay, the hash write looks like a no-op — without
+    //      authoritative completion writes it is ELIDED from the commit;
+    //   3. the completion moved the memo doc's head past the wave's
+    //      basis, so the wave commit supersede-DROPS the wipe (C8a) and
+    //      the overlay rolls back.
+    //
+    // Durable outcome pre-fix: `result present + inputHash stale` — the
+    // next run's memo guard reads "inputs changed" and destroys the
+    // just-served value. The pin: after the drop, the ENGINE's hash
+    // matches the served result.
+    const lease = liveLease();
+    const wave = newWave({ lease });
+    const sink = newSink();
+    const holder = executionLeaseHolder(`service:${space}`);
+
+    const internalDoc = runtime.getCell<{ inputHash?: string }>(
+      space,
+      "torn-internal",
+      undefined,
+    );
+    const resultDoc = runtime.getCell<{ value?: string }>(
+      space,
+      "torn-result",
+      undefined,
+    );
+
+    // Prime the STALE hash as engine + confirmed state (an ordinary
+    // pushed commit — no destination installed yet).
+    const primeTx = runtime.edit();
+    internalDoc.withTx(primeTx).set({ inputHash: "stale" });
+    expect((await primeTx.commit()).error).toBeUndefined();
+
+    // The routing destination: unmarked seals ride the wave; a MARKED
+    // effect-completion writeback commits as its own engine-plane commit
+    // at `basisSeq = NOW` with an inline verdict — the SpaceServer
+    // completion committer's core (space-server.ts §4), minus the
+    // outbox/annotation carriage this pin does not need.
+    const destination: TransactionSealDestination = {
+      seal: async (tx) => {
+        if (effectCompletionKeyOf(tx) === undefined) return wave.seal(tx);
+        const inner = tx.tx;
+        const sealedSpaces: Array<{
+          sealed: SealedNativeCommit;
+          resolveVerdict: (verdict: SealedCommitVerdict) => void;
+        }> = [];
+        const collector: ITransactionSealSink = {
+          sealSpaceCommit: (sealSpace, native, source) => {
+            const replica = storageManager.open(sealSpace).replica;
+            const { promise, resolve } = Promise.withResolvers<
+              SealedCommitVerdict
+            >();
+            sealedSpaces.push({
+              sealed: replica.sealNative!(native, source, promise),
+              resolveVerdict: resolve,
+            });
+            return Promise.resolve({ ok: {} });
+          },
+        };
+        const result = await inner.sealInto!(collector);
+        if (result.error) {
+          for (const sealed of sealedSpaces) {
+            sealed.resolveVerdict({
+              withdrawn: { message: "completion seal failed" },
+            });
+          }
+          return result;
+        }
+        const sealed = sealedSpaces[0];
+        const outcome = await sink.commitWave({
+          space,
+          home: true,
+          basisSeq: Engine.serverSeq(engine),
+          rebasedHeads: [],
+          operations: [...sealed.sealed.commit.operations],
+          preconditions: [...sealed.sealed.commit.preconditions ?? []],
+          annotations: [],
+          consequenceOf: [],
+          basisInstances: [],
+          holder,
+        });
+        if (outcome.error) {
+          sealed.resolveVerdict({
+            withdrawn: { message: outcome.error.message },
+          });
+          return {
+            error: {
+              name: "StorageTransactionAborted",
+              message: outcome.error.message,
+              reason: new Error("completion-commit-rejected"),
+            },
+          };
+        }
+        sealed.resolveVerdict({ committed: { seq: outcome.ok.seq } });
+        // Sequence the promotion (settleSealedCommit runs inside
+        // settlement) before reporting the writeback committed.
+        await sealed.sealed.settled;
+        return { ok: {} };
+      },
+    };
+    runtime.installSealDestination(destination);
+
+    // 1. The doomed derivation: the memo-state wipe, sealed into the
+    // open wave. The overlay now masks the memo doc with "new".
+    const t1 = runtime.edit();
+    stampWaveRunContext(t1, { actionId: "memo-wipe", kind: "derivation" });
+    internalDoc.withTx(t1).key("inputHash").set("new");
+    expect((await t1.commit()).error).toBeUndefined();
+
+    // 2. The completion writeback, racing the open wave: the result AND
+    // the hash it serves. Against the overlay the hash write is a
+    // visible no-op — authoritative completion writes must carry it
+    // anyway.
+    const completion = await runtime.editWithRetry((tx) => {
+      markEffectCompletion(tx, "fetchTest:torn-hash");
+      internalDoc.withTx(tx).key("inputHash").set("new");
+      resultDoc.withTx(tx).set({ value: "served" });
+    });
+    expect(completion.error).toBeUndefined();
+
+    // 3. The wave commits: the completion moved the memo doc's head past
+    // the wave's basis — the wipe is superseded and DROPS (C8a). The
+    // drop must actually happen or this pin is vacuous.
+    runtime.clearSealDestination();
+    const outcome = await wave.commitWave(sink);
+    await wave.settled();
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.supersededWrites).toBe(1);
+    expect(outcome.dispositions[0]).toEqual({ kind: "dropped" });
+
+    // THE PIN: engine-side hash and result are CONSISTENT — the elision
+    // did not tear them (pre-fix: hash "stale", result "served").
+    const iLink = internalDoc.getAsNormalizedFullLink();
+    expect(Engine.readState(engine, { id: iLink.id })?.document).toEqual({
+      value: { inputHash: "new" },
+    });
+    const rLink = resultDoc.getAsNormalizedFullLink();
+    expect(Engine.readState(engine, { id: rLink.id })?.document).toEqual({
+      value: { value: "served" },
+    });
+
+    // And the replica's visible state agrees with the engine after the
+    // drop rolled the overlay back — no stale-hash flip for later reads.
+    expect(internalDoc.get()).toEqual({ inputHash: "new" });
+    lease.release();
   });
 
   it("requeues a raced consequence (C8b) — never lost, never doubled across waves — and annotates + records its basis when it lands", async () => {

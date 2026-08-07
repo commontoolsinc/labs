@@ -448,6 +448,59 @@ sentences, one recorded acceptance, three owed entries):
   surviving rows ride the next wave instead of waiting for the next
   appends-carrying wave or re-activation.
 
+Delta 2026-08-07 — the completion-visibility wedge fix batch (F1a +
+F2, mechanism-triaged from the serving-loop soak's ~11%-red wedge
+population):
+
+- Retirement LIVENESS (F1a): sealed commits — waves and effect
+  completions alike — now CONFIRM on the serving replica at verdict
+  time (`settleSealedCommit` → `confirmPending`) instead of taking
+  the parkable path. Parking guards a REMOTE mirror against
+  promoting over missing foreign novelty, but engine-plane commits
+  bypass the transact path — the only place catch-up marker
+  obligations are staged — so a parked sealed accept could NEVER
+  promote: `whenApplied` waiters never resolved, every served
+  effect leaked one permanently-in-flight outbox entry, and any
+  A→B→A input cycle starved deduping against the dead entry.
+  CT-1927 parking for pushed (socket) commits is untouched. The
+  earlier fix-batch row's "whenApplied over CT-1927's parked
+  accepts" mechanism reads accordingly: readability is now
+  immediate for completions and the retirement barrier is the BELT
+  over the structural guarantee (its hold/re-admit/dedupe pins are
+  unchanged and still green). Red-first pinned by the deterministic
+  A→B→A starvation test and the N-effects in-flight-baseline test
+  (`executor-serving-loop.test.ts`).
+- Completion writebacks are AUTHORITATIVE (F2): a completion-marked
+  transaction's writes commit even where the replica's optimistic
+  view calls them no-ops — that view can layer a DOOMED sealed
+  overlay (a derivation write a later wave-commit supersede-drops,
+  §3d), and eliding the completion's `inputHash`/`pending` writes
+  against it durably landed `result present + inputHash stale`,
+  which the next run's memo guard read as "inputs changed" and
+  destroyed the just-served value (the observed ~30 ms
+  arrive-then-wipe). Mechanism: `markEffectCompletion` flips the
+  transaction into authoritative-writes mode
+  (`markAuthoritativeWrites`, gated on the serving posture's seal
+  destination so the OFF arm stays byte-identical), which is
+  honored at every elision layer — the value-diff leaf
+  (`normalizeAndDiff`), the transaction write paths, the doc-level
+  no-op skip and the initial-vs-current patch diff
+  (`getNativeCommit`/`buildPatchOperation`, which emits forced
+  full-cover `replace` asserts). All effectful builtins already
+  route their writebacks through `markEffectCompletion`
+  (fetch/fetch-program/llm/llm-dialog/sqlite), so the audit
+  reduces to that single seam. Ordinary transactions keep the
+  elision everywhere. Red-first pinned by the torn-hash
+  supersede-drop interleave (`executor-wave.test.ts`).
+- The parked-overlay stale-read machine (the triage's independent
+  observation — a never-promoted sealed overlay replaying over
+  advancing confirmed state until a later drop flips visible
+  state): structurally unreachable post-F1a — sealed verdicts
+  either confirm immediately or withdraw-and-roll-back, and
+  `settleAccept`'s parking branch is reachable only from the
+  socket-transact paths, where CT-1927's marker machinery
+  guarantees eventual promotion. No test forced; recorded here.
+
 ## 3. The owed register (every genuine orphan, with its trigger)
 
 Nothing here blocks Phase 1. Each item names the instrument
