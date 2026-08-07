@@ -1,5 +1,6 @@
 import {
   action,
+  type ComparableCell,
   computed,
   Default,
   entityRefToString,
@@ -10,6 +11,7 @@ import {
   pattern,
   type PerSession,
   type PerUser,
+  type ReadonlyCell,
   Stream,
   UI,
   type VNode,
@@ -591,13 +593,41 @@ export const submitProfileLink = handler<void, {
  * whole topic regardless of how little the lift declared, so the cast matches
  * what a consumer receives while the narrow parameter bounds what this reads.
  * See the same note on `crossrefRows` in main.tsx. */
+/**
+ * Which entry of `mentionable` is this topic.
+ *
+ * Its own lift, declared over `unknown` items, because `.equals` compares cell
+ * identity and never touches content: locating yourself among the siblings
+ * reads nothing from any of them. A linear scan is fine at board scale — it is
+ * a walk over cell identities, not a read — and keyed collections will give
+ * this a direct lookup later.
+ *
+ * Deliberately not fid-based. An entry's fid is a resolution detail on its way
+ * out; `.equals` against the title cell is the durable identity, and it is what
+ * survives that removal.
+ */
+const findSelfIndex = lift((
+  { siblings, title }: {
+    siblings: ReadonlyCell<unknown[] | Default<[]>>;
+    title: ComparableCell<unknown>;
+  },
+): number => {
+  const list = siblings.get();
+  const length = Array.isArray(list) ? list.length : 0;
+  for (let index = 0; index < length; index++) {
+    if (equals(siblings.key(index).key("title"), title)) return index;
+  }
+  return -1;
+});
+
 const topicCrossrefView = lift((
-  { mentionable, title }: {
+  { mentionable, me }: {
     // Reads `TopicMention` — title and prose, nothing else. The row below
     // republishes each sibling as the deployed `TopicReference` (see the HACK
     // note), so narrowing here costs a consumer nothing.
     mentionable: Writable<TopicMention[] | Default<[]>>;
-    title: Writable<string | Default<"">>;
+    /** This topic's position, from `findSelfIndex`; -1 when not on the list. */
+    me: number;
   },
 ): TopicCrossrefs => {
   const sibs = mentionable.get();
@@ -616,15 +646,7 @@ const topicCrossrefView = lift((
     return ref ? fidPayload(entityRefToString(ref)) : "";
   });
   const joined = crossrefJoin(sibs.map((t) => topicCorpus(t)), payloads);
-  // Select this Topic by a durable field-link identity. Its result title is a
-  // write-through link to its unique argument title cell, so following a
-  // retained sibling's title through any wrapper/result aliases meets the
-  // current input title without relying on the materialized object's
-  // comparable marker (which some derived wrappers lose).
-  const me = sibs.findIndex((t, i) =>
-    t && equals(mentionable.key(i).key("title"), title)
-  );
-  if (me < 0) return empty;
+  if (me < 0 || me >= sibs.length || !sibs[me]) return empty;
   return {
     refsOut: joined.refsOut[me].map((j) => sibs[j] as TopicReference),
     referencedBy: joined.referencedBy[me].map((j) => sibs[j] as TopicReference),
@@ -839,7 +861,10 @@ export default pattern<TopicInput, TopicOutput>(
       comments.get().toSorted((a, b) => a.sentAt - b.sentAt)
     );
 
-    const crossrefs = topicCrossrefView({ mentionable, title });
+    const crossrefs = topicCrossrefView({
+      mentionable,
+      me: findSelfIndex({ siblings: mentionable, title }),
+    });
 
     const linksView = computed(() => links.get());
     const hasLinks = linksView.length > 0;
