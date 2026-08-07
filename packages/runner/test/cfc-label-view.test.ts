@@ -1,5 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import {
   cfcLabelViewForCell,
   cfcLabelViewFromMetadata,
@@ -1474,5 +1476,34 @@ describe("redactSigilCfcLabelViewsForDisplay", () => {
       (value.items[0] as ReturnType<typeof linkWithView>)["/"][LINK_V1_TAG]
         .cfcLabelView,
     ).toBeDefined();
+  });
+
+  // A `FabricSpecialObject` is `isRecord`, so it reaches the record branch
+  // rather than the leaf return. What keeps it whole is the copy-on-write
+  // gate: such a value has zero enumerable own properties, so no member can
+  // come back changed, `changed` stays false, and the original goes back by
+  // identity. That is a real guarantee resting on nothing but the
+  // zero-property fact, so these pin it -- give a special object an enumerable
+  // property and this walk starts flattening values on the ingress path.
+  it("keeps a `FabricBytes` whole while stripping a sibling's view", () => {
+    const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+    const value = { bytes, tagged: linkWithView("of:strip-bytes") };
+
+    // The discriminating shape: the sibling's view forces the surrounding
+    // record to clone, which is where a descended-into special object would be
+    // lost. The clone carries the reference across instead.
+    const stripped = stripSigilCfcLabelViews(value) as typeof value;
+
+    expect(stripped).not.toBe(value);
+    expect(stripped.bytes).toBe(bytes);
+  });
+
+  it("keeps a `FabricError` whole, the `FabricInstance` arm", () => {
+    const failure = FabricError.fromNativeError(new Error("boom"));
+    const value = { failure, tagged: linkWithView("of:strip-error") };
+
+    const stripped = stripSigilCfcLabelViews(value) as typeof value;
+
+    expect(stripped.failure).toBe(failure);
   });
 });

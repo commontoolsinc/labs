@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
-
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -10,7 +9,11 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricBytes,
+  FabricEpochNsec,
+} from "@commonfabric/data-model/fabric-primitives";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -198,6 +201,41 @@ describe("Cell Static Methods", () => {
         const cell = Cell.of(null);
         expect(cell).toBeDefined();
         expect(cell.get()).toBe(null);
+      });
+    });
+
+    // The static-data validation walk descends anything `typeof === "object"`,
+    // which admits a `FabricSpecialObject`. Such a value survives it because it
+    // has zero enumerable own properties: `Object.keys()` is empty, the descent
+    // ends there, and the walk only ever reads -- it never rebuilds. Nothing
+    // guards that, so these pin it.
+    it("should accept a `FabricBytes` in static data", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+        expect(Cell.of({ payload: bytes }).get().payload).toBeInstanceOf(
+          FabricBytes,
+        );
+      });
+    });
+
+    it("should accept a `FabricError` in static data", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        const failure = FabricError.fromNativeError(new Error("boom"));
+
+        expect(Cell.of({ failure }).get().failure).toBeInstanceOf(FabricError);
+      });
+    });
+
+    it("should accept the same `FabricBytes` at two paths", () => {
+      withinHandlerContext(runtime, space, tx, () => {
+        // Every branch that ends a descent must still clear the ancestor it
+        // recorded. One that did not would leave the value an ancestor for the
+        // rest of the walk, and the second position holding it would be
+        // reported as a circular reference.
+        const shared = new FabricBytes(new Uint8Array([7]));
+
+        expect(() => Cell.of({ a: shared, b: shared })).not.toThrow();
       });
     });
 

@@ -84,10 +84,13 @@ export function stripSigilCfcLabelViews(value: unknown): unknown {
  * where a cycle has already become a back-link. That is a coupling between two
  * files and nothing enforces it.
  *
+ * A `FabricSpecialObject` comes back as the same instance, both arms of it: the
+ * copy-on-write gate only rebuilds once a member comes back changed, and such a
+ * value has zero enumerable own properties for a member to be found under.
+ * `cfc-label-view.test.ts` pins that, since nothing here guards it.
+ *
  * TODO(danfuzz): track ancestors here, so this stands on its own rather than on
- * what its callers happen to pass. A `FabricInstance` is flattened by this walk
- * too, the same gap marked at the sibling walks -- see
- * `convertCellsToLinks` in `cell.ts`.
+ * what its callers happen to pass.
  */
 function transformSigilCfcLabelViews(
   value: unknown,

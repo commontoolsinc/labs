@@ -3284,10 +3284,13 @@ function validateStaticData(value: unknown): void {
 
     ancestors.add(obj);
 
-    // TODO(danfuzz): This walk has no `FabricSpecialObject` guard, so a
-    // `FabricPrimitive`/`FabricInstance` in `Cell.of()` static data is walked by
-    // enumerable props instead of treated as a leaf / descended by codec
-    // contents.
+    // A `FabricSpecialObject` reaches here and survives: it has zero
+    // enumerable own properties, so `Object.keys()` is empty and the descent
+    // ends -- and this walk only ever reads, never rebuilds, so ending early
+    // costs nothing it was looking for. A primitive holds no cell to find; an
+    // instance could hold one in its codec contents, which is a completeness
+    // gap rather than a corruption, and fails toward accepting data rather than
+    // rejecting it. `cell-static-methods.test.ts` pins the pass-through.
     //
     // Traverse arrays and objects
     if (Array.isArray(obj)) {
