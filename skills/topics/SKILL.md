@@ -64,7 +64,7 @@ linked Topic and can include its body, comments, handlers, and reference graph.
 ```bash
 deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \
   --filter '.title != null' \
-  --schema title,createdAt,lastActivityAt,commentCount,createdBy.kind,createdBy.name
+  --select title,createdAt,lastActivityAt,commentCount,createdBy.kind,createdBy.name
 ```
 
 The title predicate keeps discovery output uniformly object-shaped by omitting
@@ -72,30 +72,30 @@ valid null rows. Concise projection itself preserves nullable rows and follows
 declared nested arrays without exposing sibling fields.
 
 `--filter` is useful for exact field and range searches. It runs before
-`--schema`, so a predicate can inspect a field that the result omits:
+`--select`, so a predicate can inspect a field that the result omits:
 
 ```bash
 # Find one Topic by exact title.
 deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \
   --filter '.title == "<exact title>"' \
-  --schema title,lastActivityAt,commentCount
+  --select title,lastActivityAt,commentCount
 
 # Find Topics active at or after an epoch-millisecond threshold.
 deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \
   --filter '.lastActivityAt >= 1785074400000' \
-  --schema title,lastActivityAt,commentCount,createdBy.kind,createdBy.name
+  --select title,lastActivityAt,commentCount,createdBy.kind,createdBy.name
 
 # Combine predicates for a narrower field search.
 deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input \
   --filter '.createdBy.name == "<name>" and .commentCount > 0' \
-  --schema title,lastActivityAt,commentCount
+  --select title,lastActivityAt,commentCount
 ```
 
 Filtering preserves board order; it does not sort by activity. The predicate
 language supports paths, JSON literals, comparisons, boolean operators, and
 parentheses, but not substring, regex, sorting, or arbitrary jq programs. Use
 exact known fields or numeric ranges to shrink the corpus, then inspect the
-small result. Always combine a Topic-list filter with `--schema`; filter alone
+small result. Always combine a Topic-list filter with `--select`; filter alone
 returns every property of each match.
 
 Address a selected Topic by the canonical fid published in the board's
@@ -104,21 +104,21 @@ Address a selected Topic by the canonical fid published in the board's
 ```bash
 deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step \
   --filter '.topic.title == "<exact title>"' \
-  --schema fid,topic.title,topic.lastActivityAt,topic.commentCount
+  --select fid,topic.title,topic.lastActivityAt,topic.commentCount
 export TOPIC_URL='https://estuary.saga-castor.ts.net/topics-dev-476ea34f/<topic-fid>'
 deno task cf piece get --url "$TOPIC_URL" title --input
 deno task cf piece get --url "$TOPIC_URL" body --input
 deno task cf piece get --url "$TOPIC_URL" comments --input \
-  --schema sentAt,author.kind,author.name,authorName,body
+  --select sentAt,author.kind,author.name,authorName,body
 deno task cf piece get --url "$TOPIC_URL" links --input \
-  --schema kind,url,label,addedAt,addedBy.kind,addedBy.name
+  --select kind,url,label,addedAt,addedBy.kind,addedBy.name
 
 # Search within a selected Topic's arrays.
 deno task cf piece get --url "$TOPIC_URL" comments --input \
   --filter '.author.name == "<agent>" or .authorName == "<legacy name>"' \
-  --schema sentAt,author.kind,author.name,authorName,body
+  --select sentAt,author.kind,author.name,authorName,body
 deno task cf piece get --url "$TOPIC_URL" links --input \
-  --filter '.kind == "pr"' --schema kind,url,label,addedAt
+  --filter '.kind == "pr"' --select kind,url,label,addedAt
 ```
 
 Each crossref row's `fid` is the canonical address for its `topic`. Prefer it to
@@ -140,7 +140,7 @@ directly:
 deno task cf piece call --url "$TOPICS_BOARD_URL" addTopic \
   '{"title":"<title>","agentName":"<agent name>"}'
 deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step \
-  --filter '.topic.title == "<exact title>"' --schema fid,topic.title
+  --filter '.topic.title == "<exact title>"' --select fid,topic.title
 ```
 
 `addTopic` returns the topic it created, so a board running this source hands
