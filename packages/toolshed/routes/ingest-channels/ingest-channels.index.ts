@@ -3,23 +3,18 @@ import env from "@/env.ts";
 import { bodyLimit } from "@hono/hono/body-limit";
 import { requireFirstPartyHttpAuth } from "@/middlewares/first-party-http-auth.ts";
 import { createRateLimiter, rateLimit } from "@/middlewares/rate-limit.ts";
+import { ingestGate } from "./gate.ts";
 import * as handlers from "./ingest-channels.handlers.ts";
 import * as routes from "./ingest-channels.routes.ts";
 
 const router = createRouter();
 
-// Opt-in gate, mirroring the memory-dump router: when the deployment has not
-// enabled self-serve, every verb 404s as if the routes never existed rather
-// than 403-ing. An endpoint that is not meant to be reachable should not
-// advertise itself. Mounted FIRST so nothing downstream — not the body limit,
-// not the rate limiter, not signature verification — runs for a disabled
-// deployment. See INGEST_SELF_SERVE_ENABLED in env.ts for why the default is
-// off: minting issues a durable capability that outlives the trust conditions
-// which authorized it.
-router.use(`${routes.BASE}/*`, async (c, next) => {
-  if (!env.INGEST_SELF_SERVE_ENABLED) return c.notFound();
-  await next();
-});
+// Mounted FIRST so nothing downstream — not the body limit, not the rate
+// limiter, not signature verification — runs for a disabled deployment. See
+// INGEST_SELF_SERVE_ENABLED in env.ts for why the default is off: minting
+// issues a durable capability that outlives the trust conditions that
+// authorized it.
+router.use(`${routes.BASE}/*`, ingestGate(env.INGEST_SELF_SERVE_ENABLED));
 
 // ORDER MATTERS: the body limit must run BEFORE the auth middleware.
 // `verifyFirstPartyHttpRequest` buffers the entire body (to hash it) *before*

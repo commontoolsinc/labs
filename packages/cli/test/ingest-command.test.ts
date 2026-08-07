@@ -110,6 +110,7 @@ const minted = {
   causePrefix: "ingest/phone-1",
   installId: "phone-1",
   token: "tok-secret",
+  expiresAt: "2026-11-02T00:00:00.000Z",
 };
 
 function channel(overrides: Record<string, unknown>) {
@@ -252,7 +253,31 @@ describe("cf ingest mint", () => {
     expect(calls[0].body.space).toBe(SPACE_DID);
     expect(calls[0].body.causePrefix).toBeUndefined();
     expect(output).toContain("Ingest channel minted.");
-    expect(output).toContain("expires:");
+    // The VALUE, not the label: the label prints unconditionally, so asserting
+    // it alone would pass just as happily against a server that dropped the
+    // field entirely.
+    expect(output).toContain("expires:     2026-11-02T00:00:00.000Z");
+  });
+
+  // The server always sets an expiry, so a response without one means the two
+  // sides disagree about the contract. Printing a bare blank there would hide
+  // that behind something that reads like "never expires" — the opposite of
+  // the truth.
+  it("says so loudly when a mint response carries no expiry", async () => {
+    const { expiresAt: _dropped, ...noExpiry } = minted;
+    const { output } = await run([
+      "mint",
+      "--identity",
+      keyPath,
+      "--api-url",
+      API_URL,
+      "--space",
+      SPACE_DID,
+      "--install-id",
+      "phone-1",
+    ], { mint: noExpiry });
+
+    expect(output).toContain("unexpected");
   });
 });
 
@@ -361,7 +386,14 @@ describe("cf ingest revoke", () => {
     ], { revoke: { id: "chan-1", revokedAt: "2026-08-04T12:00:00.000Z" } });
 
     expect(calls[0].verb).toBe("revoke");
-    expect(calls[0].body).toEqual({ id: "chan-1" });
+    expect(calls[0].body.id).toBe("chan-1");
+    // A revoke carries a fresh idempotency key, spent server-side in the same
+    // transaction as the write. Without it a captured revoke stays replayable
+    // for its whole proof window, and firing it after the owner re-pairs kills
+    // the new credential.
+    expect(calls[0].body.requestId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
     expect(output).toContain("Revoked chan-1 at 2026-08-04T12:00:00.000Z.");
     expect(output).toContain("retained as an audit record");
   });

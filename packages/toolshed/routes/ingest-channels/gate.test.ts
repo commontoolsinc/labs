@@ -1,24 +1,21 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createRouter } from "@/lib/create-app.ts";
+import { ingestGate } from "./gate.ts";
 import { BASE } from "./ingest-channels.routes.ts";
 
 // The gate's ROUTING consequence, which env.test.ts does not cover — that pins
 // the flag's default value, not what the router does with it.
 //
-// The middleware is rebuilt here against a stub rather than imported, because
-// the real router reads `env` once at module load and `.env.test` enables the
-// feature so the other suites can exercise it. What is asserted is the shape
-// the real router relies on: a first `use` on `${BASE}/*` that short-circuits
-// before anything downstream runs.
+// This mounts the REAL `ingestGate` — the same function
+// `ingest-channels.index.ts` mounts first — with the flag passed in, because
+// `.env.test` enables the feature so the other suites can reach the handlers.
+// Only the flag is a stub; the middleware under test is production code.
 describe("self-serve gate", () => {
   const build = (enabled: boolean) => {
     const seen: string[] = [];
     const router = createRouter();
-    router.use(`${BASE}/*`, async (c, next) => {
-      if (!enabled) return c.notFound();
-      await next();
-    });
+    router.use(`${BASE}/*`, ingestGate(enabled));
     router.use(`${BASE}/*`, async (_c, next) => {
       seen.push("downstream");
       await next();
