@@ -204,20 +204,21 @@ including when the marker sits below a link rather than on it.
 Ahead of anything that publishes a receipt address, so no caller holds one that
 later moves.
 
-**S1. Mint and plumb a session.** *(M)* `cf session new` emits a bare random
-string on stdout — no file format, since unlike `cf id new` there is no key
-material and a keyfile shape would only be cargo-culted. `--invocation-session`
-and `CF_INVOCATION_SESSION` carry it, following `CF_IDENTITY` and `CF_API_URL`.
-Accepted and threaded through, but **not yet joined to the hash** — nothing
-observable changes, and the mechanism can be exercised before it matters.
+**S1. Mint and plumb a session.** *(M)* `cf invocation-session new` emits a
+bare random string on stdout — no file format, since unlike `cf id new` there is
+no key material and a keyfile shape would only be cargo-culted.
+`--invocation-session` and `CF_INVOCATION_SESSION` carry it, following
+`CF_IDENTITY` and `CF_API_URL`. Accepted and threaded through, but **not yet
+joined to the hash** — nothing observable changes, and the mechanism can be
+exercised before it matters.
 
-*The name is qualified deliberately.* `cf inspect` already takes `--session`,
-meaning a storage session — a different thing entirely, in the same binary. One
-word for two concepts is what this arc spent its first document untangling
-elsewhere, so it is not worth introducing here. Qualifying the new flag is free
-today because nothing uses it yet; `cf inspect`'s could become
-`--storage-session` later, which is a change to a forensics tool with its own
-callers and is not part of this work.
+*The name is qualified deliberately, command and flag alike.* `cf inspect`
+already takes `--session`, meaning a storage session — a different thing
+entirely, in the same binary. One word for two concepts is what this arc spent
+its first document untangling elsewhere, so it is not worth introducing here.
+Qualifying the new surface is free today because nothing uses it yet;
+`cf inspect`'s could become `--storage-session` later, which is a change to a
+forensics tool with its own callers and is not part of this work.
 
 *It is closer to a secret than to a setting.* Its unguessability is what keeps
 an outcome's address out of reach of anyone who can guess a piece, a verb, and a
@@ -428,7 +429,7 @@ Each step carries its own, rather than a sweep at the end.
 | F2 | `packages/cli/README.md` output conventions: two flags, which syntax each takes |
 | A1, A3 | The marker and the suffix, same file; [Verbs over the CLI](../common/verbs-over-the-cli.md), already stale |
 | A4 | Address forms wherever `--piece` is taught — the CLI README and the tutorial's workflow chapter |
-| S1, S2 | `cf session new`, `CF_INVOCATION_SESSION`, and what an absent session means; the CLI README and the agent-facing skills that teach invocation ids |
+| S1, S2 | `cf invocation-session new`, `CF_INVOCATION_SESSION`, and what an absent session means; the CLI README and the agent-facing skills that teach invocation ids |
 | C1 | What a receipt declares, in the design document's open-question slot |
 | C2, C3 | `piece call`'s section, and the envelope's fields |
 | W1, W2 | `wish` and `exec` in `packages/cli/README.md`, and the read options stated once where all four arrivals can point at them rather than four times |
