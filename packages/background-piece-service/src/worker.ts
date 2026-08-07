@@ -352,6 +352,12 @@ export async function runPiece(data: RunData): Promise<void> {
 // Logs here are often viewed through observability dashboards
 // that don't render objects well. Attempt to stringify any objects
 // here.
+//
+// TODO(danfuzz): this is an unsafe use of `stringify()` for piece console
+// arguments, which arrive live and in-process (the runtime's console capture
+// dispatches them without serialization): a logged `FabricSpecialObject`
+// renders as `{}`, silently. Wants a `FabricSpecialObject` test rendering
+// via `toCompactDebugString()` from `@commonfabric/data-model/value-debug`.
 export function safeFormat(value: unknown): unknown {
   if (value && typeof value === "object") {
     try {

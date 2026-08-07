@@ -1421,6 +1421,14 @@ export function normalizeAndDiff(
     // writes land in a slot whose stored parent is still an array and storage
     // rejects them with a TypeMismatchError. This mirrors the array branch
     // above, which resets a mismatched container via `value: []`.
+    //
+    // TODO(danfuzz): `isObject` is also true for a `FabricSpecialObject`, so
+    // a stored special object (which reaches storage whole via this
+    // function's `FabricSpecialObject` branch above) is treated as an
+    // existing plain record: no reset is emitted, its zero keys yield no
+    // removals, and the per-key child writes land in slots whose stored
+    // parent is still the special object. The special-object→object
+    // transition wants the same reset the array→object one gets.
     if (!isObject(currentValue) || isPrimitiveCellLink(currentValue)) {
       diffLogger.debug(
         "diff",

@@ -1346,6 +1346,14 @@ export function mergeAnyOfMatches<T>(
   // address is set, and name is ignored, we want to include both.
   if (matches.length > 1) {
     // If all our matches are non-array objects, merge the properties.
+    //
+    // TODO(danfuzz): `isObject` admits a `FabricSpecialObject`, whose state
+    // lives in private fields, so `Object.assign` copies nothing from it: a
+    // `FabricPrimitive` that matches more than one branch (say, an `anyOf` of
+    // its specific type name and `"object"`, which the subtype rule also
+    // accepts) merges to a plain `{}` and the value is lost. The merge wants
+    // a `FabricSpecialObject` test ahead of this point, returning the value
+    // whole rather than merging it.
     if (matches.every((v) => isObject(v))) {
       const unified: Record<string, T> = {};
       for (const match of matches) {
@@ -1863,6 +1871,17 @@ export function getAtPath(
         value: curDoc.value.length,
       };
     } else if (isRecord(curDoc.value) && part in curDoc.value) {
+      // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, and `in`
+      // consults the prototype chain, so this arm descends a special object
+      // by its class surface rather than its codec contents: on a
+      // `FabricError` (live traffic — the fetch builtins store one),
+      // `"message"` resolves through a prototype accessor and `"slice"` on a
+      // `FabricBytes` yields a function as the next doc value, while the
+      // instance's actual contents are unreachable and fall to the debug-log
+      // arm below. The schema-declared-name descents elsewhere in this file
+      // use own-property checks for the same reason; this value-side descent
+      // wants that too, plus codec-contents addressing for a
+      // `FabricInstance`.
       const cursorObj = curDoc.value as Immutable<JSONObject>;
       curDoc = {
         ...curDoc,

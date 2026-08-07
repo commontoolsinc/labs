@@ -1725,6 +1725,11 @@ export class StorageManager implements IStorageManager {
       return;
     }
 
+    // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, whose
+    // `Object.keys` are empty, so a cell link held inside a `FabricInstance`
+    // reconstructed from the data URI is never found here and its target
+    // document is never synced — the later read finds it absent. (A
+    // `FabricPrimitive` ends the walk harmlessly; it is a leaf.)
     if (isRecord(value)) {
       for (const key of Object.keys(value)) {
         const child = value[key];

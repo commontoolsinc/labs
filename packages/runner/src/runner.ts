@@ -419,6 +419,10 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
     return;
   }
 
+  // TODO(danfuzz): same gap as `recordOutputSchemaPolicyInputs()` above:
+  // `isRecord` admits a `FabricSpecialObject`, whose empty entries end the
+  // descent, so a link inside a `FabricInstance`'s codec contents records no
+  // policy input. Fails closed, as there.
   if (isRecord(outputBinding) && !isCellLink(outputBinding)) {
     for (const child of Object.values(outputBinding)) {
       recordRawBuiltinBindingSchemaPolicyInputs(
@@ -540,6 +544,11 @@ export function firstResolvedOutputRedirect(
     }
     return undefined;
   }
+  // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, whose empty
+  // entries end the descent, so a write-redirect link inside a
+  // `FabricInstance`'s codec contents is invisible here. The caller then
+  // sees no redirect and silently skips the sub-pattern's owned-cell
+  // pre-sync keyed off it.
   if (isRecord(binding) && !isCellLink(binding)) {
     for (const child of Object.values(binding)) {
       const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
@@ -3853,6 +3862,10 @@ export class Runner {
       if (link) {
         promises.add(this.runtime.getCellFromLink(link).sync());
       } else if (isRecord(value)) {
+        // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, and
+        // `for..in` sees none of its state, so a link nested in a
+        // `FabricInstance`'s codec contents is never synced here — the cold
+        // target this pre-sync exists to warm.
         for (const key in value) syncAllMentionedCells(value[key]);
       }
     };
@@ -4050,6 +4063,11 @@ export class Runner {
               ),
           );
         } else if (isRecord(value)) {
+          // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, and
+          // `for..in` sees none of its state, so a link inside a
+          // `FabricInstance` held in a raw argument value is never pre-synced
+          // — a cold target can then enter the commit basis, the exact
+          // failure this walk exists to prevent.
           for (const key in value) collectLinkTargets(value[key], base);
         }
       };
