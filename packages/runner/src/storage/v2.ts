@@ -2596,7 +2596,11 @@ class SpaceReplica implements ISpaceReplica {
     this.#caughtUpLocalSeq = Math.max(this.#caughtUpLocalSeq, localSeq);
     // Apply parked accepts the marker now covers, ascending, BEFORE waking
     // marker waiters: gated code (readyToRetry retries) resumes against a
-    // replica whose decided promotions are already settled.
+    // replica where every promotion COVERED BY THIS MARKER is settled.
+    // Accepts decided but not yet covered — verdict received, coverage
+    // still outstanding (the two moments CT-1950 splits) — remain parked
+    // past this wake: their pending overlays stay visible and their
+    // settlement promises unresolved until their own marker arrives.
     if (this.#parkedAccepts.size > 0) {
       const due = [...this.#parkedAccepts.keys()]
         .filter((parked) => parked <= this.#caughtUpLocalSeq)
