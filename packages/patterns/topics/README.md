@@ -59,19 +59,34 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   read-side from it (SELF + equals to find its own row). Requires the
   path-scoped wildcard fix (#4714) — the derive combines a resolveAsCell chain
   with an equals-only SELF capture in one lift.
-- **A declared schema is the only thing that bounds a read.** Every derivation
-  over the board — the board's own `crossrefRows`, each topic's
-  `topicCrossrefView` — is a module-scope `lift` whose parameter type is
-  `TopicScan`, the narrowest projection the crossref join needs. That is not
-  style: the transformer shrinks an inferred input schema to the paths it can
-  see a body reach, and it cannot see through a helper call. These bodies call
-  `topicCorpus` and `crossrefJoin`, so an inferred schema falls back to reading
-  every element whole — and through a link to the board, "whole" is every
-  topic's thread, verbs, and rendered UI, which is how one derived value ends up
-  reading the entire space. `TopicScan` is non-recursive for the same reason: it
-  is what stops a list read from expanding, per topic, every sibling that topic
-  references. Prefer a scalar reduction (`topics.get().length`) over anything
-  that hands the array to a helper.
+- **A declared schema is the only thing that bounds a read.** The transformer
+  shrinks a derivation's input schema to the paths it can see the body reach,
+  and gives up when it cannot: `topics.get().length` declares `items: unknown`
+  and expands no topic, while the same count through a helper it cannot see into
+  declares `items: true` and reads every topic whole — thread, verbs, and
+  rendered UI included. That is how one derived value ends up reading the whole
+  space. So every derivation here is a module-scope `lift`, because a `lift`'s
+  declared parameter type is a ceiling an opaque helper cannot widen, and the
+  bodies here call `topicCorpus` and `crossrefJoin`.
+
+  A lift's parameter and its result are one type in TypeScript, which looks like
+  it forces a choice: narrow the parameter to bound the read, and the published
+  `crossrefs` edge targets narrow with it, removing result fields consumers were
+  promised (`deno task pattern-compat` rejects exactly that). It is not a real
+  choice. A reference that passes through a lift is a link, and a link resolves
+  to the whole topic however little of it the lift declared — so `crossrefRows`
+  and `topicCrossrefView` read `TopicScan` and assert each republished reference
+  back to `TopicPiece`/`TopicReference`. The parameter bounds the read; the
+  assertion states what a consumer actually receives. Both carry a `HACK:` note:
+  the runtime already guarantees this, and a generic lift that carried the input
+  reference type through to the output would say it without a cast.
+
+  `TopicCard`/`TopicCardSource`, which the board's ordering and card rendering
+  are declared over, go further and carry no reference at all — nothing
+  published is shaped by them, which is what leaves them free to be that narrow.
+
+  The rule for new code stands regardless: prefer a scalar reduction
+  (`topics.get().length`) over anything that hands the array to a helper.
 - **Authoring: cf-code-editor in the Edit→Save draft flow.** The editor binds
   the session-local `bodyDraft` (never live to the shared string — whole-value
   conflict semantics hold) with `@`-mention autocomplete over `mentionable`;
@@ -116,10 +131,11 @@ references — every reference declared through a title-only schema, so the read
 cannot expand a topic's body, thread, or verbs no matter how it is projected.
 
 `index` and `crossrefs` are the same rows published under two declared types:
-`index` declares every reference title-only, `crossrefs` declares them as
-`TopicScan` (prose and counts, no verbs and no nested graph) and adds the
-`fid`/`title` navigation snapshots the cards render. Read `index` to survey and
-`crossrefs` when a row's prose is what you are after; neither expands a topic.
+`index` declares every reference title-only, so a survey through it cannot
+expand a topic at all; `crossrefs` keeps the deployed piece-valued references
+and adds the `fid`/`title` navigation snapshots the cards render, so a reader
+following one of its edges _can_ expand the sibling. Read `index` to survey the
+board; reach for `crossrefs` when you mean to follow an edge.
 
 ```bash
 cf piece get --piece <board> index --step
