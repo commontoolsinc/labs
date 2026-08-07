@@ -135,31 +135,35 @@ export interface TopicInput {
 }
 
 /**
- * A sibling Topic as a crossref derivation reads it: its prose (the surfaces a
- * reference edge can be pasted into) and the scalars a survey row shows.
+ * The least a crossref join needs from a sibling: the prose it scans for pasted
+ * fids, and the title it snapshots onto a rendered chip.
  *
- * This is the narrowest useful projection of a topic, and it is what every
- * derivation over the board declares its input as. The declared schema is the
- * bound: a reader arriving through this type reaches a sibling's prose and
- * counts, and cannot expand its verbs, its own crossref graph, or its rendered
- * UI. Deliberately non-recursive — that is what lets one topic's schema
- * describe its siblings without traversing the whole board.
+ * This is the input type for any derivation over `mentionable`. That input is a
+ * link to the whole board, so every field declared here is paid once per topic
+ * on it — which is why this carries neither the summary scalars a board row
+ * shows nor the display fields a rendered reference needs.
  */
-export interface TopicScan {
-  /** The topic's display name. Like the other derived display fields, a cold
-   * retained sibling may not have produced this path yet; its persisted title
-   * remains authoritative until it does. */
-  [NAME]: string | Default<""> | undefined;
+export interface TopicMention {
   title: string;
   body: string;
   comments: { body: string }[];
   links: { url: string }[];
+}
+
+/**
+ * `TopicMention` plus the scalars a board row summarises. The board's own
+ * crossref derivation reads these; a single topic's does not.
+ *
+ * Both are input projections, not published types: every reference this pattern
+ * publishes is declared at `TopicReference` or `TopicPiece`. Keeping them out of
+ * the published surface is what leaves them free to shrink.
+ */
+export interface TopicScan extends TopicMention {
   createdAt: number;
   createdBy?:
     | TopicAuthor
     | Default<{ kind: "person"; name: "" }>
     | undefined;
-  createdByName: string;
   commentCount: number | Default<0> | undefined;
   lastActivityAt: number | Default<0> | undefined;
 }
@@ -169,6 +173,13 @@ export interface TopicScan {
  * name and the mutation verbs, so a crossref chip can be rendered and acted on.
  */
 export interface TopicReference extends TopicScan {
+  /** The topic's display name. Like the other derived display fields, a cold
+   * retained sibling may not have produced this path yet; its persisted title
+   * remains authoritative until it does. */
+  [NAME]: string | Default<""> | undefined;
+  /** @deprecated Compatibility shadow for consumers of the previous result
+   * schema. New callers must use `createdBy`; the pattern mirrors this field. */
+  createdByName: string;
   comments: TopicComment[];
   links: TopicLink[];
   bodyUpdatedBy?: TopicAuthor | undefined;
@@ -575,16 +586,17 @@ export const submitProfileLink = handler<void, {
  * this piece's row. Nothing persisted; a topic without `mentionable` derives
  * empty sets.
  *
- * HACK: reads `TopicScan`, publishes `TopicReference`, via an `as` on each
+ * HACK: reads `TopicMention`, publishes `TopicReference`, via an `as` on each
  * sibling. A reference passed through a lift is a link and resolves to the
  * whole topic regardless of how little the lift declared, so the cast matches
  * what a consumer receives while the narrow parameter bounds what this reads.
  * See the same note on `crossrefRows` in main.tsx. */
 const topicCrossrefView = lift((
   { mentionable, title }: {
-    // Reads `TopicScan`; the row below republishes each sibling as the
-    // deployed `TopicReference` (see the HACK note).
-    mentionable: Writable<TopicScan[] | Default<[]>>;
+    // Reads `TopicMention` — title and prose, nothing else. The row below
+    // republishes each sibling as the deployed `TopicReference` (see the HACK
+    // note), so narrowing here costs a consumer nothing.
+    mentionable: Writable<TopicMention[] | Default<[]>>;
     title: Writable<string | Default<"">>;
   },
 ): TopicCrossrefs => {
