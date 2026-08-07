@@ -286,9 +286,9 @@ and bind results to the wrong network vantage point. The request-hash
 memoization these built-ins already carry is what makes reading-through
 sound: same inputs → the committed result *is* the value.
 
-`resume-recover` / `resume-republish`: re-evaluate under v2 recovery —
-currently load-bearing on main in `filter.ts`/`flatmap.ts` (#4367,
-#4438); builtins.md §5 carries the call.
+`resume-republish`: re-evaluate under v2 recovery — currently
+load-bearing on main in `filter.ts`/`flatmap.ts` (#4367, #4438);
+builtins.md §5 carries the call.
 
 ### 3.6 Events are the client's computational commit (D-v2-1, RULED 2026-08-02)
 
@@ -424,7 +424,7 @@ intent, the following have no decision left to make:
   at derived-run frequency; `persistentSchedulerState`'s persisted form
   reduces to the v2 basis index — see below)
 - unserved markers, demand-shrink compensation, the legacy-background
-  exclusion protocol, `resume-recover`-style compensations
+  exclusion protocol, `resume-republish`-style compensations
 - the arc's write-firewall-as-admission (write bounding moves to handle
   grant time; client computational commits narrow to event appends)
 

@@ -8,6 +8,7 @@ import {
   pattern,
   Stream,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 
@@ -87,7 +88,7 @@ type FactCheckHostInput = {
 
 export type DisclosureExampleOutput = {
   [NAME]: string;
-  [UI]: unknown;
+  [UI]: VNode;
   content: string;
   disclaimerText?: string;
   acknowledgedDisclaimer?: string;

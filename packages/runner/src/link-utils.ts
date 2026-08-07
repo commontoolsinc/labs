@@ -477,6 +477,13 @@ function recursiveStripAsCellFromSchema(
   }
 
   // Recursively process all object properties
+  //
+  // TODO(danfuzz): this loop filters by key name only, so it also descends
+  // into `default` and `examples` VALUES, and the recursion's shallow copy
+  // (`{ ...schema }` above) rebuilds whatever it meets: a fabric-valued
+  // default (which `Cell.of()` embeds into schemas) comes out as `{}` in the
+  // sanitized schema that rides on links. Value-bearing keys want to be
+  // carried by reference, the way `simplifySchemaForContext` preserves them.
   for (const [key, value] of Object.entries(result)) {
     // Skip $ref - it's just a string pointer, not a schema to process
     if (key === "$ref") continue;

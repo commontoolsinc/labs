@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { NAME, pattern, UI } from "commonfabric";
+import { NAME, pattern, UI, type VNode } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -26,12 +26,12 @@ interface RowInput {
 }
 interface RowOutput {
     rendered: string;
-    [UI]: string;
+    [UI]: VNode;
     [NAME]: string;
 }
 const EntryRow = pattern((input) => ({
     rendered: input.key("piece"),
-    [UI]: input.key("piece"),
+    [UI]: <div />,
     [NAME]: input.key("name"),
 }), {
     type: "object",
@@ -57,7 +57,7 @@ const EntryRow = pattern((input) => ({
             type: "string"
         },
         $UI: {
-            type: "string"
+            $ref: "https://commonfabric.org/schemas/vnode.json"
         },
         $NAME: {
             type: "string"
@@ -108,7 +108,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     type: "object",
     properties: {
         ui: {
-            type: "string"
+            $ref: "https://commonfabric.org/schemas/vnode.json"
         },
         n: {
             type: "string"

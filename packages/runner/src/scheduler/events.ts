@@ -1258,7 +1258,7 @@ export async function dispatchQueuedEvent(state: {
         throw telemetryFailure.error;
       }
     };
-    tx.commit().then(
+    const handled = tx.commit().then(
       ({ error }) => handleCommitResult(error),
       (reason) => handleCommitResult(normalizeEventCommitRejection(reason)),
     ).catch((error) => {
@@ -1268,6 +1268,12 @@ export async function dispatchQueuedEvent(state: {
         error,
       );
     });
+    // The barrier entry commit() registered settles with the commit
+    // promise, but the disposition above — a conflict's backoff requeue in
+    // particular — runs a few microtasks later. Register the handled chain
+    // too, so the pending-commit barrier cannot release in the gap between
+    // a rejection settling and its retry being requeued.
+    state.runtime.storageManager.trackPendingCommit(handled);
   };
 
   try {
