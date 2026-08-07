@@ -7,26 +7,26 @@
 // shapes JSON round-trips by identity are accepted -- `null`, booleans,
 // strings, finite numbers other than `-0`, dense arrays of accepted values,
 // and plain objects whose values are accepted. Everything else is reported:
-// `undefined` (dropped from an object, `null` in an array), `NaN` / `±Infinity`
-// (become `null`), `-0` (loses its sign), `bigint` / `symbol` / `function`
-// (not representable), array holes (`null`), a non-index property on an array
-// (dropped), symbol-keyed properties (dropped), a `toJSON` hook (replaces the
-// value before JSON sees it), non-plain objects such as a class instance
-// (flattened -- `JSON.stringify` finds no data in its private fields), and
-// cycles (`JSON.stringify` throws).
+// `undefined` (dropped from an object, `null` in an array), `NaN` and
+// `±Infinity` (both become `null`), `-0` (loses its sign), `bigint` /
+// `symbol` / `function` (not representable), array holes (`null`), a
+// non-index property on an array (dropped), symbol-keyed properties
+// (dropped), a `toJSON` hook (replaces the value before JSON sees it),
+// non-plain objects such as a class instance (flattened -- `JSON.stringify`
+// finds no data in its private fields), and cycles (`JSON.stringify` throws).
 //
 // A blacklist that only hunted bad numbers would pass every one of those: they
 // leave no offending numeric leaf, yet JSON still alters them. Whitelisting is
 // the only framing that makes an empty result actually mean "JSON serialization
 // will not change this."
 //
-// KNOWN LIMITATIONS. The walk reads enumerable own keys (`Object.keys` /
+// Known limitations. The walk reads enumerable own keys (`Object.keys` /
 // `Object.entries`) and an own `toJSON` data property, which certifies the
-// ordinary values it is meant for. It does NOT fully certify adversarially-shaped
-// objects, so for these the empty result is not a guarantee (all confirmed to
-// pass here while `JSON.stringify` alters them):
+// ordinary values it is meant for. It does _not_ fully certify
+// adversarially-shaped objects, so for these the empty result is not a
+// guarantee (all confirmed to pass here while `JSON.stringify` alters them):
 //
-//   - A non-enumerable string data property on a PLAIN OBJECT is dropped by
+//   - A non-enumerable string data property on a _plain object_ is dropped by
 //     JSON but not seen here (that walk is enumerable-only). An array's
 //     properties are read with `Object.getOwnPropertyNames`, so the same
 //     property on an array _is_ reported.
@@ -39,10 +39,12 @@
 //     inherited numeric property masks a hole; this also does not match JSON's
 //     own-vs-inherited element read.
 //
-// A future hardening pass would inspect own property descriptors for plain
-// objects too, instead of `Object.entries`, reject accessors and
-// non-enumerable data properties, use `Object.hasOwn` for array slots, and
-// reject a nonstandard array prototype or an inherited `toJSON`.
+// TODO(danfuzz): Close those four gaps, by inspecting own property
+// descriptors for plain objects instead of using `Object.entries`, rejecting
+// accessors and non-enumerable data properties, using `Object.hasOwn` for
+// array slots, and rejecting a nonstandard array prototype or an inherited
+// `toJSON`. Required once a caller has to certify a value it did not
+// construct.
 
 import type { JSONValue } from "@commonfabric/api";
 
@@ -57,12 +59,19 @@ export interface JsonUnfaithfulValue {
   readonly reason: string;
 }
 
-/** Append one token to a JSON Pointer, escaping `~` and `/` per RFC 6901. */
+/**
+ * Helper for `walk()`, which appends one token to the JSON Pointer `base`,
+ * escaping `~` and `/` per RFC 6901.
+ */
 function pointerChild(base: string, token: string | number): string {
   const escaped = String(token).replace(/~/g, "~0").replace(/\//g, "~1");
   return `${base}/${escaped}`;
 }
 
+/**
+ * Helper for `walk()`, which returns the reason JSON would not carry `value`
+ * faithfully, or `null` if it would.
+ */
 function numberReason(value: number): string | null {
   if (Number.isNaN(value)) return "NaN (becomes null)";
   if (value === Infinity) return "Infinity (becomes null)";
@@ -71,6 +80,11 @@ function numberReason(value: number): string | null {
   return null;
 }
 
+/**
+ * Helper for `findJsonUnfaithfulValues()`, which walks `value` -- found at
+ * `pointer`, with `ancestors` holding the objects on the path down to it --
+ * appending to `out` a report for each part JSON would not carry faithfully.
+ */
 function walk(
   value: unknown,
   pointer: string,
@@ -183,7 +197,7 @@ function walk(
 }
 
 /**
- * Find every value in `value` that ordinary JSON serialization would not carry
+ * Finds every value in `value` that ordinary JSON serialization would not carry
  * faithfully -- see the module comment for the whitelist. Returns them with
  * their JSON Pointers; an empty array means the value round-trips through JSON
  * by identity and is safe to send.
@@ -200,7 +214,7 @@ export function findJsonUnfaithfulValues(
  * Indicates whether `value` is pure JSON -- that ordinary JSON serialization
  * carries it faithfully, by the whitelist in the module comment above. This is
  * the boolean form of {@link findJsonUnfaithfulValues}; reach for that one when
- * a caller needs to report WHICH parts are unfaithful and where.
+ * a caller needs to report _which_ parts are unfaithful and where.
  *
  * Note the known limitations documented above: an empty result does not certify
  * adversarially-shaped objects, so this answers "will JSON change this ordinary
