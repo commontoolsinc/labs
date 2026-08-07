@@ -10,6 +10,7 @@ import { FUNCTION_HARDENING_HELPER_NAME } from "@commonfabric/utils/sandbox-cont
 
 import {
   classifyArrayMethodCall,
+  declaredVerbResultTypeNode,
   detectCallKind,
   detectNewExpressionKind,
   ensureTypeNodeRegistered,
@@ -3037,6 +3038,70 @@ function handlePatternSchemaInjection(
   return visited;
 }
 
+/**
+ * Add the handler options object carrying the verb's declared result schema.
+ *
+ * `handler`'s trailing argument is its options object, and `resultSchema` is
+ * the member the builder reads from it (`builder/module.ts`) to put the
+ * declared result on the node's module — where the runner reads it when a
+ * handling's result launches a pattern and the receipt needs a schema. The
+ * result type reaches here in the third type-argument slot: authored directly
+ * on `handler<Event, State, Result>`, or carried there by the `action<Event,
+ * Result>` lowering (`closures/strategies/action-strategy.ts`).
+ *
+ * A call that already passes options — the `{ proxy: true }` form — keeps
+ * them, spread into the same object, so one slot holds every option. A verb
+ * that declares no result gets its arguments back untouched.
+ */
+function withDeclaredResultSchema(
+  args: readonly ts.Expression[],
+  node: ts.CallExpression,
+  context: TransformationContext,
+  checker: ts.TypeChecker,
+  typeRegistry: TypeRegistry | undefined,
+): ts.Expression[] {
+  const next = [...args];
+  const resultTypeNode = declaredVerbResultTypeNode(node, "handler");
+  if (!resultTypeNode) return next;
+
+  const { factory, sourceFile } = context;
+  const resultSchemaCall = createSchemaCallWithRegistryTransfer(
+    context,
+    resultTypeNode,
+    checker,
+    typeRegistry,
+  );
+  const resultType = getTypeFromTypeNodeWithFallback(
+    resultTypeNode,
+    checker,
+    typeRegistry,
+  );
+  if (resultType && typeRegistry) {
+    typeRegistry.set(resultSchemaCall, resultType);
+  }
+
+  // Only an argument the author wrote AFTER the callback is an options object;
+  // the callback itself, and the schemas prepended above, never are.
+  const authoredTail = node.arguments.length >= 2
+    ? node.arguments[node.arguments.length - 1]
+    : undefined;
+  const authoredOptions = authoredTail !== undefined &&
+      !resolveFunctionLikeExpression(authoredTail, checker, sourceFile)
+    ? authoredTail
+    : undefined;
+
+  const options = factory.createObjectLiteralExpression([
+    ...(authoredOptions
+      ? [factory.createSpreadAssignment(authoredOptions)]
+      : []),
+    factory.createPropertyAssignment("resultSchema", resultSchemaCall),
+  ]);
+
+  if (authoredOptions) next[next.length - 1] = options;
+  else next.push(options);
+  return next;
+}
+
 export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const { sourceFile, tsContext: transformation, checker } = context;
@@ -3244,7 +3309,13 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             factory.createCallExpression(
               node.expression,
               undefined,
-              [toSchemaEvent, toSchemaState, ...node.arguments],
+              withDeclaredResultSchema(
+                [toSchemaEvent, toSchemaState, ...node.arguments],
+                node,
+                context,
+                checker,
+                typeRegistry,
+              ),
             ),
             node,
           );
