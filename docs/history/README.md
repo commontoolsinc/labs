@@ -313,6 +313,10 @@ One line per archived document; each document's header carries the fuller
   an eager default-route resolution in the constructor, why the benchmark
   times only construction, and why the guard for it counts URL parses rather
   than comparing values, August 2026.
+- [2026-08-schemaless-read-membership-walk.md](development/performance/2026-08-schemaless-read-membership-walk.md)
+  — why the schemaless whole-array read benchmarks stepped by two to three
+  times: the storage read path re-derived, per read, that what the replica
+  holds is a `FabricValue`, August 2026.
 - [coverage-ratchet-noise-2026-07-28.md](development/coverage-ratchet-noise-2026-07-28.md)
   — why a rename-only pull request owed coverage debt: a wall-clock-guarded
   diagnostic and a shard re-partition each moved the `packages/runner`
