@@ -1,6 +1,9 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { encodableFormOf } from "./encodable-form.ts";
-import { hasEntityUriScheme } from "./entity-kind.ts";
+import {
+  hasEntityUriScheme,
+  hashStringForEntityAddress,
+} from "./entity-kind.ts";
 import {
   BaseFabricPrimitive,
   FabricHash,
@@ -33,10 +36,22 @@ declare const ENTITY_ID_BRAND: unique symbol;
  */
 export type EntityId = FabricHash & { readonly [ENTITY_ID_BRAND]: true };
 
-/** Brands a content-hash string (or `FabricHash`) as an {@link EntityId}. */
+/**
+ * Brands a content-hash string (or `FabricHash`) as an {@link EntityId}.
+ *
+ * A string may arrive in either spelling of an unkinded entity: the bare
+ * tagged hash (`fid1:<hash>`) or the `of:`-schemed URI over it. This is the
+ * entity-specific intake seam, so it is where the URI scheme is understood —
+ * `FabricHash.fromString` below parses a tagged hash, in which `of:` is not a
+ * tag but a second colon, and would reject the schemed form.
+ *
+ * A kinded id (`computed:fid1:<hash>`) throws by name rather than being
+ * stripped to the different entity its bare hash names; see
+ * {@link hashStringForEntityAddress}.
+ */
 export function entityIdFrom(hash: string | FabricHash): EntityId {
   return (typeof hash === "string"
-    ? FabricHash.fromString(hash)
+    ? FabricHash.fromString(hashStringForEntityAddress(hash))
     : hash) as EntityId;
 }
 

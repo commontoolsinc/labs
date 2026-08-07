@@ -672,7 +672,7 @@ describe("page slug metadata", () => {
     expect(received).toEqual([bare, bare]);
   });
 
-  it("rejects computed ids as page ids", async () => {
+  it("throws for a `computed:` page id, naming the address", async () => {
     const processor = {
       getSpaceCtx: homeSpaceCtx,
       runtime: {
@@ -685,12 +685,13 @@ describe("page slug metadata", () => {
       },
     };
 
+    const computed = `computed:${fid("not-a-page")}`;
     await expect(
       (RuntimeProcessor.prototype as any).handlePageGetSlug.call(processor, {
         type: RequestType.PageGetSlug,
-        pageId: `computed:${fid("not-a-page")}`,
+        pageId: computed,
       }),
-    ).rejects.toThrow("Computed ids are not valid page ids");
+    ).rejects.toThrow(`Kinded entity id \`${computed}\``);
   });
 });
 
@@ -740,7 +741,7 @@ describe("page slug redirects", () => {
     };
   }
 
-  it("normalizes an of:-schemed id before the piece-manager lookup", async () => {
+  it("carries either spelling of a pageId to the same entity", async () => {
     const bare = fid("ordinary-page");
     const requestedRef: CellRef = {
       id: `of:${bare}` as CellRef["id"],
@@ -757,6 +758,7 @@ describe("page slug redirects", () => {
     const requestedCell = mockCell(requestedRef);
     const resultCell = mockCell(resultRef);
     const managerCalls: unknown[][] = [];
+    const lookedUp: string[] = [];
     const processor = {
       getSpaceCtx: () => ({
         pieceManager: { getSpace: () => space },
@@ -770,18 +772,29 @@ describe("page slug redirects", () => {
         },
       }),
       runtime: {
-        getCellFromEntityId: () => requestedCell,
+        getCellFromEntityId: (_space: unknown, entityId: unknown) => {
+          lookedUp.push(String(entityId));
+          return requestedCell;
+        },
       },
     };
 
-    await (RuntimeProcessor.prototype as any).handlePageGet.call(processor, {
-      type: RequestType.PageGet,
-      pageId: `of:${bare}`,
-      runIt: true,
-      space,
-    });
+    for (const pageId of [bare, `of:${bare}`]) {
+      await (RuntimeProcessor.prototype as any).handlePageGet.call(processor, {
+        type: RequestType.PageGet,
+        pageId,
+        runIt: true,
+        space,
+      });
+    }
 
-    expect(managerCalls).toEqual([[bare, true]]);
+    expect(lookedUp).toEqual([bare, bare]);
+    // The address handed on to the piece manager still names the requested
+    // entity, whichever spelling the request carried.
+    expect(
+      managerCalls.map(([id]) => entityIdFrom(id as string).taggedHashString),
+    ).toEqual([bare, bare]);
+    expect(managerCalls.map(([, runIt]) => runIt)).toEqual([true, true]);
   });
 
   it("renders slug redirects to output cells directly", async () => {
