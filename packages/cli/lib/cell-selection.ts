@@ -56,6 +56,14 @@ export interface ParsedSelectionFilter {
 const LINK_MARKER_KEY = "$link";
 
 /**
+ * The character a concise field path ends a segment with to ask for the
+ * address of the position that segment names. A backslash before it writes a
+ * literal `@`, which a name needs only at the end of its segment: anywhere
+ * else in a segment `@` is an ordinary character.
+ */
+const CONCISE_ADDRESS_SUFFIX = "@";
+
+/**
  * The address a marked position renders, and the key it renders under. Every
  * field is present so a caller indexes it without branching: `id` keeps its
  * scheme, because the scheme is the kind and dropping it retargets the
@@ -78,8 +86,9 @@ export interface RenderedLinkAddress {
 }
 
 /**
- * The positions a `--schema` marked with `$link`, mirroring the projection's
- * own shape. A node exists only where it, or something below it, is marked.
+ * The positions a projection marked for their address, mirroring the
+ * projection's own shape. A node exists only where it, or something below it,
+ * is marked.
  */
 export interface LinkMarkers {
   /** The address at this position was asked for. */
@@ -719,53 +728,135 @@ function normalizeProjectionSchema(
   };
 }
 
+/** A field name one concise path segment names, and what it asks for there. */
+interface ConciseSegment {
+  name: string;
+  /** The segment ended in an unescaped {@link CONCISE_ADDRESS_SUFFIX}. */
+  marked: boolean;
+}
+
+/**
+ * The positions a concise field list names, as a tree. `whole` and `marked`
+ * are separate questions about one position: `topic` asks for what is stored
+ * there, `topic@` asks for its address, and a list naming both asks for both.
+ */
+interface ConciseSelection {
+  whole: boolean;
+  marked: boolean;
+  properties: Map<string, ConciseSelection>;
+}
+
+/**
+ * Helper for {@link conciseProjectionSchema}, which reads one dot-separated
+ * segment of `path`. A trailing {@link CONCISE_ADDRESS_SUFFIX} asks for the
+ * named position's address unless a backslash escapes it, and the character is
+ * part of the name anywhere else: `user@home` names a field, and `a\@` names
+ * the field `a@`.
+ */
+function parseConciseSegment(
+  segment: string,
+  path: string,
+  flag: ProjectionFlag,
+): ConciseSegment {
+  const escaped = `\\${CONCISE_ADDRESS_SUFFIX}`;
+  const marked = segment.endsWith(CONCISE_ADDRESS_SUFFIX) &&
+    !segment.endsWith(escaped);
+  const name = (marked ? segment.slice(0, -1) : segment)
+    .replaceAll(escaped, CONCISE_ADDRESS_SUFFIX);
+  if (!/^[A-Za-z_$][A-Za-z0-9_$@-]*$/.test(name)) {
+    throw new CellSelectionError(
+      `Invalid ${flag} field path ${JSON.stringify(path)}`,
+    );
+  }
+  return { name, marked };
+}
+
+/**
+ * Helper for {@link conciseProjectionSchema}, which constructs a position that
+ * has named nothing yet.
+ */
+function emptyConciseSelection(): ConciseSelection {
+  return { whole: false, marked: false, properties: new Map() };
+}
+
+/**
+ * Helper for {@link conciseProjectionSchema}, which says whether `node` or
+ * anything below it asked for an address.
+ */
+function conciseSelectionMarks(node: ConciseSelection): boolean {
+  return node.marked ||
+    [...node.properties.values()].some(conciseSelectionMarks);
+}
+
+/**
+ * Helper for {@link conciseProjectionSchema}, which writes `node` out as the
+ * projection schema it describes, `$link` markers included. Normalization
+ * reads those markers back out, so a concise address suffix reaches the read
+ * selector and the address composition the same way a written one does.
+ */
+function conciseSelectionSchema(node: ConciseSelection): unknown {
+  const properties: Record<string, unknown> = {};
+  for (const [name, child] of node.properties) {
+    // A position asked for whole already answers every path through it, so a
+    // deeper path adds something only where it asked for an address.
+    if (node.whole && !conciseSelectionMarks(child)) continue;
+    properties[name] = conciseSelectionSchema(child);
+  }
+  const named = Object.keys(properties).length > 0;
+  const marker = node.marked ? { [LINK_MARKER_KEY]: true } : {};
+  if (!node.whole) {
+    // A position whose whole request was its address says exactly that, and
+    // normalization reduces it to the rejecting schema.
+    return named
+      ? { ...marker, type: "object", properties, additionalProperties: false }
+      : marker;
+  }
+  if (!named && !node.marked) return true;
+  // `additionalProperties` keeps what a projection did not name, which is what
+  // a bare path asks for at the position it ends on. `properties` is written
+  // out beside it only to carry the markers below.
+  return {
+    ...marker,
+    type: "object",
+    ...(named ? { properties } : {}),
+    additionalProperties: true,
+  };
+}
+
+/**
+ * Reads a comma-separated field list into the projection it describes. The
+ * list names positions rather than shapes, so it is collected as a tree first:
+ * the same position can be reached by several paths, and `topic@` beside
+ * `topic.title` is one position asked two questions rather than two answers.
+ */
 function conciseProjectionSchema(
   source: string,
   flag: ProjectionFlag,
-): JSONSchema {
+): NormalizedProjectionSchema {
   const paths = source.split(",").map((part) => part.trim());
   if (paths.some((path) => path.length === 0)) {
     throw new CellSelectionError(
       `Invalid ${flag} concise projection: expected comma-separated field paths`,
     );
   }
-  const root: Record<string, unknown> = {};
+  const root = emptyConciseSelection();
   for (const path of paths) {
-    const segments = path.split(".");
-    if (
-      segments.some((segment) => !/^[A-Za-z_$][A-Za-z0-9_$-]*$/.test(segment))
-    ) {
-      throw new CellSelectionError(
-        `Invalid ${flag} field path ${JSON.stringify(path)}`,
-      );
-    }
+    const segments = path.split(".").map((segment) =>
+      parseConciseSegment(segment, path, flag)
+    );
     let node = root;
-    for (let index = 0; index < segments.length; index++) {
-      const segment = segments[index];
-      if (index === segments.length - 1) {
-        node[segment] = true;
-        continue;
+    for (const [index, segment] of segments.entries()) {
+      let child = node.properties.get(segment.name);
+      if (child === undefined) {
+        child = emptyConciseSelection();
+        node.properties.set(segment.name, child);
       }
-      const existing = node[segment];
-      if (existing === true) break;
-      if (!isRecord(existing)) {
-        node[segment] = {};
-      }
-      node = node[segment] as Record<string, unknown>;
+      if (segment.marked) child.marked = true;
+      if (index === segments.length - 1 && !segment.marked) child.whole = true;
+      node = child;
     }
   }
-
-  const toSchema = (node: Record<string, unknown>): JSONSchema => ({
-    type: "object",
-    properties: Object.fromEntries(
-      Object.entries(node).map(([key, value]) => [
-        key,
-        value === true ? true : toSchema(value as Record<string, unknown>),
-      ]),
-    ),
-    additionalProperties: false,
-  });
-  return toSchema(root);
+  return normalizeProjectionSchema(conciseSelectionSchema(root));
 }
 
 export interface ProjectionParseDependencies {
@@ -774,9 +865,11 @@ export interface ProjectionParseDependencies {
 
 /**
  * Parses a `--select` argument: the comma-separated field paths, which is the
- * whole of what this flag accepts. `--schema` reads the same spelling and more,
- * so an argument written in the JSON Schema language is pointed at the flag
- * that reads it rather than reported as a malformed field path.
+ * whole of what this flag accepts. A path segment ending in
+ * {@link CONCISE_ADDRESS_SUFFIX} asks for the address of the position it
+ * names. `--schema` reads the same spelling and more, so an argument written
+ * in the JSON Schema language is pointed at the flag that reads it rather than
+ * reported as a malformed field path.
  */
 export function parseSelectProjection(source: string): SelectionProjection {
   const trimmed = source.trim();
@@ -794,7 +887,7 @@ export function parseSelectProjection(source: string): SelectionProjection {
   }
   return {
     source,
-    schema: conciseProjectionSchema(trimmed, "--select"),
+    ...conciseProjectionSchema(trimmed, "--select"),
     kind: "concise",
     flag: "--select",
   };
@@ -872,7 +965,7 @@ export async function parseSelectionProjection(
 
   return {
     source,
-    schema: conciseProjectionSchema(trimmed, "--schema"),
+    ...conciseProjectionSchema(trimmed, "--schema"),
     kind: "concise",
     flag: "--schema",
   };
@@ -1613,37 +1706,49 @@ async function storedContainer(position: WalkedPosition): Promise<unknown> {
 }
 
 /**
- * Composes the addresses a selection's `$link` markers asked for into
- * `projected`, the value its projection produced.
+ * Composes the addresses a selection's markers asked for into `projected`, the
+ * value its projection produced.
  *
  * A marked position renders `{"$link": <address>}`. Where the same position
  * also projected contents, the address joins them in one object, because both
  * were asked for. Where those contents are not an object there is nothing to
  * join them to, and the address is the whole answer.
+ *
+ * `implicitArrayTraversal` states that the markers came from a concise field
+ * list, which names a field wherever the value holds one rather than at a
+ * fixed depth. The positions below an array then belong to its elements, the
+ * same way {@link projectValue} applies one field mask across them, while an
+ * address asked for at the array names the array itself.
  */
 async function composeLinkAddresses(
   position: WalkedPosition,
   markers: LinkMarkers,
   projected: unknown,
+  implicitArrayTraversal = false,
 ): Promise<unknown> {
   let composed = projected;
-  if (markers.items !== undefined) {
-    const stored = await storedContainer(position);
-    if (Array.isArray(stored)) {
-      const projectedItems = Array.isArray(projected) ? projected : [];
-      const items: unknown[] = [];
-      for (let index = 0; index < stored.length; index++) {
-        items.push(
-          await composeLinkAddresses(
-            positionBelow(position, index, stored),
-            markers.items,
-            projectedItems[index],
-          ),
-        );
-      }
-      composed = items;
+  const elementMarkers = markers.items ??
+    (implicitArrayTraversal && markers.properties !== undefined
+      ? { properties: markers.properties }
+      : undefined);
+  const stored = elementMarkers === undefined
+    ? undefined
+    : await storedContainer(position);
+  if (elementMarkers !== undefined && Array.isArray(stored)) {
+    const projectedItems = Array.isArray(projected) ? projected : [];
+    const items: unknown[] = [];
+    for (let index = 0; index < stored.length; index++) {
+      items.push(
+        await composeLinkAddresses(
+          positionBelow(position, index, stored),
+          elementMarkers,
+          projectedItems[index],
+          implicitArrayTraversal,
+        ),
+      );
     }
-  } else if (markers.properties !== undefined) {
+    composed = items;
+  } else if (markers.items === undefined && markers.properties !== undefined) {
     const projectedRecord = isRecord(projected) && !Array.isArray(projected)
       ? projected
       : {};
@@ -1653,6 +1758,7 @@ async function composeLinkAddresses(
         positionBelow(position, key, position.stored?.value),
         child,
         projectedRecord[key],
+        implicitArrayTraversal,
       );
     }
     composed = record;
@@ -1692,13 +1798,13 @@ export interface DeriveSelectedValueDependencies {
  * shape only; source schemas remain authoritative for CFC and other Fabric
  * metadata.
  *
- * A `$link` marker is answered beside that graph rather than through it: the
- * marked position contributes the rejecting selector to the read, so nothing
- * behind it is loaded, and its address is composed in from the deepest link
- * the walk down to it crosses, plus the segments below that link. That
- * composition walks the source, which a `--filter` makes unavailable — the
- * elements a predicate keeps cannot be traced back to the positions they came
- * from — so the two are refused together.
+ * A marker is answered beside that graph rather than through it: the marked
+ * position contributes the rejecting selector to the read, so nothing behind
+ * it is loaded, and its address is composed in from the deepest link the walk
+ * down to it crosses, plus the segments below that link. That composition
+ * walks the source, which a `--filter` makes unavailable — the elements a
+ * predicate keeps cannot be traced back to the positions they came from — so
+ * the two are refused together.
  */
 export async function deriveSelectedValue(
   runtime: Runtime,
@@ -1708,11 +1814,16 @@ export async function deriveSelectedValue(
   deps: DeriveSelectedValueDependencies = {},
 ): Promise<unknown> {
   const markers = selection.projection?.markers;
+  const implicitArrayTraversal = selection.projection?.kind === "concise";
   if (selection.filter !== undefined && markers !== undefined) {
+    const asked = implicitArrayTraversal
+      ? `an \`${CONCISE_ADDRESS_SUFFIX}\` suffix in ` +
+        selection.projection!.flag
+      : `a "${LINK_MARKER_KEY}" projection`;
     throw new CellSelectionError(
-      `--filter cannot be combined with a "${LINK_MARKER_KEY}" projection: a ` +
-        "filtered array's elements no longer say which positions they came " +
-        "from, and an address names a position",
+      `--filter cannot be combined with ${asked}: a filtered array's ` +
+        "elements no longer say which positions they came from, and an " +
+        "address names a position",
     );
   }
   const declaredSourceSchema = sourceCell.schema;
@@ -1750,6 +1861,7 @@ export async function deriveSelectedValue(
       sourcePosition(sourceValueCell),
       markers,
       undefined,
+      implicitArrayTraversal,
     );
   }
   const sourceItemSchema = schemaAtArrayItem(sourceSchema);
@@ -1999,6 +2111,7 @@ export async function deriveSelectedValue(
       sourcePosition(sourceValueCell),
       markers,
       outputValue,
+      implicitArrayTraversal,
     );
   } finally {
     runtime.runner.stop(resultCell);
