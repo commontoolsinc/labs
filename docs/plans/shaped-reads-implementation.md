@@ -54,6 +54,7 @@ session is unguessable where a DID is public.
 | --- | --- |
 | neither | both are minted — a random id, and a one-time session for this request |
 | `--invocation` only | error |
+| `--invocation-session` only | the id is minted, scoped to the session named |
 | both | replayable, and scoped to that session |
 
 Naming an invocation asks for an outcome to be addressable and replayable, and a
@@ -95,7 +96,8 @@ deferred in the design documents, with the condition that would reopen it.
 
 ## Stage 1 — foundation
 
-Nothing here is visible to a caller.
+F1 is invisible to a caller; F2 and F3 are the flag surface the rest of this
+plan is written against.
 
 **F1. Factor the read step out.** *(M)* One implementation turning a cell and a
 selection into structured output, with `piece get` as its first caller.
@@ -123,16 +125,40 @@ its own flag; `--schema` keeps full schemas and `@file`. Concise input on
 `--schema` continues to work, without a warning — there is no removal date yet,
 and warning on every invocation would be noise in the skills that teach it.
 
-*Exit:* `piece get` reads through the factored step, both flags work, and
+**F3. A projection schema is checked against an allowlist.** *(M)* Today two
+denylists are consulted and every key in neither is accepted and ignored. So a
+typo (`propertys`) selects nothing and says nothing, and any keyword given a
+meaning later changes behavior for schemas that already carry it, with no error
+ever having been raised.
+
+Three tiers replace the two lists. **Honored**: the keys projection acts on.
+**Tolerated**: the annotation and validation keywords, ignored but not refused —
+this tier has to exist, because a caller is told to lift a source schema and
+prune it, and a lifted schema is full of them. **Anything else**: refused by
+name.
+
+Deciding the second tier's membership is the work; the check itself is small.
+The reason it is worth the work is that a projection which quietly returns `{}`
+is the same failure this plan has already had to fix twice — a missing `type`
+and an untyped `items` root each returned nothing and reported nothing.
+
+*Exit:* `piece get` reads through the factored step, both flags work, an
+unrecognized key is refused by name, and
 `packages/cli/test/piece-get-transform.test.ts` passes **unchanged**. A moved
 expectation means the extraction changed behavior and is wrong.
 
 ## Stage 2 — addresses in results
 
-**A1. `$link` in a selection.** *(M)* The projection-only keyword, refused today
-alongside the treatment keywords, becomes meaningful: a marked position returns
-its address rather than its contents, rendered as the declared link shape and
-not the runtime envelope.
+**A1. `$link` in a selection.** *(M)* The projection-only keyword becomes
+meaningful: a marked position returns its address rather than its contents,
+rendered as the declared link shape and not the runtime envelope.
+
+Note what it becomes meaningful *from*. `$link` is in neither key set today, so
+it is carried through and ignored rather than refused — a schema already
+containing it changes behavior with no error having warned. The population at
+risk is empty in practice, since `$link` is not a source-schema keyword and
+lifting one cannot produce it. F3 is what stops the next key from having this
+story.
 
 **A2. Compose the rejecting selector.** *(M)* A marked position contributes a
 rejecting selector to the path union the projection already builds, so its
@@ -180,10 +206,24 @@ later moves.
 
 **S1. Mint and plumb a session.** *(M)* `cf session new` emits a bare random
 string on stdout — no file format, since unlike `cf id new` there is no key
-material and a keyfile shape would only be cargo-culted. `--session` and
-`CF_SESSION` carry it, following `CF_IDENTITY` and `CF_API_URL`. Accepted and threaded through, but **not yet joined to the
-hash** — nothing observable changes, and the mechanism can be exercised before
-it matters.
+material and a keyfile shape would only be cargo-culted. `--invocation-session`
+and `CF_INVOCATION_SESSION` carry it, following `CF_IDENTITY` and `CF_API_URL`.
+Accepted and threaded through, but **not yet joined to the hash** — nothing
+observable changes, and the mechanism can be exercised before it matters.
+
+*The name is qualified deliberately.* `cf inspect` already takes `--session`,
+meaning a storage session — a different thing entirely, in the same binary. One
+word for two concepts is what this arc spent its first document untangling
+elsewhere, so it is not worth introducing here. Qualifying the new flag is free
+today because nothing uses it yet; `cf inspect`'s could become
+`--storage-session` later, which is a change to a forensics tool with its own
+callers and is not part of this work.
+
+*It is closer to a secret than to a setting.* Its unguessability is what keeps
+an outcome's address out of reach of anyone who can guess a piece, a verb, and a
+conventional id. A flag value is visible in process listings where an
+environment variable is not, so the environment form is the one to teach and the
+flag is the override.
 
 **S2. Join the session to the hash.** *(S)* The session enters the hash
 `scopeCallerEventId` computes, so an id chosen in one agent's session and in
@@ -194,7 +234,7 @@ an error.
 what relies on it is the tests of the property itself.
 `packages/cli/integration/verbs-over-the-cli.sh` replays one id to assert
 deduplication, and `packages/cli/integration/integration.sh` has four retry
-scenarios doing the same across separate processes. All of them pass a session
+scenarios (of six) doing the same across separate processes. All of them pass a session
 after this, which is the change rather than a casualty of it.
 
 This is the one address-changing commit in the plan. It carries nothing else,
@@ -214,6 +254,15 @@ property names — since that is what narrowing needs, and recording link
 positions would mean writing `asCell` onto a document nothing can be written
 through. Lands before C2 so a selection over a receipt is bounded from the first
 call that can express one.
+
+*Plain results only, which leaves the flagship case out.* Deriving a shape needs
+a settled value, and a result holding anything reactive has none when the
+receipt is written — so a verb returning a child piece, which is what the
+walkthrough fixture does, gets no schema. What that costs is narrower than it
+sounds: a `$link` marker still renders an address and still suppresses the
+fetch, because a rejecting selector short-circuits before a source schema is
+consulted. What is lost is narrowing on field selection, and checking a
+selection before the call. The backlog item above is what closes it.
 
 *Why descriptive rather than declared.* A verb's declared result type does not
 survive compilation: `handler()` takes an event schema and a state schema, its
@@ -285,6 +334,7 @@ Stages are ordered, but not everything in them is blocked.
 | --- | --- | --- |
 | F1 | — | everything selection-shaped depends on it |
 | F2 | — | independent of F1; grouped for one flag change |
+| F3 | F1 | independent of F2; both are the flag surface |
 | A1 | F1 | |
 | A2 | A1 | |
 | A3 | A1, F2 | needs both the marker and the flag |
@@ -378,7 +428,7 @@ Each step carries its own, rather than a sweep at the end.
 | F2 | `packages/cli/README.md` output conventions: two flags, which syntax each takes |
 | A1, A3 | The marker and the suffix, same file; [Verbs over the CLI](../common/verbs-over-the-cli.md), already stale |
 | A4 | Address forms wherever `--piece` is taught — the CLI README and the tutorial's workflow chapter |
-| S1, S2 | `cf session new`, `CF_SESSION`, and what an absent session means; the CLI README and the agent-facing skills that teach invocation ids |
+| S1, S2 | `cf session new`, `CF_INVOCATION_SESSION`, and what an absent session means; the CLI README and the agent-facing skills that teach invocation ids |
 | C1 | What a receipt declares, in the design document's open-question slot |
 | C2, C3 | `piece call`'s section, and the envelope's fields |
 | W1, W2 | `wish` and `exec` in `packages/cli/README.md`, and the read options stated once where all four arrivals can point at them rather than four times |
