@@ -12,9 +12,10 @@ const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 // FIXTURE: fabric-special-object-brand
-// Verifies: the `FabricSpecialObject` nominal brand -- a type-system-only key
-// on `FabricBytes` and the other fabric special objects -- never reaches a
-// generated schema's `properties` or `required`.
+// Verifies: a field authored against a fabric-primitive class emits its
+// fabric-primitive schema type (`{ type: "FabricBytes" }`, matched by
+// prototype at validation time), and the `FabricSpecialObject` nominal brand
+// -- a type-system-only key -- never reaches a generated schema.
 export default pattern((state: {
     blob: FabricBytes;
 }) => {
@@ -25,21 +26,10 @@ export default pattern((state: {
     type: "object",
     properties: {
         blob: {
-            $ref: "#/$defs/FabricBytes"
+            type: "FabricBytes"
         }
     },
-    required: ["blob"],
-    $defs: {
-        FabricBytes: {
-            type: "object",
-            properties: {
-                length: {
-                    type: "number"
-                }
-            },
-            required: ["length"]
-        }
-    }
+    required: ["blob"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

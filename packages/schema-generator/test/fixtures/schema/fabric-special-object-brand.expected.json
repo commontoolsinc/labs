@@ -1,24 +1,21 @@
 {
   "$defs": {
-    "FabricBytes": {
-      "properties": {
-        "length": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "length"
-      ],
+    "FabricPrimitive": {
+      "properties": {},
       "type": "object"
     }
   },
   "properties": {
     "blob": {
-      "$ref": "#/$defs/FabricBytes"
+      "type": "FabricBytes"
+    },
+    "opaque": {
+      "$ref": "#/$defs/FabricPrimitive"
     }
   },
   "required": [
-    "blob"
+    "blob",
+    "opaque"
   ],
   "type": "object"
 }
