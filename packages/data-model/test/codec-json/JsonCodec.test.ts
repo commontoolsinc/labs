@@ -702,6 +702,21 @@ describe("JsonCodec", () => {
         >;
         expect(result["/x"]!["a"]).toBe(1);
       });
+
+      it("collapses a `/quote` nested inside an array value into the outer one", () => {
+        // The array element is itself a literal `/`-keyed object, so it encodes
+        // as its own `/quote`. Wrapping the whole structure has to unquote
+        // *through* the array; otherwise the inner wrapper survives into the
+        // output, and decoding -- which strips exactly one `/quote` layer --
+        // hands back the wrapper instead of the object the caller wrote.
+        const obj = { "/outer": [{ "/inner": "val" }] };
+        expect(toWireFormat(obj)).toEqual({
+          "/quote": { "/outer": [{ "/inner": "val" }] },
+        });
+
+        const result = roundTrip(obj) as Record<string, FabricValue[]>;
+        expect(result["/outer"]![0]).toEqual({ "/inner": "val" });
+      });
     });
 
     describe("/object: any value requires encoding", () => {
