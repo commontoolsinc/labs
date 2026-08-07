@@ -3179,7 +3179,7 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
-    "errors on top-level .get() on Writable path in pattern body",
+    "allows top-level .get() on Writable path in pattern body (auto-wrapped)",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";
 
@@ -3191,8 +3191,118 @@ Deno.test("Reactive .get() Validation", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "return-site .get() is auto-wrapped, not an error",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on statement-position .get() on a Writable",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      export default pattern<{ count: Writable<number> }>(({ count }) => {
+        count.get();
+        return {};
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
       assertHasErrorType(errors, "pattern-context:get-call");
+    },
+  );
+
+  await t.step(
+    "allows a bare .get() binding on a Writable (auto-wrapped)",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      export default pattern<{ rows: Writable<string[]> }>(({ rows }) => {
+        const all = rows.get();
+        const first = rows.get()[0];
+        return { all, first };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "binding-site .get() with no further computation is auto-wrapped",
+      );
+    },
+  );
+
+  await t.step(
+    "allows the computed-key spelling of a .get() binding (auto-wrapped)",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      export default pattern<{ layout: Writable<string> }>(({ layout }) => {
+        const value = layout["get"]();
+        return { value };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "layout['get']() is the same read as layout.get()",
+      );
+    },
+  );
+
+  await t.step(
+    "still errors on an opaque .get() binding",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        const all = items.get();
+        return { all };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "opaque-get:invalid-call");
+      assertHasErrorType(errors, "pattern-context:get-call");
+    },
+  );
+
+  await t.step(
+    "allows a method call over a .get() binding on a Writable (auto-wrapped)",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      export default pattern<{ rows: Writable<string[]> }>(({ rows }) => {
+        const joined = rows.get().join(",");
+        const kept = rows.get().filter((row) => row.length > 0);
+        return { joined, kept };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "a method call whose receiver chain reaches a .get() is auto-wrapped",
+      );
     },
   );
 
