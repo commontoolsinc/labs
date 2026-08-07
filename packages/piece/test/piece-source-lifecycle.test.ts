@@ -12,7 +12,6 @@ import {
   setPatternSource,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { PieceManager } from "../src/manager.ts";
 import { readPieceSourceState } from "../src/ops/piece-origin.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
@@ -151,7 +150,6 @@ function installFetchStub(
 describe("piece source lifecycle", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
   let pieces: PiecesController;
   let webSources: Record<string, RuntimeProgram>;
   let webFetches: number;
@@ -166,15 +164,14 @@ describe("piece source lifecycle", () => {
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
     });
-    manager = new PieceManager(
+    pieces = new PiecesController(
       await createSession({
         identity: signer,
         spaceName: `piece-source-lifecycle-${crypto.randomUUID()}`,
       }),
       runtime,
     );
-    await manager.synced();
-    pieces = new PiecesController(manager);
+    await pieces.synced();
   });
 
   afterEach(async () => {
@@ -443,18 +440,18 @@ describe("piece source lifecycle", () => {
   it("rejects a different pattern at an existing creation identity", async () => {
     const firstPattern = await runtime.patternManager.compilePattern(
       versionProgram("first"),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const secondPattern = await runtime.patternManager.compilePattern(
       versionProgram("second"),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const cause = "piece-creation-collision-" + crypto.randomUUID();
-    const piece = await manager.setupPersistent(firstPattern, {}, cause);
+    const piece = await pieces.setupPersistent(firstPattern, {}, cause);
     const firstRef = getPatternIdentityRef(piece);
 
     await expect(
-      manager.setupPersistent(secondPattern, {}, cause),
+      pieces.setupPersistent(secondPattern, {}, cause),
     ).rejects.toThrow("piece already exists with a different pattern");
 
     await piece.sync();
@@ -469,17 +466,17 @@ describe("piece source lifecycle", () => {
   it("allows only one pattern to win a concurrent creation identity", async () => {
     const firstPattern = await runtime.patternManager.compilePattern(
       versionProgram("first"),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const secondPattern = await runtime.patternManager.compilePattern(
       versionProgram("second"),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const cause = "concurrent-piece-creation-" + crypto.randomUUID();
 
     const results = await Promise.allSettled([
-      manager.setupPersistent(firstPattern, {}, cause),
-      manager.setupPersistent(secondPattern, {}, cause),
+      pieces.setupPersistent(firstPattern, {}, cause),
+      pieces.setupPersistent(secondPattern, {}, cause),
     ]);
     const fulfilled = results.filter((result) => result.status === "fulfilled");
     const rejected = results.filter((result) => result.status === "rejected");
@@ -490,7 +487,7 @@ describe("piece source lifecycle", () => {
     );
 
     const piece = (fulfilled[0] as PromiseFulfilledResult<
-      Awaited<ReturnType<typeof manager.setupPersistent>>
+      Awaited<ReturnType<typeof pieces.setupPersistent>>
     >).value;
     await piece.sync();
     const current = getPatternIdentityRef(piece);
@@ -502,18 +499,18 @@ describe("piece source lifecycle", () => {
   it("validates initialized history when the same creation identity is reused", async () => {
     const pattern = await runtime.patternManager.compilePattern(
       versionProgram("first"),
-      { space: manager.getSpace() },
+      { space: pieces.getSpace() },
     );
     const cause = "reused-piece-creation-" + crypto.randomUUID();
-    const first = await manager.setupPersistent(pattern, {}, cause);
-    const second = await manager.setupPersistent(pattern, {}, cause);
+    const first = await pieces.setupPersistent(pattern, {}, cause);
+    const second = await pieces.setupPersistent(pattern, {}, cause);
     expect(second.entityId).toEqual(first.entityId);
 
     const tx = runtime.edit();
     first.withTx(tx).setMetaRaw("patternIdentity", undefined);
     await tx.commit();
     await expect(
-      manager.setupPersistent(pattern, {}, cause),
+      pieces.setupPersistent(pattern, {}, cause),
     ).rejects.toThrow(
       "piece source history exists without a pattern identity",
     );
@@ -607,7 +604,7 @@ describe("piece source lifecycle", () => {
     const target = await pieces.create(versionProgram("target-v1"), {
       input: {},
     });
-    const origin = `cf:/${manager.getSpace()}/${source.id}`;
+    const origin = `cf:/${pieces.getSpace()}/${source.id}`;
     await stampOrigin(target, origin);
     await target.changeSource({ kind: "detach" });
     const detachedState = await readPieceSourceState(
@@ -863,9 +860,9 @@ describe("piece source lifecycle", () => {
     await piece.changeSource({ kind: "detach" });
     const revision = (await readPieceSourceState(runtime, piece.getCell()))
       .history.find((entry) => entry.origin?.url === origin)!;
-    const argument = manager.getArgument(piece.getCell());
+    const argument = pieces.getArgument(piece.getCell());
     const contractless = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       `contractless-${crypto.randomUUID()}`,
     );
     await runtime.editWithRetry((tx) => {
@@ -897,10 +894,10 @@ describe("piece source lifecycle", () => {
     await piece.changeSource({ kind: "detach" });
     const revision = (await readPieceSourceState(runtime, piece.getCell()))
       .history.find((entry) => entry.origin?.url === origin)!;
-    const argument = manager.getArgument(piece.getCell());
-    const getArgument = manager.getArgument;
+    const argument = pieces.getArgument(piece.getCell());
+    const getArgument = pieces.getArgument;
     const getRaw = argument.getRaw;
-    manager.getArgument = (() => argument) as typeof manager.getArgument;
+    pieces.getArgument = (() => argument) as typeof pieces.getArgument;
     argument.getRaw = (() => {
       return {
         value: 4,
@@ -920,7 +917,7 @@ describe("piece source lifecycle", () => {
       }
     } finally {
       argument.getRaw = getRaw;
-      manager.getArgument = getArgument;
+      pieces.getArgument = getArgument;
     }
   });
 
@@ -1072,11 +1069,11 @@ describe("piece source lifecycle", () => {
       throw new Error("expected an incompatibility warning");
     }
 
-    const mutableManager = manager as unknown as {
-      runWithPattern: typeof manager.runWithPattern;
+    const mutablePieces = pieces as unknown as {
+      runWithPattern: typeof pieces.runWithPattern;
     };
-    const runWithPattern = manager.runWithPattern.bind(manager);
-    mutableManager.runWithPattern = async (...args) => {
+    const runWithPattern = pieces.runWithPattern.bind(pieces);
+    mutablePieces.runWithPattern = async (...args) => {
       await piece.input.set(
         (await secondSource.result.getCell()).key("value"),
         ["mode"],
@@ -1092,7 +1089,7 @@ describe("piece source lifecycle", () => {
         "retained piece input changed after compatibility was checked",
       );
     } finally {
-      mutableManager.runWithPattern = runWithPattern;
+      mutablePieces.runWithPattern = runWithPattern;
     }
   });
 
@@ -1120,11 +1117,11 @@ describe("piece source lifecycle", () => {
       throw new Error("expected an incompatibility warning");
     }
 
-    const mutableManager = manager as unknown as {
-      runWithPattern: typeof manager.runWithPattern;
+    const mutablePieces = pieces as unknown as {
+      runWithPattern: typeof pieces.runWithPattern;
     };
-    const runWithPattern = manager.runWithPattern.bind(manager);
-    mutableManager.runWithPattern = async (...args) => {
+    const runWithPattern = pieces.runWithPattern.bind(pieces);
+    mutablePieces.runWithPattern = async (...args) => {
       const tx = runtime.edit();
       piece.getCell().withTx(tx).setMetaRaw("argument", undefined);
       await tx.commit();
@@ -1137,7 +1134,7 @@ describe("piece source lifecycle", () => {
         }),
       ).rejects.toThrow("piece missing its current argument");
     } finally {
-      mutableManager.runWithPattern = runWithPattern;
+      mutablePieces.runWithPattern = runWithPattern;
     }
   });
 
@@ -1153,11 +1150,11 @@ describe("piece source lifecycle", () => {
       .history.find((entry) => entry.origin?.url === origin)!;
     webSources["/new-link-race.tsx"] = optionalModeProgram(2);
 
-    const mutableManager = manager as unknown as {
-      runWithPattern: typeof manager.runWithPattern;
+    const mutablePieces = pieces as unknown as {
+      runWithPattern: typeof pieces.runWithPattern;
     };
-    const runWithPattern = manager.runWithPattern.bind(manager);
-    mutableManager.runWithPattern = async (...args) => {
+    const runWithPattern = pieces.runWithPattern.bind(pieces);
+    mutablePieces.runWithPattern = async (...args) => {
       await piece.input.set(
         (await source.result.getCell()).key("value"),
         ["mode"],
@@ -1176,7 +1173,7 @@ describe("piece source lifecycle", () => {
         );
       }
     } finally {
-      mutableManager.runWithPattern = runWithPattern;
+      mutablePieces.runWithPattern = runWithPattern;
     }
   });
 
@@ -1189,11 +1186,11 @@ describe("piece source lifecycle", () => {
       .history.find((entry) => entry.origin?.url === origin)!;
     webSources["/spurious-runtime-error.tsx"] = versionProgram("candidate");
 
-    const mutableManager = manager as unknown as {
-      runWithPattern: typeof manager.runWithPattern;
+    const mutablePieces = pieces as unknown as {
+      runWithPattern: typeof pieces.runWithPattern;
     };
-    const runWithPattern = manager.runWithPattern;
-    mutableManager.runWithPattern = () => {
+    const runWithPattern = pieces.runWithPattern;
+    mutablePieces.runWithPattern = () => {
       throw new Error(
         "piece source is incompatible with retained input: synthetic",
       );
@@ -1206,7 +1203,7 @@ describe("piece source lifecycle", () => {
         }),
       ).rejects.toThrow("retained input: synthetic");
     } finally {
-      mutableManager.runWithPattern = runWithPattern;
+      mutablePieces.runWithPattern = runWithPattern;
     }
   });
 
@@ -1219,11 +1216,11 @@ describe("piece source lifecycle", () => {
       .history.find((entry) => entry.origin?.url === origin)!;
     webSources["/non-error.tsx"] = versionProgram("candidate");
 
-    const mutableManager = manager as unknown as {
-      runWithPattern: typeof manager.runWithPattern;
+    const mutablePieces = pieces as unknown as {
+      runWithPattern: typeof pieces.runWithPattern;
     };
-    const runWithPattern = manager.runWithPattern;
-    mutableManager.runWithPattern =
+    const runWithPattern = pieces.runWithPattern;
+    mutablePieces.runWithPattern =
       (() =>
         Promise.reject("raw execution rejection")) as typeof runWithPattern;
     let reason: unknown;
@@ -1235,7 +1232,7 @@ describe("piece source lifecycle", () => {
     } catch (error) {
       reason = error;
     } finally {
-      mutableManager.runWithPattern = runWithPattern;
+      mutablePieces.runWithPattern = runWithPattern;
     }
     expect(reason).toBe("raw execution rejection");
   });
@@ -1249,11 +1246,11 @@ describe("piece source lifecycle", () => {
       .history[0];
     await piece.setPattern(versionProgram("v2"));
 
-    const mutableManager = manager as unknown as {
-      runWithPattern: typeof manager.runWithPattern;
+    const mutablePieces = pieces as unknown as {
+      runWithPattern: typeof pieces.runWithPattern;
     };
-    const runWithPattern = manager.runWithPattern.bind(manager);
-    mutableManager.runWithPattern = async (...args) => {
+    const runWithPattern = pieces.runWithPattern.bind(pieces);
+    mutablePieces.runWithPattern = async (...args) => {
       await runWithPattern(...args);
       throw new Error("post-commit refresh failed");
     };
@@ -1268,7 +1265,7 @@ describe("piece source lifecycle", () => {
         executionWarning: "post-commit refresh failed",
       });
     } finally {
-      mutableManager.runWithPattern = runWithPattern;
+      mutablePieces.runWithPattern = runWithPattern;
     }
 
     const state = await readPieceSourceState(runtime, piece.getCell());
@@ -1331,18 +1328,18 @@ describe("piece source lifecycle", () => {
 
   it("does not report a direct edit as unsaved after its refresh fails", async () => {
     const piece = await pieces.create(versionProgram("v1"), { input: {} });
-    const mutableManager = manager as unknown as {
-      runWithPattern: typeof manager.runWithPattern;
+    const mutablePieces = pieces as unknown as {
+      runWithPattern: typeof pieces.runWithPattern;
     };
-    const runWithPattern = manager.runWithPattern.bind(manager);
-    mutableManager.runWithPattern = async (...args) => {
+    const runWithPattern = pieces.runWithPattern.bind(pieces);
+    mutablePieces.runWithPattern = async (...args) => {
       await runWithPattern(...args);
       throw new Error("direct edit refresh failed");
     };
     try {
       await piece.setPattern(versionProgram("v2"));
     } finally {
-      mutableManager.runWithPattern = runWithPattern;
+      mutablePieces.runWithPattern = runWithPattern;
     }
 
     expect(
@@ -1361,16 +1358,16 @@ describe("piece source lifecycle", () => {
       .history[0];
     await piece.setPattern(versionProgram("v2"));
 
-    const mutableManager = manager as unknown as {
-      runWithPattern: typeof manager.runWithPattern;
+    const mutablePieces = pieces as unknown as {
+      runWithPattern: typeof pieces.runWithPattern;
     };
-    const runWithPattern = manager.runWithPattern.bind(manager);
+    const runWithPattern = pieces.runWithPattern.bind(pieces);
     let changedAgain = false;
-    mutableManager.runWithPattern = async (...args) => {
+    mutablePieces.runWithPattern = async (...args) => {
       await runWithPattern(...args);
       if (!changedAgain) {
         changedAgain = true;
-        mutableManager.runWithPattern = runWithPattern;
+        mutablePieces.runWithPattern = runWithPattern;
         await piece.setPattern(versionProgram("v3"));
       }
       throw new Error("older post-commit refresh failed");
@@ -1386,7 +1383,7 @@ describe("piece source lifecycle", () => {
         executionWarning: "older post-commit refresh failed",
       });
     } finally {
-      mutableManager.runWithPattern = runWithPattern;
+      mutablePieces.runWithPattern = runWithPattern;
     }
 
     const state = await readPieceSourceState(runtime, piece.getCell());

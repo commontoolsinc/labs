@@ -8,7 +8,7 @@ import {
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { sourceDocKey } from "../../../runner/src/compilation-cache/cell-cache.ts";
-import { PieceManager } from "../../src/manager.ts";
+import { PiecesController } from "../../src/ops/pieces-controller.ts";
 
 const SOURCE = "export default 1;\n";
 const SOURCE_IDENTITY = "Qxkzi6OeLOLPP3A3-e-8kLe0DyNgoDZMZVIKr4PLz3w";
@@ -28,7 +28,7 @@ const runtime = new Runtime({
 
 let outcome: { baseline?: string; history?: string[]; error?: string };
 try {
-  const manager = new PieceManager(
+  const pieces = new PiecesController(
     await createSession({
       identity: storageManager.as as Identity,
       spaceName:
@@ -36,7 +36,7 @@ try {
     }),
     runtime,
   );
-  await manager.synced();
+  await pieces.synced();
 
   const currentPattern = {
     identity: MISSING_IDENTITY,
@@ -47,7 +47,7 @@ try {
     symbol: "default",
   };
   const piece = runtime.getCell(
-    manager.getSpace(),
+    pieces.getSpace(),
     "source-transition-compiler-preload",
   );
   const seedTx = runtime.edit();
@@ -59,7 +59,7 @@ try {
     "https://example.test/missing-pattern.tsx",
   );
   runtime.getCell(
-    manager.getSpace(),
+    pieces.getSpace(),
     sourceDocKey(SOURCE_IDENTITY),
     undefined,
     seedTx,

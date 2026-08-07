@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { ANYONE_USER } from "@commonfabric/memory/acl";
+import { ACLManager } from "@commonfabric/runner";
 import {
   initializePiecesController,
   PiecesController,
@@ -49,7 +50,7 @@ testComponents.forEach(({ name, file }) => {
       pieceId = piece.id;
 
       // Add permissions for ANYONE in the first test
-      await cc.acl().set(ANYONE_USER, "WRITE");
+      await new ACLManager(cc.runtime, cc.getSpace()).set(ANYONE_USER, "WRITE");
     });
 
     afterAll(async () => {
@@ -131,7 +132,7 @@ describe("cf-checkbox waitForDisabled fallback integration test", () => {
       { start: false },
     );
     pieceId = piece.id;
-    await cc.acl().set(ANYONE_USER, "WRITE");
+    await new ACLManager(cc.runtime, cc.getSpace()).set(ANYONE_USER, "WRITE");
   });
 
   afterAll(async () => {

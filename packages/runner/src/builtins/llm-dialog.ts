@@ -315,7 +315,7 @@ function prepareSchemaForLLM(schema: JSONSchema): JSONSchema {
 }
 
 /**
- * Resolve a piece's result schema similarly to PieceManager.#getResultSchema:
+ * Resolve a piece's result schema:
  * - Prefer a non-empty pattern.resultSchema if pattern is loaded
  * - Otherwise derive a simple object schema from the current value
  */

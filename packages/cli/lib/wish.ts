@@ -7,7 +7,7 @@ import {
   type MemorySpace,
   type Runtime,
 } from "@commonfabric/runner";
-import { loadManager, type SpaceConfig } from "./piece.ts";
+import { loadPieces, type SpaceConfig } from "./piece.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 
 /**
@@ -126,7 +126,7 @@ export async function resolveWish(
   };
 }
 
-/** What {@link readWish} needs from a connected manager. */
+/** What {@link readWish} needs from a connected pieces controller. */
 export interface WishRuntimeHost {
   runtime: Runtime;
   getSpace(): MemorySpace;
@@ -134,19 +134,19 @@ export interface WishRuntimeHost {
 
 /** Injectable connection dep, mirroring lib/piece.ts's `RootPatternDeps`. */
 export interface ReadWishDeps {
-  loadManager?: (config: SpaceConfig) => Promise<WishRuntimeHost>;
+  loadPieces?: (config: SpaceConfig) => Promise<WishRuntimeHost>;
 }
 
 /**
  * The blessed, headless read: connect a real identity/session-backed runtime via
- * {@link loadManager}, then {@link resolveWish}. See {@link WishReadConfig}.
+ * {@link loadPieces}, then {@link resolveWish}. See {@link WishReadConfig}.
  */
 export async function readWish(
   config: WishReadConfig,
   deps: ReadWishDeps = {},
 ): Promise<WishReadResult> {
-  const manager = await (deps.loadManager ?? loadManager)(config);
-  return await resolveWish(manager.runtime, manager.getSpace(), {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  return await resolveWish(pieces.runtime, pieces.getSpace(), {
     query: config.query,
     path: config.path,
     schema: config.schema,

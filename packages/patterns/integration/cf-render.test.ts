@@ -83,7 +83,7 @@ describe("cf-render integration test", () => {
     // change. The sink also drives awaitResultValue: it records the latest
     // committed value and resolves a pending waiter when its target is
     // reached.
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink((value) => {
       latestResultValue = (value as { value?: number } | undefined)?.value;
       if (resultWaiter && latestResultValue === resultWaiter.target) {

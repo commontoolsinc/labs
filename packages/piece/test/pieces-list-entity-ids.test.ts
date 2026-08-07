@@ -1,8 +1,8 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { PieceManager } from "../src/manager.ts";
+import { PiecesController } from "../src/ops/pieces-controller.ts";
 
-describe("PieceManager.listEntityIds", () => {
+describe("PiecesController.listEntityIds", () => {
   it("opens the space session without requesting entity identifiers", async () => {
     const ready = Promise.withResolvers<void>();
     const openedSpaces: string[] = [];
@@ -29,13 +29,13 @@ describe("PieceManager.listEntityIds", () => {
         },
       },
     };
-    const manager = new PieceManager({
+    const pieces = new PiecesController({
       as: {} as never,
       space: "did:key:test-space" as never,
     }, runtime as never);
-    manager.ready = ready.promise;
+    pieces.ready = ready.promise;
 
-    const result = manager.ensureSpaceSession();
+    const result = pieces.ensureSpaceSession();
     await Promise.resolve();
     expect(openedSpaces).toEqual([]);
     expect(sessionCalls).toBe(0);
@@ -47,7 +47,7 @@ describe("PieceManager.listEntityIds", () => {
     expect(listCalls).toBe(0);
   });
 
-  it("waits until the manager is ready and delegates to the space provider", async () => {
+  it("waits until the pieces is ready and delegates to the space provider", async () => {
     const ready = Promise.withResolvers<void>();
     const listed = ["of:fid1:alpha", "of:fid1:beta"];
     const openedSpaces: string[] = [];
@@ -69,13 +69,13 @@ describe("PieceManager.listEntityIds", () => {
         },
       },
     };
-    const manager = new PieceManager({
+    const pieces = new PiecesController({
       as: {} as never,
       space: "did:key:test-space" as never,
     }, runtime as never);
-    manager.ready = ready.promise;
+    pieces.ready = ready.promise;
 
-    const result = manager.listEntityIds();
+    const result = pieces.listEntityIds();
     await Promise.resolve();
     expect(openedSpaces).toEqual([]);
     expect(listCalls).toBe(0);

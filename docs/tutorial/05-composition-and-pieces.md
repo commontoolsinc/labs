@@ -46,7 +46,7 @@ parent passes.
 
 A **pattern** is source code — a template. A **piece** is an instance of a
 pattern living in a space. Top-level deployment through `cf piece new` or the
-shell does roughly this (see `packages/piece/src/manager.ts`):
+shell does roughly this (see `packages/piece/src/ops/pieces-controller.ts`):
 
 1. The pattern source is compiled and registered, so the space knows the
    program (not just its output).
