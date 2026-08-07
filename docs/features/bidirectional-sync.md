@@ -286,9 +286,19 @@ export async function doSyncCycle(
   let editWatermark = 0;
   // Canonical IDs learned on an earlier attempt, kept across retries.
   const editIdMap = new Map<Edit, string>();
+  // What became of each edit the filesystem has already seen. These accumulate
+  // across retries for the same reason the watermark does: an aborted attempt
+  // still applied its edits to disk, and the commit that finally lands is the
+  // only one that gets to record them.
+  const applied: Edit[] = [];
+  const failed: FailedEdit[] = [];
   let committed = false;
 
   while (!committed) {
+    // Which optimistic-create cells this attempt redirected. Reset per
+    // attempt, because an aborted commit undoes the redirects with it.
+    const redirected: number[] = [];
+
     // Let any in-flight storage traffic settle first.
     await runtime.storageManager.synced();
 
@@ -309,8 +319,6 @@ export async function doSyncCycle(
       //    attempt the watermark is 0, so every edit is applied. On a retry
       //    only the edits that arrived since are applied; the earlier ones
       //    are already on disk.
-      const applied: Edit[] = [];
-      const failed: FailedEdit[] = [];
       for (let i = editWatermark; i < edits.length; i++) {
         const original = edits[i];
         const edit = resolveEdit(original, pendingToCanonical);
@@ -342,15 +350,18 @@ export async function doSyncCycle(
       txState.set(buildStateFromFs(watchPath, cellFor));
 
       // 3. Redirect the cells the pattern allocated for optimistic creates
-      //    at the cells their canonical IDs now name.
+      //    at the cells their canonical IDs now name. These writes go through
+      //    the transaction, so a failed commit rolls them back and the next
+      //    attempt has to make them again.
       for (const [index, tempCell] of tempCells) {
         const canonicalId = editIdMap.get(edits[index]);
         if (canonicalId === undefined) continue;
         redirectToCanonical(tempCell, cellFor(canonicalId));
-        tempCells.delete(index);
+        redirected.push(index);
       }
 
-      // 4. Clear the queue, and record what happened to each edit.
+      // 4. Clear the queue, and record what happened to every edit this cycle
+      //    has processed, including the ones an earlier attempt applied.
       txApplied.push(...applied);
       txFailed.push(...failed);
       txEdits.set([]);
@@ -362,7 +373,11 @@ export async function doSyncCycle(
     //    running, so go round again and catch up. The watermark keeps the
     //    filesystem from receiving the earlier edits a second time.
     const { error } = await tx.commit();
-    if (!error) committed = true;
+    if (!error) {
+      committed = true;
+      // The redirects are durable now, so stop offering those cells.
+      for (const index of redirected) tempCells.delete(index);
+    }
   }
 }
 ```
@@ -547,8 +562,24 @@ Retry:          edits = [A, B, C] → skip A, B (watermark) → apply C → wate
 
 The watermark lives outside the `while (!committed)` loop but inside
 `doSyncCycle`, so it survives across CAS retries within a single sync cycle but
-resets between cycles. The `editIdMap` works the same way — canonical IDs discovered during
-earlier attempts are preserved across retries.
+resets between cycles. The `editIdMap` works the same way — canonical IDs
+discovered during earlier attempts are preserved across retries.
+
+The `applied` and `failed` lists must live out there too, and for a reason that
+is easy to miss. An aborted attempt still wrote its edits to the filesystem,
+and the watermark makes sure the next attempt skips them. So if those lists
+were rebuilt per attempt, the commit that finally lands would record only the
+last attempt's edits. Every edit an earlier attempt applied would vanish from
+`appliedEdits`, and, worse, every edit an earlier attempt rejected would vanish
+from `failedEdits` without ever reaching the user who has to reformulate it.
+Accumulating both lists across attempts is what makes the winning commit a
+complete record of the cycle.
+
+The redirects go the other way. Each one is a write through the transaction, so
+an aborted commit rolls it back and the next attempt has to make it again. That
+is why a `tempCells` entry is only dropped after a commit succeeds. Drop one
+earlier and the retry skips a redirect that no longer exists, leaving an
+optimistically created item pointing at a cell nothing writes to.
 
 #### Why there's no backsliding
 
@@ -595,6 +626,8 @@ up anything that arrived mid-sync.
 | `txState.set(...)` in same tx    | No-backsliding: state and queue are always consistent |
 | `editWatermark`                  | No double-apply: filesystem edits aren't repeated on retry |
 | `editIdMap` outside retry loop   | Canonical IDs survive CAS retries             |
+| `applied`/`failed` outside retry loop | The winning commit records every edit the cycle processed |
+| `tempCells` entries dropped after commit | A rolled-back redirect is made again on the retry |
 | `pendingToCanonical` across cycles | Edits naming a pending ID still reach the right item |
 | Append-only queue                | Watermark validity: prefix is stable across retries |
 | `syncInProgress` guard           | Efficiency: one sync at a time, no redundant fs reads |
@@ -626,7 +659,7 @@ const myPattern = pattern<{ state: State; edits: Edit[] }>(
   ({ state, edits }) => {
     return (
       <div>
-        {state.items.map((item, index) => <div key={index}>{item.name}</div>)}
+        {state.items.map((item) => <div>{item.name}</div>)}
       </div>
     );
   },
