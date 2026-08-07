@@ -63,6 +63,7 @@ import {
   type Cell,
   computed,
   Default,
+  equals,
   handler,
   NAME,
   pattern,
@@ -78,18 +79,10 @@ import PollOptionCard from "./poll-option-card.tsx";
 import ParticipantIdentityCard from "./participant-identity-card.tsx";
 import { safeImageUrl } from "./generated-art.tsx";
 
-export interface User {
-  name: string;
-  /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
-  avatar?: string;
-  color: string;
-}
-
 /**
- * The minimal profile shape a roster needs: the stable identity cell for
- * `<cf-profile-badge>` binding and `equals()` dedup. Deliberately just
- * `{ name?, avatar? }`, matching the shared-profile-rosters spec's
- * `ParticipantProfileCell` — a richer wish schema (bio / externalLinks /
+ * The minimal profile shape this pattern reads: the stable identity cell for
+ * `<cf-profile-badge>` binding and `equals()` comparison. Deliberately just
+ * `{ name?, avatar? }` — a richer wish schema (bio / externalLinks /
  * verifiedIdentities Cell[]) makes the cross-space `#profile` result fail to
  * resolve, so the badge falls back to "Unknown profile". The display NAME is
  * never read off this cell; it comes from the `#profileName` string wish and
@@ -100,36 +93,44 @@ export interface LunchProfile {
   readonly avatar?: string;
 }
 
-/** Stable identity for a profile-backed participant. */
+/**
+ * A participant's identity: their shared profile cell.
+ *
+ * Compare two of these with `equals()`, which follows links to the end. Never
+ * compare display names — a name is mutable, may collide between distinct
+ * people, and is not an address. Never key by list position either: a
+ * `list.key(i)` handle follows the SLOT, so it silently retargets when an
+ * earlier element is removed.
+ */
 export type LunchProfileCell = Cell<LunchProfile>;
 
-export interface ParticipantProfileLink {
-  /** Immutable Lunch Poll name used by the current name-keyed vote schema. */
-  readonly name: string;
-  /** Live canonical profile cell; compare it by identity with `equals()`. */
-  readonly profile: LunchProfileCell;
+/**
+ * A participant who has joined. `profile` is the identity; everything else is
+ * display, snapshotted at join and free to go stale or collide.
+ */
+export interface User {
+  /** Identity. Compare with `equals()`. */
+  profile: LunchProfileCell;
+  /** Display name at join time — cosmetic, may duplicate another participant. */
+  name: string;
+  /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
+  avatar?: string;
+  color: string;
 }
 
 /**
- * Live profile links use an object-wrapped directory. Nested cross-space cells
- * inside Lunch Poll's legacy bare `users` array do not preserve strong handler
- * schemas, so the compatibility-safe profile index remains separate.
+ * Which participant hosts the poll, object-wrapped so the field reads as
+ * absent rather than as an empty cell before anyone joins.
  */
-export interface ParticipantProfileDirectory {
-  readonly participants: ParticipantProfileLink[] | Default<[]>;
+export interface PollHost {
+  readonly profile?: LunchProfileCell;
 }
 
-export const DEFAULT_PARTICIPANT_PROFILES = {
-  participants: [] as ParticipantProfileLink[],
-} satisfies ParticipantProfileDirectory;
+export const DEFAULT_HOST: PollHost = {};
 
-export type ParticipantProfileDirectoryValue =
-  | ParticipantProfileDirectory
-  | Default<typeof DEFAULT_PARTICIPANT_PROFILES>;
+export type HostValue = PollHost | Default<typeof DEFAULT_HOST>;
 
-export type ParticipantProfileDirectoryCell = Writable<
-  ParticipantProfileDirectoryValue
->;
+export type HostCell = Writable<HostValue>;
 
 export interface Option {
   id: string;
@@ -146,7 +147,8 @@ export interface Option {
 export type VoteColor = "green" | "yellow" | "red";
 
 export interface Vote {
-  voterName: string;
+  /** Whose vote this is. Identity — found with `equals()`, never by name. */
+  voter: LunchProfileCell;
   optionId: string;
   voteType: VoteColor;
   /**
@@ -157,9 +159,11 @@ export interface Vote {
   castAt?: number;
 }
 
-export interface JoinEvent {
-  name?: string;
-}
+/**
+ * Joining takes no arguments: identity comes from the viewer's resolved
+ * `#profile`, so there is nothing for the joiner to type or spoof.
+ */
+export type JoinEvent = Record<PropertyKey, never>;
 
 export type ClaimHostEvent = Record<PropertyKey, never>;
 
@@ -193,12 +197,14 @@ export type ResetVotesEvent = Record<PropertyKey, never>;
  * A snapshot of one person's vote at the moment a visit was logged, embedded in
  * the visit's `votes` list. `optionTitle` is denormalized (options can be
  * removed later; the title is the meaningful record). `voter` is a frozen name
- * snapshot; `voterLink` is a live `Cell<User>` link to that voter's Lunch Poll
- * roster entry (null if the voter is no longer in the directory).
+ * snapshot for legibility; `voterProfile` is the live identity link, so a badge
+ * rendered from it stays correct after a rename or a roster change.
  */
 export interface VoteSnapshot {
+  /** Display name at snapshot time — cosmetic; the profile below is identity. */
   voter: string;
-  voterLink: Cell<User> | null;
+  /** Live identity link, so a badge stays right even after a rename. */
+  voterProfile: LunchProfileCell;
   optionTitle: string;
   color: VoteColor;
 }
@@ -206,16 +212,17 @@ export interface VoteSnapshot {
 /**
  * A place the group actually ate, logged by the host — one entry in the
  * `PerSpace<HistoryEntry[]>` visit log. `loggedByName` is a frozen name snapshot
- * (what the "Recently eaten" card renders); `loggedBy` is a live `Cell<User>`
- * link to the logging host's Lunch Poll roster entry (null if absent). `votes`
- * embeds the vote snapshot taken at log time, so per-place stats survive an
- * option's removal.
+ * (what the "Recently eaten" card renders); `loggedBy` is the live identity
+ * link to whoever logged it. `votes` embeds the vote snapshot taken at log
+ * time, so per-place stats survive an option's removal.
  */
 export interface HistoryEntry {
   id: string;
   title: string;
+  /** Display name at log time — cosmetic. */
   loggedByName: string;
-  loggedBy: Cell<User> | null;
+  /** Live identity link to whoever logged it. */
+  loggedBy: LunchProfileCell;
   wentAt: number;
   votes: VoteSnapshot[];
 }
@@ -254,7 +261,8 @@ type QuestionCell = Writable<string | Default<"Where should we eat?">>;
 type OptionsCell = Writable<Option[] | Default<[]>>;
 type VotesCell = Writable<Vote[] | Default<[]>>;
 type UsersCell = Writable<User[] | Default<[]>>;
-type NameCell = Writable<string | Default<"">>;
+/** Free-text drafts (option title, visit date) — never identity. */
+type DraftCell = Writable<string | Default<"">>;
 type HistoryCell = Writable<HistoryEntry[] | Default<[]>>;
 
 const POLL_THEME = {
@@ -324,21 +332,21 @@ const newOptionId = (
     ...votes.map((v) => v.optionId),
   ]);
 
-// The deterministic key a vote is addressed by: a voter's vote for one option.
-// castVote, clearMyVote, and the removeOption cascade all derive the same key,
-// so they reach the same vote entity in any session without scanning the list.
-const voteKey = (voterName: string, optionId: string): string =>
-  JSON.stringify([voterName, optionId]);
+// A vote belongs to whoever's profile cell it carries, so it is found by
+// comparison rather than addressed by a key. Reading the list to find it puts
+// the list in this transaction's conflict set, so two people voting at once
+// conflict and the loser retries. That is the accepted trade for identity that
+// cannot be spoofed by a name: correctness is unaffected (both votes survive),
+// and once handler events serialize server-side they stop conflicting at all.
+const findVote = (
+  votes: readonly Vote[],
+  voter: LunchProfileCell,
+  optionId: string,
+): Vote | undefined =>
+  votes.find((v) => v.optionId === optionId && equals(v.voter, voter));
 
-// Clear a vote's entity document. The entity outlives its membership link, so a
-// removal that only drops the link would leave the entity holding the removed
-// vote's content; a later read by the same key (the castVote toggle decision)
-// would then see that stale content and treat the absent vote as present.
-// Removing a vote always pairs the link removal with this clear.
-const clearVoteEntity = (votes: VotesCell, key: string): void => {
-  const vote: Writable<Vote | undefined> = votes.elementById(key);
-  vote.set(undefined);
-};
+const isSameVoter = (vote: Vote, voter: LunchProfileCell): boolean =>
+  equals(vote.voter, voter);
 
 const COMBINING_MARK = /^\p{Mark}$/u;
 const EMOJI_MODIFIER = /^\p{Emoji_Modifier}$/u;
@@ -559,33 +567,50 @@ const visitLabel = (wentAt: number): string => {
   }`;
 };
 
+/**
+ * Is this viewer the host? Compares the host pointer against the viewer's own
+ * profile cell — never a name.
+ */
+const isHost = (
+  host: HostCell,
+  me: LunchProfileCell | undefined,
+): boolean => {
+  if (!me) return false;
+  const current = host.get().profile;
+  return current !== undefined && equals(current, me);
+};
+
 const addOption = handler<AddOptionEvent, {
   options: OptionsCell;
   votes: VotesCell;
-  myName: NameCell;
-  adminName: NameCell;
-  optionDraft: NameCell;
-}>(({ title }, { options, votes, myName, adminName, optionDraft }) => {
-  const me = trimmedName(myName.get());
-  const admin = trimmedName(adminName.get());
-  if (!me || me !== admin) return;
-  const trimmed = trimmedName(title ?? optionDraft.get());
-  if (!trimmed) return;
-  // Address the option by its id so later edits and removal reach it without a
-  // positional index. addUnique merges concurrent adds (distinct ids) and is
-  // idempotent on the id. The votes read joins the id-freshness guard into
-  // this transaction's conflict set — a concurrent cast retries the add.
-  const id = newOptionId(options.get(), votes.get(), me, trimmed);
-  const option = options.elementById(id);
-  option.set({
-    id,
-    title: trimmed,
-    addedByName: me,
-    imageUrl: "",
-  });
-  options.addUnique(option);
-  optionDraft.set("");
-});
+  myProfile: LunchProfileCell | undefined;
+  myName: string;
+  host: HostCell;
+  optionDraft: DraftCell;
+}>(
+  (
+    { title },
+    { options, votes, myProfile, myName, host, optionDraft },
+  ) => {
+    if (!isHost(host, myProfile)) return;
+    const trimmed = trimmedName(title ?? optionDraft.get());
+    if (!trimmed) return;
+    // Address the option by its id so later edits and removal reach it without
+    // a positional index. addUnique merges concurrent adds (distinct ids) and
+    // is idempotent on the id. The votes read joins the id-freshness guard
+    // into this transaction's conflict set — a concurrent cast retries the add.
+    const id = newOptionId(options.get(), votes.get(), myName, trimmed);
+    const option = options.elementById(id);
+    option.set({
+      id,
+      title: trimmed,
+      addedByName: myName,
+      imageUrl: "",
+    });
+    options.addUnique(option);
+    optionDraft.set("");
+  },
+);
 
 // Host persists the generated cuisine thumbnail (a data URL read from the
 // GeneratedArt sub-pattern by the card's keep action) onto its option.
@@ -594,12 +619,10 @@ const addOption = handler<AddOptionEvent, {
 // holds regardless.
 const setOptionImage = handler<SetOptionImageEvent, {
   options: OptionsCell;
-  myName: NameCell;
-  adminName: NameCell;
-}>(({ optionId, imageUrl }, { options, myName, adminName }) => {
-  const me = trimmedName(myName.get());
-  const admin = trimmedName(adminName.get());
-  if (!me || me !== admin) return;
+  myProfile: LunchProfileCell | undefined;
+  host: HostCell;
+}>(({ optionId, imageUrl }, { options, myProfile, host }) => {
+  if (!isHost(host, myProfile)) return;
   const option = options.elementById(optionId);
   const current = option.get();
   if (!current) return;
@@ -611,35 +634,25 @@ const setOptionImage = handler<SetOptionImageEvent, {
 const removeOption = handler<RemoveOptionEvent, {
   options: OptionsCell;
   votes: VotesCell;
-  myName: NameCell;
-  adminName: NameCell;
-}>(({ optionId }, { options, votes, myName, adminName }) => {
-  const me = trimmedName(myName.get());
-  const admin = trimmedName(adminName.get());
-  if (!me || me !== admin) return;
+  myProfile: LunchProfileCell | undefined;
+  host: HostCell;
+}>(({ optionId }, { options, votes, myProfile, host }) => {
+  if (!isHost(host, myProfile)) return;
   const option = options.elementById(optionId);
   if (!option.get()) return;
   options.removeByValue(option);
-  // Cascade: drop every vote for this option, each by its own deterministic
-  // key, so votes for other options (including ones cast concurrently) merge
-  // through rather than being clobbered by a whole-list rewrite. The explicit
-  // read of the vote list is retained, so a concurrent change to it makes this
-  // commit conflict and retry, catching votes cast for this option after the
-  // read.
-  for (const v of votes.get().filter((v) => v.optionId === optionId)) {
-    const key = voteKey(v.voterName, optionId);
-    votes.removeByValue(votes.elementById(key));
-    clearVoteEntity(votes, key);
-  }
+  // Cascade: drop every vote for the removed option in one read-modify-write.
+  // A concurrent cast conflicts with this read and retries, which is what
+  // catches a vote cast for this option after the read.
+  votes.set(votes.get().filter((v) => v.optionId !== optionId));
 });
 
 const castVote = handler<CastVoteEvent, {
   votes: VotesCell;
-  myName: NameCell;
+  myProfile: LunchProfileCell | undefined;
   nowTick: number | null;
-}>(({ optionId, voteType }, { votes, myName, nowTick }) => {
-  const me = trimmedName(myName.get());
-  if (!me) return;
+}>(({ optionId, voteType }, { votes, myProfile, nowTick }) => {
+  if (!myProfile) return;
   // Stamp with the shared `#now/300` tick — fresh to five minutes, all a
   // day-granularity stamp needs, and it keeps the deployed source compatible
   // with Loom runtimes from before handler-scoped Date.now(). Null until the
@@ -647,12 +660,8 @@ const castVote = handler<CastVoteEvent, {
   // votes): voting no-ops rather than reading an ambient clock.
   const now = nowTick;
   if (!now) return;
-  // My vote for this option has a deterministic address, so this reads and
-  // edits just that one vote — never the whole list. Clicking the current
-  // color toggles the vote off; any other color sets it.
-  const key = voteKey(me, optionId);
-  const myVote = votes.elementById(key);
-  const existing = myVote.get();
+  const current = votes.get();
+  const existing = findVote(current, myProfile, optionId);
   // Toggle off only when the same color was cast TODAY. A same-color click on
   // a stale (hidden) vote re-casts it with a fresh timestamp instead of
   // removing a vote the voter cannot see.
@@ -660,29 +669,25 @@ const castVote = handler<CastVoteEvent, {
     existing.voteType === voteType &&
     typeof existing.castAt === "number" &&
     dayKeyOf(existing.castAt) === dayKeyOf(now);
+  const withoutMine = current.filter((v) =>
+    !(v.optionId === optionId && isSameVoter(v, myProfile))
+  );
   if (sameColorToday) {
-    votes.removeByValue(myVote);
-    clearVoteEntity(votes, key);
+    votes.set(withoutMine);
     return;
   }
-  myVote.set({ voterName: me, optionId, voteType, castAt: now });
-  votes.addUnique(myVote);
+  votes.set([
+    ...withoutMine,
+    { voter: myProfile, optionId, voteType, castAt: now },
+  ]);
 });
 
 const resetVotes = handler<ResetVotesEvent, {
   votes: VotesCell;
-  myName: NameCell;
-  adminName: NameCell;
-}>((_, { votes, myName, adminName }) => {
-  const me = trimmedName(myName.get());
-  const admin = trimmedName(adminName.get());
-  if (!me || me !== admin) return;
-  // Clearing the board is an intentional whole-list overwrite. Clear each vote's
-  // entity too, so a voter who re-votes their pre-reset color after the reset is
-  // not toggled off against the stale entity content.
-  for (const v of votes.get()) {
-    clearVoteEntity(votes, voteKey(v.voterName, v.optionId));
-  }
+  myProfile: LunchProfileCell | undefined;
+  host: HostCell;
+}>((_, { votes, myProfile, host }) => {
+  if (!isHost(host, myProfile)) return;
   votes.set([]);
 });
 
@@ -692,13 +697,14 @@ export interface ClearVoteEvent {
 
 const clearMyVote = handler<ClearVoteEvent, {
   votes: VotesCell;
-  myName: NameCell;
-}>(({ optionId }, { votes, myName }) => {
-  const me = trimmedName(myName.get());
-  if (!me) return;
-  const key = voteKey(me, optionId);
-  votes.removeByValue(votes.elementById(key));
-  clearVoteEntity(votes, key);
+  myProfile: LunchProfileCell | undefined;
+}>(({ optionId }, { votes, myProfile }) => {
+  if (!myProfile) return;
+  votes.set(
+    votes.get().filter((v) =>
+      !(v.optionId === optionId && isSameVoter(v, myProfile))
+    ),
+  );
 });
 
 // Host-only, same gate as the other mutating admin actions. Logs where the
@@ -710,9 +716,10 @@ const logVisit = handler<LogVisitEvent, {
   options: OptionsCell;
   votes: VotesCell;
   users: UsersCell;
-  myName: NameCell;
-  adminName: NameCell;
-  visitDate: NameCell;
+  myProfile: LunchProfileCell | undefined;
+  myName: string;
+  host: HostCell;
+  visitDate: DraftCell;
   nowTick: number | null;
 }>(
   (
@@ -722,15 +729,14 @@ const logVisit = handler<LogVisitEvent, {
       options,
       votes,
       users,
+      myProfile,
       myName,
-      adminName,
+      host,
       visitDate,
       nowTick,
     },
   ) => {
-    const me = trimmedName(myName.get());
-    const admin = trimmedName(adminName.get());
-    if (!me || me !== admin) return;
+    if (!isHost(host, myProfile) || !myProfile) return;
     let place = trimmedName(title);
     if (!place && optionId) {
       const opt = options.get().find((o) => o.id === optionId);
@@ -743,13 +749,14 @@ const logVisit = handler<LogVisitEvent, {
       : parseVisitDate(visitDate.get(), fallbackNow);
     if (!when) return;
 
-    // Resolve a name → that user's same-space Cell<User> roster entry.
-    // Canonical cross-space identity is held by `participantProfiles`; these
-    // historical links remain unchanged for stored-value compatibility.
+    // A history entry records WHO by holding their profile cell, the same
+    // identity the roster and the votes use. It must not hold a `users.key(i)`
+    // handle: that follows the SLOT, so removing an earlier participant would
+    // silently retarget every stored attribution to the wrong person.
     const us = users.get();
-    const cellForName = (name: string): Cell<User> | null => {
-      const idx = us.findIndex((u) => u.name === name);
-      return idx >= 0 ? users.key(idx) : null;
+    const displayNameOf = (voter: LunchProfileCell): string => {
+      const entry = us.find((u) => equals(u.profile, voter));
+      return entry ? entry.name : "";
     };
 
     // Snapshot the current live votes, embedded in the entry. Denormalize the
@@ -774,8 +781,8 @@ const logVisit = handler<LogVisitEvent, {
       const optTitle = trimmedName(titleById.get(v.optionId));
       if (!optTitle) continue; // vote for an already-removed option → skip
       voteSnapshot.push({
-        voter: v.voterName,
-        voterLink: cellForName(v.voterName),
+        voter: displayNameOf(v.voter),
+        voterProfile: v.voter,
         optionTitle: optTitle,
         color: v.voteType,
       });
@@ -786,10 +793,10 @@ const logVisit = handler<LogVisitEvent, {
     // the conflict set anyway and would mix an append with a whole-list trim.
     const currentVisits = visits.get();
     const entry: HistoryEntry = {
-      id: newHistoryId(currentVisits, me, place, when),
+      id: newHistoryId(currentVisits, myName, place, when),
       title: place,
-      loggedByName: me,
-      loggedBy: cellForName(me),
+      loggedByName: myName,
+      loggedBy: myProfile,
       wentAt: when,
       votes: voteSnapshot,
     };
@@ -809,24 +816,20 @@ const logVisit = handler<LogVisitEvent, {
 
 const removeHistoryEntry = handler<RemoveHistoryEntryEvent, {
   visits: HistoryCell;
-  myName: NameCell;
-  adminName: NameCell;
-}>(({ id }, { visits, myName, adminName }) => {
-  const me = trimmedName(myName.get());
-  const admin = trimmedName(adminName.get());
-  if (!me || me !== admin) return;
+  myProfile: LunchProfileCell | undefined;
+  host: HostCell;
+}>(({ id }, { visits, myProfile, host }) => {
+  if (!isHost(host, myProfile)) return;
   // The embedded vote snapshot goes with the entry — no separate cascade.
   visits.set(visits.get().filter((v) => v.id !== id));
 });
 
 const clearHistory = handler<ClearHistoryEvent, {
   visits: HistoryCell;
-  myName: NameCell;
-  adminName: NameCell;
-}>((_, { visits, myName, adminName }) => {
-  const me = trimmedName(myName.get());
-  const admin = trimmedName(adminName.get());
-  if (!me || me !== admin) return;
+  myProfile: LunchProfileCell | undefined;
+  host: HostCell;
+}>((_, { visits, myProfile, host }) => {
+  if (!isHost(host, myProfile)) return;
   visits.set([]);
 });
 
@@ -848,9 +851,13 @@ const tallyOptions = (
   votes: readonly Vote[],
   users: readonly User[],
 ): OptionTally[] => {
-  const colorByName = new Map(users.map((u) => [u.name, u.color]));
+  // A vote carries its voter's identity, so the display name and swatch colour
+  // are looked up from the roster by comparison. A voter who has left the
+  // roster still tallies; they just render without a name.
   const participantNames = users.map((u) => u.name);
   const initialsByName = getInitialsByName(participantNames);
+  const rosterOf = (voter: LunchProfileCell): User | undefined =>
+    users.find((u) => equals(u.profile, voter));
   const tallies = options.map((option): OptionTally => {
     const optionVotes = votes.filter((v) => v.optionId === option.id);
     return {
@@ -858,13 +865,17 @@ const tallyOptions = (
       green: optionVotes.filter((v) => v.voteType === "green").length,
       yellow: optionVotes.filter((v) => v.voteType === "yellow").length,
       red: optionVotes.filter((v) => v.voteType === "red").length,
-      voters: optionVotes.map((v) => ({
-        name: v.voterName,
-        voteType: v.voteType,
-        color: colorByName.get(v.voterName) ?? "#888",
-        initials: initialsByName.get(v.voterName) ??
-          getInitials(v.voterName, participantNames),
-      })),
+      voters: optionVotes.map((v) => {
+        const entry = rosterOf(v.voter);
+        const name = entry?.name ?? "";
+        return {
+          name,
+          voteType: v.voteType,
+          color: entry?.color ?? "#888",
+          initials: initialsByName.get(name) ??
+            getInitials(name, participantNames),
+        };
+      }),
     };
   });
   return [...tallies].sort((a, b) => {
@@ -906,10 +917,8 @@ export interface CozyPollInput {
   options?: PerSpace<Option[] | Default<[]>>;
   votes?: PerSpace<Vote[] | Default<[]>>;
   users?: PerSpace<User[] | Default<[]>>;
-  /** Canonical live profile links for profile-backed users; guests are absent. */
-  participantProfiles?: PerSpace<ParticipantProfileDirectoryValue>;
-  adminName?: PerSpace<string | Default<"">>;
-  myName?: PerUser<string | Default<"">>;
+  /** Which participant hosts the poll — the first to join, transferable. */
+  host?: PerSpace<HostValue>;
   // Durable "we went here" log; each entry embeds its own vote snapshot. Capped
   // at MAX_HISTORY most-recent entries in `logVisit`. optionDraft etc. are
   // internal form drafts, declared as local per-session cells in the pattern
@@ -926,8 +935,9 @@ export interface CozyPollOutput {
   // only `todaysVotes` — see the current-day filter note in the file header.
   votes: readonly Vote[];
   users: readonly User[];
-  participantProfiles: readonly ParticipantProfileLink[];
-  adminName: string;
+  /** The host's display name, resolved from the roster ("" when unhosted). */
+  hostName: string;
+  /** This viewer's display name from their profile ("" before it resolves). */
   myName: string;
   userCount: number;
   optionCount: number;
@@ -971,7 +981,6 @@ export interface CozyPollOutput {
 const EMPTY_OPTIONS: Option[] = [];
 const EMPTY_VOTES: Vote[] = [];
 const EMPTY_USERS: User[] = [];
-const EMPTY_PARTICIPANT_PROFILE_LINKS: ParticipantProfileLink[] = [];
 
 export default pattern<CozyPollInput, CozyPollOutput>(
   (
@@ -980,9 +989,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       options,
       votes,
       users,
-      participantProfiles,
-      adminName,
-      myName,
+      host,
       visits,
     },
   ) => {
@@ -1041,13 +1048,33 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const viewerProfileAvatar = computed(() =>
       (profileAvatarWish.result ?? "").trim()
     );
-    // This pattern renders identity only from the STORED directory entries, so
-    // a later profile switch cannot orphan the joined identity.
+    // Who this viewer is in THIS poll: their roster entry, found by comparing
+    // profile cells. Derived, never stored per-user — so a viewer is recognised
+    // on any device the moment their profile resolves, and no per-user state
+    // can go stale and lock them out.
+    const myEntry = computed(() => {
+      const mine = viewerProfileCell;
+      if (!mine) return undefined;
+      return users.find((u: User) => equals(u.profile, mine));
+    });
+    const isJoined = computed(() => myEntry !== undefined);
+    const isAdmin = computed(() => {
+      const mine = viewerProfileCell;
+      const current = host.profile;
+      if (!mine || current === undefined) return false;
+      return equals(current, mine);
+    });
+    // The host's display name is resolved from the roster, so a rename shows up
+    // everywhere at once instead of stranding a stale copy.
+    const hostName = computed(() => {
+      const current = host.profile;
+      if (current === undefined) return "";
+      const entry = users.find((u: User) => equals(u.profile, current));
+      return entry ? entry.name : "";
+    });
     const participantIdentity = ParticipantIdentityCard({
       users,
-      myName,
-      adminName,
-      participantProfiles,
+      host,
       profile: viewerProfileCell,
       profileName: viewerProfileName,
       profileAvatar: viewerProfileAvatar,
@@ -1056,39 +1083,56 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const boundAddOption = addOption({
       options,
       votes,
-      myName,
-      adminName,
+      myProfile: viewerProfileCell,
+      myName: viewerProfileName,
+      host,
       optionDraft,
     });
     const boundRemoveOption = removeOption({
       options,
       votes,
-      myName,
-      adminName,
+      myProfile: viewerProfileCell,
+      host,
     });
-    const boundCastVote = castVote({ votes, myName, nowTick });
-    const boundSetOptionImage = setOptionImage({ options, myName, adminName });
-    const boundClearMyVote = clearMyVote({ votes, myName });
-    const boundResetVotes = resetVotes({ votes, myName, adminName });
+    const boundCastVote = castVote({
+      votes,
+      myProfile: viewerProfileCell,
+      nowTick,
+    });
+    const boundSetOptionImage = setOptionImage({
+      options,
+      myProfile: viewerProfileCell,
+      host,
+    });
+    const boundClearMyVote = clearMyVote({
+      votes,
+      myProfile: viewerProfileCell,
+    });
+    const boundResetVotes = resetVotes({
+      votes,
+      myProfile: viewerProfileCell,
+      host,
+    });
     const boundLogVisit = logVisit({
       visits,
       options,
       votes,
       users,
-      myName,
-      adminName,
+      myProfile: viewerProfileCell,
+      myName: viewerProfileName,
+      host,
       visitDate,
       nowTick,
     });
     const boundRemoveHistoryEntry = removeHistoryEntry({
       visits,
-      myName,
-      adminName,
+      myProfile: viewerProfileCell,
+      host,
     });
     const boundClearHistory = clearHistory({
       visits,
-      myName,
-      adminName,
+      myProfile: viewerProfileCell,
+      host,
     });
     const userCount = users.length;
     const optionCount = options.length;
@@ -1131,34 +1175,17 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const voteHistoryCount = computed(() =>
       [...visits].reduce((n, v) => n + v.votes.length, 0)
     );
-    // Resolve the viewer's name ONCE here at the top level through the
-    // participant identity child. PerUser `myName` does not resolve inside the
-    // per-option `options.map(...)` lift; passing this resolved value down
-    // avoids that.
-    const me = participantIdentity.me;
-    const isJoined = participantIdentity.isJoined;
-    const isAdmin = participantIdentity.isAdmin;
-    // Normalize the Default<>-wrapped directory once: downstream maps need
-    // one concrete element type, not the raw schema union.
-    const participantLinks = computed((): readonly ParticipantProfileLink[] =>
-      participantProfiles.participants ?? EMPTY_PARTICIPANT_PROFILE_LINKS
-    );
-    // The viewer's stored canonical profile link(s) — the STORED entry (not
-    // the live `#profile` wish) is the rendered identity source, so switching
-    // the active profile after joining keeps the joined badge. An array of
-    // 0-or-1 entries: the header chip renders it with a plain static map,
-    // which keeps the `$profile` binding free of conditionals.
-    const viewerLinks = computed((): readonly ParticipantProfileLink[] => {
-      const viewerName = participantIdentity.me;
-      if (!viewerName) return EMPTY_PARTICIPANT_PROFILE_LINKS;
-      return participantLinks.filter((entry) => entry.name === viewerName);
-    });
-    const viewerHasStoredProfile = computed(() => viewerLinks.length > 0);
-    // Guests (typed-name joins) have no directory entry; the participants
-    // strip renders them as plain name chips next to the profile badges.
-    const guestUsers = computed(() => {
-      const linked = new Set(participantLinks.map((entry) => entry.name));
-      return users.filter((u) => !linked.has(u.name));
+    // The viewer's display name, resolved from their STORED roster entry so a
+    // later profile rename shows through everywhere at once.
+    const me = computed(() => myEntry?.name ?? "");
+    // The viewer's own roster entry as a 0-or-1 array: the header chip renders
+    // it with a plain static map, which keeps the `$profile` binding free of
+    // conditionals (a `$`-binding inside an authored computed blanks the
+    // render — pattern-critique-guide §5).
+    const viewerEntries = computed((): readonly User[] => {
+      const mine = viewerProfileCell;
+      if (!mine) return EMPTY_USERS;
+      return users.filter((u: User) => equals(u.profile, mine));
     });
     // Hoisted booleans for the JSX ternaries below (the file's reset-confirm
     // idiom): conditions in JSX stay bare computed refs.
@@ -1216,7 +1243,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     const o = optionCount ?? 0;
                     const v = todayVoteCount ?? 0;
                     const todayLabel = nowTick ? dayLabelOf(nowTick) : "…";
-                    const admin = trimmedName(adminName);
+                    const admin = hostName;
                     const viewer = me;
                     const amAdmin = isAdmin;
                     // "you are the host" is handled by the HOST chip in the
@@ -1263,33 +1290,13 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                             the tally computed below. These badges navigate;
                             only the viewer's own chip is noNavigate. */
                         }
-                        {participantLinks.map((entry) => (
+                        {users.map((entry: User) => (
                           <cf-profile-badge
                             variant="chip"
                             size="sm"
                             $profile={entry.profile}
                             data-participant-badge={entry.name}
                           />
-                        ))}
-                        {guestUsers.map((u) => (
-                          <span
-                            data-participant-guest={u.name}
-                            title={u.name}
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              padding: "2px 8px",
-                              borderRadius: "9999px",
-                              background: "#f3f4f6",
-                              border: "1px solid #e5e7eb",
-                              fontSize: "11px",
-                              fontWeight: 600,
-                              color: "#374151",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {u.name}
-                          </span>
                         ))}
                       </div>
                     )
@@ -1337,10 +1344,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         /* The viewer's chip binds the STORED directory entry
                           (never the live `#profile` wish), so a profile
                           switch after joining keeps the joined identity.
-                          `viewerLinks` is pre-filtered to 0-or-1 entries, so
+                          `viewerEntries` is pre-filtered to 0-or-1 entries, so
                           this map stays conditional-free at the binding. */
                       }
-                      {viewerLinks.map((entry) => (
+                      {viewerEntries.map((entry: User) => (
                         <cf-profile-badge
                           variant="chip"
                           size="sm"
@@ -1349,29 +1356,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           data-viewer-badge
                         />
                       ))}
-                      {viewerHasStoredProfile ? null : (
-                        <span
-                          title={me}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "6px",
-                            padding: "4px 10px",
-                            borderRadius: "9999px",
-                            background: "#f3f4f6",
-                            border: "1px solid #e5e7eb",
-                            fontSize: "12px",
-                            fontWeight: 600,
-                            color: "#374151",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          <span style={{ fontSize: "10px", color: "#10b981" }}>
-                            ●
-                          </span>
-                          {me}
-                        </span>
-                      )}
                     </div>
                   )
                   : null}
@@ -1599,7 +1583,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                 {/* Empty state */}
                 {computed(() => {
                   if (options && options.length > 0) return null;
-                  const admin = trimmedName(adminName);
+                  const admin = hostName;
                   const hint = isAdmin
                     ? "Add the first one above."
                     : admin !== ""
@@ -1656,7 +1640,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     <PollOptionCard
                       option={cardOption}
                       rank={rank}
-                      me={me}
+                      me={viewerProfileCell}
                       isJoined={isJoined}
                       isAdmin={isAdmin}
                       votes={todaysVotes}
@@ -2012,9 +1996,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       options: computed(() => options ?? EMPTY_OPTIONS),
       votes: computed(() => votes ?? EMPTY_VOTES),
       users: computed(() => users ?? EMPTY_USERS),
-      participantProfiles: participantLinks,
-      adminName: computed(() => trimmedName(adminName)),
-      myName: participantIdentity.me,
+      hostName,
+      myName: me,
       userCount,
       optionCount,
       voteCount,
@@ -2026,8 +2009,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       mostRecentTitle,
       voteHistoryCount,
       placeStats,
-      isJoined: participantIdentity.isJoined,
-      isAdmin: participantIdentity.isAdmin,
+      isJoined,
+      isAdmin,
       joinAs: participantIdentity.joinAs,
       claimHost: participantIdentity.claimHost,
       addOption: boundAddOption,

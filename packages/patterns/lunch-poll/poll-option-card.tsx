@@ -1,5 +1,6 @@
 import {
   computed,
+  equals,
   lift,
   NAME,
   pattern,
@@ -11,6 +12,7 @@ import {
 import type {
   CastVoteEvent,
   LogVisitEvent,
+  LunchProfileCell,
   Option,
   RemoveOptionEvent,
   SetOptionImageEvent,
@@ -30,12 +32,12 @@ export type PollOptionLinkTargetCell = Writable<string | null | undefined>;
 
 const myVoteFor = (
   votes: readonly Vote[],
-  me: string,
+  me: LunchProfileCell | undefined,
   optionId: string,
 ): VoteColor | undefined => {
   if (!me) return undefined;
   return votes.find(
-    (v) => v.voterName === me && v.optionId === optionId,
+    (v) => v.optionId === optionId && equals(v.voter, me),
   )?.voteType;
 };
 
@@ -69,7 +71,8 @@ export interface PollOptionCardInput {
   rank: number | undefined;
 
   /** Resolved current viewer name; required for per-option vote styling. */
-  me: string;
+  /** The viewer's profile cell — identity, compared with `equals()`. */
+  me?: LunchProfileCell;
 
   /** Whether the current viewer is allowed to vote. */
   isJoined: boolean;
