@@ -167,8 +167,20 @@ cf daemon start work \
   --space team-space
 ```
 
-The command reports the name, PID, owning checkout or immutable build, API,
-identity DID, primary space, runtime configuration fingerprint, and socket
+Callers may choose a name directly or derive a stable, shell-safe name without
+starting anything:
+
+```console
+cf daemon name --scope worktree --prefix dev
+```
+
+The generated form combines the prefix with a digest of the canonical
+worktree. It prints only the name by default so an agent or script can capture
+it. Generation does not reserve the name, select a daemon, or make daemon use
+implicit.
+
+The start command reports the name, PID, owning checkout or immutable build,
+API, identity DID, primary space, runtime configuration fingerprint, and socket
 location. It reports readiness only after the daemon owns its name, listens on
 its private endpoint, has installed its source and identity watchers, and can
 answer the control protocol.
@@ -190,26 +202,45 @@ A conflicting API, identity, primary space, or runtime option is an error.
 
 The control surface is:
 
+- `cf daemon name --scope worktree [--prefix <prefix>]`
 - `cf daemon ls`
 - `cf daemon status <name>`
 - `cf daemon logs <name>`
+- `cf daemon doctor`
+- `cf daemon prune`
 - `cf daemon stop <name>`
 - `cf daemon restart <name>`
 
 Status includes ownership and compatibility metadata, connection and sync
-state, source state, the active request, queue depth, retained resource counts,
-and the last terminal daemon error. Trace mode separates client startup, IPC,
-queue wait, request setup, command work, synchronization, cleanup, and total
-latency.
+state, source state, the active request and its origin metadata, bounded origin
+summaries for queued requests, queue depth, retained resource counts, and the
+last terminal daemon error. Trace mode separates client startup, IPC, queue
+wait, request setup, command work, synchronization, cleanup, and total latency.
+
+`daemon doctor` is read-only. It diagnoses runtime-directory permissions,
+unreachable endpoints, inconsistent sidecars, source and protocol mismatches,
+and owners whose liveness cannot be proven. `daemon prune` removes only records
+whose endpoint is unreachable and whose recorded instance is proven dead. It
+refuses to remove a reachable or uncertain owner. Neither command stops a live
+daemon.
 
 Normal command stdout retains its existing format. The explicit `--daemon`
 selection identifies the route without wrapping JSON or adding a banner.
 
 ## Namespace and ownership
 
-Daemon names occupy one namespace per OS user and host. The namespace lives in
-a user-private runtime directory and is shared across `cf` processes and
-checkouts. A live name is exclusive.
+Daemon names occupy a default namespace per OS user and host. The namespace
+lives in a user-private runtime directory and is shared across `cf` processes
+and checkouts. A live name is exclusive.
+
+Tests and automation may select a separate namespace with the explicit global
+option `--daemon-namespace <name>` or `CF_DAEMON_NAMESPACE`. The option applies
+to daemon management and routed commands, contains only a restricted name
+rather than a path, and selects a child of the same user-private runtime
+directory. Status and diagnostics always report the namespace. A namespace
+changes discovery only: it does not weaken ownership checks, alter the daemon's
+Fabric context, or cause automatic daemon selection. Production commands use
+the shared default when the option and environment variable are absent.
 
 Starting an occupied name reports one of:
 
@@ -346,6 +377,15 @@ queued -> executing -> completed
                   -> failed
                   -> outcome-unknown
 ```
+
+The request envelope also contains advisory origin metadata: the client
+instance nonce, client PID where meaningful, original working directory, and an
+optional caller label supplied by `--daemon-caller <label>` or
+`CF_DAEMON_CALLER`. Status and diagnostic logs may show this metadata so users
+can identify competing agents or scripts. It is not an authentication signal,
+does not affect queue ordering, and never substitutes for endpoint ownership or
+peer checks. Arguments, stdin payloads, and cell values remain excluded from
+default logs.
 
 The daemon retains a bounded, in-memory-only result ledger for reconnecting
 clients. It is never persisted and its payloads are excluded from default logs.
@@ -506,7 +546,8 @@ validation rules in a daemon-only client path.
    reaches cleanup without starting execution or waiting for effectful tracked
    work; a command that cannot meet that invariant leaves the read scope.
 3. Implement the private namespace, stable control protocol, explicit lifecycle,
-   compatibility handshake, and source/identity invalidation.
+   compatibility handshake, generated worktree names, origin metadata,
+   read-only diagnostics, proven-dead pruning, and source/identity invalidation.
 4. Refactor the MVP inspection commands so their direct and routed forms are
    cold, then implement bounded serialized request transport for those commands.
 5. Route explicitly selected Fabric-backed completion through the cold read
@@ -530,6 +571,11 @@ The implementation must demonstrate:
 - confirmed writes before the next queued request begins;
 - no automatic replay under disconnect or daemon crash;
 - deterministic rejection of incompatible, foreign, and stale daemons;
+- stable generated names without reservation or implicit selection;
+- isolation between the default and explicitly named daemon namespaces;
+- diagnostic visibility of advisory request origin without payload logging;
+- cleanup removing proven-dead records while preserving live or uncertain
+  owners;
 - detected source and identity changes preventing all later dispatch, with
   admission-time source revalidation and the source-mode race documented above;
 - bounded queue, result-ledger, provider, cache, and memory growth;
