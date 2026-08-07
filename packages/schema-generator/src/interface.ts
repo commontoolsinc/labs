@@ -111,38 +111,3 @@ export interface TypeFormatter {
     context: GenerationContext,
   ): SchemaDefinition;
 }
-
-/**
- * Main schema generator class
- */
-export interface SchemaGenerator {
-  /**
-   * Generate JSON Schema for a TypeScript type
-   */
-  generateSchema(
-    type: ts.Type,
-    checker: ts.TypeChecker,
-    typeNode?: ts.TypeNode,
-    options?: SchemaGenerationOptions,
-    schemaHints?: SchemaHints,
-    sourceFile?: ts.SourceFile,
-  ): SchemaDefinition;
-
-  /**
-   * Generate schema from a synthetic TypeNode that doesn't resolve to a proper Type.
-   * Used by transformers that create synthetic type structures programmatically.
-   *
-   * @param typeNode - Synthetic TypeNode to analyze
-   * @param checker - TypeScript type checker
-   * @param typeRegistry - Optional WeakMap of Node → Type for registered synthetic nodes
-   * @param schemaHints - Optional WeakMap of Node → hints for overriding default behavior
-   */
-  generateSchemaFromSyntheticTypeNode(
-    typeNode: ts.TypeNode,
-    checker: ts.TypeChecker,
-    typeRegistry?: WeakMap<ts.Node, ts.Type>,
-    schemaHints?: SchemaHints,
-    sourceFile?: ts.SourceFile,
-    options?: SchemaGenerationOptions,
-  ): SchemaDefinition;
-}
