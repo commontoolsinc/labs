@@ -6,6 +6,7 @@ import {
   FabricPrimitive,
   shallowFabricFromNativeValue,
 } from "@commonfabric/data-model/fabric-value";
+import { refuseFabricInstance } from "../fabric-special-object.ts";
 import { type AliasBinding } from "../sigil-types.ts";
 import {
   type FabricExecPlainObject,
@@ -44,19 +45,16 @@ export type CellAliasResolver = (
 ) => AliasBinding | null | undefined;
 
 /**
- * The refusal a `FabricInstance` gets from the binding walks: it is a container
- * reached by its codec contents rather than by property name, and nothing here
- * can do that yet.
+ * The refusal a `FabricInstance` gets from the binding walks. Nothing reaches
+ * it in production today, de facto: a `FabricError` is exposed to pattern
+ * authors and ungated, so what keeps this safe is that no caller builds one
+ * into a binding, not that none could.
  *
  * TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
- * point this becomes a walk rather than a refusal. See "Flag-gated tripwires"
- * in `docs/development/EXPERIMENTAL_OPTIONS.md`.
+ * point this becomes a walk rather than a refusal.
  */
-function refuseFabricInstance(value: FabricInstance): Error {
-  return new Error(
-    `Cannot yet handle \`${value.constructor.name}\` (a \`FabricInstance\`) ` +
-      "in a pattern binding.",
-  );
+function refuseBoundFabricInstance(value: FabricInstance): never {
+  refuseFabricInstance(value, "in a pattern binding");
 }
 
 export function withAliasBindings(
@@ -158,7 +156,7 @@ export function withAliasBindings(
   // contents rather than by property name, which this walk cannot do, so the
   // `for...in` copy would rebuild it from zero enumerable own properties as
   // `{}`. It refuses instead of doing that quietly.
-  if (value instanceof FabricInstance) throw refuseFabricInstance(value);
+  if (value instanceof FabricInstance) refuseBoundFabricInstance(value);
 
   // Whatever reaches here goes to the sanctioned conversion, which mints its
   // fabric form or rejects it. Three kinds arrive: a native carrying a
@@ -185,7 +183,7 @@ export function withAliasBindings(
     // The conversion mints either arm: a `Uint8Array` becomes a `FabricBytes`,
     // an `Error` a `FabricError`.
     if (value instanceof FabricPrimitive) return value;
-    if (value instanceof FabricInstance) throw refuseFabricInstance(value);
+    if (value instanceof FabricInstance) refuseBoundFabricInstance(value);
   }
 
   // If this is an object or a pattern, process each key recursively.
