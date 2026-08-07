@@ -7,6 +7,8 @@
  */
 
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { debugVDOMSchema } from "@commonfabric/runner/schemas";
 import { type ActiveRender, getActiveRenders } from "./render.ts";
 
@@ -72,7 +74,7 @@ function readCellAsync<T>(cell: CellHandle<T>): Promise<T | undefined> {
  * Recursively format a VDOM tree node into a readable string.
  * CellHandle props are shown as `<cell>`.
  */
-function formatTree(node: unknown, indent = 0): string {
+export function formatTree(node: unknown, indent = 0): string {
   const pad = "  ".repeat(indent);
 
   if (node == null) return `${pad}(null)`;
@@ -85,6 +87,16 @@ function formatTree(node: unknown, indent = 0): string {
   }
   if (typeof node !== "object") return `${pad}${String(node)}`;
 
+  // A `FabricSpecialObject` keeps its state in private fields and has zero
+  // enumerable own properties, so `stringify()` renders one as `{}` -- and
+  // does so silently, since the `catch` below fires only on a throw and
+  // `stringify()` does not throw on one. Naming it is the whole of what a
+  // debug dump can honestly say about a value whose contents are not reachable
+  // by property name.
+  if (node instanceof FabricSpecialObject) {
+    return `${pad}${toCompactDebugString(node)}`;
+  }
+
   const obj = node as Record<string, unknown>;
 
   // Always follow $UI indirection, matching the render code's behavior
@@ -96,15 +108,6 @@ function formatTree(node: unknown, indent = 0): string {
   const name = obj.name as string | undefined;
   if (!name) {
     // Not a vdom node — try to stringify
-    //
-    // TODO(danfuzz): This is an unsafe use of `stringify()`. `node` comes from
-    // a cell, so it is a `FabricValue`, and a `FabricSpecialObject` keeps its
-    // state in private fields rather than in enumerable properties. Such a
-    // value renders as `{}` here, and does so silently: the `catch` below
-    // fires only on a throw, and `stringify()` does not throw on one. The fix
-    // is to test for a `FabricSpecialObject` before this point and render it
-    // with `toCompactDebugString()`, from
-    // `@commonfabric/data-model/value-debug`.
     try {
       return `${pad}${JSON.stringify(node)}`;
     } catch {
@@ -122,13 +125,11 @@ function formatTree(node: unknown, indent = 0): string {
         propParts.push(`${key}=<cell>`);
       } else if (typeof value === "string") {
         propParts.push(`${key}="${value}"`);
+      } else if (value instanceof FabricSpecialObject) {
+        // Named rather than stringified, for the reason given at the node case
+        // above: `stringify()` renders one as `{}` and does not throw doing so.
+        propParts.push(`${key}=${toCompactDebugString(value)}`);
       } else {
-        // TODO(danfuzz): This is an unsafe use of `stringify()`. `value` is a
-        // render prop read from a cell, so it is a `FabricValue`. A
-        // `FabricSpecialObject` among them renders as `{}` here, silently, for
-        // the same reason as the node case above -- and wants the same fix, a
-        // `FabricSpecialObject` test ahead of this point and
-        // `toCompactDebugString()` to render it.
         try {
           propParts.push(`${key}=${JSON.stringify(value)}`);
         } catch {
