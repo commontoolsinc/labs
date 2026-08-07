@@ -38,7 +38,7 @@ driver needs to know what is already moving before scheduling anything new.
 
 | PR | What | State |
 | --- | --- | --- |
-| #5307 | closed-world verb event schemas | update gate resolved, 336/336 patterns clean; held only for a courtesy nod |
+| #5307 | closed-world verb event schemas | code is gate-clear, 336/336 patterns; held for confirmation of the recorded skew policy, the one question named open |
 | #5309 | wrapper-tier and deprecated listing marks | rebased current; compat classification landed ahead of emission |
 | #5458 | the shared read step, factored out | open |
 | #5459 | `--piece` accepts the `of:` entity URI | open |
@@ -94,7 +94,22 @@ carries), and refused by name.
 
 This is the general form of a failure already fixed twice as instances — a
 missing `type` and an untyped `items` root each returned an empty result and
-reported nothing. It also generalizes the reserve-then-emit discipline #5309
+reported nothing.
+
+*Reservation records a class, not a spelling.* An allowlist that says only
+"allowed" loses why, and a key admitted without its kind has its treatment
+decided by whatever the checker happens to default to — the original trap, one
+level up. So each reservation carries what it is: honored, tolerated because it
+is an annotation, tolerated because it is a validation keyword. A later change
+wanting to honor a tolerated key then knows it was deliberately ignored rather
+than overlooked.
+
+The same discipline, on a different registry, is what classifies keys for the
+pattern compatibility checker — where the class decides whether adding and
+removing a key are both free, and where getting it wrong is what withdrew the
+July result-schema work. Sibling registries, not one: a projection is supplied
+per read and never compared across versions, so it has no add-and-remove
+semantics to get wrong. What transfers is classify-before-you-accept. #5309
 applied by hand to its two marks.
 
 *Exit:* an unrecognized key is refused and the message names it; a tolerated
@@ -153,6 +168,19 @@ anything reactive gets none, which is what item 1 decides.
 verb contract arc. Both unblocked; both wanted a courtesy review rather than a
 gate.
 
+**10. Listing rows carry a handler's declared result.** *(S)* `cf piece verbs`
+already reports an `outputSchema` per row, and the type says why it is empty for
+handlers: *"Tools only, until handlers gain declared results."* Item 1 is what
+supplies them. This is the deferred half of verb discovery finally closing, and
+it is a consumer change — the plumbing is built.
+
+*A terminology collision made this look like more than it is.* A pattern's
+**result-schema literal** is where its stream properties live, and the listing
+marks are stamped there. A **verb's declared result** is what a handler returns.
+The two share the words and nothing else, which is why the listing work and the
+declared-result work read as coupled when they are independent. Only this item
+joins them.
+
 ## Ordering
 
 | Item | After | Why |
@@ -165,7 +193,8 @@ gate.
 | 3 | 6 | completes the suppression property |
 | 4 | 7 | publishes an address, so the address must have stopped moving |
 | 5 | 4 | the fourth and fifth arrivals inherit whatever a read costs |
-| 1 | — | blocks nothing; makes 8 and the verb listing provisional |
+| 10 | 1 | listing rows carry a handler's `outputSchema`; the plumbing exists for tools already |
+| 1 | — | blocks nothing; makes 8 and item 10 provisional |
 
 Items 2, 3 and 5 touch one file heavily and want to land one at a time rather
 than in parallel. Item 4 is the only one that touches the call envelope.
@@ -176,8 +205,23 @@ One agent owns this document and the ordering in it. Work is farmed out per
 item, not per file, and an item comes back with its own tests rather than a
 promise of them.
 
+**This document owns the record as well as the order.** The plans it replaces
+are archived, so there is no longer a live plan for an author to strike a done
+note into as their work lands; done state belongs in the State table above, and
+keeping it current is this document's job rather than each author's. That is
+worth stating because the alternative — several sessions editing one shared
+plan as their PRs land — is the collision the per-agent split exists to avoid.
+
 Two rules earn their place, both from what went wrong when this was three
 plans:
+
+**#5307 and #5501 reconcile rather than order.** They touch no common source
+file and neither depends on the other — a declared result rides a trailing
+options argument, while event stamping keys on the first. But #5501's
+handler-schema fixtures were compiled before event schemas closed, so once
+#5307 lands they gain `additionalProperties: false` on their event literals.
+Whichever merges second owes a golden regeneration. That is a note on the pair,
+not an edge in the table above.
 
 **A shared golden is a coordination point, not a merge conflict.** Two branches
 can modify a generated fixture without conflicting textually and still leave it
