@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/record/extraction/schema-discovery.test.tsx --root packages/patterns --verbose
  */
-import { computed, pattern } from "commonfabric";
+import { computed, pattern, TESTS } from "commonfabric";
 import { getSchemaForType } from "./schema-utils.ts";
 import { getFieldToTypeMapping } from "../registry.ts";
 import Note from "../../notes/note.tsx";
@@ -59,7 +59,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_real_piece_built },
       { assertion: assert_notes_content_discoverable },
       { assertion: assert_address_has_fields },

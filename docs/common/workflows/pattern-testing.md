@@ -31,7 +31,7 @@ Test patterns are patterns that test other patterns. They:
 - Import and instantiate the pattern under test
 - Define test actions using `action()`
 - Define assertions using `assert(() => boolean)`
-- Return a `tests` array that the runner executes sequentially
+- Return a `[TESTS]` array that the runner executes sequentially
 
 Test files end in `.test.tsx` and are run with `deno task cf test`.
 
@@ -55,9 +55,9 @@ export default pattern(() => {
   const assert_is_zero = assert(() => counter.value === 0);
   const assert_is_one = assert(() => counter.value === 1);
 
-  // 4. Return tests array
+  // 4. Return the test steps under the [TESTS] key
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_is_zero },
       { action: action_increment },
       { assertion: assert_is_one },
@@ -88,7 +88,7 @@ Tests use a **discriminated union** format:
 ```tsx
 // Shown inside a pattern body.
 return {
-  tests: [
+  [TESTS]: [
     { action: action_do_something },     // Runner calls .send()
     { assertion: assert_something },     // Runner checks === true
   ],
@@ -182,7 +182,7 @@ export default pattern(() => {
     }
   });
 
-  return { tests: [{ action: action_add_area }], subject };
+  return { [TESTS]: [{ action: action_add_area }], subject };
 });
 ```
 
@@ -312,7 +312,7 @@ Put actions before the assertions that depend on them:
 ```tsx
 // Shown inside a pattern body.
 return {
-  tests: [
+  [TESTS]: [
     // Initial state
     { assertion: assert_starts_empty },
 
@@ -359,10 +359,11 @@ deno task cf piece inspect --piece <PIECE_ID>
 # Get specific values
 deno task cf piece get subject/items --piece <PIECE_ID>
 
-# Step through manually
-deno task cf piece call tests/0/action --piece <PIECE_ID>
+# Step through manually (the reserved key is the literal `$TESTS`, quoted so
+# the shell does not expand it)
+deno task cf piece call '$TESTS/0/action' --piece <PIECE_ID>
 deno task cf piece step --piece <PIECE_ID>
-deno task cf piece get tests/1/assertion --piece <PIECE_ID>
+deno task cf piece get '$TESTS/1/assertion' --piece <PIECE_ID>
 ```
 
 This diagnostic command deliberately deploys the test pattern as the executable
@@ -377,7 +378,7 @@ Add extra fields to your test pattern for debugging:
 ```tsx
 // Shown for illustration only.
 return {
-  tests: [...],
+  [TESTS]: [...],
   // Expose internals for debugging
   subject,
   debugState: computed(() => ({
@@ -399,7 +400,7 @@ const assert_initial_count = assert(() => counter.value === 0);
 const assert_initial_empty = assert(() => list.items.length === 0);
 
 return {
-  tests: [
+  [TESTS]: [
     { assertion: assert_initial_count },
     { assertion: assert_initial_empty },
     // ... actions and more assertions
@@ -419,7 +420,7 @@ const assert_playing = assert(() => game.phase === "playing");
 const assert_paused = assert(() => game.phase === "paused");
 
 return {
-  tests: [
+  [TESTS]: [
     { action: action_start },
     { assertion: assert_playing },
     { action: action_pause },

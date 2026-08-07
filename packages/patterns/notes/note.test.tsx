@@ -15,6 +15,7 @@ import {
   assert,
   NAME,
   pattern,
+  TESTS,
   UI,
   wish,
   Writable,
@@ -353,7 +354,7 @@ export default pattern(() => {
   // Test Sequence
   // ==========================================================================
   return {
-    tests: [
+    [TESTS]: [
       // === Initial state ===
       { assertion: assert_name },
       { assertion: assert_initial_title },

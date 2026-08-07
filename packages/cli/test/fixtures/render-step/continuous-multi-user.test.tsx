@@ -3,6 +3,7 @@ import {
   computed,
   multiUserTest,
   pattern,
+  TESTS,
   UI,
   Writable,
 } from "commonfabric";
@@ -24,7 +25,7 @@ const alice = pattern(() => {
 
   return {
     [UI]: view,
-    tests: [
+    [TESTS]: [
       { action: advance },
       { assertion: isLate },
     ],

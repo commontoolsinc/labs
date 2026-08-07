@@ -2,7 +2,7 @@
  * Fixture: expectRuntimeErrors: 2 but only one throw occurs.
  * A numeric expectation is exact — a count mismatch must fail the run.
  */
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, computed, pattern, TESTS, Writable } from "commonfabric";
 
 export default pattern(() => {
   const fine = new Writable(true);
@@ -13,7 +13,7 @@ export default pattern(() => {
   });
 
   return {
-    tests: [
+    [TESTS]: [
       { action: throwsOnce },
       { assertion: stillFine },
     ],

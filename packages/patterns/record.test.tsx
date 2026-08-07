@@ -29,7 +29,7 @@
  *
  * Run: deno task cf test packages/patterns/record.test.tsx --root packages/patterns --verbose
  */
-import { action, assert, pattern, UI, Writable } from "commonfabric";
+import { action, assert, pattern, TESTS, UI, Writable } from "commonfabric";
 import RecordPattern from "./record.tsx";
 
 interface AddResult {
@@ -241,7 +241,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       // Seeding: empty until the module list is rendered, then the default
       // Notes + TypePicker pair appears, and a later add lands after them.
       { assertion: assert_rendered_starts_empty },

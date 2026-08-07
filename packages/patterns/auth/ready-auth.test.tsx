@@ -6,7 +6,14 @@
  *
  * Run: deno task cf test packages/patterns/auth/ready-auth.test.tsx --verbose
  */
-import { action, assert, computed, pattern, Writable } from "commonfabric";
+import {
+  action,
+  assert,
+  computed,
+  pattern,
+  TESTS,
+  Writable,
+} from "commonfabric";
 import {
   type AuthAvailability,
   authIsReady,
@@ -94,7 +101,7 @@ export default pattern(() => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { assertion: assert_auth_unavailable },
       { action: mark_needs_login },
       { assertion: assert_auth_unavailable },

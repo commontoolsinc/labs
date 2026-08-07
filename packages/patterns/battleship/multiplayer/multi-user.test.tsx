@@ -11,7 +11,7 @@
  * Joins go through the programmatic `joinWithName` stream (the headless seam
  * kept by the profile migration); the profile-wish UI path needs a browser.
  */
-import { action, computed, multiUserTest, pattern } from "commonfabric";
+import { action, computed, multiUserTest, pattern, TESTS } from "commonfabric";
 import BattleshipLobby, { type LobbyOutput } from "./lobby.tsx";
 
 interface Setup {
@@ -45,7 +45,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { action: action_join },
       { assertion: assert_joined_slot_1 },
       { label: "alice-joined" },
@@ -80,7 +80,7 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   );
 
   return {
-    tests: [
+    [TESTS]: [
       { await: "alice-joined" },
       { assertion: assert_sees_alice },
       { assertion: assert_not_joined_yet },

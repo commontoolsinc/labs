@@ -36,6 +36,7 @@ import {
   Runtime,
   type RuntimeOptions,
   runtimePresets,
+  TESTS,
   writePatternCoverageLcov,
 } from "@commonfabric/runner";
 import type {
@@ -1228,10 +1229,10 @@ export async function runTestPattern(
       await runtime.idle();
     });
 
-    // 4. Get the tests array from pattern output
+    // 4. Get the tests array from pattern output (the reserved [TESTS] key)
     const testsCell = await withPhase(
       ["runTestPattern", "testsCell"],
-      () => patternResult.key("tests") as Cell<unknown>,
+      () => patternResult.key(TESTS) as Cell<unknown>,
     );
     const testSteps = await withPhase(
       ["runTestPattern", "testsValue"],
@@ -1241,7 +1242,7 @@ export async function runTestPattern(
     // Validate it's an array
     if (!Array.isArray(testSteps)) {
       throw new Error(
-        "Test pattern must return { tests: TestStep[] }. Got: " +
+        "Test pattern must return { [TESTS]: TestStep[] }. Got: " +
           toCompactDebugString(typeof testSteps),
       );
     }
