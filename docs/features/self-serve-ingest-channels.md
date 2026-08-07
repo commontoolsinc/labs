@@ -488,6 +488,10 @@ All five paths were verified by deliberately breaking each one: weakness fixed,
 file deleted, sentinel removed, test skipped, and the healthy case.
 
 **Procedure when space keys are fixed:**
+0. `deno task audit-ingest-channels --repair-indexes --recover <record>` —
+   only needed on a deployment that provisioned channels *before* this change,
+   and only once. See "Recovering a channel the index never learned about"
+   below for what `<record>` is and why the step exists.
 1. `deno task audit-ingest-channels` — record the current population.
 2. `deno task retire-ingest-channels --reason space-key-derivation-fix`
    (dry run), then again with `--confirm`.
@@ -496,6 +500,37 @@ file deleted, sentinel removed, test skipped, and the healthy case.
    and that entry is what would let an attacker simply mint again the next day.
    This step is not optional.
 4. `deno task audit-ingest-channels` — confirm nothing is left active.
+
+### Recovering a channel the index never learned about
+
+Before this change the audit-index write was best-effort and its failure was
+swallowed (`ingest.utils.ts` on `main`: "A failure here must NOT fail
+provisioning"). So a channel can exist that is live, appends into a user's
+space, and appears in no index at all. Its space's owner cannot see it, and
+therefore cannot revoke it — and neither a retirement sweep nor
+`--repair-indexes` would find it, because both walk the very index it is
+missing from. Repairing an index by enumerating that same index only ever
+confirms what is already there.
+
+The source of truth is not the index and it is not a scan of the service space:
+the memory layer exposes no space-wide enumeration, and reaching into its
+SQLite internals from an operator script would couple the Operation layer to
+Foundation internals that are actively changing. It does not need to be either.
+A channel id is `channelId(space, installId)` — derived, not random — and
+`provision-ingest-channel.ts` is the only thing that ever created one, from
+arguments the operator chose. **The operator's own provisioning record is the
+source of truth**, and probing it is exact: an id either resolves to a
+registration or it does not.
+
+`--recover <file>` takes that record as `<space-did> <install-id>` per line
+(`#` comments and blank lines ignored), visits each derived id alongside the
+index, and — with `--repair-indexes` — reindexes any that resolve. After it
+runs once, the channel is in the index and every later audit finds it without
+the record.
+
+Nothing minted from this change onward can join that population: indexing is
+now mandatory and lands in the same transaction as the registration, so there
+is no longer a write whose failure can be swallowed.
 
 ## One transaction per lifecycle write
 
