@@ -140,7 +140,11 @@ export function dataUriFromValueWithResolvedLinks(
  * media type is returned as it came in, on the same footing as a link
  * naming a document in a space.
  *
- * A `FabricSpecialObject` comes back as the same instance, both arms of it.
+ * A `FabricPrimitive` comes back as the same instance, correctly: a leaf holds
+ * no link to inline.
+ *
+ * A `FabricInstance` comes back as the same instance too, and that is a gap
+ * rather than an answer -- see the `TODO` in the record branch.
  *
  * @param value - The value to find and inline data: URI links in.
  * @returns The value with any data: URI links inlined.
@@ -217,14 +221,21 @@ export function findAndInlineDataUriLinks(value: any): any {
     return next ?? value;
   } else if (isRecord(value)) {
     // A `FabricSpecialObject` is `isRecord` and so arrives here rather than at
-    // the leaf return, and survives anyway: the clone happens only once an
-    // entry inlines to something new, and such a value has zero enumerable own
-    // properties. The loop body never runs, `next` stays undefined, and the
-    // original goes back by identity -- including when a SIBLING inlines and
-    // forces the surrounding record to clone, since that clone copies the
-    // reference across rather than descending. `data-uri-inlining.test.ts`
-    // pins both, so the zero-property fact this rests on cannot quietly stop
-    // holding.
+    // the leaf return, and is not damaged: the clone happens only once an entry
+    // inlines to something new, and such a value has zero enumerable own
+    // properties, so the loop body never runs and the original goes back by
+    // identity -- including when a SIBLING inlines and forces the surrounding
+    // record to clone, since that clone copies the reference across.
+    //
+    // For a `FabricPrimitive` that is the whole answer: a leaf holds no link to
+    // inline.
+    //
+    // TODO(danfuzz): a `FabricInstance` is NOT answered by passing through. Its
+    // state can carry a `data:` URI link -- a `FabricError`'s extras bag, for
+    // one -- and that link is never inlined, so the value comes back whole and
+    // untransformed. Reaching it needs codec-mediated traversal into instance
+    // state, the same gap marked at the sibling walk in
+    // `dataUriFromValueWithResolvedLinks()`.
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {
       const inlined = findAndInlineDataUriLinks(entry);

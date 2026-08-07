@@ -10,6 +10,7 @@ import { findAndInlineDataUriLinks } from "../src/data-uri.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -342,10 +343,12 @@ describe("data URI inlining", () => {
       // object has zero enumerable own properties: the loop body never runs,
       // so `next` stays undefined and the original comes back by identity.
       //
-      // That is a real guarantee but an indirect one, resting entirely on the
-      // zero-property fact. These pin it, so giving a special object an
-      // enumerable property turns the walk red here rather than silently
-      // flattening values in a `data:` URI.
+      // For a `FabricPrimitive` that is the whole answer, and the guarantee --
+      // though indirect, resting entirely on the zero-property fact -- is
+      // pinned here so that giving one an enumerable property turns this red.
+      //
+      // For a `FabricInstance` it is NOT the answer: not being flattened is not
+      // the same as being handled, and the third test below pins that gap.
 
       it("returns a `FabricBytes` as the same instance", () => {
         const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
@@ -353,10 +356,30 @@ describe("data URI inlining", () => {
         expect(findAndInlineDataUriLinks(bytes)).toBe(bytes);
       });
 
-      it("returns a `FabricError` as the same instance", () => {
-        const failure = FabricError.fromNativeError(new Error("boom"));
+      it("leaves a `data:` URI link inside a `FabricError` un-inlined", () => {
+        // A KNOWN GAP, pinned as one. A `FabricInstance` is not answered by
+        // passing through: its state can carry a link that this walk exists to
+        // inline, and coming back whole means coming back untransformed.
+        //
+        // The control is the point -- the same link inlines on a plain object,
+        // so what changes the outcome is the wrapper, not the link.
+        const dataURI = dataUriFromValueWithResolvedLinks("inlined value");
+        const link = { "/": { [LINK_V1_TAG]: { id: dataURI, path: [] } } };
+        const failure = new FabricError({
+          type: "Error",
+          message: "boom",
+          stack: undefined,
+          cause: undefined,
+          extras: { attachment: link as unknown as FabricValue },
+        });
 
-        expect(findAndInlineDataUriLinks(failure)).toBe(failure);
+        expect(findAndInlineDataUriLinks({ e: link })).toEqual({
+          e: "inlined value",
+        });
+
+        const result = findAndInlineDataUriLinks(failure) as FabricError;
+        expect(result).toBe(failure);
+        expect(result.getExtra("attachment")).toEqual(link);
       });
 
       it("keeps a special object whole while inlining a sibling", () => {
