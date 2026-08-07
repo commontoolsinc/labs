@@ -84,12 +84,13 @@ current (v2) protocol, authorization happens at **session open**
    partitions from Chapter 9. `PerUser` isolation is cryptographic
    identity, enforced in the storage engine.
 
-Beyond authentication, per-space **ACLs** are now wired into the v2 server
-itself. A space can carry an ACL document (addressed by the wire entity id
+## Authorization: per-space ACLs
+
+Beyond authentication, per-space **ACLs** are wired into the v2 server itself.
+A space can carry an ACL document (addressed by the wire entity id
 `of:<space DID>`; types in `packages/memory/acl.ts`, managed by the runner's
-`ACLManager`
-and surfaced as `cf acl ...`) granting READ/WRITE/OWNER capabilities. The
-server evaluates them per message — session-open, queries, and watches need
+`ACLManager` and surfaced as `cf acl`) granting READ/WRITE/OWNER capabilities.
+The server evaluates them per message — session-open, queries, and watches need
 READ; `transact` needs WRITE; writing the ACL itself needs OWNER. A fresh space
 is read-only until its space identity (or a configured service DID) writes a
 valid ACL with at least one concrete OWNER. Named-space bootstrap uses a
@@ -106,6 +107,66 @@ is a deployment dial (`MEMORY_ACL_MODE`: `off`/`observe`/`enforce`) that
 defaults to `enforce`; `enforce` additionally revokes live sessions that lose
 access. Operators can still select `observe` or `off` explicitly. Structural
 ACL validity and fresh-space genesis remain hard invariants in `observe` mode.
+
+## Reading and changing a space's ACL
+
+That bootstrap default has a consequence worth stating plainly: **a newly
+created named space is world-writable, not private.** The `"*": "WRITE"` grant
+is a literal entry in its ACL document, and `cf acl ls` shows it:
+
+```bash
+cf acl ls --identity ./my.key --api-url https://api.example.com --space my-space
+```
+
+That prints a bordered `DID` / `CAPABILITY` table (or `No ACL entries found.`
+if the space has no ACL yet). For a space you just created it is two rows: your
+own DID with `OWNER`, and `*` with `WRITE`. Grant and revoke are the other two
+subcommands (`packages/cli/commands/acl.ts`):
+
+```bash
+# Grant, or change an existing grant. Capability is READ, WRITE, or OWNER.
+cf acl set did:key:z6Mkk... WRITE --space my-space
+
+# Revoke one identity — but while `*` is still present this revokes nothing;
+# see the caveat below.
+cf acl remove did:key:z6Mkk... --space my-space
+
+# Drop the bootstrap wildcard — this is what makes the space private.
+cf acl remove ANYONE --space my-space
+```
+
+**Drop the wildcard first, or the per-identity commands do not mean what they
+look like.** The server resolves a principal's capability as *its own entry if
+it has one, otherwise the wildcard's* (`#resolveCapability` in
+`packages/memory/v2/server.ts`: `acl[principal] ?? acl["*"]`). While
+`"*": "WRITE"` is in the ACL, that fallback is WRITE, and it produces two
+counter-intuitive results:
+
+- `cf acl remove <did>` **revokes nothing.** It deletes that identity's
+  explicit entry, which drops them onto the wildcard's WRITE. `cf acl ls` will
+  stop listing them and they will keep writing.
+- `cf acl set <did> READ` is a **downgrade, not a grant.** An explicit entry
+  shadows the wildcard, so a principal who had WRITE via `*` ends up with only
+  READ. (`cf acl set <did> WRITE` changes nothing today, but is a durable grant
+  that survives removing the wildcard.)
+
+So the order that works is `cf acl remove ANYONE` first, then grant each
+identity what it should have. Until the wildcard is gone, treat the space as
+world-writable regardless of what the per-identity rows say.
+
+`--identity` and `--api-url` fall back to `CF_IDENTITY` and `CF_API_URL`;
+`--space` takes a space name or a DID and has no environment fallback. `ANYONE`
+is the CLI spelling of the `"*"` wildcard, so the shell does not glob-expand it
+before the CLI sees it — `cf acl ls` still prints the raw `*`.
+
+All three commands act as the identity in the key file, and writing the ACL
+needs OWNER, so you can only administer a space you own. Two guardrails come
+from the server rather than the CLI: it refuses any mutation that would leave
+the space with no concrete (non-`"*"`) OWNER, so this is not a way to lock
+yourself out; and it requires an ACL change to arrive as a single
+whole-document replacement, which is why `ACLManager` writes the entire ACL on
+every grant. That rule and the genesis rule are catalogued as INV-12 and INV-13
+in [`docs/specs/memory-v2/09-invariants.md`](../specs/memory-v2/09-invariants.md).
 
 ## Running untrusted code: three rings
 

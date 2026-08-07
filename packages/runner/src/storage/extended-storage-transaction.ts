@@ -8,6 +8,7 @@ import {
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { aclDocId } from "@commonfabric/memory/acl";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type {
   CommitError,
@@ -762,6 +763,24 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         `${address.id}/${address.path.join("/")}`,
       );
       return;
+    }
+    // The space ACL document has a non-standard write contract: the memory
+    // server accepts only an ACL-only commit carrying a single whole-document
+    // `set` (INV-12, docs/specs/memory-v2/09-invariants.md). A write through
+    // the value surface is decomposed per key by `normalizeAndDiff` and
+    // emitted as `op: "patch"`, which the server refuses — so it fails after a
+    // round-trip, with an error about commit shape that the author of the
+    // write has no reason to understand. Refuse it here instead, in-process,
+    // naming the one sanctioned writer. `ACLManager` addresses the whole
+    // document (path `[]`) and so passes; genesis bypasses this transaction
+    // entirely via a raw `session.transact`; hydration delivers path-`[]`
+    // shapes; the CFC space-membership reader only reads.
+    if (address.path.length > 0 && address.id === aclDocId(address.space)) {
+      throw new Error(
+        `${address.id} is the space ACL document: mutate it through ` +
+          `ACLManager, which replaces the whole document. A value-path write ` +
+          `is emitted as a patch and rejected by the memory server.`,
+      );
     }
     // The ["cfc"] document field holds the persisted label map. A value-path
     // write (path[0] is a user key) or a path-[] full-document write is not it.
@@ -1743,10 +1762,25 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.invalidateReadResultCache();
     if (this.tx.writeBatch) {
       // Keep the batch path on the same noteSystemWrite chokepoint as single
-      // writes (S18). Structurally inert today — the NormalizedFullLink
-      // signature means toMemorySpaceAddress always yields path ["value", ...]
-      // — but the guard must not silently fall away if the signature is ever
-      // widened to document-root addresses.
+      // writes (S18). This is not inert, and never was: `noteSystemWrite`'s
+      // ID-keyed arms do not care about the path at all. The
+      // `cfcPolicyManifest` immutability guard has always been reachable here,
+      // and the space-ACL guard now joins it — that one fires on exactly
+      // `path.length > 0`, and `toMemorySpaceAddress` prefixes "value", so
+      // EVERY link-shaped write to the ACL document throws from here,
+      // including one whose link path is [].
+      //
+      // That throw escapes mid-batch. `writeBatch` groups the generator's
+      // writes into same-document runs and applies each run as it pulls the
+      // next write, so a throw on write k leaves runs 1..k-1 already applied to
+      // the transaction while the call fails: a partial write plus a throw, not
+      // an atomic refusal. Nothing rolls those writes back — the transaction is
+      // still open and still writable, so a caller that swallows the error and
+      // commits anyway lands the prefix. Callers must treat a throw from
+      // `writeValuesOrThrow` as poisoning the transaction (abort it, or let the
+      // throw propagate past the commit, which is what every caller does
+      // today). See `writeValuesOrThrow` partial-batch coverage in
+      // `packages/runner/test/memory-v2-acl-mutation.test.ts`.
       const noteSystemWrite = (address: IMemorySpaceAddress) =>
         this.noteSystemWrite(address);
       // Note the write identity per yielded write (not once up front): an

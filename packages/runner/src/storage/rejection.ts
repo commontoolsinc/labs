@@ -89,3 +89,165 @@ export function isStorageTransactionInconsistent(
 ): boolean {
   return error?.name === "StorageTransactionInconsistent";
 }
+
+/**
+ * A liveness failure: the commit never reached a verdict because the link to
+ * the memory server was down. The committed data was never evaluated, so
+ * nothing about it is refused — a fresh attempt over a re-established
+ * connection can land the identical write, and the memory client re-establishes
+ * one WITHOUT being asked: a transport close schedules `reconnect()`, and a
+ * `transact` issued while disconnected queues in `#outstandingCommits` and calls
+ * `client.restoreConnection()` (memory/v2/client.ts). `ConnectionError` is the
+ * runner's normalization of a transport failure (storage/v2.ts
+ * `toConnectionError`).
+ *
+ * `InvalidMessageError` is the other liveness class, and the less obvious one.
+ * The client raises it when a frame off the wire will not decode
+ * (memory/v2/client.ts `onMessage`), and then calls `rejectPending(error)` —
+ * which rejects EVERY in-flight request with it, not just the request whose
+ * response was malformed. An in-flight `transact` is collateral: the server may
+ * never have seen it, may have committed it, may have replied successfully in a
+ * frame that was garbled after the fact. What is certain is that nothing about
+ * the commit was evaluated and refused, so it is a liveness failure and not a
+ * verdict, and a re-run over a healthy connection can land the identical write.
+ * (For it to be classified at all the name must survive normalization —
+ * `toRejectedError` in storage/v2.ts preserves it explicitly for that reason.)
+ *
+ * This is deliberately narrow. An `AuthorizationError` is NOT a liveness
+ * failure even though it also arrives from the network: the server evaluated
+ * the request and denied it. The one exception the server marks itself —
+ * `retriable: true` on a session-open anti-replay race
+ * (memory/v2/session-open-auth.ts) — is handled by
+ * {@link isRetryableCommitRejection} reading that marker, not by class.
+ *
+ * `SessionError` is NOT here, and the reason is the retry path rather than the
+ * error: it is the same "never evaluated" shape as a `ConnectionError`, but the
+ * re-established session its convergence argument needs never arrives. Nothing
+ * between two `editWithRetry` attempts clears or remounts one:
+ *  - `SpaceReplica.sessionHandle()` (storage/v2.ts) memoizes the mount and drops
+ *    it only in `close()`/`closeNow()`, so every attempt reuses the very handle
+ *    the server just refused;
+ *  - `SpaceSession.reopen()` (memory/v2/client.ts) runs only from `restore()`,
+ *    which only the client's `reconnect()` calls — i.e. only after a TRANSPORT
+ *    close;
+ *  - `sendOutstandingCommit`'s catch (memory/v2/client.ts) keeps a commit
+ *    outstanding for replay on `isConnectionError`/`isSessionRevokedError` only;
+ *    a `SessionError` falls through and rejects the commit with `#sessionId`
+ *    untouched.
+ * Those three also say which case actually reaches here. A transport drop never
+ * surfaces as a `SessionError` at all — the commit queues and replays after the
+ * reconnect's `reopen()`, and the server re-creates even a TTL-expired session
+ * from the id the client resends (memory/v2/session-registry.ts `open`). What
+ * reaches `editWithRetry` is the other case: a LIVE connection whose session the
+ * SERVER dropped — an ACL de-authorization sweep (`#revokeDeauthorizedSessions`,
+ * memory/v2/server.ts, whose own comment is "its next message fails closed
+ * (Unknown session)"), or a takeover, both of which also delete the entry
+ * `Connection.requireSession` checks. That is terminal for the session: the
+ * client's remedy is the `session/revoked` frame, which CLOSES it
+ * (`terminateSession`), not a reopen — and a reopen would be denied at
+ * `session.open`.
+ *
+ * Retrying it is therefore all cost. With no backoff the whole budget burns
+ * within milliseconds on identical doomed round-trips, each one emitting a
+ * subscriber revert from `finalizeRejection`; and it DOWNGRADES the reported
+ * error, because once the revocation frame lands `#assertOpen()` throws
+ * `SessionRevokedError`, a name `toRejectedError` does not preserve — so the
+ * caller is handed a generic `TransactionError` instead of the real cause it
+ * would have seen on attempt 1. Move it back into the allow-list the day the
+ * retry path clears `#sessionHandle`, or the client reopens on `SessionError`:
+ * the convergence argument is sound, only the remount is missing.
+ */
+export function isTransientCommitRejection(
+  error: { name?: string } | undefined | null,
+): boolean {
+  return error?.name === "ConnectionError" ||
+    error?.name === "InvalidMessageError";
+}
+
+/**
+ * The attempt was discarded before it ever reached storage, so there is no
+ * server verdict to respect: either the `editWithRetry` callback called
+ * `tx.abort()` to throw this attempt away, or CFC enforcement refused to hand
+ * the transaction to storage (`rejectCommitBeforeStorage` in
+ * extended-storage-transaction.ts). Re-running produces a genuinely new
+ * attempt, and — unlike every other rejection class — a discarded attempt costs
+ * no round-trip and no `finalizeRejection`, so retrying one is local work
+ * rather than churn against the server.
+ *
+ * It is NOT free of observable churn: `rejectCommitBeforeStorage` calls
+ * `runCommitCallbacks(result)`, so every `cell.set(v, cb)` callback and every
+ * `tx.addCommitCallback` consumer registered on the discarded transaction fires
+ * with the failure — once per doomed attempt, same as any other rejection. The
+ * cheapness argument is about server round-trips, not about staying invisible
+ * to commit-callback consumers.
+ *
+ * NOTE the asymmetry with a callback that THROWS: `editWithRetry` aborts that
+ * transaction and returns immediately without retrying, because a thrown
+ * callback is a failure rather than a request for a fresh attempt. `abort()` is
+ * the affordance for "discard this attempt and run me again".
+ */
+export function isDiscardedAttemptRejection(
+  error: { name?: string } | undefined | null,
+): boolean {
+  return error?.name === "StorageTransactionAborted";
+}
+
+/**
+ * The commit-retry ALLOW-LIST: the only rejection classes for which re-running
+ * the same function against fresh state can produce a different outcome. Used
+ * by `Runtime.editWithRetry` (runtime.ts), which before this predicate retried
+ * on the mere TRUTHINESS of the commit error — so a deterministic refusal (an
+ * ACL `ProtocolError`, an `AuthorizationError`, a `PreconditionFailedError`
+ * whose own interface doc says the client MUST NOT retry) burned the whole
+ * budget on identical doomed round-trips, each one emitting a subscriber revert
+ * from `finalizeRejection`. Budgets are not small everywhere: pattern-manager
+ * sizes one at `Math.max(16, 2 * importEdges + 8)`.
+ *
+ * It is an allow-list on purpose. A rejection class introduced tomorrow — a new
+ * server-side commit rule, a new policy refusal — is non-retryable until
+ * someone establishes that re-running can converge and adds it here, next to
+ * the reason why. The reverse default silently enrolls every new refusal in the
+ * doomed-retry loop, which is how this defect arose.
+ *
+ * The four admitted cases and their convergence argument:
+ *  - stale basis from upstream ({@link isConflictRejection}) — the retry runs
+ *    after the conflict's `readyToRetry` catch-up gate, against fresh state.
+ *  - stale basis locally ({@link isStorageTransactionInconsistent}) — a value
+ *    read during the transaction changed on this replica; re-reading resolves.
+ *  - liveness ({@link isTransientCommitRejection}) — the commit was never
+ *    evaluated, and the client re-establishes the connection on its own, so a
+ *    retry lands it. `SessionError` is the near miss that is NOT admitted: same
+ *    "never evaluated" shape, but no one remounts the session between attempts;
+ *    see that predicate's doc for why, and for what would change the answer.
+ *  - discarded attempt ({@link isDiscardedAttemptRejection}) — the attempt
+ *    never reached storage and the caller asked for a fresh one.
+ *
+ * Plus one marker-driven case: an `AuthorizationError` the SERVER tagged
+ * `retriable` (the session-open anti-replay race a fresh handshake heals — see
+ * memory/v2/session-open-auth.ts, and `isNonRetriableAuthorizationError` in
+ * memory/v2/client.ts, which reads the same marker). An unmarked
+ * `AuthorizationError` is terminal, including the ACL bootstrap denial
+ * ("Space … requires an ACL genesis commit before ordinary writes",
+ * memory/v2/server.ts): that denial CAN clear if a concurrent genesis lands,
+ * but retrying it here is not how it clears — `editWithRetry` re-runs with no
+ * backoff, so all attempts complete within milliseconds of each other, and the
+ * runner's own genesis runs at session open (storage/v2.ts) rather than
+ * concurrently with a replica's writes. Failing fast surfaces the real problem
+ * instead of hiding it behind six identical denials. If that race ever needs to
+ * heal by retry, the server should mark the denial `retriable` — the marker,
+ * not a blanket class exemption, is the mechanism.
+ */
+export function isRetryableCommitRejection(
+  error: { name?: string; retriable?: boolean } | undefined | null,
+): boolean {
+  if (!error) return false;
+  if (
+    isConflictRejection(error) ||
+    isStorageTransactionInconsistent(error) ||
+    isTransientCommitRejection(error) ||
+    isDiscardedAttemptRejection(error)
+  ) {
+    return true;
+  }
+  return error.name === "AuthorizationError" && error.retriable === true;
+}
