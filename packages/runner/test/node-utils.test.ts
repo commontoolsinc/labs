@@ -1,7 +1,8 @@
 // What the CFC output-labelling walk does with a `FabricSpecialObject`. Such a
 // value has zero enumerable own properties, so the walk's `Object.entries()`
-// descent ends at it -- which costs a `FabricPrimitive` nothing, since a leaf
-// holds no cell to label.
+// descent ends at it. That costs a `FabricPrimitive` nothing -- a leaf holds no
+// cell to label -- but for a `FabricInstance` it means a cell in its codec
+// contents goes UNLABELLED, so the walk refuses one instead.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -9,6 +10,8 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -83,6 +86,36 @@ describe("node-utils", () => {
         // deno-lint-ignore no-explicit-any
         expect((target as any).schema?.ifc?.confidentiality).toContain(
           "secret",
+        );
+      });
+    });
+
+    it("throws for a `FabricError` holding a cell rather than skipping it", () => {
+      withinHandler(() => {
+        // The control is the point: the same cell IS labelled when it sits in
+        // a plain record, so what changes the outcome is the wrapper.
+        const input = new Cell("classified", {
+          type: "string",
+          ifc: { confidentiality: ["secret"] },
+        });
+        const plain = new Cell("out", { type: "string" });
+
+        applyInputIfcToOutput({ input }, { target: plain });
+        // deno-lint-ignore no-explicit-any
+        expect((plain as any).schema?.ifc?.confidentiality).toContain("secret");
+
+        const held = new Cell("out", { type: "string" });
+        const wrapper = new FabricError({
+          type: "Error",
+          message: "boom",
+          stack: undefined,
+          cause: undefined,
+          extras: { held: held as unknown as FabricValue },
+        });
+
+        expect(() => applyInputIfcToOutput({ input }, { w: wrapper })).toThrow(
+          "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
+            "attaching CFC labels to outputs.",
         );
       });
     });
