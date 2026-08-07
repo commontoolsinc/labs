@@ -24,7 +24,8 @@ const addTodo = handler({
             type: "string"
         }
     },
-    required: ["add"]
+    required: ["add"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {

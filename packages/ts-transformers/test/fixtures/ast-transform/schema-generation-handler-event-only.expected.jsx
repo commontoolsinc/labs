@@ -26,7 +26,8 @@ export const incrementer = handler({
             type: "number"
         }
     },
-    required: ["amount"]
+    required: ["amount"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, false as const satisfies __cfHelpers.JSONSchema, (event: IncrementEvent, _state) => {
     console.log("increment by", event.amount);
 });

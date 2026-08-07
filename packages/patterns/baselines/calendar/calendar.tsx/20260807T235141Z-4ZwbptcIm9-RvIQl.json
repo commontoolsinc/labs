@@ -1,0 +1,304 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "EventDetailOutput": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          },
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          "date": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "setDate": {
+            "additionalProperties": false,
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "date": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "date"
+            ],
+            "type": "object"
+          },
+          "setNotes": {
+            "additionalProperties": false,
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "notes": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "notes"
+            ],
+            "type": "object"
+          },
+          "setTime": {
+            "additionalProperties": false,
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "time": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "time"
+            ],
+            "type": "object"
+          },
+          "setTitle": {
+            "additionalProperties": false,
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "type": "object"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "date",
+          "time",
+          "notes",
+          "summary",
+          "setTitle",
+          "setDate",
+          "setTime",
+          "setNotes",
+          "$NAME",
+          "$UI"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "events": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/EventDetailOutput"
+        },
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "calendar/calendar.tsx",
+  "resultSchema": {
+    "$defs": {
+      "EventDetailOutput": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          },
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          "date": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "setDate": {
+            "additionalProperties": false,
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "date": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "date"
+            ],
+            "type": "object"
+          },
+          "setNotes": {
+            "additionalProperties": false,
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "notes": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "notes"
+            ],
+            "type": "object"
+          },
+          "setTime": {
+            "additionalProperties": false,
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "time": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "time"
+            ],
+            "type": "object"
+          },
+          "setTitle": {
+            "additionalProperties": false,
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "type": "object"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "date",
+          "time",
+          "notes",
+          "summary",
+          "setTitle",
+          "setDate",
+          "setTime",
+          "setNotes",
+          "$NAME",
+          "$UI"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "addEvent": {
+        "additionalProperties": false,
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "date",
+          "time"
+        ],
+        "type": "object"
+      },
+      "events": {
+        "items": {
+          "$ref": "#/$defs/EventDetailOutput"
+        },
+        "type": "array"
+      },
+      "mentionable": {
+        "items": {
+          "$ref": "#/$defs/EventDetailOutput"
+        },
+        "type": "array"
+      },
+      "removeEvent": {
+        "additionalProperties": false,
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "event": {
+            "$ref": "#/$defs/EventDetailOutput"
+          }
+        },
+        "required": [
+          "event"
+        ],
+        "type": "object"
+      },
+      "sortedEvents": {
+        "items": {
+          "$ref": "#/$defs/EventDetailOutput"
+        },
+        "type": "array"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "todayDate": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "events",
+      "sortedEvents",
+      "mentionable",
+      "todayDate",
+      "summary",
+      "addEvent",
+      "removeEvent",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

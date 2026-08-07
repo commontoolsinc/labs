@@ -30,7 +30,8 @@ const __cfHandler_1 = __cfHelpers.handler({
             type: "string"
         }
     },
-    required: ["title"]
+    required: ["title"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -51,7 +52,8 @@ const __cfHandler_2 = __cfHelpers.handler({
             type: "string"
         }
     },
-    required: ["title"]
+    required: ["title"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
@@ -94,11 +96,13 @@ export default pattern(() => {
     properties: {
         addTopic: {
             $ref: "#/$defs/AddTopic",
-            asCell: ["stream"]
+            asCell: ["stream"],
+            additionalProperties: false
         },
         touch: {
             $ref: "#/$defs/AddTopic",
-            asCell: ["stream"]
+            asCell: ["stream"],
+            additionalProperties: false
         }
     },
     required: ["addTopic", "touch"],

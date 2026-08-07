@@ -28,7 +28,8 @@ const removeItem = handler({
             type: "string"
         }
     },
-    required: ["key"]
+    required: ["key"],
+    additionalProperties: false
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     additionalProperties: true,

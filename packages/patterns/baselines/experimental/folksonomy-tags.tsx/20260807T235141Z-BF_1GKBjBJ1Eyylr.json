@@ -1,0 +1,166 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "AggregatorPiece": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/$defs/TagEvent"
+            },
+            "type": "array"
+          },
+          "postEvent": {
+            "$ref": "#/$defs/TagEvent",
+            "additionalProperties": false,
+            "asCell": [
+              "stream"
+            ]
+          },
+          "suggestions": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/$defs/CommunityTagSuggestion"
+              },
+              "type": "array"
+            },
+            "properties": {},
+            "type": "object"
+          }
+        },
+        "required": [
+          "events",
+          "postEvent",
+          "suggestions"
+        ],
+        "type": "object"
+      },
+      "CommunityTagSuggestion": {
+        "properties": {
+          "count": {
+            "type": "number"
+          },
+          "tag": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tag",
+          "count"
+        ],
+        "type": "object"
+      },
+      "TagEvent": {
+        "properties": {
+          "action": {
+            "enum": [
+              "add",
+              "use",
+              "remove"
+            ]
+          },
+          "scope": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "scope",
+          "tag",
+          "action",
+          "timestamp"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "aggregator": {
+        "$ref": "#/$defs/AggregatorPiece",
+        "description": "Optional: Direct reference to aggregator (bypasses wish() discovery)"
+      },
+      "scope": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "description": "Namespace key (e.g., GitHub URL of the pattern using it)",
+        "type": "string"
+      },
+      "tags": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "description": "User's tags for this scope - bidirectional binding",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "scope",
+      "tags"
+    ],
+    "type": "object"
+  },
+  "pattern": "experimental/folksonomy-tags.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "addTag": {
+        "additionalProperties": false,
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "tag": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tag"
+        ],
+        "type": "object"
+      },
+      "removeTag": {
+        "additionalProperties": false,
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "tag": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tag"
+        ],
+        "type": "object"
+      },
+      "tags": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "tags",
+      "addTag",
+      "removeTag",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}
