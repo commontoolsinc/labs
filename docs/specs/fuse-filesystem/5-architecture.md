@@ -25,7 +25,7 @@
               |   - virtual handle entries |
               |                            |
               |  Session / Runtime         |
-              |   - PieceManager           |
+              |   - PiecesController       |
               |   - Cell read/write        |
               |   - Subscriptions          |
               +---------------------------+

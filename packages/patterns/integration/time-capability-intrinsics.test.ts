@@ -8,7 +8,6 @@ import { join } from "@std/path";
 import { createSession, Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 
@@ -28,9 +27,9 @@ async function makeController(
       actingPrincipal: session.as.did(),
     }),
   });
-  const manager = new PieceManager(session, runtime);
-  await manager.synced();
-  return new PiecesController(manager);
+  const pieces = new PiecesController(session, runtime);
+  await pieces.synced();
+  return pieces;
 }
 
 function gatedController(spaceName: string): Promise<PiecesController> {
@@ -38,7 +37,7 @@ function gatedController(spaceName: string): Promise<PiecesController> {
 }
 
 async function instantiate(cc: PiecesController, rel: string) {
-  const program = await cc.manager().runtime.harness.resolve(
+  const program = await cc.runtime.harness.resolve(
     new FileSystemProgramResolver(join(ROOT, rel), ROOT),
   );
   return await cc.create(program, { start: true });
@@ -48,7 +47,7 @@ describe("W6: gated Date/Math intrinsics", () => {
   it("raw new Date() in a lift throws a TimeCapabilityError", async () => {
     const cc = await gatedController(`w6-lift-${crypto.randomUUID()}`);
     const errors: string[] = [];
-    cc.manager().runtime.scheduler.onError((e) => {
+    cc.runtime.scheduler.onError((e) => {
       if (e?.name === "TimeCapabilityError") errors.push(e.message);
     });
     let cancel: (() => void) | undefined;
@@ -57,9 +56,9 @@ describe("W6: gated Date/Math intrinsics", () => {
         cc,
         "integration/fixtures/lift-raw-date-violation.tsx",
       );
-      const rc = cc.manager().getResult(piece.getCell());
+      const rc = cc.getResult(piece.getCell());
       cancel = rc.sink(() => {});
-      await cc.manager().runtime.idle();
+      await cc.runtime.idle();
     } catch (e) {
       if ((e as Error)?.name === "TimeCapabilityError") {
         errors.push((e as Error).message);
@@ -75,7 +74,7 @@ describe("W6: gated Date/Math intrinsics", () => {
   it("new Date(arg) in a lift passes through (deterministic)", async () => {
     const cc = await gatedController(`w6-arg-${crypto.randomUUID()}`);
     const errors: string[] = [];
-    cc.manager().runtime.scheduler.onError((e) => {
+    cc.runtime.scheduler.onError((e) => {
       if (e?.name === "TimeCapabilityError") errors.push(e.message);
     });
     let cancel: (() => void) | undefined;
@@ -85,9 +84,9 @@ describe("W6: gated Date/Math intrinsics", () => {
         cc,
         "integration/fixtures/lift-date-with-arg-ok.tsx",
       );
-      const rc = cc.manager().getResult(piece.getCell());
+      const rc = cc.getResult(piece.getCell());
       cancel = rc.sink(() => {});
-      await cc.manager().runtime.idle();
+      await cc.runtime.idle();
       label = rc.key("label").get();
     } finally {
       cancel?.();
@@ -100,7 +99,7 @@ describe("W6: gated Date/Math intrinsics", () => {
   it("raw new Date()/Math.random() in a handler work, coarsened to 1s", async () => {
     const cc = await gatedController(`w6-handler-${crypto.randomUUID()}`);
     const errors: string[] = [];
-    cc.manager().runtime.scheduler.onError((e) => {
+    cc.runtime.scheduler.onError((e) => {
       if (e?.name === "TimeCapabilityError") errors.push(e.message);
     });
     let cancel: (() => void) | undefined;
@@ -111,11 +110,11 @@ describe("W6: gated Date/Math intrinsics", () => {
         cc,
         "integration/fixtures/handler-raw-clock-ok.tsx",
       );
-      const rc = cc.manager().getResult(piece.getCell());
+      const rc = cc.getResult(piece.getCell());
       cancel = rc.sink(() => {});
-      await cc.manager().runtime.idle();
+      await cc.runtime.idle();
       (rc.key("stamp") as unknown as { send: (e: unknown) => void }).send({});
-      await cc.manager().runtime.idle();
+      await cc.runtime.idle();
       stampedAt = rc.key("stampedAt").get();
       roll = rc.key("roll").get();
     } finally {
@@ -133,7 +132,7 @@ describe("W6: gated Date/Math intrinsics", () => {
   it("a handler's clock is carried forward to the event it emits", async () => {
     const cc = await gatedController(`w6-carryforward-${crypto.randomUUID()}`);
     const errors: string[] = [];
-    cc.manager().runtime.scheduler.onError((e) => {
+    cc.runtime.scheduler.onError((e) => {
       if (e?.name === "TimeCapabilityError") errors.push(e.message);
     });
     let cancel: (() => void) | undefined;
@@ -144,11 +143,11 @@ describe("W6: gated Date/Math intrinsics", () => {
         cc,
         "integration/fixtures/handler-event-time-carryforward.tsx",
       );
-      const rc = cc.manager().getResult(piece.getCell());
+      const rc = cc.getResult(piece.getCell());
       cancel = rc.sink(() => {});
-      await cc.manager().runtime.idle();
+      await cc.runtime.idle();
       (rc.key("first") as unknown as { send: (e: unknown) => void }).send({});
-      await cc.manager().runtime.idle();
+      await cc.runtime.idle();
       stampFirst = rc.key("stampFirst").get();
       stampSecond = rc.key("stampSecond").get();
     } finally {

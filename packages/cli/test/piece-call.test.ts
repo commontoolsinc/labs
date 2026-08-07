@@ -76,7 +76,7 @@ describe("executePieceCallable", () => {
         "missing",
         [],
         {
-          loadManager: () =>
+          loadPieces: () =>
             Promise.resolve({ getSpace: () => "home" } as never),
           loadPiece: () => Promise.resolve(piece as never),
         },
@@ -96,7 +96,7 @@ describe("executePieceCallable", () => {
         "missing",
         [],
         {
-          loadManager: () =>
+          loadPieces: () =>
             Promise.resolve({ getSpace: () => "home" } as never),
           loadPiece: () => Promise.resolve(pieceWithoutCell as never),
         },
@@ -125,9 +125,9 @@ describe("executePieceCallable", () => {
       "refresh",
       [],
       {
-        loadManager: (config) => {
+        loadPieces: (config) => {
           managerConfig = config;
-          return Promise.resolve(harness.manager);
+          return Promise.resolve(harness.pieces);
         },
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => true,
@@ -164,9 +164,9 @@ describe("executePieceCallable", () => {
       "refresh",
       [],
       {
-        loadManager: (config) => {
+        loadPieces: (config) => {
           managerConfig = config;
-          return Promise.resolve(harness.manager);
+          return Promise.resolve(harness.pieces);
         },
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => true,
@@ -205,7 +205,7 @@ describe("executePieceCallable", () => {
       "recordMessage",
       ["--message", "milk"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
       },
     );
@@ -245,7 +245,7 @@ describe("executePieceCallable", () => {
         "recordMessage",
         [],
         {
-          loadManager: () => Promise.resolve(harness.manager),
+          loadPieces: () => Promise.resolve(harness.pieces),
           loadPiece: () => Promise.resolve(harness.piece),
           isStdinTerminal: () => false,
           readTextInput: () => Promise.resolve('{"mesage":"milk"}'),
@@ -298,7 +298,7 @@ describe("executePieceCallable", () => {
         "recordMessage",
         [],
         {
-          loadManager: () => Promise.resolve(harness.manager),
+          loadPieces: () => Promise.resolve(harness.pieces),
           loadPiece: () => Promise.resolve(harness.piece),
           isStdinTerminal: () => true,
           invocationId: "inv-absent-retry",
@@ -345,7 +345,7 @@ describe("executePieceCallable", () => {
       "refreshFeed",
       [],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => true,
         invocationId: "inv-defaulted",
@@ -423,7 +423,7 @@ describe("executePieceCallable", () => {
       "search",
       ["--query", "tea"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
       },
@@ -474,7 +474,7 @@ describe("executePieceCallable", () => {
       "recordMessage",
       ["--message", "milk"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: (_manager, _pieceId, scope) => {
           resolvedScope = scope;
           return Promise.resolve(harness.piece);
@@ -520,7 +520,7 @@ describe("executePieceCallable", () => {
       "search",
       ["--query", "tea"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
       },
@@ -549,7 +549,7 @@ describe("executePieceCallable", () => {
       "editContent",
       ["--value-file", "/tmp/content.md"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         readTextFile: () => Promise.resolve("# Title\n\nUse `cat` here"),
       },
@@ -592,7 +592,7 @@ describe("executePieceCallable", () => {
       "editContent",
       ["--json-file", "/tmp/input.json"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         readTextFile: () =>
           Promise.resolve(
@@ -644,7 +644,7 @@ describe("executePieceCallable", () => {
         "editContent",
         ["--json-file", "/tmp/input.json"],
         {
-          loadManager: () => Promise.resolve(harness.manager),
+          loadPieces: () => Promise.resolve(harness.pieces),
           loadPiece: () => Promise.resolve(harness.piece),
           readTextFile: () => Promise.resolve('["not-an-object"]'),
         },
@@ -671,7 +671,7 @@ describe("executePieceCallable", () => {
       "editContent",
       [],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => false,
         readTextInput: () => Promise.resolve("# Title\n\nLine 2"),
@@ -715,7 +715,7 @@ describe("executePieceCallable", () => {
       "editContent",
       [],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => false,
         readTextInput: () =>
@@ -763,7 +763,7 @@ describe("executePieceCallable", () => {
         "editContent",
         [],
         {
-          loadManager: () => Promise.resolve(harness.manager),
+          loadPieces: () => Promise.resolve(harness.pieces),
           loadPiece: () => Promise.resolve(harness.piece),
           isStdinTerminal: () => false,
           readTextInput: () => Promise.resolve('["not-an-object"]'),
@@ -803,7 +803,7 @@ describe("executePieceCallable", () => {
         "editContent",
         ["--json", '["not-an-object"]'],
         {
-          loadManager: () => Promise.resolve(harness.manager),
+          loadPieces: () => Promise.resolve(harness.pieces),
           loadPiece: () => Promise.resolve(harness.piece),
         },
       ),
@@ -844,7 +844,7 @@ describe("executePieceCallable", () => {
       "search",
       ["--help"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
       },
     );
@@ -898,7 +898,7 @@ describe("executePieceCallable", () => {
         "recordMessage",
         ["--message", "milk"],
         {
-          loadManager: () => Promise.resolve(harness.manager),
+          loadPieces: () => Promise.resolve(harness.pieces),
           loadPiece: () => Promise.resolve(harness.piece),
         },
       ),
@@ -930,7 +930,7 @@ describe("executePieceCallable", () => {
       "addComment",
       ["--message", "milk"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         invocationId: "inv-123",
         onPhase: (phase) => phases.push(phase),
@@ -976,7 +976,7 @@ describe("executePieceCallable", () => {
       "addComment",
       ["--message", "milk"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         invocationId: "inv-dup",
       },
@@ -1008,7 +1008,7 @@ describe("executePieceCallable", () => {
       "refresh",
       [],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => true,
         invocationId: "inv-empty",
@@ -1036,7 +1036,7 @@ describe("executePieceCallable", () => {
       "refresh",
       [],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => true,
       },
@@ -1224,7 +1224,7 @@ function createPieceCallableHarness(options: {
     key: (_key: string) => defaultReceiptCell,
   };
 
-  const manager = {
+  const pieces = {
     getSpace: () => "home",
     synced: () => {
       tracker.syncedCalls++;
@@ -1274,7 +1274,7 @@ function createPieceCallableHarness(options: {
     },
   };
 
-  return { manager, piece, tracker };
+  return { pieces, piece, tracker };
 }
 
 function createMockCell(
@@ -1431,7 +1431,7 @@ describe("forced-stream fallback dispatch", () => {
       },
     };
 
-    const manager = {
+    const pieces = {
       getSpace: () => "home",
       synced: async () => {},
       runtime: {
@@ -1440,7 +1440,7 @@ describe("forced-stream fallback dispatch", () => {
       },
     };
 
-    return { sends, dataWrites, piece, manager, linkDerivedCell, streamCell };
+    return { sends, dataWrites, piece, pieces, linkDerivedCell, streamCell };
   }
 
   const config = {
@@ -1458,7 +1458,7 @@ describe("forced-stream fallback dispatch", () => {
       "hiddenPing",
       ["--note", "hi"],
       {
-        loadManager: () => Promise.resolve(harness.manager as never),
+        loadPieces: () => Promise.resolve(harness.pieces as never),
         loadPiece: () => Promise.resolve(harness.piece as never),
         isStdinTerminal: () => true,
       },
@@ -1480,7 +1480,7 @@ describe("forced-stream fallback dispatch", () => {
       "hiddenPing",
       ["--note", "hi"],
       {
-        loadManager: () => Promise.resolve(harness.manager as never),
+        loadPieces: () => Promise.resolve(harness.pieces as never),
         loadPiece: () => Promise.resolve(harness.piece as never),
         isStdinTerminal: () => true,
       },
@@ -1925,7 +1925,7 @@ describe("piece call stdin payloads", () => {
       "recordMessage",
       ["--json-file", "-"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => false,
         readTextInput: () => Promise.resolve('{"message":"from stdin"}'),
@@ -1964,7 +1964,7 @@ describe("piece call stdin payloads", () => {
       "recordMessage",
       ["--json", "-"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => false,
         readTextInput: () => Promise.resolve('{"message":"json stdin"}'),
@@ -2004,7 +2004,7 @@ describe("piece call stdin payloads", () => {
         "recordMessage",
         ["--json-file", "-"],
         {
-          loadManager: () => Promise.resolve(harness.manager),
+          loadPieces: () => Promise.resolve(harness.pieces),
           loadPiece: () => Promise.resolve(harness.piece),
           isStdinTerminal: () => false,
           readTextInput: () => Promise.resolve(""),
@@ -2115,7 +2115,7 @@ describe("piece call wait control", () => {
       "addComment",
       ["--message", "milk"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         invocationId: "inv-no-readback",
         skipReadback: true,
@@ -2161,7 +2161,7 @@ describe("piece call wait control", () => {
 
     const error = await boundedSettlement(
       executePieceCallable(config, "addComment", ["--message", "milk"], {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         invocationId: "inv-held-commit",
         skipReadback: true,
@@ -2197,7 +2197,7 @@ describe("piece call wait control", () => {
       "addComment",
       ["--message", "milk"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         invocationId: "inv-dup-no-readback",
         skipReadback: true,
@@ -2233,7 +2233,7 @@ describe("piece call wait control", () => {
     // is reported exactly as it would be on the default path.
     await expect(
       executePieceCallable(config, "recordMessage", ["--message", "milk"], {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         invocationId: "inv-failed-commit",
         skipReadback: true,
@@ -2250,7 +2250,7 @@ describe("piece call wait control", () => {
 
     await expect(
       executePieceCallable(config, "refresh", [], {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => true,
         skipReadback: true,
@@ -2281,7 +2281,7 @@ describe("piece call wait control", () => {
         "recordMessage",
         ["--json", '{"mesage":"milk"}'],
         {
-          loadManager: () => Promise.resolve(harness.manager),
+          loadPieces: () => Promise.resolve(harness.pieces),
           loadPiece: () => Promise.resolve(harness.piece),
           invocationId: "inv-no-wait-typo",
           skipReadback: true,
@@ -2322,7 +2322,7 @@ describe("piece call wait control", () => {
 
     await expect(
       executePieceCallable(config, "search", ["--query", "tea"], {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         invocationId: "inv-tool-no-wait",
         skipReadback: true,
@@ -2828,7 +2828,7 @@ describe("piece call --show-links", () => {
       "addComment",
       ["--message", "milk"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         invocationId: "inv-links",
         showLinks: true,
@@ -2870,7 +2870,7 @@ describe("piece call --show-links", () => {
       "addComment",
       ["--message", "milk"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         invocationId: "inv-no-links",
       },
@@ -2896,7 +2896,7 @@ describe("piece call --show-links", () => {
     });
 
     const result = await executePieceCallable(config, "refresh", [], {
-      loadManager: () => Promise.resolve(harness.manager),
+      loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
       isStdinTerminal: () => true,
       invocationId: "inv-void-links",
@@ -2944,7 +2944,7 @@ describe("piece call --show-links", () => {
       "search",
       ["--query", "tea"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
         showLinks: true,

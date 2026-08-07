@@ -411,10 +411,11 @@ unless noted.
 **Addressing**
 
 - The function that fetches a piece's result returns the piece unchanged
-  (`PieceManager.getResult`, `packages/piece/src/manager.ts`) — a piece *is* its
-  result cell, and the read path checks nothing piece-specific. Its counterpart
-  `getArgument` follows a link stored in the document and throws when absent,
-  making it the only piece-shaped operation of the pair.
+  (`PiecesController.getResult`, `packages/piece/src/ops/pieces-controller.ts`)
+  — a piece *is* its result cell, and the read path checks nothing
+  piece-specific. Its counterpart `getArgument` follows a link stored in the
+  document and throws when absent, making it the only piece-shaped operation of
+  the pair.
 - `cf piece get` against a receipt address returns its value, and
   `--schema note.title` projects it to `{"note": {"title": …}}`.
 

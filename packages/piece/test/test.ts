@@ -1,12 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { PieceManager } from "../src/manager.ts";
+import { PiecesController } from "../src/ops/pieces-controller.ts";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 
 describe("noop", () => {
 });
 
-describe("PieceManager.get", () => {
+describe("PiecesController.getPieceCell", () => {
   it("syncs a loaded piece before starting it", async () => {
     let pieceSynced = false;
     let startSawSyncedPiece = false;
@@ -32,12 +32,14 @@ describe("PieceManager.get", () => {
         return Promise.resolve(true);
       },
     };
-    const manager = new PieceManager({
+    const pieces = new PiecesController({
       as: {} as never,
       space: "did:key:test-space" as never,
     }, runtime as never);
 
-    await manager.get(taggedHashStringOf("piece-id"), true, { type: "object" });
+    await pieces.getPieceCell(taggedHashStringOf("piece-id"), true, {
+      type: "object",
+    });
 
     expect(startSawSyncedPiece).toBe(true);
   });

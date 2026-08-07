@@ -1362,7 +1362,7 @@ describe("cast admin entry point", () => {
       readTextFile: () =>
         Promise.resolve("export default pattern(() => ({}));"),
       createSession: () => Promise.resolve({ fakeSession: true } as never),
-      createPieceManager: () => ({
+      createPiecesController: () => ({
         ready: Promise.resolve(),
         runPersistent: () => Promise.resolve({ entityId: "fid1:cast" }),
       }),
@@ -1397,8 +1397,8 @@ describe("cast admin entry point", () => {
         identity,
         spaceDid: identity.did() as never,
       });
-      const pieceManager = dependencies.createPieceManager(session, runtime);
-      await pieceManager.ready;
+      const pieces = dependencies.createPiecesController(session, runtime);
+      await pieces.ready;
     } finally {
       await runtime.dispose();
     }

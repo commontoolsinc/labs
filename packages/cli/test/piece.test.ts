@@ -134,7 +134,7 @@ describe("cli piece parsing", () => {
     )).toBe("https://user:pass@rapids.saga-castor.ts.net/base");
   });
 
-  it("force-closes loadManager storage before disposing failed runtime", async () => {
+  it("force-closes loadPieces storage before disposing failed runtime", async () => {
     let disposeCalls = 0;
     let closeNowCalls = 0;
     const cleanupOrder: string[] = [];
@@ -177,7 +177,7 @@ describe("cli piece parsing", () => {
     expect(disposeCalls).toBe(1);
   });
 
-  it("does not dispose loadManager runtime after successful initialization", async () => {
+  it("does not dispose loadPieces runtime after successful initialization", async () => {
     let disposeCalls = 0;
 
     const result = await withRuntimeCleanupOnFailure({
@@ -380,23 +380,17 @@ describe("cli piece parsing", () => {
   });
 
   it("recreateSpaceRootPattern() targets the explicit space", async () => {
-    const seen: { config?: SpaceConfig; manager?: object } = {};
+    const seen: { config?: SpaceConfig } = {};
     const pieceId = await recreateSpaceRootPattern({
       apiUrl: API_URL,
       space: SPACE,
       identity: ID,
     }, {
-      loadManager: (config) => {
+      loadPieces: (config) => {
         seen.config = config;
-        const manager = {};
-        seen.manager = manager;
-        return Promise.resolve(manager as any);
-      },
-      createController: (manager) => {
-        expect(manager).toBe(seen.manager);
-        return {
+        return Promise.resolve({
           recreateDefaultPattern: () => Promise.resolve({ id: PIECE }),
-        };
+        } as any);
       },
     });
 
@@ -618,8 +612,6 @@ describe("cli piece parsing", () => {
             getCell: () => Promise.resolve(rootCell),
           },
         }),
-    };
-    const manager = {
       runtime: { marker: "runtime" },
       getSpace: () => "did:key:test-space",
     };
@@ -630,11 +622,10 @@ describe("cli piece parsing", () => {
       ["items"],
       { transform: { filter } },
       {
-        loadManager: () => Promise.resolve(manager as any),
-        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
+        resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
         derivePieceGetValue: (runtime, space, source, transform) => {
-          expect(runtime).toBe(manager.runtime as any);
+          expect(runtime).toBe(controller.runtime as any);
           expect(space).toBe("did:key:test-space");
           expect(source).toBe(targetCell as any);
           expect(transform.filter).toBe(filter);
@@ -655,6 +646,8 @@ describe("cli piece parsing", () => {
         Promise.resolve({
           result: { getCell: () => Promise.resolve(rootCell) },
         }),
+      runtime: {},
+      getSpace: () => "did:key:test-space",
     };
 
     await expect(getCellValue(
@@ -662,13 +655,8 @@ describe("cli piece parsing", () => {
       [],
       { transform: { filter: parsePieceGetFilter(".active") } },
       {
-        loadManager: () =>
-          Promise.resolve({
-            runtime: {},
-            getSpace: () => "did:key:test-space",
-          } as any),
-        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
+        resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
         derivePieceGetValue: () => Promise.reject(transformError),
       },
     )).rejects.toBe(transformError);
@@ -692,15 +680,12 @@ describe("cli piece parsing", () => {
         Promise.resolve({
           result: { getCell: () => Promise.resolve(rootCell) },
         }),
+      runtime: {},
+      getSpace: () => "did:key:test-space",
     };
     const deps = {
-      loadManager: () =>
-        Promise.resolve({
-          runtime: {},
-          getSpace: () => "did:key:test-space",
-        } as any),
-      resolvePieceAddress: (_manager: any, id: string) => Promise.resolve(id),
-      createController: () => controller as any,
+      loadPieces: () => Promise.resolve(controller as any),
+      resolvePieceAddress: (_pieces: any, id: string) => Promise.resolve(id),
     };
     const options = {
       transform: { filter: parsePieceGetFilter(".active") },
@@ -742,6 +727,8 @@ describe("cli piece parsing", () => {
         Promise.resolve({
           input: { getCell: () => Promise.resolve(rootCell) },
         }),
+      runtime: {},
+      getSpace: () => "did:key:test-space",
     };
 
     const options = {
@@ -749,13 +736,8 @@ describe("cli piece parsing", () => {
       transform: { projection: await parsePieceGetProjection("id") },
     };
     const deps = {
-      loadManager: () =>
-        Promise.resolve({
-          runtime: {},
-          getSpace: () => "did:key:test-space",
-        } as any),
-      resolvePieceAddress: (_manager: any, id: string) => Promise.resolve(id),
-      createController: () => controller as any,
+      loadPieces: () => Promise.resolve(controller as any),
+      resolvePieceAddress: (_pieces: any, id: string) => Promise.resolve(id),
     };
 
     await expect(getCellValue(
@@ -855,12 +837,10 @@ describe("cli piece parsing", () => {
           },
         });
       },
-      stop: (id: string) => {
+      stopPiece: (id: string) => {
         order.push(`stop:${id}`);
         return Promise.resolve();
       },
-    };
-    const manager = {
       runtime: {
         idle: () => {
           order.push("runtime.idle");
@@ -868,7 +848,7 @@ describe("cli piece parsing", () => {
         },
       },
       synced: () => {
-        order.push("manager.synced");
+        order.push("pieces.synced");
         return Promise.resolve();
       },
     };
@@ -884,9 +864,8 @@ describe("cli piece parsing", () => {
       ["value"],
       { step: true },
       {
-        loadManager: () => Promise.resolve(manager as any),
-        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
+        resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
       },
     );
 
@@ -896,9 +875,9 @@ describe("cli piece parsing", () => {
       "piece.pull",
       "result.key:value",
       "result.pull",
-      "manager.synced",
+      "pieces.synced",
       "runtime.idle",
-      "manager.synced",
+      "pieces.synced",
       "result.get",
       // The read-path guard classifies the read path after the value read
       // (verb contract WS-F), descending to the same key once more.
@@ -928,9 +907,8 @@ describe("cli piece parsing", () => {
       [],
       {},
       {
-        loadManager: () => Promise.resolve({} as any),
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
       },
     ).catch((error) => error);
     expect(error).toBeInstanceOf(PieceResultProjectionError);
@@ -958,9 +936,8 @@ describe("cli piece parsing", () => {
       [],
       {},
       {
-        loadManager: () => Promise.resolve({} as any),
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
       },
     )).resolves.toBeUndefined();
   });
@@ -998,9 +975,8 @@ describe("cli piece parsing", () => {
       ["count"],
       {},
       {
-        loadManager: () => Promise.resolve({} as any),
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
       },
     )).rejects.toThrow(PieceResultProjectionError);
   });
@@ -1023,9 +999,8 @@ describe("cli piece parsing", () => {
       ["count"],
       {},
       {
-        loadManager: () => Promise.resolve({} as any),
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
       },
     )).rejects.toThrow("network unreachable");
   });
@@ -1053,9 +1028,8 @@ describe("cli piece parsing", () => {
       [],
       {},
       {
-        loadManager: () => Promise.resolve({} as any),
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
       },
     )).resolves.toBeUndefined();
   });
@@ -1119,10 +1093,16 @@ describe("cli piece parsing", () => {
     };
 
     const guardDeps = (piece: unknown) => ({
-      loadManager: () => Promise.resolve({} as never),
-      resolvePieceAddress: (_manager: unknown, id: string) =>
+      resolvePieceAddress: (_pieces: unknown, id: string) =>
         Promise.resolve(id),
-      createController: () => ({ get: () => Promise.resolve(piece) }) as never,
+      loadPieces: () =>
+        Promise.resolve(
+          {
+            get: () => Promise.resolve(piece),
+            runtime: {},
+            getSpace: () => "did:key:test-space",
+          } as never,
+        ),
     });
 
     const guardPiece = (
@@ -1299,13 +1279,7 @@ describe("cli piece parsing", () => {
           getCell: () => Promise.resolve(rootCell),
         },
       };
-      const deps = {
-        ...guardDeps(piece),
-        loadManager: () =>
-          Promise.resolve(
-            { runtime: {}, getSpace: () => "did:key:test-space" } as never,
-          ),
-      };
+      const deps = guardDeps(piece);
       const options = { transform: { filter: parsePieceGetFilter(".active") } };
 
       // The transform throws the "Cannot access path" shape a real projection
@@ -1609,8 +1583,7 @@ describe("cli piece parsing", () => {
       space: SPACE,
       identity: ID,
     }, {
-      loadManager: () => Promise.resolve({} as any),
-      createController: () => controller as any,
+      loadPieces: () => Promise.resolve(controller as any),
     });
 
     expect(listed).toEqual([
@@ -1712,8 +1685,7 @@ describe("cli piece parsing", () => {
     };
     const config = { apiUrl: API_URL, space: SPACE, identity: ID };
     const deps = {
-      loadManager: () => Promise.resolve({} as any),
-      createController: () => controller as any,
+      loadPieces: () => Promise.resolve(controller as any),
     };
 
     const matches = await searchPieces(config, "NEEDLE", deps);
@@ -1750,8 +1722,7 @@ describe("cli piece parsing", () => {
     };
     const config = { apiUrl: API_URL, space: SPACE, identity: ID };
     const deps = {
-      loadManager: () => Promise.resolve({} as any),
-      createController: () => controller as any,
+      loadPieces: () => Promise.resolve(controller as any),
     };
 
     expect(await searchPieces(config, "048", deps)).toEqual([{
@@ -1790,8 +1761,7 @@ describe("cli piece parsing", () => {
     };
     const config = { apiUrl: API_URL, space: SPACE, identity: ID };
     const deps = {
-      loadManager: () => Promise.resolve({} as any),
-      createController: () => controller as any,
+      loadPieces: () => Promise.resolve(controller as any),
     };
 
     expect(
@@ -1851,8 +1821,7 @@ describe("cli piece parsing", () => {
         { apiUrl: API_URL, space: SPACE, identity: ID },
         "absent search value",
         {
-          loadManager: () => Promise.resolve({} as any),
-          createController: () => controller as any,
+          loadPieces: () => Promise.resolve(controller as any),
           reportSearchError: (_pieceId, _source, error) => errors.push(error),
         },
       ),
@@ -1889,8 +1858,7 @@ describe("cli piece parsing", () => {
           { apiUrl: API_URL, space: SPACE, identity: ID },
           "needle",
           {
-            loadManager: () => Promise.resolve({} as any),
-            createController: () => controller as any,
+            loadPieces: () => Promise.resolve(controller as any),
           },
         ),
       ).toEqual([]);
@@ -1929,8 +1897,7 @@ describe("cli piece parsing", () => {
         { apiUrl: API_URL, space: SPACE, identity: ID },
         "needle",
         {
-          loadManager: () => Promise.resolve({} as any),
-          createController: () => controller as any,
+          loadPieces: () => Promise.resolve(controller as any),
           reportSearchError: (_pieceId, source, error) =>
             errors.push({ source, error }),
         },
@@ -1969,8 +1936,7 @@ describe("cli piece parsing", () => {
     };
     const config = { apiUrl: API_URL, space: SPACE, identity: ID };
     const deps = {
-      loadManager: () => Promise.resolve({} as any),
-      createController: () => controller as any,
+      loadPieces: () => Promise.resolve(controller as any),
     };
 
     expect(await searchPieces(config, "MASSE", deps)).toEqual([{
@@ -2077,8 +2043,7 @@ describe("cli piece parsing", () => {
       };
       const config = { apiUrl: API_URL, space: SPACE, identity: ID };
       const deps = {
-        loadManager: () => Promise.resolve({} as any),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
       };
 
       expect(await searchPieces(config, "nested runtime", deps)).toEqual([{
@@ -2128,8 +2093,7 @@ describe("cli piece parsing", () => {
       };
       expect(
         await searchPieces(config, "nested runtime cell", {
-          loadManager: () => Promise.resolve({} as any),
-          createController: () => viewController as any,
+          loadPieces: () => Promise.resolve(viewController as any),
         }),
       ).toEqual([{
         id: "of:multiple-runtime-cell-views",
@@ -2170,8 +2134,7 @@ describe("cli piece parsing", () => {
       };
       expect(
         await searchPieces(config, "surviving nested", {
-          loadManager: () => Promise.resolve({} as any),
-          createController: () => partialController as any,
+          loadPieces: () => Promise.resolve(partialController as any),
           reportSearchError: (_pieceId, _source, error) =>
             nestedErrors.push(error),
         }),
@@ -2416,8 +2379,7 @@ describe("cli piece parsing", () => {
       };
       const config = { apiUrl: API_URL, space: SPACE, identity: ID };
       const deps = {
-        loadManager: () => Promise.resolve({} as any),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
       };
 
       expect(
@@ -2637,8 +2599,7 @@ describe("cli piece parsing", () => {
         error: unknown;
       }> = [];
       const searchDeps = {
-        loadManager: () => Promise.resolve({} as any),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
         reportSearchError: (
           pieceId: string,
           source: "input data" | "result data" | "metadata",
@@ -2746,8 +2707,7 @@ describe("cli piece parsing", () => {
           { apiUrl: API_URL, space: SPACE, identity: ID },
           "cyclic ownership",
           {
-            loadManager: () => Promise.resolve({} as any),
-            createController: () => controller as any,
+            loadPieces: () => Promise.resolve(controller as any),
             reportSearchError: (_pieceId, _source, error) => errors.push(error),
           },
         ),
@@ -2871,8 +2831,7 @@ describe("cli piece parsing", () => {
           },
           "cold-cache-needle",
           {
-            loadManager: () => Promise.resolve({} as any),
-            createController: () => controller as any,
+            loadPieces: () => Promise.resolve(controller as any),
           },
         ),
       ).toEqual([{
@@ -2916,8 +2875,7 @@ describe("cli piece parsing", () => {
         },
         "large-array-needle",
         {
-          loadManager: () => Promise.resolve({} as any),
-          createController: () => controller as any,
+          loadPieces: () => Promise.resolve(controller as any),
         },
       ),
     ).toEqual([{
@@ -2996,8 +2954,7 @@ describe("cli piece parsing", () => {
       };
       const config = { apiUrl: API_URL, space: SPACE, identity: ID };
       const deps = {
-        loadManager: () => Promise.resolve({} as any),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
       };
       const match = [{
         id: "of:stale-array-proxy",
@@ -3102,8 +3059,7 @@ describe("cli piece parsing", () => {
         },
         "needle",
         {
-          loadManager: () => Promise.resolve({} as any),
-          createController: () => controller as any,
+          loadPieces: () => Promise.resolve(controller as any),
           reportSearchError: (pieceId, source, error) =>
             errors.push({ pieceId, source, error }),
         },
@@ -3157,9 +3113,6 @@ describe("cli piece parsing", () => {
     const repository = "https://github.com/commontoolsinc/labs";
     const entry = { mainPath: "/repo/main.tsx", repository };
     const program = {} as any;
-    const manager = {
-      add: () => Promise.resolve(),
-    };
     let createOptions: unknown;
     let setPatternOptions: unknown;
     const createdPiece = { id: PIECE, getCell: () => ({} as any) };
@@ -3169,14 +3122,15 @@ describe("cli piece parsing", () => {
       entry,
       { start: false },
       {
-        loadManager: () => Promise.resolve(manager as any),
-        createController: () => ({
-          ensureDefaultPattern: () => Promise.resolve({}),
-          create: (_program: unknown, options: unknown) => {
-            createOptions = options;
-            return Promise.resolve(createdPiece);
-          },
-        } as any),
+        loadPieces: () =>
+          Promise.resolve({
+            add: () => Promise.resolve(),
+            ensureDefaultPattern: () => Promise.resolve({}),
+            create: (_program: unknown, options: unknown) => {
+              createOptions = options;
+              return Promise.resolve(createdPiece);
+            },
+          } as any),
         getPinnedProgramFromFile: () => Promise.resolve(program),
       },
     );
@@ -3190,17 +3144,17 @@ describe("cli piece parsing", () => {
       piece: "notes",
     };
     const deps = {
-      loadManager: () => Promise.resolve(manager as any),
+      loadPieces: () =>
+        Promise.resolve({
+          get: () =>
+            Promise.resolve({
+              setPattern: (_program: unknown, options: unknown) => {
+                setPatternOptions = options;
+                return Promise.resolve();
+              },
+            }),
+        } as any),
       resolvePieceAddress: () => Promise.resolve(PIECE),
-      createController: () => ({
-        get: () =>
-          Promise.resolve({
-            setPattern: (_program: unknown, options: unknown) => {
-              setPatternOptions = options;
-              return Promise.resolve();
-            },
-          }),
-      } as any),
       getPinnedProgramFromFile: () => Promise.resolve(program),
     };
 
@@ -3226,7 +3180,6 @@ describe("cli piece parsing", () => {
     // worse than no check at all.
     const entry = { mainPath: "/repo/main.tsx" };
     const program = {} as any;
-    const manager = { add: () => Promise.resolve() };
     let resolvedPiece: unknown;
     let checkedProgram: unknown;
     const report = {
@@ -3240,19 +3193,19 @@ describe("cli piece parsing", () => {
       { apiUrl: API_URL, space: SPACE, identity: ID, piece: "notes" },
       entry,
       {
-        loadManager: () => Promise.resolve(manager as any),
+        loadPieces: () =>
+          Promise.resolve({
+            get: (id: string) => {
+              resolvedPiece = id;
+              return Promise.resolve({
+                checkPattern: (candidate: unknown) => {
+                  checkedProgram = candidate;
+                  return Promise.resolve(report);
+                },
+              });
+            },
+          } as any),
         resolvePieceAddress: () => Promise.resolve(PIECE),
-        createController: () => ({
-          get: (id: string) => {
-            resolvedPiece = id;
-            return Promise.resolve({
-              checkPattern: (candidate: unknown) => {
-                checkedProgram = candidate;
-                return Promise.resolve(report);
-              },
-            });
-          },
-        } as any),
         getPinnedProgramFromFile: () => Promise.resolve(program),
       },
     );
@@ -3273,20 +3226,20 @@ describe("cli piece parsing", () => {
     const inspected = await inspectPiece(
       { apiUrl: API_URL, space: SPACE, identity: ID, piece: "notes" },
       {
-        loadManager: () => Promise.resolve({} as any),
         resolvePieceAddress: () => Promise.resolve(PIECE),
-        createController: () => ({
-          get: () =>
-            Promise.resolve({
-              id: PIECE,
-              name: () => "Notes",
-              getPatternRef: () => Promise.resolve(patternRef),
-              input: { get: () => Promise.resolve({ title: "Input" }) },
-              result: { get: () => Promise.resolve({ title: "Result" }) },
-              readingFrom: () => Promise.resolve([]),
-              readBy: () => Promise.resolve([]),
-            }),
-        } as any),
+        loadPieces: () =>
+          Promise.resolve({
+            get: () =>
+              Promise.resolve({
+                id: PIECE,
+                name: () => "Notes",
+                getPatternRef: () => Promise.resolve(patternRef),
+                input: { get: () => Promise.resolve({ title: "Input" }) },
+                result: { get: () => Promise.resolve({ title: "Result" }) },
+                readingFrom: () => Promise.resolve([]),
+                readBy: () => Promise.resolve([]),
+              }),
+          } as any),
       },
     );
 
@@ -3304,14 +3257,14 @@ describe("cli piece parsing", () => {
       {
         loadIdentity: () =>
           Promise.resolve({ did: () => "did:key:home" } as any),
-        loadManager: () => Promise.resolve({} as any),
         getProgramFromFile: () => Promise.resolve({} as any),
-        createController: () => ({
-          recreateDefaultPattern: (options: unknown) => {
-            recreateOptions = options;
-            return Promise.resolve({ id: PIECE });
-          },
-        } as any),
+        loadPieces: () =>
+          Promise.resolve({
+            recreateDefaultPattern: (options: unknown) => {
+              recreateOptions = options;
+              return Promise.resolve({ id: PIECE });
+            },
+          } as any),
       },
     );
 
@@ -3338,7 +3291,7 @@ describe("cli piece parsing", () => {
       identity: ID,
       piece: "demo",
     }, {
-      loadManager: (config: SpaceConfig) => {
+      loadPieces: (config: SpaceConfig) => {
         expect(config.space).toBe(SPACE);
         return Promise.resolve(manager as any);
       },
@@ -3359,7 +3312,7 @@ describe("cli piece parsing", () => {
       identity: ID,
       piece: "of:fid1:piece-123",
     }, {
-      loadManager: () => Promise.resolve({} as any),
+      loadPieces: () => Promise.resolve({} as any),
     });
 
     expect(resolved.piece).toBe("of:fid1:piece-123");

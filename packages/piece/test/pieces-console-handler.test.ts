@@ -8,16 +8,16 @@ import {
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
-import { PieceManager } from "../src/manager.ts";
+import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase(
-  "piece manager console handler tests",
+  "piece pieces console handler tests",
 );
 
-describe("PieceManager runtime diagnostics", () => {
+describe("PiecesController runtime diagnostics", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
+  let pieces: PiecesController;
   let messages: ConsoleMessage[];
 
   beforeEach(async () => {
@@ -40,12 +40,12 @@ describe("PieceManager runtime diagnostics", () => {
     });
     const session = await createSession({
       identity: signer,
-      spaceName: `manager-console-${crypto.randomUUID()}`,
+      spaceName: `pieces-console-${crypto.randomUUID()}`,
     });
-    manager = new PieceManager(session, runtime);
-    await manager.ready;
+    pieces = new PiecesController(session, runtime);
+    await pieces.ready;
 
-    Object.defineProperty(manager, "getPieceRegistry", {
+    Object.defineProperty(pieces, "getPieceRegistry", {
       configurable: true,
       value: () =>
         Promise.resolve({
@@ -66,7 +66,7 @@ describe("PieceManager runtime diagnostics", () => {
         throw failure;
       },
     } as unknown as Cell<unknown>;
-    Object.defineProperty(manager, "getArgument", {
+    Object.defineProperty(pieces, "getArgument", {
       configurable: true,
       value: () => argumentCell,
     });
@@ -76,7 +76,7 @@ describe("PieceManager runtime diagnostics", () => {
       },
     } as unknown as Cell<unknown>;
 
-    assertEquals(await manager.getReadingFrom(piece), []);
+    assertEquals(await pieces.getReadingFrom(piece), []);
     assertEquals(messages.length, 1);
     assertStrictEquals(messages[0].method, ConsoleMethod.Debug);
     assertStrictEquals(messages[0].args[0], "Error getting argument value:");
@@ -85,7 +85,7 @@ describe("PieceManager runtime diagnostics", () => {
 
   it("sends argument lookup failures to the runtime console handler", async () => {
     const failure = new Error("argument lookup failed");
-    Object.defineProperty(manager, "getArgument", {
+    Object.defineProperty(pieces, "getArgument", {
       configurable: true,
       value: () => {
         throw failure;
@@ -97,7 +97,7 @@ describe("PieceManager runtime diagnostics", () => {
       },
     } as unknown as Cell<unknown>;
 
-    assertEquals(await manager.getReadingFrom(piece), []);
+    assertEquals(await pieces.getReadingFrom(piece), []);
     assertEquals(messages.length, 1);
     assertStrictEquals(messages[0].method, ConsoleMethod.Debug);
     assertStrictEquals(
@@ -119,7 +119,7 @@ describe("PieceManager runtime diagnostics", () => {
     const argumentCell = {
       getRaw: () => argumentValue,
     } as unknown as Cell<unknown>;
-    Object.defineProperty(manager, "getArgument", {
+    Object.defineProperty(pieces, "getArgument", {
       configurable: true,
       value: () => argumentCell,
     });
@@ -129,7 +129,7 @@ describe("PieceManager runtime diagnostics", () => {
       },
     } as unknown as Cell<unknown>;
 
-    assertEquals(await manager.getReadingFrom(piece), []);
+    assertEquals(await pieces.getReadingFrom(piece), []);
     assertEquals(messages.length, 1);
     assertStrictEquals(messages[0].method, ConsoleMethod.Debug);
     assertStrictEquals(
@@ -151,7 +151,7 @@ describe("PieceManager runtime diagnostics", () => {
     const argumentCell = {
       getRaw: () => argumentValue,
     } as unknown as Cell<unknown>;
-    Object.defineProperty(manager, "getArgument", {
+    Object.defineProperty(pieces, "getArgument", {
       configurable: true,
       value: () => argumentCell,
     });
@@ -161,7 +161,7 @@ describe("PieceManager runtime diagnostics", () => {
       },
     } as unknown as Cell<unknown>;
 
-    assertEquals(await manager.getReadingFrom(piece), []);
+    assertEquals(await pieces.getReadingFrom(piece), []);
     assertEquals(messages.length, 1);
     assertStrictEquals(messages[0].method, ConsoleMethod.Debug);
     assertStrictEquals(
@@ -173,18 +173,18 @@ describe("PieceManager runtime diagnostics", () => {
 
   it("sends result-link traversal failures to the runtime console handler", async () => {
     const argumentCell = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "diagnostic-argument",
     );
     const linkedCell = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "diagnostic-result",
     );
     const tx = runtime.edit();
     argumentCell.withTx(tx).setRawUntyped(linkedCell.getAsLink());
     assertEquals((await tx.commit()).error, undefined);
 
-    Object.defineProperty(manager, "getArgument", {
+    Object.defineProperty(pieces, "getArgument", {
       configurable: true,
       value: () => argumentCell,
     });
@@ -205,7 +205,7 @@ describe("PieceManager runtime diagnostics", () => {
       },
     } as unknown as Cell<unknown>;
 
-    assertEquals(await manager.getReadingFrom(piece), []);
+    assertEquals(await pieces.getReadingFrom(piece), []);
     assertEquals(messages.length, 1);
     assertStrictEquals(messages[0].method, ConsoleMethod.Debug);
     assertStrictEquals(messages[0].args[0], "Error getting doc value:");

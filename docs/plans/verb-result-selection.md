@@ -206,7 +206,7 @@ finishes the work.
 ### What a repeated read costs
 
 Each `cf` invocation is a separate process with a **cold replica** —
-`loadManager` builds a `runtimePresets.remoteClient` runtime over a remote
+`loadPieces` builds a `runtimePresets.remoteClient` runtime over a remote
 `StorageManager`, and nothing persists between runs. Expect process start,
 session setup, a connection, and a sync; the walkthrough's `--verbose` output
 puts `initial_sync → dispatched` around 400ms against a warm local toolshed.
