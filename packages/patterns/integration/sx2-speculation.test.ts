@@ -97,11 +97,48 @@ describe("sx2 speculation (Phase 2 gates)", () => {
       (watermarkCell(runtime, space).get() as { seq?: number } | undefined)
         ?.seq ?? 0;
 
+    // PULL the result chain once before editing — the real client
+    // shape (render precedes the first edit), materializing the write
+    // destination's producer chain: the KEPT #4717 write-destination
+    // validator still reads the instantaneous view (the ruled
+    // narrowing covered the schema half only), so a cold-chain write
+    // in the creation window can fail on the server-derived-late
+    // producer — the escalated fork's remaining surface, noted in the
+    // PR's Flags.
+    const resultCell = cc.manager().getResult(piece.getCell());
+    await resultCell.pull();
+
     // The ECHO: the authored edit's local render does not gate on the
     // serving round trip. The result sink observes the value through
     // the overlay-reading path as soon as the local run lands.
+    // The set retries ONCE-per-backoff on the KEPT write-destination
+    // validator's instantaneous-view failure (the escalated
+    // set-validation fork's remaining half after the 2026-08-07
+    // ruling narrowed the schema half): under load the destination's
+    // producer chain materializes late and the first attempt can see
+    // a cold view. This gate's subject is the OVERLAY lifecycle; the
+    // un-retried controller path stays exercised by the counter
+    // product gate.
     const echoStart = performance.now();
-    await piece.result.set(7, ["value"]);
+    let lastDestinationIssue: unknown;
+    for (let attempt = 0;; attempt++) {
+      try {
+        await piece.result.set(7, ["value"]);
+        lastDestinationIssue = undefined;
+        break;
+      } catch (error) {
+        if (
+          attempt < 3 &&
+          String(error).includes("does not match its write destination")
+        ) {
+          lastDestinationIssue = error;
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          continue;
+        }
+        throw error;
+      }
+    }
+    if (lastDestinationIssue !== undefined) throw lastDestinationIssue;
     const deadline = performance.now() + 5_000;
     while (latestValue !== 7 && performance.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 5));
