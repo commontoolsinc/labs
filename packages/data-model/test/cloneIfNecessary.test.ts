@@ -490,9 +490,9 @@ describe("cloneIfNecessary", () => {
 
   /**
    * Describes what `cloneIfNecessary` is expected to do for a given subclass on
-   * a given option vector. `kind: "ok"` means the call returns; `kind: "throws"`
-   * means it throws (we don't pin the exact message -- subclass stubs use
-   * varying phrasing).
+   * a given option vector. `kind: "ok"` means the call returns; `kind:
+   * "throws"` means it throws (we don't pin the exact message -- subclass stubs
+   * use varying phrasing).
    */
   type ExpectedOutcome =
     | { kind: "ok" }
@@ -583,7 +583,7 @@ describe("cloneIfNecessary", () => {
   ];
 
   /**
-   * Compute the expected outcome of a `cloneIfNecessary(value, opts)` call for
+   * Computes the expected outcome of a `cloneIfNecessary(value, opts)` call for
    * a given subclass, by inspecting the *actual* value to predict which
    * `cloneHelper` arm is reached. The point of computing rather than tabulating
    * is so that adding a new subclass to `subclassCases` (or changing what its

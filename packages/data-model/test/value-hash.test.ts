@@ -17,8 +17,8 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 const nodeCrypto = await import("node:crypto");
 
 /**
- * Compute the SHA-256 hash of a raw byte sequence (for verifying against
- * byte-level spec examples).
+ * Returns the SHA-256 hash of a raw byte sequence, for verifying against
+ * byte-level spec examples.
  */
 function sha256(bytes: number[] | Uint8Array): Uint8Array {
   // node:crypto digest() returns Buffer; normalize to plain Uint8Array so
@@ -29,12 +29,13 @@ function sha256(bytes: number[] | Uint8Array): Uint8Array {
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
+/** Returns the lowercase hex rendering of `hash`. */
 function hex(hash: Uint8Array): string {
   return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /**
- * Extract the raw hash bytes from `hashOf()` for comparison. Takes `unknown`,
+ * Returns the raw hash bytes from `hashOf()`, for comparison. Takes `unknown`,
  * as `hashOf()` itself does: the native-instance cases below hash a native
  * `Date` / `RegExp` / `Uint8Array`, none of which is a `FabricValue`.
  */
