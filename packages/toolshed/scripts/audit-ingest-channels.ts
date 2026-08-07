@@ -23,6 +23,7 @@ import {
   getRegistration,
   getRegistrationIndex,
   type IngestRegistration,
+  RegistrationConflictError,
   saveRegistration,
 } from "@/routes/ingest/ingest.utils.ts";
 
@@ -51,6 +52,13 @@ export async function collectRows(
    * the space's current owner cannot see them in `cf ingest ls --space` — and
    * an operator-provisioned channel has no `owner`, so nobody else can either.
    * Off by default: an audit should not write unless asked.
+   *
+   * LIMIT, and it is load-bearing for a pre-enablement sweep: this walks the
+   * global audit index, so it cannot recover a registration that is missing
+   * FROM that index — a channel whose best-effort index write was lost before
+   * indexing became mandatory is invisible here. Establishing a source of
+   * truth that can find those is a prerequisite for enabling self-serve on a
+   * deployment that has provisioned channels before this change.
    */
   repairIndexes = false,
 ): Promise<ChannelRow[]> {
@@ -65,8 +73,12 @@ export async function collectRows(
       // than clobbering it.
       try {
         await saveRegistration(runtime, serviceSpace, r, r.revision ?? 0);
-      } catch {
-        // A channel that moved under us is already being maintained.
+      } catch (error) {
+        // A channel that moved under us is already being maintained, so a lost
+        // precondition is benign. Anything else means the repair did NOT
+        // happen, and a repair that reports success while leaving a channel
+        // undiscoverable is worse than one that fails.
+        if (!(error instanceof RegistrationConflictError)) throw error;
       }
     }
     rows.push({

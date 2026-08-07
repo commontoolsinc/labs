@@ -77,6 +77,14 @@ describe("Ingest channels route (authenticated)", () => {
     }
   });
 
+  // The revoke replay defence is only as strong as the request id being part
+  // of what was signed. If the field were optional, a captured revoke would
+  // carry no id to spend and the middle box could add its own.
+  it("rejects a signed revoke that omits requestId", async () => {
+    const res = await signedRequest("revoke", { id: "ing_whatever" });
+    expect(res.status).toBe(422);
+  });
+
   // Request validation runs after auth, so a signed request with a bad body is
   // the only way to reach schema validation at all. stoker's `defaultHook`
   // answers 422 for a zod failure, not 400.

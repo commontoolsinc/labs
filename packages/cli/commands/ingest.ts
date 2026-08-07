@@ -213,7 +213,10 @@ export const ingest = new Command()
   .usage(`${commonUsage} <id>`)
   .action(async (options, id: string) => {
     const config = parseConfig(options);
-    const { revokedAt } = await revokeChannel(config, { id });
+    const { revokedAt } = await revokeChannel(config, {
+      id,
+      requestId: newRequestId(),
+    });
     // The registration is kept deliberately — it is the only record of who was
     // authorized to write provenance-marked data into the space.
     render(
