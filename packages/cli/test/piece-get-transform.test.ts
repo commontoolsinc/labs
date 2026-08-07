@@ -1989,6 +1989,80 @@ describe("cf piece get transforms", () => {
       ).toEqual({ notes: notes.map((note) => ({ $link: addressOf(note) })) });
     });
 
+    it("returns the link crossed above a marked position, plus the segments below it", async () => {
+      const { board, notes } = await seedBoard("link-marker-below", true);
+      expect(
+        await deriveSelectedValue(runtime, space, board, {
+          projection: await parseSelectionProjection(
+            '{"properties":{"notes":{"type":"array","items":' +
+              '{"properties":{"title":{"$link":true}}}}}}',
+          ),
+        }),
+      ).toEqual({
+        notes: notes.map((note) => ({
+          title: { $link: { ...addressOf(note), path: ["title"] } },
+        })),
+      });
+    });
+
+    it("returns the link stored at the read's own source for a marked position below it", async () => {
+      const { board, notes } = await seedBoard(
+        "link-marker-below-source",
+        true,
+      );
+      expect(
+        await deriveSelectedValue(runtime, space, board.key("topic"), {
+          projection: await parseSelectionProjection(
+            '{"properties":{"title":{"$link":true}}}',
+          ),
+        }),
+      ).toEqual({
+        title: { $link: { ...addressOf(notes[0]), path: ["title"] } },
+      });
+    });
+
+    it("returns a stored link's own path followed by the segments below it", async () => {
+      const tx = runtime.edit();
+      const note = runtime.getCell(
+        space,
+        "link-marker-nested-note",
+        { type: "object", properties: { content: noteSchema } } as const,
+        tx,
+      );
+      note.set({ content: { title: "a", body: "body a" } });
+      const board = runtime.getCell(
+        space,
+        "link-marker-nested-board",
+        boardSchema,
+        tx,
+      );
+      board.setRaw({
+        notes: [],
+        topic: note.key("content").getAsLink(),
+        label: "Field notes",
+      } as never);
+      expect((await tx.commit()).ok).toBeDefined();
+
+      expect(
+        await deriveSelectedValue(
+          runtime,
+          space,
+          runtime.getCell(space, "link-marker-nested-board", boardSchema),
+          {
+            projection: await parseSelectionProjection(
+              '{"properties":{"topic":{"properties":{"title":{"$link":true}}}}}',
+            ),
+          },
+        ),
+      ).toEqual({
+        topic: {
+          title: {
+            $link: { ...addressOf(note), path: ["content", "title"] },
+          },
+        },
+      });
+    });
+
     it("reads one document for a marked collection, not one per element", async () => {
       const { board, notes } = await seedBoard("link-marker-reads", false);
       const provider = storageManager.open(space);

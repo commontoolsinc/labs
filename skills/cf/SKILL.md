@@ -260,7 +260,11 @@ metadata is authoritative; projection schemas cannot supply `ifc`, `asCell`,
 `scope`, or `default`. A JSON `--schema` marks a position `"$link": true` to get
 that position's address — `{"id","space","scope","path"}`, all four always
 present, no schema inlined — instead of what is behind it, or beside a
-projection to get both. A marked position is never fetched, so a marked
+projection to get both. That address is the deepest stored link crossed on the
+way to the marked position plus the segments below it, so marking a field under
+a linked element names that element's own document rather than a slot in the
+collection above it; a position with no link above it keeps the source
+document's own address. A marked position is never fetched, so a marked
 collection costs one document read rather than one per element; the rendered
 `id` minus its `of:` prefix is what `--piece` accepts. Markers do not compose
 with `--filter`. See `packages/cli/README.md` for the exact syntax and supported

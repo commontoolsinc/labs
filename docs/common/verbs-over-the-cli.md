@@ -280,6 +280,11 @@ branching. `id` keeps its scheme, because the scheme is the kind and dropping
 it retargets the address silently. No schema is inlined: a stored link can
 carry an entire one, and what was asked for is where the value lives.
 
+Marking a position deeper than a link names the linked document and the path
+below it — `notes[0].title`, where `notes` holds links, renders the note's own
+`id` with `path` `["title"]`. A link is a durable identity; the slot that holds
+it stops naming the same value the moment the collection is reordered.
+
 The marker sits beside a projection when both are wanted, and the answer
 carries both:
 

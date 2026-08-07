@@ -211,6 +211,18 @@ the reader's own, and `path` is `[]` at a document's root. No schema is inlined
 and no write-redirect flag rides along. The rendered `id`, minus its `of:`
 prefix, is what `cf piece call --piece` and `cf piece get --piece` accept.
 
+The address names the deepest stored link crossed on the way to the marked
+position, plus the segments that remain below that link. Marking `title` under
+each element of a `notes` array whose entries are links returns the note's own
+`id` with `path` `["title"]`, not the board's `id` with `path`
+`["notes","0","title"]`: a link is a durable identity, while a position in a
+containing document is a slot, and reordering the collection above it leaves the
+same path naming a different value. Where the stored link carries a path of its
+own, that path comes first and the segments below it follow — a link to
+`{"path":["content"]}` marked at `title` renders `["content","title"]`. Where
+nothing is linked on the way, the value lives in the source document itself and
+the address is its position there.
+
 The marker sits beside a projection when both are wanted —
 `{"$link":true,"type":"object","properties":{"title":true}}` returns the address
 and the title — and replaces the contents when it is alone. It is accepted
@@ -218,11 +230,12 @@ anywhere `properties` is, except under `additionalProperties`, whose membership
 the stored value rather than the selection decides.
 
 A marked position is never fetched: it contributes a rejecting selector to the
-same path union the projection builds, and the address comes from the link
-stored in the containing document. A marked collection therefore costs one
-document read rather than one per element. The marker is a JSON-schema spelling
-only, and it cannot be combined with `--filter`: the elements a predicate keeps
-no longer say which positions they came from, and an address names a position.
+same path union the projection builds, and the address is composed from links
+already stored in the documents the read visited rather than by following one. A
+marked collection therefore costs one document read rather than one per element.
+The marker is a JSON-schema spelling only, and it cannot be combined with
+`--filter`: the elements a predicate keeps no longer say which positions they
+came from, and an address names a position.
 
 ## Built Binary
 

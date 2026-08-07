@@ -61,6 +61,11 @@ const LINK_MARKER_KEY = "$link";
  * scheme, because the scheme is the kind and dropping it retargets the
  * address silently; `path` is `[]` at a document's root.
  *
+ * The address names the deepest stored link crossed on the way to the marked
+ * position, plus the segments below that link. A link is a durable identity
+ * and a position in a containing document is not: reorder the collection
+ * above it and the same position holds a different value.
+ *
  * `overwrite` is dropped and `schema` is never inlined. A stored link can
  * carry an entire schema with its own `$defs`, and what was asked for is
  * where the value lives, not what shape it declares.
@@ -1393,40 +1398,98 @@ function resolveProjection(
 }
 
 /**
- * Helper for {@link composeLinkAddresses}, which renders the address of the
- * position `cell` names. The link a position holds is stored in the document
- * that contains it, so this reads no further than a document the selection
- * has already read: `lastNode: "top"` stops at the stored link rather than
- * following it.
+ * A position the address walk has reached, and what a marker there renders.
  *
- * A position holding an inline value rather than a link renders where that
- * value lives, which is the position's own address. `space` and `scope` come
- * from the containing document when the stored link leaves them implicit, so
- * both are always filled in.
+ * `address` is the deepest stored link the walk has crossed, plus the segments
+ * below that link. `stored` is what the document containing this position
+ * holds at it, and is absent below a crossed link: that link's target is a
+ * document the walk does not read, so it can see no link stored inside it.
  */
-function renderedLinkAddress(cell: Cell<unknown>): RenderedLinkAddress {
-  const position = cell.getAsNormalizedFullLink();
-  const stored = cell.getRaw({ lastNode: "top" });
-  const link = parseLink(stored, position) ?? position;
+interface WalkedPosition {
+  cell: Cell<unknown>;
+  address: RenderedLinkAddress;
+  stored?: { value: unknown };
+}
+
+/** The address `link` names, in the shape a marked position renders. */
+function renderedLinkAddress(link: NormalizedFullLink): RenderedLinkAddress {
   return {
     id: link.id,
     space: link.space,
     scope: link.scope,
-    path: [...link.path],
+    path: link.path.map((segment) => segment.toString()),
   };
 }
 
 /**
- * Helper for {@link composeLinkAddresses}, which reads the container stored at
- * `cell` so a marked collection can be walked element by element. Pulls the
- * container's own document when the selection's read stopped above it, which
- * is what a marked collection's rejecting selector does.
+ * Helper for {@link composeLinkAddresses}: the position `cell` names, carrying
+ * `address` from the walk above it unless the containing document stores a
+ * link there. A stored link is a durable identity, so it becomes the address
+ * this position renders and the base everything below it is addressed from.
+ *
+ * `space` and `scope` come from the containing document when the stored link
+ * leaves them implicit, so both are always filled in.
  */
-async function storedContainer(cell: Cell<unknown>): Promise<unknown> {
-  const stored = cell.getRaw({ lastNode: "value" });
+function walkedPosition(
+  cell: Cell<unknown>,
+  address: RenderedLinkAddress,
+  stored: { value: unknown } | undefined,
+): WalkedPosition {
+  const link = stored === undefined
+    ? undefined
+    : parseLink(stored.value, address);
+  return link === undefined
+    ? { cell, address, stored }
+    : { cell, address: renderedLinkAddress(link), stored: undefined };
+}
+
+/**
+ * Helper for {@link composeLinkAddresses}: the position the walk reaches by
+ * one more segment. `container` is what the document stores at the position
+ * above, which is where the segment's own stored value comes from — so the
+ * link a segment holds is read out of a document the selection already read,
+ * rather than by following anything.
+ */
+function positionBelow(
+  position: WalkedPosition,
+  segment: string | number,
+  container: unknown,
+): WalkedPosition {
+  const key = segment.toString();
+  return walkedPosition(
+    position.cell.key(key),
+    { ...position.address, path: [...position.address.path, key] },
+    isRecord(container) ? { value: container[key] } : undefined,
+  );
+}
+
+/**
+ * Helper for {@link composeLinkAddresses}: the position a composition starts
+ * from, which is the cell the selection read. `lastNode: "top"` stops at a
+ * link stored at that cell rather than following it, so a source that holds
+ * one is addressed by it, exactly as any position below is.
+ */
+function sourcePosition(cell: Cell<unknown>): WalkedPosition {
+  return walkedPosition(
+    cell,
+    renderedLinkAddress(cell.getAsNormalizedFullLink()),
+    { value: cell.getRaw({ lastNode: "top" }) },
+  );
+}
+
+/**
+ * Helper for {@link composeLinkAddresses}, which reads the container stored at
+ * `position` so a marked collection can be walked element by element. Reaches
+ * for the container's own document when the walk cannot see the container:
+ * behind a link, or where the selection's read stopped above it, which is what
+ * a marked collection's rejecting selector does.
+ */
+async function storedContainer(position: WalkedPosition): Promise<unknown> {
+  if (position.stored?.value !== undefined) return position.stored.value;
+  const stored = position.cell.getRaw({ lastNode: "value" });
   if (stored !== undefined) return stored;
-  await cell.asSchema(false).pull();
-  return cell.getRaw({ lastNode: "value" });
+  await position.cell.asSchema(false).pull();
+  return position.cell.getRaw({ lastNode: "value" });
 }
 
 /**
@@ -1439,20 +1502,20 @@ async function storedContainer(cell: Cell<unknown>): Promise<unknown> {
  * join them to, and the address is the whole answer.
  */
 async function composeLinkAddresses(
-  cell: Cell<unknown>,
+  position: WalkedPosition,
   markers: LinkMarkers,
   projected: unknown,
 ): Promise<unknown> {
   let composed = projected;
   if (markers.items !== undefined) {
-    const stored = await storedContainer(cell);
+    const stored = await storedContainer(position);
     if (Array.isArray(stored)) {
       const projectedItems = Array.isArray(projected) ? projected : [];
       const items: unknown[] = [];
       for (let index = 0; index < stored.length; index++) {
         items.push(
           await composeLinkAddresses(
-            cell.key(index),
+            positionBelow(position, index, stored),
             markers.items,
             projectedItems[index],
           ),
@@ -1467,7 +1530,7 @@ async function composeLinkAddresses(
     const record: Record<string, unknown> = { ...projectedRecord };
     for (const [key, child] of Object.entries(markers.properties)) {
       record[key] = await composeLinkAddresses(
-        cell.key(key),
+        positionBelow(position, key, position.stored?.value),
         child,
         projectedRecord[key],
       );
@@ -1475,7 +1538,12 @@ async function composeLinkAddresses(
     composed = record;
   }
   if (markers.marked !== true) return composed;
-  const address = { [LINK_MARKER_KEY]: renderedLinkAddress(cell) };
+  const address = {
+    [LINK_MARKER_KEY]: {
+      ...position.address,
+      path: [...position.address.path],
+    },
+  };
   return isRecord(composed) && !Array.isArray(composed)
     ? { ...address, ...composed }
     : address;
@@ -1506,10 +1574,11 @@ export interface DeriveSelectedValueDependencies {
  *
  * A `$link` marker is answered beside that graph rather than through it: the
  * marked position contributes the rejecting selector to the read, so nothing
- * behind it is loaded, and its address is composed in from the link stored at
- * that position. That composition walks the source, which a `--filter` makes
- * unavailable — the elements a predicate keeps cannot be traced back to the
- * positions they came from — so the two are refused together.
+ * behind it is loaded, and its address is composed in from the deepest link
+ * the walk down to it crosses, plus the segments below that link. That
+ * composition walks the source, which a `--filter` makes unavailable — the
+ * elements a predicate keeps cannot be traced back to the positions they came
+ * from — so the two are refused together.
  */
 export async function deriveSelectedValue(
   runtime: Runtime,
@@ -1557,7 +1626,11 @@ export async function deriveSelectedValue(
     // pattern graph would run over the rejecting selector and produce nothing
     // for the composition to join. Read the stored links and answer.
     await sourceValueCell.asSchema(false).pull();
-    return await composeLinkAddresses(sourceValueCell, markers, undefined);
+    return await composeLinkAddresses(
+      sourcePosition(sourceValueCell),
+      markers,
+      undefined,
+    );
   }
   const sourceItemSchema = schemaAtArrayItem(sourceSchema);
   const predicateItemMask = selection.filter === undefined
@@ -1801,9 +1874,11 @@ export async function deriveSelectedValue(
       );
     }
     deps.onOutputCell?.(outputCell);
-    return markers === undefined
-      ? outputValue
-      : await composeLinkAddresses(sourceValueCell, markers, outputValue);
+    return markers === undefined ? outputValue : await composeLinkAddresses(
+      sourcePosition(sourceValueCell),
+      markers,
+      outputValue,
+    );
   } finally {
     runtime.runner.stop(resultCell);
   }
