@@ -8,7 +8,6 @@ import {
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
-import { PieceManager } from "../src/manager.ts";
 import {
   HOME_PATTERN_SOURCE,
   PiecesController,
@@ -138,7 +137,6 @@ describe("home golden replay (durable home state survives an in-place roll-forwa
   let stub: StubControls;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
   let controller: PiecesController;
 
   beforeEach(async () => {
@@ -160,9 +158,8 @@ describe("home golden replay (durable home state survives an in-place roll-forwa
       spaceDid: signer.did(),
     });
     expect(session.space).toBe(runtime.userIdentityDID);
-    manager = new PieceManager(session, runtime);
-    await manager.synced();
-    controller = new PiecesController(manager);
+    controller = new PiecesController(session, runtime);
+    await controller.synced();
   });
 
   afterEach(async () => {
@@ -210,7 +207,7 @@ describe("home golden replay (durable home state survives an in-place roll-forwa
     // Let the watcher observe the meta change and re-instantiate, then pull so
     // the new instance actually executes.
     await runtime.idle();
-    const rolled = (await manager.getDefaultPattern(false))!;
+    const rolled = (await controller.getDefaultPattern(false))!;
     await rolled.pull();
     await runtime.idle();
 

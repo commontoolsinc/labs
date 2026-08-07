@@ -1,7 +1,6 @@
 import { createSession, Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { moduleByteCache } from "./pieces-controller.ts";
 
@@ -22,7 +21,7 @@ export async function initializeCapabilityGateController(
       actingPrincipal: session.as.did(),
     }),
   });
-  const manager = new PieceManager(session, runtime);
-  await manager.synced();
-  return new PiecesController(manager);
+  const pieces = new PiecesController(session, runtime);
+  await pieces.synced();
+  return pieces;
 }

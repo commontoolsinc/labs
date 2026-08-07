@@ -7,7 +7,6 @@ import {
   type RuntimeProgram,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { PieceManager } from "../src/manager.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 // CT-1917 at the `cf piece setsrc` boundary: a slot the piece cannot READ right
@@ -79,7 +78,6 @@ function registryProgram(marker: string): RuntimeProgram {
 describe("setsrc over a cold argument document", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
   let pieces: PiecesController;
 
   beforeEach(async () => {
@@ -88,15 +86,14 @@ describe("setsrc over a cold argument document", () => {
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
     });
-    manager = new PieceManager(
+    pieces = new PiecesController(
       await createSession({
         identity: signer,
         spaceName: `setsrc-cold-argument-${crypto.randomUUID()}`,
       }),
       runtime,
     );
-    await manager.synced();
-    pieces = new PiecesController(manager);
+    await pieces.synced();
   });
 
   afterEach(async () => {
@@ -135,7 +132,7 @@ describe("setsrc over a cold argument document", () => {
 
     // Guard the fixture itself. If this ever reads a value, the case has gone
     // warm and its verdict means nothing.
-    const argument = manager.getArgument(piece.getCell());
+    const argument = pieces.getArgument(piece.getCell());
     await argument.sync();
     expect(
       argument.asSchema(undefined).get(),

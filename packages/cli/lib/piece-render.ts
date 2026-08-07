@@ -2,8 +2,7 @@ import { renderInProcess } from "@commonfabric/html/in-process";
 import { MockDoc } from "@commonfabric/html/mock-doc";
 import { type Cell, UI } from "@commonfabric/runner";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import { loadManager } from "./piece.ts";
-import { PiecesController } from "@commonfabric/piece/ops";
+import { loadPieces } from "./piece.ts";
 import type { PieceConfig } from "./piece.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
@@ -120,8 +119,7 @@ export async function renderPiece(
   config: PieceConfig,
   options: RenderOptions = {},
 ): Promise<string | (() => void)> {
-  const manager = await loadManager(config);
-  const pieces = new PiecesController(manager);
+  const pieces = await loadPieces(config);
   const piece = await pieces.get(
     config.piece,
     options.start ?? true,
@@ -143,7 +141,7 @@ export async function renderPiece(
 
   return renderVDomToHtml(
     cell.key(UI),
-    () => manager.runtime.idle(),
+    () => pieces.runtime.idle(),
     options.watch ? (html) => options.onUpdate?.(html) : undefined,
   );
 }

@@ -1579,7 +1579,7 @@ export async function collectBrowserLoadSummary(
       // Prefix-match so sub-loggers are included: storage commit/conflict
       // timings live under `storage.v2` (+ `.transaction`/`.multi-space-commit`),
       // not a bare `storage` logger; runner/scheduler similarly have sub-loggers.
-      // `piece` carries the PieceManager/PiecesController phase timers (boot,
+      // `piece` carries the PiecesController phase timers (boot,
       // default-pattern ensure/resume); `runner.ipc`/`runner.loop` (worker
       // request delivery/handling + event-loop lag) ride the `runner` prefix;
       // `pattern-manager` carries the compile-cache read/evaluate spans that

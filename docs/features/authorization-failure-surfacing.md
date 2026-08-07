@@ -78,7 +78,7 @@ changing what the sync barrier does:
 
 ## CLI: surface the denial for the space it was asked to reach
 
-The CLI waits on storage sync in three places — `loadManager`, the ACL
+The CLI waits on storage sync in three places — `loadPieces`, the ACL
 operations, and the headless wish read — and none uses a wall-clock guard. Each
 calls `synced()`, then reads `storageManager.authorizationError(space)` for the
 one space it operates on, after that space has been pulled, and throws the real

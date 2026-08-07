@@ -25,6 +25,7 @@ import {
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { refuseFabricInstance } from "./fabric-special-object.ts";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
@@ -3305,11 +3306,26 @@ function validateStaticData(value: unknown): void {
 
     ancestors.add(obj);
 
-    // TODO(danfuzz): This walk has no `FabricSpecialObject` guard, so a
-    // `FabricPrimitive`/`FabricInstance` in `Cell.of()` static data is walked by
-    // enumerable props instead of treated as a leaf / descended by codec
-    // contents.
+    // A `FabricPrimitive` reaches here and survives, correctly: it has zero
+    // enumerable own properties, so `Object.keys()` is empty and the descent
+    // ends -- and a leaf holds no cell for this validation to find.
     //
+    // A `FabricInstance` is refused instead. Its codec contents can hold a
+    // `Cell`, which is exactly what this validation exists to reject, and those
+    // contents are not reachable by property name -- so passing one through
+    // _smuggles_ a cell into static data past the check meant to stop it.
+    // That is not a completeness gap; it is the validation failing open.
+    //
+    // Nothing reaches this in production today, de facto rather than by
+    // construction: a `FabricError` is ungated and exposed to pattern authors,
+    // so what keeps this safe is that nothing yet puts one in `Cell.of()` data.
+    //
+    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
+    // at which point this becomes a walk rather than a refusal.
+    if (obj instanceof FabricInstance) {
+      refuseFabricInstance(obj, `in \`Cell.of()\` static data`);
+    }
+
     // Traverse arrays and objects
     if (Array.isArray(obj)) {
       for (let i = 0; i < obj.length; i++) {

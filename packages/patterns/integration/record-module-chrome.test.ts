@@ -109,7 +109,7 @@ describe("record module chrome integration test", () => {
       apiUrl: new URL(API_URL),
       identity,
     });
-    const program = await cc.manager().runtime.harness.resolve(
+    const program = await cc.runtime.harness.resolve(
       new FileSystemProgramResolver(
         join(import.meta.dirname!, "..", "record.tsx"),
       ),
@@ -120,14 +120,14 @@ describe("record module chrome integration test", () => {
     });
     pieceId = record.id;
     // Keep the piece reactive (pull mode) so its handlers run on send.
-    cancels.push(cc.manager().getResult(record.getCell()).sink(() => {}));
+    cancels.push(cc.getResult(record.getCell()).sink(() => {}));
 
     // Two emails take the first two standard labels, "Personal" and "Work". The
     // photo module is the one that exports a settingsUI; its label is set
     // explicitly, so the dialog title has an instance label to show.
     for (const type of ["email", "email", "photo"]) {
       await record.result.set({ type }, ["addModule"]);
-      await cc.manager().runtime.idle();
+      await cc.runtime.idle();
     }
     // The list also holds the modules the Record seeded itself with, so the
     // photo is addressed by its type rather than by the order it was added in.
@@ -140,8 +140,8 @@ describe("record module chrome integration test", () => {
       { index: photoIndex, field: "label", value: "Portrait" },
       ["updateModule"],
     );
-    await cc.manager().runtime.idle();
-    await cc.manager().synced();
+    await cc.runtime.idle();
+    await cc.synced();
 
     // Navigate once, here rather than in the first case, so each case below
     // starts from a shell showing the Record and none of them depends on an
