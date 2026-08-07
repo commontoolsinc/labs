@@ -9,12 +9,11 @@ The split is deliberate, though not absolute. The read layer is additive with
 one exception it owns and sequences itself: scoping invocation ids to a session
 makes `--invocation` without one an error, a spelling that works today and that
 [Verbs over the CLI](../common/verbs-over-the-cli.md) teaches. That is one
-change, landing alone, ahead of anything that publishes an address. This arc's
-risk is different in kind — every step of it renames or merges something a
-caller already learned;
-this arc renames, aliases and merges, so its risk is entirely in what breaks for
-someone who already learned the current spelling. The two want different
-sequencing, different tests, and different appetites for landing quickly.
+change, landing alone, ahead of anything that publishes an address. This arc
+renames, aliases and merges, so its risk is different in kind — entirely in what
+breaks for someone who already learned the current spelling. The two want
+different sequencing, different tests, and different appetites for landing
+quickly.
 
 ## Governing decisions
 
