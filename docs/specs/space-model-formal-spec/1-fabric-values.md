@@ -3065,8 +3065,10 @@ difference matters to anyone tracing a value through the wire format.
 - **The link-ref envelope is not.** `/` is reserved — the prefix is wholly owned
   by the encoding system in the wire format (Section 9 of `3-json-encoding.md`),
   so a `/`-keyed record reaching the wire is a tagged value, a built-in escape,
-  or an encoding error, never a literal user key. A literal one survives only by
-  being wrapped in the `/object` escape first.
+  or an encoding error, never a literal user key. A literal one reaches the wire
+  only by being wrapped in an escape first — `/object` where its values should
+  still be interpreted, `/quote` where the whole subtree is to be taken
+  literally (Section 6 of the same document).
 
 That the envelope needs escaping is the stronger statement of the two. It is not
 a rival encoding the JSON layer tolerates alongside its own; it is user data the
