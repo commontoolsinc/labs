@@ -241,6 +241,19 @@ handler-schema fixtures were compiled before event schemas closed, so once
 Whichever merges second owes a golden regeneration. That is a note on the pair,
 not an edge in the table above.
 
+**A squash merge invalidates the fork point of everything stacked on it.**
+Rebasing a child with `git rebase <new-base>` then replays commits the base
+already contains, and the duplicate-commit conflicts look like real ones.
+`git rebase --onto <new-base> <the branch's own first commit's parent>` is the
+form that works. The cheapest tell that a fork point was wrong: the branch
+suddenly touches files it has no business in.
+
+**`deno fmt` does not check anything under `docs/`.** The directory is in the
+formatter's exclude list, so a passing `deno fmt --check` after a documentation
+edit says nothing about that edit. The gates that do apply are `check-docs` for
+code blocks, `check-conflict-markers`, and `docs-links --orphan`. Prose wrapping
+is convention here rather than enforcement.
+
 **A shared golden is a coordination point, not a merge conflict.** Two branches
 can modify a generated fixture without conflicting textually and still leave it
 encoding only one change. Whoever lands second regenerates.
