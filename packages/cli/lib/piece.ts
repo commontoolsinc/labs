@@ -29,7 +29,6 @@ import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   assignSlug,
   pieceId,
-  PieceManager,
   resolvePieceAddress as resolveStoredPieceAddress,
   resolveSlugTargetCell,
   setSlugLink,
@@ -184,9 +183,9 @@ export interface ResolvedPieceCallable extends CallableResolution {
 
 export interface PieceCallableDependencies extends CallableExecutionDeps {
   helpCommandPrefix?: string;
-  loadManager?: (config: SpaceConfig) => Promise<any>;
+  loadPieces?: (config: SpaceConfig) => Promise<any>;
   loadPiece?: (
-    manager: any,
+    pieces: any,
     pieceId: string,
     scope?: PieceConfig["pieceScope"],
   ) => Promise<any>;
@@ -208,9 +207,9 @@ export interface ExecutedPieceCallable {
 }
 
 export interface PieceResolutionDeps {
-  loadManager?: typeof loadManager;
+  loadPieces?: typeof loadPieces;
   resolvePieceAddress?: (
-    manager: PieceManager,
+    pieces: PiecesController,
     token: string,
   ) => Promise<string>;
 }
@@ -219,7 +218,6 @@ interface PieceOperationDependencies extends PieceResolutionDeps {
   loadIdentity?: typeof loadIdentity;
   getProgramFromFile?: typeof getProgramFromFile;
   getPinnedProgramFromFile?: typeof getPinnedProgramFromFile;
-  createController?: (manager: PieceManager) => PiecesController;
   reportSearchError?: (
     pieceId: string,
     source: "input data" | "result data" | "metadata",
@@ -261,7 +259,7 @@ export async function withRuntimeCleanupOnFailure<T>(
     if (closeNow) {
       await closeNow().catch((disposeError) => {
         console.warn(
-          `loadManager storage cleanup failed: ${
+          `loadPieces storage cleanup failed: ${
             disposeError instanceof Error
               ? disposeError.message
               : String(disposeError)
@@ -272,7 +270,7 @@ export async function withRuntimeCleanupOnFailure<T>(
     await runtime.dispose().catch(
       (disposeError) => {
         console.warn(
-          `loadManager cleanup failed: ${
+          `loadPieces cleanup failed: ${
             disposeError instanceof Error
               ? disposeError.message
               : String(disposeError)
@@ -309,17 +307,19 @@ async function makeSession(config: SpaceConfig): Promise<Session> {
   }
 }
 
-export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
+export async function loadPieces(
+  config: SpaceConfig,
+): Promise<PiecesController> {
   setLLMUrl(config.apiUrl);
   const session = await timeCliPhase(
-    "loadManager.makeSession",
+    "loadPieces.makeSession",
     () => makeSession(config),
   );
   // Use a const ref object so we can assign later while keeping const binding
-  const pieceManagerRef: { current?: PieceManager } = {};
+  const piecesRef: { current?: PiecesController } = {};
   const runtimeErrors: CliRuntimeErrorRecord[] = [];
   const runtime = await timeCliPhase(
-    "loadManager.runtime",
+    "loadPieces.runtime",
     () =>
       // Shared first-party posture for client runtimes against a deployed
       // API (CT-1814); collectors and the navigate hook are this CLI's
@@ -361,7 +361,7 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
                 .synced()
                 .then(async () => {
                   try {
-                    const mgr = pieceManagerRef.current!;
+                    const mgr = piecesRef.current!;
                     const piecesCell = await mgr.getPieceRegistry();
                     const list = piecesCell.get();
                     const exists = list.some((c) => pieceId(c) === id);
@@ -394,7 +394,7 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
     // subprocess op outlives a thrown error.
     const versionCheck = startVersionCheck();
     const healthy = await timeCliPhase(
-      "loadManager.healthCheck",
+      "loadPieces.healthCheck",
       () => runtime.healthCheck(),
     );
     await versionCheck.finish(runtime.serverGitSha, config.apiUrl);
@@ -402,18 +402,18 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
       throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
     }
 
-    const pieceManager = await timeCliPhase(
-      "loadManager.pieceManager",
+    const pieces = await timeCliPhase(
+      "loadPieces.controller",
       () =>
-        new PieceManager(session, runtime, {
+        new PiecesController(session, runtime, {
           deferSpaceCellSync: config.deferSpaceCellSync,
         }),
     );
-    pieceManagerRef.current = pieceManager;
+    piecesRef.current = pieces;
     if (config.deferSpaceCellSync) {
       await timeCliPhase(
-        "loadManager.ensureSpaceSession",
-        () => pieceManager.ensureSpaceSession(),
+        "loadPieces.ensureSpaceSession",
+        () => pieces.ensureSpaceSession(),
       );
     } else {
       // `synced()` settles even when this space is permanently denied: the
@@ -422,20 +422,20 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
       // silent absent read — so surface a denial on THIS space deliberately,
       // with the server's real AuthorizationError.
       await timeCliPhase(
-        "loadManager.synced",
-        () => pieceManager.synced(),
+        "loadPieces.synced",
+        () => pieces.synced(),
       );
     }
     throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
-    return pieceManager;
+    return pieces;
   });
 }
 
 export async function getProgramFromFile(
-  manager: PieceManager,
+  pieces: PiecesController,
   entry: EntryConfig,
 ): Promise<RuntimeProgram> {
-  const program: RuntimeProgram = await manager.runtime.harness.resolve(
+  const program: RuntimeProgram = await pieces.runtime.harness.resolve(
     new FileSystemProgramResolver(entry.mainPath, entry.rootPath),
   );
   if (entry.mainExport) {
@@ -445,13 +445,13 @@ export async function getProgramFromFile(
 }
 
 async function getPinnedProgramFromFile(
-  manager: PieceManager,
+  pieces: PiecesController,
   entry: EntryConfig,
 ): Promise<RuntimeProgram> {
-  const program = await getProgramFromFile(manager, entry);
+  const program = await getProgramFromFile(pieces, entry);
   const result = await pinProgramFabricImports(
-    manager.runtime,
-    manager.getSpace(),
+    pieces.runtime,
+    pieces.getSpace(),
     program,
   );
   for (const rewrite of result.rewrites) {
@@ -467,9 +467,7 @@ export async function listPieces(
 ): Promise<
   { id: string; name?: string; patternRef?: PiecePatternRef; error?: string }[]
 > {
-  const manager = await (deps.loadManager ?? loadManager)(config);
-  const pieces = deps.createController?.(manager) ??
-    new PiecesController(manager);
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const registeredPieces = await pieces.getRegisteredPieces();
   return Promise.all(
     registeredPieces.map(async (piece) => {
@@ -957,9 +955,7 @@ export async function searchPieces(
   const normalizedQuery = foldSearchText(query);
   // TODO(@ianh): Add an API for clients to initiate server-side searches
   // against a server-hosted index.
-  const manager = await (deps.loadManager ?? loadManager)(config);
-  const pieces = deps.createController?.(manager) ??
-    new PiecesController(manager);
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const registeredPieces = await pieces.getRegisteredPieces();
   const registeredPieceIds = new Set(
     registeredPieces.map((piece) => piece.id),
@@ -1055,15 +1051,15 @@ export async function searchPieces(
   );
 }
 
-async function resolvePieceConfigWithManager(
+async function resolvePieceConfigWithPieces(
   config: PieceConfig,
-  manager: PieceManager,
+  pieces: PiecesController,
   resolver: PieceResolutionDeps["resolvePieceAddress"] =
     resolveStoredPieceAddress,
 ): Promise<PieceConfig> {
   return {
     ...config,
-    piece: await resolver(manager, config.piece),
+    piece: await resolver(pieces, config.piece),
   };
 }
 
@@ -1071,23 +1067,23 @@ export async function resolvePieceConfig(
   config: PieceConfig,
   deps: PieceResolutionDeps = {},
 ): Promise<PieceConfig> {
-  const manager = await (deps.loadManager ?? loadManager)(config);
-  return await resolvePieceConfigWithManager(
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  return await resolvePieceConfigWithPieces(
     config,
-    manager,
+    pieces,
     deps.resolvePieceAddress,
   );
 }
 
 export async function resolveLinkEndpointAddress(
-  manager: PieceManager,
+  pieces: PiecesController,
   token: string,
   resolver: PieceResolutionDeps["resolvePieceAddress"] =
     resolveStoredPieceAddress,
   options?: { allowMissingSlugFallback?: boolean },
 ): Promise<string> {
   try {
-    return await resolver(manager, token);
+    return await resolver(pieces, token);
   } catch (error) {
     if (
       options?.allowMissingSlugFallback &&
@@ -1112,15 +1108,13 @@ export async function newPiece(
   options?: { start?: boolean; slug?: string },
   deps: PieceOperationDependencies = {},
 ): Promise<string> {
-  const manager = await timeCliPhase(
-    "newPiece.loadManager",
-    () => (deps.loadManager ?? loadManager)(config),
+  const pieces = await timeCliPhase(
+    "newPiece.loadPieces",
+    () => (deps.loadPieces ?? loadPieces)(config),
   );
-  const pieces = deps.createController?.(manager) ??
-    new PiecesController(manager);
 
   // The default pattern is a hard requirement for this command: even when the
-  // user's pattern doesn't use it, registration below (manager.add) sends an
+  // user's pattern doesn't use it, registration below (pieces.add) sends an
   // event to the default pattern's addPiece stream. Proceeding past a failure
   // here can only end in "Cannot add pieces" — fail now, with the real cause.
   try {
@@ -1145,7 +1139,7 @@ export async function newPiece(
     "newPiece.getProgramFromFile",
     () =>
       (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
-        manager,
+        pieces,
         entry,
       ),
   );
@@ -1157,7 +1151,7 @@ export async function newPiece(
   // When it fires, report the actual runtime error the pattern recorded while
   // starting rather than only pointing at the server logs.
   const PIECE_START_TIMEOUT_MS = 60_000;
-  const runtimeErrors = runtimeErrorLog(manager.runtime);
+  const runtimeErrors = runtimeErrorLog(pieces.runtime);
   const errorCountBefore = runtimeErrors.length;
   const piece = await timeCliPhase("newPiece.create", () => {
     const createPromise = pieces.create(program, {
@@ -1188,14 +1182,14 @@ export async function newPiece(
   if (options?.slug) {
     await timeCliPhase(
       "newPiece.assignSlug",
-      () => assignSlug(manager, piece.getCell(), options.slug!),
+      () => assignSlug(pieces, piece.getCell(), options.slug!),
     );
   }
 
   // Explicitly add the piece to the space's registry.
   await timeCliPhase(
     "newPiece.addToDefaultPattern",
-    () => manager.add([piece.getCell()]),
+    () => pieces.add([piece.getCell()]),
   );
 
   return piece.id;
@@ -1211,17 +1205,17 @@ export async function setPieceSlug(
     resolveBeforeLinking?: boolean;
   },
 ): Promise<void> {
-  const manager = await timeCliPhase(
-    "setPieceSlug.loadManager",
-    () => loadManager(config),
+  const pieces = await timeCliPhase(
+    "setPieceSlug.loadPieces",
+    () => loadPieces(config),
   );
   const resolvedSourcePieceId = await timeCliPhase(
     "setPieceSlug.resolveSource",
-    () => resolveStoredPieceAddress(manager, sourcePieceId),
+    () => resolveStoredPieceAddress(pieces, sourcePieceId),
   );
   const source = sourcePath.length === 0
-    ? manager.runtime.getCellFromEntityId(
-      manager.getSpace(),
+    ? pieces.runtime.getCellFromEntityId(
+      pieces.getSpace(),
       entityIdFrom(resolvedSourcePieceId),
       [],
       undefined,
@@ -1231,7 +1225,6 @@ export async function setPieceSlug(
     : (await timeCliPhase(
       "setPieceSlug.getSourcePiece",
       () => {
-        const pieces = new PiecesController(manager);
         return pieces.get(
           resolvedSourcePieceId,
           false,
@@ -1244,7 +1237,7 @@ export async function setPieceSlug(
   await timeCliPhase(
     "setPieceSlug.setSlugLink",
     () =>
-      setSlugLink(manager, slug, source, {
+      setSlugLink(pieces, slug, source, {
         resolveBeforeLinking: options?.resolveBeforeLinking,
         writeTargetMetadata: sourcePath.length === 0,
       }),
@@ -1257,14 +1250,12 @@ export async function setPiecePattern(
   options: SetPiecePatternOptions = {},
   deps: PieceOperationDependencies = {},
 ): Promise<void> {
-  const manager = await (deps.loadManager ?? loadManager)(config);
-  const resolvedConfig = await resolvePieceConfigWithManager(
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
     config,
-    manager,
+    pieces,
     deps.resolvePieceAddress,
   );
-  const pieces = deps.createController?.(manager) ??
-    new PiecesController(manager);
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
@@ -1273,7 +1264,7 @@ export async function setPiecePattern(
   );
   await piece.setPattern(
     await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
-      manager,
+      pieces,
       entry,
     ),
     {
@@ -1297,14 +1288,12 @@ export async function checkPiecePattern(
   entry: EntryConfig,
   deps: PieceOperationDependencies = {},
 ): Promise<PatternCompatibilityReport> {
-  const manager = await (deps.loadManager ?? loadManager)(config);
-  const resolvedConfig = await resolvePieceConfigWithManager(
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
     config,
-    manager,
+    pieces,
     deps.resolvePieceAddress,
   );
-  const pieces = deps.createController?.(manager) ??
-    new PiecesController(manager);
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
@@ -1313,7 +1302,7 @@ export async function checkPiecePattern(
   );
   return await piece.checkPattern(
     await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
-      manager,
+      pieces,
       entry,
     ),
   );
@@ -1324,9 +1313,8 @@ export async function savePiecePattern(
   outPath: string,
 ): Promise<void> {
   await ensureDir(outPath);
-  const manager = await loadManager(config);
-  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
-  const pieces = new PiecesController(manager);
+  const pieces = await loadPieces(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
@@ -1352,9 +1340,8 @@ export async function savePiecePattern(
 }
 
 export async function applyPieceInput(config: PieceConfig, input: object) {
-  const manager = await loadManager(config);
-  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
-  const pieces = new PiecesController(manager);
+  const pieces = await loadPieces(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
@@ -1377,7 +1364,7 @@ function getCallableValue(rootValue: unknown, callableName: string): unknown {
 
 async function tryResolvePieceCallableAt(
   piece: any,
-  manager: any,
+  pieces: any,
   space: MemorySpace,
   callableName: string,
   cellProp: "input" | "result",
@@ -1397,7 +1384,7 @@ async function tryResolvePieceCallableAt(
     callableKind,
     cellKey: callableName,
     commandSpec: callableCommandSpec(callableCell, callableKind),
-    manager,
+    pieces,
     space,
   };
 }
@@ -1433,7 +1420,7 @@ function probeForcedStreamCell(cell: any, name: string): any | null {
 
 async function tryResolvePieceHandler(
   piece: any,
-  manager: any,
+  pieces: any,
   space: MemorySpace,
   callableName: string,
 ): Promise<ResolvedPieceCallable | null> {
@@ -1465,14 +1452,14 @@ async function tryResolvePieceHandler(
     // does publish, which the forced stream cast does not; keep using it for
     // the command spec so `--help` and input validation are unaffected.
     commandSpec: callableCommandSpec(linkDerivedCell, "handler"),
-    manager,
+    pieces,
     space,
   };
 }
 
 async function tryResolveLivePieceToolCallable(
   piece: any,
-  manager: any,
+  pieces: any,
   space: MemorySpace,
   callableName: string,
   pieceScope?: PieceConfig["pieceScope"],
@@ -1486,18 +1473,18 @@ async function tryResolveLivePieceToolCallable(
 
   const pattern = await piece.getPattern();
   const input = await piece.input.get();
-  const tx = manager.runtime.edit();
-  const liveResult = manager.runtime.getCell(
+  const tx = pieces.runtime.edit();
+  const liveResult = pieces.runtime.getCell(
     space,
     crypto.randomUUID(),
     pattern?.resultSchema,
     tx,
     pieceScope,
   );
-  manager.runtime.run(tx, pattern, input, liveResult);
-  manager.runtime.prepareTxForCommit?.(tx);
+  pieces.runtime.run(tx, pattern, input, liveResult);
+  pieces.runtime.prepareTxForCommit?.(tx);
   await tx.commit();
-  await manager.runtime.idle();
+  await pieces.runtime.idle();
 
   const callableCell = liveResult.key(callableName).asSchemaFromLinks();
   const callableKind = detectCallableKind(
@@ -1507,21 +1494,20 @@ async function tryResolveLivePieceToolCallable(
   return callableKind === "tool" ? callableCell : null;
 }
 
-/** Load the target piece and its manager for callable resolution/listing —
+/** Load the target piece and its pieces for callable resolution/listing —
  * one shared path so `cf piece call` and `cf piece verbs` always see the same
  * piece state. */
 async function loadPieceForCallables(
   config: PieceConfig,
   deps: PieceCallableDependencies = {},
 ): Promise<{
-  manager: any;
+  pieces: any;
   piece: any;
   space: MemorySpace;
-  resolvedConfig: Awaited<ReturnType<typeof resolvePieceConfigWithManager>>;
+  resolvedConfig: Awaited<ReturnType<typeof resolvePieceConfigWithPieces>>;
 }> {
-  const manager = await (deps.loadManager ?? loadManager)(config);
-  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
-  const pieces = new PiecesController(manager);
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
 
   if (!deps.loadPiece) {
     try {
@@ -1537,7 +1523,7 @@ async function loadPieceForCallables(
 
   const piece = await (deps.loadPiece
     ? deps.loadPiece(
-      manager,
+      pieces,
       resolvedConfig.piece,
       resolvedConfig.pieceScope,
     )
@@ -1547,8 +1533,8 @@ async function loadPieceForCallables(
       undefined,
       resolvedConfig.pieceScope,
     ));
-  const space = manager.getSpace?.() ?? config.space;
-  return { manager, piece, space, resolvedConfig };
+  const space = pieces.getSpace?.() ?? config.space;
+  return { pieces, piece, space, resolvedConfig };
 }
 
 async function resolvePieceCallable(
@@ -1556,26 +1542,26 @@ async function resolvePieceCallable(
   callableName: string,
   deps: PieceCallableDependencies = {},
 ): Promise<ResolvedPieceCallable> {
-  const { manager, piece, space, resolvedConfig } = await loadPieceForCallables(
+  const { pieces, piece, space, resolvedConfig } = await loadPieceForCallables(
     config,
     deps,
   );
 
   const resolved = (await tryResolvePieceCallableAt(
     piece,
-    manager,
+    pieces,
     space,
     callableName,
     "result",
   )) ??
     (await tryResolvePieceCallableAt(
       piece,
-      manager,
+      pieces,
       space,
       callableName,
       "input",
     )) ??
-    (await tryResolvePieceHandler(piece, manager, space, callableName));
+    (await tryResolvePieceHandler(piece, pieces, space, callableName));
   if (!resolved) {
     throw new Error(
       `Callable "${callableName}" not found on piece ${config.piece}`,
@@ -1585,7 +1571,7 @@ async function resolvePieceCallable(
   if (resolved.callableKind === "tool") {
     const liveCallableCell = await tryResolveLivePieceToolCallable(
       piece,
-      manager,
+      pieces,
       space,
       callableName,
       resolvedConfig.pieceScope,
@@ -1767,21 +1753,20 @@ export async function linkPieces(
     targetScope?: PieceConfig["pieceScope"];
   },
 ): Promise<void> {
-  const manager = await timeCliPhase(
-    "linkPieces.loadManager",
-    () => loadManager(config),
+  const pieces = await timeCliPhase(
+    "linkPieces.loadPieces",
+    () => loadPieces(config),
   );
-  const pieces = new PiecesController(manager);
   const resolvedSourcePieceId = await timeCliPhase(
     "linkPieces.resolveSource",
     () =>
-      resolveLinkEndpointAddress(manager, sourcePieceId, undefined, {
+      resolveLinkEndpointAddress(pieces, sourcePieceId, undefined, {
         allowMissingSlugFallback: true,
       }),
   );
   const resolvedTargetPieceId = await timeCliPhase(
     "linkPieces.resolveTarget",
-    () => resolveLinkEndpointAddress(manager, targetPieceId),
+    () => resolveLinkEndpointAddress(pieces, targetPieceId),
   );
 
   // Validate that source and target pieces/paths exist by reading them
@@ -1881,9 +1866,9 @@ export async function linkPieces(
   }
 
   await timeCliPhase(
-    "linkPieces.manager.link",
+    "linkPieces.link",
     () =>
-      manager.link(
+      pieces.link(
         resolvedSourcePieceId,
         sourcePath,
         resolvedTargetPieceId,
@@ -1910,8 +1895,8 @@ export async function linkSqliteDiskSource(
   targetPath: (string | number)[],
   options?: { start?: boolean; targetScope?: CellScope },
 ): Promise<void> {
-  const manager = await loadManager(config);
-  const space = manager.getSpace();
+  const pieces = await loadPieces(config);
+  const space = pieces.getSpace();
   const id = deriveDiskHandleId(space, absPath);
 
   // 1. Seed the handle cell AT the deterministic id. Its entity id == its
@@ -1919,19 +1904,19 @@ export async function linkSqliteDiskSource(
   //    handle resolves to the id the server holds a disk descriptor for. tables
   //    is empty — v1 does not migrate external files (the on-disk db owns its
   //    schema); the server skips ensureTables for a registered source.
-  const handle = manager.runtime.getCellFromEntityId(
+  const handle = pieces.runtime.getCellFromEntityId(
     space,
     entityIdFrom(id),
     [],
     undefined,
   );
-  const writeRes = await manager.runtime.editWithRetry((tx) => {
+  const writeRes = await pieces.runtime.editWithRetry((tx) => {
     handle.withTx(tx).set({ id, tables: {}, rev: 0 });
   });
   if (writeRes.error) throw writeRes.error;
 
   // 2. Register the on-disk source with the server (read-only attach for `id`).
-  const provider = manager.runtime.storageManager.open(space);
+  const provider = pieces.runtime.storageManager.open(space);
   if (!provider.registerSqliteDiskSource) {
     throw new Error(
       "storage provider does not support injected sqlite disk sources",
@@ -1941,14 +1926,14 @@ export async function linkSqliteDiskSource(
 
   // 3. Link the handle (addressed by entity id) into the target field.
   const resolvedTarget = await resolveLinkEndpointAddress(
-    manager,
+    pieces,
     targetPieceId,
   );
-  await manager.link(id, [], resolvedTarget, targetPath, {
+  await pieces.link(id, [], resolvedTarget, targetPath, {
     start: options?.start,
     targetScope: options?.targetScope,
   });
-  await manager.synced();
+  await pieces.synced();
 }
 
 export class LinkValidationError extends Error {
@@ -2129,12 +2114,12 @@ export async function inspectPiece(
   readingFrom: Array<{ id: string; name?: string }>;
   readBy: Array<{ id: string; name?: string }>;
 }> {
-  const manager = await (deps.loadManager ?? loadManager)(config);
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
   let resolvedConfig: PieceConfig;
   try {
-    resolvedConfig = await resolvePieceConfigWithManager(
+    resolvedConfig = await resolvePieceConfigWithPieces(
       config,
-      manager,
+      pieces,
       deps.resolvePieceAddress,
     );
   } catch (error) {
@@ -2142,12 +2127,10 @@ export async function inspectPiece(
       error instanceof SlugResolutionError &&
       error.code === "not-piece"
     ) {
-      return await inspectSlugTargetCell(manager, config.piece);
+      return await inspectSlugTargetCell(pieces, config.piece);
     }
     throw error;
   }
-  const pieces = deps.createController?.(manager) ??
-    new PiecesController(manager);
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
@@ -2181,7 +2164,7 @@ export async function inspectPiece(
 }
 
 async function inspectSlugTargetCell(
-  manager: PieceManager,
+  pieces: PiecesController,
   slug: string,
 ): Promise<{
   id: string;
@@ -2192,7 +2175,7 @@ async function inspectSlugTargetCell(
   readingFrom: Array<{ id: string; name?: string }>;
   readBy: Array<{ id: string; name?: string }>;
 }> {
-  const target = await resolveSlugTargetCell(manager, slug);
+  const target = await resolveSlugTargetCell(pieces, slug);
   await target.pull();
   const result = target.get() as Readonly<unknown>;
   const name = isRecord(result) && typeof result[NAME] === "string"
@@ -2332,14 +2315,12 @@ export async function getCellValue(
   options: GetCellValueOptions = {},
   deps: PieceOperationDependencies = {},
 ): Promise<unknown> {
-  const manager = await (deps.loadManager ?? loadManager)(config);
-  const resolvedConfig = await resolvePieceConfigWithManager(
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
     config,
-    manager,
+    pieces,
     deps.resolvePieceAddress,
   );
-  const pieces = deps.createController?.(manager) ??
-    new PiecesController(manager);
   const shouldStep = options.step === true;
   const piece = await pieces.get(
     resolvedConfig.piece,
@@ -2355,9 +2336,9 @@ export async function getCellValue(
         await (options.input ? piece.input.getCell() : piece.result.getCell());
       const targetCell = rootCell.key(...path);
       await targetCell.pull();
-      await manager.synced();
-      await manager.runtime.idle();
-      await manager.synced();
+      await pieces.synced();
+      await pieces.runtime.idle();
+      await pieces.synced();
     }
 
     const prop = options.input ? "input" : "result";
@@ -2367,8 +2348,8 @@ export async function getCellValue(
       let transformed: unknown;
       try {
         transformed = await (deps.derivePieceGetValue ?? derivePieceGetValue)(
-          manager.runtime,
-          manager.getSpace(),
+          pieces.runtime,
+          pieces.getSpace(),
           targetCell,
           options.transform,
         );
@@ -2472,7 +2453,7 @@ export async function getCellValue(
     return value;
   } finally {
     if (shouldStep) {
-      await pieces.stop(resolvedConfig.piece);
+      await pieces.stopPiece(resolvedConfig.piece);
     }
   }
 }
@@ -2483,9 +2464,8 @@ export async function setCellValue(
   value: unknown,
   options?: { input?: boolean },
 ): Promise<void> {
-  const manager = await loadManager(config);
-  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
-  const pieces = new PiecesController(manager);
+  const pieces = await loadPieces(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
@@ -2521,12 +2501,11 @@ export async function callPieceHandler<T = any>(
 }
 
 export async function stepPiece(config: PieceConfig): Promise<void> {
-  const manager = await timeCliPhase(
-    "stepPiece.loadManager",
-    () => loadManager(config),
+  const pieces = await timeCliPhase(
+    "stepPiece.loadPieces",
+    () => loadPieces(config),
   );
-  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
-  const pieces = new PiecesController(manager);
+  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
   const piece = await timeCliPhase(
     "stepPiece.getPiece",
     () =>
@@ -2538,17 +2517,19 @@ export async function stepPiece(config: PieceConfig): Promise<void> {
       ),
   );
   await timeCliPhase("stepPiece.pull", () => piece.getCell().pull());
-  await timeCliPhase("stepPiece.manager.synced", () => manager.synced());
-  await timeCliPhase("stepPiece.stop", () => pieces.stop(resolvedConfig.piece));
+  await timeCliPhase("stepPiece.synced", () => pieces.synced());
+  await timeCliPhase(
+    "stepPiece.stop",
+    () => pieces.stopPiece(resolvedConfig.piece),
+  );
 }
 
 /**
  * Removes a piece from the space.
  */
 export async function removePiece(config: PieceConfig): Promise<void> {
-  const manager = await loadManager(config);
-  const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
-  const pieces = new PiecesController(manager);
+  const pieces = await loadPieces(config);
+  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
   const removed = await pieces.remove(resolvedConfig.piece);
 
   if (!removed) {
@@ -2556,13 +2537,8 @@ export async function removePiece(config: PieceConfig): Promise<void> {
   }
 }
 
-interface RootPatternController {
-  recreateDefaultPattern(): Promise<{ id: string }>;
-}
-
 interface RootPatternDeps {
-  loadManager?: typeof loadManager;
-  createController?: (manager: PieceManager) => RootPatternController;
+  loadPieces?: typeof loadPieces;
 }
 
 /**
@@ -2572,9 +2548,7 @@ export async function recreateSpaceRootPattern(
   config: SpaceConfig,
   deps: RootPatternDeps = {},
 ): Promise<string> {
-  const manager = await (deps.loadManager ?? loadManager)(config);
-  const pieces = deps.createController?.(manager) ??
-    new PiecesController(manager);
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const piece = await pieces.recreateDefaultPattern();
   return piece.id;
 }
@@ -2600,13 +2574,11 @@ export async function setHomePattern(
 ): Promise<void> {
   const identity = await (deps.loadIdentity ?? loadIdentity)(config.identity);
   const homeConfig: SpaceConfig = { ...config, space: identity.did() };
-  const manager = await (deps.loadManager ?? loadManager)(homeConfig);
+  const pieces = await (deps.loadPieces ?? loadPieces)(homeConfig);
   const program = await (deps.getProgramFromFile ?? getProgramFromFile)(
-    manager,
+    pieces,
     entry,
   );
-  const pieces = deps.createController?.(manager) ??
-    new PiecesController(manager);
   await pieces.recreateDefaultPattern({
     customProgram: program,
     repository: entry.repository,
@@ -2621,7 +2593,6 @@ export async function resetHomePattern(
 ): Promise<void> {
   const identity = await loadIdentity(config.identity);
   const homeConfig: SpaceConfig = { ...config, space: identity.did() };
-  const manager = await loadManager(homeConfig);
-  const pieces = new PiecesController(manager);
+  const pieces = await loadPieces(homeConfig);
   await pieces.recreateDefaultPattern();
 }

@@ -53,7 +53,7 @@ describe("Compile all patterns", () => {
       try {
         const sourcePath = join(import.meta.dirname!, "..", name);
         const rootPath = join(import.meta.dirname!, "..");
-        const program = await cc.manager().runtime.harness
+        const program = await cc.runtime.harness
           .resolve(
             new FileSystemProgramResolver(sourcePath, rootPath),
           );

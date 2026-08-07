@@ -44,12 +44,12 @@ describe("Topics durable navigation", () => {
 
     const sourcePath = join(import.meta.dirname!, "..", "topics", "main.tsx");
     const rootPath = join(import.meta.dirname!, "..");
-    const program = await cc.manager().runtime.harness.resolve(
+    const program = await cc.runtime.harness.resolve(
       new FileSystemProgramResolver(sourcePath, rootPath),
     );
     board = await cc.create(program, { start: true });
 
-    const resultCell = cc.manager().getResult(board.getCell());
+    const resultCell = cc.getResult(board.getCell());
     boardSinkCancel = resultCell.sink(() => {});
 
     await board.result.set(
@@ -122,7 +122,7 @@ async function topicAt(
   const result = await board.result.getCell();
   await result.pull();
   return new PieceController(
-    board.manager(),
+    board.pieces(),
     result.key("topics").key(index).resolveAsCell(),
   );
 }

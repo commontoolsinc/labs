@@ -1641,7 +1641,7 @@ export class Runner {
     // but a piece whose `schema` meta is missing or stale-but-same-version
     // still gets it repaired, which is what keeps its reads typed and its
     // durable write contract present. Both branches need it: a caller may
-    // re-run a running piece WITH an argument (`PieceManager.runWithPattern`),
+    // re-run a running piece WITH an argument (`PiecesController.runWithPattern`),
     // and that piece's metadata is no less worth repairing.
     if (setupState.storedSetupMatches) {
       this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);

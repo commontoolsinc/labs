@@ -53,11 +53,11 @@ Favorites are stored on the home default pattern at
 
 ### Accessing Favorites
 
-Via `PieceManager`:
+Via `PiecesController`:
 
 ```typescript
 // Shown inside a pattern body.
-const manager = new PieceManager(session, runtime);
+const manager = new PiecesController(session, runtime);
 await manager.addFavorite(piece);
 await manager.removeFavorite(piece);
 const isFav = manager.isFavorite(piece);
@@ -229,5 +229,6 @@ Both the home pattern and the default app pattern follow the same mechanism:
    sourceless roots always remain pinned.
 
 
-Runtime internals (ACL initialization, PieceManager home-space detection) are
+Runtime internals (ACL initialization, PiecesController home-space detection)
+are
 documented in [docs/features/home-space-internals.md](../../features/home-space-internals.md).

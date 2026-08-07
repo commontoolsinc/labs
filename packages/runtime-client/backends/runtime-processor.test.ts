@@ -5,7 +5,6 @@ import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import type { PieceManager } from "@commonfabric/piece";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   browserWorkerParamsFromInitializationData,
@@ -97,9 +96,9 @@ const createRuntime = () => {
 
 // Handlers resolve their per-space piece context via getSpaceCtx
 // (federation PR2). The duck-typed processors below are single-space:
-// their context is always the home pieceManager/cc.
-function homeSpaceCtx(this: { pieceManager?: unknown; cc?: unknown }) {
-  return { pieceManager: this.pieceManager, cc: this.cc };
+// their context is always the home pieces controller.
+function homeSpaceCtx(this: { cc?: unknown }) {
+  return this.cc;
 }
 
 // A valid `fid1:` page id from a readable seed (handlers parse pageId via
@@ -304,9 +303,7 @@ describe("piece source state", () => {
       asSchema: () => ({ get: () => ({}) }),
     };
     const processor = {
-      getSpaceCtx: (requested: string) => ({
-        pieceManager: { getSpace: () => requested },
-      }),
+      getSpaceCtx: (requested: string) => ({ getSpace: () => requested }),
       runtime: {
         // Stands in for readPieceSourceState's reads: the handler's own job is
         // to address the right cell and hand back what the reader produced.
@@ -350,9 +347,7 @@ describe("piece source state", () => {
   it("rejects an unknown compatibility confirmation before changing a piece", async () => {
     const space = "did:key:z6Mk-runtime-processor-source" as const;
     const processor = {
-      getSpaceCtx: () => ({
-        pieceManager: { getSpace: () => space },
-      }),
+      getSpaceCtx: () => ({ getSpace: () => space }),
       pieceSourceConfirmations: new Map(),
     };
 
@@ -401,9 +396,7 @@ describe("piece source state", () => {
       asSchema: () => ({ get: () => ({}) }),
     };
     const processor = {
-      getSpaceCtx: () => ({
-        pieceManager: { getSpace: () => space },
-      }),
+      getSpaceCtx: () => ({ getSpace: () => space }),
       pieceSourceConfirmations: new Map(),
       runtime: {
         getCellFromEntityId: () => cell,
@@ -490,9 +483,7 @@ describe("piece source state", () => {
     const space = "did:key:z6Mk-runtime-processor-source" as const;
     const pieceId = fid("sourced-piece");
     const processor = {
-      getSpaceCtx: () => ({
-        pieceManager: { getSpace: () => space },
-      }),
+      getSpaceCtx: () => ({ getSpace: () => space }),
       pieceSourceConfirmations: new Map(),
       runtime: {
         getCellFromEntityId: () => ({
@@ -546,9 +537,7 @@ describe("piece source state", () => {
     const getCellFromEntityId = runtime.getCellFromEntityId.bind(runtime);
     runtime.getCellFromEntityId = (() => cell) as typeof getCellFromEntityId;
     const processor = {
-      getSpaceCtx: () => ({
-        pieceManager: { getSpace: () => space },
-      }),
+      getSpaceCtx: () => ({ getSpace: () => space }),
       pieceSourceConfirmations: new Map(),
       runtime,
     };
@@ -597,7 +586,7 @@ describe("page slug metadata", () => {
           },
         }),
       },
-      pieceManager: {
+      cc: {
         getSpace: () => "did:key:z6Mk-runtime-processor-slug",
       },
     };
@@ -627,7 +616,7 @@ describe("page slug metadata", () => {
             metaField === "slug" ? { not: "a slug" } : undefined,
         }),
       },
-      pieceManager: {
+      cc: {
         getSpace: () => "did:key:z6Mk-runtime-processor-slug",
       },
     };
@@ -658,7 +647,7 @@ describe("page slug metadata", () => {
           };
         },
       },
-      pieceManager: {
+      cc: {
         getSpace: () => "did:key:z6Mk-runtime-processor-slug",
       },
     };
@@ -680,7 +669,7 @@ describe("page slug metadata", () => {
           throw new Error("computed page id reached the runtime lookup");
         },
       },
-      pieceManager: {
+      cc: {
         getSpace: () => "did:key:z6Mk-runtime-processor-slug",
       },
     };
@@ -759,14 +748,10 @@ describe("page slug redirects", () => {
     const managerCalls: unknown[][] = [];
     const processor = {
       getSpaceCtx: () => ({
-        pieceManager: { getSpace: () => space },
-        cc: {
-          manager: () => ({
-            get: (...args: unknown[]) => {
-              managerCalls.push(args);
-              return Promise.resolve(resultCell);
-            },
-          }),
+        getSpace: () => space,
+        getPieceCell: (...args: unknown[]) => {
+          managerCalls.push(args);
+          return Promise.resolve(resultCell);
         },
       }),
       runtime: {
@@ -804,19 +789,19 @@ describe("page slug redirects", () => {
       },
     });
     const slugCell = mockCell(slugRef, { raw: redirectRaw(targetRef) });
-    const manager = {
-      get: () => {
+    const pieces = {
+      getSpace: () => space,
+      getPieceCell: () => {
         throw new Error("output-cell slug redirects should not load as pieces");
       },
     };
     const processor = {
       getSpaceCtx: homeSpaceCtx,
-      pieceManager: { getSpace: () => space },
       runtime: {
         getCellFromEntityId: () => slugCell,
         getCellFromLink: () => targetCell,
       },
-      cc: { manager: () => manager },
+      cc: pieces,
     };
 
     const result = await (RuntimeProcessor.prototype as any).handlePageGet
@@ -872,8 +857,9 @@ describe("page slug redirects", () => {
       },
     });
     const slugCell = mockCell(slugRef, { raw: redirectRaw(targetRef) });
-    const manager = {
-      get: () => {
+    const pieces = {
+      getSpace: () => space,
+      getPieceCell: () => {
         throw new Error(
           "nested output-cell slug redirects should not load as pieces",
         );
@@ -881,12 +867,11 @@ describe("page slug redirects", () => {
     };
     const processor = {
       getSpaceCtx: homeSpaceCtx,
-      pieceManager: { getSpace: () => space },
       runtime: {
         getCellFromEntityId: () => slugCell,
         getCellFromLink: () => targetCell,
       },
-      cc: { manager: () => manager },
+      cc: pieces,
     };
 
     const result = await (RuntimeProcessor.prototype as any).handlePageGet
@@ -901,7 +886,7 @@ describe("page slug redirects", () => {
     expect(result.page.cell).toMatchObject(schemaRef);
   });
 
-  it("loads slug redirects to piece cells through the piece manager", async () => {
+  it("loads slug redirects to piece cells through the pieces controller", async () => {
     const pieceRef: CellRef = {
       id: "of:fid1-piece" as CellRef["id"],
       space,
@@ -929,20 +914,20 @@ describe("page slug redirects", () => {
     const resultCell = mockCell(resultRef);
     const slugCell = mockCell(slugRef, { raw: redirectRaw(pieceRef) });
     const calls: unknown[][] = [];
-    const manager = {
-      get: (...args: unknown[]) => {
+    const pieces = {
+      getSpace: () => space,
+      getPieceCell: (...args: unknown[]) => {
         calls.push(args);
         return Promise.resolve(resultCell);
       },
     };
     const processor = {
       getSpaceCtx: homeSpaceCtx,
-      pieceManager: { getSpace: () => space },
       runtime: {
         getCellFromEntityId: () => slugCell,
         getCellFromLink: () => pieceCell,
       },
-      cc: { manager: () => manager },
+      cc: pieces,
     };
 
     const result = await (RuntimeProcessor.prototype as any).handlePageGet
@@ -1564,7 +1549,7 @@ describe("system-pattern update wiring", () => {
       ensureDefaultPattern: () => Promise.resolve({ getCell: () => rootCell }),
     };
     const processor = {
-      getSpaceCtx: () => ({ cc }),
+      getSpaceCtx: () => cc,
     } as unknown as RuntimeProcessor;
 
     const result = await RuntimeProcessor.prototype.handleGetSpaceRootPattern
@@ -2903,27 +2888,24 @@ describe("browserWorkerParamsFromInitializationData", () => {
 });
 
 // Federation PR2: one worker serves page operations for many spaces.
-// getSpaceCtx resolves the per-space PieceManager/PiecesController,
-// lazily for foreign spaces, over the shared runtime/storage.
+// getSpaceCtx resolves the per-space PiecesController, lazily for
+// foreign spaces, over the shared runtime/storage.
 describe("RuntimeProcessor per-space piece contexts", () => {
   const getSpaceCtx = (RuntimeProcessor.prototype as any).getSpaceCtx;
 
   async function makeProcessorState() {
     const { runtime } = createRuntime();
-    const { PieceManager } = await import("@commonfabric/piece");
     const { PiecesController } = await import("@commonfabric/piece/ops");
     const homeSpace = cfcSigner.did();
-    const pieceManager = new PieceManager(
+    const cc = new PiecesController(
       { as: cfcSigner, space: homeSpace },
       runtime,
     );
-    const cc = new PiecesController(pieceManager);
     const processor = {
       runtime,
       identity: cfcSigner,
       space: homeSpace,
-      spaces: new Map([[homeSpace, { pieceManager, cc }]]),
-      pieceManager,
+      spaces: new Map([[homeSpace, cc]]),
       cc,
       getSpaceCtx,
     };
@@ -2936,9 +2918,7 @@ describe("RuntimeProcessor per-space piece contexts", () => {
       expect(processor.getSpaceCtx(homeSpace)).toBe(
         processor.spaces.get(homeSpace),
       );
-      expect(processor.getSpaceCtx(homeSpace).pieceManager).toBe(
-        processor.pieceManager,
-      );
+      expect(processor.getSpaceCtx(homeSpace)).toBe(processor.cc);
       expect(() =>
         (processor as { getSpaceCtx: (s?: string) => unknown })
           .getSpaceCtx()
@@ -2955,13 +2935,11 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     )).did();
     try {
       const ctxB = processor.getSpaceCtx(spaceB);
-      expect(ctxB.pieceManager).not.toBe(processor.pieceManager);
-      expect(ctxB.pieceManager.getSpace()).toBe(spaceB);
+      expect(ctxB).not.toBe(processor.cc);
+      expect(ctxB.getSpace()).toBe(spaceB);
       // Cached: the same context comes back, and the home context is intact.
       expect(processor.getSpaceCtx(spaceB)).toBe(ctxB);
-      expect(processor.getSpaceCtx(homeSpace).pieceManager).toBe(
-        processor.pieceManager,
-      );
+      expect(processor.getSpaceCtx(homeSpace)).toBe(processor.cc);
     } finally {
       await runtime.dispose();
     }
@@ -3070,17 +3048,12 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     ]);
     await tx.commit();
 
-    const { PieceManager: PieceManagerConstructor } = await import(
-      "@commonfabric/piece"
-    );
-    const pieceManager = new PieceManagerConstructor(
+    const cc = new PiecesController(
       { as: cfcSigner, space: userDid },
       runtime,
     );
-    const cc = new PiecesController(pieceManager);
     const ProcessorConstructor = RuntimeProcessor as unknown as new (
       runtime: Runtime,
-      pieceManager: PieceManager,
       cc: PiecesController,
       initSpace: MemorySpace,
       identity: Identity,
@@ -3088,7 +3061,6 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     ) => RuntimeProcessor;
     const processor = new ProcessorConstructor(
       runtime,
-      pieceManager,
       cc,
       userDid,
       cfcSigner,
@@ -3144,19 +3116,17 @@ describe("RuntimeProcessor per-space piece contexts", () => {
     expect(calls.length).toBe(2);
   });
 
-  it("managerFor returns only existing contexts (no lazy create)", async () => {
+  it("piecesFor returns only existing contexts (no lazy create)", async () => {
     const { processor, runtime, homeSpace } = await makeProcessorState();
     const spaceB = (await Identity.fromPassphrase(
       "runtime-processor-space-b",
     )).did();
-    const managerFor = (RuntimeProcessor.prototype as any).managerFor;
+    const piecesFor = (RuntimeProcessor.prototype as any).piecesFor;
     try {
-      expect(managerFor.call(processor, homeSpace)).toBe(
-        processor.pieceManager,
-      );
-      expect(managerFor.call(processor, spaceB)).toBeUndefined();
+      expect(piecesFor.call(processor, homeSpace)).toBe(processor.cc);
+      expect(piecesFor.call(processor, spaceB)).toBeUndefined();
       const ctxB = processor.getSpaceCtx(spaceB);
-      expect(managerFor.call(processor, spaceB)).toBe(ctxB.pieceManager);
+      expect(piecesFor.call(processor, spaceB)).toBe(ctxB);
     } finally {
       await runtime.dispose();
     }
