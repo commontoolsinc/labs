@@ -47,6 +47,13 @@ describe("CFC browser helpers", () => {
   beforeAll(async () => {
     browser = await Browser.launch({ headless: true });
     page = await browser.newPage();
+    // These tests place controls at chosen coordinates and then check where a
+    // trusted click landed, so the viewport they are placed in has to be a
+    // known size. A browser's default viewport is not: the widest surface below
+    // reaches x=920, which is off-screen in an 800-wide default, and a click
+    // aimed at a control's middle then lands outside the page and reaches
+    // nothing.
+    await page.setViewportSize({ width: 1280, height: 800 });
   });
 
   afterAll(async () => {
@@ -1534,6 +1541,10 @@ describe("CFC browser helpers", () => {
       error.message,
       "again, where a trusted click already failed to reach it",
     );
+    // The click has to have been stopped by the cover, not by landing outside
+    // the page: a point off the viewport reaches nothing, which would satisfy
+    // every other assertion here while testing none of what this test is for.
+    assertStringIncludes(error.message, "the click reached div");
 
     const clicks = await page.evaluate(() =>
       (globalThis as typeof globalThis & {
