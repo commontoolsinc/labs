@@ -395,6 +395,10 @@ Deno.test("memory v2 server: a verdict precedes fan-out held by scheduler bookke
     runPostCommitSchedulerSideEffects: (
       ...args: unknown[]
     ) => Promise<void>;
+    withSpacePublicationLock<T>(
+      space: string,
+      run: () => Promise<T>,
+    ): Promise<T>;
   };
   const originalSideEffects = serverInternals.runPostCommitSchedulerSideEffects
     .bind(server);
@@ -428,6 +432,21 @@ Deno.test("memory v2 server: a verdict precedes fan-out held by scheduler bookke
     },
   }));
   await reached.promise;
+
+  const fanoutLockAttempted = Promise.withResolvers<void>();
+  let fanoutEntered = false;
+  const originalPublicationLock = serverInternals.withSpacePublicationLock
+    .bind(server);
+  serverInternals.withSpacePublicationLock = <T>(
+    space: string,
+    run: () => Promise<T>,
+  ) => {
+    fanoutLockAttempted.resolve();
+    return originalPublicationLock(space, async () => {
+      fanoutEntered = true;
+      return await run();
+    });
+  };
   let fanout: Promise<void> | undefined;
   try {
     // Scheduler bookkeeping begins only after the verdict is published.
@@ -440,12 +459,19 @@ Deno.test("memory v2 server: a verdict precedes fan-out held by scheduler bookke
     // An explicit flush uses the same per-space publication lock. It cannot
     // consume the dirty batch while this transaction still owns the lock.
     fanout = server.flushSessions([space]);
+    await fanoutLockAttempted.promise;
+    assertEquals(fanoutEntered, false);
     assertEquals(committerMessages.length, 0);
   } finally {
     gate.resolve();
-    await Promise.all([commit, completed.promise, fanout]);
+    try {
+      await Promise.all([commit, completed.promise, fanout]);
+    } finally {
+      serverInternals.withSpacePublicationLock = originalPublicationLock;
+    }
   }
 
+  assertEquals(fanoutEntered, true);
   const effect = assertEffect(shiftMessage(committerMessages));
   const sync = effect.effect as SessionSync;
   assertEquals(sync.caughtUpLocalSeq, 1);

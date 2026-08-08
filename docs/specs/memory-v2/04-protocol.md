@@ -987,8 +987,9 @@ the subscription pipeline's throughput comes from. A per-space publication lock
 orders transactions and fan-out: the server sends the verdict while holding the
 lock, completes the transaction's post-commit scheduler bookkeeping, and then
 releases the lock for fan-out. Locks for other spaces remain independent. The
-remaining ordering contract is enforced through the catch-up marker and
-CLIENT-side verdict parking (CT-1927):
+lock covers each complete turn, so a transaction arriving during fan-out for
+its space waits for that fan-out to finish. The remaining ordering contract is
+enforced through the catch-up marker and CLIENT-side verdict parking (CT-1927):
 
 - the server MAY coalesce multiple successful commits into one `SessionSync`
   frame

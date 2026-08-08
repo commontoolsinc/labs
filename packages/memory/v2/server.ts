@@ -1390,6 +1390,9 @@ export class Server {
    * has no pending work. Tests use this to prevent the module-level singleton's
    * work from leaking across Deno test boundaries.
    *
+   * Callers stop submitting work before awaiting this method. A sustained
+   * stream of new work can extend the drain indefinitely.
+   *
    * `flushSessions()` (called with no `spaces` argument) cancels any
    * pending timer, runs the refresh loop to completion, and intentionally
    * does not reschedule, so a single call is sufficient.
@@ -2080,10 +2083,25 @@ export class Server {
   ): Promise<ResponseMessage<Engine.AppliedCommit>> {
     return await this.withSpacePublicationLock(message.space, async () => {
       const decision = await this.decideTransaction(message);
+      let verdictError: { value: unknown } | undefined;
       try {
         publishVerdict?.(decision.response);
-      } finally {
+      } catch (error) {
+        verdictError = { value: error };
+      }
+      try {
         await decision.postCommit?.();
+      } catch (postCommitError) {
+        if (verdictError !== undefined) {
+          throw new AggregateError(
+            [verdictError.value, postCommitError],
+            "Verdict publication and post-commit bookkeeping both failed",
+          );
+        }
+        throw postCommitError;
+      }
+      if (verdictError !== undefined) {
+        throw verdictError.value;
       }
       return decision.response;
     });
@@ -3628,7 +3646,13 @@ export class Server {
     }
   }
 
-  /** Runs one transaction or fan-out turn at a time for `space`. */
+  /**
+   * Runs one transaction or fan-out turn at a time for `space`.
+   *
+   * A transaction arriving during fan-out waits for that turn to finish. Locks
+   * for other spaces remain independent, so the latency coupling is local to
+   * one space.
+   */
   private async withSpacePublicationLock<T>(
     space: string,
     run: () => Promise<T>,
