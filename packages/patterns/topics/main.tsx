@@ -1,9 +1,9 @@
 import {
   action,
-  computed,
   Default,
   entityRefToString,
   handler,
+  lift,
   NAME,
   pattern,
   type PerSession,
@@ -16,7 +16,6 @@ import {
 } from "commonfabric";
 
 import Topic, {
-  asArray,
   crossrefJoin,
   crossrefLinkRow,
   fidPayload,
@@ -31,6 +30,7 @@ import Topic, {
   type TopicNavigationLink,
   type TopicPiece,
   TOPICS_THEME,
+  type TopicScan,
   whenLabel,
 } from "./topic.tsx";
 
@@ -52,6 +52,7 @@ export type {
   TopicOutput,
   TopicPiece,
   TopicReference,
+  TopicScan,
 } from "./topic.tsx";
 
 export interface TopicsInput {
@@ -86,43 +87,52 @@ export interface AddTopicResult {
   topic: TopicPiece;
 }
 
-/** One topic's place in the prose reference graph. Derived at read time from
- * fids pasted in bodies, comments, and link URLs — never persisted, so a
- * partial-view replica can never destroy real edges (the failure class of
- * index patterns that write backlinks into their targets). */
+/** One topic's place in the prose reference graph, plus the scalars a survey
+ * needs and the durable fid/title snapshots rendered navigation needs.
+ *
+ * Derived at read time from fids pasted in bodies, comments, and link URLs —
+ * never persisted, so a partial-view replica can never destroy real edges (the
+ * failure class of index patterns that write backlinks into their targets).
+ *
+ * Everything reference-valued is declared through `TopicScan`: the row schema —
+ * not reader discipline — is what keeps a full-board survey bounded. A reader
+ * following an edge from here reaches a sibling's prose and counts, never its
+ * verbs or its rendered UI. */
 export interface TopicCrossref {
   /** The topic's own fid in tagged form (`fid1:…`); "" until known. */
   fid: string;
   topic: TopicPiece;
+  title: string;
+  createdAt: number;
+  /** Authorship has no honest zero, so absence stays declared rather than
+   * being coalesced to an empty author. */
+  createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
+  /** Coalesced to 0 for a cold or older sibling whose derived path is absent,
+   * so the row itself never carries the mixed-version undefined. */
+  commentCount: number;
+  lastActivityAt: number;
   /** Sibling topics whose fids this topic's prose mentions. */
   refsOut: TopicPiece[];
   /** Sibling topics whose prose mentions this topic's fid. */
   referencedBy: TopicPiece[];
-}
-
-/** Private UI projection. Public consumers retain TopicCrossref's deployed
- * piece-valued schema; navigation uses durable fid/title snapshots. */
-interface TopicCrossrefView extends TopicCrossref {
+  /** The same two edge sets as durable fid/title snapshots, so rendered
+   * navigation survives a cold load without resolving a sibling. */
   refsOutLinks: TopicNavigationLink[];
   referencedByLinks: TopicNavigationLink[];
 }
 
-/** A sibling topic as the index carries it: the piece reference itself
- * (stored as a link to the child) declared through a title-only schema.
- * The declared schema is the bound — schemas filter visibility, so a reader
- * following an index edge through this type cannot expand the sibling's
- * body, thread, or verbs. No pattern-authored fid fields: rendering a
- * reference as an address is the CLI's job (decision 6, F2). */
+/** A sibling topic as the compact index carries it: the child reference itself
+ * declared through a title-only schema. The declared schema is the bound, so a
+ * reader following an index edge cannot expand the sibling's prose at all. No
+ * pattern-authored fid fields: rendering a reference as an address is the CLI's
+ * job (decision 6, F2). */
 export interface TopicIndexRef {
   title: string;
 }
 
-/** One row of the board's compact discovery index: the child reference plus
- * scalar summaries and the prose reference edges as sibling references.
- * The count/activity scalars are plain numbers — the computed coalesces a
- * cold or older sibling's absent path to 0, so the row itself never carries
- * the mixed-version undefined. `createdBy` keeps TopicReference's shaping:
- * authorship has no honest zero, so absence stays declared. */
+/** One row of the board's compact discovery index — the same rows `crossrefs`
+ * carries, declared through the tighter `TopicIndexRef` so one bounded read
+ * surveys the whole board. */
 export interface TopicIndexRow {
   topic: TopicIndexRef;
   title: string;
@@ -137,6 +147,133 @@ export interface TopicIndexRow {
 }
 
 /**
+ * The prose reference graph over the board's own topics, one row per (non-null)
+ * entry. Recomputed from the whole corpus on any board change (O(topics × text)
+ * — trivial at board scale; the growth path is per-topic memoization). Identity
+ * is each entry's resolved result-doc fid, so the existing corpus lights up with
+ * zero authoring changes and nothing derived is persisted.
+ *
+ * A `lift` rather than a pattern-body derivation because the declared parameter
+ * type is what bounds the read: the body calls helpers this schema analysis
+ * cannot see through (`topicCorpus`, `crossrefJoin`), and an inferred input
+ * schema would fall back to reading every topic whole — verbs, thread, and
+ * rendered UI included.
+ *
+ * HACK: the parameter reads `TopicScan` but the rows publish `TopicPiece`, via
+ * an `as` on each reference. A reference the lift passes through is a link, and
+ * a link resolves to the whole topic no matter how little of it this lift
+ * declared — so the cast describes what a consumer actually receives, and the
+ * narrow parameter still bounds what this derivation reads. TypeScript cannot
+ * express that on its own here: a lift's parameter and result are one type, so
+ * without the cast, narrowing the read would also narrow the published
+ * `crossrefs` edge targets and remove result fields consumers were promised
+ * (`deno task pattern-compat` rejects exactly that). Generic lifts that carry
+ * an input reference type through to the output would remove the need for it.
+ */
+const crossrefRows = lift(
+  (topics: Writable<TopicScan[] | Default<[]>>): TopicCrossref[] => {
+    const list = topics.get();
+    // Each entry's own fid payload ("" while unresolved, e.g. mid-sync — such
+    // entries simply hold no edges this render). resolveAsCell/entityId are
+    // cell-runtime surface, not on the pattern Writable type (same cast as
+    // notes' appendLink).
+    const payloads = list.map((t, i) => {
+      if (!t) return "";
+      const ref = (topics.key(i) as any).resolveAsCell?.()?.entityId;
+      return ref ? fidPayload(entityRefToString(ref)) : "";
+    });
+    const { refsOut, referencedBy } = crossrefJoin(
+      list.map((t) => topicCorpus(t)),
+      payloads,
+    );
+    const rows: TopicCrossref[] = [];
+    list.forEach((t, i) => {
+      if (!t) return;
+      rows.push({
+        fid: payloads[i] ? `fid1:${payloads[i]}` : "",
+        topic: t as TopicPiece,
+        title: t.title,
+        createdAt: t.createdAt,
+        createdBy: t.createdBy,
+        commentCount: t.commentCount ?? 0,
+        lastActivityAt: t.lastActivityAt ?? 0,
+        refsOut: refsOut[i].map((j) => list[j] as TopicPiece),
+        referencedBy: referencedBy[i].map((j) => list[j] as TopicPiece),
+        refsOutLinks: refsOut[i].map((j) => ({
+          fid: payloads[j] ? `fid1:${payloads[j]}` : "",
+          title: list[j].title,
+        })),
+        referencedByLinks: referencedBy[i].map((j) => ({
+          fid: payloads[j] ? `fid1:${payloads[j]}` : "",
+          title: list[j].title,
+        })),
+      });
+    });
+    return rows;
+  },
+);
+
+/** Exactly what one board card renders. Carries no piece reference at all: the
+ * cards navigate through the durable fid/title snapshots, so they never need
+ * the reference itself. Private to the board — nothing published is shaped by
+ * it, which is what leaves it free to be this narrow. */
+interface TopicCard {
+  // Every field carries a default. The board's card list is lowered to a
+  // mapped sub-pattern, so this is the argument schema a piece holding rows
+  // written by an older version of this pattern gets updated against — and a
+  // required property that its stored rows lack refuses the update outright
+  // (`deno task pattern-vintage` catches exactly that).
+  fid: string | Default<"">;
+  title: string | Default<"">;
+  body: string | Default<"">;
+  createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
+  createdByName: string | Default<"">;
+  commentCount: number | Default<0>;
+  lastActivityAt: number | Default<0>;
+  refsOutLinks: TopicNavigationLink[] | Default<[]>;
+  referencedByLinks: TopicNavigationLink[] | Default<[]>;
+}
+
+/** The fields of a crossref row that a card is built from. `TopicCrossref`
+ * satisfies this structurally; declaring the parameter this way is what stops
+ * ordering the board from carrying a reference-bearing row schema. */
+interface TopicCardSource {
+  fid: string;
+  title: string;
+  topic: { body: string; createdByName: string };
+  createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
+  commentCount: number;
+  lastActivityAt: number;
+  refsOutLinks: TopicNavigationLink[];
+  referencedByLinks: TopicNavigationLink[];
+}
+
+/**
+ * The board's cards, most recently active first.
+ *
+ * Separate from `crossrefRows` so the published rows keep the board's own
+ * order, and declared over `TopicCardSource`/`TopicCard` rather than over
+ * `TopicCrossref` so neither the sort nor the render carries a schema that can
+ * expand a sibling. `TopicCrossref`'s reference fields exist for consumers of
+ * the published result; a card reads prose and scalars and never follows one.
+ */
+const cardsByActivity = lift((rows: TopicCardSource[]): TopicCard[] =>
+  rows
+    .toSorted((a, b) => b.lastActivityAt - a.lastActivityAt)
+    .map((row) => ({
+      fid: row.fid,
+      title: row.title,
+      body: row.topic.body,
+      createdBy: row.createdBy,
+      createdByName: row.topic.createdByName,
+      commentCount: row.commentCount,
+      lastActivityAt: row.lastActivityAt,
+      refsOutLinks: row.refsOutLinks,
+      referencedByLinks: row.referencedByLinks,
+    }))
+);
+
+/**
  * Topics — a tracker over #topic pieces: durable units of shared attention
  * (CT-1878). Deliberately minimal: no statuses, labels, or assignees; topics
  * sort by last activity. Replaces Linear / GitHub issues / loose process docs
@@ -148,16 +285,11 @@ export interface TopicsOutput {
   topics: TopicPiece[];
   mentionable: TopicPiece[] | Default<[]>;
   topicCount: number;
-  /** The prose reference graph over the board's own topics, one row per
-   * (non-null) entry of `topics`. Rows carry their topic, so consumers never
+  /** The prose reference graph. Rows carry their topic, so consumers never
    * need to correlate by index — indices are not a stable address. */
   crossrefs: TopicCrossref[] | Default<[]>;
-  /** Compact discovery index — the documented full-board survey surface: one
-   * reference-plus-summary row per (non-null) entry of `topics`. Everything
-   * reference-valued in a row is declared through the title-only
-   * `TopicIndexRef`, so one bounded read surveys the whole board.
-   * `crossrefs` stays as the UI's reference graph; it is not compact — each
-   * row expands to full pieces — and is not the survey surface. */
+  /** The documented full-board survey surface: the same rows as `crossrefs`,
+   * declared through the tighter title-only reference type. */
   index: TopicIndexRow[] | Default<[]>;
   /** Session-local draft for the footer composer (exposed for embedding and
    * headless driving, like the chat exemplar's drafts). */
@@ -193,7 +325,7 @@ export const submitProfileTopic = handler<void, {
   profileName,
   profileAvatar,
 }) => {
-  const trimmed = (newTitle.get() ?? "").trim();
+  const trimmed = newTitle.get().trim();
   const author = topicAuthorFromPerson(profileName, profileAvatar);
   if (!trimmed || !author) return;
   const piece = Topic({
@@ -211,19 +343,31 @@ export const submitProfileTopic = handler<void, {
 export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   const newTitle = new Writable.perSession("");
 
+  // Declared before the mutation actions: `addTopic` passes `rows` to each
+  // child it creates, and a const referenced from an action closure must be
+  // initialized by the time the pattern body finishes building it.
+  // `.length` alone is what makes this cheap: the shrunk schema declares
+  // `items: unknown`, so counting the board expands no topic. Reaching past
+  // `.length` — or through a helper this analysis cannot see into — is what
+  // puts the whole board back in the read.
+  const topicCount = topics.get().length;
+  const rows = crossrefRows(topics);
+  const cards = cardsByActivity(rows);
+  const hasNoTopics = rows.length === 0;
+
   // Browser authorship comes from the current viewer's canonical Profile.
   // CLI streams below remain wish-free: agents sign each mutation in the
   // event payload, while Fabric records the human principal behind the key.
-  const profileWish = wish<{ name?: string; avatar?: string }>({
+  // One wish, not three: `#profile` resolves the profile itself, and `name`
+  // and `avatar` are fields on it. The `#profileName` / `#profileAvatar`
+  // targets are the same two fields reached through a second and third
+  // resolution of the same profile.
+  const profileWish = wish<{ name: string; avatar: string }>({
     query: "#profile",
   });
-  const profileNameWish = wish<string>({ query: "#profileName" });
-  const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
-  const profileName = computed(() => profileNameWish.result ?? "");
-  const profileAvatar = computed(() => profileAvatarWish.result ?? "");
-  const hasProfile = computed(() =>
-    profileName.trim().length > 0 && profileWish.result !== undefined
-  );
+  const profileName = profileWish.result?.name ?? "";
+  const profileAvatar = profileWish.result?.avatar ?? "";
+  const hasProfile = profileName.trim().length > 0;
 
   const addTopic = action<AddTopicEvent, AddTopicResult>((
     { title, body, agentName },
@@ -236,7 +380,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     if (!trimmed) rejectMutation("addTopic", "title must be non-empty");
     const legacyName = author
       ? topicAuthorLabel(author)
-      : (myName.get() ?? "").trim() || "someone";
+      : myName.get().trim() || "someone";
     const piece = Topic({
       title: trimmed,
       // Body at create is part of the create's atomic unit; created-with is
@@ -252,6 +396,9 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
       // and the editor has a mention universe (backfilled as a one-time
       // link-bind on pieces created before this input existed).
       mentionable: topics,
+      // The board's computed graph. A topic reads its inbound edges out of the
+      // row the board already built for it rather than rebuilding the join.
+      boardCrossrefs: rows,
     });
     // Mergeable append: concurrent creates from different users all land.
     topics.push(piece);
@@ -272,88 +419,8 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     profileAvatar,
   });
 
-  const myNameView = computed(() => myName.get() ?? "");
-
-  const topicCount = computed(() => asArray(topics.get()).length);
-
-  // The prose reference graph as one piece-valued view over the board's own
-  // topics (one row per non-null entry), recomputed from the whole corpus on
-  // any board change (O(topics × text) — trivial at board scale; the growth
-  // path is per-topic memoization). Identity is each entry's resolved
-  // result-doc fid, so the existing corpus lights up with zero authoring
-  // changes and nothing derived is persisted. The private view also carries
-  // fid/title snapshots so rendered navigation is durable across cold loads;
-  // the public result below retains its deployed piece-valued schema.
-  const crossrefView = computed(() => {
-    const list = asArray(topics.get());
-    // Each entry's own fid payload ("" while unresolved, e.g. mid-sync — such
-    // entries simply hold no edges this render). resolveAsCell/entityId are
-    // cell-runtime surface, not on the pattern Writable type (same cast as
-    // notes' appendLink).
-    const payloads = list.map((t, i) => {
-      if (!t) return "";
-      const ref = (topics.key(i) as any).resolveAsCell?.()?.entityId;
-      return ref ? fidPayload(entityRefToString(ref)) : "";
-    });
-    const { refsOut, referencedBy } = crossrefJoin(
-      list.map((t) => topicCorpus(t)),
-      payloads,
-    );
-    const rows: TopicCrossrefView[] = [];
-    list.forEach((t, i) => {
-      if (!t) return;
-      rows.push({
-        fid: payloads[i] ? `fid1:${payloads[i]}` : "",
-        topic: t,
-        refsOut: refsOut[i].map((j) => list[j]),
-        referencedBy: referencedBy[i].map((j) => list[j]),
-        refsOutLinks: refsOut[i].map((j) => ({
-          fid: payloads[j] ? `fid1:${payloads[j]}` : "",
-          title: list[j]?.title ?? "",
-        })),
-        referencedByLinks: referencedBy[i].map((j) => ({
-          fid: payloads[j] ? `fid1:${payloads[j]}` : "",
-          title: list[j]?.title ?? "",
-        })),
-      });
-    });
-    return rows;
-  });
-
-  const crossrefs = computed(() =>
-    crossrefView.map((row) => ({
-      fid: row.fid,
-      topic: row.topic,
-      refsOut: row.refsOut,
-      referencedBy: row.referencedBy,
-    }))
-  );
-
-  // The compact discovery surface. Rows reuse the crossref join, but every
-  // reference-valued field is DECLARED through the title-only TopicIndexRef,
-  // so the row schema — not reader discipline — is what keeps a full-board
-  // survey bounded (a live full-board read through `crossrefs` exceeded 300k
-  // tokens). The summary scalars are read into the row here so a survey needs
-  // no second hop to answer "what changed lately".
-  const index = computed(() =>
-    crossrefView.map((row) => ({
-      topic: row.topic,
-      title: row.topic?.title ?? "",
-      createdAt: row.topic?.createdAt ?? 0,
-      createdBy: row.topic?.createdBy,
-      commentCount: row.topic?.commentCount ?? 0,
-      lastActivityAt: row.topic?.lastActivityAt ?? 0,
-      refsOut: row.refsOut,
-      referencedBy: row.referencedBy,
-    }))
-  );
-
-  const hasNoTopics = computed(() =>
-    asArray(topics.get()).filter((t) => t).length === 0
-  );
-
   return {
-    [NAME]: computed(() => `Topics (${asArray(topics.get()).length})`),
+    [NAME]: `Topics (${topicCount})`,
     [UI]: (
       <cf-theme theme={TOPICS_THEME}>
         <cf-screen>
@@ -381,55 +448,33 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
           </cf-vstack>
 
           <cf-vstack gap="2" padding="4">
-            {computed(() => {
-              // Iterate the private rows directly so card and crossref links
-              // persist ordinary fid data instead of scheduler event streams.
-              const rows = crossrefView;
-              const order = rows
-                .map((_, i) => i)
-                .filter((i) => rows[i]?.topic)
-                .toSorted((a, b) =>
-                  (rows[b]?.topic?.lastActivityAt ?? 0) -
-                  (rows[a]?.topic?.lastActivityAt ?? 0)
-                );
-              return order.map((i) => {
-                const row = rows[i];
-                const t = row.topic;
-                return (
-                  <cf-card>
-                    <cf-hstack gap="3" align="center">
-                      <cf-vstack gap="0" style="flex: 1; min-width: 0;">
-                        <cf-text block style="font-weight: 600;">
-                          {t.title || "(untitled topic)"}
+            {cards.map((card) => (
+              <cf-card>
+                <cf-hstack gap="3" align="center">
+                  <cf-vstack gap="0" style="flex: 1; min-width: 0;">
+                    <cf-text block style="font-weight: 600;">
+                      {card.title || "(untitled topic)"}
+                    </cf-text>
+                    {card.body
+                      ? (
+                        <cf-text tone="muted" block truncate>
+                          {snippet(card.body, 120)}
                         </cf-text>
-                        {t.body
-                          ? (
-                            <cf-text tone="muted" block truncate>
-                              {snippet(t.body, 120)}
-                            </cf-text>
-                          )
-                          : null}
-                        <cf-text variant="caption" tone="muted">
-                          {t.commentCount ?? 0} comments · by{" "}
-                          {topicAuthorLabel(t.createdBy, t.createdByName)} ·
-                          {" "}
-                          {whenLabel(t.lastActivityAt ?? 0)}
-                        </cf-text>
-                        {crossrefLinkRow(
-                          "references →",
-                          row.refsOutLinks,
-                        )}
-                        {crossrefLinkRow(
-                          "← referenced by",
-                          row.referencedByLinks,
-                        )}
-                      </cf-vstack>
-                      {topicCellLink(row.fid, "Open")}
-                    </cf-hstack>
-                  </cf-card>
-                );
-              });
-            })}
+                      )
+                      : null}
+                    <cf-text variant="caption" tone="muted">
+                      {card.commentCount} comments · by{" "}
+                      {topicAuthorLabel(card.createdBy, card.createdByName)}
+                      {" · "}
+                      {whenLabel(card.lastActivityAt)}
+                    </cf-text>
+                    {crossrefLinkRow("references →", card.refsOutLinks)}
+                    {crossrefLinkRow("← referenced by", card.referencedByLinks)}
+                  </cf-vstack>
+                  {topicCellLink(card.fid, "Open")}
+                </cf-hstack>
+              </cf-card>
+            ))}
 
             {hasNoTopics
               ? (
@@ -448,7 +493,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
               </cf-field>
               <cf-button
                 variant="primary"
-                disabled={computed(() => !hasProfile)}
+                disabled={!hasProfile}
                 onClick={submitTopic}
               >
                 Start
@@ -461,11 +506,11 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     topics,
     mentionable: topics,
     topicCount,
-    crossrefs,
-    index,
+    crossrefs: rows,
+    index: rows,
     newTitle,
     addTopic,
-    myName: myNameView,
+    myName,
     setMyName,
     submitTopic,
   };

@@ -1,14 +1,17 @@
 import {
   action,
+  type ComparableCell,
   computed,
   Default,
   entityRefToString,
   equals,
   handler,
+  lift,
   NAME,
   pattern,
   type PerSession,
   type PerUser,
+  type ReadonlyCell,
   Stream,
   UI,
   type VNode,
@@ -124,43 +127,73 @@ export interface TopicInput {
    * crossrefs and the mention universe for authoring. A reference to the
    * tracker's array, wired at creation like `myName` (and backfillable as a
    * one-time link-bind on pieces created before it existed). Absent, the
-   * detail page simply derives no connections. */
+   * detail page simply derives no connections.
+   *
+   * Declared at the deployed reference type: this is the pattern's accepted
+   * argument, not a read. What bounds the read is the parameter type of the
+   * derivation that consumes it (`outboundEdges` below takes `TopicMention`),
+   * which is where a narrow declaration actually costs a consumer nothing. */
   mentionable?: Writable<TopicReference[] | Default<[]>>;
+  /** The board's own computed reference graph, one row per topic in the same
+   * order as `mentionable`. A topic reads its own row out of this instead of
+   * rebuilding the whole join for itself: the board already did that work, and
+   * a per-row read only re-triggers when that row changes.
+   *
+   * Optional, like `mentionable` before it. A topic wired before this input
+   * existed falls back to deriving its row locally. */
+  boardCrossrefs?: Writable<TopicCrossrefs[] | Default<[]>>;
 }
 
 /**
- * A sibling Topic as seen from another Topic: enough to render and navigate a
- * crossref chip and to scan its prose for references, and deliberately not its
- * own crossref graph. Keeping this projection non-recursive is what lets one
- * Topic's schema describe its siblings without traversing the whole board.
+ * The least a crossref join needs from a sibling: the prose it scans for pasted
+ * fids, and the title it snapshots onto a rendered chip.
+ *
+ * This is the input type for any derivation over `mentionable`. That input is a
+ * link to the whole board, so every field declared here is paid once per topic
+ * on it — which is why this carries neither the summary scalars a board row
+ * shows nor the display fields a rendered reference needs.
  */
-export interface TopicReference {
-  /** Like the other derived display fields, a cold retained sibling may not
-   * have produced this path yet. Its persisted title remains authoritative. */
-  [NAME]: string | Default<""> | undefined;
+export interface TopicMention {
   title: string;
   body: string;
-  comments: TopicComment[];
-  links: TopicLink[];
+  comments: { body: string }[];
+  links: { url: string }[];
+}
+
+/**
+ * `TopicMention` plus the scalars a board row summarises. The board's own
+ * crossref derivation reads these; a single topic's does not.
+ *
+ * Both are input projections, not published types: every reference this pattern
+ * publishes is declared at `TopicReference` or `TopicPiece`. Keeping them out of
+ * the published surface is what leaves them free to shrink.
+ */
+export interface TopicScan extends TopicMention {
   createdAt: number;
-  /** Mixed-version list projections can resolve an older sibling's absent
-   * path as undefined. Fabric shapes that absence to this inert legacy
-   * sentinel at the list boundary; newly computed non-empty authorship remains
-   * a structured TopicAuthor. */
   createdBy?:
     | TopicAuthor
     | Default<{ kind: "person"; name: "" }>
     | undefined;
+  commentCount: number | Default<0> | undefined;
+  lastActivityAt: number | Default<0> | undefined;
+}
+
+/**
+ * A sibling Topic as seen from another Topic: `TopicScan` plus the display
+ * name and the mutation verbs, so a crossref chip can be rendered and acted on.
+ */
+export interface TopicReference extends TopicScan {
+  /** The topic's display name. Like the other derived display fields, a cold
+   * retained sibling may not have produced this path yet; its persisted title
+   * remains authoritative until it does. */
+  [NAME]: string | Default<""> | undefined;
   /** @deprecated Compatibility shadow for consumers of the previous result
    * schema. New callers must use `createdBy`; the pattern mirrors this field. */
   createdByName: string;
+  comments: TopicComment[];
+  links: TopicLink[];
   bodyUpdatedBy?: TopicAuthor | undefined;
   bodyUpdatedAt?: number | undefined;
-  /** Cold mixed-version references can expose an unresolved computed path as
-   * explicit undefined. Shape it to zero until the sibling starts. */
-  commentCount: number | Default<0> | undefined;
-  /** Max of creation, comments, body saves, and link additions. */
-  lastActivityAt: number | Default<0> | undefined;
   addComment: Stream<AddCommentEvent, AddCommentResult>;
   addLink: Stream<AddLinkEvent, AddLinkResult>;
   setBody: Stream<SetBodyEvent, SetBodyResult>;
@@ -176,9 +209,9 @@ export interface TopicReference {
  * This is the board-facing projection, and the one stored in the tracker's
  * list. Session-local UI controls are intentionally excluded: a TopicPiece can
  * be followed from a shared list even when the viewer has no matching
- * session-local cells. Crossref targets deliberately use the non-recursive
- * TopicReference contract: a Topic needs enough sibling data to render and
- * navigate chips, not each sibling's entire crossref graph.
+ * session-local cells. Crossref targets use the narrower `TopicScan` contract,
+ * which is what stops a list read of topics from expanding, per topic, every
+ * sibling that topic references.
  */
 export interface TopicPiece extends TopicReference {
   /** This topic's own place in the board's prose graph, derived read-side
@@ -189,9 +222,28 @@ export interface TopicPiece extends TopicReference {
    * undefined outside the minting session; the list projection must accept
    * that rather than fail argument validation. */
   crossrefs?:
-    | { refsOut: TopicReference[]; referencedBy: TopicReference[] }
+    | TopicEdges
     | Default<{ refsOut: []; referencedBy: [] }>
     | undefined;
+}
+
+/** One topic's row in the prose reference graph, as a sibling sees it. */
+export interface TopicEdges {
+  /** Sibling topics whose fids this topic's prose mentions. */
+  refsOut: TopicReference[];
+  /** Sibling topics whose prose mentions this topic's fid. */
+  referencedBy: TopicReference[];
+}
+
+/** The same row on the topic's own page, which additionally carries the two
+ * edge sets as durable fid/title snapshots so rendered navigation survives a
+ * cold load without resolving a sibling. The snapshots stay off `TopicEdges`
+ * because a sibling never renders them, and widening the projection every
+ * reader of a topics list resolves is what a narrow declared schema exists to
+ * prevent. */
+export interface TopicCrossrefs extends TopicEdges {
+  refsOutLinks?: TopicNavigationLink[];
+  referencedByLinks?: TopicNavigationLink[];
 }
 
 /** The complete result available when a Topic is instantiated directly. */
@@ -244,11 +296,6 @@ export const TOPICS_THEME = {
 };
 
 // ===== Pure helpers =====
-
-/** Safely coerce a reactive array read to an array (intermediate updates can
- * momentarily yield a non-array). Same guard as reading-list. */
-export const asArray = <T,>(v: readonly T[] | T[]): T[] =>
-  Array.isArray(v) ? v as T[] : [];
 
 const MONTHS = [
   "Jan",
@@ -370,8 +417,8 @@ export const topicCorpus = (
 ): string => {
   if (!t) return "";
   const parts = [t.body ?? ""];
-  for (const c of asArray(t.comments ?? [])) parts.push(c?.body ?? "");
-  for (const l of asArray(t.links ?? [])) parts.push(l?.url ?? "");
+  for (const c of t.comments ?? []) parts.push(c?.body ?? "");
+  for (const l of t.links ?? []) parts.push(l?.url ?? "");
   return parts.join("\n");
 };
 
@@ -425,14 +472,14 @@ export const topicCellLink = (fid: string, label: string) =>
  * its existing piece-valued contract. */
 export const crossrefLinkRow = (
   caption: string,
-  links: TopicNavigationLink[],
+  links: TopicNavigationLink[] | undefined,
 ) =>
-  links.length === 0
+  (links ?? []).length === 0
     ? null
     : (
       <cf-hstack gap="1" align="center" style="flex-wrap: wrap;">
         <cf-text variant="caption" tone="muted">{caption}</cf-text>
-        {links.map((link) =>
+        {(links ?? []).map((link) =>
           topicCellLink(
             link.fid,
             snippet(link.title || "(untitled topic)", 40),
@@ -536,6 +583,221 @@ export const submitProfileLink = handler<void, {
   linkKindDraft.set("web");
 });
 
+// ===== Derivations =====
+//
+// Each of these is a `lift` rather than a pattern-body derivation for one
+// reason: the declared parameter type is what bounds the read. Their bodies
+// call helpers (`topicCorpus`, `crossrefJoin`) that schema analysis cannot see
+// through, and an inferred input schema falls back to reading its input whole —
+// for anything reached through `mentionable`, that is the entire board.
+
+/** This topic's own place in the board's prose graph, derived read-side from
+ * the mentionable siblings — the same join the board's cards use, reduced to
+ * this piece's row. Nothing persisted; a topic without `mentionable` derives
+ * empty sets.
+ *
+ * HACK: reads `TopicMention`, publishes `TopicReference`, via an `as` on each
+ * sibling. A reference passed through a lift is a link and resolves to the
+ * whole topic regardless of how little the lift declared, so the cast matches
+ * what a consumer receives while the narrow parameter bounds what this reads.
+ * See the same note on `crossrefRows` in main.tsx. */
+/**
+ * Which entry of `mentionable` is this topic.
+ *
+ * Its own lift, declared over `unknown` items, because `.equals` compares cell
+ * identity and never touches content: locating yourself among the siblings
+ * reads nothing from any of them. A linear scan is fine at board scale — it is
+ * a walk over cell identities, not a read — and keyed collections will give
+ * this a direct lookup later.
+ *
+ * Deliberately not fid-based. An entry's fid is a resolution detail on its way
+ * out; `.equals` against the title cell is the durable identity, and it is what
+ * survives that removal.
+ */
+const findSelfIndex = lift((
+  { siblings, title }: {
+    siblings: ReadonlyCell<unknown[] | Default<[]>>;
+    title: ComparableCell<unknown>;
+  },
+): number => {
+  const list = siblings.get();
+  const length = Array.isArray(list) ? list.length : 0;
+  for (let index = 0; index < length; index++) {
+    if (equals(siblings.key(index).key("title"), title)) return index;
+  }
+  return -1;
+});
+
+/**
+ * This topic's OUTBOUND edges: the siblings its own prose mentions.
+ *
+ * Reactive on this topic's own prose and nothing else. The sibling list is
+ * SAMPLED, not read, which is the whole point: prose written before a topic
+ * existed cannot mention it, so an add re-running this for every topic already
+ * on the board was pure waste — N full corpus scans per add, producing a result
+ * that provably could not have changed. Sampling registers no dependency, so
+ * this now runs when this topic's body, comments, or links change, and then
+ * only for this topic.
+ *
+ * The cost of sampling: a sibling renamed after this ran keeps its old title in
+ * the snapshot, and a sibling removed from the board keeps its chip, until this
+ * topic's own prose changes. Both are display staleness on a derived, never
+ * persisted view.
+ */
+const outboundEdges = lift((
+  { siblings, body, comments, links }: {
+    siblings: Writable<TopicMention[] | Default<[]>>;
+    body: string | Default<"">;
+    comments: { body: string }[] | Default<[]>;
+    links: { url: string }[] | Default<[]>;
+  },
+): { refsOut: TopicReference[]; refsOutLinks: TopicNavigationLink[] } => {
+  const sibs = siblings.sample();
+  if (!Array.isArray(sibs) || sibs.length === 0) {
+    return { refsOut: [], refsOutLinks: [] };
+  }
+  const mine = topicCorpus({ body, comments, links });
+  const mentioned = new Set(extractFidPayloads(mine));
+  if (mentioned.size === 0) return { refsOut: [], refsOutLinks: [] };
+
+  const hits: number[] = [];
+  const payloads: string[] = [];
+  for (let index = 0; index < sibs.length; index++) {
+    if (!sibs[index]) {
+      payloads.push("");
+      continue;
+    }
+    // deno-lint-ignore no-explicit-any
+    const ref = (siblings.key(index) as any).resolveAsCell?.()?.entityId;
+    const payload = ref ? fidPayload(entityRefToString(ref)) : "";
+    payloads.push(payload);
+    if (payload && mentioned.has(payload)) hits.push(index);
+  }
+  return {
+    // HACK, as elsewhere: read the narrow projection, publish the deployed
+    // reference type. A reference through a lift is a link and resolves whole.
+    refsOut: hits.map((index) => sibs[index] as TopicReference),
+    refsOutLinks: hits.map((index) => ({
+      fid: payloads[index] ? `fid1:${payloads[index]}` : "",
+      title: sibs[index].title,
+    })),
+  };
+});
+
+/**
+ * This topic's INBOUND edges, read out of the board's own computed graph.
+ *
+ * Who mentions me cannot be derived from my own prose, so this is the half that
+ * genuinely needs the whole corpus — and the board already scanned it. Reading
+ * one row rather than rebuilding the join means this re-triggers only when that
+ * row changes: `normalizeAndDiff` writes the board's table per changed
+ * location, and a read of one path is invalidated only by a write under it.
+ */
+/** The two directions as the published row. */
+const joinEdges = lift((
+  { outbound, inbound }: {
+    outbound: {
+      refsOut: TopicReference[];
+      refsOutLinks: TopicNavigationLink[];
+    };
+    inbound: {
+      referencedBy: TopicReference[];
+      referencedByLinks: TopicNavigationLink[];
+    };
+  },
+): TopicCrossrefs => ({
+  refsOut: outbound.refsOut,
+  refsOutLinks: outbound.refsOutLinks,
+  referencedBy: inbound.referencedBy,
+  referencedByLinks: inbound.referencedByLinks,
+}));
+
+const inboundEdges = lift((
+  { boardCrossrefs, siblings, me }: {
+    boardCrossrefs: Writable<TopicCrossrefs[] | Default<[]>>;
+    siblings: Writable<TopicMention[] | Default<[]>>;
+    me: number;
+  },
+): {
+  referencedBy: TopicReference[];
+  referencedByLinks: TopicNavigationLink[];
+} => {
+  const none = { referencedBy: [], referencedByLinks: [] };
+  if (me < 0) return none;
+
+  const row = boardCrossrefs.key(me).get();
+  if (row) {
+    return {
+      referencedBy: row.referencedBy ?? [],
+      referencedByLinks: row.referencedByLinks ?? [],
+    };
+  }
+
+  // No board table: a topic wired before that input existed, which is every
+  // piece already deployed. Derive inbound edges the old way rather than
+  // publishing an empty set — `pattern-vintage` catches exactly that, and a
+  // silently emptied Connections card is a worse failure than a slow one.
+  // Backfilling `boardCrossrefs` as a link-bind (as `mentionable` was) retires
+  // this branch.
+  const sibs = siblings.get();
+  if (!Array.isArray(sibs) || me >= sibs.length) return none;
+  // deno-lint-ignore no-explicit-any
+  const myRef = (siblings.key(me) as any).resolveAsCell?.()?.entityId;
+  const myPayload = myRef ? fidPayload(entityRefToString(myRef)) : "";
+  if (!myPayload) return none;
+
+  const hits: number[] = [];
+  for (let index = 0; index < sibs.length; index++) {
+    if (index === me || !sibs[index]) continue;
+    if (extractFidPayloads(topicCorpus(sibs[index])).includes(myPayload)) {
+      hits.push(index);
+    }
+  }
+  return {
+    referencedBy: hits.map((index) => sibs[index] as TopicReference),
+    referencedByLinks: hits.map((index) => {
+      // deno-lint-ignore no-explicit-any
+      const ref = (siblings.key(index) as any).resolveAsCell?.()?.entityId;
+      const payload = ref ? fidPayload(entityRefToString(ref)) : "";
+      return {
+        fid: payload ? `fid1:${payload}` : "",
+        title: sibs[index].title,
+      };
+    }),
+  };
+});
+
+/** Max of creation, the newest comment, the newest link, and the last body
+ * save — declared over just those four timestamp surfaces. */
+const lastActivityOf = lift((
+  { comments, links, createdAt, bodyUpdatedAt }: {
+    comments: { sentAt: number }[];
+    links: { addedAt?: number }[];
+    createdAt: number;
+    bodyUpdatedAt: number;
+  },
+): number => {
+  let newest = Math.max(createdAt, bodyUpdatedAt);
+  for (const c of comments) newest = Math.max(newest, c.sentAt);
+  // `addedAt` is optional on TopicLink: links written before it existed carry
+  // no timestamp and simply do not move the clock.
+  for (const l of links) newest = Math.max(newest, l.addedAt ?? 0);
+  return newest;
+});
+
+/** A legacy Topic has only `createdByName`. Project that snapshot into the
+ * structured result instead of returning a dangling link to an absent optional
+ * input path; sibling Topic schemas can then validate the piece. */
+const createdByOf = lift((
+  { createdBy, createdByName }: {
+    createdBy?: TopicAuthor;
+    createdByName: string;
+  },
+): TopicAuthor => {
+  if (createdBy && createdBy.name.trim()) return createdBy;
+  return { kind: "person", name: createdByName.trim() };
+});
+
 // ===== The pattern =====
 
 export default pattern<TopicInput, TopicOutput>(
@@ -552,6 +814,7 @@ export default pattern<TopicInput, TopicOutput>(
       bodyUpdatedBy,
       bodyUpdatedAt,
       mentionable,
+      boardCrossrefs,
     },
   ) => {
     // Session-local UI state (new-tab test: none of this should carry over).
@@ -565,27 +828,15 @@ export default pattern<TopicInput, TopicOutput>(
     // Browser mutations snapshot the current viewer's canonical Profile.
     // Agent-facing streams below deliberately remain wish-free and accept the
     // agent's content-level signature in the same event as the mutation.
-    const profileWish = wish<{ name?: string; avatar?: string }>({
+    // One wish, not three: `#profile` resolves the profile itself, and `name`
+    // and `avatar` are fields on it.
+    const profileWish = wish<{ name: string; avatar: string }>({
       query: "#profile",
     });
-    const profileNameWish = wish<string>({ query: "#profileName" });
-    const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
-    const profileName = computed(() => profileNameWish.result ?? "");
-    const profileAvatar = computed(() => profileAvatarWish.result ?? "");
-    const hasProfile = computed(() =>
-      profileName.trim().length > 0 && profileWish.result !== undefined
-    );
-    // A legacy Topic has only `createdByName`. Project that snapshot into the
-    // structured result instead of returning a dangling link to an absent
-    // optional input path; sibling Topic schemas can then validate the piece.
-    const createdByView = computed(() => {
-      const name = (createdBy?.name ?? "").trim();
-      if (name && createdBy) return createdBy;
-      const legacyName = (createdByName ?? "").trim();
-      return legacyName
-        ? { kind: "person" as const, name: legacyName }
-        : { kind: "person" as const, name: "" as const };
-    });
+    const profileName = profileWish.result?.name ?? "";
+    const profileAvatar = profileWish.result?.avatar ?? "";
+    const hasProfile = profileName.trim().length > 0;
+    const createdByView = createdByOf({ createdBy, createdByName });
 
     // --- Streams (external API; also usable headlessly via CLI) ---
 
@@ -697,92 +948,54 @@ export default pattern<TopicInput, TopicOutput>(
 
     // --- Derived values ---
 
-    const commentCount = computed(() => asArray(comments.get()).length);
+    // Each of these reads its own topic's data, which the page renders in full
+    // anyway, and the shrunk schemas say so: a `.length` read declares
+    // `items: unknown` and never expands an element.
+    const commentCount = comments.get().length;
 
-    const lastActivityAt = computed(() => {
-      const newestComment = asArray(comments.get())
-        .reduce((max, c) => Math.max(max, c?.sentAt ?? 0), 0);
-      const newestLink = asArray(links.get())
-        .reduce((max, link) => Math.max(max, link?.addedAt ?? 0), 0);
-      return Math.max(
-        createdAt ?? 0,
-        newestComment,
-        newestLink,
-        bodyUpdatedAt.get() ?? 0,
-      );
+    const lastActivityAt = lastActivityOf({
+      comments,
+      links,
+      createdAt,
+      bodyUpdatedAt,
     });
 
+    // `computed()` here and for `linksView` below is not ceremony: a `.get()`
+    // whose result is the array itself — bare, or fed to a callback-taking
+    // method — is the shape the transformer rejects at pattern scope. Scalar
+    // reductions like `comments.get().length` need no wrapper.
     const commentsView = computed(() =>
-      asArray(comments.get())
-        .filter((c) => c)
-        .toSorted((a, b) => (a?.sentAt ?? 0) - (b?.sentAt ?? 0))
+      comments.get().toSorted((a, b) => a.sentAt - b.sentAt)
     );
 
-    const linksView = computed(() => asArray(links.get()).filter((l) => l));
-
-    // This topic's own place in the board's prose graph, derived read-side
-    // from the mentionable siblings — the same join the board's cards use,
-    // reduced to this piece's row (identified via SELF). Nothing persisted;
-    // pre-rev pieces without `mentionable` simply derive empty sets.
-    const crossrefView = computed(() => {
-      const sibs = asArray(mentionable.get());
-      if (sibs.length === 0) {
-        return {
-          refsOut: [],
-          referencedBy: [],
-          refsOutLinks: [],
-          referencedByLinks: [],
-        };
-      }
-      // Each sibling's own fid payload ("" while unresolved — such entries
-      // hold no edges this render). Cell-runtime surface cast, as in notes'
-      // appendLink.
-      const payloads = sibs.map((t, i) => {
-        if (!t) return "";
-        const ref = (mentionable.key(i) as any).resolveAsCell?.()?.entityId;
-        return ref ? fidPayload(entityRefToString(ref)) : "";
-      });
-      const joined = crossrefJoin(sibs.map((t) => topicCorpus(t)), payloads);
-      // Select this Topic by a durable field-link identity. Its result title is
-      // a write-through link to its unique argument title cell, so following a
-      // retained sibling's title through any wrapper/result aliases meets the
-      // current input title without relying on the materialized object's
-      // comparable marker (which some derived wrappers lose).
-      const me = sibs.findIndex((t, i) =>
-        t && equals(mentionable.key(i).key("title"), title)
-      );
-      return me < 0
-        ? {
-          refsOut: [],
-          referencedBy: [],
-          refsOutLinks: [],
-          referencedByLinks: [],
-        }
-        : {
-          refsOut: joined.refsOut[me].map((j) => sibs[j]),
-          referencedBy: joined.referencedBy[me].map((j) => sibs[j]),
-          refsOutLinks: joined.refsOut[me].map((j) => ({
-            fid: payloads[j] ? `fid1:${payloads[j]}` : "",
-            title: sibs[j]?.title ?? "",
-          })),
-          referencedByLinks: joined.referencedBy[me].map((j) => ({
-            fid: payloads[j] ? `fid1:${payloads[j]}` : "",
-            title: sibs[j]?.title ?? "",
-          })),
-        };
+    // Split by direction: outbound depends on this topic's prose, inbound on
+    // one row of the board's table. Neither depends on the sibling list, so an
+    // unrelated topic being added re-runs nothing here.
+    const outbound = outboundEdges({
+      siblings: mentionable,
+      body,
+      comments,
+      links,
     });
-    // Preserve the deployed public result schema. Navigation-only fid/title
-    // snapshots stay private to the rendered view.
-    const crossrefs = computed(() => ({
-      refsOut: crossrefView.refsOut,
-      referencedBy: crossrefView.referencedBy,
-    }));
+    const inbound = inboundEdges({
+      boardCrossrefs,
+      siblings: mentionable,
+      me: findSelfIndex({ siblings: mentionable, title }),
+    });
+    const crossrefs = joinEdges({ outbound, inbound });
 
-    const hasLinks = computed(() => linksView.length > 0);
-    const hasComments = computed(() => commentsView.length > 0);
-    const hasBody = computed(() => body.get().trim().length > 0);
+    const linksView = computed(() => links.get());
+    const hasLinks = linksView.length > 0;
+    const hasComments = commentCount > 0;
+    const hasBody = body.get().trim().length > 0;
+    // The snapshots are optional on the published sibling projection (a
+    // sibling's row never renders them, and adding required fields there would
+    // change the deployed `crossrefs` default). This topic's own row always
+    // carries them — the derivation above sets both on every path.
+    const hasConnections = (crossrefs.refsOutLinks ?? []).length +
+        (crossrefs.referencedByLinks ?? []).length > 0;
 
-    const topicName = computed(() => title.get().trim() || "(untitled topic)");
+    const topicName = title.get().trim() || "(untitled topic)";
 
     return {
       [NAME]: topicName,
@@ -824,7 +1037,7 @@ export default pattern<TopicInput, TopicOutput>(
                     {editingBody ? null : (
                       <cf-button
                         variant="secondary"
-                        disabled={computed(() => !hasProfile)}
+                        disabled={!hasProfile}
                         onClick={startEditBody}
                       >
                         Edit
@@ -848,7 +1061,7 @@ export default pattern<TopicInput, TopicOutput>(
                         <cf-hstack gap="2">
                           <cf-button
                             variant="primary"
-                            disabled={computed(() => !hasProfile)}
+                            disabled={!hasProfile}
                             onClick={saveBody}
                           >
                             Save
@@ -887,38 +1100,36 @@ export default pattern<TopicInput, TopicOutput>(
                   {hasLinks
                     ? (
                       <cf-vstack gap="1">
-                        {computed(() =>
-                          linksView.map((link) => (
-                            <cf-hstack gap="2" align="center">
-                              <cf-badge size="xs" color="neutral">
-                                {link.kind}
-                              </cf-badge>
-                              {isSafeLinkUrl(link.url)
-                                ? (
-                                  <a
-                                    href={link.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    style="color: inherit;"
-                                  >
-                                    {link.label || link.url}
-                                  </a>
-                                )
-                                : (
-                                  <cf-text tone="muted">
-                                    {link.label || link.url}
-                                  </cf-text>
-                                )}
-                              {link.addedBy
-                                ? (
-                                  <cf-text variant="caption" tone="muted">
-                                    by {topicAuthorLabel(link.addedBy)}
-                                  </cf-text>
-                                )
-                                : null}
-                            </cf-hstack>
-                          ))
-                        )}
+                        {linksView.map((link) => (
+                          <cf-hstack gap="2" align="center">
+                            <cf-badge size="xs" color="neutral">
+                              {link.kind}
+                            </cf-badge>
+                            {isSafeLinkUrl(link.url)
+                              ? (
+                                <a
+                                  href={link.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style="color: inherit;"
+                                >
+                                  {link.label || link.url}
+                                </a>
+                              )
+                              : (
+                                <cf-text tone="muted">
+                                  {link.label || link.url}
+                                </cf-text>
+                              )}
+                            {link.addedBy
+                              ? (
+                                <cf-text variant="caption" tone="muted">
+                                  by {topicAuthorLabel(link.addedBy)}
+                                </cf-text>
+                              )
+                              : null}
+                          </cf-hstack>
+                        ))}
                       </cf-vstack>
                     )
                     : (
@@ -944,7 +1155,7 @@ export default pattern<TopicInput, TopicOutput>(
                     </cf-field>
                     <cf-button
                       variant="secondary"
-                      disabled={computed(() => !hasProfile)}
+                      disabled={!hasProfile}
                       onClick={submitLink}
                     >
                       Add
@@ -954,24 +1165,23 @@ export default pattern<TopicInput, TopicOutput>(
               </cf-card>
 
               {/* ── Connections (derived crossrefs; nothing persisted) ── */}
-              {computed(() => {
-                const { refsOutLinks, referencedByLinks } = crossrefView;
-                return refsOutLinks.length === 0 &&
-                    referencedByLinks.length === 0
-                  ? null
-                  : (
-                    <cf-card>
-                      <cf-vstack gap="2">
-                        <cf-heading level={5}>Connections</cf-heading>
-                        {crossrefLinkRow("references →", refsOutLinks)}
-                        {crossrefLinkRow(
-                          "← referenced by",
-                          referencedByLinks,
-                        )}
-                      </cf-vstack>
-                    </cf-card>
-                  );
-              })}
+              {hasConnections
+                ? (
+                  <cf-card>
+                    <cf-vstack gap="2">
+                      <cf-heading level={5}>Connections</cf-heading>
+                      {crossrefLinkRow(
+                        "references →",
+                        crossrefs.refsOutLinks,
+                      )}
+                      {crossrefLinkRow(
+                        "← referenced by",
+                        crossrefs.referencedByLinks,
+                      )}
+                    </cf-vstack>
+                  </cf-card>
+                )
+                : null}
 
               {/* ── The thread ── */}
               <cf-card>
@@ -986,37 +1196,35 @@ export default pattern<TopicInput, TopicOutput>(
                   {hasComments
                     ? (
                       <cf-vstack gap="2">
-                        {computed(() =>
-                          commentsView.map((comment) => (
-                            <cf-vstack
-                              gap="0"
-                              style="border-left: 2px solid var(--cf-theme-color-border); padding-left: 0.75rem;"
-                            >
-                              <cf-hstack gap="2" align="center">
-                                <cf-avatar
-                                  src={comment.author?.avatar || ""}
-                                  name={topicAuthorLabel(
-                                    comment.author,
-                                    comment.authorName,
-                                  )}
-                                  size="xs"
-                                />
-                                <cf-text style="font-weight: 600;">
-                                  {topicAuthorLabel(
-                                    comment.author,
-                                    comment.authorName,
-                                  )}
-                                </cf-text>
-                                <cf-text variant="caption" tone="muted">
-                                  {whenLabel(comment.sentAt)}
-                                </cf-text>
-                              </cf-hstack>
-                              <cf-text block style="white-space: pre-wrap;">
-                                {comment.body}
+                        {commentsView.map((comment) => (
+                          <cf-vstack
+                            gap="0"
+                            style="border-left: 2px solid var(--cf-theme-color-border); padding-left: 0.75rem;"
+                          >
+                            <cf-hstack gap="2" align="center">
+                              <cf-avatar
+                                src={comment.author?.avatar || ""}
+                                name={topicAuthorLabel(
+                                  comment.author,
+                                  comment.authorName,
+                                )}
+                                size="xs"
+                              />
+                              <cf-text style="font-weight: 600;">
+                                {topicAuthorLabel(
+                                  comment.author,
+                                  comment.authorName,
+                                )}
                               </cf-text>
-                            </cf-vstack>
-                          ))
-                        )}
+                              <cf-text variant="caption" tone="muted">
+                                {whenLabel(comment.sentAt)}
+                              </cf-text>
+                            </cf-hstack>
+                            <cf-text block style="white-space: pre-wrap;">
+                              {comment.body}
+                            </cf-text>
+                          </cf-vstack>
+                        ))}
                       </cf-vstack>
                     )
                     : (
@@ -1035,7 +1243,7 @@ export default pattern<TopicInput, TopicOutput>(
                     </cf-field>
                     <cf-button
                       variant="primary"
-                      disabled={computed(() => !hasProfile)}
+                      disabled={!hasProfile}
                       onClick={submitComment}
                     >
                       Send
