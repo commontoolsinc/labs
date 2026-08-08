@@ -1724,9 +1724,26 @@ after --. Handlers interpret piped input when no input argument is present.`,
       !!options.verbose,
       (next) => phase = next,
     );
+    setQuietMode(!!options.quiet);
+    // Read outside the invocation's failure wrapper below. Nothing is
+    // dispatched here — no callable resolved, no id spent — so a malformed
+    // selection is a data error about the flags, the same one `cf piece get`
+    // reports. Inside the wrapper it would name an id and a phase to retry
+    // from for a call that was never made; a selection that fails against a
+    // RESULT does sit inside it, and does name one.
+    let selection: CellSelection | undefined;
     try {
-      setQuietMode(!!options.quiet);
-      const selection = await parsePieceCallSelection(options);
+      selection = await parsePieceCallSelection(options);
+    } catch (error) {
+      // Both exits below leave without reaching the action's catch, so the
+      // verbose in-flight span is closed here.
+      observer.finish("failed");
+      if (error instanceof CellSelectionError) {
+        exitWithDataError({ message: error.message });
+      }
+      throw error;
+    }
+    try {
       const invocation = pieceCallInvocation(
         tail,
         this.getLiteralArgs(),
