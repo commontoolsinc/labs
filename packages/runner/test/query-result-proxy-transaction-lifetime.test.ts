@@ -18,7 +18,6 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { createQueryResultProxy } from "../src/query-result-proxy.ts";
-import { markLazyMaterializationTx } from "../src/storage/reactivity-log.ts";
 import { type Cell } from "../src/cell.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -51,7 +50,7 @@ describe("query-result-proxy transaction lifetime", () => {
   // Marking the transaction is the whole gate: the same call that builds a
   // standing handle on an unmarked transaction builds a view on a marked one.
   const pinnedView = (cell: Cell<Nested>, tx: IExtendedStorageTransaction) => {
-    markLazyMaterializationTx(tx);
+    tx.markLazyMaterialize(true);
     return createQueryResultProxy<Nested>(
       runtime,
       tx,

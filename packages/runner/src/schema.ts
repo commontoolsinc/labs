@@ -42,6 +42,7 @@ import {
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { toCell } from "./back-to-cell.ts";
+import { materializeSchemaView } from "./schema-view.ts";
 import {
   canBranchMatch,
   combineSchema,
@@ -1011,6 +1012,12 @@ export interface ValidateAndTransformOptions {
   traverseCells?: boolean;
   /** When true, cells created during traversal are marked as already synced */
   synced?: boolean;
+  /**
+   * Set by a schema view reading one of its children: a mismatch there is a
+   * refusal the reader must be told about, not the `undefined` a root read
+   * yields, which a reader cannot tell from an absent value.
+   */
+  mismatchThrows?: boolean;
 }
 
 export function validateAndTransform(
@@ -1177,6 +1184,22 @@ export function validateAndTransform(
     path: doc.address.path,
     schema: valueSelectedSchema ?? resolvedValueLink.schema ?? link.schema!,
   };
+  // A marked transaction takes the lazy route from here. Everything above has
+  // run either way — link resolution, the `asCell` dispatch, schema
+  // combination — so a view and an eager read start from the same link and the
+  // same schema; only the materialization differs.
+  if (tx.isLazyMaterialize()) {
+    return materializeSchemaView(
+      runtime,
+      tx,
+      { ...resolvedValueLink, schema: selector.schema },
+      value,
+      cfcLabelView,
+      options?.synced ?? false,
+      options?.mismatchThrows !== true,
+    );
+  }
+
   // TODO(@ubik2): these constructor parameters are complex enough that we should
   // use an options struct
   const traverser = new SchemaObjectTraverser<any>(

@@ -1204,6 +1204,35 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   getNarrowestReadScope(): CellScope;
   resetNarrowestReadScope(scope?: CellScope): void;
 
+  /**
+   * Turn lazy materialization on (or off) for this transaction.
+   *
+   * A marked transaction hands a reader views that resolve each path as it is
+   * touched, rather than a value built in one pass before the reader looks at
+   * any of it. A view also keeps the transaction it was created with, so the
+   * value it describes stays the value that was there when it was taken, and
+   * reading after the transaction finishes throws rather than quietly
+   * answering from committed state.
+   *
+   * Unmarked, every read behaves exactly as it did before lazy materialization
+   * existed — including the standing-handle semantics that long-lived
+   * consumers rely on, where a query-result proxy keeps tracking current state
+   * after the transaction it was made against has finished.
+   */
+  markLazyMaterialize(enabled?: boolean): void;
+  isLazyMaterialize(): boolean;
+
+  /**
+   * Record that a reader touched data its schema does not describe.
+   *
+   * Recorded on the transaction rather than left to the throw alone, because a
+   * reader can catch a `SchemaMismatchError` and carry on. Whoever dispatched
+   * the read checks `takeSchemaRefusal()` after the body returns and disposes
+   * of the run the same way either way.
+   */
+  noteSchemaRefusal(refusal: unknown): void;
+  takeSchemaRefusal(): unknown;
+
   //
   // CFC recording / ownership-transfer API
   //

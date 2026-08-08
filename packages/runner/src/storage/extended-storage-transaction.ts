@@ -51,7 +51,12 @@ import {
 } from "./transaction-inspection.ts";
 import {
   isInternalVerifierRead,
+  isLazyMaterializationTx,
+  markLazyMaterializationTx,
+  noteSchemaRefusalTx,
   reactivityLogFromActivities,
+  takeSchemaRefusalTx,
+  unmarkLazyMaterializationTx,
 } from "./reactivity-log.ts";
 
 import {
@@ -871,6 +876,23 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   resetNarrowestReadScope(scope: CellScope = "space"): void {
     this.narrowestReadScope = scope;
+  }
+
+  markLazyMaterialize(enabled = true): void {
+    if (enabled) markLazyMaterializationTx(this);
+    else unmarkLazyMaterializationTx(this);
+  }
+
+  isLazyMaterialize(): boolean {
+    return isLazyMaterializationTx(this);
+  }
+
+  noteSchemaRefusal(refusal: unknown): void {
+    noteSchemaRefusalTx(this, refusal);
+  }
+
+  takeSchemaRefusal(): unknown {
+    return takeSchemaRefusalTx(this);
   }
 
   private recordReadScope(address: Pick<IMemorySpaceAddress, "scope">): void {
@@ -2208,6 +2230,27 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T {
     return this.wrapped.runWithAmbientReadMeta(meta, fn);
+  }
+
+  markLazyMaterialize(enabled = true): void {
+    // Mark this layer as well as what it wraps: a reader holding the wrapper
+    // asks the wrapper, and a reader holding the inner transaction asks that.
+    if (enabled) markLazyMaterializationTx(this);
+    else unmarkLazyMaterializationTx(this);
+    this.wrapped.markLazyMaterialize(enabled);
+  }
+
+  isLazyMaterialize(): boolean {
+    return isLazyMaterializationTx(this) || this.wrapped.isLazyMaterialize();
+  }
+
+  noteSchemaRefusal(refusal: unknown): void {
+    noteSchemaRefusalTx(this, refusal);
+    this.wrapped.noteSchemaRefusal(refusal);
+  }
+
+  takeSchemaRefusal(): unknown {
+    return takeSchemaRefusalTx(this) ?? this.wrapped.takeSchemaRefusal();
   }
 
   markCfcRelevant(reason?: string): void {

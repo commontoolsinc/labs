@@ -16,7 +16,6 @@ import {
 } from "./storage/interface.ts";
 import {
   ignoreReadForScheduling,
-  isLazyMaterializationTx,
   mergeableOpRead,
 } from "./storage/reactivity-log.ts";
 import { toURI } from "./uri-utils.ts";
@@ -172,7 +171,7 @@ export function createQueryResultProxy<T>(
   // An unmarked caller who supplies no transaction gets a genuinely fresh one
   // per access rather than whatever `readTx()` would hand back, so the handle
   // cannot be pinned to an ambient transaction that has since gone stale.
-  const pinned = tx !== undefined && isLazyMaterializationTx(tx);
+  const pinned = tx?.isLazyMaterialize() === true;
   return createViewProxy(
     runtime,
     pinned ? tx : tx === undefined ? runtime.edit() : runtime.readTx(tx),

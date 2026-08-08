@@ -227,8 +227,35 @@ export function unmarkLazyMaterializationTx(tx: object): void {
     lazyMaterializationTxs.delete(layer);
   }
 }
+// A refusal recorded on the transaction, so it survives being caught. A reader
+// can swallow a `SchemaMismatchError` — its own `try`/`catch`, or an `await`
+// that discards the rejection — and still hand back a plausible-looking result.
+// The runner reads the mark after the body returns and disposes of the run as
+// an argument that did not resolve either way.
+const schemaRefusals = new WeakMap<object, unknown>();
+
+export function noteSchemaRefusalTx(tx: object, refusal: unknown): void {
+  for (const layer of blindWriteTxChain(tx)) {
+    if (!schemaRefusals.has(layer)) schemaRefusals.set(layer, refusal);
+  }
+}
+
+export function takeSchemaRefusalTx(tx: object): unknown {
+  for (const layer of blindWriteTxChain(tx)) {
+    const refusal = schemaRefusals.get(layer);
+    if (refusal !== undefined) return refusal;
+  }
+  return undefined;
+}
+
 export function isLazyMaterializationTx(tx: object): boolean {
-  return lazyMaterializationTxs.has(tx);
+  // Walk the chain rather than testing the object: a wrapper built over a
+  // transaction that was marked earlier has never been marked itself, and must
+  // still answer for what it wraps.
+  for (const layer of blindWriteTxChain(tx)) {
+    if (lazyMaterializationTxs.has(layer)) return true;
+  }
+  return false;
 }
 
 // Renderer-input (user-keystroke `$value`) provenance for timing-mitigation

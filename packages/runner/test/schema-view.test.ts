@@ -1,0 +1,396 @@
+// The schema-observing lazy view, reached through `Cell.get()` on a
+// transaction marked for lazy materialization.
+//
+// Two properties carry most of the confidence: a view agrees with an eager read
+// on what the value is, and it reads only what the reader touches. The rest
+// covers the refusal contract — where a mismatch surfaces, and where it does
+// not.
+
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Runtime } from "../src/runtime.ts";
+import { isSchemaMismatchError } from "../src/schema-view.ts";
+import { type JSONSchema } from "../src/builder/types.ts";
+import { getTransactionReadActivities } from "../src/storage/transaction-inspection.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
+const signer = await Identity.fromPassphrase("schema-view");
+const space = signer.did();
+
+describe("schema-view", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+  });
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  /** Seed a cell, then hand back a reader bound to a fresh transaction. */
+  const seeded = async (
+    cause: string,
+    value: unknown,
+    schema: JSONSchema,
+  ) => {
+    const write = runtime.edit();
+    runtime.getCell(space, cause, undefined, write).set(value);
+    await write.commit();
+
+    const read = (lazy: boolean): {
+      tx: IExtendedStorageTransaction;
+      get: () => unknown;
+    } => {
+      const tx = runtime.edit();
+      if (lazy) tx.markLazyMaterialize(true);
+      const cell = runtime.getCell(space, cause, schema, tx);
+      return { tx, get: () => cell.get() };
+    };
+    return read;
+  };
+
+  const pathsRead = (tx: IExtendedStorageTransaction): string[] =>
+    (getTransactionReadActivities(tx) ?? []).map((activity) =>
+      activity.path.join("/")
+    );
+
+  describe("agreement with an eager read", () => {
+    const cases: Array<[string, unknown, JSONSchema]> = [
+      [
+        "a flat record",
+        { a: 1, b: "two" },
+        {
+          type: "object",
+          properties: { a: { type: "number" }, b: { type: "string" } },
+        } as const,
+      ],
+      [
+        "a nested record",
+        { outer: { inner: { leaf: 7 } } },
+        {
+          type: "object",
+          properties: {
+            outer: {
+              type: "object",
+              properties: {
+                inner: {
+                  type: "object",
+                  properties: { leaf: { type: "number" } },
+                },
+              },
+            },
+          },
+        } as const,
+      ],
+      [
+        "an array of scalars",
+        { xs: [1, 2, 3] },
+        {
+          type: "object",
+          properties: { xs: { type: "array", items: { type: "number" } } },
+        } as const,
+      ],
+      [
+        "an array of records",
+        { xs: [{ n: 1 }, { n: 2 }] },
+        {
+          type: "object",
+          properties: {
+            xs: {
+              type: "array",
+              items: { type: "object", properties: { n: { type: "number" } } },
+            },
+          },
+        } as const,
+      ],
+      [
+        "a property the schema does not select",
+        { a: 1, hidden: 2 },
+        {
+          type: "object",
+          properties: { a: { type: "number" } },
+        } as const,
+      ],
+      [
+        "a declared default for an absent property",
+        { a: 1 },
+        {
+          type: "object",
+          properties: {
+            a: { type: "number" },
+            b: { type: "string", default: "fallback" },
+          },
+        } as const,
+      ],
+      [
+        "a matching anyOf branch",
+        { kind: "circle", radius: 2 },
+        {
+          type: "object",
+          properties: {
+            kind: { type: "string" },
+            radius: { type: "number" },
+          },
+          anyOf: [
+            { type: "object", required: ["radius"] },
+            { type: "object", required: ["side"] },
+          ],
+        } as const,
+      ],
+    ];
+
+    for (const [name, value, schema] of cases) {
+      it(`returns the same value as an eager read for ${name}`, async () => {
+        const read = await seeded(`agree-${name}`, value, schema);
+        const eager = read(false);
+        const lazy = read(true);
+        try {
+          expect(JSON.parse(JSON.stringify(lazy.get()))).toEqual(
+            JSON.parse(JSON.stringify(eager.get())),
+          );
+        } finally {
+          await eager.tx.commit();
+          await lazy.tx.commit();
+        }
+      });
+    }
+  });
+
+  describe("reading only what is touched", () => {
+    it("registers no read for a sibling the reader never looks at", async () => {
+      const read = await seeded(
+        "frugal",
+        {
+          wanted: { leaf: 1 },
+          untouched: { leaf: 2 },
+        },
+        {
+          type: "object",
+          properties: {
+            wanted: {
+              type: "object",
+              properties: { leaf: { type: "number" } },
+            },
+            untouched: {
+              type: "object",
+              properties: { leaf: { type: "number" } },
+            },
+          },
+        } as const,
+      );
+
+      const lazy = read(true);
+      const value = lazy.get() as { wanted: { leaf: number } };
+      expect(value.wanted.leaf).toBe(1);
+      const lazyPaths = pathsRead(lazy.tx);
+      await lazy.tx.commit();
+
+      const eager = read(false);
+      eager.get();
+      const eagerPaths = pathsRead(eager.tx);
+      await eager.tx.commit();
+
+      expect(lazyPaths.some((path) => path.includes("untouched"))).toBe(false);
+      expect(eagerPaths.some((path) => path.includes("untouched"))).toBe(true);
+    });
+
+    it("registers no read for an array element the reader never looks at", async () => {
+      const read = await seeded(
+        "frugal-array",
+        {
+          xs: [{ n: 1 }, { n: 2 }, { n: 3 }],
+        },
+        {
+          type: "object",
+          properties: {
+            xs: {
+              type: "array",
+              items: { type: "object", properties: { n: { type: "number" } } },
+            },
+          },
+        } as const,
+      );
+
+      const lazy = read(true);
+      const value = lazy.get() as { xs: { n: number }[] };
+      expect(value.xs.length).toBe(3);
+      expect(value.xs[0].n).toBe(1);
+      const paths = pathsRead(lazy.tx);
+      await lazy.tx.commit();
+
+      // An element is its own document, so the element's own fields are read
+      // under that document rather than under `xs/<i>`. What the slot read
+      // shows is which elements were reached at all.
+      expect(paths.some((path) => path.endsWith("xs/0"))).toBe(true);
+      expect(paths.some((path) => path.endsWith("xs/2"))).toBe(false);
+    });
+  });
+
+  describe("refusal", () => {
+    it("returns undefined when the root is missing a required property", async () => {
+      const read = await seeded(
+        "root-required",
+        { b: 1 },
+        {
+          type: "object",
+          required: ["a"],
+          properties: { a: { type: "number" }, b: { type: "number" } },
+        } as const,
+      );
+
+      const lazy = read(true);
+      const eager = read(false);
+      try {
+        expect(lazy.get()).toBeUndefined();
+        expect(eager.get()).toBeUndefined();
+      } finally {
+        await lazy.tx.commit();
+        await eager.tx.commit();
+      }
+    });
+
+    it("throws when the reader touches a nested missing required property", async () => {
+      const read = await seeded(
+        "nested-required",
+        { inner: { b: 1 } },
+        {
+          type: "object",
+          properties: {
+            inner: {
+              type: "object",
+              required: ["a"],
+              properties: { a: { type: "number" }, b: { type: "number" } },
+            },
+          },
+        } as const,
+      );
+
+      const lazy = read(true);
+      try {
+        const value = lazy.get() as { inner: unknown };
+        let thrown: unknown;
+        try {
+          value.inner;
+        } catch (error) {
+          thrown = error;
+        }
+        expect(isSchemaMismatchError(thrown)).toBe(true);
+      } finally {
+        await lazy.tx.commit();
+      }
+    });
+
+    it("throws when the reader touches a value of the wrong type", async () => {
+      const read = await seeded(
+        "wrong-type",
+        { n: "not a number" },
+        {
+          type: "object",
+          properties: { n: { type: "number" } },
+        } as const,
+      );
+
+      const lazy = read(true);
+      try {
+        const value = lazy.get() as { n: unknown };
+        expect(() => value.n).toThrow("Schema mismatch");
+      } finally {
+        await lazy.tx.commit();
+      }
+    });
+
+    it("runs on past a mismatch in a subtree the reader never touches", async () => {
+      // The one behavior change a pattern author can observe: an eager read
+      // collapses the whole value, a view hands back what was asked for.
+      const read = await seeded(
+        "untouched-mismatch",
+        {
+          wanted: 1,
+          broken: { b: 1 },
+        },
+        {
+          type: "object",
+          properties: {
+            wanted: { type: "number" },
+            broken: {
+              type: "object",
+              required: ["a"],
+              properties: { a: { type: "number" } },
+            },
+          },
+        } as const,
+      );
+
+      const eager = read(false);
+      const lazy = read(true);
+      try {
+        // Eager: `broken` fails, so it is dropped, and `wanted` survives —
+        // the collapse only reaches the whole value when the failing property
+        // is itself required.
+        expect((eager.get() as { wanted: number }).wanted).toBe(1);
+        expect((lazy.get() as { wanted: number }).wanted).toBe(1);
+      } finally {
+        await eager.tx.commit();
+        await lazy.tx.commit();
+      }
+    });
+
+    it("registers the read that failed, so the reader runs again when it arrives", async () => {
+      const read = await seeded(
+        "registers-failure",
+        { inner: { b: 1 } },
+        {
+          type: "object",
+          properties: {
+            inner: {
+              type: "object",
+              required: ["a"],
+              properties: { a: { type: "number" } },
+            },
+          },
+        } as const,
+      );
+
+      const lazy = read(true);
+      try {
+        const value = lazy.get() as { inner: unknown };
+        try {
+          value.inner;
+        } catch {
+          // The refusal is the point; what matters is what it left behind.
+        }
+        expect(pathsRead(lazy.tx).some((path) => path.endsWith("inner")))
+          .toBe(true);
+      } finally {
+        await lazy.tx.commit();
+      }
+    });
+  });
+
+  describe("a view is a read", () => {
+    it("refuses assignment", async () => {
+      const read = await seeded(
+        "no-assign",
+        { a: 1 },
+        {
+          type: "object",
+          properties: { a: { type: "number" } },
+        } as const,
+      );
+      const lazy = read(true);
+      try {
+        const value = lazy.get() as { a: number };
+        expect(() => {
+          value.a = 2;
+        }).toThrow("it is a read");
+      } finally {
+        await lazy.tx.commit();
+      }
+    });
+  });
+});

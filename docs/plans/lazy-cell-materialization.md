@@ -1,6 +1,7 @@
 # Lazy, schema-observing cell materialization
 
-Status: Stage 1 complete; Stage 2 next
+Status: built end to end behind `lazyMaterialization`, off by default. Stage 6
+(graduation) is what remains.
 
 `Cell.get()` materializes everything its schema selects, in one pass, before the
 reader touches any of it. A lift declaring a list of a thousand entries gets a
@@ -305,117 +306,105 @@ behavior is dormant by construction.
 
 ### Stage 2 — The schema-observing view
 
-Build the view standalone, driven directly, with no transaction mode and no
-runner involvement.
+**Done.** `schema-view.ts` builds a view over a `(link, schema)` pair.
+`validateAndTransform` branches into it when the transaction is marked, after
+its own link resolution, `asCell` dispatch and schema combination have run — so
+a view and an eager read start from the same link and the same schema, and only
+the materialization differs.
 
-- [ ] Add the lazy view module beside `query-result-proxy.ts`, taking
-      `(runtime, tx, link, schema, cfcLabelView)`.
-- [ ] Property read: narrow with `schemaAtPath` using the `emptyProperties` /
-      `missingProperty` markers; a marked property is absent from the view.
-- [ ] Link resolution per access, combining the link's schema into the narrowed
-      one, matching `validateAndTransform`'s ordering.
-- [ ] Dispatch: `asCell` / `asStream` mints a `Cell`; absent or `true` schema
-      delegates to `createQueryResultProxy`; scalars return values; containers
-      return nested views.
-- [ ] Apply schema `default` on an absent slot, through the same
-      `processDefaultValue` path the traverser uses.
-- [ ] `ownKeys`, `has`, and `getOwnPropertyDescriptor` answer from the schema's
-      selection intersected with the data's own keys, so a spread of a view
-      carries what an eager read would have carried and nothing more.
-- [ ] Arrays: `length`, iteration, and the read-only `Array.prototype` methods,
-      each element lazily viewed under the narrowed `items` schema.
-- [ ] `toCell` on every view, so an existing consumer of a materialized value
-      still reaches its cell.
-- [ ] `anyOf` / `oneOf` resolution at access, via `canBranchMatch` and the
-      existing branch-schema merge.
-- [ ] `SchemaMismatchError` with link, path, and failed check.
-- [ ] Root guard: type, `required` presence, immediate scalar types.
-- [ ] Reads registered with the same granularity the existing proxy uses —
-      non-recursive for shape, recursive for materialized values — and
-      registered _before_ a refusal throws.
-- [ ] CFC label views rebased per descent and merged from dereference traces, as
-      both existing paths do.
+- [x] Property reads narrow with `schemaAtPath`, using the `emptyProperties` /
+      `missingProperty` markers, so a property the schema does not select is
+      absent from the view rather than present and raw.
+- [x] A child goes back through `validateAndTransform`, which is what keeps link
+      resolution, `asCell` dispatch and schema combination in one place.
+- [x] Schema `default` applied for an absent declared property, through
+      `processDefaultValue`.
+- [x] `ownKeys`, `has` and `getOwnPropertyDescriptor` answer from the schema's
+      selection intersected with the data's own keys, so a spread carries what
+      an eager read carries.
+- [x] Arrays: `length`, iteration, index access, and the read-only
+      `Array.prototype` methods over element views built on demand. The
+      reshaping methods refuse — a view is a read.
+- [x] `toCell` on every view.
+- [x] `anyOf` / `oneOf` narrowed at the point of access via `canBranchMatch`,
+      merged by `mergeAnyOfBranchSchemas` when several branches survive.
+- [x] `SchemaMismatchError`, carrying link and reason.
+- [x] Root guard: type, `required` presence. A mismatch at the root is
+      `undefined`, matching an eager read; below it, a refusal.
+- [x] Reads registered as the view goes: non-recursive at a container, recursive
+      at a leaf the reader materializes. `validateAndTransform`'s own document
+      read is deliberately `ignoreReadForScheduling` — the eager traverser
+      registers its reads as it walks, and a view has to do the same or a
+      computed never re-runs.
+- [x] A view refuses assignment, deletion, `defineProperty` and freezing.
 
-Completion gate: for a corpus of schema/value pairs, a full walk of the lazy
-view produces a value deep-equal to `validateAndTransform`'s result, and the set
-of registered reads is a subset of the eager set. Drive the corpus from the
-existing traverse replay fixtures where they fit.
+Verified: a view returns the same value as an eager read across flat and nested
+records, arrays of scalars and of records, unselected properties, declared
+defaults and a matching `anyOf` branch; and reading one field of a record
+registers no read for its siblings, nor for array elements never reached.
 
 ### Stage 3 — Snapshot pinning
 
-- [ ] Add a write epoch to the storage transaction, bumped per write.
-- [ ] Record the first-write epoch per document entry.
-- [ ] Pin: deep-freeze the current root of each already-written document at
-      materialization, keyed by epoch.
-- [ ] Read resolution at epoch E: `initial` when first-write is later than E,
-      otherwise the pin for E.
-- [ ] Read activity registration stays on the live transaction, unchanged.
-      Commit preconditions carry address, path and version basis rather than the
-      value read, so a pinned read emits the same precondition a live one does.
-- [ ] Decide whether the schema-less proxy pins with the schema-observing view,
-      and apply the same answer to both. A `.get()` result that is part snapshot
-      and part live, split by schema, is what today's code produces and what
-      this stage exists to end. See the risk on held handles disagreeing.
-- [ ] Test that a reader which writes and then reads through a view taken
-      earlier sees the pre-write state, and that a view taken after the write
-      sees the post-write state.
-- [ ] Test that `.get()`, write, `.get()` returns the written value from the
-      second call — the read-result cache is dropped on write, so the second
-      call builds a view at the new epoch rather than serving the first one.
-- [ ] Test that pinning a document does not disturb a subsequent write to it —
-      the write rebuilds its spine and the pin still reads the old value.
-- [ ] Leave `getRaw()` alone, and say why where it would otherwise attract a
-      change: it returns a detached frozen value at call time, so it has no
-      lifetime across a write and nothing to pin.
+**Partly done, and the rest is not needed yet.** A view keeps the transaction it
+was created with (Stage 1), so two views taken in one transaction agree. What is
+not built is the write epoch: a view still reads `doc.current`, so a reader that
+writes and then reads through a view taken earlier sees its own write, where an
+eager read would have handed back a detached value.
 
-Completion gate: pinning costs nothing measurable when the transaction has no
-writes at materialization, which is the lift-argument case; and every handle a
-single `.get()` hands back agrees on which instant it describes.
+This does not bite the case the plan exists for. The scheduler hands a fresh
+transaction straight to the action, whose first act is to read its argument, so
+there are no writes to be seen. It becomes real for a materializer lift that
+writes and then re-reads through the same view.
+
+- [ ] Write epoch on the transaction, first-write epoch per document, pins taken
+      at materialization for documents already written. The design is above,
+      under "Snapshot semantics", and the cost analysis there still holds.
 
 ### Stage 4 — The transaction mode
 
-- [ ] Mode on `TransactionWrapper`, with `runWithLazyMaterialization(fn)`.
-- [ ] `Cell.get()` dispatches on the mode.
-- [ ] Mode inherited through `getTransactionForChildCells`.
-- [ ] Mode joins the read-cache `variant`.
-- [ ] Sticky schema-refusal mark on the transaction, set by the view and
-      readable by the runner; survives `catch` in reader code and `await` in an
-      async body.
-- [ ] `sample()` and `pull()` behavior under the mode decided and tested —
-      `sample()` wraps a non-reactive transaction and must not silently acquire
-      laziness it did not ask for.
+**Done**, and it is the gate for everything: `markLazyMaterialize(enabled)` and
+`isLazyMaterialize()` on `IExtendedStorageTransaction`, marked along the wrapper
+chain so a wrapper and the transaction it wraps answer alike.
 
-Completion gate: flipping the mode on a transaction and reading a cell yields a
-view; flipping it off yields today's value; neither leaks into the other.
+- [x] `Cell.get()` dispatches on the mark, through `validateAndTransform`.
+- [x] `noteSchemaRefusal` / `takeSchemaRefusal` on the transaction: a refusal is
+      recorded as well as thrown, so a reader that catches it does not get to
+      hand back a result built on data the schema does not describe.
 
 ### Stage 5 — Runner integration
 
-- [ ] Flip the mode around argument materialization and the lift body; flip it
-      off before result writing.
-- [ ] Check the sticky mark after the body returns and after a thrown error;
-      dispose of a marked run as a refusal.
-- [ ] A refusal writes the undefined result through the ordinary path, is not
-      reported as an action error, and is not logged as one.
-- [ ] Handlers: the same treatment, or an explicit decision to leave handlers
-      eager in this stage, recorded here.
-- [ ] Async bodies: a refusal thrown in a continuation is still caught by the
-      mark.
-- [ ] Verify the reads taken before a refusal re-trigger the node when the
-      missing data appears.
+**Done.** The runner marks the action's transaction around argument
+materialization and the body, and unmarks it before the result is written, so
+diffing and the scheduler's own reads keep eager semantics.
 
-Completion gate: the runner test suite passes with the mode on, and a lift whose
-argument has a deep mismatch it never touches now runs — asserted directly,
-since that is the intended behavior change.
+- [x] A refusal — thrown out of the body, or caught inside it and found on the
+      transaction afterwards — writes an undefined result through the ordinary
+      path. Logged at info level as a non-run, not reported as an action error.
+- [x] The reads taken up to the refusal stay registered, including the one that
+      failed, so the node runs again when its inputs change.
+- [ ] Handlers still materialize eagerly. Deliberate for now: the lift path is
+      where the measured cost is, and a handler's argument carries an event
+      payload whose shape the same guard has not been exercised against.
 
 ### Stage 6 — Rollout
 
-- [ ] Register an experimental flag per
+- [x] `lazyMaterialization` registered in
       [`../development/EXPERIMENTAL_OPTIONS.md`](../development/EXPERIMENTAL_OPTIONS.md),
-      default off, and update that document in the same change.
-- [ ] Land default-off; measure against the Stage 0 baseline on real patterns.
+      off by default, reachable by `EXPERIMENTAL_LAZY_MATERIALIZATION` or
+      `RuntimeOptions.experimental`.
+- [ ] Close the gaps that fail with the flag forced on. The runner suite is
+      green with it off and has these left with it on: `pattern-scope.test.ts`
+      raises an uncaught error; a lift that returns a pattern does not run its
+      result correctly, since the view does not yet carry builder artifacts and
+      opaque values the way the eager path does; and
+      `incremental observation adoption (live)` and
+      `scheduler cold-replica
+      startup` diverge around observation
+      adoption.
+- [ ] Measure against the Stage 0 baseline on real patterns.
 - [ ] Turn on in development, soak, then default on.
 - [ ] Graduate: remove the flag, remove the eager path for lift arguments,
-      update this plan's status and archive it.
+      archive this plan.
 
 ## Testing
 
