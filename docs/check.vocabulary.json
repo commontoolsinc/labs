@@ -627,6 +627,7 @@
     "timeout",
     "title",
     "toMemorySpaceAddress",
+    "toOwnedUint8Array",
     "toUnpaddedBase64url",
     "todos",
     "topologicalSort",

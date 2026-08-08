@@ -29,6 +29,21 @@ describe("FabricBytes", () => {
       original[0] = 99; // mutate original
       expect(fb.slice()[0]).toBe(1); // unaffected
     });
+
+    it("leaves the source array readable, by default", () => {
+      const original = new Uint8Array([1, 2, 3]);
+      new FabricBytes(original);
+      expect(original.length).toBe(3);
+    });
+
+    it("consumes the source array, given `transfer` as `true`", () => {
+      const original = new Uint8Array([1, 2, 3]);
+      const fb = new FabricBytes(original, true);
+
+      expect(original.length).toBe(0); // Its buffer was detached.
+      expect(fb.slice()).toEqual(new Uint8Array([1, 2, 3]));
+      expect(fb.length).toBe(3);
+    });
   });
 
   describe("instance members", () => {

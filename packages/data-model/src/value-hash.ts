@@ -404,7 +404,7 @@ function feedPlainObject(
 function computeHash(value: unknown): FabricHash {
   const hasher = createHasher();
   feedValue(hasher, value);
-  return new FabricHash(hasher.digest(), "fid1");
+  return new FabricHash(hasher.digest(), "fid1", true);
 }
 
 /**
