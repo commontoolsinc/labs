@@ -106,21 +106,47 @@ the caller could not have computed them.
 
 ### Retries are safe, and cheap to reason about
 
-`--invocation <id>` makes a call idempotent. Replaying a settled id returns the
-**original** result rather than re-executing:
+`--invocation <id>` makes a call idempotent. The id is your own word for the
+call — and `add-comment-1` is a word two agents both reach for, so an id on its
+own does not say whose invocation it is. An **invocation session** does. Mint
+one per agent run and carry it on every call of that run:
+
+```bash
+export CF_INVOCATION_SESSION=$(cf invocation-session new)
+```
+
+The environment is where a session belongs, because it is closer to a secret
+than a setting: it is what keeps an outcome's address out of reach of a
+stranger, and a command's arguments are readable in a process listing where its
+environment is not. `--invocation-session <id>` overrides it for one call.
+
+The pair is what names an invocation. Replaying a settled id **from the session
+that chose it** returns the **original** result rather than re-executing:
 
 ```bash
 cf piece call --piece <topic> --invocation add-comment-1 \
   addComment '{"body":"first","agentName":"Sol"}'
 
-# Same id, different payload: the original result comes back, and no second
-# comment is recorded.
+# Same id, same session, different payload: the original result comes back,
+# and no second comment is recorded.
 cf piece call --piece <topic> --invocation add-comment-1 \
   addComment '{"body":"different","agentName":"Sol"}'
 ```
 
 That is the property an agent depends on when it retries a call whose response
 it never saw.
+
+That same id under a **different** session is a different invocation: it
+executes, and returns its own result. So two agents that pick the same word are
+never told each other's calls have settled, and knowing a piece, a verb and an
+id is not enough to read someone else's outcome — the session is the part a
+stranger cannot guess.
+
+`--invocation` therefore requires a session, and a call naming an id without one
+is refused, pointing you at `cf invocation-session new` and
+`CF_INVOCATION_SESSION`. Pass neither and both are minted for that one call: a
+random id names an outcome nothing else will ask for, and a call that never
+intended to replay loses nothing.
 
 A **rejected** call is different from a settled one: it never spends its id. If
 a verb refuses the payload, correct it and retry under the same id.
@@ -201,7 +227,7 @@ API_URL=http://localhost:8000 packages/cli/integration/verbs-over-the-cli.sh
 ```
 
 CI runs it in the `piece-call` shard. It takes under half a minute and around
-twenty `cf` invocations against a warm local toolshed.
+two dozen `cf` invocations against a warm local toolshed.
 
 Each step demonstrates one use case:
 
@@ -212,12 +238,13 @@ Each step demonstrates one use case:
 | 4 | A verb returns what it wrote, including what only it could compute |
 | 5 | A call's result names the document behind each path, and that address calls |
 | 6 | A read returns an address in place of what is behind it |
-| 7 | A replayed id returns the original result; nothing runs twice |
+| 7 | A replayed id returns the original result within its session, and executes as its own call in another |
 | 8 | A piece result needs no option; a plain record does — and the write lands either way |
 | 9 | A value-less verb settles with the empty witness |
 | 10 | A refused call does not spend its invocation id |
 | 11 | Reading a verb redirects to `cf piece call` |
 | 12 | Timings on stderr, Invocation JSON still clean on stdout |
+| 13 | An invocation id without a session is refused, and the refusal says how to mint one |
 
 ## Addressing a piece you were handed
 
