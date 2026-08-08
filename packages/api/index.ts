@@ -142,7 +142,7 @@ export interface FabricHash extends FabricPrimitive {
 }
 
 export interface FabricHashConstructor {
-  new (hash: Uint8Array, tag: string): FabricHash;
+  new (hash: Uint8Array, tag: string, transfer?: boolean): FabricHash;
   prototype: FabricHash;
 }
 
@@ -179,7 +179,7 @@ export interface FabricBytes extends FabricPrimitive {
 }
 
 export interface FabricBytesConstructor {
-  new (bytes: Uint8Array): FabricBytes;
+  new (bytes: Uint8Array, transfer?: boolean): FabricBytes;
   prototype: FabricBytes;
 }
 

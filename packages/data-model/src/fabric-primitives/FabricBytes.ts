@@ -2,6 +2,7 @@ import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
+import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
 
 import { FabricValue } from "@/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
@@ -22,24 +23,26 @@ import {
  * - `slice()` -- returns an unshared copy (or sub-range).
  * - `copyInto()` -- copies bytes into a caller-provided buffer.
  *
- * Immutable by convention: instances are `Object.freeze()`-d at construction
- * time, and the constructor copies the input bytes so the caller cannot mutate
- * them after construction. (JS cannot freeze `ArrayBuffer` contents, so the
- * copy is the defense.)
+ * Immutable: instances are `Object.freeze()`-d at construction time, and an
+ * instance owns its bytes outright, holding a buffer no other code can reach.
+ * (JS cannot freeze `ArrayBuffer` contents, so sole ownership is the defense.)
  */
 export class FabricBytes extends BaseFabricPrimitive {
   /** Private byte storage. Callers use `slice()` or `copyInto()`. */
   readonly #bytes: Uint8Array;
 
   /**
-   * Constructs an instance from raw bytes. The input is copied;
-   * the caller may freely mutate the original after construction.
+   * Constructs an instance holding the given bytes, which it owns outright.
    *
-   * @param bytes - The raw bytes to wrap (copied, not shared).
+   * @param bytes - The raw bytes to wrap.
+   * @param transfer - Whether the caller cedes `bytes` to this instance, which
+   *   permits taking over its buffer instead of copying it. When `true`, the
+   *   caller must not use `bytes` afterwards; `toOwnedUint8Array()` says what that
+   *   permission does and does not guarantee.
    */
-  constructor(bytes: Uint8Array) {
+  constructor(bytes: Uint8Array, transfer: boolean = false) {
     super();
-    this.#bytes = new Uint8Array(bytes);
+    this.#bytes = toOwnedUint8Array(bytes, transfer);
     Object.freeze(this);
   }
 
@@ -117,7 +120,7 @@ export class FabricBytes extends BaseFabricPrimitive {
         }
         try {
           const bytes = fromBase64url(state);
-          return new FabricBytes(bytes);
+          return new FabricBytes(bytes, true);
         } catch {
           return new ProblematicValue(
             typeTag,
