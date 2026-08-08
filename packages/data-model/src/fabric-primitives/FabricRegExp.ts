@@ -58,7 +58,7 @@ export class FabricRegExp extends BaseFabricPrimitive
   readonly #value: RegExp | undefined;
 
   /**
-   * Constructs a `FabricRegExp`, either from a native `RegExp` (implying the
+   * Constructs an instance, either from a native `RegExp` (implying the
    * `"es2025"` flavor) or from explicit `flavor` / `source` / `flags`.
    *
    * When the resulting flavor is `"es2025"`, the `source` and `flags` are
@@ -133,6 +133,7 @@ export class FabricRegExp extends BaseFabricPrimitive
 
   static #codec = Object.freeze(
     new (class RegExpCodec extends BaseFabricCodec {
+      /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.RegExp, FabricRegExp);
       }

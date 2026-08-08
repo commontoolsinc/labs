@@ -28,6 +28,7 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
  * confirms via `typeof`.
  */
 export class BigIntCodec extends BaseFabricCodec {
+  /** Constructs an instance. */
   constructor() {
     super(CODEC_TYPE_TAGS.BigInt, BigInt as unknown as Constructor);
   }

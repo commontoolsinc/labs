@@ -74,20 +74,19 @@ export function isFabricValueLayer(
  * Indicates whether the value is a `FabricValue` -- a recursive check of exact
  * structural membership in the `FabricValue` type, independent of frozen-ness.
  *
- * Returns `true` for any scalar (`null`, `undefined`, `boolean`, `number`
- * -- including `-0`, `NaN`, and `±Infinity` -- `string`, `bigint`, and
+ * Returns `true` for any scalar (`null`, `undefined`, `boolean`, `number` --
+ * including `-0`, `NaN`, and `±Infinity` -- `string`, `bigint`, and
  * registry-interned (`Symbol.for(...)`) symbols), any `FabricInstance` or
  * `FabricPrimitive`, a direct `Array` instance holding `FabricValue`s with no
- * named or symbol-keyed properties, `length` aside (sparse holes allowed), or
- * a plain object whose values are all
- * `FabricValue`s. Returns `false` for a `function` or a unique (uninterned)
- * symbol -- whether the value itself or reached anywhere within it -- for an
- * accessor-backed (getter/setter) property anywhere, plain-object keyed or
- * array-indexed alike, which makes its container non-inert, for an `Array`
- * subclass instance or other indirectly-rooted array, whose prototype is live
- * code the same way an accessor is, and for any
- * other class instance (`Date`, `Map`, ...) not representable as a
- * `FabricValue`. Handles circular references.
+ * named or symbol-keyed properties, `length` aside (sparse holes allowed), or a
+ * plain object whose values are all `FabricValue`s. Returns `false` for a
+ * `function` or a unique (uninterned) symbol -- whether the value itself or
+ * reached anywhere within it -- for an accessor-backed (getter/setter) property
+ * anywhere, plain-object keyed or array-indexed alike, which makes its
+ * container non-inert, for an `Array` subclass instance or other
+ * indirectly-rooted array, whose prototype is live code the same way an
+ * accessor is, and for any other class instance (`Date`, `Map`, ...) not
+ * representable as a `FabricValue`. Handles circular references.
  *
  * This is a *membership* check, not a frozen-ness check: a structurally-valid
  * but unfrozen object or array is still a `FabricValue`. For the deep-frozen
@@ -98,8 +97,8 @@ export function isFabricValueLayer(
  * membership check must not invoke.
  *
  * Contrast the shallow, single-level sibling `isFabricValueLayer()` and
- * `isFabricCompatible()` (which additionally accepts native values *convertible*
- * to fabric form).
+ * `isFabricCompatible()` (which additionally accepts native values
+ * *convertible* to fabric form).
  */
 export function isFabricValue(value: unknown): value is FabricValue {
   // Fast leaf paths first, so a function or a primitive answers without
@@ -198,18 +197,18 @@ export function isFabricObjectOrArray(
 }
 
 /**
- * Narrows to the plain-record arm of `FabricValue` (`FabricPlainObject`): an object
- * whose prototype is `Object.prototype` or `null`. This rejects arrays,
+ * Narrows to the plain-record arm of `FabricValue` (`FabricPlainObject`): an
+ * object whose prototype is `Object.prototype` or `null`. This rejects arrays,
  * `FabricSpecialObject`s, and other class instances (`Date`, `Map`, …), none of
- * which are representable as a `FabricPlainObject`. Unlike a bare `isRecord()` check,
- * it preserves the value type — `FabricPlainObject`'s string index of `FabricValue`
- * keeps an indexed value typed as a `FabricValue`.
+ * which are representable as a `FabricPlainObject`. Unlike a bare `isRecord()`
+ * check, it preserves the value type — `FabricPlainObject`'s string index of
+ * `FabricValue` keeps an indexed value typed as a `FabricValue`.
  *
  * This asks a shape question -- "may I read this by property name?" -- of a
  * value the type already says is a `FabricValue`, and a null-prototype object
- * answers yes as readily as any other record. That makes it deliberately
- * looser than membership: a `FabricPlainObject` is `Object.prototype`-rooted,
- * so `isFabricValue()` refuses the null-prototype object this accepts. The
+ * answers yes as readily as any other record. That makes it deliberately looser
+ * than membership: a `FabricPlainObject` is `Object.prototype`-rooted, so
+ * `isFabricValue()` refuses the null-prototype object this accepts. The
  * looseness costs nothing, the input being out of contract either way, and it
  * keeps callers holding un-validated values from losing a reader they can use.
  */

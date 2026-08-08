@@ -24,14 +24,14 @@ class MockRuntime extends BaseReconstructionContext {
 }
 const mockRuntime = new MockRuntime();
 
-/** Encode then decode a value through the current dispatch configuration. */
+/** Encodes and then decodes a value, per the current dispatch configuration. */
 function roundTrip(value: FabricValue): FabricValue {
   return valueFromJson(jsonFromValue(value), mockRuntime);
 }
 
 /**
- * Assert that encoding a value produces the expected JSON wire format
- * (compared as parsed structure, after stripping the modern encoding prefix).
+ * Asserts that encoding a value produces the expected JSON wire format,
+ * compared as parsed structure, after stripping the modern encoding prefix.
  */
 function expectWireFormat(value: FabricValue, expected: unknown): void {
   const json = jsonFromValue(value);

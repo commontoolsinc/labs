@@ -62,14 +62,10 @@ export class CodecRegistry {
   /** Class -> codec map for O(1) encode dispatch on object values. */
   readonly #classMap = new Map<Constructor, FabricCodec>();
 
-  /**
-   * Primitive `type` -> codec map for O(1) encode dispatch on primitives.
-   */
+  /** Primitive `type` -> codec map for O(1) encode dispatch on primitives. */
   readonly #primitiveCodecs = new Map<PrimitiveTypeName, FabricCodec>();
 
-  /**
-   * Primitive `type`s that are self-representing (encoded as-is).
-   */
+  /** Primitive `type`s that are self-representing (encoded as-is). */
   readonly #selfRepTypes = new Set<PrimitiveTypeName>();
 
   /**
