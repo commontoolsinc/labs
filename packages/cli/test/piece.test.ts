@@ -848,6 +848,17 @@ describe("cli piece parsing", () => {
     expect(callFlags).toContain("--show-links");
   });
 
+  it("describes piece call's `--schema` as taking a field list as well", () => {
+    // The call reads its selection through the read's grammar, so the flag
+    // takes every form the read's does. Its own `--help` line is where a
+    // caller learns which, and one naming fewer forms than the parser takes
+    // reads as a narrowing that is not there.
+    const schemaOption = piece.getCommand("call")!.getOptions().find((option) =>
+      option.flags.includes("--schema")
+    )!;
+    expect(schemaOption.description).toContain("--select field list");
+  });
+
   it("steps, reads, syncs, and stops in one get operation", async () => {
     const order: string[] = [];
     const controller = {
