@@ -79,6 +79,27 @@ describe("scheduler event identity", () => {
     );
   });
 
+  it("separates one caller id sent to streams differing only by scope", () => {
+    // A per-user, a per-session, and a per-space stream at one id and path
+    // are three streams. Sharing an address, a retry against one would be
+    // told it had settled by the outcome of a call made against another.
+    const perSpace = scopeCallerEventId("inv-1", "ses-a", {
+      ...eventLink,
+      scope: "space",
+    });
+    const perUser = scopeCallerEventId("inv-1", "ses-a", {
+      ...eventLink,
+      scope: "user",
+    });
+    const perSession = scopeCallerEventId("inv-1", "ses-a", {
+      ...eventLink,
+      scope: "session",
+    });
+    expect(perSpace).not.toBe(perUser);
+    expect(perSpace).not.toBe(perSession);
+    expect(perUser).not.toBe(perSession);
+  });
+
   it("separates one caller id sent to different streams", () => {
     // The defect the helper exists for: an invocation id reused across two
     // verbs of a piece must not make the second collide on the first's

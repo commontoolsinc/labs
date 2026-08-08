@@ -1417,13 +1417,12 @@ export class CellImpl<T extends FabricValue>
      * `eventId` supplies the durable event id (spec §7.5) instead of minting
      * one: an ingress caller that owns a delivery id passes it, with the
      * `session` it chose that id within, so a retry of the same pair collides
-     * on the handling's create-only receipt (verb contract WS-D,
-     * docs/history/plans/pattern-verb-contract-implementation.md). The receipt
-     * is a COMMIT witness, not an execution witness — the redelivered event
-     * still runs the handler body and then loses the race, so effects outside
-     * the transaction repeat. `runtimeInjectedEventKeys` carries the
-     * runtime-injection provenance the closed-world gate consumes. Ignored on
-     * the plain-cell write path.
+     * on the handling's create-only receipt (the verb contract,
+     * docs/plans/pattern-verb-contract.md). The receipt is a COMMIT witness,
+     * not an execution witness — the redelivered event still runs the handler
+     * body and then loses the race, so effects outside the transaction repeat.
+     * `runtimeInjectedEventKeys` carries the runtime-injection provenance the
+     * closed-world gate consumes. Ignored on the plain-cell write path.
      */
     sendOptions?: StreamSendOptions,
   ): Cell<T> {
