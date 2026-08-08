@@ -121,6 +121,16 @@ deno task cf piece get --url "$TOPIC_URL" links --input \
   --filter '.kind == "pr"' --select kind,url,label,addedAt
 ```
 
+A `--select` segment ending in `@` returns that position's address instead of a
+copy of what is behind it, which is what a following `piece call` needs. It does
+not compose with `--filter` — a filtered array's survivors no longer say which
+positions they came from — so ask for an address in its own unfiltered read:
+
+```bash
+deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs --step \
+  --select fid,topic@
+```
+
 Each crossref row's `fid` is the canonical address for its `topic`. Prefer it to
 the intermediate wrapper link stored in the board's topics array. Read the
 existing topic's input before changing it, especially its full body, comments,

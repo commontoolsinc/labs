@@ -1414,6 +1414,12 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   )
   .example(
     cliText(
+      `cf piece get ${EX_ID} ${EX_COMP_PIECE} --select 'topic@,topic.title'`,
+    ),
+    "Return a field's address, and the fields asked for beside it.",
+  )
+  .example(
+    cliText(
       `cf piece get ${EX_ID} ${EX_COMP_PIECE} items ` +
         `--schema '{"type":"array","items":{"$link":true}}'`,
     ),
@@ -1435,7 +1441,8 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   )
   .option(
     "--select <fields:string>",
-    "Project output to comma-separated field paths",
+    "Project output to comma-separated field paths; a trailing @ asks for a " +
+      "position's address, and @ alone for the source's own",
   )
   .option(
     "--schema <schema:string>",
