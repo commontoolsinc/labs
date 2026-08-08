@@ -68,12 +68,15 @@ export function mintEventId(
  * concatenation, because the caller's halves are opaque: with `a:b` joined by
  * `:`, the pair (`x`, `y:z`) and the pair (`x:y`, `z`) render identically, and
  * a caller choosing its own id chooses which side of that ambiguity to sit on.
- * Hashing also lets the whole link identify the stream — id, path, and space —
- * so this does not quietly depend on stream links always being whole documents
- * at the empty path, which is true today and is not a stated invariant.
- * `hashOf` is type-tagged and length-prefixed, so no component can impersonate
- * another, and it is deterministic across processes: a retry from a fresh CLI
- * invocation derives the same id.
+ * Hashing also lets the whole link identify the stream — id, path, scope, and
+ * space. That keeps this from quietly depending on stream links always being
+ * whole documents at the empty path, which is true today and is not a stated
+ * invariant, and it keeps a per-user stream apart from a per-space one at the
+ * same id and path: those are two streams, and one address across both would
+ * settle one caller's retry on the other's outcome. `hashOf` is type-tagged
+ * and length-prefixed, so no component can impersonate another, and it is
+ * deterministic across processes: a retry from a fresh CLI invocation derives
+ * the same id.
  *
  * The result deliberately does not carry the caller's id or session in the
  * clear. That costs some greppability — an operator correlating a CLI
@@ -92,6 +95,7 @@ export function scopeCallerEventId(
       caller: callerEventId,
       id: eventLink.id,
       path: [...eventLink.path],
+      scope: eventLink.scope,
       session,
       space: eventLink.space,
     })

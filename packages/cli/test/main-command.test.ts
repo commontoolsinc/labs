@@ -159,8 +159,9 @@ describe("main command", () => {
 
     // The environment is the standing default for a shell or an agent run,
     // and the flag is the one call that departs from it — so the flag wins.
-    // With neither, no session: nothing is invented for a caller that named
-    // none.
+    // With neither, the option arrives `undefined`: this is the option layer
+    // alone, and `resolveInvocationIdentity` is what goes on to mint a
+    // session for a caller that named none.
     //
     // The middle reading is the one that pins the env var to this option:
     // the variable is declared under the `CF_` prefix, and what reaches
