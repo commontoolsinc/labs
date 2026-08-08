@@ -250,7 +250,11 @@ export class JsonCodec implements SerializationContext<string> {
     // order. See `3-json-encoding.md` Section 10 for the spec.
     const result: Record<string, JsonCodecValue> = {};
     const valueRec = value as Record<string, FabricValue>;
+    let anySlashKey = false;
     for (const key of utf8SortedKeysOf(valueRec)) {
+      if (key.startsWith("/")) {
+        anySlashKey = true;
+      }
       result[key] = this.#encodeValue(valueRec[key], seen);
     }
     seen.delete(value as object);
@@ -259,8 +263,7 @@ export class JsonCodec implements SerializationContext<string> {
     // Serialize all values first (post-pass), then check if all are quote-safe.
     // If so, unwrap any /quote children and wrap the whole object with /quote.
     // Otherwise wrap with /object so the decoder deserializes entries.
-    const keys = Object.keys(result);
-    if (keys.some((k) => k.startsWith("/"))) {
+    if (anySlashKey) {
       if (Object.values(result).every((v) => JsonCodec.#isQuoteSafe(v))) {
         const unquoted = Object.freeze(
           Object.fromEntries(
