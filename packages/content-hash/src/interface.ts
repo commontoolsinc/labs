@@ -1,6 +1,6 @@
 /**
- * Type definitions for SHA-256 hashing: the incremental hasher interface
- * and the all-at-once digest function type used by the package.
+ * Type definitions for SHA-256 hashing: the incremental hasher interface, and
+ * the all-at-once digest function type.
  */
 
 /**

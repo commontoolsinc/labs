@@ -1,3 +1,13 @@
+// The contract between the pattern toolchain and the sandbox compartment a
+// pattern runs in: the globals a compartment withholds, the builder and
+// data-helper names that are trusted, the identifiers reserved within a
+// factory's scope, and the source text of the helpers that carry the
+// value-side parts of the contract.
+
+/**
+ * Names that a factory's scope shadows, so that authored code reaching for one
+ * of them finds `undefined` rather than the module loader's binding.
+ */
 export const SHADOWED_FACTORY_BINDINGS = [
   "define",
   "runtimeDeps",
@@ -23,8 +33,8 @@ export const SHADOWED_FACTORY_BINDINGS = [
  * happen.
  *
  * Changing this list also affects the `ts-transformers` and `schema-generator`
- * fixture suites, which type-check their fixtures against the type libraries and
- * are checked only in CI; see `packages/static/README.md`.
+ * fixture suites, which type-check their fixtures against the type libraries
+ * and are checked only in CI; see `packages/static/README.md`.
  */
 export const SANDBOX_WITHHELD_GLOBALS = Object.freeze(
   [
@@ -112,9 +122,14 @@ export const SANDBOX_WITHHELD_GLOBALS = Object.freeze(
     "self",
   ] as const,
 );
+/** Name of a global withheld from a sandbox compartment. */
 export type SandboxWithheldGlobalName =
   (typeof SANDBOX_WITHHELD_GLOBALS)[number];
 
+/**
+ * Names of the builders a pattern may call, whose results the toolchain
+ * treats as trusted.
+ */
 export const TRUSTED_BUILDERS = Object.freeze(
   [
     "action",
@@ -128,40 +143,69 @@ export const TRUSTED_BUILDERS = Object.freeze(
     "pattern",
   ] as const,
 );
+/** Name of a trusted builder. */
 export type TrustedBuilderName = (typeof TRUSTED_BUILDERS)[number];
+
+/** `TRUSTED_BUILDERS`, indexed for lookup. */
 const TRUSTED_BUILDER_SET = new Set<string>(TRUSTED_BUILDERS);
 
+/** Indicates whether `name` is the name of a trusted builder. */
 export function isTrustedBuilder(name: string): name is TrustedBuilderName {
   return TRUSTED_BUILDER_SET.has(name);
 }
 
+/**
+ * Names of the data helpers a pattern may call, whose results the toolchain
+ * treats as trusted.
+ */
 export const TRUSTED_DATA_HELPERS = Object.freeze(
   [
     "schema",
     "__cf_data",
   ] as const,
 );
+/** Name of a trusted data helper. */
 export type TrustedDataHelperName = (typeof TRUSTED_DATA_HELPERS)[number];
+
+/** `TRUSTED_DATA_HELPERS`, indexed for lookup. */
 const TRUSTED_DATA_HELPER_SET = new Set<string>(TRUSTED_DATA_HELPERS);
 
+/** Indicates whether `name` is the name of a trusted data helper. */
 export function isTrustedDataHelper(
   name: string,
 ): name is TrustedDataHelperName {
   return TRUSTED_DATA_HELPER_SET.has(name);
 }
 
+/** Default name of the function-hardening helper. */
 export const FUNCTION_HARDENING_HELPER_NAME = "__cfHardenFn";
+
+/** Default name of the binding-identity helper. */
 export const BINDING_IDENTITY_HELPER_NAME = "__cfBindVerifiedBinding";
+
+/** Default name of the property the binding-identity helper writes. */
 export const VERIFIED_BINDING_METADATA_FIELD = "__cfVerifiedBindingIdentity";
 
+/** Names that authored code must not bind at the top level of a factory. */
 export const RESERVED_FACTORY_BINDINGS = [
   ...SHADOWED_FACTORY_BINDINGS,
 ] as const;
 
+/**
+ * Returns the source lines that shadow each of `SHADOWED_FACTORY_BINDINGS`
+ * with `undefined`, one declaration per line.
+ */
 export function createFactoryShadowGuardSource(): string[] {
   return SHADOWED_FACTORY_BINDINGS.map((name) => `const ${name} = undefined;`);
 }
 
+/**
+ * Returns the source text of the function-hardening helper: a function that
+ * freezes what it is given, freezes its `.prototype` when it has an object
+ * one, and returns it. `helperName` names the declared function, and
+ * `options.typedParameter` annotates the parameter, for a helper emitted into
+ * TypeScript rather than JavaScript.
+ */
 export function createFunctionHardeningHelperSource(
   helperName = FUNCTION_HARDENING_HELPER_NAME,
   options: { typedParameter?: boolean } = {},
@@ -179,6 +223,14 @@ export function createFunctionHardeningHelperSource(
   ].join("\n");
 }
 
+/**
+ * Returns the source text of the binding-identity helper: a function that
+ * stamps `metadataField` onto the value it is given, and onto that value's
+ * `.implementation` when there is a callable one, then returns the value. A
+ * non-extensible target is left alone rather than throwing. `helperName` names
+ * the declared function, and `options.typedParameter` annotates the
+ * parameters, for a helper emitted into TypeScript rather than JavaScript.
+ */
 export function createBindingIdentityHelperSource(
   helperName = BINDING_IDENTITY_HELPER_NAME,
   metadataField = VERIFIED_BINDING_METADATA_FIELD,

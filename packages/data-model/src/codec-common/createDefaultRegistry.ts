@@ -23,10 +23,11 @@ import { CodecRegistry } from "./CodecRegistry.ts";
  * reports them directly; arrays and plain objects are handled structurally by
  * the serializer after no codec matches.
  *
- * `UnknownValue` / `ProblematicValue` are registered (via `instanceCodecClasses`)
- * but their codecs recognize no single wire tag: the encode path resolves each
- * instance's tag with `tagForValue()`, and an unrecognized tag on decode is
- * wrapped in an `UnknownValue` by the encoding context rather than tag-routed.
+ * `UnknownValue` / `ProblematicValue` are registered (via
+ * `instanceCodecClasses`) but their codecs recognize no single wire tag: the
+ * encode path resolves each instance's tag with `tagForValue()`, and an
+ * unrecognized tag on decode is wrapped in an `UnknownValue` by the encoding
+ * context rather than tag-routed.
  */
 export function createDefaultRegistry(): CodecRegistry {
   const registry = new CodecRegistry();

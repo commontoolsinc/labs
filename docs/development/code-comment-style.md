@@ -272,9 +272,12 @@ This project uses JSDoc-style comments: open them with `/**`, and close them
 with `*/`.
 
 If a doc comment would fit in the 80-column line width limit including
-indentation and comment markers, then it can be written on a single line, e.g.:
+indentation and comment markers, then it should be written on a single line,
+e.g.:
 
 ```ts
+// Indented as if it were a doc comment on an inner declaration.
+
     /** Desired fryer temperature, in Kelvin. */
 ```
 

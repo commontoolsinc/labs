@@ -131,9 +131,7 @@ function fixtureLabel(v: bigint, encoded: Uint8Array): string {
   return `${sign}0x${hex.slice(0, 12)}... (${encoded.length} bytes)`;
 }
 
-/**
- * Makes a fixture, optionally calculating the encoded form.
- */
+/** Makes a fixture, optionally calculating the encoded form. */
 function makeFixture(value: bigint, preEncoded?: number[]): Fixture {
   let encoded: Uint8Array;
 

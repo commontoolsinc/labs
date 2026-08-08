@@ -29,8 +29,10 @@ import { CODEC_META_TAGS } from "@/codec-common/codec-meta-tags.ts";
  * the `CodecRegistry`.
  */
 export class JsonCodec implements SerializationContext<string> {
-  /** Whether failed reconstructions produce `ProblematicValue` instead of
-   *  throwing. */
+  /**
+   * Whether a failed reconstruction produces a `ProblematicValue` instead of
+   * throwing.
+   */
   readonly lenient: boolean;
 
   /**
@@ -70,17 +72,12 @@ export class JsonCodec implements SerializationContext<string> {
     return this.#decodeValue(parsed, context);
   }
 
-  /**
-   * Serializes a fabric value to UTF-8 JSON bytes. (Public for now -- used by
-   * byte-level round-trip tests.)
-   */
+  /** Serializes a fabric value to UTF-8 JSON bytes. */
   encodeToBytes(value: FabricValue): Uint8Array {
     return this.toBytes(this.#encodeValue(value));
   }
 
-  /**
-   * Deserializes UTF-8 JSON bytes back into a fabric value.
-   */
+  /** Deserializes UTF-8 JSON bytes back into a fabric value. */
   decodeFromBytes(
     bytes: Uint8Array,
     context: ReconstructionContext,
@@ -612,9 +609,7 @@ export class JsonCodec implements SerializationContext<string> {
     return encoded;
   }
 
-  /**
-   * Parses the JSON-text wire form, _without_ a tag prefix.
-   */
+  /** Parses the JSON-text wire form, _without_ a tag prefix. */
   static #parseWireText(jsonText: string): JsonCodecValue {
     return deepFreeze(JSON.parse(jsonText) as JsonCodecValue);
   }

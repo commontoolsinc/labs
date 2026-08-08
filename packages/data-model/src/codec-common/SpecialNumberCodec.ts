@@ -18,6 +18,7 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
  * back to `Number.NaN`.
  */
 export class SpecialNumberCodec extends BaseFabricCodec {
+  /** Constructs an instance. */
   constructor() {
     super(CODEC_TYPE_TAGS.SpecialNumber, Number);
   }

@@ -1,6 +1,4 @@
-/**
- * Debugging-ish helpers for `FabricValue`s.
- */
+/** Debugging-ish helpers for `FabricValue`s. */
 
 import { isPlainObject } from "@commonfabric/utils/types";
 
@@ -47,15 +45,17 @@ function unquoteMarked(json: string): string {
   });
 }
 
-/**
- * Helper class for rendering debug-string representations of values.
- */
+/** Helper class for rendering debug-string representations of values. */
 class DebugStringifier {
   #circles = new Set<object>();
   #unusedCircles = new Set<object>();
   #indent: number | undefined;
   #value: unknown;
 
+  /**
+   * Constructs an instance which renders `value`, using `indent` spaces per
+   * level when given and a single-line rendering when not.
+   */
   constructor(value: unknown, indent?: number) {
     this.#value = value;
     this.#indent = indent;

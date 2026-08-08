@@ -39,7 +39,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   readonly #fullStringForm: string;
 
   /**
-   * Constructs a `FabricHash` from raw hash bytes and an algorithm tag.
+   * Constructs an instance from raw hash bytes and an algorithm tag.
    * The instance is frozen after construction.
    *
    * **Ownership transfer:** the caller must not mutate `hash` after passing
@@ -96,7 +96,10 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
     return this.#fullStringForm;
   }
 
-  /** Copies the hash bytes into `target` starting at offset 0. Returns `target`. */
+  /**
+   * Copies the hash bytes into `target` starting at offset `0`, and returns
+   * `target`.
+   */
   copyInto(target: Uint8Array): Uint8Array {
     target.set(this.#hash);
     return target;
@@ -131,6 +134,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
 
   static #codec = Object.freeze(
     new (class HashCodec extends BaseFabricCodec {
+      /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Hash, FabricHash);
       }

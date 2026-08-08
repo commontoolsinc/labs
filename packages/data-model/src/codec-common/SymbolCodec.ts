@@ -22,6 +22,7 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
  * confirms via `typeof`.
  */
 export class SymbolCodec extends BaseFabricCodec {
+  /** Constructs an instance. */
   constructor() {
     super(CODEC_TYPE_TAGS.Symbol, Symbol as unknown as Constructor);
   }

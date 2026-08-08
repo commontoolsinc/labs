@@ -89,9 +89,7 @@ const TAG_REGEXP_BYTES = new Uint8Array([TAG_REGEXP]);
  */
 const MAX_DIRECT_STRING_LENGTH = 64;
 
-/**
- * Maximum value (inclusive) of the small-length-number cache.
- */
+/** Maximum value (inclusive) of the small-length-number cache. */
 const MAX_CACHED_SMALL_LENGTH = 500;
 
 /** Shared TextEncoder for UTF-8 string encoding. */
@@ -350,9 +348,7 @@ function feedObjectValue(
   }
 }
 
-/**
- * Feed an array value with sparse hole handling, terminated by `TAG_END`.
- */
+/** Feed an array value with sparse hole handling, terminated by `TAG_END`. */
 function feedArray(hasher: IncrementalHasher, value: unknown[]): void {
   hasher.update(TAG_ARRAY_BYTES);
   let i = 0;
@@ -404,9 +400,7 @@ function feedPlainObject(
 // Uncached hash computation
 //
 
-/**
- * Computes the hash of a value without consulting or populating any cache.
- */
+/** Computes the hash of a value without consulting or populating any cache. */
 function computeHash(value: unknown): FabricHash {
   const hasher = createHasher();
   feedValue(hasher, value);

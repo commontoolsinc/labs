@@ -9,6 +9,7 @@ import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
  * matching is by `canEncode()`. See Section 1.4.1 of the formal spec.
  */
 export class UndefinedCodec extends BaseFabricCodec {
+  /** Constructs an instance. */
   constructor() {
     super(CODEC_TYPE_TAGS.Undefined, undefined);
   }

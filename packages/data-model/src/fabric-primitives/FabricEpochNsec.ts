@@ -23,22 +23,29 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 
 /**
- * Temporal type representing nanoseconds from the POSIX Epoch (1970-01-01T00:00:00Z).
- * Wraps a `bigint` value. Used for high-precision timestamps.
- * See Section 1.4.6 of the formal spec.
+ * Temporal type representing nanoseconds from the POSIX Epoch
+ * (1970-01-01T00:00:00Z). Wraps a `bigint` value. Used for high-precision
+ * timestamps. See Section 1.4.6 of the formal spec.
  */
 export class FabricEpochNsec extends BaseFabricPrimitive
   implements ApiFabricEpochNsec {
-  /** Nanoseconds from POSIX Epoch. Negative values represent pre-epoch timestamps. */
+  /**
+   * Nanoseconds from the POSIX Epoch. A negative value represents a pre-epoch
+   * timestamp.
+   */
   readonly #value: bigint;
 
+  /** Constructs an instance representing `value` nanoseconds from the Epoch. */
   constructor(value: bigint) {
     super();
     this.#value = value;
     Object.freeze(this);
   }
 
-  /** Nanoseconds from POSIX Epoch. Negative values represent pre-epoch timestamps. */
+  /**
+   * Nanoseconds from the POSIX Epoch. A negative value represents a pre-epoch
+   * timestamp.
+   */
   get value(): bigint {
     return this.#value;
   }
@@ -49,6 +56,7 @@ export class FabricEpochNsec extends BaseFabricPrimitive
 
   static #codec = Object.freeze(
     new (class EpochNsecCodec extends BaseFabricCodec {
+      /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.EpochNsec, FabricEpochNsec);
       }
