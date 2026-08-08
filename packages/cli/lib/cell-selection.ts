@@ -1028,12 +1028,6 @@ function projectionMask(schema: JSONSchema): ProjectionMask {
   if (schema === true) return true;
   if (schema === false) return false;
   const objectSchema = schema as Exclude<JSONSchema, boolean>;
-  if (
-    objectSchema.additionalProperties === true ||
-    isRecord(objectSchema.additionalProperties)
-  ) {
-    return true;
-  }
   if (objectSchema.type === "array" || objectSchema.items !== undefined) {
     const items = objectSchema.items === undefined
       ? true
@@ -1044,6 +1038,18 @@ function projectionMask(schema: JSONSchema): ProjectionMask {
     // schema, so a rejection one level down arrives after the load it was
     // meant to prevent.
     return items === false ? false : { type: "array", items };
+  }
+  // An object that admits keys it does not name cannot be narrowed: the
+  // selector has to read whatever is there. The array branch above takes a
+  // position that names both vocabularies, the same way
+  // `impliedProjectionType()` types one: `additionalProperties` describes no
+  // part of an array, and deciding an array position by it reads the whole
+  // source over a keyword that says nothing about that position.
+  if (
+    objectSchema.additionalProperties === true ||
+    isRecord(objectSchema.additionalProperties)
+  ) {
+    return true;
   }
   if (
     objectSchema.type === "object" || objectSchema.properties !== undefined
