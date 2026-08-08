@@ -16,7 +16,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
+import { isPlainObject, isRecord } from "@commonfabric/utils/types";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { PatternManager } from "./pattern-manager.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
@@ -43,6 +43,7 @@ import {
   pushFrameFromCause,
 } from "./builder/pattern.ts";
 import { type Cell, createCell, isCell } from "./cell.ts";
+import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import { type Action } from "./scheduler.ts";
 import {
   isSchedulerActionObservation,
@@ -270,6 +271,41 @@ function schemaCellScope(
 
 function patternDefaultScope(pattern: Pattern): CellScope | undefined {
   return schemaCellScope(pattern.resultSchema) ?? pattern.defaultScope;
+}
+
+/**
+ * Structural description of `value` for the durable `schema` metadata of the
+ * receipt cell it is about to be written into: the root container kind, plus
+ * the property names when that kind is a record. Returns `undefined` for a
+ * value with no container kind of its own — a scalar, a `FabricSpecialObject`,
+ * or a link, whose kind belongs to whatever it resolves to rather than to the
+ * receipt.
+ *
+ * A `data:` link is the exception among links: it carries its value inside
+ * its own identifier, and the write inlines it, so the receipt holds that
+ * value rather than a link to it. The description comes from the same
+ * inlining, so it describes what is stored.
+ *
+ * This is DESCRIPTIVE — what this one receipt holds — and never a contract
+ * bearing on anything written later. Description and authority cannot diverge
+ * here, because the receipt's create-only mark means the value it describes is
+ * the only value the document ever holds.
+ *
+ * The root kind is what lets a reader's selection become a fetch selector
+ * instead of a filter applied after loading, since the same selection means
+ * different things over a record and over an array. The property schemas are
+ * left as `true` — everything is admissible at every position — which is what
+ * keeps a link position honest: spelling one out means `asCell`, and `["cell"]`
+ * asserts a writable handle on a document nothing can be written through.
+ */
+function receiptShapeSchema(value: unknown): JSONSchema | undefined {
+  const stored = isCellLink(value) ? findAndInlineDataUriLinks(value) : value;
+  if (isCellLink(stored)) return undefined;
+  if (Array.isArray(stored)) return { type: "array" };
+  if (!isPlainObject(stored)) return undefined;
+  const properties: Record<string, JSONSchema> = {};
+  for (const key of Object.keys(stored)) properties[key] = true;
+  return { type: "object", properties };
 }
 
 const recordOutputSchemaPolicyInputs = (
@@ -5341,7 +5377,15 @@ export class Runner {
             result !== undefined
             ? result
             : {};
-        receiptCell.withTx(tx).set(receiptValue);
+        const receipt = receiptCell.withTx(tx);
+        receipt.set(receiptValue);
+        // The receipt says what it holds, the way any other cell does. The
+        // shape is only knowable here: the cell is minted at the top of the
+        // dispatch, before the handler runs. Both writes ride this one
+        // transaction, which the create-only mark below gates, so the schema
+        // and the value it describes commit together or not at all.
+        const shape = receiptShapeSchema(receiptValue);
+        if (shape !== undefined) receipt.setMetaRaw("schema", shape);
         tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
       }
       return result;
