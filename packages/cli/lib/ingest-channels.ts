@@ -162,6 +162,10 @@ export function rotateChannel(
 export function revokeChannel(
   config: ChannelConfig,
   input: { id: string; requestId: string; expectedRevision: number },
-): Promise<{ id: string; revokedAt: string }> {
-  return call<{ id: string; revokedAt: string }>(config, "revoke", input);
+): Promise<{ id: string; revokedAt: string; revision: number }> {
+  return call<{ id: string; revokedAt: string; revision: number }>(
+    config,
+    "revoke",
+    input,
+  );
 }

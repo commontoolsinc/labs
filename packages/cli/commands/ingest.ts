@@ -239,9 +239,16 @@ export const ingest = new Command()
       throw new Error(
         space
           ? `No ingest channel ${id} targeting that space.`
-          : `No ingest channel ${id} among the ones you minted. If it was ` +
-            `minted by someone else against a space you own, pass --space ` +
-            `to look it up there.`,
+          : `No ingest channel ${id} among the ones you minted. A revoked ` +
+            `channel is not in your own list — pass --space to look it up ` +
+            `there, which is also how to reach one minted by someone whose ` +
+            `access to the space has since been removed.`,
+      );
+    }
+    if (found.revoked) {
+      render(
+        `${id} was already revoked at ${found.revoked.at}. Re-issuing the ` +
+          `revoke to confirm; the original attribution is kept.`,
       );
     }
     const { revokedAt } = await revokeChannel(config, {

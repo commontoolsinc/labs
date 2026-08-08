@@ -211,7 +211,15 @@ export const revoke = createRoute({
     [HttpStatusCodes.OK]: {
       content: {
         "application/json": {
-          schema: z.object({ id: z.string(), revokedAt: z.string() }),
+          // `revision` is the generation AFTER this write. Returned because
+          // `revoke` requires the caller to name a current generation, and a
+          // caller who has just revoked would otherwise have to go find it
+          // again via a space-scoped list.
+          schema: z.object({
+            id: z.string(),
+            revokedAt: z.string(),
+            revision: z.number(),
+          }),
         },
       },
       description:
