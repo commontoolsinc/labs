@@ -1709,7 +1709,8 @@ after --. Handlers interpret piped input when no input argument is present.`,
   )
   .option(
     "--schema <schema:string>",
-    "Project output with an inline JSON Schema or @file",
+    "Project output with an inline JSON Schema, @file, or the --select " +
+      "field list",
     // Both flags carry the one projection, so a command naming both has not
     // said which shape it wants. Refuse before the call rather than pick.
     { conflicts: ["select"] },
