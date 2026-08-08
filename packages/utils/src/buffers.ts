@@ -23,7 +23,10 @@
  * @param bytes - The source bytes.
  * @param transfer - Whether the caller cedes `bytes`.
  */
-export function ownedBytes(bytes: Uint8Array, transfer: boolean): Uint8Array {
+export function toOwnedUint8Array(
+  bytes: Uint8Array,
+  transfer: boolean,
+): Uint8Array {
   const buffer = bytes.buffer;
 
   if (

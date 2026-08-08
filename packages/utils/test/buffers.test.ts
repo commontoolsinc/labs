@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { ownedBytes } from "@commonfabric/utils/buffers";
+import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
 
 /**
  * Whether `bytes` is backed by a detached buffer. A `SharedArrayBuffer` can
@@ -13,25 +13,29 @@ function isDetached(bytes: Uint8Array): boolean {
 }
 
 describe("buffers", () => {
-  describe("ownedBytes()", () => {
+  describe("toOwnedUint8Array()", () => {
     it("returns an array with the same contents, without `transfer`", () => {
       const source = new Uint8Array([1, 2, 3]);
-      expect(ownedBytes(source, false)).toEqual(new Uint8Array([1, 2, 3]));
+      expect(toOwnedUint8Array(source, false)).toEqual(
+        new Uint8Array([1, 2, 3]),
+      );
     });
 
     it("returns an array with the same contents, with `transfer`", () => {
       const source = new Uint8Array([1, 2, 3]);
-      expect(ownedBytes(source, true)).toEqual(new Uint8Array([1, 2, 3]));
+      expect(toOwnedUint8Array(source, true)).toEqual(
+        new Uint8Array([1, 2, 3]),
+      );
     });
 
     it("returns an empty array for an empty source", () => {
-      expect(ownedBytes(new Uint8Array(), true).length).toBe(0);
-      expect(ownedBytes(new Uint8Array(), false).length).toBe(0);
+      expect(toOwnedUint8Array(new Uint8Array(), true).length).toBe(0);
+      expect(toOwnedUint8Array(new Uint8Array(), false).length).toBe(0);
     });
 
     it("leaves the source usable, without `transfer`", () => {
       const source = new Uint8Array([1, 2, 3]);
-      const result = ownedBytes(source, false);
+      const result = toOwnedUint8Array(source, false);
 
       expect(isDetached(source)).toBe(false);
       source[0] = 99;
@@ -40,7 +44,7 @@ describe("buffers", () => {
 
     it("detaches the source buffer, with `transfer` on a whole-buffer view", () => {
       const source = new Uint8Array([1, 2, 3]);
-      const result = ownedBytes(source, true);
+      const result = toOwnedUint8Array(source, true);
 
       expect(isDetached(source)).toBe(true);
       expect(source.length).toBe(0);
@@ -54,7 +58,7 @@ describe("buffers", () => {
       whole.set([1, 2, 3, 4, 5, 6, 7, 8]);
       const source = new Uint8Array(buffer, 2, 3);
 
-      const result = ownedBytes(source, true);
+      const result = toOwnedUint8Array(source, true);
 
       expect(result).toEqual(new Uint8Array([3, 4, 5]));
       expect(buffer.detached).toBe(false);
@@ -71,7 +75,7 @@ describe("buffers", () => {
       const source = new Uint8Array(buffer, 0, 3);
       source.set([1, 2, 3]);
 
-      const result = ownedBytes(source, true);
+      const result = toOwnedUint8Array(source, true);
 
       expect(result).toEqual(new Uint8Array([1, 2, 3]));
       expect(buffer.detached).toBe(false);
@@ -82,7 +86,7 @@ describe("buffers", () => {
       const source = new Uint8Array(buffer);
       source.set([1, 2, 3]);
 
-      const result = ownedBytes(source, true);
+      const result = toOwnedUint8Array(source, true);
 
       expect(result).toEqual(new Uint8Array([1, 2, 3]));
       expect(result.buffer).not.toBe(buffer);
@@ -95,8 +99,8 @@ describe("buffers", () => {
       const source = new Uint8Array([1, 2, 3]);
       (source.buffer as ArrayBuffer).transfer();
 
-      expect(() => ownedBytes(source, true)).toThrow(TypeError);
-      expect(() => ownedBytes(source, false)).toThrow(TypeError);
+      expect(() => toOwnedUint8Array(source, true)).toThrow(TypeError);
+      expect(() => toOwnedUint8Array(source, false)).toThrow(TypeError);
     });
   });
 });

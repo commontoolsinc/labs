@@ -1008,7 +1008,7 @@ export class FabricHash extends FabricPrimitive {
    */
   constructor(hash: Uint8Array, tag: string, transfer = false) {
     super();
-    this.#hash = ownedBytes(hash, transfer);
+    this.#hash = toOwnedUint8Array(hash, transfer);
     this.#tag = tag;
     this.#justHashString = toUnpaddedBase64url(this.#hash);
     this.#fullStringForm = `${tag}:${this.#justHashString}`;
@@ -1133,7 +1133,7 @@ export class FabricBytes extends FabricPrimitive {
    */
   constructor(bytes: Uint8Array, transfer = false) {
     super();
-    this.#bytes = ownedBytes(bytes, transfer);
+    this.#bytes = toOwnedUint8Array(bytes, transfer);
     Object.freeze(this);
   }
 
