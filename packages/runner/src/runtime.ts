@@ -167,6 +167,45 @@ export const DEFAULT_MAX_RETRIES = 5;
 
 export type { IExtendedStorageTransaction, MemorySpace };
 
+export interface EditWithRetryOptions {
+  /**
+   * How many times to re-run the action against a fresh transaction after a
+   * failed commit. Defaults to {@link DEFAULT_MAX_RETRIES}.
+   */
+  maxRetries?: number;
+  /**
+   * Whether the work this edit carries is still wanted. Called once per
+   * attempt, immediately before that attempt's commit; returning false aborts
+   * the staged transaction and yields `{ abandoned: true }`. See
+   * {@link Runtime.editWithRetry} for the window this narrows and the window it
+   * leaves open. A caller holding an `AbortSignal` passes
+   * `() => !signal.aborted`.
+   */
+  shouldCommit?: () => boolean;
+}
+
+/**
+ * The outcome of an {@link Runtime.editWithRetry} that reached a commit: the
+ * action's return value once its transaction committed, or the commit error
+ * once the retries were spent. An `error` of `undefined` implies an `ok`, which
+ * is what lets a caller narrow with `if (result.error) ...` and then read
+ * `result.ok`.
+ */
+export type CommittedEditResult<T> =
+  | { ok: T; error?: undefined; abandoned?: undefined }
+  | { ok?: undefined; error: CommitError; abandoned?: undefined };
+
+/**
+ * The outcome of an {@link Runtime.editWithRetry} that supplied a
+ * `shouldCommit`: either a commit outcome, or the abandonment that predicate
+ * produces by returning false, which carries neither `ok` nor `error`. An edit
+ * without a `shouldCommit` is typed as {@link CommittedEditResult} instead, so
+ * the abandonment reaches only the callers that can produce one.
+ */
+export type EditWithRetryResult<T> =
+  | CommittedEditResult<T>
+  | { ok?: undefined; error?: undefined; abandoned: true };
+
 export interface ConsoleHandlerOutput {
   method: ConsoleMethod;
   args: any[];
@@ -1637,18 +1676,71 @@ export class Runtime {
    * locally replicated memory spaces. Transaction allows reading from many
    * multiple spaces but writing only to one space.
    *
-   * If the transaction fails, it will be retried up to maxRetries times.
+   * If the transaction fails, it will be retried up to `maxRetries` times. Each
+   * retry runs `fn` again against a fresh transaction.
+   *
+   * A caller whose work can become obsolete while the edit is outstanding
+   * supplies `shouldCommit`. It is called once per attempt, immediately before
+   * that attempt's `tx.commit()`. Returning false discards the staged writes:
+   * the transaction is aborted, `fn` is not retried, and the result is
+   * `{ abandoned: true }`, carrying neither `ok` nor `error`.
+   *
+   * `shouldCommit` narrows the window in which an obsolete write can still
+   * land, and leaves a residual window open. Once `tx.commit()` has been
+   * called, the transaction has left its `ready` state, and `abort()` on it
+   * returns `InactiveTransactionError` and discards nothing. An attempt whose
+   * commit is already in flight therefore lands whatever `shouldCommit` would
+   * say now. The residual window is one in-flight commit per attempt, which
+   * spans the round trip to storage. What `shouldCommit` guarantees is
+   * narrower: no attempt begins committing after it turns false. A caller for
+   * which a write inside that window is more than a lost race needs its own
+   * reconciliation for the value that lands there.
+   *
+   * A caller holding an `AbortSignal` passes `() => !signal.aborted`.
+   *
+   * The second argument also accepts a bare number, which means `maxRetries`.
    *
    * @param fn - Function to execute with the transaction.
-   * @param maxRetries - Maximum number of retries.
-   * @returns Promise<boolean> that resolves to true on success, or false after exhausting retries.
+   * @param options - Retry count, or the options described above.
+   * @returns The value `fn` returned once its transaction committed, the commit
+   * error once the retries were spent, or `{ abandoned: true }` when
+   * `shouldCommit` turned an attempt away.
    */
   editWithRetry<T = void>(
     fn: (tx: IExtendedStorageTransaction) => T,
-    maxRetries: number = DEFAULT_MAX_RETRIES,
-  ): Promise<
-    { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
-  > {
+    options: EditWithRetryOptions & { shouldCommit: () => boolean },
+  ): Promise<EditWithRetryResult<T>>;
+  /**
+   * An edit with no `shouldCommit`, which therefore always reaches a commit and
+   * never abandons. See the overload above for the full contract.
+   */
+  editWithRetry<T = void>(
+    fn: (tx: IExtendedStorageTransaction) => T,
+    options?: number | (EditWithRetryOptions & { shouldCommit?: undefined }),
+  ): Promise<CommittedEditResult<T>>;
+  /**
+   * An edit whose options are only known to be one or the other at the call
+   * site, so both outcomes stay in the result. See the first overload for the
+   * full contract.
+   */
+  editWithRetry<T = void>(
+    fn: (tx: IExtendedStorageTransaction) => T,
+    options?: number | EditWithRetryOptions,
+  ): Promise<EditWithRetryResult<T>>;
+  editWithRetry<T = void>(
+    fn: (tx: IExtendedStorageTransaction) => T,
+    options: number | EditWithRetryOptions = DEFAULT_MAX_RETRIES,
+  ): Promise<EditWithRetryResult<T>> {
+    const { maxRetries = DEFAULT_MAX_RETRIES, shouldCommit } =
+      typeof options === "number" ? { maxRetries: options } : options;
+    return this.runEditWithRetry(fn, maxRetries, shouldCommit);
+  }
+
+  private runEditWithRetry<T>(
+    fn: (tx: IExtendedStorageTransaction) => T,
+    maxRetries: number,
+    shouldCommit: (() => boolean) | undefined,
+  ): Promise<EditWithRetryResult<T>> {
     const tx = this.edit();
     tx.tx.immediate = true;
     (tx.tx as { deferRunnerStartUntilCommit?: boolean })
@@ -1669,6 +1761,30 @@ export class Runtime {
       });
     }
     this.prepareTxForCommit(tx);
+    if (shouldCommit !== undefined) {
+      // The last point at which the staged writes can still be discarded: from
+      // the commit below onwards the transaction has left its ready state and
+      // abort() no longer applies to it. A predicate that throws aborts the
+      // transaction and surfaces the error as a Result, the same as an fn that
+      // throws.
+      let proceed: boolean;
+      try {
+        proceed = shouldCommit();
+      } catch (error) {
+        tx.abort(error);
+        return Promise.resolve({
+          error: {
+            name: "StorageTransactionAborted" as const,
+            message: `editWithRetry shouldCommit threw: ${error}`,
+            reason: error,
+          },
+        });
+      }
+      if (!proceed) {
+        tx.abort(new Error("editWithRetry abandoned before commit"));
+        return Promise.resolve({ abandoned: true as const });
+      }
+    }
     return tx.commit().then(async ({ error }) => {
       if (error) {
         if (maxRetries > 0) {
@@ -1715,7 +1831,11 @@ export class Runtime {
               // Pull failed — the retry's commit decides.
             }
           }
-          return this.editWithRetry<T>(fn, maxRetries - 1);
+          return this.runEditWithRetry<T>(
+            fn,
+            maxRetries - 1,
+            shouldCommit,
+          );
         } else {
           return { error };
         }

@@ -155,6 +155,30 @@ const result = await runtime.editWithRetry(async (tx) => {
 
 The scheduler also provides automatic retry for handlers on transaction conflict.
 
+#### Abandoning an edit
+
+A caller whose work can become obsolete while the edit is outstanding passes a
+`shouldCommit` predicate. It is called once per attempt, immediately before that
+attempt's commit, and returning false aborts the staged transaction instead of
+committing it. The result is then `{ abandoned: true }`, which carries neither
+`ok` nor `error`, and no retry follows.
+
+```typescript
+// Shown for illustration only.
+const result = await runtime.editWithRetry((tx) => {
+  cell.withTx(tx).set(1);
+}, { shouldCommit: () => stillWanted });
+```
+
+The predicate narrows the window in which an obsolete write can still land, and
+leaves a residual window open. Committing is a round trip to storage, and a
+transaction that has entered it is no longer abortable: `abort()` applies only
+to a transaction still in its `ready` state, and returns
+`InactiveTransactionError` otherwise. So an attempt already committing when the
+predicate turns false writes anyway. What the predicate guarantees is that no
+attempt begins committing after that point. A caller for which a write inside
+the residual window is more than a lost race reconciles that value itself.
+
 ### Relationship to Handlers
 
 Handlers execute within transaction context:

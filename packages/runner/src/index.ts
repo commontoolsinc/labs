@@ -1,8 +1,11 @@
 export { Runtime } from "./runtime.ts";
 export { normalizeSpaceHost } from "./space-host.ts";
 export type {
+  CommittedEditResult,
   ConsoleHandler,
   ConsoleHandlerOutput,
+  EditWithRetryOptions,
+  EditWithRetryResult,
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
   ExperimentalOptions, // Space-model feature flags; see ExperimentalOptions in runtime.ts

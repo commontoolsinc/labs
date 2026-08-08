@@ -95,9 +95,12 @@ export function filter(
   const elementRuns = new Map<string, ElementRun>();
 
   // Cleared when the coordinator is torn down, so the asynchronous resume work
-  // below stops writing to a result container nothing owns any more. The same
-  // teardown releases the children the coordinator still holds; the ones whose
-  // elements left the list were released when they left.
+  // below stops writing to a result container nothing owns any more. Each of
+  // those edits passes it as `shouldCommit`, so one that staged before the
+  // teardown aborts instead of committing. One already committing at that
+  // moment still writes, and a later coordinator start reconciles over that
+  // value. The same teardown releases the children the coordinator still
+  // holds; the ones whose elements left the list were released when they left.
   let active = true;
   addCancel(() => {
     active = false;
@@ -168,7 +171,7 @@ export function filter(
                     .set([]),
               );
             }
-          }).then(({ error }) => {
+          }, { shouldCommit: () => active }).then(({ error }) => {
             if (error) {
               logger.warn("resume-input", "settling the resumed input failed", {
                 error,
@@ -314,7 +317,7 @@ export function filter(
           if (!active) return;
           const container = result!.withTx(seedTx);
           if (container.getRaw() === undefined) container.set([]);
-        }).then(({ error }) => {
+        }, { shouldCommit: () => active }).then(({ error }) => {
           if (error) {
             logger.warn(
               "resume-seed",

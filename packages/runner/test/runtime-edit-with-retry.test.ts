@@ -295,4 +295,134 @@ describe("Runtime.editWithRetry", () => {
     expect(statuses).toEqual(["done"]);
     expect(cell.get()).toBe(1);
   });
+
+  describe("shouldCommit", () => {
+    it("commits and returns the action's value while it holds", async () => {
+      const cell = runtime.getCell<number>(
+        space,
+        "editWithRetry-should-commit-true",
+        undefined,
+        tx,
+      );
+      cell.set(0);
+      await tx.commit();
+
+      const result = await runtime.editWithRetry((t) => {
+        cell.withTx(t).send(1);
+        return "committed";
+      }, { shouldCommit: () => true });
+
+      expect(result.ok).toBe("committed");
+      expect(result.error).toBeUndefined();
+      expect(result.abandoned).toBeUndefined();
+      expect(cell.get()).toBe(1);
+    });
+
+    it("discards the staged writes and returns `{ abandoned: true }` once it turns false", async () => {
+      const cell = runtime.getCell<number>(
+        space,
+        "editWithRetry-should-commit-false",
+        undefined,
+        tx,
+      );
+      cell.set(0);
+      await tx.commit();
+
+      let attempts = 0;
+      const result = await runtime.editWithRetry((t) => {
+        attempts++;
+        cell.withTx(t).send(1);
+        return "committed";
+      }, { shouldCommit: () => false });
+
+      // The action ran and staged its write; only the commit was withheld.
+      expect(attempts).toBe(1);
+      expect(result.abandoned).toBe(true);
+      expect(result.ok).toBeUndefined();
+      expect(result.error).toBeUndefined();
+      expect(cell.get()).toBe(0);
+    });
+
+    it("is consulted again on the retry that follows a failed commit", async () => {
+      const cell = runtime.getCell<number>(
+        space,
+        "editWithRetry-should-commit-retry",
+        undefined,
+        tx,
+      );
+      cell.set(0);
+      await tx.commit();
+
+      let attempts = 0;
+      let allowed = true;
+      const result = await runtime.editWithRetry((t) => {
+        attempts++;
+        if (attempts === 1) {
+          t.abort("force retry");
+          return;
+        }
+        // The teardown lands while the retry is staging its write.
+        allowed = false;
+        cell.withTx(t).send(1);
+      }, { maxRetries: 3, shouldCommit: () => allowed });
+
+      expect(attempts).toBe(2);
+      expect(result.abandoned).toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(cell.get()).toBe(0);
+    });
+
+    it("does not stop an attempt whose commit is already in flight", async () => {
+      const cell = runtime.getCell<number>(
+        space,
+        "editWithRetry-should-commit-in-flight",
+        undefined,
+        tx,
+      );
+      cell.set(0);
+      await tx.commit();
+
+      let allowed = true;
+      // The action, the predicate and `tx.commit()` all run in the synchronous
+      // part of the call, so the next statement runs with the commit in flight.
+      // That is the residual window the predicate does not cover.
+      const pending = runtime.editWithRetry((t) => {
+        cell.withTx(t).send(1);
+        return "committed";
+      }, { shouldCommit: () => allowed });
+      allowed = false;
+      const result = await pending;
+
+      expect(result.ok).toBe("committed");
+      expect(result.abandoned).toBeUndefined();
+      expect(cell.get()).toBe(1);
+    });
+
+    it("returns a `StorageTransactionAborted` and settles the transaction when it throws", async () => {
+      const cell = runtime.getCell<number>(
+        space,
+        "editWithRetry-should-commit-throws",
+        undefined,
+        tx,
+      );
+      cell.set(0);
+      await tx.commit();
+
+      let staged: IExtendedStorageTransaction | undefined;
+      const result = await runtime.editWithRetry((t) => {
+        staged = t;
+        cell.withTx(t).send(1);
+      }, {
+        shouldCommit: () => {
+          throw new Error("predicate failed");
+        },
+      });
+
+      expect(result.error?.name).toBe("StorageTransactionAborted");
+      expect(result.error?.message).toContain("shouldCommit threw");
+      expect(result.abandoned).toBeUndefined();
+      expect(staged?.status().status).toBe("error");
+      expect(cell.get()).toBe(0);
+    });
+  });
 });

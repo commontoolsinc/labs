@@ -49,7 +49,9 @@ export interface ResumeRepublisherOptions {
   /**
    * False once the coordinator is torn down. A republish outstanding at that
    * moment has a container nothing owns any more, so it is dropped rather than
-   * written.
+   * written. It is also the republish edit's `shouldCommit`, so a republish
+   * that staged before the teardown aborts instead of committing; one already
+   * committing at that moment still writes.
    */
   isActive: () => boolean;
   /**
@@ -173,7 +175,7 @@ export function createResumeRepublisher(
         () => result.asSchema(resultSchema).withTx(tx).set(out),
       );
       return [];
-    }).then(({ ok, error }) => {
+    }, { shouldCommit: isActive }).then(({ ok, error }) => {
       if (error) {
         logger.warn(
           "resume-republish",
