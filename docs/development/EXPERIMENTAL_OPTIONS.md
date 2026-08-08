@@ -46,6 +46,7 @@ was last checked against the code.
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off | Ben Follington (#4937; shell toggle #4974) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default, not yet measured over real latency |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
+| [`INGEST_SELF_SERVE_ENABLED`](#ingest_self_serve_enabled) | `INGEST_SELF_SERVE_ENABLED` env on toolshed | off | Alex Komoroske (self-serve ingest channels) | graduate on once named-space keys stop deriving from a public passphrase | implemented, off by default |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
 
 Removed or never-shipped flags that documentation elsewhere still references are
@@ -832,6 +833,42 @@ the per-epic implementation notes).
 
 ---
 
+## Category 6: Deployment feature gates
+
+### `INGEST_SELF_SERVE_ENABLED`
+
+- **Toggle via.** The `INGEST_SELF_SERVE_ENABLED` environment variable on
+  toolshed, read once at module load
+  ([`packages/toolshed/env.ts`](../../packages/toolshed/env.ts)). Not a
+  `RuntimeOptions` flag: it gates an HTTP router, not runtime behavior.
+- **Added by.** Alex Komoroske, in the self-serve ingest channels change.
+- **Purpose.** Gates the `/api/ingest-channels` control plane, through which a
+  user holding their own identity key mints, lists, rotates, and revokes ingest
+  channels for spaces they own — without an operator. When off, the router
+  [404s every verb](../../packages/toolshed/routes/ingest-channels/gate.ts)
+  before the body limit, the rate limiter, or signature verification runs, so a
+  deployment that has not opted in does not advertise the endpoint. The data
+  plane (`/api/ingest/:id`) and the operator provisioning scripts are
+  unaffected by the flag.
+- **Current default and planned end state.** Off by default. The gate exists
+  because minting issues a durable bearer capability that outlives the trust
+  conditions that authorized it, and because authorization rests on the memory
+  ACL — which, for a NAMED space, is only as strong as a key currently derived
+  from the public passphrase `"common user"`
+  ([`packages/identity/src/session.ts`](../../packages/identity/src/session.ts)).
+  Anyone can derive that key today, so on a deployment with named spaces the
+  owner check is not yet a real boundary. The end state is on by default.
+- **Status on 2026-08-07.** Implemented, off by default. The derivation
+  weakness is pinned by a tripwire test
+  ([`space-key-derivation-tripwire.test.ts`](../../packages/toolshed/routes/ingest-channels/space-key-derivation-tripwire.test.ts))
+  that FAILS once the derivation is fixed — the signal to flip the default and
+  to sweep any channels minted under the old trust conditions with
+  `retire-ingest-channels`. See
+  [`self-serve-ingest-channels.md`](../features/self-serve-ingest-channels.md).
+- **Path to removal.** Fix named-space key derivation, run the retirement
+  sweep, turn the flag on by default, then delete the gate and mount the router
+  unconditionally.
+
 ## Flag-gated tripwires
 
 Some code paths refuse a value they cannot yet handle, by throwing and naming
@@ -1129,7 +1166,9 @@ sweep does not mistake them for missing experimental flags:
   [the configuration reference](./CONFIGURATION.md#runner-diagnostics).
 - **CLI controls** (environment): `CF_EXEC_SHEBANG`, `CF_CLI_TRACE_TIMINGS`,
   `CF_PROFILE_DONE_MARKER`.
-- **Operational and build toggles**: `MEMORY_ACL_MODE` (`off` / `observe` /
+- **Operational and build toggles**: `RATE_LIMIT_TRUST_FORWARDED_FOR`
+  (deployment topology, not a feature dial — see CONFIGURATION.md),
+  `MEMORY_ACL_MODE` (`off` / `observe` /
   `enforce` space-access policy), `MEMORY_DUMP_ENABLED` (state-inspector dump
   endpoint), `OTEL_ENABLED`, `PRODUCTION` (shell build mode). ACL mode is a
   permanent deployment policy ladder, not an experimental runtime feature.
