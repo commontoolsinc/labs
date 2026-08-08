@@ -4,52 +4,50 @@ import {
   waitForCondition,
 } from "@commonfabric/integration";
 import {
-  CLICK_TARGET_ATTR,
   clickMarked,
+  markTargetsArgs,
+  settleAndMarkTargets,
   settleView,
 } from "./cfc-browser-helpers.ts";
 
 // Find-and-click-a-button-by-text helpers shared by the default-app
-// integration tests. The predicate below stamps the button it resolved with
-// CLICK_TARGET_ATTR, and clickMarked then resolves that exact element and
-// dispatches a single trusted click on it. The predicate is what this module
-// adds: it picks a button by its text, its exact text, or its title, where the
-// predicates in cfc-browser-helpers.ts pick one by CSS selector, by index
-// within a selector, or by data-ui-action value.
+// integration tests. What this module adds is the finder below: it picks a
+// button by its text, its exact text, or its title, where the finders in
+// cfc-browser-helpers.ts pick one by CSS selector, by index within a selector,
+// or by data-ui-action value. Settling around the match, marking it, and
+// clicking it are that module's shared step, which every marked click runs.
 
-// Serialized into the page by waitForCondition: find the first rendered
-// button/link whose text or title matches and stamp its inner click target with
-// `token`. "Rendered" means laid out and not display:none/visibility:hidden —
-// the same elements the innerText scan the poll used could see — and is
-// viewport-independent, so a match below the fold is still tagged: the click
-// scrolls the element into view itself. Returns false until a match exists, so
-// the wait re-checks on the next DOM mutation instead of the caller retrying a
-// bare find-and-click loop. Self-contained — it closes over nothing in this
-// module — so it can be serialized and run in the page.
-const markNoteButton = (
+// Serialized into the page: the first rendered button or link whose text or
+// title matches, reached through its host's shadow root when the host wraps the
+// control that takes the click. "Rendered" means laid out and not
+// display:none/visibility:hidden — the same elements the innerText scan the
+// poll used could see — and is viewport-independent, so a match below the fold
+// still qualifies: the click scrolls the element into view itself. Answers
+// `undefined` until a match exists, so the wait re-checks on the next DOM
+// mutation instead of the caller retrying a bare find-and-click loop.
+// Self-contained — it closes over nothing in this module — so it can be
+// serialized and run in the page.
+const findNoteButton = (
   probe: ProbeApi,
   selector: string,
   match: "includes" | "exact" | "title",
   needle: string,
-  token: string,
-  attr: string,
-): boolean => {
+): readonly HTMLElement[] | undefined => {
   const target = probe.collect(selector).find((element) => {
     if (!probe.isRendered(element)) return false;
     if (match === "title") return element.getAttribute("title") === needle;
     const text = (element.textContent ?? "").trim();
     return match === "exact" ? text === needle : text.includes(needle);
   }) as HTMLElement | undefined;
-  if (!target) return false;
-  const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
-    | HTMLElement
-    | null) ?? target;
-  if (!clickTarget.isConnected || !probe.isRendered(clickTarget)) return false;
-  probe.addToken(clickTarget, attr, token);
-  return true;
+  if (!target) return undefined;
+  return [
+    (target.shadowRoot?.querySelector("[data-cf-button]") as
+      | HTMLElement
+      | null) ?? target,
+  ];
 };
 
-// Settle the view, tag a matching button, and dispatch a single trusted click
+// Settle around a matching button, tag it, and dispatch a single trusted click
 // on it. Throws if no matching button becomes clickable.
 async function settleAndClickNoteButton(
   page: Page,
@@ -57,14 +55,12 @@ async function settleAndClickNoteButton(
   match: "includes" | "exact" | "title",
   needle: string,
 ): Promise<void> {
-  // Settle before tagging so the tagged button is the final rendered node, laid
-  // out and still attached when the click resolves its box model.
-  await settleView(page);
   const token = `cfc-note-button-${crypto.randomUUID()}`;
+  const args = markTargetsArgs(findNoteButton, [selector, match, needle], [
+    token,
+  ]);
   try {
-    await waitForCondition(page, markNoteButton, {
-      args: [selector, match, needle, token, CLICK_TARGET_ATTR],
-    });
+    await waitForCondition(page, settleAndMarkTargets, { args });
   } catch (cause) {
     throw new Error(
       `Unable to find a ${
@@ -75,11 +71,9 @@ async function settleAndClickNoteButton(
   }
   await clickMarked(page, {
     token,
-    remark: {
-      predicate: markNoteButton,
-      args: [selector, match, needle, token, CLICK_TARGET_ATTR],
-    },
+    remark: { predicate: settleAndMarkTargets, args },
   });
+  await settleView(page);
 }
 
 // The click helpers resolve `true` once the single click has landed (they throw

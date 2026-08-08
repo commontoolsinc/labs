@@ -235,7 +235,10 @@ below it appears — so a control that has just become rendered is still moving.
 If the box moves between when the click resolves it and when the mouse events
 fire, the click lands on whatever shifted into that spot instead of the control,
 and nothing happens. Settling the view drains the pending reflow so the target
-is stationary when it is clicked.
+is stationary when it is clicked. `clickCfButton` also catches the case where
+the page moves the control anyway: it stops an interaction that misses before
+the page sees it, and aims again. `docs/development/waiting-in-tests.md`
+describes how.
 
 **Use `awaitViewSettled(page)`** from `@commonfabric/integration` as the
 lower-level wait after navigation or a state change. When the next step
@@ -258,11 +261,12 @@ await waitForCondition(page, (probe) =>
 Pattern integration tests can use the higher-level wrappers in
 `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
 `fillCfInput`, `clickCfButton`, `clickCfButtonAndWaitForText` — which bundle
-the common waiting and interaction sequences. `clickCfButton` proceeds only
-when the same target remains rendered before and after a settle. It marks that
-target inside the successful predicate. See
+the common waiting and interaction sequences. Every one of them that clicks
+proceeds only when the same target remains rendered before and after a settle,
+and marks that target inside the successful predicate — the helpers that reach a
+control by index, by `data-ui-action`, or by its button text included. See
 `docs/development/waiting-in-tests.md` for why that ordering is the load-bearing
-part, and for which helpers do not yet have it.
+part.
 
 ### Do not reach for these instead
 

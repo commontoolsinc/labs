@@ -281,98 +281,190 @@ const fillAndVerify = async (
   return verified;
 };
 
-// Resolve every click target before settling the view. Mark them only when the
-// same rendered elements remain afterward. The resolution is spelled out here
-// because this predicate is serialized into the page and closes over nothing
-// in this module.
-//
-// A target introduced or replaced during the settle is checked again when the
-// DOM mutation triggers the next evaluation. That evaluation gives the exact
-// element a full settle before marking it.
-//
-// The settle also drives the page forward. Asking the worker whether it is idle
-// queues runnable pull work that nothing else would start. A target reached
-// only by the page's pending work arrives on a settling check.
-const settleAndMarkClickTargets = async (
+/**
+ * Which elements a marked click is about to be aimed at.
+ *
+ * A finder answers with the elements to mark, in the order their tokens were
+ * supplied, or `undefined` when the page does not yet present all of them. It
+ * decides only which elements qualify — being rendered, surviving a settle, and
+ * carrying the mark are {@link settleAndMarkTargets}'s business, and every
+ * marked click goes through that one shared step.
+ *
+ * A finder is serialized into the page as its own source, so it closes over
+ * nothing in this module and reads only what it is passed.
+ */
+export type ClickTargetFinder<A extends readonly unknown[]> = (
   probe: ProbeApi,
-  selectors: readonly string[],
+  ...args: A
+) => readonly HTMLElement[] | undefined;
+
+/** What {@link settleAndMarkTargets} is called with, ready to serialize. */
+export type MarkTargetsArgs = [
+  finderSource: string,
+  finderArgs: readonly unknown[],
   tokens: readonly string[],
   attr: string,
+  onMarkSource: string | null,
+];
+
+/**
+ * Spell out one call to {@link settleAndMarkTargets}. The wait that places the
+ * mark and the aim that places it again on whatever replaced a rebuilt control
+ * both run these same arguments, so they mark under the same rules.
+ */
+export const markTargetsArgs = <A extends readonly unknown[]>(
+  finder: ClickTargetFinder<A>,
+  finderArgs: A,
+  tokens: readonly string[],
+  onMark?: (target: HTMLElement) => void,
+): MarkTargetsArgs => [
+  finder.toString(),
+  finderArgs,
+  tokens,
+  CLICK_TARGET_ATTR,
+  onMark ? onMark.toString() : null,
+];
+
+/**
+ * Resolve every click target with `finderSource`, settle the view, and mark the
+ * targets only when the same rendered elements survive the settle.
+ *
+ * Being in the DOM is not being clickable. The reactive scheduler runs in a
+ * worker while the DOM lives on the main thread, so a control can be found by a
+ * selector while the vdom batch that binds its click handler is still crossing
+ * to the main thread, and while the Lit update cycle that removes its
+ * `pointer-events: none` is still pending. A click delivered to that control is
+ * dropped without a trace. Settling covers all three stages, and a click helper
+ * that skips it can hand a test a control that takes the click and does nothing
+ * with it.
+ *
+ * The settle sits between two resolutions rather than before the wait, because
+ * a target that arrives partway through a settle was never covered by it. Both
+ * resolutions have to answer the same elements, so what gets marked is the
+ * element the settle ran for. A target introduced or replaced during the settle
+ * fails that comparison, and the next DOM mutation re-enters this predicate and
+ * gives whatever took its place a settle of its own.
+ *
+ * The settle also drives the page forward rather than watching it. Asking the
+ * worker whether it is idle queues runnable pull work that nothing else would
+ * start, so a target reached only by the page's own pending work arrives on a
+ * settling check and never on one that reads the DOM alone.
+ *
+ * `onMarkSource`, when supplied, runs on each element once it carries its mark
+ * and inside this same page turn — for a caller that has to attach something to
+ * the exact element the click will reach.
+ */
+export const settleAndMarkTargets = async (
+  probe: ProbeApi,
+  finderSource: string,
+  finderArgs: readonly unknown[],
+  tokens: readonly string[],
+  attr: string,
+  onMarkSource: string | null,
 ): Promise<boolean> => {
   const settle = (globalThis as typeof globalThis & {
     commonfabric?: { viewSettled?: () => Promise<void> };
   }).commonfabric?.viewSettled;
-  if (!settle || selectors.length !== tokens.length) return false;
+  if (!settle) return false;
 
-  const resolveClickTarget = (
-    selector: string,
-  ): HTMLElement | undefined => {
-    const target = probe.collect(selector)[0] as HTMLElement | undefined;
-    if (!target) return undefined;
-    return (target.shadowRoot?.querySelector("[data-cf-button]") as
-      | HTMLElement
-      | null) ?? target;
-  };
-  const targetsBefore = selectors.map(resolveClickTarget);
-  const renderedBefore = targetsBefore.map((target) =>
-    target !== undefined &&
-    target.isConnected &&
-    probe.isRendered(target)
-  );
+  const finder = new Function("return (" + finderSource + ")")() as (
+    probe: ProbeApi,
+    ...args: readonly unknown[]
+  ) => readonly HTMLElement[] | undefined;
+  const onMark = onMarkSource === null ? undefined : new Function(
+    "return (" + onMarkSource + ")",
+  )() as (target: HTMLElement) => void;
+  const clickable = (target: HTMLElement): boolean =>
+    target.isConnected && probe.isRendered(target);
+
+  // The settle runs whether or not the targets are there yet, because it is
+  // what drives the page: a target reached only by the page's own pending work
+  // arrives on a settle, and a predicate that returned early on a missing
+  // target would be waiting for a page nothing is moving.
+  const before = finder(probe, ...finderArgs);
+  const readyBefore = before !== undefined &&
+    before.length === tokens.length &&
+    before.every(clickable);
 
   await settle();
 
-  const settledTargets = selectors.map(resolveClickTarget);
-  const ready = settledTargets.every((target, index) => {
-    return renderedBefore[index] === true &&
-      target !== undefined &&
-      target === targetsBefore[index] &&
-      target.isConnected &&
-      probe.isRendered(target);
-  });
-  if (!ready) return false;
+  if (!readyBefore || before === undefined) return false;
+  const after = finder(probe, ...finderArgs);
+  if (!after || after.length !== before.length) return false;
+  if (
+    !after.every((target, index) =>
+      target === before[index] && clickable(target)
+    )
+  ) return false;
 
-  for (let index = 0; index < settledTargets.length; index++) {
-    const target = settledTargets[index];
+  for (let index = 0; index < after.length; index++) {
+    const target = after[index];
     const token = tokens[index];
     if (target === undefined || token === undefined) return false;
     probe.addToken(target, attr, token);
+    onMark?.(target);
   }
   return true;
 };
 
-// Tag the `index`-th element matching `selector` once it is rendered. The
-// selector already resolves to clickable elements, so the match is tagged
-// directly rather than reached through a host's shadow root. The rendered check
-// is viewport-independent. The click scrolls the element into view.
-const markNthForClick = (
+// The first element matching each selector, reached through a host's shadow
+// root when the host wraps the control that takes the click.
+const findSelectorClickTargets = (
+  probe: ProbeApi,
+  selectors: readonly string[],
+): readonly HTMLElement[] | undefined => {
+  const targets: HTMLElement[] = [];
+  for (const selector of selectors) {
+    const host = probe.collect(selector)[0] as HTMLElement | undefined;
+    if (!host) return undefined;
+    targets.push(
+      (host.shadowRoot?.querySelector("[data-cf-button]") as
+        | HTMLElement
+        | null) ?? host,
+    );
+  }
+  return targets;
+};
+
+// The first element matching `selector`, taken directly. The selector resolves
+// to the field itself, since a `cf-submit-input` forwards its `inputId` to the
+// inner `<input>`.
+const findKeyboardTarget = (
+  probe: ProbeApi,
+  selector: string,
+): readonly HTMLElement[] | undefined => {
+  const target = probe.collect(selector)[0] as HTMLElement | undefined;
+  return target ? [target] : undefined;
+};
+
+// Focus the field that carries the mark, so the key press that follows reaches
+// the element the settle ran for.
+const focusMarkedTarget = (target: HTMLElement): void => {
+  target.focus();
+};
+
+// The `index`-th element matching `selector`. The selector already resolves to
+// clickable elements, so the match is taken directly rather than reached
+// through a host's shadow root.
+const findNthClickTarget = (
   probe: ProbeApi,
   selector: string,
   index: number,
-  token: string,
-  attr: string,
-): boolean => {
+): readonly HTMLElement[] | undefined => {
   const target = probe.collect(selector)[index] as HTMLElement | undefined;
-  if (!target) return false;
-  if (!target.isConnected || !probe.isRendered(target)) return false;
-  probe.addToken(target, attr, token);
-  return true;
+  return target ? [target] : undefined;
 };
 
-// Tag the first rendered, enabled element carrying `data-ui-action="<action>"`
-// for a single trusted click, and record the next click's provenance so a
-// failure can show whether the dispatch was trusted and where it landed.
+// The first rendered, enabled element carrying `data-ui-action="<action>"`.
 // Rendered-ness is asked of the resolved click target, which covers the host:
 // hiding the host reaches the inner control either way. It is asked without an
 // on-screen requirement, since the trusted click scrolls the target into view
 // before dispatching. Disabled-ness is asked of both, because a host can carry
 // an `aria-disabled` its inner control does not.
-const markTrustedAction = (
+const findTrustedActionTarget = (
   probe: ProbeApi,
   action: string,
-  token: string,
-  attr: string,
-): boolean => {
+): readonly HTMLElement[] | undefined => {
   const isDisabled = (element: HTMLElement): boolean =>
     element.hasAttribute("disabled") ||
     element.getAttribute("aria-disabled") === "true";
@@ -386,34 +478,40 @@ const markTrustedAction = (
       probe.isRendered(clickTarget) &&
       !isDisabled(target) && !isDisabled(clickTarget)
     ) {
-      probe.addToken(clickTarget, attr, token);
-      clickTarget.addEventListener(
-        "click",
-        (event) => {
-          (globalThis as typeof globalThis & {
-            __lastCfcTrustedActionClick?: TrustedActionProbe["lastClick"];
-          }).__lastCfcTrustedActionClick = {
-            trusted: event.isTrusted,
-            path: event.composedPath().flatMap((node) => {
-              if (!(node instanceof HTMLElement)) return [];
-              const dataset: Record<string, string> = {};
-              for (const key in node.dataset) {
-                dataset[key] = node.dataset[key] ?? "";
-              }
-              return [{
-                tagName: node.tagName.toLowerCase(),
-                id: node.id,
-                dataset,
-              }];
-            }),
-          };
-        },
-        { capture: true, once: true },
-      );
-      return true;
+      return [clickTarget];
     }
   }
-  return false;
+  return undefined;
+};
+
+// Record the provenance of the next click the marked control receives, so a
+// failure can show whether the dispatch was trusted and where it landed.
+// Attached to the control that carries the mark, which is the control the
+// trusted click is aimed at.
+const recordTrustedActionClick = (clickTarget: HTMLElement): void => {
+  clickTarget.addEventListener(
+    "click",
+    (event) => {
+      (globalThis as typeof globalThis & {
+        __lastCfcTrustedActionClick?: TrustedActionProbe["lastClick"];
+      }).__lastCfcTrustedActionClick = {
+        trusted: event.isTrusted,
+        path: event.composedPath().flatMap((node) => {
+          if (!(node instanceof HTMLElement)) return [];
+          const dataset: Record<string, string> = {};
+          for (const key in node.dataset) {
+            dataset[key] = node.dataset[key] ?? "";
+          }
+          return [{
+            tagName: node.tagName.toLowerCase(),
+            id: node.id,
+            dataset,
+          }];
+        }),
+      };
+    },
+    { capture: true, once: true },
+  );
 };
 
 // Resolve once the shell's reactive view has caught up to runtime state and is
@@ -470,19 +568,21 @@ export async function clickTrustedAction(
   const token = `trusted-action-${crypto.randomUUID()}`;
   let probe: TrustedActionProbe | undefined;
   try {
-    // Wait until a visible, enabled instance of the action can be marked, then
-    // click it exactly once. Marking attaches the provenance listener, so the
-    // single click is the trusted dispatch we record.
-    await waitForCondition(page, markTrustedAction, {
-      args: [action, token, CLICK_TARGET_ATTR],
-    });
+    // Wait until a visible, enabled instance of the action has settled and can
+    // be marked, then click it exactly once. Marking attaches the provenance
+    // listener, so the single click is the trusted dispatch we record.
+    const args = markTargetsArgs(
+      findTrustedActionTarget,
+      [action],
+      [token],
+      recordTrustedActionClick,
+    );
+    await waitForCondition(page, settleAndMarkTargets, { args });
     await clickMarked(page, {
       token,
-      remark: {
-        predicate: markTrustedAction,
-        args: [action, token, CLICK_TARGET_ATTR],
-      },
+      remark: { predicate: settleAndMarkTargets, args },
     });
+    await settleView(page);
   } catch (cause) {
     probe ??= await readTrustedActionProbe(page, action).catch(() => undefined);
     // Indented for readable test-log output
@@ -504,20 +604,37 @@ export async function clickTrustedAction(
  * scripted `KeyboardEvent` does not trigger implicit submission, which is why an
  * earlier dispatched-keydown attempt never reached the create handler.
  *
- * The view is settled first so the form is interactive, and the inner input is
- * resolved by piercing shadow roots (the `inputId` is forwarded to the inner
- * `<input>`, so the selector matches it directly).
+ * The field is resolved either side of a settle and focused only once the same
+ * element survives it, the way a marked click resolves the control it clicks.
+ * A field focused without that is a field whose form may not be wired up yet,
+ * and the Enter then reaches a submit button with no handler bound.
  */
 export async function submitViaEnter(
   page: Page,
   inputSelector: string,
 ) {
-  await settleView(page);
-  const input = await page.waitForSelector(inputSelector, {
-    strategy: "pierce",
-  });
-  await input.focus();
+  const token = `cf-submit-input-${crypto.randomUUID()}`;
+  const args = markTargetsArgs(
+    findKeyboardTarget,
+    [inputSelector],
+    [token],
+    focusMarkedTarget,
+  );
+  try {
+    await waitForCondition(page, settleAndMarkTargets, { args });
+  } catch (cause) {
+    const probe = await readTextProbe(page, inputSelector).catch(() =>
+      undefined
+    );
+    throw new Error(
+      `Timed out waiting for ${inputSelector} to settle before pressing ` +
+        `Enter. Last probe: ${toIndentedDebugString(probe)}`,
+      { cause },
+    );
+  }
   await page.keyboard.press("Enter");
+  await clearClickMark(page, token).catch(() => {});
+  await settleView(page);
 }
 
 export async function clickTrustedActionAndWaitForText(
@@ -752,8 +869,8 @@ async function settleWithClickTargets(
 ): Promise<string[]> {
   const tokens = selectors.map(() => `cf-button-${crypto.randomUUID()}`);
   try {
-    await waitForCondition(page, settleAndMarkClickTargets, {
-      args: [selectors, tokens, CLICK_TARGET_ATTR],
+    await waitForCondition(page, settleAndMarkTargets, {
+      args: markTargetsArgs(findSelectorClickTargets, [selectors], tokens),
     });
   } catch (cause) {
     await Promise.all(
@@ -799,8 +916,8 @@ export async function clickCfButton(
   await clickMarked(page, {
     token,
     remark: {
-      predicate: settleAndMarkClickTargets,
-      args: [[selector], [token], CLICK_TARGET_ATTR],
+      predicate: settleAndMarkTargets,
+      args: markTargetsArgs(findSelectorClickTargets, [[selector]], [token]),
     },
   });
   await settleView(page);
@@ -877,8 +994,10 @@ export async function clickCfButtonsConcurrently(
  * across a rendered piece) rather than to a host wrapping one.
  *
  * The wait is the mark: a `waitForCondition` predicate re-checks on each DOM
- * mutation until the indexed element is present and visible, then tags it, and
- * the test dispatches a single trusted click on the tagged element.
+ * mutation until the indexed element is present and visible, settles the view
+ * around it, and tags it. The test then dispatches a single trusted click on
+ * the tagged element and settles the view again so the click's local effect is
+ * in the DOM when the next step looks for it.
  */
 export async function clickNthCfButton(
   page: Page,
@@ -886,10 +1005,9 @@ export async function clickNthCfButton(
   index: number,
 ) {
   const token = `cf-nth-button-${crypto.randomUUID()}`;
+  const args = markTargetsArgs(findNthClickTarget, [selector, index], [token]);
   try {
-    await waitForCondition(page, markNthForClick, {
-      args: [selector, index, token, CLICK_TARGET_ATTR],
-    });
+    await waitForCondition(page, settleAndMarkTargets, { args });
   } catch (cause) {
     const probe = await readTextProbe(page, selector).catch(() => undefined);
     throw new Error(
@@ -901,11 +1019,9 @@ export async function clickNthCfButton(
   }
   await clickMarked(page, {
     token,
-    remark: {
-      predicate: markNthForClick,
-      args: [selector, index, token, CLICK_TARGET_ATTR],
-    },
+    remark: { predicate: settleAndMarkTargets, args },
   });
+  await settleView(page);
 }
 
 // Where a trusted click is about to be aimed, or why the marked control could
@@ -913,6 +1029,23 @@ export async function clickNthCfButton(
 type ClickAim =
   | { x: number; y: number }
   | { missing: true; sawTarget: boolean };
+
+/**
+ * What became of the trusted click the aim armed for.
+ *
+ * `hit` means the click reached the marked control. `missed` means it reached
+ * something else. `pending` means no click event was raised at all, which is
+ * what a control that declines the interaction leaves behind — a disabled one
+ * takes the press and produces no click.
+ *
+ * Neither `missed` nor `pending` activated the control, so the click can be
+ * aimed again.
+ */
+type ClickLanding = {
+  verdict: "pending" | "hit" | "missed";
+  /** The innermost few elements the interaction did reach, outward. */
+  path: string;
+};
 
 // Resolve the marked control, hold until it has a settled layout box, scroll it
 // into view, and answer with the point to click — all inside one page turn.
@@ -938,6 +1071,11 @@ type ClickAim =
 // the caller supplies it, is the mark predicate's own source; running it again
 // re-establishes the mark on whatever control took the old one's place, so a
 // rebuilt surface is clicked rather than reported.
+//
+// Answering also arms the landing interceptor, which decides the trusted click
+// that follows. The interceptor is armed here rather than by the test process
+// so that it is in place from the instant the point is measured, leaving no
+// window in which an interaction could arrive unwatched.
 const aimAtMarkedTarget = async (
   probe: ProbeApi,
   selector: string,
@@ -950,6 +1088,117 @@ const aimAtMarkedTarget = async (
   }).__cfAimDiag ??= {});
   const diag: AimDiag = { phase: "resolving", frames: 0, lastBox: "none" };
   registry[selector] = diag;
+
+  type Landing = {
+    verdict: "pending" | "hit" | "missed";
+    /** Whether the interaction's first event carried the mark. */
+    onTarget: boolean | undefined;
+    path: string;
+    armed: boolean;
+    detach: () => void;
+  };
+  const landings = ((globalThis as typeof globalThis & {
+    __cfClickLanding?: Record<string, Landing>;
+  }).__cfClickLanding ??= {});
+  const open = ((globalThis as typeof globalThis & {
+    __cfClickLandingOpen?: Record<string, true>;
+  }).__cfClickLandingOpen ??= {});
+
+  // Watch the pointer and mouse events of one trusted click, at the window and
+  // in the capture phase.
+  //
+  // The first event decides what happens to the rest: its composed path either
+  // carries the mark, and every event of the interaction goes through, or it
+  // does not, and every event is stopped there. One decision covers the whole
+  // interaction, so the control takes the press and the release together or
+  // takes neither.
+  //
+  // The verdict is settled at the click event, which is the event a control
+  // acts on. The press and the release cross the protocol separately, so the
+  // page can carry the control away between them, and the browser then raises
+  // the click on the nearest ancestor the two have in common. A click that does
+  // not carry the mark is stopped like any other miss.
+  //
+  // What is stopped is the press, the release and the click. The pointer moves
+  // to the point before the press, and the hover events that produces are the
+  // page's to handle.
+  //
+  // Only trusted events are watched. The page raises clicks of its own — a
+  // label forwarding to its control, a component clicking itself from a key
+  // handler — and those pass through untouched and leave the verdict alone.
+  //
+  // Arming is gated on the entry the test process opens for this click and
+  // removes when the click is done, so a wait that outlived its caller cannot
+  // leave an interceptor behind.
+  const arm = (): void => {
+    if (!open[selector]) return;
+    landings[selector]?.detach();
+    const carriesMark = (event: Event): boolean =>
+      event.composedPath().some((node) =>
+        node instanceof Element && node.matches(selector)
+      );
+    const describe = (event: Event): string =>
+      event.composedPath()
+        .flatMap((node) =>
+          node instanceof Element
+            ? [node.tagName.toLowerCase() + (node.id ? `#${node.id}` : "")]
+            : []
+        )
+        .slice(0, 4)
+        .join(" < ");
+    const block = (event: Event): void => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    const onEvent = (event: Event): void => {
+      if (!landing.armed || !event.isTrusted) return;
+      if (landing.onTarget === undefined) {
+        landing.onTarget = carriesMark(event);
+        landing.path = describe(event);
+      }
+      if (!landing.onTarget) block(event);
+      if (
+        event.type === "click" || event.type === "auxclick" ||
+        event.type === "contextmenu"
+      ) {
+        if (landing.onTarget && carriesMark(event)) {
+          landing.verdict = "hit";
+        } else {
+          landing.verdict = "missed";
+          landing.path = describe(event);
+          block(event);
+        }
+        // One trusted click ends at its click event, whether that event reached
+        // the page or was stopped here.
+        landing.armed = false;
+      }
+    };
+    const types = [
+      "pointerdown",
+      "mousedown",
+      "pointerup",
+      "mouseup",
+      "click",
+      "auxclick",
+      "contextmenu",
+    ];
+    const landing: Landing = {
+      verdict: "pending",
+      onTarget: undefined,
+      path: "",
+      armed: true,
+      detach: () => {
+        landing.armed = false;
+        for (const type of types) {
+          globalThis.removeEventListener(type, onEvent, { capture: true });
+        }
+      },
+    };
+    landings[selector] = landing;
+    for (const type of types) {
+      globalThis.addEventListener(type, onEvent, { capture: true });
+    }
+  };
 
   const find = (): HTMLElement | undefined =>
     probe.collect(selector)[0] as HTMLElement | undefined;
@@ -1055,6 +1304,7 @@ const aimAtMarkedTarget = async (
       behavior: "instant",
     });
     const rect = target.getBoundingClientRect();
+    arm();
     diag.phase = "aimed";
     return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
   }
@@ -1091,6 +1341,20 @@ export interface ClickMark {
  * One wait settles the control and measures where to click it; one dispatch
  * follows. Nothing separates the measurement from the decision that produced
  * it, so the coordinates describe the control as the wait left it.
+ *
+ * The dispatch itself still crosses the protocol, and the page keeps running
+ * while it does, so a surface that relays out in that crossing carries the
+ * control off the measured point. The aim leaves an interceptor watching for
+ * the interaction it armed for: one that does not reach the marked control is
+ * stopped at the window, so the control was not activated and it can be aimed
+ * at and clicked again where it now stands. The loop ends on the first click
+ * the control receives, so the control is activated exactly once.
+ *
+ * Clicking again requires the aim to answer a pixel no dispatch has lost yet.
+ * A control that has not moved answers the same pixel, and a page that shuffles
+ * a control around a few positions comes back to one of them, so both stop at
+ * the second aim that repeats itself rather than dispatching forever. What is
+ * reported then names every pixel tried and what the click reached at each.
  */
 export async function clickMarked(
   page: Page,
@@ -1098,43 +1362,80 @@ export async function clickMarked(
 ): Promise<void> {
   const { token, remark } = typeof mark === "string" ? { token: mark } : mark;
   const markSelector = `[${CLICK_TARGET_ATTR}~="${token}"]`;
+  // Pixels a dispatch has already lost this click at, and what it reached
+  // there.
+  const lost = new Map<string, string>();
   try {
-    let aim: ClickAim | undefined;
-    try {
-      aim = await waitForCondition(page, aimAtMarkedTarget, {
-        args: [
-          markSelector,
-          remark ? remark.predicate.toString() : null,
-          remark ? remark.args : [],
-        ],
-      });
-    } catch (cause) {
-      const probe = await readTextProbe(page, markSelector).catch(() =>
-        undefined
-      );
-      const progress = await readAimProgress(page, markSelector).catch(() =>
-        undefined
-      );
-      throw new Error(
-        `Marked click target ${markSelector} never presented a stable box. ` +
-          `Aim reached: ${toIndentedDebugString(progress)}. ` +
-          `Last probe: ${toIndentedDebugString(probe)}`,
-        { cause },
+    await openClickLanding(page, markSelector);
+    for (;;) {
+      let aim: ClickAim | undefined;
+      try {
+        aim = await waitForCondition(page, aimAtMarkedTarget, {
+          args: [
+            markSelector,
+            remark ? remark.predicate.toString() : null,
+            remark ? remark.args : [],
+          ],
+        });
+      } catch (cause) {
+        const probe = await readTextProbe(page, markSelector).catch(() =>
+          undefined
+        );
+        const progress = await readAimProgress(page, markSelector).catch(() =>
+          undefined
+        );
+        throw new Error(
+          `Marked click target ${markSelector} never presented a stable box. ` +
+            `Aim reached: ${toIndentedDebugString(progress)}. ` +
+            `Last probe: ${toIndentedDebugString(probe)}`,
+          { cause },
+        );
+      }
+      if (aim === undefined || "missing" in aim) {
+        const probe = await readTextProbe(page, markSelector).catch(() =>
+          undefined
+        );
+        throw new Error(
+          `The control marked for click was replaced before the click ` +
+            `could be aimed at it${
+              aim?.sawTarget ? " while its box was settling" : ""
+            }. Last probe: ${toIndentedDebugString(probe)}`,
+        );
+      }
+      const pixel = `${Math.round(aim.x)},${Math.round(aim.y)}`;
+      const lostBefore = lost.get(pixel);
+      if (lostBefore !== undefined) {
+        const progress = await readAimProgress(page, markSelector).catch(() =>
+          undefined
+        );
+        const probe = await readTextProbe(page, markSelector).catch(() =>
+          undefined
+        );
+        throw new Error(
+          `${markSelector} is aimed at ${pixel} again, where a trusted click ` +
+            `already failed to reach it (${lostBefore}). Every pixel tried: ${
+              toIndentedDebugString(Object.fromEntries(lost))
+            }. Aim reached: ${toIndentedDebugString(progress)}. ` +
+            `Last probe: ${toIndentedDebugString(probe)}`,
+        );
+      }
+      await page.clickPoint(aim);
+      const landing = await readClickLanding(page, markSelector);
+      if (landing.verdict === "hit") return;
+      // The click did not reach the control, so the control did not act on it.
+      // Aim again: the page has had the whole dispatch to move the control, and
+      // the next aim finds where it went.
+      lost.set(
+        pixel,
+        landing.verdict === "missed"
+          ? `the click reached ${landing.path || "nothing"}`
+          : `no click was raised; the interaction reached ${
+            landing.path || "nothing"
+          }`,
       );
     }
-    if (aim === undefined || "missing" in aim) {
-      const probe = await readTextProbe(page, markSelector).catch(() =>
-        undefined
-      );
-      throw new Error(
-        `The control marked for click was replaced before the click could be ` +
-          `aimed at it${
-            aim?.sawTarget ? " while its box was settling" : ""
-          }. Last probe: ${toIndentedDebugString(probe)}`,
-      );
-    }
-    await page.clickPoint(aim);
   } finally {
+    await closeClickLanding(page, markSelector).catch(() => {});
     await clearClickMark(page, token).catch(() => {});
   }
 }
@@ -2132,6 +2433,56 @@ async function clearClickMark(
       }
     }
   }, { args: [token, CLICK_TARGET_ATTR] });
+}
+
+// What the interceptor the aim armed made of the trusted click that followed.
+async function readClickLanding(
+  page: Page,
+  selector: string,
+): Promise<ClickLanding> {
+  return await page.evaluate((targetSelector: string) => {
+    const landing = (globalThis as typeof globalThis & {
+      __cfClickLanding?: Record<
+        string,
+        { verdict: "pending" | "hit" | "missed"; path: string }
+      >;
+    }).__cfClickLanding?.[targetSelector];
+    return {
+      verdict: landing?.verdict ?? "pending",
+      path: landing?.path ?? "",
+    };
+  }, { args: [selector] });
+}
+
+// Let the aim arm an interceptor for this mark. An aim that runs outside this
+// window — one whose wait the test process has already given up on — leaves the
+// page alone.
+async function openClickLanding(
+  page: Page,
+  selector: string,
+): Promise<void> {
+  await page.evaluate((targetSelector: string) => {
+    ((globalThis as typeof globalThis & {
+      __cfClickLandingOpen?: Record<string, true>;
+    }).__cfClickLandingOpen ??= {})[targetSelector] = true;
+  }, { args: [selector] });
+}
+
+// Close the window and take the interceptor off the page, so the page's own
+// clicks are watched by nothing.
+async function closeClickLanding(
+  page: Page,
+  selector: string,
+): Promise<void> {
+  await page.evaluate((targetSelector: string) => {
+    const global = globalThis as typeof globalThis & {
+      __cfClickLanding?: Record<string, { detach: () => void }>;
+      __cfClickLandingOpen?: Record<string, true>;
+    };
+    delete global.__cfClickLandingOpen?.[targetSelector];
+    global.__cfClickLanding?.[targetSelector]?.detach();
+    delete global.__cfClickLanding?.[targetSelector];
+  }, { args: [selector] });
 }
 
 async function readTrustedActionProbe(
