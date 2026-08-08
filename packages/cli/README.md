@@ -21,6 +21,10 @@ line. Recognized shebangs and transformed compiler headers remain explicit
 selectors. JSON-, YAML-, Markdown-, Python-, and other language-shaped source is
 not guessed from its syntax.
 
+A diff shows its whole-diff change totals at the top right corner of its first
+line: the added line count and the removed line count, coloured like additions
+and removals.
+
 Markdown files can switch between the source and a rendered terminal view with
 `V`. The rendered view formats headings, emphasis, links, quotes, lists, task
 markers, tables, rules, and code. The same view is available for Markdown files

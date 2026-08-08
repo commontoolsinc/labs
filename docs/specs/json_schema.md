@@ -196,12 +196,26 @@ Deliberate extensions beyond the 2020-12 vocabulary:
   `"FabricEpochNsec"`, `"FabricHash"`, `"FabricRegExp"` — each naming a
   concrete `FabricPrimitive` class from the data-model. A value matches by
   prototype (`instanceof`), not by structure: these values are opaque leaves
-  with no enumerable properties, so structural keywords do not apply to them.
+  with no enumerable properties, and they are never property-walked.
   Each fabric-primitive type is a subtype of `"object"` (the way `"integer"`
   is a subtype of `"number"`): a `FabricBytes` value satisfies both
   `{ "type": "FabricBytes" }` and `{ "type": "object" }`, while a plain
-  object satisfies only the latter. The authoritative name list is
-  `FABRIC_PRIMITIVE_SCHEMA_TYPES` in `packages/api/index.ts`.
+  object satisfies only the latter. One structural keyword gates the subtype
+  match: an object-typed schema's `required` keys must exist on the
+  primitive, where class accessors count (`FabricBytes` satisfies
+  `required: ["length"]` but not `required: ["x"]`) — mirroring the
+  TypeScript structural rule that a `FabricBytes` is assignable to
+  `{length: number}`. The nominal brand key
+  (`FABRIC_SPECIAL_OBJECT_BRAND` in `packages/api/index.ts`), which
+  generated schemas name in `required`, has no runtime existence and counts
+  as present on any fabric value. Property sub-schemas are still not walked
+  against a primitive: presence is checked, shapes are not, so
+  `{ "type": "object", "properties": { "source": { "type": "number" } } }`
+  matches a `FabricRegExp` even though its `source` is a string. Schemas
+  generated from the real class types cannot express such a mismatch; only
+  hand-written schemas can, and they get no shape enforcement on opaque
+  leaves. The authoritative name list is `FABRIC_PRIMITIVE_SCHEMA_TYPES` in
+  `packages/api/index.ts`.
 
 Generated schemas also hoist named types into `$defs` and reference them via
 `#/$defs/...`. The full TypeScript→schema mapping is specified in the

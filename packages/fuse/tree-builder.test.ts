@@ -868,7 +868,7 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
     result: {
       getCell: () => Promise.resolve(makeChannel("piece", "result")),
     },
-    manager: () => ({
+    pieces: () => ({
       runtime: { idle: () => Promise.resolve() },
       synced: () => Promise.resolve(),
     }),
@@ -881,7 +881,7 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
     result: {
       getCell: () => Promise.resolve(makeChannel("entity", "result")),
     },
-    manager: () => ({
+    pieces: () => ({
       runtime: { idle: () => Promise.resolve() },
       synced: () => Promise.resolve(),
     }),
@@ -914,7 +914,6 @@ Deno.test("CellBridge.sendToHandler resolves mounted callable paths under pieces
   );
 
   bridge.spaces.set("home", {
-    manager: {} as never,
     pieces: {} as never,
     spaceIno,
     piecesIno,
@@ -979,7 +978,7 @@ Deno.test("CellBridge.sendToHandlerTarget survives callable inode rebuilds", asy
     result: {
       getCell: () => Promise.resolve(makeChannel("result")),
     },
-    manager: () => ({
+    pieces: () => ({
       runtime: { idle: () => Promise.resolve() },
       synced: () => Promise.resolve(),
     }),
@@ -1002,7 +1001,6 @@ Deno.test("CellBridge.sendToHandlerTarget survives callable inode rebuilds", asy
   );
 
   bridge.spaces.set("home", {
-    manager: {} as never,
     pieces: {} as never,
     spaceIno,
     piecesIno,

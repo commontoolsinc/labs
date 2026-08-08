@@ -21,13 +21,12 @@ import { deepFreeze } from "@/deep-freeze.ts";
  * to produce the original wire format. See Section 3.3 of the formal spec.
  */
 export class UnknownValue extends ExplicitTagValue {
+  /** Constructs an instance for the given unrecognized tag and its state. */
   constructor(wireTypeTag: string, state: FabricValue) {
     super(wireTypeTag, state);
   }
 
-  /**
-   * Deep-freezes in place.
-   */
+  /** Deep-freezes in place. */
   [DEEP_FREEZE](
     subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
@@ -56,6 +55,7 @@ export class UnknownValue extends ExplicitTagValue {
 
   static #codec = Object.freeze(
     new (class UnknownValueCodec extends BaseFabricCodec {
+      /** Constructs an instance. */
       constructor() {
         // No preferred wire tag: an `UnknownValue` round-trips to its
         // *preserved* tag, which varies per instance.

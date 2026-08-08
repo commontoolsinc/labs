@@ -3,7 +3,7 @@
  * refresh round trips may overlap up to a bounded window instead of the default
  * strict single-flight. (The memory-client ordering guarantees — wire order
  * across the set/add family and ordered delivery through the real server — are
- * covered in packages/memory/test/v2-concurrent-watch-refresh-test.ts, where
+ * covered in packages/memory/test/v2-concurrent-watch-refresh.test.ts, where
  * the in-package server/loopback helpers are available.)
  *
  * Everything here is event-driven (no wall-clock sleeps): progress is awaited

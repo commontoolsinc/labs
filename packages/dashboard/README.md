@@ -31,6 +31,7 @@ deno task test
 dashboard/
   types.ts      the interface: Tile, TileView, Status, Ctx, Route
   config.ts     port, repo, tunable status thresholds
+  palette.ts    THE ONE PLACE status colors, washes and dot shapes are chosen
   lib.ts        shared helpers (github, memo, escapeHtml, sparkline, strip, …)
   blacksmith.ts authenticated read client for Blacksmith billing data
   ctx.ts        shared, memoized data sources handed to every tile (ctx.runs)
@@ -192,13 +193,54 @@ tiles sit red or amber most of the time, people stop seeing them, and a board
 everyone has learned to ignore is worse than no board. A tile earns a color
 change; it never reaches for one to get attention.
 
-Each signal carries a texture behind the tile as well as a color, so a state is
-legible without depending on color alone. A gray tile is covered in a grid of
-tiny dots, an amber tile in wavy lines, and a red tile in zig-zags. Green tiles
+A signal is carried by four things at once, so that no one of them has to be
+read on its own. Losing any single cue still leaves a state legible, which is
+what a person who cannot separate red from green is doing all day.
+
+The first is color, chosen so the four stay apart for that person too. Green
+sits at a teal and amber at an orange rather than at a yellow, which puts the
+two on the blue/yellow axis; red/green color blindness leaves that axis
+working, and good against warn is otherwise the hardest pair on the wall. Every
+pair of statuses is measured in `palette.test.ts`, which simulates the two
+common forms of red/green color blindness and fails if any pair comes within
+reach of reading as one color.
+
+The second is the shape of the header dot: a circle for good, a triangle for
+warn, a diamond for bad, and a hollow ring for unknown. A shape survives any
+kind of color vision, and any distance at which the dot is still visible at all.
+
+The third is weight. A tile's background wash and its border both get stronger
+as its status gets more serious, so a good tile is the quietest thing on the
+wall and a red one the loudest. That ordering holds with the color taken away
+altogether.
+
+The fourth is texture, behind the tile. A gray tile is covered in a grid of
+tiny dots, an amber tile in broad wavy lines, and a red tile in zig-zags. The
+lines are wide and faint rather than fine and dark, which puts enough of the
+pattern on the tile to catch the eye without any one line drawing it. The
+zig-zag covers a little under half of a red tile, and the longer, gentler wave
+about a third of an amber one. Green tiles
 are left plain, which is the calm the rest of the wall is measured against.
-Every texture fades out down the tile: it is whole for the tile's top fifth,
-thins from there, and is gone four fifths of the way down, which leaves the
+Every texture fades out down the tile: it is whole for the tile's top seventh,
+thins from there, and is gone seven tenths of the way down, which leaves the
 sub line and the foot of a chart on plain color.
+
+Everything the wall draws over a texture has to stay legible against it, and
+the faintest marks are the ones that decide how strong a texture can be: a
+tile's title, its drill-down hint, its running badge, and the times, dividers
+and pop-out arrows down the recent-runs list. Those are set against the lightest the background
+reaches under a texture band rather than against the tile's flat color. The
+dividers and the arrows are fractions of white rather than fixed grays,
+because the surface they sit on is tinted by the status and a gray that reads
+on one wash washes out on another.
+
+`palette.ts` holds all of this, and it is the only place any of it is chosen.
+A status color that appears anywhere — a tile, a dot, a headline, a run cell,
+a sparkline's fade, a drill-down row, the favicon — comes from there. A shade
+that follows from another, like the one a sparkline fades up out of, is worked
+out there too rather than written down beside it, so a change to a color or to
+a tile's wash carries to it without a second edit. The shape a dot takes is
+geometry rather than color, and lives with the rest of the tile's CSS.
 
 Think about how a tile makes someone feel before you think about what it
 measures. Prefer an honest gray "unknown" over a false green — a tile that
@@ -576,7 +618,21 @@ Notes:
   benchmarks the latest run measured and the highlighted window when applicable.
   **Red** marks the **most recent run failing outright, or finishing green on CI
   with no readable benchmark data**. A successful run with no usable output is
-  treated as failed. This
+  treated as failed. Either failure takes over that second line, in place of the
+  count and the window. A run that failed outright dates the outage and counts
+  it: **last good 2 days ago · 12 runs failed**. The count reads back through
+  the newest-first run list. It stops at the first completed run that did not
+  fail, so a cancelled run ends it. The date comes from the newest run that
+  passed, including one that passed on a later attempt, and it is read from the
+  run list the collection paged rather than from the trend's 45-day window. That
+  list runs to the end of the first page past 45 days, so an older outage is
+  dated whenever the run that ended it is still on the last page fetched. With
+  no passing run anywhere on the list there is nothing to date the outage from,
+  and the line is the count alone: **last 12 runs failed**. A run that finished green
+  with nothing readable reads **no benchmark data**. A **running** badge sits in
+  the header while a run is under way, wherever in the list it sits — a rerun
+  keeps its original place instead of moving to the head. The badge says the
+  colour may be about to move; the runs that have finished still set it. The red
   state reads the workflow-run list and the latest run's cached result. It
   therefore fires when the artifacts cannot be read. **Orange** means at least
   one CPU index is **trending up** past 5%. Each CPU trend uses the runs in the
@@ -620,6 +676,12 @@ Notes:
   days in the window the trend is marked new: there is too little data to claim one.
   The window is capped by the 90-day artifact retention, so it shows at most ~45
   days and only as far back as the job has run.
+  - The tile collects every minute, which is what the run state needs: a
+    benchmark run lasts about an hour, so a slower collection could miss one from
+    start to finish and never show its **running** badge. Each collection pages
+    the run list. The artifact history behind it is left alone while the last
+    refresh is recent and already covers the runs that list names — nothing new
+    has been sampled, so there is nothing to download.
   - The tile drills through to the per-benchmark history behind `/bench`, which the
     tile's collection keeps warm in the background. The collection lists
     benchmark runs on main. It samples one run per shortest-view bucket,
@@ -662,7 +724,13 @@ Notes:
     Idle between
     collections. During collection it shows cached, queued, requested,
     responded, outstanding, and failed artifact checks. Changing the range
-    leaves the server collection running and joins it from the new page.
+    leaves the server collection running and joins it from the new page. The
+    page closes with a **rerun hand-off**: a link to GitHub, where the run is
+    started. It targets the newest completed run when that run failed, whose
+    **Re-run all jobs** repeats it, and the workflow otherwise, whose **Run
+    workflow** starts a fresh run. The dashboard's GitHub token is read-only, so
+    the board cannot start a run itself, and GitHub decides whether the viewer
+    may start one.
   - The **CI duration history** view at `/bench?view=ci` selects either labs
     `deno.yml` or loom `test-fast.yml`. It charts every job's start-to-finish
     duration on one calendar-time axis. An overall row measures the workflow

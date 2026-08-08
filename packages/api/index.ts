@@ -39,6 +39,15 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
 // declaration here (interface + constructor + declare-const with `new`).
 
 /**
+ * The nominal brand key declared on `FabricSpecialObject`. It exists only in
+ * the type system — a runtime instance never carries the key; `instanceof
+ * FabricSpecialObject` is its runtime form. Schema `required` presence
+ * checks must therefore treat this key as satisfied by any fabric value
+ * rather than probing for it with `in`.
+ */
+export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
+
+/**
  * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
  * single `instanceof` check for any fabric-system value type.
  *
@@ -2380,35 +2389,76 @@ export interface BuiltInCompileAndRunState<T> {
 // derived from these types, so it would silently downgrade live cells to dead
 // values. (`SELF` and the consumer-facing factory result deliberately use the
 // same unstripped `R`.)
+/**
+ * The reserved output fields the runtime reads off a pattern's result, each
+ * typed so a value of the wrong shape under a reserved key is a compile error.
+ * `[NAME]` names the piece; `[UI]`, `[TILE_UI]` and `[CHIP_UI]` are its
+ * renderings; `[FS]` is its filesystem projection. Each is `FactoryInput`-
+ * wrapped so a reactive value (a `computed()`, a cell) is accepted alongside a
+ * plain one.
+ */
+type ReservedOutput = {
+  [NAME]?: FactoryInput<string>;
+  [TYPE]?: FactoryInput<string>;
+  [UI]?: FactoryInput<VNode> | JSXElement;
+  [TILE_UI]?: FactoryInput<VNode> | JSXElement;
+  [CHIP_UI]?: FactoryInput<VNode> | JSXElement;
+  [FS]?: FactoryInput<FsProjection>;
+};
+
+/**
+ * Attach the reserved fields to an object return, so a reserved key is typed
+ * in the return position without disturbing the author's own output shape: a
+ * pattern that omits them is unaffected. A pattern that returns a bare value
+ * or `undefined` (not an object) is passed through untouched — there is no
+ * reserved field to type there.
+ */
+type WithReservedOutput<R> = R extends object ? R & ReservedOutput : R;
+
+/**
+ * Values a pattern can return that are not objects, and so carry no reserved
+ * fields to check. Unioned into the explicit-`<T>` overloads' return so a
+ * pattern that returns a bare value (e.g. `string | undefined`) still type-
+ * checks there, where the output type is not a constrained parameter.
+ */
+type NonObjectOutput =
+  | string
+  | number
+  | bigint
+  | boolean
+  | symbol
+  | null
+  | undefined;
+
 export interface PatternFunction {
   // Function-only overload: T and R inferred from function
   <T, R>(
     fn: (
       input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
-    ) => FactoryInput<R>,
+    ) => WithReservedOutput<FactoryInput<R>>,
   ): PatternFactory<StripCell<T>, R>;
 
   // Function-only overload: T explicit, R inferred
   <T>(
     fn: (
       input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<any> },
-    ) => any,
-  ): PatternFactory<StripCell<T>, ReturnType<typeof fn>>;
+    ) => (object & ReservedOutput) | NonObjectOutput,
+  ): PatternFactory<StripCell<T>, any>;
 
   // Function + schema overload: T explicit, R inferred
   <T>(
     fn: (
       input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<any> },
-    ) => any,
+    ) => (object & ReservedOutput) | NonObjectOutput,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
-  ): PatternFactory<StripCell<T>, ReturnType<typeof fn>>;
+  ): PatternFactory<StripCell<T>, any>;
 
   // Function + schema overload: T and R explicit
   <T, R>(
     fn: (
       input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
-    ) => FactoryInput<R>,
+    ) => WithReservedOutput<FactoryInput<R>>,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
   ): PatternFactory<StripCell<T>, R>;

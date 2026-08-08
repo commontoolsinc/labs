@@ -1618,6 +1618,11 @@ export class StorageManager implements IStorageManager {
       return;
     }
 
+    // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, whose
+    // `Object.keys` are empty, so a cell link held inside a `FabricInstance`
+    // reconstructed from the data URI is never found here and its target
+    // document is never synced — the later read finds it absent. (A
+    // `FabricPrimitive` ends the walk harmlessly; it is a leaf.)
     if (isRecord(value)) {
       for (const key of Object.keys(value)) {
         const child = value[key];
@@ -4340,10 +4345,10 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   // CT-1927 client half: an accept's promotion waits for marker coverage.
-  // Immediate application remains for markers already observed (the frame
-  // can outrun the verdict handler on the same socket) and for servers that
-  // predate per-verdict markers (verdictCatchUpMarkers absent: an older
-  // server stamps markers only for conflicts, so parking would hang).
+  // Immediate application remains for a marker already observed before this
+  // replica begins settlement and for servers that predate per-verdict markers
+  // (verdictCatchUpMarkers absent: an older server stamps markers only for
+  // conflicts, so parking would hang).
   private settleAccept(
     localSeq: number,
     operations: NativeCommitOperation[],

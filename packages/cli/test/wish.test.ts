@@ -13,7 +13,7 @@ import { safeStringify } from "../lib/render.ts";
 
 // Exercises the headless wish read core (`resolveWish`) against an emulated
 // runtime — no live server. The full `readWish` (which adds a session-backed
-// `loadManager`) is covered by the integration lane. These tests assert that the
+// `loadPieces`) is covered by the integration lane. These tests assert that the
 // blessed read resolves through the SAME builtin resolution the runtime uses:
 // a profile object, a profile scalar, and the zero-profile error path.
 
@@ -306,7 +306,7 @@ describe("cf wish headless read (resolveWish)", () => {
         query: "#profileName",
       },
       {
-        loadManager: (config) => {
+        loadPieces: (config) => {
           seen.push(config.apiUrl, config.space);
           return Promise.resolve({
             runtime,

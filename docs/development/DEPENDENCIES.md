@@ -397,7 +397,7 @@ To roll SQLite, update all six import maps and
 `SQLITE3_RELEASE_VERSION` in one change, run `deno install`, and verify:
 
 ```bash
-deno test -A packages/memory/test/v2-sqlite-column-origin-test.ts
+deno test -A packages/memory/test/v2-sqlite-column-origin.test.ts
 deno task check
 deno task test
 ```

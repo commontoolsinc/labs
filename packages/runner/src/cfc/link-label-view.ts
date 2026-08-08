@@ -3,7 +3,12 @@ import {
   linkRefFrom,
   linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
+import {
+  FabricInstance,
+  FabricPrimitive,
+} from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
+import { refuseFabricInstance } from "../fabric-special-object.ts";
 import type { CellLinkRefPayload, SigilLink } from "../sigil-types.ts";
 import type { CfcLabelView } from "./label-view-core.ts";
 import { redactCaveatSourcesForDisplay } from "./label-view-core.ts";
@@ -84,10 +89,12 @@ export function stripSigilCfcLabelViews(value: unknown): unknown {
  * where a cycle has already become a back-link. That is a coupling between two
  * files and nothing enforces it.
  *
+ * A `FabricPrimitive` comes back as the same instance, correctly: a leaf holds
+ * no sigil link for this to rewrite. A `FabricInstance` is refused, since
+ * passing one through would leave a view riding a link inside it untouched.
+ *
  * TODO(danfuzz): track ancestors here, so this stands on its own rather than on
- * what its callers happen to pass. A `FabricInstance` is flattened by this walk
- * too, the same gap marked at the sibling walks -- see
- * `convertCellsToLinks` in `cell.ts`.
+ * what its callers happen to pass.
  */
 function transformSigilCfcLabelViews(
   value: unknown,
@@ -113,6 +120,27 @@ function transformSigilCfcLabelViews(
     });
     return changed ? out : value;
   }
+  // A `FabricPrimitive` is `isRecord` and leaves ahead of the record branch. It
+  // holds no sigil link, so returning it whole is the answer.
+  if (value instanceof FabricPrimitive) return value;
+
+  // A `FabricInstance` is refused. Its codec contents can carry a sigil link
+  // with a `cfcLabelView` riding it, and those contents are not reachable by
+  // property name -- so passing one through leaves that view in place. For
+  // `stripSigilCfcLabelViews()` that is the inv-12 Stage 0 boundary failing
+  // open: an untrusted view arriving from the main thread survives into worker
+  // label state, which is the one thing the strip exists to prevent.
+  //
+  // Nothing reaches this in production today, de facto rather than by
+  // construction: a `FabricError` is ungated and exposed to pattern authors, so
+  // what keeps this safe is that nothing yet routes one through this ingress.
+  //
+  // TODO(danfuzz): descend by codec-mediated traversal into instance state, at
+  // which point this becomes a walk rather than a refusal.
+  if (value instanceof FabricInstance) {
+    refuseFabricInstance(value, "when transforming sigil CFC label views");
+  }
+
   if (isRecord(value)) {
     let changed = false;
     const out: Record<string, unknown> = {};

@@ -35,12 +35,12 @@ async function timeCapabilityErrors(rel: string): Promise<string[]> {
     `${rel}-${crypto.randomUUID()}`,
   );
   const errors: string[] = [];
-  cc.manager().runtime.scheduler.onError((err) => {
+  cc.runtime.scheduler.onError((err) => {
     if (err?.name === "TimeCapabilityError") errors.push(err.message);
   });
   let cancel: (() => void) | undefined;
   try {
-    const program = await cc.manager().runtime.harness.resolve(
+    const program = await cc.runtime.harness.resolve(
       new FileSystemProgramResolver(join(ROOT, rel), ROOT),
     );
     // A lift-context violation is reported via onError (above) and swallowed; a
@@ -48,10 +48,10 @@ async function timeCapabilityErrors(rel: string): Promise<string[]> {
     // both as the same finding.
     const piece = await cc.create(program, { start: true });
     // A sink keeps the result reactive so its computeds actually evaluate.
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     cancel = resultCell.sink(() => {});
-    await cc.manager().runtime.idle();
-    await cc.manager().synced();
+    await cc.runtime.idle();
+    await cc.synced();
   } catch (e) {
     const err = e as Error;
     if (err?.name === "TimeCapabilityError") errors.push(err.message);
@@ -140,7 +140,7 @@ const CAPABILITY_CASES: CapabilityCase[] = [
         `compile-cache-${crypto.randomUUID()}`,
       );
       try {
-        expect(cc.manager().runtime.moduleByteCache).toBe(moduleByteCache);
+        expect(cc.runtime.moduleByteCache).toBe(moduleByteCache);
       } finally {
         await cc.dispose();
       }

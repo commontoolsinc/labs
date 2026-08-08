@@ -25,6 +25,7 @@ import {
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { refuseFabricInstance } from "./fabric-special-object.ts";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
@@ -1343,6 +1344,9 @@ export class CellImpl<T extends FabricValue>
     if ("error" in rowGate) throw new TypeError(rowGate.error);
     if (rowGate.policies !== undefined && rowGate.policies.length > 0) {
       this.tx.markCfcRelevant(`sqlite-row-label:${handle.id}`);
+      // TODO(danfuzz): `JSON.stringify` renders a `FabricPrimitive` bind
+      // param (a `FabricBytes` blob, say) as `{}`, so two requests differing
+      // only in such a param collapse onto one policy-input identity here.
       recordSinkRequestPolicyInput(
         this.tx,
         `sqlite:${handle.id}`,
@@ -1407,10 +1411,10 @@ export class CellImpl<T extends FabricValue>
      * one: an ingress caller that owns a delivery id passes it through so a
      * retry of the same id collides on the handling's create-only receipt
      * (verb contract WS-D,
-     * docs/plans/pattern-verb-contract-implementation.md). The receipt is a
-     * COMMIT witness, not an execution witness — the redelivered event still
-     * runs the handler body and then loses the race, so effects outside the
-     * transaction repeat. `runtimeInjectedEventKeys` carries the
+     * docs/history/plans/pattern-verb-contract-implementation.md). The receipt
+     * is a COMMIT witness, not an execution witness — the redelivered event
+     * still runs the handler body and then loses the race, so effects outside
+     * the transaction repeat. `runtimeInjectedEventKeys` carries the
      * runtime-injection provenance the closed-world gate consumes. Ignored on
      * the plain-cell write path.
      */
@@ -2023,6 +2027,13 @@ export class CellImpl<T extends FabricValue>
       throw new Error("Can't remove from non-array value");
     }
     const array = got as ElemT[];
+    // TODO(danfuzz): `typeof ref === "object"` routes a `FabricPrimitive`
+    // (or `FabricInstance`) ref to `areLinksSame`, which parses both
+    // operands as links and answers `false` when either is not one — so a
+    // fabric-valued ref matches only by reference identity, never by value,
+    // and the call otherwise silently no-ops. The sibling `removeByValue`
+    // has the right shape: link comparison for cells, `valueEqual` (which
+    // has a fabric arm) for everything else.
     const index = typeof ref === "object"
       ? array.findIndex((item) =>
         areLinksSame(
@@ -2057,6 +2068,9 @@ export class CellImpl<T extends FabricValue>
       throw new Error("Can't remove from non-array value");
     }
     const array = got as ElemT[];
+    // TODO(danfuzz): same gap as `remove()` above — a fabric-valued `ref`
+    // reaches `areLinksSame` and matches only by reference identity, never
+    // by value, so the call otherwise silently no-ops.
     // Cast needed: TS can't prove ElemT[] reconstitutes to T
     const newArray = array.filter((item) =>
       typeof ref === "object"
@@ -3095,6 +3109,14 @@ function sinkHelper(
  * This is used by pull() to ensure all nested values are read,
  * which registers them as dependencies for pull-based scheduling.
  * Works with query result proxies which trigger reads on property access.
+ *
+ * TODO(danfuzz): A `FabricInstance` passes the `typeof` gate but has no
+ * enumerable own properties, so the `for..in` walk ends at it without
+ * touching its codec contents: a link nested inside one (a `FabricError`
+ * `cause`, say — live traffic via the fetch builtins) is never read, so
+ * `pull()` neither registers it as a dependency nor syncs it, and a sink
+ * never re-fires on its change. A `FabricPrimitive` ends the walk too, which
+ * is correct — it is a leaf.
  */
 function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
   if (value === null || value === undefined) return;
@@ -3284,11 +3306,26 @@ function validateStaticData(value: unknown): void {
 
     ancestors.add(obj);
 
-    // TODO(danfuzz): This walk has no `FabricSpecialObject` guard, so a
-    // `FabricPrimitive`/`FabricInstance` in `Cell.of()` static data is walked by
-    // enumerable props instead of treated as a leaf / descended by codec
-    // contents.
+    // A `FabricPrimitive` reaches here and survives, correctly: it has zero
+    // enumerable own properties, so `Object.keys()` is empty and the descent
+    // ends -- and a leaf holds no cell for this validation to find.
     //
+    // A `FabricInstance` is refused instead. Its codec contents can hold a
+    // `Cell`, which is exactly what this validation exists to reject, and those
+    // contents are not reachable by property name -- so passing one through
+    // _smuggles_ a cell into static data past the check meant to stop it.
+    // That is not a completeness gap; it is the validation failing open.
+    //
+    // Nothing reaches this in production today, de facto rather than by
+    // construction: a `FabricError` is ungated and exposed to pattern authors,
+    // so what keeps this safe is that nothing yet puts one in `Cell.of()` data.
+    //
+    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
+    // at which point this becomes a walk rather than a refusal.
+    if (obj instanceof FabricInstance) {
+      refuseFabricInstance(obj, `in \`Cell.of()\` static data`);
+    }
+
     // Traverse arrays and objects
     if (Array.isArray(obj)) {
       for (let i = 0; i < obj.length; i++) {

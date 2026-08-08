@@ -92,8 +92,6 @@ When authoring or reviewing a skill itself, read
 
 For reading or changing Topics on Estuary, use `skills/topics/SKILL.md`.
 
-**Important:** Ignore the `packages/patterns/deprecated` folder - it is defunct.
-
 ### Runtime Development
 
 If you are developing runtime code, start with:

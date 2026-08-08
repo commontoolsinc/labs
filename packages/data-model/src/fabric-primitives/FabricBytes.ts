@@ -32,7 +32,7 @@ export class FabricBytes extends BaseFabricPrimitive {
   readonly #bytes: Uint8Array;
 
   /**
-   * Constructs a `FabricBytes` from raw bytes. The input is copied;
+   * Constructs an instance from raw bytes. The input is copied;
    * the caller may freely mutate the original after construction.
    *
    * @param bytes - The raw bytes to wrap (copied, not shared).
@@ -67,8 +67,10 @@ export class FabricBytes extends BaseFabricPrimitive {
    * Copies bytes from this instance into a caller-provided buffer.
    *
    * @param target - The destination buffer.
-   * @param offset - Byte offset in the source to start copying from (default 0).
-   * @param length - Number of bytes to copy (default: all remaining from offset).
+   * @param offset - Byte offset in the source to start copying from
+   *   (default `0`).
+   * @param length - Number of bytes to copy (default: all remaining from
+   *   `offset`).
    * @returns The number of bytes actually copied.
    */
   copyInto(target: Uint8Array, offset = 0, length?: number): number {
@@ -95,6 +97,7 @@ export class FabricBytes extends BaseFabricPrimitive {
 
   static #codec = Object.freeze(
     new (class BytesCodec extends BaseFabricCodec {
+      /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Bytes, FabricBytes);
       }

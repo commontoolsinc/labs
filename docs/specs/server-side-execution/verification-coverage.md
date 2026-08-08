@@ -44,7 +44,7 @@ families), the Phase 1 dry-run, and the doc-review panels
   pull its rows from this register.
 - **Deferral (~9)**: explicitly deferred semantics (streaming,
   quota attribution, session-data GC, basis-row retention bound,
-  resume-recover end state). Deferrals are answers.
+  resume-republish end state). Deferrals are answers.
 - **Derivable (~24)**: follows from a covered rule; each mapping
   run named the covering cell. Spot-checked in adjudication.
 

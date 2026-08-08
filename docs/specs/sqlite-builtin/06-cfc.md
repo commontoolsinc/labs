@@ -13,7 +13,7 @@ that declares no `ifc` and no row rule is unaffected and pays nothing.
 CFC labels are open-ended sets of **atoms** (immutable JSON values), not a fixed
 classification lattice
 ([`packages/runner/src/cfc.ts`](../../../packages/runner/src/cfc.ts);
-`packages/api/cfc-atoms.ts`). A schema attaches labels through its `ifc` field
+`packages/api/cfc.ts`). A schema attaches labels through its `ifc` field
 ([`packages/api/index.ts`](../../../packages/api/index.ts)):
 
 - `confidentiality` — who may read (set of atoms; principals are common atoms,

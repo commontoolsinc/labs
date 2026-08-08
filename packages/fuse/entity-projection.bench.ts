@@ -1,7 +1,6 @@
 // Entity projection scaling benchmark. The scheduled benchmark workflow stores
 // its operation timings and additional resource diagnostics.
 
-import type { PieceManager } from "@commonfabric/piece";
 import type {
   PieceController,
   PiecesController,
@@ -104,7 +103,7 @@ async function connect(
   let requests = 0;
   let lookups = 0;
   let transferredBytes = 0;
-  const manager = {
+  const spacePieces = {
     getSpace: () => "did:key:zFuseEntityProjectionBenchmark",
     listEntityIdPage: (options: {
       after?: string;
@@ -131,12 +130,12 @@ async function connect(
       return Promise.resolve(exists);
     },
     runtime: { dispose: () => Promise.resolve() },
-  } as unknown as PieceManager;
+  } as unknown as PiecesController;
   const tree = new FsTree(() => 0);
   const bridge = new CellBridge(tree, "", {
     cfcAnnotations,
     projectionGeneration: "entity-projection-review",
-    loadManager: () => Promise.resolve(manager),
+    loadPieces: () => Promise.resolve(spacePieces),
   });
   bridge.init({ apiUrl: "https://example.invalid", identity: "benchmark" });
   const state = await bridge.connectSpace("home");

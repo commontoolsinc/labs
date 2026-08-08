@@ -25,8 +25,12 @@ type TransactResponse = {
   ok?: unknown;
   error?: { name: string; message: string };
 };
+type PublishTransactVerdict = (response: TransactResponse) => void;
 type TestMemoryServer = {
-  transact(message: TransactMessage): Promise<TransactResponse>;
+  transact(
+    message: TransactMessage,
+    publishVerdict?: PublishTransactVerdict,
+  ): Promise<TransactResponse>;
 };
 
 // Hold the first commit whose payload mentions a marker, and decide its outcome
@@ -47,20 +51,24 @@ function holdCommitCarrying(
   const release = Promise.withResolvers<void>();
   let holding = false;
 
-  server.transact = (message) => {
+  server.transact = (message, publishVerdict) => {
     if (!holding && JSON.stringify(message).includes(marker)) {
       holding = true;
       held.resolve();
-      return release.promise.then(() => ({
-        type: "response" as const,
-        requestId: message.requestId,
-        error: {
-          name: "ConflictError",
-          message: "forced child ownership test conflict",
-        },
-      }));
+      return release.promise.then(() => {
+        const response: TransactResponse = {
+          type: "response",
+          requestId: message.requestId,
+          error: {
+            name: "ConflictError",
+            message: "forced child ownership test conflict",
+          },
+        };
+        publishVerdict?.(response);
+        return response;
+      });
     }
-    return original(message);
+    return original(message, publishVerdict);
   };
 
   return {

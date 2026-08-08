@@ -50,10 +50,6 @@ for the registration logic.
 | `CFTS_AI_LLM_ANTHROPIC_API_KEY` | Anthropic (Claude) |
 | `CFTS_AI_LLM_OPENAI_API_KEY` | OpenAI |
 | `CFTS_AI_LLM_GROQ_API_KEY` | Groq |
-| `CFTS_AI_LLM_CEREBRAS_API_KEY` | Cerebras |
-| `CFTS_AI_LLM_PERPLEXITY_API_KEY` | Perplexity |
-| `CFTS_AI_LLM_XAI_API_KEY` | xAI (Grok) |
-| `CFTS_AI_LLM_AWS_ACCESS_KEY_ID` + `CFTS_AI_LLM_AWS_SECRET_ACCESS_KEY` | AWS Bedrock |
 | `CFTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS` + `CFTS_AI_LLM_GOOGLE_VERTEX_PROJECT` + `CFTS_AI_LLM_GOOGLE_VERTEX_LOCATION` | Google Vertex AI |
 
 > Note: toolshed uses the `CFTS_AI_LLM_` prefix (not the conventional
@@ -82,7 +78,7 @@ for `TASK_MODELS.coding` / `TASK_MODELS.json`.
 | Var | Purpose |
 |---|---|
 | `FAL_API_KEY` | `/routes/ai/img` (image gen), `/routes/ai/voice` (transcription). |
-| `JINA_API_KEY` | `/routes/ai/webreader`. |
+| `JINA_API_KEY` | `/routes/agent-tools/web-read` (page extraction), `/routes/link-preview` (link previews). |
 
 ---
 
@@ -117,7 +113,6 @@ All blank by default. Each integration is gated on its `_CLIENT_ID` /
 
 | Var | Purpose |
 |---|---|
-| `DISCORD_WEBHOOK_URL` | General-purpose alerts. |
 | `LLM_HEALTH_DISCORD_WEBHOOK` | LLM health monitor alerts. |
 | `HOSTNAME` | Included in alerts so multi-host deploys are distinguishable. |
 
