@@ -296,6 +296,10 @@ One line per archived document; each document's header carries the fuller
 - [2026-07-binary-artifact-transfer.md](development/performance/2026-07-binary-artifact-transfer.md)
   — binary artifact file and byte transfer snapshot before the per-binary
   workflow split, July 2026.
+- [2026-08-schemaless-read-membership-walk.md](development/performance/2026-08-schemaless-read-membership-walk.md)
+  — why the schemaless whole-array read benchmarks stepped by two to three
+  times: the storage read path re-derived, per read, that what the replica
+  holds is a `FabricValue`, August 2026.
 - [coverage-ratchet-noise-2026-07-28.md](development/coverage-ratchet-noise-2026-07-28.md)
   — why a rename-only pull request owed coverage debt: a wall-clock-guarded
   diagnostic and a shard re-partition each moved the `packages/runner`
