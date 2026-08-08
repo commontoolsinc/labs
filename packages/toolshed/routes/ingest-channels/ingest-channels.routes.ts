@@ -218,6 +218,17 @@ export const revoke = createRoute({
         "Channel disabled; the registration is kept as an audit record",
     },
     ...commonResponses,
+    // Overrides the shared 409: revoke has a cause the others do not, and it is
+    // the one a caller is most likely to hit. Sending them to look for a
+    // replayed requestId when they actually raced a rotate wastes the debugging
+    // session the description exists to shorten.
+    [HttpStatusCodes.CONFLICT]: {
+      ...jsonError,
+      description:
+        "`expectedRevision` no longer matches the stored channel (list it " +
+        "again and re-issue), replayed requestId, or this deployment cannot " +
+        "write to the space",
+    },
   },
 });
 

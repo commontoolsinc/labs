@@ -638,26 +638,6 @@ export async function processRevoke(
   const replay = await peekReplay(deps, callerDid, input.requestId);
   if (replay) return replay;
 
-  // Already revoked: report the original revocation and write NOTHING.
-  //
-  // This used to rewrite the registration unchanged, purely to spend the
-  // request id — the worry being that a free 200 lets an attacker hold a
-  // captured revoke until the owner re-mints and fire it again. Binding to
-  // `expectedRevision` closed that on its own: a re-mint moves the generation,
-  // so the held request names one that no longer exists.
-  //
-  // Once redundant the write was actively harmful. A revoked channel sits at a
-  // STABLE revision, so its precondition never stops matching — any space owner
-  // could issue unlimited 200-returning revokes, each a real durable
-  // transaction over the registration and claims cells, metered by nothing.
-  // Reads cost nothing to repeat.
-  if (existing.registration.revoked !== undefined) {
-    return {
-      status: 200,
-      body: { id: input.id, revokedAt: existing.registration.revoked.at },
-    };
-  }
-
   return await writeRevocation(deps, callerDid, input, existing.registration, {
     claim: true,
   });
@@ -674,7 +654,26 @@ const writeRevocation = async (
   registration: IngestRegistration,
   opts: { claim: boolean },
 ): Promise<ControlResult<{ id: string; revokedAt: string }>> => {
-  const revokedAt = new Date().toISOString();
+  // Already revoked: keep the ORIGINAL revocation rather than overwriting it.
+  // Any owner of the space may revoke, so an overwrite would let a later caller
+  // replace an operator retirement's attribution with their own.
+  //
+  // It still WRITES, and the write is what makes the answer trustworthy. A
+  // read-only fast path here would decide "already revoked" from a registration
+  // read before the transaction — and a re-mint landing in that window would
+  // leave this reporting success while a freshly minted credential is live.
+  // Going through the transaction means `expectedRevision` is enforced against
+  // what is actually stored, so that case answers 409.
+  //
+  // The revision advances even though nothing else does. That is deliberate: it
+  // makes the write self-limiting. A revoked channel at a STABLE revision has a
+  // precondition that never stops matching, so the same request could be
+  // replayed for unlimited 200-returning durable transactions. Advancing it
+  // means a repeat must go read the new generation first.
+  const alreadyRevoked = registration.revoked !== undefined;
+  const revokedAt = alreadyRevoked
+    ? registration.revoked!.at
+    : new Date().toISOString();
   try {
     const history = plainRevocations(registration.revocations);
     await saveRegistration(
@@ -683,7 +682,9 @@ const writeRevocation = async (
       {
         ...registration,
         enabled: false,
-        revoked: { at: revokedAt, by: callerDid },
+        revoked: alreadyRevoked
+          ? { at: registration.revoked!.at, by: registration.revoked!.by }
+          : { at: revokedAt, by: callerDid },
         revision: (registration.revision ?? 0) + 1,
         // Rebuilt, not carried through the spread: see plainRevocations.
         // Without this the history vanishes on the SECOND revoke.
@@ -777,19 +778,26 @@ export async function processList(
       // that is simply false, on the path they would walk to confirm the
       // revoke worked. The counter never decreases, so "has ever had a
       // channel" survives revocation while leaking no more than before.
-      const everHadChannels = await getSpaceLifetimeChannelCount(
-        deps.runtime,
-        deps.serviceSpace,
-        input.space!,
-      );
-      if (everHadChannels === 0) return forbidden();
-      const authority = await authorize(deps, input.space!, callerDid);
-      if (!authority.ok) return fromAuthority(authority);
+      //
+      // Two sources, because neither alone covers every channel. The counter
+      // only starts moving at this change, so a channel provisioned before it
+      // and never re-minted leaves the space reading zero — and its owner would
+      // get the denial for a space that demonstrably has one. The live index
+      // covers those; the counter covers the ones the index has since dropped.
       ids = await getSpaceRegistrationIndex(
         deps.runtime,
         deps.serviceSpace,
         input.space!,
       );
+      const everHadChannels = ids.length > 0 ||
+        (await getSpaceLifetimeChannelCount(
+            deps.runtime,
+            deps.serviceSpace,
+            input.space!,
+          )) > 0;
+      if (!everHadChannels) return forbidden();
+      const authority = await authorize(deps, input.space!, callerDid);
+      if (!authority.ok) return fromAuthority(authority);
     } else {
       ids = await getOwnerRegistrationIndex(
         deps.runtime,
