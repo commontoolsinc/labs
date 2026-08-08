@@ -200,6 +200,37 @@ export function isUiInputBlindWriteTx(tx: object): boolean {
   return uiInputBlindWriteTxs.has(tx);
 }
 
+// Lazy materialization: a marked transaction hands a reader views that resolve
+// each path as it is touched, rather than a value built in one pass before the
+// reader looks at any of it.
+//
+// The mark also decides how a view treats the transaction it was made against.
+// Unmarked, a query-result proxy is a standing handle: it resolves the
+// transaction on every access, so a holder keeps reading current state after
+// that transaction has finished — which long-lived consumers depend on, an LLM
+// tool call dispatched later and a SQLite result flushed post-commit among
+// them. Marked, a view keeps the transaction it was created with, so the value
+// it describes stays the value that was there when it was taken, and reading
+// after that transaction finishes throws rather than quietly answering from
+// committed state.
+//
+// Nothing outside the mark changes, so an unmarked transaction reads exactly as
+// it did before lazy materialization existed. Marked on the same wrapper chain
+// as the marks above, so a wrapper and the transaction it wraps answer alike.
+const lazyMaterializationTxs = new WeakSet<object>();
+
+export function markLazyMaterializationTx(tx: object): void {
+  for (const layer of blindWriteTxChain(tx)) lazyMaterializationTxs.add(layer);
+}
+export function unmarkLazyMaterializationTx(tx: object): void {
+  for (const layer of blindWriteTxChain(tx)) {
+    lazyMaterializationTxs.delete(layer);
+  }
+}
+export function isLazyMaterializationTx(tx: object): boolean {
+  return lazyMaterializationTxs.has(tx);
+}
+
 // Renderer-input (user-keystroke `$value`) provenance for timing-mitigation
 // cell-flip shaping (plan B, channels 4/5). Unlike the blind-write mark above —
 // which is cleared before commit — this one must SURVIVE to commit time so the

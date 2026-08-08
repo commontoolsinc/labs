@@ -6,20 +6,19 @@
 // depend on that — a tool call dispatched by the LLM builtin, a SQLite result
 // flushed after commit, a piece started on demand.
 //
-// `createPinnedViewProxy` builds a view over the state one transaction sees,
-// fixed at creation. Reading after that transaction finishes throws instead of
-// quietly answering from committed state, which is what a materialized read
-// wants: the value it describes is the value that was there when it was taken.
+// A transaction marked for lazy materialization turns the same call into a view
+// over the state that one transaction sees, fixed at creation. Reading after
+// the transaction finishes throws instead of quietly answering from committed
+// state, which is what a materialized read wants: the value it describes is the
+// value that was there when it was taken.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
-import {
-  createPinnedViewProxy,
-  createQueryResultProxy,
-} from "../src/query-result-proxy.ts";
+import { createQueryResultProxy } from "../src/query-result-proxy.ts";
+import { markLazyMaterializationTx } from "../src/storage/reactivity-log.ts";
 import { type Cell } from "../src/cell.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -28,7 +27,7 @@ const space = signer.did();
 
 type Nested = { outer: { middle: { leaf: number } } };
 
-describe("query-result proxy transaction lifetime", () => {
+describe("query-result-proxy transaction lifetime", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
@@ -49,13 +48,16 @@ describe("query-result proxy transaction lifetime", () => {
     return cell;
   };
 
-  const pinnedView = (cell: Cell<Nested>, tx: IExtendedStorageTransaction) =>
-    createPinnedViewProxy<Nested>(
+  // Marking the transaction is the whole gate: the same call that builds a
+  // standing handle on an unmarked transaction builds a view on a marked one.
+  const pinnedView = (cell: Cell<Nested>, tx: IExtendedStorageTransaction) => {
+    markLazyMaterializationTx(tx);
+    return createQueryResultProxy<Nested>(
       runtime,
-      tx,
       tx,
       cell.getAsNormalizedFullLink(),
     );
+  };
 
   describe("a pinned view", () => {
     it("throws when read after its transaction has committed", async () => {

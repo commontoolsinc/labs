@@ -270,14 +270,23 @@ A test pinned that contract directly (`runtime-v2-read-tx-fallback.test.ts`,
 "uses a fresh read transaction for top-level query result proxy reads when no tx
 is provided"), which settles it: the behavior is intended.
 
-So both readings now exist over one proxy body:
+So both readings now exist over one proxy body, and **the transaction decides
+which one a caller gets**. `markLazyMaterializationTx` marks a transaction, on
+the same wrapper chain as the marks beside it in `reactivity-log.ts`, and
+`createQueryResultProxy` reads that mark:
 
-- [x] `createQueryResultProxy` — the standing handle. Resolves per access, as
-      before. Unchanged semantics, and the default.
-- [x] `createPinnedViewProxy` — the view. Keeps the transaction it was given for
-      every access and every child it hands out; reading after that transaction
-      finishes throws `StorageTransactionCompleteError` through the
-      transaction's own `editable()` guard, with no new error type.
+- [x] Unmarked — every caller today — is the standing handle, resolving per
+      access exactly as before. Nothing outside the mark changes behavior.
+- [x] Marked is the view. It keeps that transaction for every access and every
+      child it hands out; reading after the transaction finishes throws
+      `StorageTransactionCompleteError` through the transaction's own
+      `editable()` guard, with no new error type.
+
+Gating on the transaction rather than on a second entry point is what keeps the
+rule single: a call site cannot pin by accident, and everything a marked
+transaction reads pins together, including the schema-less subtrees a
+schema-observing view will delegate.
+
 - [x] `Cell.pull()` fixed. It built its value inside a scheduler effect whose
       transaction has committed by the time the promise resolves, so a
       schemaless cell resolved a handle over a dead transaction. The effect
@@ -285,10 +294,14 @@ So both readings now exist over one proxy body:
 - [x] Suite green: 1162 passed, 0 failed, against a baseline of 1161 passed and
       1 failed — the `pull()` fix took that one too.
 
-The consequence for later stages: the schema-observing view builds on
-`createPinnedViewProxy`, and Stage 3's "pin both or pin neither" question is now
-a live choice rather than a foregone one, because the schema-less proxy has a
-demonstrated reason to stay unpinned.
+This also settles Stage 3's "pin both or pin neither": both, within a marked
+transaction, and neither outside one. A `.get()` under lazy materialization
+hands back handles that agree on which instant they describe, while an unmarked
+read keeps the live-handle semantics its consumers rely on.
+
+Stage 4 no longer has to invent the mode — it has to decide what else the mark
+means, and set it. Today nothing in the runtime marks a transaction, so the
+behavior is dormant by construction.
 
 ### Stage 2 — The schema-observing view
 

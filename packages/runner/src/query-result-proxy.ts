@@ -16,6 +16,7 @@ import {
 } from "./storage/interface.ts";
 import {
   ignoreReadForScheduling,
+  isLazyMaterializationTx,
   mergeableOpRead,
 } from "./storage/reactivity-log.ts";
 import { toURI } from "./uri-utils.ts";
@@ -156,56 +157,31 @@ export function createQueryResultProxy<T>(
   writable: boolean = false,
   cfcLabelView?: CfcLabelView,
 ): T {
-  // A standing handle on a cell: each access resolves the transaction afresh,
-  // so a holder keeps reading current state after the transaction it was made
-  // against has finished. Long-lived consumers depend on that — a tool call
-  // dispatched by the LLM builtin, a SQLite result flushed after commit, and a
-  // piece started on demand all read handles their originating run no longer
-  // owns. `createPinnedViewProxy` is the other reading of the same machinery.
+  // The transaction decides which of the two this is. Marked for lazy
+  // materialization, the proxy is a view: it keeps this transaction, so the
+  // value it describes stays the value that was there when it was taken, and
+  // reading after the transaction finishes throws.
   //
-  // A caller who supplies no transaction gets a genuinely fresh one per access
-  // rather than whatever `readTx()` would hand back, so the handle cannot be
-  // pinned to an ambient transaction that has since gone stale.
+  // Unmarked — every caller today — it is a standing handle on a cell that
+  // resolves the transaction afresh on every access, so a holder keeps reading
+  // current state after the transaction it was made against has finished. Long-
+  // lived consumers depend on that: a tool call dispatched by the LLM builtin,
+  // a SQLite result flushed after commit, and a piece started on demand all
+  // read handles their originating run no longer owns.
+  //
+  // An unmarked caller who supplies no transaction gets a genuinely fresh one
+  // per access rather than whatever `readTx()` would hand back, so the handle
+  // cannot be pinned to an ambient transaction that has since gone stale.
+  const pinned = tx !== undefined && isLazyMaterializationTx(tx);
   return createViewProxy(
     runtime,
-    tx === undefined ? runtime.edit() : runtime.readTx(tx),
+    pinned ? tx : tx === undefined ? runtime.edit() : runtime.readTx(tx),
     tx,
     link,
     depth,
     writable,
     cfcLabelView,
-    false,
-  );
-}
-
-/**
- * A view over the state one transaction sees, fixed at creation.
- *
- * Where {@link createQueryResultProxy} keeps resolving the transaction so a
- * holder tracks current state, this keeps the one it was given: every access,
- * and every child view it hands out, reads through that transaction, and
- * reading after it finishes throws rather than quietly answering from
- * committed state. That is what a materialized read wants — the value it
- * describes is the value that was there when it was taken.
- */
-export function createPinnedViewProxy<T>(
-  runtime: Runtime,
-  viewTx: IExtendedStorageTransaction,
-  tx: IExtendedStorageTransaction | undefined,
-  link: NormalizedFullLink,
-  depth: number = 0,
-  writable: boolean = false,
-  cfcLabelView?: CfcLabelView,
-): T {
-  return createViewProxy(
-    runtime,
-    viewTx,
-    tx,
-    link,
-    depth,
-    writable,
-    cfcLabelView,
-    true,
+    pinned,
   );
 }
 
