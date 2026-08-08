@@ -1102,10 +1102,15 @@ describe("ingest-channels control plane", () => {
     ).toEqual([]);
   });
 
-  // The no-op leg must not write, and the observable proof is that it spends
-  // nothing: a request id reused against an already-revoked channel is still
-  // unclaimed, so it is answered rather than refused as a replay.
-  it("writes nothing when revoking an already-revoked channel", async () => {
+  // Revoking an already-revoked channel goes through the transaction rather
+  // than short-circuiting on the registration read. A read-only fast path would
+  // decide "already revoked" from a snapshot, and a re-mint landing in that
+  // window would leave it reporting success while a fresh credential is live.
+  //
+  // Advancing the revision on that write is what keeps it from being an
+  // amplifier: at a stable revision the same request replays forever, each one
+  // a real durable transaction.
+  it("makes a repeated revoke self-limiting rather than endlessly writable", async () => {
     const first = await mint(alice, "req-noop");
     const id = ok(first).id;
     await processRevoke(deps, alice.did(), {
@@ -1116,19 +1121,56 @@ describe("ingest-channels control plane", () => {
     const settled = await getRegistration(runtime, operator.did(), id);
     const at = await revOf(id);
 
-    for (let i = 0; i < 3; i++) {
-      // The SAME id every time. If any pass had spent it, the next would 409.
-      const again = await processRevoke(deps, alice.did(), {
-        id,
-        requestId: "rv-noop-same",
-        expectedRevision: at,
-      });
-      expect(again.status).toBe(200);
-      expect(ok(again).revokedAt).toBe(settled?.revoked?.at);
-    }
-    expect(await revOf(id)).toBe(at);
-    expect((await getRegistration(runtime, operator.did(), id))?.revoked?.at)
-      .toBe(settled?.revoked?.at);
+    // A second revoke against the current generation succeeds and reports the
+    // ORIGINAL revocation — attribution is not overwritten.
+    const again = await processRevoke(deps, alice.did(), {
+      id,
+      requestId: "rv-noop-1",
+      expectedRevision: at,
+    });
+    expect(again.status).toBe(200);
+    expect(ok(again).revokedAt).toBe(settled?.revoked?.at);
+    expect((await getRegistration(runtime, operator.did(), id))?.revoked?.by)
+      .toBe(alice.did());
+
+    // And it moved the generation, so the very same request cannot be issued
+    // again without going back to read the new one.
+    expect(await revOf(id)).toBe(at + 1);
+    const third = await processRevoke(deps, alice.did(), {
+      id,
+      requestId: "rv-noop-2",
+      expectedRevision: at,
+    });
+    expect(third.status).toBe(409);
+  });
+
+  // The registration is read once to authorize and check the generation, then
+  // again inside the write transaction. Only the second read decides, which is
+  // what stops a re-mint in that window from being reported as a revocation.
+  it("refuses a revoke whose generation went stale between read and write", async () => {
+    const first = await mint(alice, "req-toctou");
+    const id = ok(first).id;
+    const at = await revOf(id);
+
+    // Revoke and re-mint: the channel is live again at a later generation.
+    await processRevoke(deps, alice.did(), {
+      id,
+      requestId: "rv-toctou",
+      expectedRevision: at,
+    });
+    const remint = await mint(alice, "req-toctou-2");
+    expect(remint.status).toBe(200);
+
+    // A revoke naming the pre-revoke generation must not report success.
+    const stale = await processRevoke(deps, alice.did(), {
+      id,
+      requestId: "rv-toctou-late",
+      expectedRevision: at,
+    });
+    expect(stale.status).toBe(409);
+    const live = await getRegistration(runtime, operator.did(), id);
+    expect(live?.revoked).toBeUndefined();
+    expect(live?.enabled).toBe(true);
   });
 
   // A per-owner quota bounds a KEYPAIR, and keypairs are free: one person can
@@ -1204,10 +1246,9 @@ describe("ingest-channels control plane", () => {
       .toBe(403);
   });
 
-  // Revoking an already-revoked channel reports the ORIGINAL revocation and
-  // writes nothing at all — a revoked channel sits at a stable revision, so a
-  // write here would have a precondition that never stops matching, and any
-  // space owner could drive unlimited durable transactions through it.
+  // The second revoke re-embeds the deep-frozen `revoked` object into a new
+  // container — the exact round-trip that silently drops values — so the
+  // ORIGINAL attribution surviving it is worth pinning on its own.
   it("keeps revocation state across a second revoke with a fresh id", async () => {
     const first = await mint(alice, "req-2rv");
     const id = ok(first).id;
@@ -1231,8 +1272,9 @@ describe("ingest-channels control plane", () => {
     const after = await getRegistration(runtime, operator.did(), id);
     expect(after?.revoked?.at).toBe(revoked?.revoked?.at);
     expect(after?.revoked?.by).toBe(alice.did());
-    // A no-op write must not bump the generation.
-    expect(after?.revision).toBe(revoked?.revision);
+    // The generation moves even though nothing else does — that is what keeps
+    // a repeated revoke from being replayable forever.
+    expect(after?.revision).toBe((revoked?.revision ?? 0) + 1);
 
     // And the trail still survives a later re-mint.
     await mint(alice, "req-2rv-remint");

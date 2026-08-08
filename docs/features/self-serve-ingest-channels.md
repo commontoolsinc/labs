@@ -332,15 +332,18 @@ Four hazards that this change introduces or amplifies, each with its fix:
    conflict the caller must re-issue against — which is the correct outcome,
    since the thing being revoked would not be the thing that was seen.
 
-   Because the generation is the binding, revoking an **already-revoked**
-   channel writes nothing: it reports the original revocation and returns. An
-   earlier version rewrote the registration unchanged to spend the request id,
-   guarding against an attacker holding a delivered-and-replayed revoke until
-   the owner re-mints — but `expectedRevision` already refuses that, since a
-   re-mint moves the generation. Once redundant, the write was actively
-   harmful: a revoked channel sits at a *stable* revision, so its precondition
-   never stops matching, and any space owner could drive unlimited
-   200-returning durable transactions through it. Reads cost nothing to repeat.
+   Revoking an **already-revoked** channel keeps the original revocation and
+   its attribution, but still goes through the write transaction rather than
+   short-circuiting on the registration read. A read-only fast path would
+   decide "already revoked" from a snapshot, and a re-mint landing between that
+   read and the answer would leave it reporting success while a freshly minted
+   credential is live. Only the transaction's own read decides.
+
+   That write advances the revision even though nothing else changes, which is
+   what keeps it from becoming an amplifier: at a *stable* revision the same
+   request's precondition never stops matching, so one captured request could
+   drive unlimited 200-returning durable transactions. Advancing it forces a
+   repeat to go read the new generation first.
 
    That read defaults to the caller's own channels, so revoking a channel
    minted by *someone else* against a space you own — the case
