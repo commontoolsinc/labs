@@ -240,7 +240,10 @@ happens.
 two consecutive rendering frames. It measures the marked control again just
 before dispatch. If that final measurement finds that the control moved or was
 replaced, the helper settles and marks the current control before dispatching
-one trusted click.
+one trusted click. A page that moves the control after even that last
+measurement is caught as well: the helper stops an interaction that misses
+before the page sees it, and aims again.
+`docs/development/waiting-in-tests.md` describes how.
 
 **Use `awaitViewSettled(page)`** from `@commonfabric/integration` as the
 lower-level wait after navigation or a state change. When the next step
@@ -263,11 +266,12 @@ await waitForCondition(page, (probe) =>
 Pattern integration tests can use the higher-level wrappers in
 `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
 `fillCfInput`, `clickCfButton`, `clickCfButtonAndWaitForText` — which bundle
-the common waiting and interaction sequences. `clickCfButton` proceeds only
-when the same target remains rendered before and after a settle. It marks that
-target inside the successful predicate. See
+the common waiting and interaction sequences. Every one of them that clicks
+proceeds only when the same target remains rendered before and after a settle,
+and marks that target inside the successful predicate — the helpers that reach a
+control by index, by `data-ui-action`, or by its button text included. See
 `docs/development/waiting-in-tests.md` for why that ordering is the load-bearing
-part, and for which helpers do not yet have it.
+part.
 
 ### Do not reach for these instead
 

@@ -20,6 +20,7 @@ import {
   fillCfInput,
   waitForSettledText,
 } from "./cfc-browser-helpers.ts";
+import { clickButtonWithText } from "./note-button-helpers.ts";
 
 /** One element's live click marks, in attribute order. */
 type MarkProbe = { clicks: number; marksAtClick: string[]; marks: string[] };
@@ -820,6 +821,9 @@ describe("CFC browser helpers", () => {
       document.body.append(host);
 
       (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = { viewSettled: () => Promise.resolve() };
+      (globalThis as typeof globalThis & {
         __indexedMarkProbe: () => unknown;
       }).__indexedMarkProbe = () => ({
         clicks,
@@ -868,6 +872,9 @@ describe("CFC browser helpers", () => {
       document.body.append(host);
 
       (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = { viewSettled: () => Promise.resolve() };
+      (globalThis as typeof globalThis & {
         __trustedMarkProbe: () => unknown;
       }).__trustedMarkProbe = () => ({
         clicks,
@@ -890,6 +897,179 @@ describe("CFC browser helpers", () => {
     );
     assertEquals(result.marksAtClick.length, 2);
     assertEquals(result.marks, ["held-by-another-click"]);
+  });
+
+  // The three tests below cover the click helpers that reach their control by
+  // index, by `data-ui-action`, and by button text. Each drives a control that
+  // is in the DOM from the start but receives its click handler only when the
+  // view settles — the ordinary case of a vdom batch that has not yet crossed
+  // to the main thread. A helper that marks its control without settling around
+  // it clicks an element with nothing bound, and `clickedAtSettle` stays zero.
+
+  it("settles the view before clicking an indexed control", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      for (const label of ["first", "second"]) {
+        const button = document.createElement("button");
+        button.className = "late-indexed-target";
+        button.textContent = label;
+        root.append(button);
+      }
+      document.body.append(host);
+
+      let settleCalls = 0;
+      let clickedAtSettle = 0;
+      let bound = false;
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = {
+        viewSettled: () => {
+          settleCalls++;
+          if (!bound) {
+            bound = true;
+            root.querySelectorAll(".late-indexed-target")[1]
+              .addEventListener("click", () => {
+                clickedAtSettle = settleCalls;
+              }, { once: true });
+          }
+          return Promise.resolve();
+        },
+      };
+      (globalThis as typeof globalThis & {
+        __lateIndexedResult: () => {
+          settleCalls: number;
+          clickedAtSettle: number;
+        };
+      }).__lateIndexedResult = () => ({ settleCalls, clickedAtSettle });
+    });
+
+    await clickNthCfButton(page, ".late-indexed-target", 1);
+
+    const result = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __lateIndexedResult: () => {
+          settleCalls: number;
+          clickedAtSettle: number;
+        };
+      }).__lateIndexedResult()
+    );
+    assertEquals(
+      result.clickedAtSettle,
+      1,
+      "the click reached no handler: the indexed target was marked and " +
+        "clicked without a settle to bind it",
+    );
+    // One settle binds the control, and one follows the click.
+    assertEquals(result.settleCalls, 2);
+  });
+
+  it("settles the view before clicking a trusted action", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      const button = document.createElement("button");
+      button.setAttribute("data-ui-action", "late-save");
+      button.textContent = "Save";
+      root.append(button);
+      document.body.append(host);
+
+      let settleCalls = 0;
+      let clickedAtSettle = 0;
+      let bound = false;
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = {
+        viewSettled: () => {
+          settleCalls++;
+          if (!bound) {
+            bound = true;
+            button.addEventListener("click", () => {
+              clickedAtSettle = settleCalls;
+            }, { once: true });
+          }
+          return Promise.resolve();
+        },
+      };
+      (globalThis as typeof globalThis & {
+        __lateActionResult: () => {
+          settleCalls: number;
+          clickedAtSettle: number;
+        };
+      }).__lateActionResult = () => ({ settleCalls, clickedAtSettle });
+    });
+
+    await clickTrustedAction(page, "late-save");
+
+    const result = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __lateActionResult: () => {
+          settleCalls: number;
+          clickedAtSettle: number;
+        };
+      }).__lateActionResult()
+    );
+    assertEquals(
+      result.clickedAtSettle,
+      1,
+      "the click reached no handler: the trusted action was marked and " +
+        "clicked without a settle to bind it",
+    );
+    assertEquals(result.settleCalls, 2);
+  });
+
+  it("settles the view before clicking a button found by text", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      const button = document.createElement("button");
+      button.id = "late-note-button";
+      button.textContent = "Publish the late note";
+      root.append(button);
+      document.body.append(host);
+
+      let settleCalls = 0;
+      let clickedAtSettle = 0;
+      let bound = false;
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = {
+        viewSettled: () => {
+          settleCalls++;
+          if (!bound) {
+            bound = true;
+            button.addEventListener("click", () => {
+              clickedAtSettle = settleCalls;
+            }, { once: true });
+          }
+          return Promise.resolve();
+        },
+      };
+      (globalThis as typeof globalThis & {
+        __lateNoteResult: () => {
+          settleCalls: number;
+          clickedAtSettle: number;
+        };
+      }).__lateNoteResult = () => ({ settleCalls, clickedAtSettle });
+    });
+
+    await clickButtonWithText(page, "Publish the late note");
+
+    const result = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __lateNoteResult: () => {
+          settleCalls: number;
+          clickedAtSettle: number;
+        };
+      }).__lateNoteResult()
+    );
+    assertEquals(
+      result.clickedAtSettle,
+      1,
+      "the click reached no handler: the named button was marked and " +
+        "clicked without a settle to bind it",
+    );
+    assertEquals(result.settleCalls, 2);
   });
 
   it("drives the page to settle before filling a cf input", async () => {
@@ -1374,6 +1554,336 @@ describe("CFC browser helpers", () => {
       1,
       "the click never reached the control the surface rebuilt under it",
     );
+  });
+
+  it("clicks the control its surface relaid out under the aim", async () => {
+    // The aim measures the control inside the page and hands the point back to
+    // the test process, which then dispatches the trusted click over a separate
+    // protocol round trip. The page runs freely across that gap. A re-render
+    // arriving in it — a roster update crossing from another browser, say —
+    // relays the surface out and carries the control away from the point the
+    // click is already aimed at, so the click lands on whatever moved into that
+    // space and the control is never clicked.
+    //
+    // The relayout is driven from the interaction observer's `beforeClick`,
+    // which the dispatch awaits, so it lands strictly between the measurement
+    // and the click with no timing to align. It fires once: the second aim
+    // measures the control where it now sits, and the click that follows has
+    // nothing left to move it.
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      const surface = document.createElement("div");
+      // Fixed and on screen, so the aim's scroll cannot move it and the
+      // content earlier cases leave on the shared page cannot reach it.
+      Object.assign(surface.style, {
+        position: "fixed",
+        left: "400px",
+        top: "300px",
+        width: "220px",
+      });
+      root.append(surface);
+      document.body.append(host);
+
+      // The block that grows into the space the control vacates. A click that
+      // went to the control's old point landed here, which is what tells the
+      // two failures apart: a click that reached nothing at all, and a click
+      // that reached the wrong control.
+      const filler = document.createElement("button");
+      filler.id = "relaid-out-filler";
+      Object.assign(filler.style, {
+        display: "block",
+        width: "200px",
+        height: "0px",
+        padding: "0",
+        margin: "0",
+        border: "none",
+      });
+      const button = document.createElement("button");
+      button.id = "relaid-out-guest-button";
+      button.textContent = "Continue as guest";
+      Object.assign(button.style, {
+        display: "block",
+        width: "200px",
+        height: "40px",
+        padding: "0",
+        margin: "0",
+      });
+      surface.append(filler, button);
+
+      let buttonClicks = 0;
+      let fillerClicks = 0;
+      button.addEventListener("click", () => void buttonClicks++);
+      filler.addEventListener("click", () => void fillerClicks++);
+
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = { viewSettled: () => Promise.resolve() };
+      (globalThis as typeof globalThis & {
+        __relaidOutRelayout: () => void;
+        __relaidOutClicks: () => { button: number; filler: number };
+      }).__relaidOutRelayout = () => {
+        // 100px of filler covers the whole 40px box the control has left.
+        filler.style.height = "100px";
+      };
+      (globalThis as typeof globalThis & {
+        __relaidOutClicks: () => { button: number; filler: number };
+      }).__relaidOutClicks = () => ({
+        button: buttonClicks,
+        filler: fillerClicks,
+      });
+    });
+
+    let relaidOut = false;
+    page.setInteractionObserver({
+      beforeClick: async () => {
+        if (relaidOut) return;
+        relaidOut = true;
+        await page.evaluate(() =>
+          (globalThis as typeof globalThis & {
+            __relaidOutRelayout: () => void;
+          }).__relaidOutRelayout()
+        );
+      },
+    });
+    try {
+      await clickCfButton(page, "#relaid-out-guest-button");
+    } finally {
+      page.setInteractionObserver(undefined);
+    }
+
+    const clicks = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __relaidOutClicks: () => { button: number; filler: number };
+      }).__relaidOutClicks()
+    );
+    assertEquals(
+      clicks,
+      { button: 1, filler: 0 },
+      "the click did not reach the control after its surface relaid out",
+    );
+  });
+
+  it("clicks the control its surface moved between press and release", async () => {
+    // A trusted click is a press and a release, dispatched over two protocol
+    // round trips. A surface that relays out between them leaves the release
+    // somewhere the press was not, and the browser raises the click on the
+    // nearest ancestor the two have in common rather than on the control. The
+    // control is never clicked.
+    //
+    // The relayout is driven from the control's own mousedown, so it lands
+    // strictly between the two dispatches with no timing to align. It fires
+    // once, so the click that follows has a control standing still to reach.
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      const surface = document.createElement("div");
+      Object.assign(surface.style, {
+        position: "fixed",
+        left: "400px",
+        top: "80px",
+        width: "220px",
+      });
+      root.append(surface);
+      document.body.append(host);
+
+      const filler = document.createElement("div");
+      Object.assign(filler.style, { display: "block", height: "0px" });
+      const button = document.createElement("button");
+      button.id = "split-guest-button";
+      button.textContent = "Continue as guest";
+      Object.assign(button.style, {
+        display: "block",
+        width: "200px",
+        height: "40px",
+        padding: "0",
+        margin: "0",
+      });
+      surface.append(filler, button);
+
+      let buttonClicks = 0;
+      let strayClicks = 0;
+      button.addEventListener("click", () => void buttonClicks++);
+      // Clicks the browser raised somewhere other than the control. The one a
+      // split press and release produces lands here, on the surface the two
+      // targets have in common.
+      surface.addEventListener("click", (event) => {
+        if (event.target !== button) strayClicks++;
+      });
+      button.addEventListener("mousedown", () => {
+        filler.style.height = "100px";
+      }, { once: true });
+
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = { viewSettled: () => Promise.resolve() };
+      (globalThis as typeof globalThis & {
+        __splitClicks: () => { button: number; stray: number };
+      }).__splitClicks = () => ({ button: buttonClicks, stray: strayClicks });
+    });
+
+    await clickCfButton(page, "#split-guest-button");
+
+    const clicks = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __splitClicks: () => { button: number; stray: number };
+      }).__splitClicks()
+    );
+    assertEquals(
+      clicks,
+      { button: 1, stray: 0 },
+      "the click did not reach the control after the press and release split",
+    );
+  });
+
+  it("leaves the page's own clicks to the page while a click is in flight", async () => {
+    // Components raise clicks of their own — a label forwarding to its control,
+    // a component clicking itself from a key handler. One of those arriving
+    // while a trusted click is crossing the protocol is not that click, and is
+    // none of the helper's business: it must reach its own listeners, and it
+    // must not answer for the interaction the helper is waiting on.
+    //
+    // The page's click is raised from the interaction observer's `beforeClick`,
+    // which the dispatch awaits, so it lands in exactly that window.
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      const surface = document.createElement("div");
+      Object.assign(surface.style, {
+        position: "fixed",
+        left: "700px",
+        top: "300px",
+        width: "220px",
+      });
+      root.append(surface);
+      document.body.append(host);
+
+      const elsewhere = document.createElement("button");
+      elsewhere.id = "page-raised-elsewhere";
+      const button = document.createElement("button");
+      button.id = "page-raised-guest-button";
+      button.textContent = "Continue as guest";
+      Object.assign(button.style, {
+        display: "block",
+        width: "200px",
+        height: "40px",
+        padding: "0",
+        margin: "0",
+      });
+      surface.append(elsewhere, button);
+
+      let buttonClicks = 0;
+      let elsewhereClicks = 0;
+      button.addEventListener("click", () => void buttonClicks++);
+      elsewhere.addEventListener("click", () => void elsewhereClicks++);
+
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = { viewSettled: () => Promise.resolve() };
+      (globalThis as typeof globalThis & {
+        __pageRaisedClick: () => void;
+        __pageRaisedClicks: () => { button: number; elsewhere: number };
+      }).__pageRaisedClick = () => elsewhere.click();
+      (globalThis as typeof globalThis & {
+        __pageRaisedClicks: () => { button: number; elsewhere: number };
+      }).__pageRaisedClicks = () => ({
+        button: buttonClicks,
+        elsewhere: elsewhereClicks,
+      });
+    });
+
+    let raised = false;
+    page.setInteractionObserver({
+      beforeClick: async () => {
+        if (raised) return;
+        raised = true;
+        await page.evaluate(() =>
+          (globalThis as typeof globalThis & {
+            __pageRaisedClick: () => void;
+          }).__pageRaisedClick()
+        );
+      },
+    });
+    try {
+      await clickCfButton(page, "#page-raised-guest-button");
+    } finally {
+      page.setInteractionObserver(undefined);
+    }
+
+    const clicks = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __pageRaisedClicks: () => { button: number; elsewhere: number };
+      }).__pageRaisedClicks()
+    );
+    assertEquals(
+      clicks,
+      { button: 1, elsewhere: 1 },
+      "the page's own click was swallowed, or answered for the trusted one",
+    );
+  });
+
+  it("reports a control that keeps taking the click nowhere", async () => {
+    // A control a click cannot reach — covered, or declining pointer events —
+    // is aimed at, missed, and aimed at again in the same place. The second aim
+    // repeats a pixel a dispatch already lost, which is where the helper stops
+    // and says so, rather than dispatching at it forever.
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      const surface = document.createElement("div");
+      Object.assign(surface.style, {
+        position: "fixed",
+        left: "700px",
+        top: "80px",
+        width: "220px",
+        height: "40px",
+      });
+      root.append(surface);
+      document.body.append(host);
+
+      const button = document.createElement("button");
+      button.id = "unreachable-guest-button";
+      button.textContent = "Continue as guest";
+      Object.assign(button.style, {
+        display: "block",
+        width: "200px",
+        height: "40px",
+        padding: "0",
+        margin: "0",
+      });
+      const cover = document.createElement("div");
+      Object.assign(cover.style, {
+        position: "absolute",
+        inset: "0",
+      });
+      surface.append(button, cover);
+
+      let buttonClicks = 0;
+      button.addEventListener("click", () => void buttonClicks++);
+
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = { viewSettled: () => Promise.resolve() };
+      (globalThis as typeof globalThis & {
+        __unreachableClicks: () => number;
+      }).__unreachableClicks = () => buttonClicks;
+    });
+
+    const error = await assertRejects(
+      () => clickCfButton(page, "#unreachable-guest-button"),
+      Error,
+    );
+    assertStringIncludes(
+      error.message,
+      "again, where a trusted click already failed to reach it",
+    );
+
+    const clicks = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __unreachableClicks: () => number;
+      }).__unreachableClicks()
+    );
+    assertEquals(clicks, 0, "the covered control should have taken no click");
   });
 
   it("tells the interaction observer where a marked click landed", async () => {
