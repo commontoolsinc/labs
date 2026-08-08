@@ -426,6 +426,23 @@ const findSelectorClickTargets = (
   return targets;
 };
 
+// The first element matching `selector`, taken directly. The selector resolves
+// to the field itself, since a `cf-submit-input` forwards its `inputId` to the
+// inner `<input>`.
+const findKeyboardTarget = (
+  probe: ProbeApi,
+  selector: string,
+): readonly HTMLElement[] | undefined => {
+  const target = probe.collect(selector)[0] as HTMLElement | undefined;
+  return target ? [target] : undefined;
+};
+
+// Focus the field that carries the mark, so the key press that follows reaches
+// the element the settle ran for.
+const focusMarkedTarget = (target: HTMLElement): void => {
+  target.focus();
+};
+
 // The `index`-th element matching `selector`. The selector already resolves to
 // clickable elements, so the match is taken directly rather than reached
 // through a host's shadow root.
@@ -587,20 +604,37 @@ export async function clickTrustedAction(
  * scripted `KeyboardEvent` does not trigger implicit submission, which is why an
  * earlier dispatched-keydown attempt never reached the create handler.
  *
- * The view is settled first so the form is interactive, and the inner input is
- * resolved by piercing shadow roots (the `inputId` is forwarded to the inner
- * `<input>`, so the selector matches it directly).
+ * The field is resolved either side of a settle and focused only once the same
+ * element survives it, the way a marked click resolves the control it clicks.
+ * A field focused without that is a field whose form may not be wired up yet,
+ * and the Enter then reaches a submit button with no handler bound.
  */
 export async function submitViaEnter(
   page: Page,
   inputSelector: string,
 ) {
-  await settleView(page);
-  const input = await page.waitForSelector(inputSelector, {
-    strategy: "pierce",
-  });
-  await input.focus();
+  const token = `cf-submit-input-${crypto.randomUUID()}`;
+  const args = markTargetsArgs(
+    findKeyboardTarget,
+    [inputSelector],
+    [token],
+    focusMarkedTarget,
+  );
+  try {
+    await waitForCondition(page, settleAndMarkTargets, { args });
+  } catch (cause) {
+    const probe = await readTextProbe(page, inputSelector).catch(() =>
+      undefined
+    );
+    throw new Error(
+      `Timed out waiting for ${inputSelector} to settle before pressing ` +
+        `Enter. Last probe: ${toIndentedDebugString(probe)}`,
+      { cause },
+    );
+  }
   await page.keyboard.press("Enter");
+  await clearClickMark(page, token).catch(() => {});
+  await settleView(page);
 }
 
 export async function clickTrustedActionAndWaitForText(

@@ -18,6 +18,7 @@ import {
   clickNthCfButton,
   clickTrustedAction,
   fillCfInput,
+  submitViaEnter,
   waitForSettledText,
 } from "./cfc-browser-helpers.ts";
 import { clickButtonWithText } from "./note-button-helpers.ts";
@@ -1069,6 +1070,65 @@ describe("CFC browser helpers", () => {
       "the click reached no handler: the named button was marked and " +
         "clicked without a settle to bind it",
     );
+    assertEquals(result.settleCalls, 2);
+  });
+
+  it("settles the view before pressing Enter in a submit input", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      const form = document.createElement("form");
+      const input = document.createElement("input");
+      input.id = "late-submit-input";
+      const submit = document.createElement("button");
+      submit.type = "submit";
+      form.append(input, submit);
+      root.append(form);
+      document.body.append(host);
+
+      let settleCalls = 0;
+      let submittedAtSettle = 0;
+      let bound = false;
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = {
+        viewSettled: () => {
+          settleCalls++;
+          if (!bound) {
+            bound = true;
+            form.addEventListener("submit", (event) => {
+              event.preventDefault();
+              submittedAtSettle = settleCalls;
+            }, { once: true });
+          }
+          return Promise.resolve();
+        },
+      };
+      (globalThis as typeof globalThis & {
+        __lateSubmitResult: () => {
+          settleCalls: number;
+          submittedAtSettle: number;
+        };
+      }).__lateSubmitResult = () => ({ settleCalls, submittedAtSettle });
+    });
+
+    await submitViaEnter(page, "#late-submit-input");
+
+    const result = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __lateSubmitResult: () => {
+          settleCalls: number;
+          submittedAtSettle: number;
+        };
+      }).__lateSubmitResult()
+    );
+    assertEquals(
+      result.submittedAtSettle,
+      1,
+      "the Enter reached no handler: the field was focused and pressed " +
+        "without a settle to wire its form up",
+    );
+    // One settle wires the form up, and one follows the submission.
     assertEquals(result.settleCalls, 2);
   });
 
