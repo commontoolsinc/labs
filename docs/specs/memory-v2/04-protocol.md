@@ -981,14 +981,19 @@ Clients MUST:
 The server processes writes serially within a branch, or with equivalent
 serializable isolation.
 
-For live sync, transact verdicts return INLINE and the fan-out stays
-batched: N commits can apply against one watch-union recompute, which is
-where the subscription pipeline's throughput comes from. The ordering
-contract is enforced through the catch-up marker and CLIENT-side verdict
-parking instead of server-side response queuing (CT-1927):
+For live sync, transact verdicts return INLINE before the independently batched
+fan-out: N commits can apply against one watch-union recompute, which is where
+the subscription pipeline's throughput comes from. A per-space publication lock
+orders transactions and fan-out: the server sends the verdict while holding the
+lock, completes the transaction's post-commit scheduler bookkeeping, and then
+releases the lock for fan-out. Locks for other spaces remain independent. The
+remaining ordering contract is enforced through the catch-up marker and
+CLIENT-side verdict parking (CT-1927):
 
 - the server MAY coalesce multiple successful commits into one `SessionSync`
   frame
+- on a live connection, the server MUST send a commit's transact response
+  before any `SessionSync` frame whose `caughtUpLocalSeq` covers that commit
 - for every accept and every `ConflictError` rejection, the server MUST
   stage a catch-up obligation for the committing session, and the next
   frame the batched fan-out sends that session MUST carry
