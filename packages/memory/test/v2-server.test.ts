@@ -240,6 +240,45 @@ const assertCommitBurstBeforeFanout = async (
   }
 };
 
+Deno.test("memory v2 server keeps publication locks independent per space", async () => {
+  const server = createServer("memory://memory-v2-publication-lock-spaces");
+  const internals = server as unknown as {
+    withSpacePublicationLock<T>(
+      space: string,
+      run: () => Promise<T>,
+    ): Promise<T>;
+  };
+  const firstEntered = Promise.withResolvers<void>();
+  const releaseFirst = Promise.withResolvers<void>();
+  let sameSpaceEntered = false;
+  let otherSpaceEntered = false;
+
+  const first = internals.withSpacePublicationLock("space-a", async () => {
+    firstEntered.resolve();
+    await releaseFirst.promise;
+  });
+  await firstEntered.promise;
+  const sameSpace = internals.withSpacePublicationLock("space-a", () => {
+    sameSpaceEntered = true;
+    return Promise.resolve();
+  });
+  const otherSpace = internals.withSpacePublicationLock("space-b", () => {
+    otherSpaceEntered = true;
+    return Promise.resolve();
+  });
+
+  try {
+    await otherSpace;
+    assertEquals(otherSpaceEntered, true);
+    assertEquals(sameSpaceEntered, false);
+  } finally {
+    releaseFirst.resolve();
+    await Promise.all([first, sameSpace]);
+    await server.close();
+  }
+  assertEquals(sameSpaceEntered, true);
+});
+
 Deno.test("memory v2 server stateless respond does not issue hello.ok", async () => {
   const server = createServer("memory://memory-v2-server-stateless-respond");
   try {
@@ -2962,13 +3001,14 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
 
   (server as unknown as {
     transact(
-      message: Parameters<Server["transact"]>[0],
+      ...args: Parameters<Server["transact"]>
     ): ReturnType<Server["transact"]>;
-  }).transact = async (message) => {
+  }).transact = async (...args) => {
+    const [message] = args;
     if (message.requestId === "tx-2") {
       await releaseTx2.promise;
     }
-    return await originalTransact(message);
+    return await originalTransact(...args);
   };
 
   try {
@@ -3129,13 +3169,14 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
 
   (server as unknown as {
     transact(
-      message: Parameters<Server["transact"]>[0],
+      ...args: Parameters<Server["transact"]>
     ): ReturnType<Server["transact"]>;
-  }).transact = async (message) => {
+  }).transact = async (...args) => {
+    const [message] = args;
     if (message.requestId === "tx-3") {
       await releaseTx3.promise;
     }
-    return await originalTransact(message);
+    return await originalTransact(...args);
   };
 
   try {
@@ -3224,7 +3265,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     await time.tickAsync(1);
     await time.tickAsync(0);
 
-    await writer.receive(encodeMemoryBoundary({
+    const tx2 = writer.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-2",
       space,
@@ -3239,10 +3280,6 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
         }],
       },
     }));
-    assertEquals(
-      nextResponse<any>(writerMessages).requestId,
-      "tx-2",
-    );
 
     const tx3 = writer.receive(encodeMemoryBoundary({
       type: "transact",
@@ -3265,7 +3302,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     await time.tickAsync(0);
 
     const firstEffect = assertEffect(shiftMessage(messages));
-    assertEquals(firstEffect.effect.toSeq, 2);
+    assertEquals(firstEffect.effect.toSeq, 1);
     assertEquals(firstEffect.effect.upserts, [{
       branch: "",
       id: "of:doc:1",
@@ -3277,8 +3314,15 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     }]);
     assertEquals(messages, []);
 
+    await tx2;
+    assertEquals(
+      nextResponse<any>(writerMessages).requestId,
+      "tx-2",
+    );
+
     releaseTx3.resolve();
     await tx3;
+    await time.tickAsync(1);
     await time.tickAsync(0);
 
     assertEquals(
@@ -3344,13 +3388,14 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
 
   (server as unknown as {
     transact(
-      message: Parameters<Server["transact"]>[0],
+      ...args: Parameters<Server["transact"]>
     ): ReturnType<Server["transact"]>;
-  }).transact = async (message) => {
+  }).transact = async (...args) => {
+    const [message] = args;
     if (message.requestId === "tx-3") {
       await releaseTx3.promise;
     }
-    return await originalTransact(message);
+    return await originalTransact(...args);
   };
 
   try {
@@ -3439,7 +3484,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
     await time.tickAsync(1);
     await time.tickAsync(0);
 
-    await writer.receive(encodeMemoryBoundary({
+    const tx2 = writer.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-2",
       space,
@@ -3454,10 +3499,6 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
         }],
       },
     }));
-    assertEquals(
-      nextResponse<any>(writerMessages).requestId,
-      "tx-2",
-    );
 
     const tx3 = writer.receive(encodeMemoryBoundary({
       type: "transact",
@@ -3480,7 +3521,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
     await time.tickAsync(0);
 
     const firstEffect = assertEffect(shiftMessage(messages));
-    assertEquals(firstEffect.effect.toSeq, 2);
+    assertEquals(firstEffect.effect.toSeq, 1);
     assertEquals(firstEffect.effect.upserts, [{
       branch: "",
       id: "of:doc:1",
@@ -3490,6 +3531,23 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
         value: { version: 1 },
       },
     }]);
+    assertEquals(messages, []);
+
+    await tx2;
+    assertEquals(
+      nextResponse<any>(writerMessages).requestId,
+      "tx-2",
+    );
+
+    await time.tickAsync(1);
+    await time.tickAsync(0);
+
+    await time.tickAsync(499);
+    await time.tickAsync(0);
+    assertEquals(messages, []);
+
+    await time.tickAsync(1);
+    await time.tickAsync(0);
     assertEquals(messages, []);
 
     await time.tickAsync(499);

@@ -170,15 +170,7 @@ export function buildFsProjection(
   );
 }
 
-/** Options for buildJsonTree beyond the required params. */
-export interface BuildJsonTreeOpts {
-  seen?: WeakSet<object>;
-  resolveLink?: (value: unknown, depth: number) => string | null;
-  depth?: number;
-  annotation?: CfcJsonAnnotationContext;
-}
-
-const ASYNC_BUILD_BATCH_SIZE = 200;
+const BUILD_BATCH_SIZE = 200;
 
 interface BuildJsonTreeTask {
   parentIno: bigint;
@@ -188,7 +180,29 @@ interface BuildJsonTreeTask {
   depth: number;
   annotation?: CfcJsonAnnotationContext;
   internalRootName?: PendingJsonRootName;
-  onBuilt?: (ino: bigint) => void;
+}
+
+/**
+ * State of one JSON-to-filesystem projection in progress: the settings that
+ * apply to every node, the nodes still waiting to be projected, and the inode
+ * of the node the caller asked for.
+ */
+interface JsonTreeBuild {
+  readonly tree: FsTree;
+  readonly resolveLink?: (value: unknown, depth: number) => string | null;
+  readonly skipEntry?: (value: unknown) => boolean;
+  readonly classifyCallableEntry?: (
+    key: string,
+    value: unknown,
+  ) => CallableKind | null;
+  /**
+   * Nodes to project, in the order their entries will be created. A slot is
+   * emptied as its node is taken, so a build holds only the nodes still
+   * waiting rather than every node it has passed.
+   */
+  readonly queue: (BuildJsonTreeTask | undefined)[];
+  nextIndex: number;
+  rootIno?: bigint;
 }
 
 type JsonScalarType = "string" | "number" | "boolean" | "null";
@@ -298,72 +312,8 @@ function addJsonAggregateSibling(
   return ino;
 }
 
-function buildJsonLeaf(
-  tree: FsTree,
-  parentIno: bigint,
-  name: string,
-  value: unknown,
-  annotation?: CfcJsonAnnotationContext,
-  internalRootName?: PendingJsonRootName,
-): bigint {
-  const fsName = encodeJsonEntryName(name, internalRootName);
-  return addJsonScalarEntry(tree, parentIno, fsName, value, annotation);
-}
-
 async function yieldToEventLoop(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
-}
-
-/**
- * Build a filesystem subtree from a JSON value.
- *
- * - null → empty file (jsonType "null")
- * - boolean → file "true"/"false" (jsonType "boolean")
- * - number → file with string representation (jsonType "number")
- * - string → file with raw UTF-8 (jsonType "string")
- * - sigil link → symlink (if resolveLink provided and returns a path)
- * - object → directory, recurse for each key (jsonType "object")
- * - array → directory, recurse with numeric indices (jsonType "array")
- *
- * Circular references are replaced with "[Circular]".
- * Also synthesizes `.json` sibling files for directory nodes.
- */
-export function buildJsonTree(
-  tree: FsTree,
-  parentIno: bigint,
-  name: string,
-  value: unknown,
-  seen?: WeakSet<object>,
-  resolveLink?: (value: unknown, depth: number) => string | null,
-  depth?: number,
-  skipEntry?: (value: unknown) => boolean,
-  classifyCallableEntry?: (key: string, value: unknown) => CallableKind | null,
-  annotation?: CfcJsonAnnotationContext,
-): bigint {
-  const initialAncestors = legacySeenContains(value, seen)
-    ? [value as object]
-    : [];
-  return buildJsonTreeWithAncestors(
-    tree,
-    parentIno,
-    name,
-    value,
-    initialAncestors,
-    resolveLink,
-    depth ?? 0,
-    skipEntry,
-    classifyCallableEntry,
-    annotation,
-    undefined,
-  );
-}
-
-function legacySeenContains(
-  value: unknown,
-  seen?: WeakSet<object>,
-): boolean {
-  return value !== null && typeof value === "object" &&
-    seen?.has(value as object) === true;
 }
 
 function aggregateJsonValue(
@@ -377,24 +327,51 @@ function aggregateJsonValue(
     : transformStreamValues(value);
 }
 
-function buildJsonTreeWithAncestors(
+function startJsonTreeBuild(
   tree: FsTree,
   parentIno: bigint,
   name: string,
   value: unknown,
-  ancestors: readonly object[],
   resolveLink: ((value: unknown, depth: number) => string | null) | undefined,
-  depth: number,
+  depth: number | undefined,
   skipEntry: ((value: unknown) => boolean) | undefined,
   classifyCallableEntry:
     | ((key: string, value: unknown) => CallableKind | null)
     | undefined,
-  annotation?: CfcJsonAnnotationContext,
-  internalRootName?: PendingJsonRootName,
+  annotation: CfcJsonAnnotationContext | undefined,
+  internalRootName: PendingJsonRootName | undefined,
+): JsonTreeBuild {
+  return {
+    tree,
+    resolveLink,
+    skipEntry,
+    classifyCallableEntry,
+    queue: [{
+      parentIno,
+      name,
+      value,
+      ancestors: [],
+      depth: depth ?? 0,
+      annotation,
+      internalRootName,
+    }],
+    nextIndex: 0,
+  };
+}
+
+/**
+ * Create the entry for one queued node, queueing its children behind every
+ * node already waiting. Returns the inode of the entry that was created.
+ */
+function buildJsonTreeNode(
+  build: JsonTreeBuild,
+  task: BuildJsonTreeTask,
 ): bigint {
+  const { tree } = build;
+  const { parentIno, value, depth, annotation } = task;
   const fsName = encodeJsonEntryName(
-    name,
-    depth === 0 ? internalRootName : undefined,
+    task.name,
+    depth === 0 ? task.internalRootName : undefined,
   );
 
   // TODO(danfuzz): the `typeof` gate treats a `FabricSpecialObject` as a
@@ -409,26 +386,20 @@ function buildJsonTreeWithAncestors(
   }
 
   const objectValue = value as object;
-  if (ancestors.includes(objectValue)) {
+  if (task.ancestors.includes(objectValue)) {
     return addJsonCircularEntry(tree, parentIno, fsName, value, annotation);
   }
 
   // Sigil link → symlink
-  if (isSigilLink(value) && resolveLink) {
-    const target = resolveLink(value, depth);
+  if (isSigilLink(value) && build.resolveLink) {
+    const target = build.resolveLink(value, depth);
     if (target) {
-      return addJsonSymlinkEntry(
-        tree,
-        parentIno,
-        fsName,
-        target,
-        annotation,
-      );
+      return addJsonSymlinkEntry(tree, parentIno, fsName, target, annotation);
     }
     // Fall through to normal object handling if link can't be resolved.
   }
 
-  const childAncestors = [...ancestors, objectValue];
+  const childAncestors = [...task.ancestors, objectValue];
 
   if (Array.isArray(value)) {
     const dirIno = addJsonDirectoryEntry(
@@ -449,18 +420,14 @@ function buildJsonTreeWithAncestors(
     );
 
     for (let i = 0; i < value.length; i++) {
-      buildJsonTreeWithAncestors(
-        tree,
-        dirIno,
-        String(i),
-        value[i],
-        childAncestors,
-        resolveLink,
-        depth + 1,
-        skipEntry,
-        classifyCallableEntry,
-        annotation?.annotator.childContext(annotation, i),
-      );
+      build.queue.push({
+        parentIno: dirIno,
+        name: String(i),
+        value: value[i],
+        ancestors: childAncestors,
+        depth: depth + 1,
+        annotation: annotation?.annotator.childContext(annotation, i),
+      });
     }
 
     return dirIno;
@@ -479,56 +446,129 @@ function buildJsonTreeWithAncestors(
     tree,
     parentIno,
     fsName,
-    aggregateJsonValue(value, depth, classifyCallableEntry),
+    aggregateJsonValue(value, depth, build.classifyCallableEntry),
     "object",
     annotation,
   );
 
   for (const [key, val] of Object.entries(obj)) {
     if (isStreamValue(val) || isHandlerCell(val)) continue;
-    if (skipEntry?.(val)) continue;
-    buildJsonTreeWithAncestors(
-      tree,
-      dirIno,
-      key,
-      val,
-      childAncestors,
-      resolveLink,
-      depth + 1,
-      skipEntry,
-      classifyCallableEntry,
-      annotation?.annotator.childContext(annotation, key),
-    );
+    if (build.skipEntry?.(val)) continue;
+    build.queue.push({
+      parentIno: dirIno,
+      name: key,
+      value: val,
+      ancestors: childAncestors,
+      depth: depth + 1,
+      annotation: annotation?.annotator.childContext(annotation, key),
+    });
   }
 
   return dirIno;
 }
 
-export function buildJsonTreeAsync(
+/**
+ * Project one batch of queued nodes. Returns true when nodes remain, which is
+ * the point at which an asynchronous build hands the event loop back.
+ */
+function runJsonTreeBatch(build: JsonTreeBuild): boolean {
+  for (let projected = 0; projected < BUILD_BATCH_SIZE; projected++) {
+    const task = build.queue[build.nextIndex];
+    if (task === undefined) return false;
+    build.queue[build.nextIndex++] = undefined;
+    const ino = buildJsonTreeNode(build, task);
+    // The node the caller asked for is the first one off the queue.
+    if (build.rootIno === undefined) build.rootIno = ino;
+  }
+  return build.nextIndex < build.queue.length;
+}
+
+function drainJsonTreeBuild(build: JsonTreeBuild): bigint {
+  while (runJsonTreeBatch(build)) {
+    // A synchronous build runs the batches back to back.
+  }
+  return build.rootIno!;
+}
+
+async function drainJsonTreeBuildAsync(
+  build: JsonTreeBuild,
+): Promise<bigint> {
+  while (runJsonTreeBatch(build)) {
+    await yieldToEventLoop();
+  }
+  return build.rootIno!;
+}
+
+/**
+ * Build a filesystem subtree from a JSON value.
+ *
+ * - null → empty file (jsonType "null")
+ * - boolean → file "true"/"false" (jsonType "boolean")
+ * - number → file with string representation (jsonType "number")
+ * - string → file with raw UTF-8 (jsonType "string")
+ * - sigil link → symlink (if resolveLink provided and returns a path)
+ * - object → directory with an entry per key (jsonType "object")
+ * - array → directory with an entry per index (jsonType "array")
+ *
+ * Circular references are replaced with "[Circular]".
+ * Also synthesizes `.json` sibling files for directory nodes.
+ *
+ * Entries are created level by level, and the whole value is projected before
+ * this returns. Callers that must not block the event loop for a large value
+ * use `buildJsonTreeAsync` instead.
+ */
+export function buildJsonTree(
   tree: FsTree,
   parentIno: bigint,
   name: string,
   value: unknown,
-  seen?: WeakSet<object>,
   resolveLink?: (value: unknown, depth: number) => string | null,
   depth?: number,
   skipEntry?: (value: unknown) => boolean,
   classifyCallableEntry?: (key: string, value: unknown) => CallableKind | null,
   annotation?: CfcJsonAnnotationContext,
-): Promise<bigint> {
-  return buildJsonTreeAsyncImpl(
+): bigint {
+  return drainJsonTreeBuild(startJsonTreeBuild(
     tree,
     parentIno,
     name,
     value,
-    seen,
     resolveLink,
     depth,
     skipEntry,
     classifyCallableEntry,
     annotation,
     undefined,
-  );
+  ));
+}
+
+/**
+ * The same projection as `buildJsonTree`, handing the event loop back between
+ * batches of entries so that a large value does not stall the filesystem.
+ */
+export function buildJsonTreeAsync(
+  tree: FsTree,
+  parentIno: bigint,
+  name: string,
+  value: unknown,
+  resolveLink?: (value: unknown, depth: number) => string | null,
+  depth?: number,
+  skipEntry?: (value: unknown) => boolean,
+  classifyCallableEntry?: (key: string, value: unknown) => CallableKind | null,
+  annotation?: CfcJsonAnnotationContext,
+): Promise<bigint> {
+  return drainJsonTreeBuildAsync(startJsonTreeBuild(
+    tree,
+    parentIno,
+    name,
+    value,
+    resolveLink,
+    depth,
+    skipEntry,
+    classifyCallableEntry,
+    annotation,
+    undefined,
+  ));
 }
 
 /** Build a pending rebuild root with reserved internal staging names intact. */
@@ -537,7 +577,6 @@ export function buildPendingJsonTreeAsync(
   parentIno: bigint,
   propName: JsonPropName,
   value: unknown,
-  seen?: WeakSet<object>,
   resolveLink?: (value: unknown, depth: number) => string | null,
   depth?: number,
   skipEntry?: (value: unknown) => boolean,
@@ -545,185 +584,16 @@ export function buildPendingJsonTreeAsync(
   annotation?: CfcJsonAnnotationContext,
 ): Promise<bigint> {
   const rootName = pendingJsonRootName(propName);
-  return buildJsonTreeAsyncImpl(
+  return drainJsonTreeBuildAsync(startJsonTreeBuild(
     tree,
     parentIno,
     rootName,
     value,
-    seen,
     resolveLink,
     depth,
     skipEntry,
     classifyCallableEntry,
     annotation,
     rootName,
-  );
-}
-
-async function buildJsonTreeAsyncImpl(
-  tree: FsTree,
-  parentIno: bigint,
-  name: string,
-  value: unknown,
-  seen: WeakSet<object> | undefined,
-  resolveLink: ((value: unknown, depth: number) => string | null) | undefined,
-  depth: number | undefined,
-  skipEntry: ((value: unknown) => boolean) | undefined,
-  classifyCallableEntry:
-    | ((key: string, value: unknown) => CallableKind | null)
-    | undefined,
-  annotation: CfcJsonAnnotationContext | undefined,
-  internalRootName?: PendingJsonRootName,
-): Promise<bigint> {
-  const queue: BuildJsonTreeTask[] = [{
-    parentIno,
-    name,
-    value,
-    ancestors: legacySeenContains(value, seen) ? [value as object] : [],
-    depth: depth ?? 0,
-    annotation,
-    internalRootName,
-  }];
-  let nextIndex = 0;
-  let processed = 0;
-  let rootIno: bigint | undefined;
-
-  queue[0].onBuilt = (ino) => {
-    rootIno = ino;
-  };
-
-  while (nextIndex < queue.length) {
-    const task = queue[nextIndex++];
-    const d = task.depth;
-    const candidate = task.value;
-    const taskInternalRootName = task.depth === 0
-      ? task.internalRootName
-      : undefined;
-    const fsName = encodeJsonEntryName(task.name, taskInternalRootName);
-
-    let builtIno: bigint | undefined;
-
-    if (candidate === null || candidate === undefined) {
-      builtIno = buildJsonLeaf(
-        tree,
-        task.parentIno,
-        task.name,
-        candidate,
-        task.annotation,
-        taskInternalRootName,
-      );
-    } else if (typeof candidate === "object") {
-      const objectValue = candidate as object;
-      if (task.ancestors.includes(objectValue)) {
-        builtIno = addJsonCircularEntry(
-          tree,
-          task.parentIno,
-          fsName,
-          candidate,
-          task.annotation,
-        );
-      } else {
-        if (isSigilLink(candidate) && resolveLink) {
-          const target = resolveLink(candidate, d);
-          if (target) {
-            builtIno = addJsonSymlinkEntry(
-              tree,
-              task.parentIno,
-              fsName,
-              target,
-              task.annotation,
-            );
-          }
-        }
-
-        if (builtIno === undefined) {
-          const childAncestors = [...task.ancestors, objectValue];
-
-          if (Array.isArray(candidate)) {
-            builtIno = addJsonDirectoryEntry(
-              tree,
-              task.parentIno,
-              fsName,
-              candidate,
-              "array",
-              task.annotation,
-            );
-            addJsonAggregateSibling(
-              tree,
-              task.parentIno,
-              fsName,
-              candidate,
-              "array",
-              task.annotation,
-            );
-
-            for (let i = 0; i < candidate.length; i++) {
-              queue.push({
-                parentIno: builtIno,
-                name: String(i),
-                value: candidate[i],
-                ancestors: childAncestors,
-                depth: d + 1,
-                annotation: task.annotation?.annotator.childContext(
-                  task.annotation,
-                  i,
-                ),
-              });
-            }
-          } else {
-            const obj = candidate as Record<string, unknown>;
-            builtIno = addJsonDirectoryEntry(
-              tree,
-              task.parentIno,
-              fsName,
-              candidate,
-              "object",
-              task.annotation,
-            );
-            addJsonAggregateSibling(
-              tree,
-              task.parentIno,
-              fsName,
-              aggregateJsonValue(candidate, d, classifyCallableEntry),
-              "object",
-              task.annotation,
-            );
-
-            for (const [key, val] of Object.entries(obj)) {
-              if (isStreamValue(val) || isHandlerCell(val)) continue;
-              if (skipEntry?.(val)) continue;
-              queue.push({
-                parentIno: builtIno,
-                name: key,
-                value: val,
-                ancestors: childAncestors,
-                depth: d + 1,
-                annotation: task.annotation?.annotator.childContext(
-                  task.annotation,
-                  key,
-                ),
-              });
-            }
-          }
-        }
-      }
-    } else {
-      builtIno = buildJsonLeaf(
-        tree,
-        task.parentIno,
-        task.name,
-        candidate,
-        task.annotation,
-        taskInternalRootName,
-      );
-    }
-
-    task.onBuilt?.(builtIno!);
-    processed++;
-    if (processed % ASYNC_BUILD_BATCH_SIZE === 0) {
-      await yieldToEventLoop();
-    }
-  }
-
-  return rootIno!;
+  ));
 }
