@@ -4374,6 +4374,15 @@ class SpaceReplica implements ISpaceReplica {
     // Zero-operation commits (scheduler observation batches) carry no state
     // to apply and no view consequences — parking them would only stall
     // synced() on the batch window for nothing.
+    //
+    // The already-caught-up check is NOT wire-reordering tolerance: since
+    // the per-space publication lock (#5529) the marker frame always
+    // FOLLOWS its verdict on the socket. It survives for intra-client
+    // interleaving — the transact awaiter resumes several microtask hops
+    // after its response resolves (request()'s internal awaits), and the
+    // marker frame's processing can integrate in that gap — so by the time
+    // this runs, the marker may already cover this commit and parking
+    // would wait on a frame that has already been consumed.
     if (
       !parkable || operations.length === 0 ||
       this.#caughtUpLocalSeq >= localSeq
