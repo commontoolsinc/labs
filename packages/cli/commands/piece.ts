@@ -49,6 +49,7 @@ import ports from "@commonfabric/ports" with { type: "json" };
 import type { PiecePatternRef } from "@commonfabric/piece/ops";
 import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
 import {
+  type CellSelection,
   CellSelectionError,
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
@@ -630,19 +631,45 @@ export interface PieceCallWaitControl {
   boundSeconds?: number;
 }
 
+/** The `cf piece call` flags whose answer needs the receipt readback. */
+export interface PieceCallReadbackFlags {
+  showLinks?: boolean;
+  filter?: string;
+  select?: string;
+  schema?: string;
+}
+
+/**
+ * Those flags paired with the spelling a refusal names them by, in the order a
+ * caller writes them.
+ */
+const READBACK_FLAGS: ReadonlyArray<
+  [keyof PieceCallReadbackFlags, string]
+> = [
+  ["showLinks", "--show-links"],
+  ["filter", "--filter"],
+  ["select", "--select"],
+  ["schema", "--schema"],
+];
+
 /**
  * Resolve the wait flags into one control. `--await` is the explicit spelling
  * of the default (flag parity, so a script can state its intent), which makes
  * `--await --no-wait` a contradiction rather than a precedence puzzle — it is
  * refused. `--await --wait <s>` is fine: both mean "wait", the bound just
  * names the patience. A non-positive bound is refused: it would spell
- * "don't wait" while claiming to be a wait. `--show-links --no-wait` is
- * refused too: the links ride the receipt readback a detached exit skips,
- * so honoring both is impossible — refusing beats silently dropping the
+ * "don't wait" while claiming to be a wait.
+ *
+ * `--no-wait` also refuses every flag that shapes or annotates the outcome —
+ * `--show-links` and the selection flags. All of them are answered from the
+ * receipt a detached exit never reads, so honoring both is impossible;
+ * refusing beats silently handing back an unshaped result or dropping the
  * links.
  */
 export function resolveWaitControl(
-  options: { await?: boolean; wait?: number | boolean; showLinks?: boolean },
+  options:
+    & { await?: boolean; wait?: number | boolean }
+    & PieceCallReadbackFlags,
 ): PieceCallWaitControl {
   if (options.wait === false) {
     if (options.await) {
@@ -650,10 +677,13 @@ export function resolveWaitControl(
         "--await and --no-wait contradict each other; pass one.",
       );
     }
-    if (options.showLinks) {
+    const named = READBACK_FLAGS
+      .filter(([key]) => options[key] !== undefined && options[key] !== false)
+      .map(([, flag]) => flag);
+    if (named.length > 0) {
       throw new ValidationError(
-        "--show-links needs the receipt readback that --no-wait skips; " +
-          "pass one.",
+        `${listFlags(named)} need${named.length === 1 ? "s" : ""} the ` +
+          "receipt readback that --no-wait skips; pass one.",
       );
     }
     return { mode: "commit" };
@@ -667,6 +697,38 @@ export function resolveWaitControl(
     return { mode: "settle", boundSeconds: options.wait };
   }
   return { mode: "settle" };
+}
+
+/** Flag names as prose: "--a", "--a and --b", "--a, --b and --c". */
+function listFlags(flags: readonly string[]): string {
+  if (flags.length <= 1) return flags.join("");
+  return `${flags.slice(0, -1).join(", ")} and ${flags.at(-1)}`;
+}
+
+/**
+ * Parse `cf piece call`'s selection flags into the shape the result should
+ * arrive in, through the same parser `cf piece get` uses — one grammar, one
+ * set of error messages, whichever command a caller reaches for.
+ *
+ * The one combination refused here is `--filter` with `--show-links`. A link
+ * names a position in the result, and a predicate that drops elements leaves
+ * the survivors at positions that are no longer the ones they came from, so
+ * every address below a filtered array would name the wrong element. It is
+ * the same refusal a `$link` marker meets inside the selection step, on the
+ * same grounds.
+ */
+export async function parsePieceCallSelection(
+  options: PieceCallReadbackFlags,
+): Promise<CellSelection | undefined> {
+  const selection = await parseCellSelectionOptions(options);
+  if (options.showLinks && selection?.filter !== undefined) {
+    throw new ValidationError(
+      "--show-links cannot be combined with --filter: a filtered array's " +
+        "elements no longer say which positions they came from, and a link " +
+        "names a position.",
+    );
+  }
+  return selection;
 }
 
 /**
@@ -1576,6 +1638,21 @@ after --. Handlers interpret piped input when no input argument is present.`,
     cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} search -- --query milk`),
     `Run the "search" tool using schema-derived flags after "--".`,
   )
+  .example(
+    cliText(
+      `cf piece call ${EX_ID} ${EX_COMP_PIECE} --select topic.title addTopic ` +
+        `'{"title":"Ship it"}'`,
+    ),
+    "Return only the selected fields of the verb's result.",
+  )
+  .example(
+    cliText(
+      `cf piece call ${EX_ID} ${EX_COMP_PIECE} ` +
+        `--schema '{"properties":{"topic":{"$link":true}}}' addTopic ` +
+        `'{"title":"Ship it"}'`,
+    ),
+    "Return the address of what the verb returned instead of its contents.",
+  )
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option(
     "--invocation <id:string>",
@@ -1622,6 +1699,22 @@ after --. Handlers interpret piped input when no input argument is present.`,
       "appear only where a path is backed by a different document. Handler " +
       "invocations only — a tool already reports its result cell on stderr.",
   )
+  .option(
+    "--filter <predicate:string>",
+    "Filter an array with a jq-inspired predicate",
+  )
+  .option(
+    "--select <fields:string>",
+    "Project output to comma-separated field paths",
+  )
+  .option(
+    "--schema <schema:string>",
+    "Project output with an inline JSON Schema, @file, or the --select " +
+      "field list",
+    // Both flags carry the one projection, so a command naming both has not
+    // said which shape it wants. Refuse before the call rather than pick.
+    { conflicts: ["select"] },
+  )
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
@@ -1632,8 +1725,26 @@ after --. Handlers interpret piped input when no input argument is present.`,
       !!options.verbose,
       (next) => phase = next,
     );
+    setQuietMode(!!options.quiet);
+    // Read outside the invocation's failure wrapper below. Nothing is
+    // dispatched here — no callable resolved, no id spent — so a malformed
+    // selection is a data error about the flags, the same one `cf piece get`
+    // reports. Inside the wrapper it would name an id and a phase to retry
+    // from for a call that was never made; a selection that fails against a
+    // RESULT does sit inside it, and does name one.
+    let selection: CellSelection | undefined;
     try {
-      setQuietMode(!!options.quiet);
+      selection = await parsePieceCallSelection(options);
+    } catch (error) {
+      // Both exits below leave without reaching the action's catch, so the
+      // verbose in-flight span is closed here.
+      observer.finish("failed");
+      if (error instanceof CellSelectionError) {
+        exitWithDataError({ message: error.message });
+      }
+      throw error;
+    }
+    try {
       const invocation = pieceCallInvocation(
         tail,
         this.getLiteralArgs(),
@@ -1651,6 +1762,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
             invocationId,
             skipReadback: waitControl.mode === "commit",
             showLinks: !!options.showLinks,
+            ...(selection === undefined ? {} : { selection }),
             onPhase: invocationPhaseReporter(
               invocationId,
               observer.onPhase,

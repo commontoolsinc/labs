@@ -120,7 +120,7 @@ standard error and continues searching that piece and the rest of the space.
 - The launcher spawns the child CLI with `deno run --quiet` so Deno's own
   warnings (npm "Ignored build scripts" banner) never reach users.
 
-### Transforming `piece get` output
+### Transforming `piece get` and `piece call` output
 
 `piece get` can filter an array before it reaches stdout and project the result
 to a smaller shape:
@@ -131,6 +131,21 @@ cf piece get --piece ID items \
   --filter '.status == "open" and .score >= 10' \
   --select id,title,author.name
 ```
+
+`piece call` takes the same three flags, with the same grammar, the same
+conflict rule, and the same error messages, written before the callable name:
+
+```bash
+cf piece call --piece ID --select topic.title addTopic '{"title":"Ship it"}'
+cf piece call --piece ID --filter '.status == "open"' listTopics
+```
+
+Everything below describes both commands. The one difference is what the
+selection is about: `piece get` shapes a cell's value, and `piece call` shapes
+the **result of the call** — a handler's `result` inside the Invocation JSON, or
+a tool's JSON on stdout. See
+[what a selection means for a call](#what-a-selection-means-for-a-call) for the
+three cases where that difference shows.
 
 `--filter` is jq-inspired rather than a full jq interpreter. It applies only to
 arrays and accepts value paths (`.status`, `.author.name`, `.["display-name"]`,
@@ -146,7 +161,7 @@ Two flags project, one per input language:
   also accepts the same field list `--select` takes.
 
 A command that names both has not said which shape it wants, and is refused
-before the read.
+before the read or the call.
 
 For an array result, the field list describes each item. An inline/file JSON
 Schema describes the complete returned value, so a schema combined with
@@ -244,6 +259,35 @@ marked collection therefore costs one document read rather than one per element.
 The marker is a JSON-schema spelling only, and it cannot be combined with
 `--filter`: the elements a predicate keeps no longer say which positions they
 came from, and an address names a position.
+
+#### What a selection means for a call
+
+A selection shapes a result that already exists. It does not narrow what the
+call fetches: the readback materializes the whole receipt before the selection
+runs, and a handling's receipt declares no schema for a selector to narrow
+against. The same holds for a tool, whose result is read off the cell the tool
+wrote. Use a selection to control what reaches stdout, not to control what
+travels.
+
+Three cases follow from that:
+
+- **A value-less verb still reports nothing.** Its receipt is the empty witness,
+  and the Invocation JSON omits `result` to say so. A selection is about a
+  value, so with none there the step never runs and `result` stays absent — it
+  does not become `{}`, and it is not an error. A selection that keeps nothing
+  from a result that _does_ exist is a different fact, and it is refused rather
+  than reported as an absent result.
+- **`--no-wait` refuses all three flags.** That mode exits once the commit is
+  acknowledged and skips the receipt readback, so there is no result to shape.
+  The refusal names the flags that need the readback, alongside `--show-links`
+  for the same reason.
+- **`--show-links` composes with a projection, not with `--filter`.** Links are
+  collected after the selection, over exactly the value the caller is holding: a
+  projection leaves every surviving path where it was, so each address still
+  names the position it annotates, and a path the projection dropped simply gets
+  no entry. A predicate does not — the elements it keeps land at positions that
+  are no longer the ones they came from — so `--filter --show-links` is refused,
+  the same refusal a `$link` marker meets for the same reason.
 
 ## Built Binary
 
