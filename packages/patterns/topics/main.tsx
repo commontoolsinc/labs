@@ -343,6 +343,18 @@ export const submitProfileTopic = handler<void, {
 export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   const newTitle = new Writable.perSession("");
 
+  // Declared before the mutation actions: `addTopic` passes `rows` to each
+  // child it creates, and a const referenced from an action closure must be
+  // initialized by the time the pattern body finishes building it.
+  // `.length` alone is what makes this cheap: the shrunk schema declares
+  // `items: unknown`, so counting the board expands no topic. Reaching past
+  // `.length` — or through a helper this analysis cannot see into — is what
+  // puts the whole board back in the read.
+  const topicCount = topics.get().length;
+  const rows = crossrefRows(topics);
+  const cards = cardsByActivity(rows);
+  const hasNoTopics = rows.length === 0;
+
   // Browser authorship comes from the current viewer's canonical Profile.
   // CLI streams below remain wish-free: agents sign each mutation in the
   // event payload, while Fabric records the human principal behind the key.
@@ -384,6 +396,9 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
       // and the editor has a mention universe (backfilled as a one-time
       // link-bind on pieces created before this input existed).
       mentionable: topics,
+      // The board's computed graph. A topic reads its inbound edges out of the
+      // row the board already built for it rather than rebuilding the join.
+      boardCrossrefs: rows,
     });
     // Mergeable append: concurrent creates from different users all land.
     topics.push(piece);
@@ -403,15 +418,6 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     profileName,
     profileAvatar,
   });
-
-  // `.length` alone is what makes this cheap: the shrunk schema declares
-  // `items: unknown`, so counting the board expands no topic. Reaching past
-  // `.length` — or through a helper this analysis cannot see into — is what
-  // puts the whole board back in the read.
-  const topicCount = topics.get().length;
-  const rows = crossrefRows(topics);
-  const cards = cardsByActivity(rows);
-  const hasNoTopics = rows.length === 0;
 
   return {
     [NAME]: `Topics (${topicCount})`,
