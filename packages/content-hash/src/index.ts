@@ -33,12 +33,8 @@ if (canUseDeno()) {
   createHasher = createHasherNoble;
 }
 
-/**
- * All-at-once SHA-256 hash.
- */
+/** All-at-once SHA-256 hash. */
 export { sha256 };
 
-/**
- * Creates a new incremental SHA-256 hasher.
- */
+/** Creates a new incremental SHA-256 hasher. */
 export { createHasher };
