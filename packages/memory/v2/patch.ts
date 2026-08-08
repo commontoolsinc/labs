@@ -7,7 +7,7 @@ import {
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isInstance, isObject } from "@commonfabric/utils/types";
-import type { EntityDocument, PatchOp } from "../v2.ts";
+import { type EntityDocument, isEntityDocument, type PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
 
 type PatchObject = Record<string, FabricValue>;
@@ -72,8 +72,17 @@ export const emptyEntityDocument = (): EntityDocument => ({});
 export const applyPatchToDocument = (
   base: EntityDocument | undefined,
   ops: PatchOp[],
-): EntityDocument =>
-  applyPatch(base ?? emptyEntityDocument(), ops) as EntityDocument;
+): EntityDocument => {
+  const patched = applyPatch(base ?? emptyEntityDocument(), ops);
+  // A root-level op can produce any FabricValue (replace at "" returns its
+  // value verbatim); the entity envelope must stay a plain object. Reject
+  // rather than type-launder — the client's pending replay treats this as
+  // an unappliable layer, and no caller ever sees an invalid envelope.
+  if (!isEntityDocument(patched)) {
+    throw new Error("patched root is not an entity document");
+  }
+  return patched;
+};
 
 export const applyPatch = (
   state: FabricValue,
