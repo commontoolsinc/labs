@@ -33,6 +33,14 @@ The authoritative field inventory is the `JSONSchema` type in
   data.)
 - **`scope`**: storage-partition selector emitted for `PerSpace<T>` /
   `PerUser<T>` / `PerSession<T>` wrappers.
+- **`tier`**: verb listing mark on stream properties. `tier: "wrapper"` names
+  a UI affordance outside the headless contract, inferred at compile time
+  from session-scoped handler bindings plus a void event
+  (ts-transformers current-behavior spec §12.1). `cf piece verbs` hides
+  marked verbs by default; everything stays callable, and `cf piece call`
+  never consults the mark. Annotation-class in the piece compat checker
+  (adds and removes freely). Standard `deprecated: true` is the companion
+  mark on the other axis, produced from `@deprecated` JSDoc.
 - **`ifc`**: Information Flow Control (IFC) annotations (see [IFC](#ifc))
 
 ### IFC

@@ -254,6 +254,7 @@ Deno.test(
       "SchemaInjectionTransformer",
       "BuilderCallHoistingTransformer",
       "SchemaGeneratorTransformer",
+      "VerbTierMarkTransformer",
       "ReactiveVariableForTransformer",
       "ModuleScopeShadowingTransformer",
       "ModuleScopeCfDataTransformer",
