@@ -396,14 +396,14 @@ diffing and the scheduler's own reads keep eager semantics.
       has finished. Promise adoption probes `then` on every value it receives
       and a lift's result crosses a promise boundary by construction, so a view
       that refuses the probe cannot be returned at all.
-- [ ] Decide what the forwarding case should do. Four tests fail with the flag
-      on, all one shape: a lift that forwards its argument onward without
-      reading it takes no dependency on the values inside, and so re-runs fewer
-      times. Forwarding passes a link, so the values it produces stay correct —
-      these tests assert run counts, not wrong results. Fewer re-runs is what
-      laziness is for; pinning the current counts is what the tests do. That is
-      a decision about scheduling semantics, not a defect to repair, and it
-      wants an owner before the flag moves.
+- [ ] Understand why four tests fail with the flag on. They are not one shape,
+      and at least one is a wrong value rather than a scheduling preference:
+      `Pattern Runner - Dynamic Patterns` reads `totalItems` as `undefined`
+      where `5` is expected; `incremental observation adoption (live)` records a
+      narrowest read scope of `session` where `space` is expected;
+      `Pattern Runner - Lift` re-runs a forwarding lift once instead of twice
+      with its computed result unchanged; `scheduler cold-replica startup`
+      diverges. Relaxing these to pass either way would hide the first two.
 - [ ] Measure against the Stage 0 baseline on real patterns.
 - [ ] Turn on in development, soak, then default on.
 - [ ] Graduate: remove the flag, remove the eager path for lift arguments,

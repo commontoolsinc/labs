@@ -392,8 +392,8 @@ preferences:
 - `incremental observation adoption (live)` records a narrowest read scope of
   `session` where `space` is expected, which decides where a result is written.
 - `Pattern Runner - Lift` re-runs a lift that forwards its argument once rather
-  than twice; its computed result is unchanged, so this one may be the
-  frugality working as intended.
+  than twice; its computed result is unchanged, so this one may be the frugality
+  working as intended.
 - `scheduler cold-replica startup` diverges.
 
 Everything else in the runner suite passes with the flag on, and the whole

@@ -1253,7 +1253,12 @@ export class CellImpl<T extends FabricValue>
         // time this resolves, so the value the caller keeps is read here
         // instead — a schemaless cell materializes as a view, and a view
         // pinned to a finished transaction refuses every access.
-        resolve(validateAndTransform(this.runtime, this.tx, this.viewRef));
+        //
+        // Read against a fresh transaction rather than this cell's. A caller
+        // holding a long-lived open transaction has snapshots in it from
+        // before the computations this pull just drove, so reading through it
+        // would hand back exactly the stale values pull() exists to avoid.
+        resolve(validateAndTransform(this.runtime, undefined, this.viewRef));
       });
     });
   }
