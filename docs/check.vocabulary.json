@@ -527,6 +527,7 @@
     "output",
     "outputSchema",
     "outputSourceMap",
+    "ownedBytes",
     "page",
     "parseFabricRef",
     "parseMountedCallablePath",
