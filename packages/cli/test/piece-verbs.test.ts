@@ -243,7 +243,7 @@ describe("listPieceCallables", () => {
         space: "home",
       },
       {
-        loadManager: () => Promise.resolve({} as never),
+        loadPieces: () => Promise.resolve({} as never),
         loadPiece: () => Promise.resolve(piece as never),
       },
     );
