@@ -6,7 +6,7 @@ import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
-import { ownedBytes } from "@commonfabric/utils/buffers";
+import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
@@ -48,7 +48,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
    * @param tag - Algorithm identifier (e.g., `fid1` for fabric ID v1).
    * @param transfer - Whether the caller cedes `hash` to this instance, which
    *   permits taking over its buffer instead of copying it. When `true`, the
-   *   caller must not use `hash` afterwards; `ownedBytes()` says what that
+   *   caller must not use `hash` afterwards; `toOwnedUint8Array()` says what that
    *   permission does and does not guarantee.
    */
   constructor(
@@ -57,7 +57,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
     transfer = false,
   ) {
     super();
-    this.#hash = ownedBytes(hash, transfer);
+    this.#hash = toOwnedUint8Array(hash, transfer);
     this.#tag = tag;
     this.#justHashString = toUnpaddedBase64url(this.#hash);
     this.#fullStringForm = `${tag}:${this.#justHashString}`;

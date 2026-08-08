@@ -2,7 +2,7 @@ import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
-import { ownedBytes } from "@commonfabric/utils/buffers";
+import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
 
 import { FabricValue } from "@/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
@@ -37,12 +37,12 @@ export class FabricBytes extends BaseFabricPrimitive {
    * @param bytes - The raw bytes to wrap.
    * @param transfer - Whether the caller cedes `bytes` to this instance, which
    *   permits taking over its buffer instead of copying it. When `true`, the
-   *   caller must not use `bytes` afterwards; `ownedBytes()` says what that
+   *   caller must not use `bytes` afterwards; `toOwnedUint8Array()` says what that
    *   permission does and does not guarantee.
    */
   constructor(bytes: Uint8Array, transfer = false) {
     super();
-    this.#bytes = ownedBytes(bytes, transfer);
+    this.#bytes = toOwnedUint8Array(bytes, transfer);
     Object.freeze(this);
   }
 
