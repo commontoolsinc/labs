@@ -41,6 +41,7 @@ import {
   pushFrameFromCause,
 } from "./builder/pattern.ts";
 import { type Cell, createCell, isCell } from "./cell.ts";
+import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import { type Action } from "./scheduler.ts";
 import {
   isSchedulerActionObservation,
@@ -278,6 +279,11 @@ function patternDefaultScope(pattern: Pattern): CellScope | undefined {
  * or a link, whose kind belongs to whatever it resolves to rather than to the
  * receipt.
  *
+ * A `data:` link is the exception among links: it carries its value inside
+ * its own identifier, and the write inlines it, so the receipt holds that
+ * value rather than a link to it. The description comes from the same
+ * inlining, so it describes what is stored.
+ *
  * This is DESCRIPTIVE — what this one receipt holds — and never a contract
  * bearing on anything written later. Description and authority cannot diverge
  * here, because the receipt's create-only mark means the value it describes is
@@ -291,11 +297,12 @@ function patternDefaultScope(pattern: Pattern): CellScope | undefined {
  * asserts a writable handle on a document nothing can be written through.
  */
 function receiptShapeSchema(value: unknown): JSONSchema | undefined {
-  if (isCellLink(value)) return undefined;
-  if (Array.isArray(value)) return { type: "array" };
-  if (!isPlainObject(value)) return undefined;
+  const stored = isCellLink(value) ? findAndInlineDataUriLinks(value) : value;
+  if (isCellLink(stored)) return undefined;
+  if (Array.isArray(stored)) return { type: "array" };
+  if (!isPlainObject(stored)) return undefined;
   const properties: Record<string, JSONSchema> = {};
-  for (const key of Object.keys(value)) properties[key] = true;
+  for (const key of Object.keys(stored)) properties[key] = true;
   return { type: "object", properties };
 }
 

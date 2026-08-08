@@ -167,6 +167,44 @@ describe("receipt schema", () => {
     expect(receipt.asSchema(declared).get()).toEqual(["a", "b"]);
   });
 
+  it("declares the record a returned `data:` cell inlines to", async () => {
+    // A `data:` cell carries its value in its own identifier, and the write
+    // dissolves the link into that value, so the receipt holds a record and
+    // is described as one. Left as a link it would go undeclared, and a
+    // shaped read would have nothing to narrow against.
+    const inline = runtime.getImmutableCell(space, { topic: "x", count: 3 });
+    const stream = await boardReturning(
+      "receipt schema data uri root",
+      () => inline,
+    );
+    const receipt = await receiptOf(
+      await dispatch(stream, {}, "evt:receipt-schema:data-uri"),
+    );
+
+    const declared = receipt.getMetaRaw("schema") as JSONSchema;
+    expect(declared).toEqual({
+      type: "object",
+      properties: { topic: true, count: true },
+    });
+    expect(receipt.getRaw()).toEqual({ topic: "x", count: 3 });
+    expect(receipt.asSchema(declared).get()).toEqual({ topic: "x", count: 3 });
+  });
+
+  it("declares an array root for a returned `data:` cell holding one", async () => {
+    const inline = runtime.getImmutableCell(space, ["a", "b"]);
+    const stream = await boardReturning(
+      "receipt schema data uri array root",
+      () => inline,
+    );
+    const receipt = await receiptOf(
+      await dispatch(stream, {}, "evt:receipt-schema:data-uri-array"),
+    );
+
+    const declared = receipt.getMetaRaw("schema") as JSONSchema;
+    expect(declared).toEqual({ type: "array" });
+    expect(receipt.asSchema(declared).get()).toEqual(["a", "b"]);
+  });
+
   it("names a property holding a reference without constraining it", async () => {
     const referenced = runtime.getCell<number>(
       space,

@@ -806,7 +806,10 @@ when that kind is a record. Every property is left admissible, which is what
 keeps a link position honest, since the spelling that would name one is
 `asCell` and `["cell"]` asserts a writable handle on a document nothing can be
 written through. A value with no container kind of its own — a scalar, or a
-link, whose kind is its target's — goes undeclared. None of this constrains a
+link, whose kind is its target's — goes undeclared. A `data:` link is the one
+link that is described: it carries its value inside its own identifier and the
+write inlines it, so the receipt holds that value rather than a link to it, and
+the description is taken after the same inlining. None of this constrains a
 later write: the create-only mark means the value the schema describes is the
 only value that document ever holds. A verb's *declared* result type is a
 separate question, settled at the type layer and never reaching the runtime.
