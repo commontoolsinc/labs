@@ -1065,7 +1065,9 @@ export class FabricHash extends FabricPrimitive {
     }
     const tag = source.substring(0, colonIndex);
     const hashBase64url = source.substring(colonIndex + 1);
-    return new FabricHash(fromBase64url(hashBase64url), tag);
+    // The decoded array is freshly allocated and reaches nothing else, so it
+    // is ceded rather than copied.
+    return new FabricHash(fromBase64url(hashBase64url), tag, true);
   }
 }
 ```
