@@ -2395,7 +2395,7 @@ export async function getCellValue(
       }
       if (selected === undefined && !sourceWasAbsent) {
         throw new CellSelectionError(
-          "Cannot read transformed value: the filter/schema expression did " +
+          "Cannot read selected value: the filter/schema expression did " +
             "not materialize a JSON-renderable value. This is not JSON " +
             "null. Retry with --step for a computed result, or inspect the " +
             "selected source data and schema.",

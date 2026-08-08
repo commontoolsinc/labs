@@ -2103,7 +2103,12 @@ describe("cf piece get transforms", () => {
       );
 
       expect(marked).toEqual([boardUri]);
-      expect(boardDocuments(syncedUris)).toEqual(noteUris);
+      // `syncedUris` is a push-order log of concurrent syncs, so which
+      // documents were reached is the fact here and the order they resolved
+      // in is not.
+      expect(boardDocuments(syncedUris).toSorted()).toEqual(
+        noteUris.toSorted(),
+      );
     });
 
     it("returns the address of the position it was read at for a marked root", async () => {
