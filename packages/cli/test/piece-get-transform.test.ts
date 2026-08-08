@@ -1748,6 +1748,71 @@ describe("cf piece get transforms", () => {
     ).toEqual([{ title: "First" }]);
   });
 
+  it("masks the read of an array projection that also names `additionalProperties`", async () => {
+    const listSchema = {
+      type: "object",
+      properties: {
+        notes: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              body: { type: "string" },
+            },
+          },
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    const tx = runtime.edit();
+    // The bodies are left unwritten: reading one has to reach storage, which
+    // is what makes a read of a field nobody asked for observable.
+    const bodies = ["a", "b"].map((suffix) =>
+      runtime.getCell(space, `array-extra-props-body-${suffix}`, {
+        type: "string",
+      }, tx)
+    );
+    const source = runtime.getCell(
+      space,
+      "array-extra-props-source",
+      listSchema,
+      tx,
+    );
+    source.setRaw({
+      notes: bodies.map((body, index) => ({
+        title: ["a", "b"][index],
+        body: body.getAsLink(),
+      })),
+    } as never);
+    expect((await tx.commit()).ok).toBeDefined();
+
+    const provider = storageManager.open(space);
+    const originalSync = provider.sync.bind(provider);
+    const syncedUris: string[] = [];
+    provider.sync = ((uri, selector, scope) => {
+      syncedUris.push(uri);
+      return originalSync(uri, selector, scope);
+    }) as typeof provider.sync;
+    const bodyUris: string[] = bodies.map((body) =>
+      body.getAsNormalizedFullLink().id
+    );
+
+    const read = runtime.getCell(space, "array-extra-props-source", listSchema);
+    expect(
+      await deriveSelectedValue(runtime, space, read, {
+        projection: await parseSelectionProjection(
+          '{"properties":{"notes":{"items":{"properties":{"title":true}},' +
+            '"additionalProperties":{"type":"string"}}}}',
+        ),
+      }),
+    ).toEqual({ notes: [{ title: "a" }, { title: "b" }] });
+    // `additionalProperties` describes an object, and `items` says this
+    // position is an array. Reading it as an object that admits anything
+    // loads every document behind a field the caller did not name.
+    expect(syncedUris.filter((uri) => bodyUris.includes(uri))).toEqual([]);
+  });
+
   it("rejects an untyped `items` root against a non-array value", async () => {
     const tx = runtime.edit();
     const source = runtime.getCell(
