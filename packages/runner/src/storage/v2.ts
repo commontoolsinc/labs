@@ -1,8 +1,4 @@
-import {
-  cloneIfNecessary,
-  cloneWithoutValueAtPath,
-  cloneWithValueAtPath,
-} from "@commonfabric/data-model/fabric-value";
+import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import type { Entity } from "@commonfabric/memory/interface";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
@@ -40,19 +36,14 @@ import {
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
 } from "@commonfabric/memory/v2";
-import { parentPath } from "../../../memory/v2/path.ts";
 import {
-  patchOpIsStructural,
-  touchedPointerPaths,
+  applyPatchToDocument,
+  PatchApplyError,
 } from "../../../memory/v2/patch.ts";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
-import {
-  isObject,
-  isPlainContainer,
-  isRecord,
-} from "@commonfabric/utils/types";
+import { isObject, isRecord } from "@commonfabric/utils/types";
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -136,11 +127,6 @@ const isArrayLengthChildPath = (
   path[arrayPath.length] === "length" &&
   arrayPath.every((segment, index) => path[index] === segment);
 import { toTransactionDocumentValue } from "./v2-document.ts";
-import {
-  hasValueAtPath,
-  isArrayIndexSegment,
-  readValueAtPath,
-} from "./v2-path.ts";
 import {
   compactWatchEntries,
   normalizeSyncEntries,
@@ -403,98 +389,6 @@ const transactionValueForVersion = (
   return version.transactionValue;
 };
 
-const isPathPrefix = (
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean =>
-  prefix.length <= path.length &&
-  prefix.every((segment, index) => segment === path[index]);
-
-const replayPathForPendingPatchTarget = (
-  base: EntityDocument | undefined,
-  pendingValue: EntityDocument,
-  path: readonly string[],
-): string[] => {
-  if (path.length === 0) {
-    return [...path];
-  }
-  const parent = parentPath(path);
-  if (
-    Array.isArray(readValueAtPath(base, parent)) ||
-    Array.isArray(readValueAtPath(pendingValue, parent))
-  ) {
-    return parent;
-  }
-  return [...path];
-};
-
-const changedPathsForPendingPatch = (
-  base: EntityDocument | undefined,
-  pendingValue: EntityDocument,
-  patches: readonly PatchOp[],
-): string[][] =>
-  patches.flatMap((patch) => {
-    const leaves = touchedPointerPaths(patch);
-    // Structural ops (add/remove/move) may target a slot whose position shifts
-    // as the pending value is rebuilt from `base`, so resolve each against live
-    // state; value-only ops keep their exact leaf path.
-    return patchOpIsStructural(patch)
-      ? leaves.map((path) =>
-        replayPathForPendingPatchTarget(base, pendingValue, path)
-      )
-      : leaves;
-  });
-
-// Finds the first existing prefix in `base` that blocks a pending nested write.
-// cloneWithValueAtPath can create missing containers when applying the selected
-// write path.
-const firstExistingPrefixThatBlocksPendingPath = (
-  base: EntityDocument | undefined,
-  path: readonly string[],
-): string[] | undefined => {
-  for (let length = 1; length < path.length; length += 1) {
-    const prefix = path.slice(0, length);
-    if (!hasValueAtPath(base, prefix)) {
-      // Once a prefix is missing, by definition everything else in the path
-      // can be written, so nothing is blocking it.
-      return undefined;
-    }
-    const value = readValueAtPath(base, prefix);
-    const nextSegment = path[length]!;
-    if (
-      !isPlainContainer(value) ||
-      (Array.isArray(value) && !isArrayIndexSegment(nextSegment))
-    ) {
-      return prefix;
-    }
-  }
-  return undefined;
-};
-
-const pendingSetPathForBase = (
-  base: EntityDocument | undefined,
-  pendingValue: EntityDocument,
-  path: readonly string[],
-): readonly string[] => {
-  const prefix = firstExistingPrefixThatBlocksPendingPath(base, path);
-  if (!prefix || !hasValueAtPath(pendingValue, prefix)) {
-    return path;
-  }
-  return prefix;
-};
-
-const compactChangedPaths = (paths: readonly string[][]): string[][] => {
-  const sorted = [...paths].sort((left, right) => left.length - right.length);
-  const retained: string[][] = [];
-  for (const path of sorted) {
-    if (retained.some((existing) => isPathPrefix(existing, path))) {
-      continue;
-    }
-    retained.push(path);
-  }
-  return retained;
-};
-
 const applyPendingVersion = (
   base: EntityDocument | undefined,
   pending: PendingVersion,
@@ -506,39 +400,43 @@ const applyPendingVersion = (
     case "set":
       return cloneIfNecessary(pending.value) as EntityDocument;
     case "patch": {
-      let next = base;
-      for (
-        const path of compactChangedPaths(
-          changedPathsForPendingPatch(base, pending.value, pending.patches),
-        )
-      ) {
-        if (hasValueAtPath(pending.value, path)) {
-          const setPath = pendingSetPathForBase(next, pending.value, path);
-          if (!isSamePath(setPath, path)) {
-            pendingPatchLogger.warn("pending-branch-replace", () => [
-              "pending patch visibility replaced data at an existing branch that blocked the nested write",
-              {
-                space: logContext.space,
-                id: logContext.id,
-                scope: normalizeCellScope(logContext.scope),
-                localSeq: pending.localSeq,
-                path,
-                replacementPath: setPath,
-              },
-            ]);
-          }
-          next = cloneWithValueAtPath(
-            next,
-            setPath,
-            readValueAtPath(pending.value, setPath),
-          ) as EntityDocument;
-          continue;
+      // Replay the layer's OPS over the base — never combine values. The
+      // patch vocabulary is semantic (append / add-unique / increment /
+      // splice / ...), so replaying re-folds the layer against whatever
+      // base the server delivered, exactly as the server folds it on
+      // accept — the client and the server share this applyPatch. Spine
+      // materialization comes from the ops that allow it (createMissing),
+      // mirroring the server's mergeable disposition, and the ops can only
+      // express this layer's own writes, so a dropped sibling's data is
+      // unrepresentable in the result (CT-1872 1a).
+      try {
+        return applyPatchToDocument(
+          base,
+          pending.patches as PatchOp[],
+        ) as EntityDocument;
+      } catch (error) {
+        if (!(error instanceof PatchApplyError)) {
+          // Only genuine inapplicability renders as a skipped layer; an
+          // unexpected implementation failure must propagate.
+          throw error;
         }
-        next = cloneWithoutValueAtPath(next, path) as
-          | EntityDocument
-          | undefined;
+        // An op that cannot apply to this base (e.g. an append onto a
+        // scalar a winner wrote) renders WITHOUT this layer: transiently
+        // honest — the server rejects the same ops against the same base,
+        // or a covering frame retires the layer with server truth. Under
+        // strict semantics (CT-1875) this becomes a terminal rejection.
+        pendingPatchLogger.debug("pending-replay-skip", () => [
+          "pending patch layer skipped: ops do not apply to the current base",
+          {
+            space: logContext.space,
+            id: logContext.id,
+            scope: normalizeCellScope(logContext.scope),
+            localSeq: pending.localSeq,
+            error: String(error),
+          },
+        ]);
+        return base;
       }
-      return next;
     }
   }
 };
@@ -2601,7 +2499,11 @@ class SpaceReplica implements ISpaceReplica {
     this.#caughtUpLocalSeq = Math.max(this.#caughtUpLocalSeq, localSeq);
     // Apply parked accepts the marker now covers, ascending, BEFORE waking
     // marker waiters: gated code (readyToRetry retries) resumes against a
-    // replica whose decided promotions are already settled.
+    // replica where every promotion COVERED BY THIS MARKER is settled.
+    // Accepts decided but not yet covered — verdict received, coverage
+    // still outstanding (the two moments CT-1950 splits) — remain parked
+    // past this wake: their pending overlays stay visible and their
+    // settlement promises unresolved until their own marker arrives.
     if (this.#parkedAccepts.size > 0) {
       const due = [...this.#parkedAccepts.keys()]
         .filter((parked) => parked <= this.#caughtUpLocalSeq)
