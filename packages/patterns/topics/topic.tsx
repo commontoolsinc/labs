@@ -131,9 +131,17 @@ export interface TopicInput {
    *
    * Declared at the deployed reference type: this is the pattern's accepted
    * argument, not a read. What bounds the read is the parameter type of the
-   * derivation that consumes it (`topicCrossrefView` below takes `TopicScan`),
+   * derivation that consumes it (`outboundEdges` below takes `TopicMention`),
    * which is where a narrow declaration actually costs a consumer nothing. */
   mentionable?: Writable<TopicReference[] | Default<[]>>;
+  /** The board's own computed reference graph, one row per topic in the same
+   * order as `mentionable`. A topic reads its own row out of this instead of
+   * rebuilding the whole join for itself: the board already did that work, and
+   * a per-row read only re-triggers when that row changes.
+   *
+   * Optional, like `mentionable` before it. A topic wired before this input
+   * existed falls back to deriving its row locally. */
+  boardCrossrefs?: Writable<TopicCrossrefs[] | Default<[]>>;
 }
 
 /**
@@ -620,44 +628,142 @@ const findSelfIndex = lift((
   return -1;
 });
 
-const topicCrossrefView = lift((
-  { mentionable, me }: {
-    // Reads `TopicMention` — title and prose, nothing else. The row below
-    // republishes each sibling as the deployed `TopicReference` (see the HACK
-    // note), so narrowing here costs a consumer nothing.
-    mentionable: Writable<TopicMention[] | Default<[]>>;
-    /** This topic's position, from `findSelfIndex`; -1 when not on the list. */
+/**
+ * This topic's OUTBOUND edges: the siblings its own prose mentions.
+ *
+ * Reactive on this topic's own prose and nothing else. The sibling list is
+ * SAMPLED, not read, which is the whole point: prose written before a topic
+ * existed cannot mention it, so an add re-running this for every topic already
+ * on the board was pure waste — N full corpus scans per add, producing a result
+ * that provably could not have changed. Sampling registers no dependency, so
+ * this now runs when this topic's body, comments, or links change, and then
+ * only for this topic.
+ *
+ * The cost of sampling: a sibling renamed after this ran keeps its old title in
+ * the snapshot, and a sibling removed from the board keeps its chip, until this
+ * topic's own prose changes. Both are display staleness on a derived, never
+ * persisted view.
+ */
+const outboundEdges = lift((
+  { siblings, body, comments, links }: {
+    siblings: Writable<TopicMention[] | Default<[]>>;
+    body: string | Default<"">;
+    comments: { body: string }[] | Default<[]>;
+    links: { url: string }[] | Default<[]>;
+  },
+): { refsOut: TopicReference[]; refsOutLinks: TopicNavigationLink[] } => {
+  const sibs = siblings.sample();
+  if (!Array.isArray(sibs) || sibs.length === 0) {
+    return { refsOut: [], refsOutLinks: [] };
+  }
+  const mine = topicCorpus({ body, comments, links });
+  const mentioned = new Set(extractFidPayloads(mine));
+  if (mentioned.size === 0) return { refsOut: [], refsOutLinks: [] };
+
+  const hits: number[] = [];
+  const payloads: string[] = [];
+  for (let index = 0; index < sibs.length; index++) {
+    if (!sibs[index]) {
+      payloads.push("");
+      continue;
+    }
+    // deno-lint-ignore no-explicit-any
+    const ref = (siblings.key(index) as any).resolveAsCell?.()?.entityId;
+    const payload = ref ? fidPayload(entityRefToString(ref)) : "";
+    payloads.push(payload);
+    if (payload && mentioned.has(payload)) hits.push(index);
+  }
+  return {
+    // HACK, as elsewhere: read the narrow projection, publish the deployed
+    // reference type. A reference through a lift is a link and resolves whole.
+    refsOut: hits.map((index) => sibs[index] as TopicReference),
+    refsOutLinks: hits.map((index) => ({
+      fid: payloads[index] ? `fid1:${payloads[index]}` : "",
+      title: sibs[index].title,
+    })),
+  };
+});
+
+/**
+ * This topic's INBOUND edges, read out of the board's own computed graph.
+ *
+ * Who mentions me cannot be derived from my own prose, so this is the half that
+ * genuinely needs the whole corpus — and the board already scanned it. Reading
+ * one row rather than rebuilding the join means this re-triggers only when that
+ * row changes: `normalizeAndDiff` writes the board's table per changed
+ * location, and a read of one path is invalidated only by a write under it.
+ */
+/** The two directions as the published row. */
+const joinEdges = lift((
+  { outbound, inbound }: {
+    outbound: {
+      refsOut: TopicReference[];
+      refsOutLinks: TopicNavigationLink[];
+    };
+    inbound: {
+      referencedBy: TopicReference[];
+      referencedByLinks: TopicNavigationLink[];
+    };
+  },
+): TopicCrossrefs => ({
+  refsOut: outbound.refsOut,
+  refsOutLinks: outbound.refsOutLinks,
+  referencedBy: inbound.referencedBy,
+  referencedByLinks: inbound.referencedByLinks,
+}));
+
+const inboundEdges = lift((
+  { boardCrossrefs, siblings, me }: {
+    boardCrossrefs: Writable<TopicCrossrefs[] | Default<[]>>;
+    siblings: Writable<TopicMention[] | Default<[]>>;
     me: number;
   },
-): TopicCrossrefs => {
-  const sibs = mentionable.get();
-  const empty: TopicCrossrefs = {
-    refsOut: [],
-    referencedBy: [],
-    refsOutLinks: [],
-    referencedByLinks: [],
-  };
-  if (sibs.length === 0) return empty;
-  // Each sibling's own fid payload ("" while unresolved — such entries hold no
-  // edges this render). Cell-runtime surface cast, as in notes' appendLink.
-  const payloads = sibs.map((t, i) => {
-    if (!t) return "";
-    const ref = (mentionable.key(i) as any).resolveAsCell?.()?.entityId;
-    return ref ? fidPayload(entityRefToString(ref)) : "";
-  });
-  const joined = crossrefJoin(sibs.map((t) => topicCorpus(t)), payloads);
-  if (me < 0 || me >= sibs.length || !sibs[me]) return empty;
+): {
+  referencedBy: TopicReference[];
+  referencedByLinks: TopicNavigationLink[];
+} => {
+  const none = { referencedBy: [], referencedByLinks: [] };
+  if (me < 0) return none;
+
+  const row = boardCrossrefs.key(me).get();
+  if (row) {
+    return {
+      referencedBy: row.referencedBy ?? [],
+      referencedByLinks: row.referencedByLinks ?? [],
+    };
+  }
+
+  // No board table: a topic wired before that input existed, which is every
+  // piece already deployed. Derive inbound edges the old way rather than
+  // publishing an empty set — `pattern-vintage` catches exactly that, and a
+  // silently emptied Connections card is a worse failure than a slow one.
+  // Backfilling `boardCrossrefs` as a link-bind (as `mentionable` was) retires
+  // this branch.
+  const sibs = siblings.get();
+  if (!Array.isArray(sibs) || me >= sibs.length) return none;
+  // deno-lint-ignore no-explicit-any
+  const myRef = (siblings.key(me) as any).resolveAsCell?.()?.entityId;
+  const myPayload = myRef ? fidPayload(entityRefToString(myRef)) : "";
+  if (!myPayload) return none;
+
+  const hits: number[] = [];
+  for (let index = 0; index < sibs.length; index++) {
+    if (index === me || !sibs[index]) continue;
+    if (extractFidPayloads(topicCorpus(sibs[index])).includes(myPayload)) {
+      hits.push(index);
+    }
+  }
   return {
-    refsOut: joined.refsOut[me].map((j) => sibs[j] as TopicReference),
-    referencedBy: joined.referencedBy[me].map((j) => sibs[j] as TopicReference),
-    refsOutLinks: joined.refsOut[me].map((j) => ({
-      fid: payloads[j] ? `fid1:${payloads[j]}` : "",
-      title: sibs[j].title,
-    })),
-    referencedByLinks: joined.referencedBy[me].map((j) => ({
-      fid: payloads[j] ? `fid1:${payloads[j]}` : "",
-      title: sibs[j].title,
-    })),
+    referencedBy: hits.map((index) => sibs[index] as TopicReference),
+    referencedByLinks: hits.map((index) => {
+      // deno-lint-ignore no-explicit-any
+      const ref = (siblings.key(index) as any).resolveAsCell?.()?.entityId;
+      const payload = ref ? fidPayload(entityRefToString(ref)) : "";
+      return {
+        fid: payload ? `fid1:${payload}` : "",
+        title: sibs[index].title,
+      };
+    }),
   };
 });
 
@@ -708,6 +814,7 @@ export default pattern<TopicInput, TopicOutput>(
       bodyUpdatedBy,
       bodyUpdatedAt,
       mentionable,
+      boardCrossrefs,
     },
   ) => {
     // Session-local UI state (new-tab test: none of this should carry over).
@@ -861,10 +968,21 @@ export default pattern<TopicInput, TopicOutput>(
       comments.get().toSorted((a, b) => a.sentAt - b.sentAt)
     );
 
-    const crossrefs = topicCrossrefView({
-      mentionable,
+    // Split by direction: outbound depends on this topic's prose, inbound on
+    // one row of the board's table. Neither depends on the sibling list, so an
+    // unrelated topic being added re-runs nothing here.
+    const outbound = outboundEdges({
+      siblings: mentionable,
+      body,
+      comments,
+      links,
+    });
+    const inbound = inboundEdges({
+      boardCrossrefs,
+      siblings: mentionable,
       me: findSelfIndex({ siblings: mentionable, title }),
     });
+    const crossrefs = joinEdges({ outbound, inbound });
 
     const linksView = computed(() => links.get());
     const hasLinks = linksView.length > 0;
