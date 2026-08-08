@@ -96,13 +96,16 @@ Waits split into two groups with different primitives.
   signal.
 - The higher-level wrappers in
   `packages/patterns/integration/cfc-browser-helpers.ts` compose the two
-  primitives above for common waits and interactions. `clickCfButton` and
-  `clickCfButtonsConcurrently` settle and mark the exact rendered targets before
-  clicking them. `clickCfButton` takes the first match and reaches through a
-  host's shadow root for its inner `[data-cf-button]`.
-  `clickNthCfButton` takes the `index`-th match of a selector that already
-  resolves to the buttons themselves. It does not yet have the same settlement
-  guarantee.
+  primitives above for common waits and interactions. Each of them settles and
+  marks the exact rendered target before acting on it; what differs between them
+  is only how they recognize that target. `clickCfButton` takes the first match
+  and reaches through a host's shadow root for its inner `[data-cf-button]`, and
+  `clickCfButtonsConcurrently` does the same for a group. `clickNthCfButton`
+  takes the `index`-th match of a selector that already resolves to the buttons
+  themselves. `clickTrustedAction` takes the first enabled match of a
+  `data-ui-action` value. The note-button helpers take a button by its text or
+  its title. `submitViaEnter` focuses a field and presses Enter rather than
+  clicking, and settles around resolving that field the same way.
 
 To click a control that appears asynchronously, follow the `clickCfButton`
 shape rather than a find-and-click retry loop: a `waitForCondition` predicate
