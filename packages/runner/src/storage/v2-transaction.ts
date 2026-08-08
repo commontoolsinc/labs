@@ -2052,8 +2052,12 @@ export class V2StorageTransaction implements IStorageTransaction {
       this.#verdict.resolve(result);
       // CT-1950: the caller's commit promise resolves at coverage — the
       // subscribed view reflects the committed write — while the verdict
-      // above already released durability-gated effects.
-      if (result.ok) {
+      // above already released durability-gated effects. Drained on EVERY
+      // settlement, not only success: waits are recorded per accepted
+      // space, so a multi-space commit rejected on a later space still
+      // holds its settlement (and commit callbacks) until the earlier
+      // accepted spaces' parked writes reach the view.
+      {
         const waits = takeCoverageWaits(this);
         if (waits.length > 0) {
           await Promise.all(waits);
@@ -2120,8 +2124,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       this.#finish(result);
       this.#verdict.resolve(result);
       // Same split as the single-space path: verdicts (all spaces) release
-      // effects; the commit promise waits for every space's coverage.
-      if (result.ok) {
+      // effects; the commit promise waits for every space's coverage —
+      // including on a partial failure, where the waits recorded by the
+      // earlier ACCEPTED spaces still gate settlement.
+      {
         const waits = takeCoverageWaits(this);
         if (waits.length > 0) {
           await Promise.all(waits);

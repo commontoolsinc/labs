@@ -1,5 +1,10 @@
-import { assert, assertEquals, assertStrictEquals } from "@std/assert";
-import { applyPatch } from "../v2/patch.ts";
+import {
+  assert,
+  assertEquals,
+  assertStrictEquals,
+  assertThrows,
+} from "@std/assert";
+import { applyPatch, applyPatchToDocument } from "../v2/patch.ts";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricInstance } from "@commonfabric/data-model/fabric-value";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
@@ -650,4 +655,29 @@ Deno.test("memory v2 remove-by-value is a no-op through a missing array index", 
     { op: "remove-by-value", path: "/items/5/inner", value: "a" },
   ]) as typeof original;
   assertEquals(out, { items: [["a"]] });
+});
+
+// `applyPatchToDocument` is the shared "replay these ops over whatever this
+// document currently is" entry point (server-side reconstruction and the
+// client's pending replay). It normalizes an absent base to the empty
+// envelope and guarantees the result IS an entity envelope — a root-level
+// op can produce any FabricValue, and type-laundering a scalar root into
+// EntityDocument would let an invalid shape reach envelope-assuming code.
+
+Deno.test("memory v2 applyPatchToDocument replays over an absent base as the empty envelope", () => {
+  const patched = applyPatchToDocument(undefined, [
+    { op: "add", path: "/value", value: { items: { mine: "hello" } } },
+  ]);
+  assertEquals(patched, { value: { items: { mine: "hello" } } });
+});
+
+Deno.test("memory v2 applyPatchToDocument rejects a patched root that is not an entity document", () => {
+  assertThrows(
+    () =>
+      applyPatchToDocument({ value: { count: 1 } }, [
+        { op: "replace", path: "", value: 5 },
+      ]),
+    Error,
+    "patched root is not an entity document",
+  );
 });

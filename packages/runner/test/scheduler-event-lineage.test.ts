@@ -35,8 +35,12 @@ type TransactResponse = {
   ok?: unknown;
   error?: { name: string; message: string };
 };
+type PublishTransactVerdict = (response: TransactResponse) => void;
 type TestMemoryServer = {
-  transact(message: TransactMessage): Promise<TransactResponse>;
+  transact(
+    message: TransactMessage,
+    publishVerdict?: PublishTransactVerdict,
+  ): Promise<TransactResponse>;
 };
 
 function emulatedServer(
@@ -52,11 +56,11 @@ function rejectNextServerTransact(
   const original = server.transact.bind(server);
   const rejected = Promise.withResolvers<void>();
   let shouldReject = true;
-  server.transact = async (message) => {
+  server.transact = async (message, publishVerdict) => {
     if (shouldReject) {
       shouldReject = false;
       rejected.resolve();
-      return {
+      const response: TransactResponse = {
         type: "response",
         requestId: message.requestId,
         error: {
@@ -64,8 +68,10 @@ function rejectNextServerTransact(
           message: "forced scheduler lineage test conflict",
         },
       };
+      publishVerdict?.(response);
+      return response;
     }
-    return await original(message);
+    return await original(message, publishVerdict);
   };
 
   return {
@@ -81,15 +87,17 @@ function rejectServerTransacts(
 ): () => void {
   const server = emulatedServer(storageManager);
   const original = server.transact.bind(server);
-  server.transact = (message) => {
-    return Promise.resolve({
+  server.transact = (message, publishVerdict) => {
+    const response: TransactResponse = {
       type: "response",
       requestId: message.requestId,
       error: {
         name: "ConflictError",
         message: "forced scheduler lineage test conflict",
       },
-    });
+    };
+    publishVerdict?.(response);
+    return Promise.resolve(response);
   };
 
   return () => {
@@ -106,15 +114,15 @@ function delayNextServerTransact(
   const release = Promise.withResolvers<"confirm" | "fail">();
   let shouldDelay = true;
 
-  server.transact = async (message) => {
+  server.transact = async (message, publishVerdict) => {
     if (!shouldDelay) {
-      return await original(message);
+      return await original(message, publishVerdict);
     }
     shouldDelay = false;
     started.resolve();
     const outcome = await release.promise;
     if (outcome === "fail") {
-      return {
+      const response: TransactResponse = {
         type: "response",
         requestId: message.requestId,
         error: {
@@ -122,8 +130,10 @@ function delayNextServerTransact(
           message: "forced scheduler lineage test conflict",
         },
       };
+      publishVerdict?.(response);
+      return response;
     }
-    return await original(message);
+    return await original(message, publishVerdict);
   };
 
   return {
