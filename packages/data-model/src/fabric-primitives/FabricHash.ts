@@ -54,7 +54,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   constructor(
     hash: Uint8Array,
     tag: string,
-    transfer = false,
+    transfer: boolean = false,
   ) {
     super();
     this.#hash = toOwnedUint8Array(hash, transfer);

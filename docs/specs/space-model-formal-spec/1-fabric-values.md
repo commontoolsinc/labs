@@ -1006,7 +1006,7 @@ export class FabricHash extends FabricPrimitive {
    *   permits taking over its buffer instead of copying it. When `true`, the
    *   caller must not use `hash` afterwards.
    */
-  constructor(hash: Uint8Array, tag: string, transfer = false) {
+  constructor(hash: Uint8Array, tag: string, transfer: boolean = false) {
     super();
     this.#hash = toOwnedUint8Array(hash, transfer);
     this.#tag = tag;
@@ -1133,7 +1133,7 @@ export class FabricBytes extends FabricPrimitive {
    *   permits taking over its buffer instead of copying it. When `true`, the
    *   caller must not use `bytes` afterwards.
    */
-  constructor(bytes: Uint8Array, transfer = false) {
+  constructor(bytes: Uint8Array, transfer: boolean = false) {
     super();
     this.#bytes = toOwnedUint8Array(bytes, transfer);
     Object.freeze(this);
