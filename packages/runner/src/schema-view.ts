@@ -336,6 +336,10 @@ function createObjectView(
 
   return new Proxy({} as Record<string, unknown>, {
     get: (_target, prop) => {
+      // See the same guard in `query-result-proxy.ts`: promise adoption probes
+      // `then`, and a view that refuses the probe cannot be returned from a
+      // lift at all.
+      if (prop === "then" && tx.status().status !== "ready") return undefined;
       if (typeof prop === "symbol") {
         if (prop === toCell) {
           return (): Cell<unknown> =>
@@ -400,6 +404,7 @@ function createArrayView(
 
   return new Proxy(new Array(value.length), {
     get: (_target, prop, receiver) => {
+      if (prop === "then" && tx.status().status !== "ready") return undefined;
       if (prop === "length") return value.length;
       if (typeof prop === "symbol") {
         if (prop === toCell) {

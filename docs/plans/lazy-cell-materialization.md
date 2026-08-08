@@ -392,15 +392,18 @@ diffing and the scheduler's own reads keep eager semantics.
       [`../development/EXPERIMENTAL_OPTIONS.md`](../development/EXPERIMENTAL_OPTIONS.md),
       off by default, reachable by `EXPERIMENTAL_LAZY_MATERIALIZATION` or
       `RuntimeOptions.experimental`.
-- [ ] Close the gaps that fail with the flag forced on. The runner suite is
-      green with it off and has these left with it on: `pattern-scope.test.ts`
-      raises an uncaught error; a lift that returns a pattern does not run its
-      result correctly, since the view does not yet carry builder artifacts and
-      opaque values the way the eager path does; and
-      `incremental observation adoption (live)` and
-      `scheduler cold-replica
-      startup` diverge around observation
-      adoption.
+- [x] A view answers a `then` probe rather than refusing it once its transaction
+      has finished. Promise adoption probes `then` on every value it receives
+      and a lift's result crosses a promise boundary by construction, so a view
+      that refuses the probe cannot be returned at all.
+- [ ] Decide what the forwarding case should do. Four tests fail with the flag
+      on, all one shape: a lift that forwards its argument onward without
+      reading it takes no dependency on the values inside, and so re-runs fewer
+      times. Forwarding passes a link, so the values it produces stay correct —
+      these tests assert run counts, not wrong results. Fewer re-runs is what
+      laziness is for; pinning the current counts is what the tests do. That is
+      a decision about scheduling semantics, not a defect to repair, and it
+      wants an owner before the flag moves.
 - [ ] Measure against the Stage 0 baseline on real patterns.
 - [ ] Turn on in development, soak, then default on.
 - [ ] Graduate: remove the flag, remove the eager path for lift arguments,

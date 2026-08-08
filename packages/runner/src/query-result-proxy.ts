@@ -79,6 +79,10 @@ const proxyCacheKey = (
     cfcLabelView ?? null,
   ]);
 
+/** Whether a transaction can still answer a read. */
+const isReadable = (tx: IExtendedStorageTransaction): boolean =>
+  tx.status().status === "ready";
+
 const childLabelView = (
   cfcLabelView: CfcLabelView | undefined,
   segment: string,
@@ -325,6 +329,12 @@ function createViewProxy<T>(
 
   const proxy = new Proxy(proxyTarget as object, {
     get: (target, prop, receiver) => {
+      // Promise adoption probes `then` on every value it receives, so a view
+      // that refuses the probe cannot cross a promise boundary at all — and a
+      // lift's result crosses one by construction. A finished view answers it
+      // with `undefined`, which is what a live one answers for a value with no
+      // `then`; every other property still refuses.
+      if (prop === "then" && pinned && !isReadable(viewTx)) return undefined;
       if (Array.isArray(value) && prop === "length") {
         const current = readTx().readValueOrThrow(link) as typeof value;
         return Array.isArray(current) ? current.length : 0;
