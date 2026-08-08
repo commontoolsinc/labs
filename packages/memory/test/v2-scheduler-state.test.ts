@@ -3170,12 +3170,18 @@ Deno.test("memory v2 server serializes scheduler side effects per owner space", 
       new Map(),
       session,
     );
+    let idleSettled = false;
+    const idle = server.idle().then(() => {
+      idleSettled = true;
+    });
     await Promise.resolve();
     assertEquals(mirroredSequences, [1]);
+    assertEquals(idleSettled, false);
 
     releaseFirst.resolve();
-    await Promise.all([first, second]);
+    await Promise.all([first, second, idle]);
     assertEquals(mirroredSequences, [1, 2]);
+    assertEquals(idleSettled, true);
   } finally {
     releaseFirst.resolve();
     await server.close().catch(() => {});
