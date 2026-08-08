@@ -2,9 +2,9 @@
  * Byte-Ownership Performance Benchmarks
  *
  * `toOwnedUint8Array()` is how a value that promises an immutable byte
- * sequence gets bytes it can rely on, so it sits directly under `FabricHash`
- * and `FabricBytes` construction. Each size runs three arms side by side, and
- * it is the spread between them that carries the information:
+ * sequence gets bytes it can rely on, so its cost is paid once per such value
+ * constructed. Each size runs three arms side by side, and it is the spread
+ * between them that carries the information:
  *
  * - `share` allocates the source and does nothing else. It is the floor: what
  *   the caller would pay if a holder simply kept the caller's array, taking on
@@ -28,9 +28,11 @@
  *    why enforcement is not free even for a digest, and why the enforced cost
  *    barely responds to which strategy is chosen.
  *
- * 3. **The absolute cost at 32 bytes.** This one is paid once per `hashOf()`,
- *    which is among the most-called operations in the runtime, so it is the
- *    figure that turns into a percentage of real work elsewhere.
+ * 3. **The absolute cost at 32 bytes.** Digest-sized values are constructed
+ *    on hot paths, and at that size the cost is a flat per-construction
+ *    addition rather than anything proportional to the work around it. It is
+ *    therefore the figure that turns into a percentage of some caller's total,
+ *    and the smaller that caller's own work, the larger the percentage.
  *
  * Every arm allocates its own source, because `transfer()` detaches and so
  * cannot be handed the same array twice. At 1 MiB that allocation dominates
