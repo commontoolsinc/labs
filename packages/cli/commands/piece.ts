@@ -1439,7 +1439,8 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   )
   .option(
     "--schema <schema:string>",
-    "Project output with an inline JSON Schema or @file",
+    "Project output with an inline JSON Schema, @file, or the --select " +
+      "field list",
     // Both flags carry the one projection, so a command naming both has not
     // said which shape it wants. Refuse before the read rather than pick.
     { conflicts: ["select"] },

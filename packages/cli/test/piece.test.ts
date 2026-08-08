@@ -558,6 +558,17 @@ describe("cli piece parsing", () => {
     expect(getFlags).toContain("--schema");
   });
 
+  it("describes `--schema` as taking the field list `--select` takes", () => {
+    // `--schema` reads that field list as well as a JSON Schema, and its
+    // description is the only place a caller reading `--help` learns so. A
+    // description naming one of the two languages sends a caller who wants
+    // both a field list and a schema shape to the wrong flag.
+    const schemaOption = piece.getCommand("get")!.getOptions().find((option) =>
+      option.flags.includes("--schema")
+    )!;
+    expect(schemaOption.description).toContain("--select field list");
+  });
+
   it("parses the --filter, --select, and --schema options into a selection", async () => {
     expect(await parseCellSelectionOptions({})).toBeUndefined();
 
