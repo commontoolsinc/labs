@@ -54,6 +54,7 @@ import {
   type deriveSelectedValue,
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
+import { cf, stripAnsi } from "./utils.ts";
 
 describe("executePieceCallable", () => {
   it("reports not-found when the piece cell has no schema-cast surface", async () => {
@@ -3299,6 +3300,24 @@ describe("piece call selection", () => {
       // set of messages whichever command produced them.
       await expect(parsePieceCallSelection({ filter: ".a ==" })).rejects
         .toThrow(CellSelectionError);
+    });
+
+    it("reports a malformed selection without naming an invocation to retry", async () => {
+      const { code, stderr } = await cf(
+        "piece call " +
+          "--identity ./definitely-missing-piece-call-review.key " +
+          "--api-url https://cf.dev --space common-knowledge " +
+          "--piece fid1:piece-123 --select a..b addTopic",
+      );
+      const errors = stripAnsi(stderr.join("\n"));
+      expect(code).toBe(1);
+      expect(errors).toContain('Invalid --select field path "a..b"');
+      // The selection is read before a callable is resolved and before
+      // anything is sent, so no id has been spent and no phase has been
+      // reached. An `invocation: <id> phase: <phase>` line here would send
+      // the caller to recover a call that was never made.
+      expect(errors).not.toContain("invocation:");
+      expect(errors).not.toContain("phase:");
     });
   });
 });
