@@ -129,10 +129,12 @@ When several controls are clicked as a group, prove that every target is stable
 before marking any of them. Mark the targets inside the successful predicate so
 the click addresses the elements that passed the settle check.
 
-`clickCfButton` and `clickCfButtonsConcurrently` work this way.
-`clickTrustedAction`, `submitViaEnter`, and `settleAndClickNoteButton` in
-`packages/patterns/integration/note-button-helpers.ts` still settle before
-resolving their target, and carry the gap described above.
+Every marked click runs the same step to get there, `settleAndMarkTargets`, so
+`clickCfButton`, `clickCfButtonsConcurrently`, `clickNthCfButton`,
+`clickTrustedAction` and the note-button helpers all mark under these rules. A
+helper supplies only a finder: which elements qualify, answered from the page.
+Resolving them either side of the settle, requiring the same elements both
+times, and marking them is the shared step's work.
 
 Ask `probe.isRendered` for that check rather than hand-rolling it, and note that
 it is deliberately not `probe.isVisible`, which additionally requires the
@@ -177,6 +179,65 @@ click on" means. A helper that tags a control by name also passes its tagging
 predicate to `clickMarked`, so a control the page rebuilt is tagged again on
 whatever took its place, under that helper's own readiness rules, rather than
 reported as gone.
+
+The dispatch that follows still crosses the protocol, and the page keeps running
+while it does. A surface that relays out in that crossing carries the control
+off the point the click is already aimed at, and the click lands on whatever
+moved into the space. So the same page turn that measures the point also arms an
+interceptor: it watches the window, in the capture phase, for the pointer and
+mouse events of that one click. The first of them to arrive decides what happens
+to the rest. If the mark is on its composed path, every event of the interaction
+goes through to the page. If it is not, every event is stopped at the window.
+One decision for the whole interaction is what makes the control take the press
+and the release together or take neither.
+
+Whether the click was delivered is decided separately, at the click event,
+because that is the event a control acts on. The press and the release cross the
+protocol one at a time, so the page can carry the control away between them, and
+the browser then raises the click on the nearest ancestor the two have in common
+rather than on the control. A click that does not carry the mark is stopped like
+any other miss. So is a control that declines the interaction outright: a
+disabled one takes the press and raises no click at all.
+
+What the interceptor stops is the press, the release and the click — the events
+a control acts on. The pointer moves to the point before it presses, and the
+hover events that produces reach the page like any other. It also leaves the
+page's own clicks alone: a label forwarding to its control, or a component
+clicking itself from a key handler, raises an untrusted event, which the
+interceptor passes through and does not read a verdict from.
+
+A miss did not activate the control, so `clickMarked` aims again at wherever the
+control now stands and dispatches again. What bounds that is progress: the aim
+has to answer a pixel no dispatch has lost yet. A control that has not moved
+answers the same pixel, and a page that shuffles a control between a few
+positions comes back to one of them, so both stop at the second aim that repeats
+itself. The report then names every pixel tried and what the click reached at
+each, which says whether the control was covered, was declining the click, or
+was being carried around the page.
+
+This is the one place in the interaction helpers where a failed operation is
+retried. It is not the kind of retry the rule above forbids, because a click the
+interceptor stopped is not a failed attempt that might have worked — it provably
+did nothing to the page — and because it cannot repeat itself: a second dispatch
+only happens at a pixel that has never been dispatched at.
+
+Those steps look like one another and are not. Each answers a different question
+about the control, and dropping any of them leaves a click that quietly does
+nothing:
+
+- Is it wired up? The settle either side of the mark answers this, and nothing
+  later can. A click that reaches a control whose handler has not been bound is
+  delivered and discarded, so every other check passes and the test waits on an
+  effect that will not come.
+- Is it the control the settle ran for? Resolving before and after the settle
+  and requiring the same elements answers this. A surface that rebuilt its
+  control mid-settle otherwise hands the mark to an element that never settled.
+- Is there a point to aim at? The single page turn that holds for a stable box
+  and measures it answers this. A control with no box makes the measurement come
+  back empty and the click throw before any of it reaches the page.
+- Did the click land on it? The interceptor answers this, and only this. It is
+  what turns a click carried off its target into a re-aim rather than a silent
+  success.
 
 That error message covers more than a missing layout box: the underlying
 `DOM.getBoxModel` reports a node the browser's DOM agent no longer knows about
