@@ -987,11 +987,11 @@ export class FabricEpochDays extends FabricPrimitive {
  * is the unpadded base64url encoding (RFC 4648 Section 5) of the hash
  * bytes. For example: `fid1:n4bQgYhMfWWaL-qgxVrQFaO_TxsrC4Is0V1sFbDwCgg`.
  *
- * Immutable: instances are `Object.freeze()`-d at construction time, and an
- * instance owns its hash bytes outright, holding a buffer no other code can
- * reach. (JS cannot freeze `ArrayBuffer` contents, so sole ownership is the
- * defense.) The string form is cached internally so that repeated
- * `toString()` calls are O(1).
+ * Immutable by convention: instances are `Object.freeze()`-d at construction
+ * time, and the constructor assumes ownership of the `hash` bytes (callers
+ * must not mutate the `Uint8Array` after passing it in, since JS cannot
+ * freeze `ArrayBuffer` contents). The string form is cached internally so
+ * that repeated `toString()` calls are O(1).
  */
 export class FabricHash extends FabricPrimitive {
   readonly #hash: Uint8Array;
@@ -1000,17 +1000,14 @@ export class FabricHash extends FabricPrimitive {
   readonly #fullStringForm: string;
 
   /**
-   * @param hash - The raw hash bytes.
+   * @param hash - The raw hash bytes (ownership transferred to this instance).
    * @param tag - Algorithm identifier (e.g., `"fid1"` for fabric ID v1).
-   * @param transfer - Whether the caller cedes `hash` to this instance, which
-   *   permits taking over its buffer instead of copying it. When `true`, the
-   *   caller must not use `hash` afterwards.
    */
-  constructor(hash: Uint8Array, tag: string, transfer = false) {
+  constructor(hash: Uint8Array, tag: string) {
     super();
-    this.#hash = toOwnedUint8Array(hash, transfer);
+    this.#hash = hash;
     this.#tag = tag;
-    this.#justHashString = toUnpaddedBase64url(this.#hash);
+    this.#justHashString = toUnpaddedBase64url(hash);
     this.#fullStringForm = `${tag}:${this.#justHashString}`;
     Object.freeze(this);
   }
@@ -1065,9 +1062,7 @@ export class FabricHash extends FabricPrimitive {
     }
     const tag = source.substring(0, colonIndex);
     const hashBase64url = source.substring(colonIndex + 1);
-    // The decoded array is freshly allocated and reaches nothing else, so it
-    // is ceded rather than copied.
-    return new FabricHash(fromBase64url(hashBase64url), tag, true);
+    return new FabricHash(fromBase64url(hashBase64url), tag);
   }
 }
 ```
@@ -1118,24 +1113,21 @@ state. See Section 5 of `3-json-encoding.md` for the wire format.
  * - `slice()` — returns an unshared copy (or sub-range).
  * - `copyInto()` — copies bytes into a caller-provided buffer.
  *
- * Immutable: instances are `Object.freeze()`-d at construction time, and an
- * instance owns its bytes outright, holding a buffer no other code can reach.
- * (JS cannot freeze `ArrayBuffer` contents, so sole ownership is the defense.)
+ * Immutable by convention: instances are `Object.freeze()`-d at construction
+ * time, and the constructor copies the input bytes so the caller cannot mutate
+ * them after construction. (JS cannot freeze `ArrayBuffer` contents, so the
+ * copy is the defense.)
  */
 export class FabricBytes extends FabricPrimitive {
   readonly #bytes: Uint8Array;
 
   /**
-   * Constructs an instance holding the given bytes, which it owns outright.
-   *
-   * @param bytes - The raw bytes to wrap.
-   * @param transfer - Whether the caller cedes `bytes` to this instance, which
-   *   permits taking over its buffer instead of copying it. When `true`, the
-   *   caller must not use `bytes` afterwards.
+   * Constructs a `FabricBytes` from raw bytes. The input is copied;
+   * the caller may freely mutate the original after construction.
    */
-  constructor(bytes: Uint8Array, transfer = false) {
+  constructor(bytes: Uint8Array) {
     super();
-    this.#bytes = toOwnedUint8Array(bytes, transfer);
+    this.#bytes = new Uint8Array(bytes);
     Object.freeze(this);
   }
 
