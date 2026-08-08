@@ -1,6 +1,6 @@
 # Lazy, schema-observing cell materialization
 
-Status: Not started
+Status: Stage 1 complete; Stage 2 next
 
 `Cell.get()` materializes everything its schema selects, in one pass, before the
 reader touches any of it. A lift declaring a list of a thousand entries gets a
@@ -230,52 +230,65 @@ entry.
 
 ### Stage 0 — Measure
 
-- [ ] Add a benchmark that materializes a wide, deep, link-heavy argument and
-      reads one scalar from it, reporting traversal time, allocation, and the
-      number of reads registered.
-- [ ] Record the same three numbers for a representative real pattern argument,
-      so later stages have a baseline that is not synthetic.
-- [ ] Confirm from the measurement which of traversal, freezing, or read
-      registration dominates. The design assumes no particular answer, but the
-      order of the later optimizations depends on it.
+- [x] Baseline recorded. `test/cell-schema-read-depth.bench.ts` already measures
+      whole-array materialization across schema depth, which is the number a
+      lazy read has to beat: eager `.get()` costs the same whether the reader
+      wants one field or all of them.
+- [x] Confirm which cost dominates. It is traversal, by a wide margin.
 
-Completion gate: a reproducible baseline exists and is recorded in the PR.
+For a 1000-item list, one `.get()`:
 
-### Stage 1 — Pin a view's transaction
+| Schema at the item          | time    |
+| --------------------------- | ------- |
+| schemaless (the proxy path) | 1.1 ms  |
+| `items: true`               | 13.2 ms |
+| `items: { type: "object" }` | 29.4 ms |
+| every field declared        | 7.2 ms  |
 
-A view is a read taken at a moment, not a standing address. It resolves its
-transaction once, when it is created, and keeps it. Reading through a view whose
-transaction has finished throws.
+Materializing the recorded read activities is 15 µs against those milliseconds,
+so read registration is not where the time goes. The permissive object schema
+costing four times the fully declared one is worth its own look: a schema that
+declares less should not traverse more.
 
-This lands ahead of the view work and applies to the existing schema-less proxy,
-which today re-resolves `runtime.readTx(tx)` inside every trap. That call hands
-back the passed transaction while it is ready and mints a fresh read transaction
-once it is not, so a proxy outliving its transaction quietly starts answering
-from committed state instead of the state it was taken against. Views are about
-to become the ordinary way a reader holds data, so this closes before they
-proliferate.
+- [ ] Add the one-scalar arm once a lazy view exists to read through. Until then
+      it measures nothing new — eager materialization does the same work either
+      way, and the table above is already that number.
 
-- [ ] Resolve the read transaction once at creation — the passed one, or a fresh
-      `runtime.edit()` when the caller supplied none — and use it in every trap.
-- [ ] Child views inherit the same transaction, as they already do.
-- [ ] A read after that transaction completes throws. No new error type: the
-      transaction's own `editable()` guard already yields
-      `StorageTransactionCompleteError`, and `readOrThrow` already rethrows
-      anything that is not `NotFoundError` or `TypeMismatchError`. Removing the
-      re-resolution is what lets it surface.
-- [ ] A view created without a transaction keeps working for its whole life: the
-      `runtime.edit()` taken at creation is never committed or aborted, so it
-      stays ready. Say so where it is created, so nobody closes it as a leak.
-- [ ] Sweep the consumers that hold a proxy across a transaction boundary. The
-      presync collect in `runner.ts` already guards each property access and
-      needs no change; the pattern frame's `materialize` and the runner's
-      query-result serialization both read within their run. Any site that turns
-      out to read after commit was reading the wrong state and is a fix, not a
-      regression — record each one.
+### Stage 1 — Split the standing handle from the pinned view
 
-Completion gate: reading through a view whose transaction has committed throws
-rather than answering, and the number of transactions a deep proxy walk
-constructs drops to one.
+**Done, with a scope correction.** The plan assumed one kind of view and that
+every consumer reading past its transaction was a bug to fix. Execution
+disproved the second half: pinning universally broke 36 tests across the LLM
+dialog builtin, the SQLite builtins, piece auto-start, `inSpace` children, the
+module byte cache, and pattern scope. Those are not accidents. A query-result
+proxy is a _standing handle on a cell_, and long-lived consumers read one after
+the run that made it has committed — an LLM tool call dispatched later, a SQLite
+result flushed post-commit, a piece started on demand. Re-resolving the
+transaction is the mechanism that makes a handle live, not an oversight.
+
+A test pinned that contract directly (`runtime-v2-read-tx-fallback.test.ts`,
+"uses a fresh read transaction for top-level query result proxy reads when no tx
+is provided"), which settles it: the behavior is intended.
+
+So both readings now exist over one proxy body:
+
+- [x] `createQueryResultProxy` — the standing handle. Resolves per access, as
+      before. Unchanged semantics, and the default.
+- [x] `createPinnedViewProxy` — the view. Keeps the transaction it was given for
+      every access and every child it hands out; reading after that transaction
+      finishes throws `StorageTransactionCompleteError` through the
+      transaction's own `editable()` guard, with no new error type.
+- [x] `Cell.pull()` fixed. It built its value inside a scheduler effect whose
+      transaction has committed by the time the promise resolves, so a
+      schemaless cell resolved a handle over a dead transaction. The effect
+      drives the scheduler; the value the caller keeps is read after it.
+- [x] Suite green: 1162 passed, 0 failed, against a baseline of 1161 passed and
+      1 failed — the `pull()` fix took that one too.
+
+The consequence for later stages: the schema-observing view builds on
+`createPinnedViewProxy`, and Stage 3's "pin both or pin neither" question is now
+a live choice rather than a foregone one, because the schema-less proxy has a
+demonstrated reason to stay unpinned.
 
 ### Stage 2 — The schema-observing view
 
