@@ -49,11 +49,9 @@ import ports from "@commonfabric/ports" with { type: "json" };
 import type { PiecePatternRef } from "@commonfabric/piece/ops";
 import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
 import {
-  parsePieceGetFilter,
-  parsePieceGetProjection,
-  type PieceGetTransform,
-  PieceGetTransformError,
-} from "../lib/piece-get-transform.ts";
+  CellSelectionError,
+  parseCellSelectionOptions,
+} from "../lib/cell-selection.ts";
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -78,21 +76,6 @@ export function normalizeApiUrl(apiUrl: string): string {
   normalized.hash = "";
   const href = normalized.toString();
   return basePath ? href : href.slice(0, -1);
-}
-
-export async function parsePieceGetTransformOptions(options: {
-  filter?: string;
-  schema?: string;
-}): Promise<PieceGetTransform | undefined> {
-  const filter = options.filter === undefined
-    ? undefined
-    : parsePieceGetFilter(options.filter);
-  const projection = options.schema === undefined
-    ? undefined
-    : await parsePieceGetProjection(options.schema);
-  return filter === undefined && projection === undefined
-    ? undefined
-    : { filter, projection };
 }
 
 function summarizeForDisplay(value: unknown): unknown {
@@ -184,7 +167,7 @@ export function localPatternEntry(
  * A `piece get` failure caused by a data condition rather than bad arguments:
  * a path that doesn't resolve, a result schema that can't project stored data
  * (PieceResultProjectionError), a filter/projection that doesn't fit the
- * selected value (PieceGetTransformError), or a path that lands on a verb
+ * selected value (CellSelectionError), or a path that lands on a verb
  * (PieceVerbReadError — the read-path guard's redirect at `cf piece call`).
  * Reported as a plain error on stderr with exit 1, never as a Cliffy
  * ValidationError (which would dump the usage screen and read as an arg-parse
@@ -192,7 +175,7 @@ export function localPatternEntry(
  */
 export function isPieceGetDataError(error: unknown): error is Error {
   return error instanceof PieceResultProjectionError ||
-    error instanceof PieceGetTransformError ||
+    error instanceof CellSelectionError ||
     error instanceof PieceVerbReadError ||
     (error instanceof Error &&
       error.message.startsWith("Cannot access path"));
@@ -202,7 +185,7 @@ export function isPieceGetDataError(error: unknown): error is Error {
  * Build the stderr report for a `piece get` failure. Returns null when the
  * error is not a data error (the caller should rethrow). `message` is the
  * one-line error; `hint` is an optional next-step tip. A projection error
- * already carries its own `--step` guidance, transform errors stand alone,
+ * already carries its own `--step` guidance, selection errors stand alone,
  * a verb refusal already carries its `cf piece call` redirect, and an
  * input-mode read has nothing more to suggest — only a result-mode
  * unresolved path gets the `--input` tip.
@@ -214,7 +197,7 @@ export function pieceGetDataErrorReport(
   if (!isPieceGetDataError(error)) return null;
   if (
     error instanceof PieceResultProjectionError ||
-    error instanceof PieceGetTransformError ||
+    error instanceof CellSelectionError ||
     error instanceof PieceVerbReadError ||
     opts.input
   ) {
@@ -1429,6 +1412,13 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     ),
     "Project each returned item to selected fields.",
   )
+  .example(
+    cliText(
+      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items ` +
+        `--schema '{"type":"array","items":{"$link":true}}'`,
+    ),
+    "Return each item's address instead of its contents.",
+  )
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option("--input", "Read from the piece's input cell instead of result cell")
   .option(
@@ -1456,11 +1446,11 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     };
     const pathSegments = pathString ? parseCellPath(pathString) : [];
     try {
-      const transform = await parsePieceGetTransformOptions(options);
+      const selection = await parseCellSelectionOptions(options);
       const value = await getCellValue(pieceConfig, pathSegments, {
         input: options.input,
         step: options.step,
-        ...(transform === undefined ? {} : { transform }),
+        ...(selection === undefined ? {} : { selection }),
       });
       render(value, { json: true });
     } catch (error) {
