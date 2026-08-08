@@ -783,42 +783,6 @@ the per-epic implementation notes).
   over-blocking, turn it on by default, and then remove the localStorage toggle
   and make the ceiling unconditional.
 
-## Category 6: Deployment feature gates
-
-### `INGEST_SELF_SERVE_ENABLED`
-
-- **Toggle via.** The `INGEST_SELF_SERVE_ENABLED` environment variable on
-  toolshed, read once at module load
-  ([`packages/toolshed/env.ts`](../../packages/toolshed/env.ts)). Not a
-  `RuntimeOptions` flag: it gates an HTTP router, not runtime behavior.
-- **Added by.** Alex Komoroske, in the self-serve ingest channels change.
-- **Purpose.** Gates the `/api/ingest-channels` control plane, through which a
-  user holding their own identity key mints, lists, rotates, and revokes ingest
-  channels for spaces they own — without an operator. When off, the router
-  [404s every verb](../../packages/toolshed/routes/ingest-channels/gate.ts)
-  before the body limit, the rate limiter, or signature verification runs, so a
-  deployment that has not opted in does not advertise the endpoint. The data
-  plane (`/api/ingest/:id`) and the operator provisioning scripts are
-  unaffected by the flag.
-- **Current default and planned end state.** Off by default. The gate exists
-  because minting issues a durable bearer capability that outlives the trust
-  conditions that authorized it, and because authorization rests on the memory
-  ACL — which, for a NAMED space, is only as strong as a key currently derived
-  from the public passphrase `"common user"`
-  ([`packages/identity/src/session.ts`](../../packages/identity/src/session.ts)).
-  Anyone can derive that key today, so on a deployment with named spaces the
-  owner check is not yet a real boundary. The end state is on by default.
-- **Status on 2026-08-07.** Implemented, off by default. The derivation
-  weakness is pinned by a tripwire test
-  ([`space-key-derivation-tripwire.test.ts`](../../packages/toolshed/routes/ingest-channels/space-key-derivation-tripwire.test.ts))
-  that FAILS once the derivation is fixed — the signal to flip the default and
-  to sweep any channels minted under the old trust conditions with
-  `retire-ingest-channels`. See
-  [`self-serve-ingest-channels.md`](../features/self-serve-ingest-channels.md).
-- **Path to removal.** Fix named-space key derivation, run the retirement
-  sweep, turn the flag on by default, then delete the gate and mount the router
-  unconditionally.
-
 ## Category 5: Fuse mount cache tuning
 
 ### `fuseNfsCacheTuning`
@@ -868,6 +832,42 @@ the per-epic implementation notes).
   FUSE-T's FSKit backend (macOS 26+) replaces the NFS backend.
 
 ---
+
+## Category 6: Deployment feature gates
+
+### `INGEST_SELF_SERVE_ENABLED`
+
+- **Toggle via.** The `INGEST_SELF_SERVE_ENABLED` environment variable on
+  toolshed, read once at module load
+  ([`packages/toolshed/env.ts`](../../packages/toolshed/env.ts)). Not a
+  `RuntimeOptions` flag: it gates an HTTP router, not runtime behavior.
+- **Added by.** Alex Komoroske, in the self-serve ingest channels change.
+- **Purpose.** Gates the `/api/ingest-channels` control plane, through which a
+  user holding their own identity key mints, lists, rotates, and revokes ingest
+  channels for spaces they own — without an operator. When off, the router
+  [404s every verb](../../packages/toolshed/routes/ingest-channels/gate.ts)
+  before the body limit, the rate limiter, or signature verification runs, so a
+  deployment that has not opted in does not advertise the endpoint. The data
+  plane (`/api/ingest/:id`) and the operator provisioning scripts are
+  unaffected by the flag.
+- **Current default and planned end state.** Off by default. The gate exists
+  because minting issues a durable bearer capability that outlives the trust
+  conditions that authorized it, and because authorization rests on the memory
+  ACL — which, for a NAMED space, is only as strong as a key currently derived
+  from the public passphrase `"common user"`
+  ([`packages/identity/src/session.ts`](../../packages/identity/src/session.ts)).
+  Anyone can derive that key today, so on a deployment with named spaces the
+  owner check is not yet a real boundary. The end state is on by default.
+- **Status on 2026-08-07.** Implemented, off by default. The derivation
+  weakness is pinned by a tripwire test
+  ([`space-key-derivation-tripwire.test.ts`](../../packages/toolshed/routes/ingest-channels/space-key-derivation-tripwire.test.ts))
+  that FAILS once the derivation is fixed — the signal to flip the default and
+  to sweep any channels minted under the old trust conditions with
+  `retire-ingest-channels`. See
+  [`self-serve-ingest-channels.md`](../features/self-serve-ingest-channels.md).
+- **Path to removal.** Fix named-space key derivation, run the retirement
+  sweep, turn the flag on by default, then delete the gate and mount the router
+  unconditionally.
 
 ## Flag-gated tripwires
 
