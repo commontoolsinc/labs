@@ -40,7 +40,7 @@ export class FabricBytes extends BaseFabricPrimitive {
    *   caller must not use `bytes` afterwards; `toOwnedUint8Array()` says what that
    *   permission does and does not guarantee.
    */
-  constructor(bytes: Uint8Array, transfer = false) {
+  constructor(bytes: Uint8Array, transfer: boolean = false) {
     super();
     this.#bytes = toOwnedUint8Array(bytes, transfer);
     Object.freeze(this);
