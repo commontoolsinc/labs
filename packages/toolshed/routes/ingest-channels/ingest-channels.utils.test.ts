@@ -1221,7 +1221,12 @@ describe("ingest-channels control plane", () => {
   // Revoking the last channel in a space used to answer the space's real owner
   // with "not authorized for that space" — a denial that is simply false, on
   // the path they would walk to confirm the revoke worked.
-  it("tells a space owner with no live channels the truth, not a denial", async () => {
+  //
+  // Worse, `revoke` requires the channel's current generation and `list` is the
+  // only place a generation is published, so an unlistable revoked channel had
+  // an unknowable generation: every later revoke of it answered 409 telling the
+  // caller to go list something that would never appear.
+  it("keeps a revoked channel visible to the space owner, with its generation", async () => {
     const shared = await sharedSpace();
     const minted = await processMint(deps, alice.did(), {
       space: shared,
@@ -1237,7 +1242,25 @@ describe("ingest-channels control plane", () => {
 
     const listed = await processList(deps, alice.did(), { space: shared });
     expect(listed.status).toBe(200);
-    expect(ok(listed).channels).toEqual([]);
+    const seen = ok(listed).channels.find((c) => c.id === id);
+    expect(seen?.revoked).toBeDefined();
+
+    // And the generation it publishes is the one a second revoke must name —
+    // the loop that was previously unclosable.
+    const second = await processRevoke(deps, alice.did(), {
+      id,
+      requestId: "rv-f4b",
+      expectedRevision: seen!.revision,
+    });
+    expect(second.status).toBe(200);
+    // The response publishes the new generation, so a third needs no re-list.
+    expect(
+      (await processRevoke(deps, alice.did(), {
+        id,
+        requestId: "rv-f4c",
+        expectedRevision: ok(second).revision,
+      })).status,
+    ).toBe(200);
 
     // A space that never had a channel is still indistinguishable from one the
     // caller does not own — the existence oracle stays closed.

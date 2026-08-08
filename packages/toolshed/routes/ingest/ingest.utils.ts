@@ -731,11 +731,8 @@ export async function saveRegistration(
     serviceSpace,
     registration.space,
   );
-  const indexes = [
-    spaceIndexCell(runtime, serviceSpace, registration.space),
-    auditIndex,
-    ...(ownerIndex ? [ownerIndex] : []),
-  ];
+  const spaceIndex = spaceIndexCell(runtime, serviceSpace, registration.space);
+  const indexes = [spaceIndex, auditIndex, ...(ownerIndex ? [ownerIndex] : [])];
   for (
     const c of [
       cell,
@@ -891,8 +888,19 @@ export async function saveRegistration(
     for (const index of indexes) {
       const boundIndex = index.withTx(tx);
       const ids = (boundIndex.get() as string[] | undefined) ?? [];
-      const isAudit = index === auditIndex;
-      const wanted = live || isAudit;
+      // The OWNER index is the only one pruned on revoke, because its length is
+      // load-bearing: it IS the live count the per-owner cap reads.
+      //
+      // The space index keeps revoked ids. It has no cap reading it, and it is
+      // the only way a caller can see a revoked channel at all — which is not
+      // cosmetic, because `revoke` requires the channel's current generation
+      // and `list` is the only place a generation is published. Pruning it left
+      // a revoked channel unlistable, so its generation was unknowable, so
+      // every later revoke of it answered 409 telling the caller to go list
+      // something that would never appear. Bounded by the per-space lifetime
+      // quota, which counts exactly the ids that can land here.
+      const keepsRevoked = index === auditIndex || index === spaceIndex;
+      const wanted = live || keepsRevoked;
       if (wanted && !ids.includes(registration.id)) {
         boundIndex.set([...ids, registration.id]);
       } else if (!wanted && ids.includes(registration.id)) {

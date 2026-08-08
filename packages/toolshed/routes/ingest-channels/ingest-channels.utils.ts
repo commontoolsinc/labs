@@ -618,7 +618,7 @@ export async function processRevoke(
   deps: ControlDeps,
   callerDid: string,
   input: { id: string; requestId: string; expectedRevision: number },
-): Promise<ControlResult<{ id: string; revokedAt: string }>> {
+): Promise<ControlResult<{ id: string; revokedAt: string; revision: number }>> {
   if (!isValidRequestId(input.requestId)) return bad("Invalid requestId");
 
   const existing = await loadOwned(deps, callerDid, input.id);
@@ -653,7 +653,9 @@ const writeRevocation = async (
   input: { id: string; requestId: string; expectedRevision: number },
   registration: IngestRegistration,
   opts: { claim: boolean },
-): Promise<ControlResult<{ id: string; revokedAt: string }>> => {
+): Promise<
+  ControlResult<{ id: string; revokedAt: string; revision: number }>
+> => {
   // Already revoked: keep the ORIGINAL revocation rather than overwriting it.
   // Any owner of the space may revoke, so an overwrite would let a later caller
   // replace an operator retirement's attribution with their own.
@@ -733,7 +735,10 @@ const writeRevocation = async (
     );
     return { status: 502, body: { error: "Storage failure" } };
   }
-  return { status: 200, body: { id: input.id, revokedAt } };
+  return {
+    status: 200,
+    body: { id: input.id, revokedAt, revision: input.expectedRevision + 1 },
+  };
 };
 
 export async function processList(

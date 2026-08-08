@@ -339,11 +339,14 @@ Four hazards that this change introduces or amplifies, each with its fix:
    read and the answer would leave it reporting success while a freshly minted
    credential is live. Only the transaction's own read decides.
 
-   That write advances the revision even though nothing else changes, which is
-   what keeps it from becoming an amplifier: at a *stable* revision the same
-   request's precondition never stops matching, so one captured request could
-   drive unlimited 200-returning durable transactions. Advancing it forces a
-   repeat to go read the new generation first.
+   That write advances the revision even though nothing else changes. At a
+   *stable* revision one captured request's precondition never stops matching,
+   so a single captured request could be replayed for unlimited 200-returning
+   durable transactions. Advancing it means a repeat must go read the new
+   generation — which bounds what a *replay* can do, not what an authenticated
+   owner can do. An owner willing to re-list between calls can still drive one
+   write per round trip; that is ordinary authenticated write traffic, bounded
+   by the rate limiter, and it grows no new documents.
 
    That read defaults to the caller's own channels, so revoking a channel
    minted by *someone else* against a space you own — the case
@@ -591,14 +594,21 @@ Durable bookkeeping is bounded rather than unbounded, on four axes:
 - **Request claims** are compacted into one cell per owner, pruned to the proof
   replay window, and capped. Full means refuse, not evict: dropping the oldest
   entry would discard the very claim that proves a replay.
-- **The owner and space indexes** hold LIVE ids only. Revoking removes the id,
-  so the owner index's length *is* the owner's live-channel count — which is
-  what makes "revoke some before minting more" a remedy that actually frees
-  something, and what lets the cap be read straight off the index.
+- **The owner index** holds LIVE ids only. Revoking removes the id, so its
+  length *is* the owner's live-channel count — which is what makes "revoke some
+  before minting more" a remedy that actually frees something, and what lets the
+  cap be read straight off the index. That length being load-bearing is the
+  whole reason it is pruned.
+- **The space index** keeps revoked ids, deliberately, because nothing reads its
+  length and something does read its contents: it is the only listing a revoked
+  channel appears in, and `revoke` cannot proceed without the generation that
+  listing publishes. Bounded by the per-space lifetime quota below, which counts
+  exactly the ids that can land in it.
 - **The live-channel cap** is enforced inside the transaction that updates that
   index, not from a read before it. A count taken beforehand is advisory: a
   burst of concurrent mints all read the same under-cap number and all commit.
-- **The audit inventory** is the one index that is never pruned — a revoked
+- **The audit inventory** is never pruned either, and unlike the space index it
+  is deployment-wide — a revoked
   channel stays in it on purpose, because that is what a trust-condition sweep
   enumerates. So it is the one that cannot be a single array: it is sharded by
   UTC month (mirroring the data plane's per-day partition cells) behind a shard
@@ -644,16 +654,20 @@ straight around the bound built to stop it.
 
 ## Known limits
 
-- **A revoked channel drops out of both list views until it is re-minted.** The
-  owner and space indexes hold live ids only — that is what makes the live cap
-  countable and keeps them bounded — so `cf ingest ls` shows a revoked channel
-  nothing more. The revocation *trail* is still readable: it reappears as
-  `revocations` once the channel is re-minted, and the operator audit
-  (`audit-ingest-channels`) sees it throughout. But an owner who revokes and
-  walks away cannot list what they revoked, which is weaker than "the trail
-  survives" suggests. A scoped list at least no longer answers such an owner
-  with a flat denial — that gate now consults the per-space lifetime counter,
-  which does not decrease.
+- **A revoked channel is visible only in the space-scoped list, not your own.**
+  The OWNER index holds live ids only, because its length is load-bearing —
+  it *is* the live count the per-owner cap reads — so `cf ingest ls` without
+  `--space` shows live channels only. The space index keeps revoked ids (no cap
+  reads it, and the per-space lifetime quota bounds it), so
+  `cf ingest ls --space <did>` shows the full trail, and `cf ingest revoke`
+  needs `--space` to reach an already-revoked channel.
+
+  This is not cosmetic: `revoke` requires the channel's current generation and
+  `list` is the only place a generation is published, so a channel that is
+  unlistable is also un-revocable — every later revoke answers 409 telling the
+  caller to list something that will never appear. Pruning both indexes on
+  revoke created exactly that dead end. The revoke response now also returns
+  the new `revision`, so revoking twice in a row needs no lookup at all.
 - **The 403 denial is opaque by design, which makes support harder, not
   easier.** Five states collapse into one message. The most common real cause is
   a legitimate owner signing with the wrong key — a passkey shell login owns the
