@@ -54,9 +54,14 @@ class BlobPayloadTooLarge extends Error {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
+/**
+ * Interprets a decoded request body as bytes, or returns `undefined` when it
+ * is not byte-shaped. The result is always freshly allocated and unshared, so
+ * a caller may cede it to something that takes ownership of a buffer.
+ */
 const toByteArray = (value: unknown): Uint8Array | undefined => {
   if (value instanceof Uint8Array) {
-    return value;
+    return new Uint8Array(value);
   }
   if (
     Array.isArray(value) &&
@@ -94,7 +99,7 @@ const asBlobContents = (value: unknown): BlobContents | undefined => {
   }
   const bytes = toByteArray(value.body);
   if (bytes) {
-    return { type: value.type, body: new FabricBytes(bytes) };
+    return { type: value.type, body: new FabricBytes(bytes, true) };
   }
   return undefined;
 };
