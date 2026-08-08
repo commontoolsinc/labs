@@ -36,7 +36,10 @@ import {
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
 } from "@commonfabric/memory/v2";
-import { applyPatchToDocument } from "../../../memory/v2/patch.ts";
+import {
+  applyPatchToDocument,
+  PatchApplyError,
+} from "../../../memory/v2/patch.ts";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -412,6 +415,11 @@ const applyPendingVersion = (
           pending.patches as PatchOp[],
         ) as EntityDocument;
       } catch (error) {
+        if (!(error instanceof PatchApplyError)) {
+          // Only genuine inapplicability renders as a skipped layer; an
+          // unexpected implementation failure must propagate.
+          throw error;
+        }
         // An op that cannot apply to this base (e.g. an append onto a
         // scalar a winner wrote) renders WITHOUT this layer: transiently
         // honest — the server rejects the same ops against the same base,

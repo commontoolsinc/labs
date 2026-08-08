@@ -56,6 +56,18 @@ const cloneValue = (value: FabricValue): FabricValue => cloneIfNecessary(value);
  * frozen.
  */
 /**
+ * A patch that cannot apply to the given base: a path descending through a
+ * non-container, a kind mismatch (append onto a non-array), an invalid
+ * pointer or index, or a root op producing a non-envelope result. Callers
+ * that tolerate inapplicability (the client's pending replay renders such a
+ * layer skipped) filter on THIS class; anything else propagating out of
+ * patch application is an implementation failure and must not be swallowed.
+ */
+export class PatchApplyError extends Error {
+  override name = "PatchApplyError";
+}
+
+/**
  * The base an absent document's patches replay over. Shared by the
  * engine's revision reconstruction and the client's pending-layer replay,
  * so both sides fold a document's very first patches identically.
@@ -79,7 +91,7 @@ export const applyPatchToDocument = (
   // rather than type-launder — the client's pending replay treats this as
   // an unappliable layer, and no caller ever sees an invalid envelope.
   if (!isEntityDocument(patched)) {
-    throw new Error("patched root is not an entity document");
+    throw new PatchApplyError("patched root is not an entity document");
   }
   return patched;
 };
@@ -119,7 +131,7 @@ const thawSpine = (
     ({ value, pathValue } = cloneForMutation(root, thawPath, options));
   } catch (e) {
     if (e instanceof CloneForMutationError) {
-      throw new Error(
+      throw new PatchApplyError(
         e.kind === "missing-segment"
           ? `missing path ${encodePointer(fullPath)}`
           : `path is not traversable at ${encodePointer(fullPath)}`,
@@ -128,7 +140,9 @@ const thawSpine = (
     throw e;
   }
   if (!isContainer(pathValue)) {
-    throw new Error(`path is not traversable at ${encodePointer(fullPath)}`);
+    throw new PatchApplyError(
+      `path is not traversable at ${encodePointer(fullPath)}`,
+    );
   }
   return { root: value, container: pathValue };
 };
@@ -173,7 +187,7 @@ const validateAddSpine = (root: FabricValue, path: string[]): void => {
       // into -- reject it rather than fabricate one. Plain object keys are fine;
       // they get created on the way down.
       if (isArraySegment(segment) || segment === "-") {
-        throw new Error(`missing path ${encodePointer(path)}`);
+        throw new PatchApplyError(`missing path ${encodePointer(path)}`);
       }
       continue;
     }
@@ -186,7 +200,9 @@ const validateAddSpine = (root: FabricValue, path: string[]): void => {
       }
       current = current[segment];
     } else {
-      throw new Error(`path is not traversable at ${encodePointer(path)}`);
+      throw new PatchApplyError(
+        `path is not traversable at ${encodePointer(path)}`,
+      );
     }
   }
 };
@@ -228,7 +244,9 @@ const addAtPath = (
 
 const removeAtPath = (root: FabricValue, path: string[]): FabricValue => {
   if (path.length === 0) {
-    throw new Error("root remove must be represented as a delete operation");
+    throw new PatchApplyError(
+      "root remove must be represented as a delete operation",
+    );
   }
   const { root: newRoot, container } = thawSpine(root, path.slice(0, -1), path);
   const key = path[path.length - 1]!;
@@ -236,7 +254,7 @@ const removeAtPath = (root: FabricValue, path: string[]): FabricValue => {
     container.splice(requireExistingArrayIndex(container, key, path), 1);
   } else {
     if (!Object.hasOwn(container, key)) {
-      throw new Error(`missing object key at ${encodePointer(path)}`);
+      throw new PatchApplyError(`missing object key at ${encodePointer(path)}`);
     }
     delete container[key];
   }
@@ -249,10 +267,10 @@ const moveValue = (
   path: string[],
 ): FabricValue => {
   if (from.length === 0) {
-    throw new Error("cannot move the root value");
+    throw new PatchApplyError("cannot move the root value");
   }
   if (isStrictPrefixPath(from, path)) {
-    throw new Error("cannot move a value into its own descendant");
+    throw new PatchApplyError("cannot move a value into its own descendant");
   }
 
   const extracted = getAtPath(root, from);
@@ -268,10 +286,12 @@ const spliceAtPath = (
 ): FabricValue => {
   const { root: newRoot, container } = thawSpine(root, path, path);
   if (!Array.isArray(container)) {
-    throw new Error(`splice target is not an array at ${encodePointer(path)}`);
+    throw new PatchApplyError(
+      `splice target is not an array at ${encodePointer(path)}`,
+    );
   }
   if (index < 0 || remove < 0 || index > container.length) {
-    throw new Error(`invalid splice at ${encodePointer(path)}`);
+    throw new PatchApplyError(`invalid splice at ${encodePointer(path)}`);
   }
   container.splice(index, remove, ...add.map((value) => cloneValue(value)));
   return newRoot;
@@ -292,7 +312,9 @@ const appendAtPath = (
     nextKeyAfterPath: "0",
   });
   if (!Array.isArray(container)) {
-    throw new Error(`append target is not an array at ${encodePointer(path)}`);
+    throw new PatchApplyError(
+      `append target is not an array at ${encodePointer(path)}`,
+    );
   }
   container.push(...values.map((value) => cloneValue(value)));
   return newRoot;
@@ -313,7 +335,7 @@ const addUniqueAtPath = (
     nextKeyAfterPath: "0",
   });
   if (!Array.isArray(container)) {
-    throw new Error(
+    throw new PatchApplyError(
       `add-unique target is not an array at ${encodePointer(path)}`,
     );
   }
@@ -384,16 +406,16 @@ const incrementAtPath = (
   by: number,
 ): FabricValue => {
   if (path.length === 0) {
-    throw new Error("increment requires a non-root path");
+    throw new PatchApplyError("increment requires a non-root path");
   }
   if (!Number.isFinite(by) || by === 0) {
-    throw new Error(
+    throw new PatchApplyError(
       `increment requires a finite non-zero amount at ${encodePointer(path)}`,
     );
   }
   const current = readNumberOrAbsent(root, path);
   if (current !== undefined && typeof current !== "number") {
-    throw new Error(
+    throw new PatchApplyError(
       `increment target is not a number at ${encodePointer(path)}`,
     );
   }
@@ -425,7 +447,7 @@ const getAtPath = (root: FabricValue, path: string[]): FabricValue => {
     } else if (isPatchObject(current) && Object.hasOwn(current, segment)) {
       current = current[segment];
     } else {
-      throw new Error(`missing path ${encodePointer(path)}`);
+      throw new PatchApplyError(`missing path ${encodePointer(path)}`);
     }
   }
   return current;
@@ -433,11 +455,11 @@ const getAtPath = (root: FabricValue, path: string[]): FabricValue => {
 
 const parseArrayIndex = (segment: string): number => {
   if (!isArraySegment(segment)) {
-    throw new Error(`invalid array index: ${segment}`);
+    throw new PatchApplyError(`invalid array index: ${segment}`);
   }
   const index = Number(segment);
   if (index > MAX_ARRAY_INDEX) {
-    throw new Error(`array index out of bounds: ${segment}`);
+    throw new PatchApplyError(`array index out of bounds: ${segment}`);
   }
   return index;
 };
@@ -445,7 +467,7 @@ const parseArrayIndex = (segment: string): number => {
 const parseArrayInsertIndex = (segment: string, length: number): number => {
   const index = parseArrayIndex(segment);
   if (index > length) {
-    throw new Error(`array index out of bounds: ${segment}`);
+    throw new PatchApplyError(`array index out of bounds: ${segment}`);
   }
   return index;
 };
@@ -457,7 +479,7 @@ const requireExistingArrayIndex = (
 ): number => {
   const index = parseArrayIndex(segment);
   if (!Object.hasOwn(array, index)) {
-    throw new Error(`missing path ${encodePointer(path)}`);
+    throw new PatchApplyError(`missing path ${encodePointer(path)}`);
   }
   return index;
 };
