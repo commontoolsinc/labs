@@ -1,8 +1,8 @@
 /**
  * The selection a CLI read applies to a cell it has already arrived at: the
- * `--filter` predicate and the `--schema` projection, their parsers, and the
- * step that turns a cell plus a selection into a value. Resolving an address
- * to a cell belongs to whoever holds the address, and stays there.
+ * `--filter` predicate and the `--select`/`--schema` projection, their parsers,
+ * and the step that turns a cell plus a selection into a value. Resolving an
+ * address to a cell belongs to whoever holds the address, and stays there.
  */
 
 import type { Cell } from "@commonfabric/api";
@@ -89,7 +89,15 @@ export interface LinkMarkers {
 }
 
 /**
- * A `--schema` argument, parsed. `source` is the text as written; `kind`
+ * The flag a projection was written on. `--select` takes the concise field
+ * list; `--schema` takes a JSON Schema, an `@file`, and the concise list too.
+ * Which one was written decides nothing about what the projection means — only
+ * which flag its error messages name.
+ */
+export type ProjectionFlag = "--select" | "--schema";
+
+/**
+ * A projection argument, parsed. `source` is the text as written; `kind`
  * records which of the two spellings it used, since a concise field list
  * traverses arrays implicitly and a JSON Schema does not. `schema` carries no
  * `$link` marker: markers move to `markers`, and a position that asked for
@@ -99,6 +107,7 @@ export interface SelectionProjection {
   source: string;
   schema: JSONSchema;
   kind: "concise" | "json";
+  flag: ProjectionFlag;
   markers?: LinkMarkers;
 }
 
@@ -113,7 +122,7 @@ export interface CellSelection {
 
 /**
  * A selection that cannot be parsed, or that does not fit the value it was
- * pointed at — a `--filter` on a non-array, a `--schema` whose root shape
+ * pointed at — a `--filter` on a non-array, a projection whose root shape
  * disagrees with the source. Reported to the user as a data error, not as an
  * argument-parsing failure.
  */
@@ -710,11 +719,14 @@ function normalizeProjectionSchema(
   };
 }
 
-function conciseProjectionSchema(source: string): JSONSchema {
+function conciseProjectionSchema(
+  source: string,
+  flag: ProjectionFlag,
+): JSONSchema {
   const paths = source.split(",").map((part) => part.trim());
   if (paths.some((path) => path.length === 0)) {
     throw new CellSelectionError(
-      "Invalid --schema concise projection: expected comma-separated field paths",
+      `Invalid ${flag} concise projection: expected comma-separated field paths`,
     );
   }
   const root: Record<string, unknown> = {};
@@ -724,7 +736,7 @@ function conciseProjectionSchema(source: string): JSONSchema {
       segments.some((segment) => !/^[A-Za-z_$][A-Za-z0-9_$-]*$/.test(segment))
     ) {
       throw new CellSelectionError(
-        `Invalid --schema field path ${JSON.stringify(path)}`,
+        `Invalid ${flag} field path ${JSON.stringify(path)}`,
       );
     }
     let node = root;
@@ -760,6 +772,38 @@ export interface ProjectionParseDependencies {
   readTextFile?: (path: string) => Promise<string>;
 }
 
+/**
+ * Parses a `--select` argument: the comma-separated field paths, which is the
+ * whole of what this flag accepts. `--schema` reads the same spelling and more,
+ * so an argument written in the JSON Schema language is pointed at the flag
+ * that reads it rather than reported as a malformed field path.
+ */
+export function parseSelectProjection(source: string): SelectionProjection {
+  const trimmed = source.trim();
+  if (trimmed.length === 0) {
+    throw new CellSelectionError("--select must not be empty");
+  }
+  if (
+    trimmed.startsWith("{") || trimmed.startsWith("@") ||
+    trimmed === "true" || trimmed === "false"
+  ) {
+    throw new CellSelectionError(
+      "--select takes comma-separated field paths. Pass a JSON Schema or an " +
+        "@file to --schema instead.",
+    );
+  }
+  return {
+    source,
+    schema: conciseProjectionSchema(trimmed, "--select"),
+    kind: "concise",
+    flag: "--select",
+  };
+}
+
+/**
+ * Parses a `--schema` argument, which is written as a JSON Schema, as `@file`
+ * naming one, or as the same comma-separated field paths `--select` takes.
+ */
 export async function parseSelectionProjection(
   source: string,
   deps: ProjectionParseDependencies = {},
@@ -798,7 +842,12 @@ export async function parseSelectionProjection(
         { cause: error },
       );
     }
-    return { source, ...normalizeProjectionSchema(parsed), kind: "json" };
+    return {
+      source,
+      ...normalizeProjectionSchema(parsed),
+      kind: "json",
+      flag: "--schema",
+    };
   }
 
   if (trimmed.startsWith("{") || trimmed === "true" || trimmed === "false") {
@@ -813,29 +862,40 @@ export async function parseSelectionProjection(
         { cause: error },
       );
     }
-    return { source, ...normalizeProjectionSchema(parsed), kind: "json" };
+    return {
+      source,
+      ...normalizeProjectionSchema(parsed),
+      kind: "json",
+      flag: "--schema",
+    };
   }
 
   return {
     source,
-    schema: conciseProjectionSchema(trimmed),
+    schema: conciseProjectionSchema(trimmed, "--schema"),
     kind: "concise",
+    flag: "--schema",
   };
 }
 
 /**
- * Parses a command's `--filter` and `--schema` arguments into the selection
+ * Parses a command's `--filter` and projection arguments into the selection
  * they describe, or `undefined` when neither was given and the caller wants
- * the whole value.
+ * the whole value. `select` and `schema` are two spellings of one projection,
+ * and the commands that offer them declare the two flags conflicting, so at
+ * most one arrives here; `select` is the one read when both do.
  */
 export async function parseCellSelectionOptions(options: {
   filter?: string;
   schema?: string;
+  select?: string;
 }): Promise<CellSelection | undefined> {
   const filter = options.filter === undefined
     ? undefined
     : parseSelectionFilter(options.filter);
-  const projection = options.schema === undefined
+  const projection = options.select !== undefined
+    ? parseSelectProjection(options.select)
+    : options.schema === undefined
     ? undefined
     : await parseSelectionProjection(options.schema);
   return filter === undefined && projection === undefined
@@ -1091,6 +1151,7 @@ function schemaFromProjectionMask(mask: ProjectionMask): JSONSchema {
 /** @internal Exported for focused schema-shape tests. */
 export function schemaMayBeArray(
   schema: JSONSchema | undefined,
+  flag: ProjectionFlag = "--schema",
   root: JSONSchema = schema ?? true,
   ancestors = new Set<object>(),
 ): boolean {
@@ -1105,7 +1166,7 @@ export function schemaMayBeArray(
       // continue without resolving the schema that determines array traversal.
       unresolvedRef: (error) => {
         throw new CellSelectionError(
-          `Could not resolve source schema reference for --schema: ${
+          `Could not resolve source schema reference for ${flag}: ${
             error instanceof Error ? error.message : String(error)
           }`,
           { cause: error },
@@ -1120,16 +1181,17 @@ export function schemaMayBeArray(
 function alignConciseProjectionMask(
   source: JSONSchema | undefined,
   mask: ProjectionMask,
+  flag: ProjectionFlag,
 ): ProjectionMask {
   if (
     typeof mask === "boolean" || source === undefined || source === true
   ) return mask;
 
-  if (schemaMayBeArray(source)) {
+  if (schemaMayBeArray(source, flag)) {
     const sourceItem = schemaAtArrayItem(source);
     return {
       type: "array",
-      items: alignConciseProjectionMask(sourceItem, mask),
+      items: alignConciseProjectionMask(sourceItem, mask, flag),
     };
   }
 
@@ -1144,6 +1206,7 @@ function alignConciseProjectionMask(
           alignConciseProjectionMask(
             child === false ? undefined : child,
             childMask,
+            flag,
           ),
         ];
       }),
@@ -1389,6 +1452,7 @@ function resolveProjection(
     const mask = alignConciseProjectionMask(
       source,
       projectionMask(projection.schema),
+      projection.flag,
     );
     const projectionSchema = schemaFromProjectionMask(mask);
     const outputSchema = sanitizeSchemaForLinks(
@@ -1921,7 +1985,8 @@ export async function deriveSelectedValue(
         )
       ) {
         throw new CellSelectionError(
-          "--schema can only project array items from an array value",
+          `${selection.projection!.flag} can only project array items from ` +
+            "an array value",
         );
       }
       const lastError = recorded.at(-1)!;

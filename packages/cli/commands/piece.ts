@@ -1408,7 +1408,7 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   )
   .example(
     cliText(
-      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items --schema id,title`,
+      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items --select id,title`,
     ),
     "Project each returned item to selected fields.",
   )
@@ -1434,8 +1434,16 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     "Filter an array with a jq-inspired predicate",
   )
   .option(
+    "--select <fields:string>",
+    "Project output to comma-separated field paths",
+  )
+  .option(
     "--schema <schema:string>",
-    "Project output with comma-separated fields, inline JSON Schema, or @file",
+    "Project output with an inline JSON Schema, @file, or the --select " +
+      "field list",
+    // Both flags carry the one projection, so a command naming both has not
+    // said which shape it wants. Refuse before the read rather than pick.
+    { conflicts: ["select"] },
   )
   .arguments("[path:string]")
   .action(async (options, pathString) => {

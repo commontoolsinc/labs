@@ -87,7 +87,7 @@ cf piece call --piece <board> addTopic \
   '{"title":"...","body":"the initial living document","agentName":"Sol"}'
 # -> { "result": { "topic": … } }: the topic this call created
 cf piece get --piece <board> topics --input \
-  --schema title,createdAt,lastActivityAt,commentCount
+  --select title,createdAt,lastActivityAt,commentCount
 cf piece call --piece <topic> addComment \
   '{"body":"point-in-time progress update","agentName":"Sol"}'
 cf piece call --piece <topic> setBody \
@@ -108,24 +108,24 @@ cf piece get --piece <board> index --step
 
 The board input links to complete Topic objects, including bodies, threads,
 handlers, and cross-reference data. Targeted headless discovery beyond the index
-should therefore combine an exact/range `--filter` with a concise `--schema`
+should therefore combine an exact/range `--filter` with a concise `--select`
 instead of materializing the whole corpus:
 
 ```bash
 cf piece get --piece <board> topics --input \
   --filter '.title == "<exact title>"' \
-  --schema title,lastActivityAt,commentCount
+  --select title,lastActivityAt,commentCount
 cf piece get --piece <board> topics --input \
   --filter '.lastActivityAt >= <epoch-milliseconds>' \
-  --schema title,lastActivityAt,commentCount,createdBy.kind,createdBy.name
+  --select title,lastActivityAt,commentCount,createdBy.kind,createdBy.name
 cf piece get --piece <board> crossrefs --step \
   --filter '.topic.title == "<exact title>"' \
-  --schema fid,topic.title,topic.lastActivityAt,topic.commentCount
+  --select fid,topic.title,topic.lastActivityAt,topic.commentCount
 cf piece get --piece <topic> comments --input \
   --filter '.author.name == "Sol" or .authorName == "Sol"' \
-  --schema sentAt,author.kind,author.name,authorName,body
+  --select sentAt,author.kind,author.name,authorName,body
 cf piece get --piece <topic> links --input \
-  --filter '.kind == "pr"' --schema kind,url,label,addedAt
+  --filter '.kind == "pr"' --select kind,url,label,addedAt
 ```
 
 Filtering happens before projection and preserves list order. The jq-inspired
