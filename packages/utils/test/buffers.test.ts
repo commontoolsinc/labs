@@ -1,18 +1,43 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
-
-/**
- * Whether `bytes` is backed by a detached buffer. A `SharedArrayBuffer` can
- * never be detached, and lacks the property entirely.
- */
-function isDetached(bytes: Uint8Array): boolean {
-  const buffer = bytes.buffer;
-  return (buffer instanceof ArrayBuffer) && buffer.detached;
-}
+import { isDetached, toOwnedUint8Array } from "@commonfabric/utils/buffers";
 
 describe("buffers", () => {
+  describe("isDetached()", () => {
+    it("returns `false` for a live buffer", () => {
+      expect(isDetached(new ArrayBuffer(8))).toBe(false);
+    });
+
+    it("returns `false` for a view onto a live buffer", () => {
+      const buffer = new ArrayBuffer(8);
+      expect(isDetached(new Uint8Array(buffer))).toBe(false);
+      expect(isDetached(new Uint8Array(buffer, 2, 3))).toBe(false);
+      expect(isDetached(new DataView(buffer))).toBe(false);
+    });
+
+    it("returns `true` for a detached buffer", () => {
+      const buffer = new ArrayBuffer(8);
+      buffer.transfer();
+      expect(isDetached(buffer)).toBe(true);
+    });
+
+    it("returns `true` for a view onto a detached buffer", () => {
+      const buffer = new ArrayBuffer(8);
+      const view = new Uint8Array(buffer);
+      buffer.transfer();
+      expect(isDetached(view)).toBe(true);
+    });
+
+    it("returns `false` for a `SharedArrayBuffer`, which cannot detach", () => {
+      // The direct `.detached` read is `undefined` here, not `false`, so this
+      // pins the coercion rather than leaving it to luck.
+      const buffer = new SharedArrayBuffer(8);
+      expect(isDetached(buffer)).toBe(false);
+      expect(isDetached(new Uint8Array(buffer))).toBe(false);
+    });
+  });
+
   describe("toOwnedUint8Array()", () => {
     it("returns an array with the same contents, without `transfer`", () => {
       const source = new Uint8Array([1, 2, 3]);
