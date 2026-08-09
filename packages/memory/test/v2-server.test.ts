@@ -3017,6 +3017,116 @@ Deno.test("memory v2 server suppresses own patch heads when the own-write echo c
   }
 });
 
+Deno.test("memory v2 server delivers a foreign-moved head to the earlier own-set writer", async () => {
+  const server = createServer("memory://memory-v2-server-echo-foreign-moved");
+  const firstMessages: ServerMessage[] = [];
+  const secondMessages: ServerMessage[] = [];
+  const first = server.connect((message) => firstMessages.push(message));
+  const second = server.connect((message) => secondMessages.push(message));
+  const space = "did:key:z6Mk-memory-v2-echo-foreign-moved";
+
+  try {
+    const firstSessionId = await openTestSession(
+      first,
+      firstMessages,
+      space,
+      "first",
+    );
+    const secondSessionId = await openTestSession(
+      second,
+      secondMessages,
+      space,
+      "second",
+    );
+
+    for (
+      const [connection, sessionId, messages] of [
+        [first, firstSessionId, firstMessages],
+        [second, secondSessionId, secondMessages],
+      ] as const
+    ) {
+      await connection.receive(encodeMemoryBoundary({
+        type: "session.watch.set",
+        requestId: "watch",
+        space,
+        sessionId,
+        watches: [{
+          id: "root",
+          kind: "graph",
+          query: {
+            roots: [{
+              id: "of:doc:f",
+              selector: { path: [], schema: false },
+            }],
+          },
+        }],
+      }));
+      shiftMessage(messages);
+    }
+
+    // The first session sets; a foreign set moves the head PAST it inside
+    // the same un-flushed batch. The first writer no longer holds the head,
+    // so its frame MUST carry the doc — with the foreign value — despite
+    // its own set being elidable a moment earlier.
+    await first.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "first-set",
+      space,
+      sessionId: firstSessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:f",
+          value: { value: { author: "first" } },
+        }],
+      },
+    }));
+    assertEquals(nextResponse<any>(firstMessages).requestId, "first-set");
+
+    await second.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "second-set",
+      space,
+      sessionId: secondSessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:f",
+          value: { value: { author: "second" } },
+        }],
+      },
+    }));
+    assertEquals(nextResponse<any>(secondMessages).requestId, "second-set");
+
+    await server.flushSessions([space]);
+
+    const firstEffect = assertEffect(shiftMessage(firstMessages));
+    assertEquals(firstEffect.effect.upserts, [{
+      branch: "",
+      id: "of:doc:f",
+      scope: "space",
+      seq: 2,
+      doc: { value: { author: "second" } },
+    }]);
+    assertEquals(firstEffect.effect.caughtUpLocalSeq, 1);
+    assertEquals(firstMessages, []);
+
+    // Mixed provenance also delivers to the head-owning second writer: the
+    // doc fans out authoritatively to every session once two sessions wrote
+    // it in one batch window.
+    const secondEffect = assertEffect(shiftMessage(secondMessages));
+    assertEquals(secondEffect.effect.upserts.map((u) => u.seq), [2]);
+    assertEquals(secondEffect.effect.caughtUpLocalSeq, 1);
+    assertEquals(secondMessages, []);
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 server returns conflicts before deferred caught-up session sync", async () => {
   // Verdict-first is the design (CT-1927): the rejection returns inline and
   // the deferred sync (with its marker) follows on the batch pass.
