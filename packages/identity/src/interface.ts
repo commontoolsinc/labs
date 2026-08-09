@@ -78,7 +78,7 @@ export interface Signer<ID extends DID = DID> extends Principal<ID> {
    * alter this signer. Callers may rely on that rather than defending
    * themselves.
    *
-   * Note what is *not* promised: that two calls return different values. The
+   * Note what is _not_ promised: that two calls return different values. The
    * requirement is unreachability, and the two key forms meet it by different
    * means. A `CryptoKeyPair` carries opaque platform keys with no reachable
    * material, so one frozen pair can serve every call. An
@@ -108,6 +108,10 @@ export interface AuthorizationError extends Error {
  * Raw ed25519 key material. Deliberately plain arrays rather than a richer
  * byte type: a value of this shape crosses worker boundaries as an IPC
  * payload, and structured cloning does not preserve a class.
+ *
+ * TODO(danfuzz): Change these properties to `FabricBytes` once `codec-realm`
+ * exists and is used to carry this across that boundary. The bytes would then
+ * be immutable end to end, instead of only within a signer.
  */
 export type InsecureCryptoKeyPair = {
   privateKey: Uint8Array;

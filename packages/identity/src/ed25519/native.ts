@@ -26,12 +26,20 @@ import {
 // | spki   |   X    |         |
 
 export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
+  /**
+   * The key material, frozen at construction. `CryptoKey`s are opaque and
+   * carry no reachable material, so a frozen pair of them cannot be used to
+   * reach this signer -- which lets the same object serve both internal use
+   * and every `serialize()`.
+   */
   #keypair: CryptoKeyPair;
+
   #did: ID;
   #verifier: Verifier<ID> | null = null;
-  #serialized: CryptoKeyPair | null = null;
+
+  /** Constructs an instance. */
   constructor(keypair: CryptoKeyPair, did: ID) {
-    this.#keypair = keypair;
+    this.#keypair = Object.freeze({ ...keypair });
     this.#did = did;
   }
 
@@ -51,12 +59,7 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
 
   /** @inheritDoc */
   serialize(): CryptoKeyPair {
-    if (!this.#serialized) {
-      // Frozen, and holding only opaque keys, so no holder can reach this
-      // signer through it -- which is what lets one value serve every call.
-      this.#serialized = Object.freeze({ ...this.#keypair });
-    }
-    return this.#serialized;
+    return this.#keypair;
   }
 
   async sign<T>(payload: AsBytes<T>): Promise<Result<Signature<T>, Error>> {

@@ -122,7 +122,10 @@ Deno.test("a signer copies the key material it is constructed from", async () =>
   assertEquals(identity.toRaw()[0], 7, "the signing secret must be unchanged");
 });
 
-Deno.test("a verifier copies the public key it is constructed from", async () => {
+Deno.test("a verifier built from raw bytes copies them", async () => {
+  // `fromRaw()` is where a mutable array enters; the constructor itself takes
+  // immutable bytes and so has nothing to defend against.
+  //
   // The observable is `verify()`, not `did()`: the DID is derived once at
   // construction and cached, so it cannot drift whatever happens. An aliased
   // key would instead leave this verifying against mutated material while
@@ -131,7 +134,7 @@ Deno.test("a verifier copies the public key it is constructed from", async () =>
     implementation: "noble",
   });
   const publicKey = (identity.serialize() as InsecureCryptoKeyPair).publicKey;
-  const verifier = new NobleEd25519Verifier(publicKey);
+  const verifier = await NobleEd25519Verifier.fromRaw(publicKey);
   const payload = new Uint8Array(32).fill(9);
   const signature = await identity.sign(payload);
   assert(signature.ok);

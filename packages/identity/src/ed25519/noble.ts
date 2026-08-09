@@ -92,14 +92,13 @@ export class NobleEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
   #did: ID;
 
   /**
-   * Constructs an instance holding its own immutable copy of `publicKey`, so
-   * that the key cannot drift from the DID derived beside it.
+   * Constructs an instance. `publicKey` is immutable, so it is held as given;
+   * the DID derived from it here therefore cannot drift from the key this
+   * verifies with.
    */
-  constructor(publicKey: Uint8Array | FabricBytes) {
-    this.#publicKey = publicKey instanceof FabricBytes
-      ? publicKey
-      : new FabricBytes(publicKey);
-    this.#did = bytesToDid(this.#publicKey.slice()) as ID;
+  constructor(publicKey: FabricBytes) {
+    this.#publicKey = publicKey;
+    this.#did = bytesToDid(publicKey.slice()) as ID;
   }
 
   async verify(
@@ -128,6 +127,8 @@ export class NobleEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
   static fromRaw<ID extends DIDKey>(
     rawPublicKey: Uint8Array,
   ): Promise<NobleEd25519Verifier<ID>> {
-    return Promise.resolve(new NobleEd25519Verifier(rawPublicKey));
+    return Promise.resolve(
+      new NobleEd25519Verifier(new FabricBytes(rawPublicKey)),
+    );
   }
 }
