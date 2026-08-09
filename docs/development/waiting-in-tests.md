@@ -499,8 +499,10 @@ in-process memory server's fan-out rather than racing it. The primitive is the
 server's `subscriptionRefreshDelayMs: "manual"` mode (via
 `newSharedServer({ subscriptionRefreshDelayMs: "manual" })` in the runner's
 test utils, or `newLoopbackServer` for other packages): the flush timer is
-never armed, dirty spaces accumulate, and frames spread only when the test
-calls `server.flushSessions([space])` at the point delivery is wanted.
+never armed, dirty spaces accumulate, and frames spread only at the explicit
+synchronization points — `server.flushSessions([space])` at the point delivery
+is wanted, or `server.idle()`, which drains held fan-out to keep its
+quiescence contract.
 
 A large numeric delay is not a substitute. Under auto-advance the pump fires
 the earliest pending `src/`-armed timer regardless of its nominal delay, so a
