@@ -1402,7 +1402,9 @@ describe("RuntimeProcessor blob upload IPC", () => {
           type: RequestType.UploadBlob,
           space: "did:key:test-space" as never,
           contentType: "image/png",
-          body: [1, 2, 3],
+          // Freshly allocated, as the transport's clone delivers it: the
+          // handler owns its request's payload.
+          body: new Uint8Array([1, 2, 3]),
           suffix: "png",
         }),
       ).resolves.toEqual({

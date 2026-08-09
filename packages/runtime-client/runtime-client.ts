@@ -661,6 +661,10 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  /**
+   * Uploads a blob to the given space. `body` is not consumed -- it crosses to
+   * the runtime as a clone -- so the caller may keep using its array.
+   */
   async uploadBlob(options: {
     space: DID;
     contentType: string;
@@ -671,7 +675,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.UploadBlob,
       space: options.space,
       contentType: options.contentType,
-      body: Array.from(options.body),
+      body: options.body,
       suffix: options.suffix,
     });
   }

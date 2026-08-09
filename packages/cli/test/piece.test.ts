@@ -11,9 +11,9 @@ import {
 } from "@commonfabric/runner";
 import {
   EmulatedStorageManager,
+  newLoopbackServer,
   StorageManager,
 } from "@commonfabric/runner/storage/cache.deno";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
@@ -2727,32 +2727,7 @@ describe("cli piece parsing", () => {
       "cf piece search cold runtime test",
     );
     const space = signer.did();
-    const audience = "did:key:z6Mk-runner-emulated-memory";
-    const server = new MemoryV2Server.Server({
-      authorizeSessionOpen(message) {
-        const principal = (message.authorization as { principal?: unknown })
-          ?.principal;
-        return typeof principal === "string" ? principal : undefined;
-      },
-      sessionOpenAuth: { audience },
-    });
-
-    class SharedStorage extends EmulatedStorageManager {
-      static connect(server: MemoryV2Server.Server): SharedStorage {
-        const manager = new SharedStorage(
-          { as: signer, memoryHost: new URL("memory://") } as any,
-          () => server,
-        );
-        manager.#server = server;
-        return manager;
-      }
-
-      #server!: MemoryV2Server.Server;
-
-      protected override server(): MemoryV2Server.Server {
-        return this.#server;
-      }
-    }
+    const server = newLoopbackServer();
 
     const leafSchema = {
       type: "object",
@@ -2769,7 +2744,9 @@ describe("cli piece parsing", () => {
       properties: { middle: { ...middleSchema, asCell: ["cell"] } },
       required: ["middle"],
     } as const satisfies JSONSchema;
-    const writerStorage = SharedStorage.connect(server);
+    const writerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
     const writer = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: writerStorage,
@@ -2799,7 +2776,9 @@ describe("cli piece parsing", () => {
     await writeTx.commit();
     await writerStorage.synced();
 
-    const readerStorage = SharedStorage.connect(server);
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
     const reader = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: readerStorage,

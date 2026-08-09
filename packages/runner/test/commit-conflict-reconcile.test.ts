@@ -17,56 +17,27 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("read-repair-strand");
 const space = signer.did();
 
-// Two StorageManagers sharing ONE real server, each with its own replicas.
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
-
 describe("read-repair: stale read after cross-replica conflict", () => {
   let server: MemoryV2Server.Server;
-  let storageA: SharedServerStorageManager;
-  let storageB: SharedServerStorageManager;
+  let storageA: EmulatedStorageManager;
+  let storageB: EmulatedStorageManager;
   let rtA: Runtime;
   let rtB: Runtime;
 
   beforeEach(() => {
-    server = newSharedServer();
-    storageA = SharedServerStorageManager.connectTo(server, { as: signer });
-    storageB = SharedServerStorageManager.connectTo(server, { as: signer });
+    // Manual fan-out: the controlled staleness these tests are built on is
+    // a gated state, not a timing accident — frames spread only when a test
+    // flushes.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    storageA = EmulatedStorageManager.connectTo(server, { as: signer });
+    storageB = EmulatedStorageManager.connectTo(server, { as: signer });
     rtA = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storageA,
@@ -152,7 +123,14 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     });
 
     // B commits its v0-based write — the server rejects it (stale read).
-    const resB = await txB.commit();
+    // The verdict receipt is the ordering barrier for the flush: it resolves
+    // only after the server staged the rejection's repair docs, so the
+    // explicit fan-out below deterministically carries the repair frame the
+    // default-mode promise is gated on.
+    const commitP = txB.commit();
+    await txB.commitVerdict!();
+    await server.flushSessions([space]);
+    const resB = await commitP;
     expect(resB.error, "B's commit should be rejected (conflict)")
       .toBeDefined();
     expect(
@@ -213,13 +191,13 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     }
     expect(docB.get()).toEqual({ v: "v0" });
 
-    // B's commit will be REJECTED. The rejection response arrives over the
-    // microtask loopback, but the read-repair frame that releases the commit
-    // promise rides the server's timed fan-out — which a held-clock drain
-    // never fires. So at the settle() fixpoint the fate is sealed and the
-    // VERDICT callback must have run, while the promise — and with it the
-    // COMMIT callbacks, whose consumers act on the repaired base — is still
-    // held by the repair gate.
+    // B's commit will be REJECTED. The rejection response arrives promptly,
+    // but the read-repair frame that releases the commit promise rides the
+    // fan-out, which this manual server withholds until the test flushes.
+    // So at the settle() fixpoint the fate is sealed and the VERDICT
+    // callback must have run, while the promise — and with it the COMMIT
+    // callbacks, whose consumers act on the repaired base — is still held
+    // by the repair gate.
     let verdictResult: { error?: unknown } | undefined;
     txB.addVerdictCallback((_tx, result) => {
       verdictResult = result;
@@ -244,9 +222,10 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     expect(promiseSettled, "commit promise still held by the repair gate")
       .toBe(false);
 
-    // Real time resumes: the fan-out delivers the repair frame; the promise
+    // The test releases the repair fan-out: the frame arrives, the promise
     // resolves with the same rejection the verdict callback saw, and the
     // commit callback fires with it.
+    await server.flushSessions([space]);
     const resB = await commitP;
     expect(resB.error?.name).toBe("ConflictError");
     expect(commitCallbackFired, "commit callback fired at promise settlement")
@@ -288,9 +267,9 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     expect(docB.get()).toEqual({ v: "v0" });
 
     // B commits in VERDICT mode. The rejection receipt must settle the
-    // returned promise inside the held-clock drain — no read-repair wait —
+    // returned promise at the settle() fixpoint — no read-repair wait —
     // while the commit callback stays on the settlement timeline, gated on
-    // the repair frame the timed fan-out has not delivered yet.
+    // the repair frame this manual server has not been told to send yet.
     const commitCallbackDone = Promise.withResolvers<void>();
     let commitCallbackFired = false;
     txB.addCommitCallback(() => {
@@ -315,8 +294,9 @@ describe("read-repair: stale read after cross-replica conflict", () => {
       "commit callback still held by the repair gate",
     ).toBe(false);
 
-    // Real time resumes: the repair frame arrives and the settlement
-    // timeline (and with it the commit callback) completes.
+    // The test releases the repair fan-out: the frame arrives and the
+    // settlement timeline (and with it the commit callback) completes.
+    await server.flushSessions([space]);
     await commitP;
     await commitCallbackDone.promise;
     expect(commitCallbackFired).toBe(true);

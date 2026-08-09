@@ -21,55 +21,26 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("linked-stale-read-strand");
 const space = signer.did();
 
 // Two StorageManagers sharing ONE real server, each with its own replicas.
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
-
 describe("stale linked read across two clients", () => {
   let server: MemoryV2Server.Server;
-  let storageA: SharedServerStorageManager;
-  let storageB: SharedServerStorageManager;
+  let storageA: EmulatedStorageManager;
+  let storageB: EmulatedStorageManager;
   let rtA: Runtime; // Client 1
   let rtB: Runtime; // Client 2
 
   beforeEach(() => {
-    server = newSharedServer();
-    storageA = SharedServerStorageManager.connectTo(server, { as: signer });
-    storageB = SharedServerStorageManager.connectTo(server, { as: signer });
+    // Manual fan-out: the controlled staleness below is a gated state, not
+    // a timing accident — frames spread only when the test flushes.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    storageA = EmulatedStorageManager.connectTo(server, { as: signer });
+    storageB = EmulatedStorageManager.connectTo(server, { as: signer });
     rtA = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storageA,
@@ -139,7 +110,10 @@ describe("stale linked read across two clients", () => {
     // Client 1 sets the field in C based on the information in A.
     cellC1.withTx(tx).set("User is allowed, because isAdmin = true");
     rtA.prepareTxForCommit(tx);
-    const res = await tx.commit();
+    // Verdict-marked so the rejection receipt resolves without the
+    // read-repair gate, which would otherwise wait on a fan-out this
+    // manual server has not been told to run.
+    const res = await tx.commit({ resolveAt: "verdict" });
 
     // ... but now that read is part of the tx's read-set, so committing the
     // grant is REJECTED: the server's head for cellB.isAdmin has advanced past
@@ -149,6 +123,11 @@ describe("stale linked read across two clients", () => {
       (res.error as { name?: string })?.name,
       "stale read across the link is a ConflictError",
     ).toBe("ConflictError");
+
+    // Release the repair fan-out and let the rejection settle — the doomed
+    // overlay drops against the repaired mirror.
+    await server.flushSessions([space]);
+    await rtA.storageManager.synced();
 
     // The grant write never lands.
     expect(cellC1.get(), "rejected grant must not persist").toBeUndefined();

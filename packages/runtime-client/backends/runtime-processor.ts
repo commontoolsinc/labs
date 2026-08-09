@@ -1571,7 +1571,6 @@ export class RuntimeProcessor {
       throw new Error("uploadBlob requires a space DID");
     }
     const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";
-    const bytes = Uint8Array.from(request.body);
     // The blob belongs to the named space, so it uploads to — and its
     // returned URL resolves against — THAT space's host.
     const host = this.runtime.hostForSpace(request.space);
@@ -1579,11 +1578,16 @@ export class RuntimeProcessor {
       `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
       host,
     );
+    // The `true` below cedes `request.body` to the `FabricBytes` rather than
+    // having it copied. That is legitimate because a handler owns the values
+    // its request carries, per `BaseRequest`, so nothing else can be reading
+    // this array.
+    const bytes = new FabricBytes(request.body, true);
     // Blob upload payloads must preserve FabricBytes even when the wider
     // process is running with legacy memory JSON flags.
     const body = blobUploadCodec.encode({
       type: request.contentType,
-      body: new FabricBytes(bytes),
+      body: bytes,
     });
     const response = await fetch(target, {
       method: "POST",

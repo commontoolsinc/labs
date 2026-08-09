@@ -23,45 +23,14 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("schema-gated-link-coverage");
 const space = signer.did();
-
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
 
 type LinkedDoc = { text?: string };
 type GatedDoc = { mediaType?: string; content?: LinkedDoc };
@@ -95,15 +64,17 @@ const gatedSchema = {
 
 describe("schema-gated link expansion at coverage", () => {
   let server: MemoryV2Server.Server;
-  let storageA: SharedServerStorageManager;
-  let storageB: SharedServerStorageManager;
+  let storageA: EmulatedStorageManager;
+  let storageB: EmulatedStorageManager;
   let rtA: Runtime;
   let rtB: Runtime;
 
   beforeEach(() => {
-    server = newSharedServer();
-    storageA = SharedServerStorageManager.connectTo(server, { as: signer });
-    storageB = SharedServerStorageManager.connectTo(server, { as: signer });
+    // Manual fan-out: the held state below is a gated state, not a timing
+    // accident — frames spread only when the test flushes.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    storageA = EmulatedStorageManager.connectTo(server, { as: signer });
+    storageB = EmulatedStorageManager.connectTo(server, { as: signer });
     rtA = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storageA,
@@ -166,10 +137,10 @@ describe("schema-gated link expansion at coverage", () => {
       return result;
     });
 
-    // Drain without moving the clock: the verdict arrives over the
-    // microtask loopback, but the fan-out frame carrying doc1 (and the
-    // coverage marker) rides the server's timed batch, which a held-clock
-    // drain never fires.
+    // Drain without moving the clock: the verdict arrives promptly, but
+    // the fan-out frame carrying doc1 (and the coverage marker) rides the
+    // batched fan-out, which this manual server withholds until the test
+    // flushes.
     await clock.settle();
     expect(verdictContent, "verdict callback ran").not.toBe("unset");
     expect(
@@ -179,15 +150,16 @@ describe("schema-gated link expansion at coverage", () => {
     // Between the verdict and coverage the client notices the expansion
     // against its own optimistic state and pulls doc1 itself — the linked
     // doc can be readable well before coverage. The commit promise still
-    // waits for its coverage marker, which rides the server's timed
-    // fan-out and cannot arrive inside a held-clock drain.
+    // waits for its coverage marker, which rides the withheld
+    // fan-out and cannot arrive before the test's flush.
     expect(promiseSettled, "commit promise still waiting for coverage")
       .toBe(false);
 
-    // Real time resumes: the fan-out delivers doc1 with the marker. A
+    // The test releases the fan-out: it delivers doc1 with the marker. A
     // resolved commit means the subscribed view reflects the write AND its
     // watch-set consequences — the linked doc reads without any further
     // sync or pull.
+    await server.flushSessions([space]);
     const res = await commitP;
     expect(res.error, `commit: ${JSON.stringify(res.error)}`).toBeUndefined();
     expect(
