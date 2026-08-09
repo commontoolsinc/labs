@@ -23,6 +23,7 @@ import {
 import { defer } from "@commonfabric/utils/defer";
 import {
   EmulatedStorageManager,
+  newLoopbackServer,
   StorageManager,
 } from "@commonfabric/runner/storage/cache.deno";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -473,40 +474,10 @@ async function withInputRootPullSpy<T>(
 
 // Two-replica harness: a server that several emulated replicas can share, so a
 // fresh reader must fetch cross-replica rather than read its own warm cache.
-// Mirrors newSharedServer/SharedServerStorageManager in
+// Mirrors newSharedServer/EmulatedStorageManager.connectTo in
 // fresh-replica-read-asymmetry.test.ts; the auth matches the server
 // EmulatedStorageManager.emulate builds for itself (v2-emulate.ts).
-const EMULATED_AUDIENCE = "did:key:z6Mk-runner-emulated-memory";
-
-function newSharedServer(): MemoryV2Server.Server {
-  return new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: { audience: EMULATED_AUDIENCE },
-  });
-}
-
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: { as: typeof signer },
-  ): SharedServerStorageManager {
-    const pieces = new SharedServerStorageManager(
-      // deno-lint-ignore no-explicit-any
-      { ...options, memoryHost: new URL("memory://") } as any,
-      () => server,
-    );
-    pieces.#sharedServer = server;
-    return pieces;
-  }
-  #sharedServer!: MemoryV2Server.Server;
-  protected override server(): MemoryV2Server.Server {
-    return this.#sharedServer;
-  }
-}
+const newSharedServer = (): MemoryV2Server.Server => newLoopbackServer();
 
 describe("piece link contract localization", () => {
   const contract = (schema: JSONSchema, root: JSONSchema = schema) => ({
@@ -7112,14 +7083,14 @@ describe("piece pull materialization", () => {
 
 describe("piece cold-replica slot read (two replicas, one server)", () => {
   let server: MemoryV2Server.Server;
-  let writerStorage: SharedServerStorageManager;
+  let writerStorage: EmulatedStorageManager;
   let writerRuntime: Runtime;
   let writerPieces: PiecesController;
   let spaceName: string;
 
   beforeEach(async () => {
     server = newSharedServer();
-    writerStorage = SharedServerStorageManager.connectTo(server, {
+    writerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     writerRuntime = new Runtime({
@@ -7162,7 +7133,7 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
     // never pulled K. Reading the slot by its fid must canonicalize R -> K (a
     // VALUE link) AND cold-fetch K's docs from the server — the end-to-end
     // behavior the local-toolshed run confirmed, now repeatable in-process.
-    const readerStorage = SharedServerStorageManager.connectTo(server, {
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     const readerRuntime = new Runtime({
@@ -7236,7 +7207,7 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
     );
     await writerPieces.synced();
 
-    const readerStorage = SharedServerStorageManager.connectTo(server, {
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     const readerRuntime = new Runtime({
@@ -7374,7 +7345,7 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
     );
     await writerPieces.synced();
 
-    const readerStorage = SharedServerStorageManager.connectTo(server, {
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     const readerRuntime = new Runtime({

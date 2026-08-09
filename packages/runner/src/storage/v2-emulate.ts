@@ -5,6 +5,34 @@ import { type Options, type SessionFactory, StorageManager } from "./v2.ts";
 
 const emulatedMemoryAudience = "did:key:z6Mk-runner-emulated-memory";
 
+/**
+ * Build a stock in-process memory server for loopback storage managers: the
+ * principal-passthrough authorizer, an emulated audience, and optionally a
+ * fan-out cadence — `"manual"` disables timer-driven fan-out entirely:
+ * either explicit synchronization point (`flushSessions()`, or `idle()`,
+ * which drains held fan-out to keep its quiescence contract) delivers it.
+ * The controlled-staleness shape.
+ */
+export const newLoopbackServer = (options?: {
+  audience?: string;
+  subscriptionRefreshDelayMs?: number | "manual";
+  store?: URL;
+}): MemoryV2Server.Server =>
+  new MemoryV2Server.Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: {
+      audience: options?.audience ?? emulatedMemoryAudience,
+    },
+    ...(options?.subscriptionRefreshDelayMs !== undefined
+      ? { subscriptionRefreshDelayMs: options.subscriptionRefreshDelayMs }
+      : {}),
+    ...(options?.store !== undefined ? { store: options.store } : {}),
+  });
+
 // Nudge the server's session fan-out after each request, on a microtask. A
 // commit promise resolves at marker coverage (CT-1950), and the catch-up
 // marker rides the batched fan-out; behind the server's coalescing TIMER it
@@ -65,6 +93,7 @@ class EmulatedSessionFactory implements SessionFactory {
 export class EmulatedStorageManager extends StorageManager {
   #serverFactory: () => MemoryV2Server.Server;
   #server?: MemoryV2Server.Server;
+  #ownsServer = true;
 
   static emulate(
     options: Omit<Options, "memoryHost" | "spaceHostMap">,
@@ -76,24 +105,35 @@ export class EmulatedStorageManager extends StorageManager {
         // resolves a storage address against this.
         memoryHost: new URL("memory://"),
       },
-      () =>
-        new MemoryV2Server.Server({
-          authorizeSessionOpen(message) {
-            const principal = (message.authorization as { principal?: unknown })
-              ?.principal;
-            return typeof principal === "string" ? principal : undefined;
-          },
-          sessionOpenAuth: {
-            audience: emulatedMemoryAudience,
-          },
-        }),
+      () => newLoopbackServer(),
       // Single-manager emulation wants request-coupled fan-out (see
       // flushOnSendTransport). Harnesses that share one server across
-      // managers use the protected constructor and keep the server's timed
-      // cadence: their controlled-staleness premises depend on frames NOT
-      // spreading until the test lets them.
+      // managers use connectTo() and keep the server's own cadence: their
+      // controlled-staleness premises depend on frames NOT spreading until
+      // the test lets them.
       true,
     );
+  }
+
+  /**
+   * Connect a manager to an externally owned shared server: several managers
+   * on one server model several real sessions, where data written by one
+   * reaches another only through an explicit per-space server
+   * query/subscription. Fan-out keeps the server's own cadence (no
+   * flush-on-send nudge), and the CALLER owns the server's lifecycle —
+   * closing this manager does not close the shared server.
+   */
+  static connectTo(
+    server: MemoryV2Server.Server,
+    options: Omit<Options, "memoryHost" | "spaceHostMap">,
+  ): EmulatedStorageManager {
+    const manager = new this(
+      { ...options, memoryHost: new URL("memory://") },
+      () => server,
+      false,
+    );
+    manager.#ownsServer = false;
+    return manager;
   }
 
   protected constructor(
@@ -125,7 +165,7 @@ export class EmulatedStorageManager extends StorageManager {
 
   override async close(): Promise<void> {
     await super.close();
-    if (this.#server) {
+    if (this.#server && this.#ownsServer) {
       await this.#server.close();
     }
   }

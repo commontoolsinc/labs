@@ -9,6 +9,7 @@ import {
 } from "@commonfabric/runner";
 import {
   EmulatedStorageManager,
+  newLoopbackServer,
 } from "@commonfabric/runner/storage/cache.deno";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { createSession, Identity } from "@commonfabric/identity";
@@ -32,38 +33,7 @@ const DEFAULT_APP_PATTERN_PATH = resolveSystemPatternSource(
 
 const signer = await Identity.fromPassphrase("default-app golden replay");
 
-const EMULATED_AUDIENCE = "did:key:z6Mk-runner-emulated-memory";
-
-function newSharedServer(): MemoryV2Server.Server {
-  return new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: { audience: EMULATED_AUDIENCE },
-  });
-}
-
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-  ): SharedServerStorageManager {
-    const controller = new SharedServerStorageManager(
-      // deno-lint-ignore no-explicit-any
-      { as: signer, memoryHost: new URL("memory://") } as any,
-      () => server,
-    );
-    controller.#sharedServer = server;
-    return controller;
-  }
-
-  #sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.#sharedServer;
-  }
-}
+const newSharedServer = (): MemoryV2Server.Server => newLoopbackServer();
 
 // A default-app-shaped root before and after the registry rename. V2 keeps the
 // old owned-cell cause privately and migrates its contents into the new cell
@@ -162,7 +132,7 @@ function installFetchStub(): StubControls {
 describe("default-app golden replay (state survives an in-place roll-forward)", () => {
   let stub: StubControls;
   let server: MemoryV2Server.Server;
-  let storageManager: SharedServerStorageManager;
+  let storageManager: EmulatedStorageManager;
   let runtime: Runtime;
   let controller: PiecesController;
 
@@ -170,7 +140,7 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     stub = installFetchStub();
     stub.setSource(ROOT_V1);
     server = newSharedServer();
-    storageManager = SharedServerStorageManager.connectTo(server);
+    storageManager = EmulatedStorageManager.connectTo(server, { as: signer });
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
@@ -318,7 +288,9 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
       identity: signer,
       spaceName: controller.getSpaceName()!,
     });
-    const readerStorage = SharedServerStorageManager.connectTo(server);
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
     const freshRuntime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager: readerStorage,

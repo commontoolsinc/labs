@@ -26,7 +26,7 @@ import { expect } from "@std/expect";
 
 import type { OpaqueCell } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
@@ -34,8 +34,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import type { Options } from "../src/storage/v2.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("replica eviction invariants");
 const space = signer.did();
@@ -130,44 +129,18 @@ describe("a list projection survives its input emptying", () => {
 
 // Two managers over one in-process server, so a commit on one can conflict with
 // a commit on the other.
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
 
 describe("a cross-replica conflict settles", () => {
   let server: MemoryV2Server.Server;
-  let storageA: SharedServerStorageManager;
-  let storageB: SharedServerStorageManager;
+  let storageA: EmulatedStorageManager;
+  let storageB: EmulatedStorageManager;
   let rtA: Runtime;
   let rtB: Runtime;
 
   beforeEach(() => {
-    server = new MemoryV2Server.Server({
-      authorizeSessionOpen(message) {
-        const principal = (message.authorization as { principal?: unknown })
-          ?.principal;
-        return typeof principal === "string" ? principal : undefined;
-      },
-      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-    });
-    storageA = SharedServerStorageManager.connectTo(server, { as: signer });
-    storageB = SharedServerStorageManager.connectTo(server, { as: signer });
+    server = newSharedServer();
+    storageA = EmulatedStorageManager.connectTo(server, { as: signer });
+    storageB = EmulatedStorageManager.connectTo(server, { as: signer });
     rtA = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storageA,
