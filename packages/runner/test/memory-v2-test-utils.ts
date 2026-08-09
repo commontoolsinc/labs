@@ -52,8 +52,10 @@ export const TEST_MEMORY_SERVER_AUTH = {
 /**
  * A shared in-process memory server for multi-manager harnesses (pair with
  * `EmulatedStorageManager.connectTo`), pinned to the runner test audience.
- * `subscriptionRefreshDelayMs: "manual"` gates fan-out entirely behind
- * explicit `flushSessions()` calls — the controlled-staleness shape.
+ * `subscriptionRefreshDelayMs: "manual"` disables timer-driven fan-out
+ * entirely; either explicit synchronization point — `flushSessions()`, or
+ * `idle()`, which drains held fan-out to keep its quiescence contract —
+ * delivers it. The controlled-staleness shape.
  */
 export const newSharedServer = (options?: {
   subscriptionRefreshDelayMs?: number | "manual";
