@@ -1578,8 +1578,10 @@ export class RuntimeProcessor {
       `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
       host,
     );
-    // Ceded: a request arrives cloned by the transport, so its payload belongs
-    // to this handler and nothing else can be reading it.
+    // The `true` below cedes `request.body` to the `FabricBytes` rather than
+    // having it copied. That is legitimate because a handler owns the values
+    // its request carries, per `BaseRequest`, so nothing else can be reading
+    // this array.
     const bytes = new FabricBytes(request.body, true);
     // Blob upload payloads must preserve FabricBytes even when the wider
     // process is running with legacy memory JSON flags.

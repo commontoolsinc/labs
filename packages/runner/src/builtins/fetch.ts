@@ -153,9 +153,10 @@ async function processJsonResponse(
 async function processBinaryResponse(
   response: Response,
 ): Promise<FetchBinaryResult> {
-  // `arrayBuffer()` yields a buffer owned by nobody else, and the view over
-  // it is a temporary, so it is ceded rather than copied. A response body is
-  // unbounded, which is what makes the copy worth avoiding.
+  // The `true` below cedes the array to the `FabricBytes` rather than having
+  // it copied. `arrayBuffer()` yields a buffer nobody else holds, and the view
+  // over it is a temporary, so there is nothing left to protect. A response
+  // body is unbounded, which is what makes the copy worth avoiding.
   const bytes = new FabricBytes(
     new Uint8Array(await response.arrayBuffer()),
     true,
