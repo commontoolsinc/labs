@@ -65,7 +65,7 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
   // is, which the type already answers.
   toPkcs8() {
     if (this.#impl instanceof NobleEd25519Signer) {
-      return toPEM(ed25519RawToPkcs8(this.#impl.rawPrivateKey()));
+      return toPEM(ed25519RawToPkcs8(this.#impl.privateKey().slice()));
     }
     throw new Error(
       'Cannot convert identity to PKCS8 format: requires "noble" implementation.',
@@ -77,7 +77,7 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
   // The array is freshly allocated, so the caller owns it outright.
   toRaw(): Uint8Array {
     if (this.#impl instanceof NobleEd25519Signer) {
-      return this.#impl.rawPrivateKey();
+      return this.#impl.privateKey().slice();
     }
     throw new Error(
       'Cannot export raw key material: requires "noble" implementation.',

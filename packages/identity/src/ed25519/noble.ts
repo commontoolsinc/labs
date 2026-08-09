@@ -29,12 +29,13 @@ export class NobleEd25519Signer<ID extends DIDKey> implements Signer<ID> {
   }
 
   /**
-   * The raw private key, as a fresh array the caller owns. Exposed so that
-   * `toRaw()` and `toPkcs8()` need not go through `serialize()`, which would
-   * build a pair object and a second array only to discard both.
+   * This signer's private key. Handed out as held, no copy being needed to
+   * make that safe: a `FabricBytes` cannot be altered by whoever receives it.
+   * A caller wanting mutable bytes takes them with `slice()`, so a copy is
+   * made where one is actually required rather than on every read.
    */
-  rawPrivateKey(): Uint8Array {
-    return this.#privateKey.slice();
+  privateKey(): FabricBytes {
+    return this.#privateKey;
   }
 
   did() {
