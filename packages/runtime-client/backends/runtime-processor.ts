@@ -1578,9 +1578,9 @@ export class RuntimeProcessor {
       `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
       host,
     );
-    // `Uint8Array.from()` allocates, and its result goes nowhere but here, so
-    // it is ceded rather than copied a second time.
-    const bytes = new FabricBytes(Uint8Array.from(request.body), true);
+    // Ceded: a request arrives cloned by the transport, so its payload belongs
+    // to this handler and nothing else can be reading it.
+    const bytes = new FabricBytes(request.body, true);
     // Blob upload payloads must preserve FabricBytes even when the wider
     // process is running with legacy memory JSON flags.
     const body = blobUploadCodec.encode({

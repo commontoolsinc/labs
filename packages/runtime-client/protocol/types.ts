@@ -135,6 +135,17 @@ export type IPCRemoteResponse = {
 
 export type IPCRemoteMessage = IPCRemoteNotification | IPCRemoteResponse;
 
+/**
+ * Base of every request a handler receives.
+ *
+ * **Ownership.** Any value reaching a handler implementation is owned outright
+ * by the receiver: it is guaranteed not to be shared elsewhere already, and not
+ * to become shared later, except by the receiver's own action. A handler may
+ * therefore retain, mutate, or cede what it is given without defending itself.
+ *
+ * That is a requirement on whatever delivers a request, not a property of any
+ * particular transport -- see `RuntimeTransport.send()`.
+ */
 export interface BaseRequest {
   type: RequestType;
 }
@@ -529,7 +540,13 @@ export interface UploadBlobRequest extends BaseRequest {
   /** The space the blob belongs to — uploads target ITS host. */
   space: DID;
   contentType: string;
-  body: number[];
+  /**
+   * The blob's bytes. A `Uint8Array` rather than a `number[]` because this
+   * protocol never leaves one runtime instantiation, and structured cloning
+   * carries a typed array intact. Boxing each byte into an array element costs
+   * both the conversion and a far more expensive clone.
+   */
+  body: Uint8Array;
   suffix?: string;
 }
 
