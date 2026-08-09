@@ -378,18 +378,25 @@ value is ignored with a warning rather than coerced. See
 - **Design, measurements and staging.**
   [`../plans/lazy-cell-materialization.md`](../plans/lazy-cell-materialization.md).
 
-**Before it can graduate**, four tests fail with the flag forced on, and they do
-not share one cause. At least two are wrong values rather than scheduling
-preferences:
+**Before it can graduate**, one runner unit test and five patterns integration
+tests fail with the flag forced on. Both remaining causes are understood:
 
-- `Pattern Runner - Dynamic Patterns` reads `totalItems` as `undefined` where
-  `5` is expected — a dynamically instantiated pattern's output is missing.
-- `incremental observation adoption (live)` records a narrowest read scope of
-  `session` where `space` is expected, which decides where a result is written.
-- `Pattern Runner - Lift` re-runs a lift that forwards its argument once rather
-  than twice; its computed result is unchanged, so this one may be the frugality
-  working as intended.
-- `scheduler cold-replica startup` diverges.
+- **`asCell` lost when narrowing a union.** A pattern declaring
+  `authorProfile: ProfileCell` inside a union-typed array element reads it back
+  as a plain view, so `profile.get()` is not a function. A view narrows `anyOf`
+  against the value at the point of access; when several branches survive it
+  merges their schemas, and the merge does not carry the child's `asCell`
+  marker. An eager read merges matched VALUES instead and prefers the cell among
+  them. This accounts for all five patterns integration failures
+  (`cfc group chat` ×2, `lunch poll`, `record module chrome`,
+  `shared
+  profile`) — each is a multi-user pattern whose shared state is
+  reached through a union-typed list.
+- **A forwarding lift re-runs once rather than twice**
+  (`Pattern Runner -
+  Lift`). Its computed result is unchanged: forwarding
+  passes a link, so what the lift produces stays correct. Whether the reduced
+  re-run is wanted is a scheduling decision rather than a defect.
 
 Everything else in the runner suite passes with the flag on, and the whole
 integration suite passes with it off.

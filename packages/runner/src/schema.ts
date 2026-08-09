@@ -1007,6 +1007,37 @@ function annotateWithBackToCellSymbols(
   return value;
 }
 
+/**
+ * Derive the label view for the dereferences made since `traceStart`.
+ *
+ * The derivation reads each involved document's `cfc` path. Those are
+ * runtime-internal verifier reads — the runtime made them to check a label, not
+ * the reader on its own behalf — and an eager read makes them once, for the
+ * document it was handed, never for the documents its traversal reaches.
+ *
+ * A view re-enters here per property, so the same reads would land once per
+ * child. They are kept out of the scheduler's view of what the ACTION read:
+ * addresses the declared scope summary does not cover drop the action's
+ * execution-context floor to `session`, which stops its observations being
+ * adopted across users. The labels themselves are still derived and still
+ * applied — CFC's own prepare pass reads the raw activity list and skips
+ * internal verifier reads there regardless.
+ */
+function deriveDereferenceLabelView(
+  tx: IExtendedStorageTransaction,
+  traceStart: number,
+  viewChild: boolean,
+): CfcLabelView | undefined {
+  const derive = () =>
+    cfcLabelViewForDereferenceTraces(
+      tx,
+      tx.getCfcState().dereferenceTraces.slice(traceStart),
+    );
+  return viewChild
+    ? tx.runWithAmbientReadMeta(ignoreReadForScheduling, derive)
+    : derive();
+}
+
 export interface ValidateAndTransformOptions {
   /** When true, also read into each Cell created for asCell fields to capture dependencies */
   traverseCells?: boolean;
@@ -1018,6 +1049,12 @@ export interface ValidateAndTransformOptions {
    * yields, which a reader cannot tell from an absent value.
    */
   mismatchThrows?: boolean;
+  /**
+   * Set by a schema view reading one of its children: this is a step inside a
+   * read the entry point already began, so the entry-point-only work — the
+   * stored CFC metadata probe — does not run again per property.
+   */
+  viewChild?: boolean;
 }
 
 export function validateAndTransform(
@@ -1070,9 +1107,10 @@ export function validateAndTransform(
   const resolvedLink = resolveLink(runtime, tx, link, "writeRedirect");
   cfcLabelView = mergeCfcLabelViews([
     cfcLabelView,
-    cfcLabelViewForDereferenceTraces(
+    deriveDereferenceLabelView(
       tx,
-      tx.getCfcState().dereferenceTraces.slice(writeRedirectTraceStart),
+      writeRedirectTraceStart,
+      options?.viewChild === true,
     ),
   ]);
 
@@ -1083,9 +1121,18 @@ export function validateAndTransform(
       : resolvedSchema
     : resolvedLinkSchema;
   const filteredSchema = filterAsCell(effectiveSchema);
+  // The stored-metadata probe reads `<doc>/cfc`, and it belongs to the entry
+  // point: an eager read runs it once for the document it was handed and never
+  // for the documents its traversal reaches through links. A view re-enters
+  // here for every property it resolves, so without this gate it probes every
+  // linked document too — reads outside any declared scope envelope, which
+  // drops the action's execution-context floor to `session` and stops its
+  // observations being adopted across users. The schema check costs no read
+  // and stays.
   if (
     schemaHasIfc(effectiveSchema) ||
-    storedCfcMetadataAppliesToPath(tx, resolvedLink)
+    (options?.viewChild !== true &&
+      storedCfcMetadataAppliesToPath(tx, resolvedLink))
   ) {
     tx.markCfcRelevant(`schema-ifc-read:${link.id}`);
   }
@@ -1121,9 +1168,10 @@ export function validateAndTransform(
   const resolvedValueLink = resolveLink(runtime, tx, link);
   cfcLabelView = mergeCfcLabelViews([
     cfcLabelView,
-    cfcLabelViewForDereferenceTraces(
+    deriveDereferenceLabelView(
       tx,
-      tx.getCfcState().dereferenceTraces.slice(valueTraceStart),
+      valueTraceStart,
+      options?.viewChild === true,
     ),
   ]);
   objectCreator.setBase(resolvedValueLink, cfcLabelView);

@@ -174,13 +174,27 @@ const childSchema = (
   key: string,
 ): JSONSchema => {
   if (schema === undefined) return true;
-  return ContextualFlowControl.schemaAtPath(
+  const narrowed = ContextualFlowControl.schemaAtPath(
     schema,
     [key],
     undefined,
     EXCLUDED_EMPTY,
     EXCLUDED_MISSING,
   );
+  if (narrowed !== false || !isRecord(schema)) return narrowed;
+  // `schemaAtPath` decides which children exist from the schema's `type`, so a
+  // schema that declares `properties` or `items` and omits `type` narrows to
+  // `false` — no child selected. An eager read reaches those children, and the
+  // subschema is right there, so read it directly rather than refuse. Losing it
+  // costs more than a refusal: the child's `asCell` marker goes with it, and
+  // the reader gets a plain view where the pattern declared a `Cell`.
+  if (isRecord(schema.properties) && Object.hasOwn(schema.properties, key)) {
+    return (schema.properties as Record<string, JSONSchema>)[key];
+  }
+  if (isArrayIndexPropertyName(key) && schema.items !== undefined) {
+    return schema.items as JSONSchema;
+  }
+  return false;
 };
 
 const declaredDefault = (schema: JSONSchema): FabricValue | undefined => {
@@ -242,10 +256,11 @@ export function materializeSchemaView(
   // above is the whole of what a schema says about it.
   if (!isRecord(value) || value instanceof FabricPrimitive) {
     // The caller read this document without telling the scheduler — the eager
-    // traverser registers its own reads as it walks, and so does a view. A leaf
-    // is a value the reader materializes, so the read is recursive: change the
-    // value and whatever read it runs again.
-    tx.readValueOrThrow(link);
+    // traverser registers its own reads as it walks, and so does a view. Same
+    // granularity it uses: non-recursive, which a write at this path still
+    // invalidates, and which keeps a view's read set comparable to an eager
+    // one's when both are measured against a declared scope envelope.
+    tx.readValueOrThrow(link, { nonRecursive: true });
     return value;
   }
 
@@ -321,7 +336,7 @@ const readChild = (
     tx,
     { link: childLink, cfcLabelView: rebaseCfcLabelView(cfcLabelView, [key]) },
     [],
-    { synced, mismatchThrows: true },
+    { synced, mismatchThrows: true, viewChild: true },
   );
 };
 

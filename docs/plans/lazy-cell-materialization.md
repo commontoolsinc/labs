@@ -396,14 +396,29 @@ diffing and the scheduler's own reads keep eager semantics.
       has finished. Promise adoption probes `then` on every value it receives
       and a lift's result crosses a promise boundary by construction, so a view
       that refuses the probe cannot be returned at all.
-- [ ] Understand why four tests fail with the flag on. They are not one shape,
-      and at least one is a wrong value rather than a scheduling preference:
-      `Pattern Runner - Dynamic Patterns` reads `totalItems` as `undefined`
-      where `5` is expected; `incremental observation adoption (live)` records a
-      narrowest read scope of `session` where `space` is expected;
-      `Pattern Runner - Lift` re-runs a forwarding lift once instead of twice
-      with its computed result unchanged; `scheduler cold-replica startup`
-      diverges. Relaxing these to pass either way would hide the first two.
+- [x] The execution-context floor divergence is fixed. A view re-enters
+      `validateAndTransform` per property, which repeated two pieces of
+      entry-point-only work: the stored CFC metadata probe, and the label-view
+      derivation for the dereferences made on the way. Both read `<doc>/cfc`. An
+      eager read makes those reads once, for the document it was handed, never
+      for the documents its traversal reaches through links — so a view
+      registered reads outside the action's declared scope envelope, which
+      dropped its execution-context floor to `session` and stopped its
+      observations being adopted across users. The probe is now gated to the
+      entry point, and the label derivation still runs for children but with its
+      runtime-internal reads kept out of the scheduler's view of what the ACTION
+      read. This fixed `incremental observation adoption (live)`,
+      `Pattern Runner - Dynamic Patterns` and `scheduler cold-replica startup`.
+- [ ] Carry `asCell` through a union narrowing. A view narrows `anyOf` at the
+      point of access and merges the surviving branches' schemas; the merge
+      drops a child's `asCell` marker, so a pattern declaring a `Cell` inside a
+      union-typed element reads it back as a plain view. An eager read merges
+      matched VALUES and prefers the cell among them, which is the behavior to
+      match. This is the whole of the remaining patterns integration failure
+      set.
+- [ ] Decide the forwarding case (`Pattern Runner - Lift`): a lift that forwards
+      its argument without reading it takes no dependency on the values inside
+      and re-runs once rather than twice. Its computed result is unchanged.
 - [ ] Measure against the Stage 0 baseline on real patterns.
 - [ ] Turn on in development, soak, then default on.
 - [ ] Graduate: remove the flag, remove the eager path for lift arguments,
