@@ -57,12 +57,14 @@ export class FabricBytes extends BaseFabricPrimitive {
 
   /**
    * Returns a copy of the bytes (or a sub-range). The returned array is
-   * unshared -- the caller may mutate it freely.
+   * unshared -- the caller may mutate it freely -- and is backed by a plain
+   * `ArrayBuffer`, never a `SharedArrayBuffer`, so it is usable wherever one
+   * is required.
    *
    * @param start - Start index (inclusive, default 0).
    * @param end - End index (exclusive, default `length`).
    */
-  slice(start?: number, end?: number): Uint8Array {
+  slice(start?: number, end?: number): Uint8Array<ArrayBuffer> {
     return this.#bytes.slice(start, end);
   }
 

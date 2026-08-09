@@ -174,7 +174,7 @@ export declare const FabricLink: FabricLinkConstructor;
  */
 export interface FabricBytes extends FabricPrimitive {
   readonly length: number;
-  slice(start?: number, end?: number): Uint8Array;
+  slice(start?: number, end?: number): Uint8Array<ArrayBuffer>;
   copyInto(target: Uint8Array, offset?: number, length?: number): number;
 }
 
