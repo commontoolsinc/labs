@@ -193,26 +193,6 @@ describe("own-write echo (live)", () => {
       );
       expect(cell1.get()).toEqual(["seed", "A", "B"]);
       expect(cell2.get()).toEqual(["seed", "A", "B"]);
-
-      // Identity stability: a foreign re-set of the identical value arrives
-      // as a full doc at a new seq. The identity guard advances the seq
-      // while KEEPING the confirmed value object, so downstream Object.is
-      // fast paths and materialization memos stay hot.
-      const replica = storage1.open(space).replica;
-      const link = cell1.getAsNormalizedFullLink();
-      const before = replica.get({ id: link.id })?.is;
-      expect(before).toBeDefined();
-
-      const txC = rt2.edit();
-      rt2.getCell<string[]>(space, "echo-merge-list", stringListSchema, txC)
-        .set(["seed", "A", "B"]);
-      await txC.commit({ resolveAt: "verdict" });
-      await server.flushSessions([space]);
-      await rt1.storageManager.synced();
-      await rt1.idle();
-
-      const after = replica.get({ id: link.id })?.is;
-      expect(Object.is(before, after)).toBe(true);
     } finally {
       await rt2.dispose();
       await rt1.dispose();

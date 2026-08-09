@@ -1,7 +1,4 @@
-import {
-  cloneIfNecessary,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
+import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import type { Entity } from "@commonfabric/memory/interface";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
@@ -4065,31 +4062,11 @@ class SpaceReplica implements ISpaceReplica {
       if (upsert.seq < record.confirmed.seq) {
         continue;
       }
-      const incoming = upsert.deleted === true ? undefined : upsert.doc;
-      const previous = record.confirmed;
-      if (
-        previous.value !== undefined && incoming !== undefined &&
-        valueEqual(previous.value as FabricValue, incoming as FabricValue)
-      ) {
-        // A delivery whose value matches the confirmed value — a redundant
-        // re-send, a watch re-add, an own-write echo of already-integrated
-        // state — advances the seq while KEEPING the value object, its
-        // transaction-value memo, and the pending materialization cache
-        // (which keys on `record.confirmed` object identity). Downstream
-        // Object.is fast paths and overlay prefixes stay valid.
-        const next: ConfirmedVersion = {
-          seq: upsert.seq,
-          value: previous.value,
-          transactionValue: previous.transactionValue,
-        };
-        record.confirmed = next;
-        if (record.materialized?.confirmed === previous) {
-          record.materialized.confirmed = next;
-        }
-      } else {
-        record.confirmed = confirmedVersion(upsert.seq, incoming);
-        record.materialized = undefined;
-      }
+      record.confirmed = confirmedVersion(
+        upsert.seq,
+        upsert.deleted === true ? undefined : upsert.doc,
+      );
+      record.materialized = undefined;
       this.#watchedIds.add(docKey(upsert.id as URI, upsert.scope));
     }
     for (const remove of sync.removes) {
