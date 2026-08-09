@@ -57,18 +57,6 @@ class SuppressibleStorageManager extends EmulatedStorageManager {
   }
 }
 
-const waitFor = async (
-  predicate: () => boolean,
-  timeout = 2000,
-): Promise<boolean> => {
-  const started = Date.now();
-  while (!predicate()) {
-    if (Date.now() - started > timeout) return false;
-    await clock.tick(5);
-  }
-  return true;
-};
-
 describe("effect commit-conflict recovery (no retry budget)", () => {
   let server: MemoryV2Server.Server;
   let storageA: SuppressibleStorageManager;
@@ -77,9 +65,27 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
   let rtB: Runtime;
   let conflicts: Error[];
 
+  // Recovery is a multi-round conversation — conflict, repair frame,
+  // re-run, commit — and each round's delivery is released by an explicit
+  // fan-out flush. Iteration-bounded rather than time-bounded: each round
+  // either makes real progress or the predicate is unreachable.
+  const converge = async (
+    predicate: () => boolean,
+    rounds = 25,
+  ): Promise<boolean> => {
+    for (let i = 0; i < rounds && !predicate(); i++) {
+      await server.flushSessions();
+      await rtB.idle();
+    }
+    return predicate();
+  };
+
   beforeEach(() => {
     conflicts = [];
-    server = newSharedServer();
+    // Manual fan-out: the controlled staleness these tests are built on is
+    // a gated state, not a timing accident — frames spread only through
+    // converge()'s explicit flushes.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
     // The inherited static builds `new this(...)`, so these ARE
     // SuppressibleStorageManager instances; its declared return type is just
     // the base class.
@@ -184,7 +190,7 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
     await rtB.idle();
     expect(seen[0], "effect first ran against the stale value").toBe(1);
 
-    const recovered = await waitFor(() => seen.includes(2));
+    const recovered = await converge(() => seen.includes(2));
     await rtB.idle();
 
     expect(
@@ -312,7 +318,7 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
 
     // On a no-requeue handler the action is stranded here (no reader-dirty, no
     // re-queue); with #4343's re-queue it re-runs against the caught-up state.
-    const recovered = await waitFor(() => runs >= 2 && resB.get() === 20);
+    const recovered = await converge(() => runs >= 2 && resB.get() === 20);
     await rtB.idle();
 
     expect(

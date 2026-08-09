@@ -110,7 +110,9 @@ describe("mergeable array appends", () => {
   let storage2: EmulatedStorageManager;
 
   beforeEach(() => {
-    server = newSharedServer();
+    // Manual fan-out: controlled staleness is a gated state, not a timing
+    // accident.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
     storage1 = EmulatedStorageManager.connectTo(server, { as: signer });
     storage2 = EmulatedStorageManager.connectTo(server, { as: signer });
   });
@@ -2016,7 +2018,9 @@ describe("keyed collections via elementById", () => {
   let storage2: EmulatedStorageManager;
 
   beforeEach(() => {
-    server = newSharedServer();
+    // Manual fan-out: controlled staleness is a gated state, not a timing
+    // accident.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
     storage1 = EmulatedStorageManager.connectTo(server, { as: signer });
     storage2 = EmulatedStorageManager.connectTo(server, { as: signer });
   });
@@ -2277,7 +2281,9 @@ describe("mergeable op guards and single-session branches", () => {
   let rt: Runtime;
 
   beforeEach(() => {
-    server = newSharedServer();
+    // Manual fan-out: controlled staleness is a gated state, not a timing
+    // accident.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
     storage1 = EmulatedStorageManager.connectTo(server, { as: signer });
     rt = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -2904,7 +2910,9 @@ describe("keyed object list (home spaces shape)", () => {
   let storage2: EmulatedStorageManager;
 
   beforeEach(() => {
-    server = newSharedServer();
+    // Manual fan-out: controlled staleness is a gated state, not a timing
+    // accident.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
     storage1 = EmulatedStorageManager.connectTo(server, { as: signer });
     storage2 = EmulatedStorageManager.connectTo(server, { as: signer });
   });
@@ -3152,7 +3160,9 @@ describe("keyed entity holding a cell reference (home favorites shape)", () => {
   let rt: Runtime;
 
   beforeEach(() => {
-    server = newSharedServer();
+    // Manual fan-out: controlled staleness is a gated state, not a timing
+    // accident.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
     storage1 = EmulatedStorageManager.connectTo(server, { as: signer });
     rt = new Runtime({
       apiUrl: new URL(import.meta.url),
