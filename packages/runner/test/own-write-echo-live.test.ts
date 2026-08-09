@@ -1,0 +1,221 @@
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import type { Options } from "../src/storage/v2.ts";
+import { Runtime } from "../src/runtime.ts";
+import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+
+// Own-write echo (CT-1965), end to end over a LIVE in-process server: a
+// session's own accepted patch-produced heads ride its covering frame as full
+// post-apply documents. The risk this suite pins is DOUBLE-APPLY — the echoed
+// base swap must not compose with a still-standing pending overlay — and the
+// notification contract: an echo fully shadowed by the write it confirms must
+// not re-notify the writer.
+//
+// The server's flush timer is held (60s) and flushed explicitly, so which
+// commits share a fan-out batch — and therefore whether the dirty-origin
+// survives as this session's own — is deterministic.
+
+class SharedServerStorageManager extends EmulatedStorageManager {
+  static connectTo(
+    server: MemoryV2Server.Server,
+    options: Omit<Options, "memoryHost" | "spaceHostMap">,
+  ): SharedServerStorageManager {
+    const manager = new SharedServerStorageManager(
+      { ...options, memoryHost: new URL("memory://") },
+      () => server,
+    );
+    manager.sharedServer = server;
+    return manager;
+  }
+
+  private sharedServer!: MemoryV2Server.Server;
+
+  protected override server(): MemoryV2Server.Server {
+    return this.sharedServer;
+  }
+}
+
+const newSharedServer = () =>
+  new MemoryV2Server.Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
+    subscriptionRefreshDelayMs: 60_000,
+  });
+
+const signer = await Identity.fromPassphrase("own-write-echo-live");
+const space = signer.did();
+
+const stringListSchema = {
+  type: "array",
+  items: { type: "string" },
+  // deno-lint-ignore no-explicit-any
+} as any;
+
+describe("own-write echo (live)", () => {
+  let server: MemoryV2Server.Server;
+  let storage1: SharedServerStorageManager;
+  let storage2: SharedServerStorageManager;
+
+  beforeEach(() => {
+    server = newSharedServer();
+    storage1 = SharedServerStorageManager.connectTo(server, { as: signer });
+    storage2 = SharedServerStorageManager.connectTo(server, { as: signer });
+  });
+
+  afterEach(async () => {
+    await storage1?.close();
+    await storage2?.close();
+    await server?.close();
+  });
+
+  // Pure echo: the only write in the batch is this session's own append, so
+  // the dirty-origin survives and the covering frame carries the patch head
+  // as a full post-apply document. The echoed base swap and the parked
+  // promotion run in the same frame application; the list must come out
+  // exactly once-appended, and the sink must not fire again for a frame that
+  // confirms what the overlay already showed.
+  it("applies its own patch echo exactly once and does not re-notify", async () => {
+    const rt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt.edit();
+      const seedCell = rt.getCell<string[]>(
+        space,
+        "echo-once-list",
+        stringListSchema,
+        tx0,
+      );
+      seedCell.set(["seed"]);
+      await tx0.commit({ resolveAt: "verdict" });
+      await server.flushSessions([space]);
+      await rt.storageManager.synced();
+
+      const cell = rt.getCell<string[]>(
+        space,
+        "echo-once-list",
+        stringListSchema,
+      );
+      await cell.sync();
+      const seen: string[][] = [];
+      const cancel = cell.sink((value) => {
+        seen.push([...(value ?? [])]);
+      });
+
+      const txA = rt.edit();
+      rt.getCell<string[]>(space, "echo-once-list", stringListSchema, txA)
+        .push("A");
+      await txA.commit({ resolveAt: "verdict" });
+      // Let the optimistic notification land before baselining the count —
+      // it rides a scheduler turn, not the commit await.
+      await rt.idle();
+      const notificationsAtVerdict = seen.length;
+      expect(seen[seen.length - 1]).toEqual(["seed", "A"]);
+
+      await server.flushSessions([space]);
+      await rt.storageManager.synced();
+      await rt.idle();
+
+      expect(cell.get()).toEqual(["seed", "A"]);
+      // The echo confirmed exactly what the optimistic overlay already
+      // showed; a second notification would be a spurious integrate.
+      expect(seen.length).toBe(notificationsAtVerdict);
+      expect(seen[seen.length - 1]).toEqual(["seed", "A"]);
+      cancel();
+    } finally {
+      await rt.dispose();
+    }
+  });
+
+  // Merged truth through frames: session 2 appends over a base that lacks
+  // session 1's concurrent append. Both writes share the held batch, and the
+  // delivered document is the server's merged head — session 2's own view
+  // must converge to it, with its own layer applied exactly once.
+  it("converges the writer to the merged list including elements it never observed", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage2,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, "echo-merge-list", stringListSchema, tx0)
+        .set(["seed"]);
+      await tx0.commit({ resolveAt: "verdict" });
+      await server.flushSessions([space]);
+      await rt1.storageManager.synced();
+
+      const cell2 = rt2.getCell<string[]>(
+        space,
+        "echo-merge-list",
+        stringListSchema,
+      );
+      await cell2.sync();
+      await cell2.pull();
+      expect(cell2.get()).toEqual(["seed"]);
+
+      // Session 1 appends "A"; the held flush keeps it out of session 2's
+      // replica, so session 2's append below is built over ["seed"].
+      const txA = rt1.edit();
+      rt1.getCell<string[]>(space, "echo-merge-list", stringListSchema, txA)
+        .push("A");
+      await txA.commit({ resolveAt: "verdict" });
+
+      const txB = rt2.edit();
+      rt2.getCell<string[]>(space, "echo-merge-list", stringListSchema, txB)
+        .push("B");
+      await txB.commit({ resolveAt: "verdict" });
+
+      await server.flushSessions([space]);
+      await rt1.storageManager.synced();
+      await rt2.storageManager.synced();
+      await rt1.idle();
+      await rt2.idle();
+
+      // Server-arrival order: A landed before B. Session 2 sees "A" — an
+      // element it never pulled — and its own "B" exactly once.
+      const cell1 = rt1.getCell<string[]>(
+        space,
+        "echo-merge-list",
+        stringListSchema,
+      );
+      expect(cell1.get()).toEqual(["seed", "A", "B"]);
+      expect(cell2.get()).toEqual(["seed", "A", "B"]);
+
+      // Identity stability: a foreign re-set of the identical value arrives
+      // as a full doc at a new seq. The identity guard advances the seq
+      // while KEEPING the confirmed value object, so downstream Object.is
+      // fast paths and materialization memos stay hot.
+      const replica = storage1.open(space).replica;
+      const link = cell1.getAsNormalizedFullLink();
+      const before = replica.get({ id: link.id })?.is;
+      expect(before).toBeDefined();
+
+      const txC = rt2.edit();
+      rt2.getCell<string[]>(space, "echo-merge-list", stringListSchema, txC)
+        .set(["seed", "A", "B"]);
+      await txC.commit({ resolveAt: "verdict" });
+      await server.flushSessions([space]);
+      await rt1.storageManager.synced();
+      await rt1.idle();
+
+      const after = replica.get({ id: link.id })?.is;
+      expect(Object.is(before, after)).toBe(true);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
+  });
+});

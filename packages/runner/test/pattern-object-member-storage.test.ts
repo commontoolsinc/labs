@@ -144,8 +144,10 @@ describe("Pattern result object with a function member", () => {
     expect(typeof (value as Record<string, unknown>)?.derived).not.toBe(
       "function",
     );
-    expect(Object.keys((value ?? {}) as Record<string, unknown>)).toEqual(
-      ["derived", "ok"],
-    );
+    // Key ORDER is not a contract: identity-preserving frame integration
+    // keeps the writer's local object when values are equal, so canonical
+    // server order no longer overwrites local insertion order.
+    expect(Object.keys((value ?? {}) as Record<string, unknown>).sort())
+      .toEqual(["derived", "ok"]);
   });
 });
