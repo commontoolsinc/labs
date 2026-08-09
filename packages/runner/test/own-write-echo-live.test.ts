@@ -144,6 +144,10 @@ describe("own-write echo (live)", () => {
       rt1.getCell<string[]>(space, "echo-merge-list", stringListSchema, txA)
         .push("A");
       await txA.commit({ resolveAt: "verdict" });
+      // The premise itself, asserted: the manual gate held "A" back. A
+      // server whose option forwarding broke (any timed cadence) delivers
+      // here and fails this, not just the merge assertions below.
+      expect(cell2.get()).toEqual(["seed"]);
 
       const txB = rt2.edit();
       rt2.getCell<string[]>(space, "echo-merge-list", stringListSchema, txB)

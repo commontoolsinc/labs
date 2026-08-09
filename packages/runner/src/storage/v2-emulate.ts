@@ -8,8 +8,10 @@ const emulatedMemoryAudience = "did:key:z6Mk-runner-emulated-memory";
 /**
  * Build a stock in-process memory server for loopback storage managers: the
  * principal-passthrough authorizer, an emulated audience, and optionally a
- * fan-out cadence — `"manual"` gates fan-out entirely behind explicit
- * `flushSessions()` calls, the controlled-staleness shape.
+ * fan-out cadence — `"manual"` disables timer-driven fan-out entirely:
+ * either explicit synchronization point (`flushSessions()`, or `idle()`,
+ * which drains held fan-out to keep its quiescence contract) delivers it.
+ * The controlled-staleness shape.
  */
 export const newLoopbackServer = (options?: {
   audience?: string;
