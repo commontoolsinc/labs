@@ -865,6 +865,7 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 let persistentSchedulerStateEnabled = false;
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
+let ownWriteEchoEnabled = true;
 
 /**
  * Ambient runtime flag for persistent scheduler observations and rehydration.
@@ -915,6 +916,27 @@ export function getSyncSchemaTableConfig(): boolean {
 
 export function resetSyncSchemaTableConfig(): void {
   syncSchemaTableEnabled = true;
+}
+
+/**
+ * Ambient server behavior for own-write echo on sync frames (CT-1965): a
+ * session's own accepted patch-produced heads ride the covering frame as full
+ * post-apply documents, so promotion retires the pending overlay against
+ * delivered truth instead of extrapolating merged state it never saw. Set- and
+ * delete-produced heads stay elided — the client provably holds their outcome.
+ * Off restores full echo suppression (the pre-CT-1965 behavior). Not a
+ * protocol capability: every client generation handles the echoed frames.
+ */
+export function setOwnWriteEchoConfig(enabled?: boolean): void {
+  ownWriteEchoEnabled = enabled ?? true;
+}
+
+export function getOwnWriteEchoConfig(): boolean {
+  return ownWriteEchoEnabled;
+}
+
+export function resetOwnWriteEchoConfig(): void {
+  ownWriteEchoEnabled = true;
 }
 
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
