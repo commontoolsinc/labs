@@ -873,8 +873,8 @@ All errors are returned in `response`.
 // Shown at module scope.
 interface ConflictError extends Error {
   name: "ConflictError";
-  commit: ClientCommit;
-  conflicts: ConflictDetail[];
+  /** Server head seq at rejection time (§3.6.4). */
+  retryAfterSeq: number;
 }
 
 interface TransactionError extends Error {
@@ -1004,16 +1004,25 @@ enforced through the catch-up marker and CLIENT-side verdict parking (CT-1927):
   obligation; the client applies them immediately
 - the marker means "every verdict of yours through this localSeq is
   decided, and this frame reflects those outcomes for the docs it covers."
-  The session's own ACCEPTED writes are echo-suppressed from frames
-  (dirty-origin tracking): the parked verdict carries their truth (with the
-  post-apply `document` on patch revisions where provided, §4.3.1).
-  REJECTED commits' docs are staged origin-less, so repair frames DO cover
-  them.
+  The frame includes a doc unless the session provably holds it (CT-1965,
+  decided per doc by the LAST op the session's accepted commit applied):
+  own `set`- and `delete`-produced heads are elided — the writer supplied
+  the bytes (or the absence), and the verdict plus marker promote them —
+  while own `patch`-produced heads are delivered as full post-apply
+  documents, since merged state is truth the writer cannot extrapolate. A
+  head moved past the session's own write, and all foreign novelty, is
+  delivered in full. REJECTED commits' docs are staged origin-less, so
+  repair frames DO cover them, and a frame lost in flight re-stages its
+  docs origin-less, so the retry delivers full documents.
 - the CLIENT MUST NOT apply a verdict's state effects ahead of the marker
   that covers it: an accept's promotion (pending overlay to confirmed
   mirror, removing the pending local copy) is PARKED until
-  `caughtUpLocalSeq` reaches its localSeq, so promotion extrapolates over a
-  base reflecting the foreign novelty the accept was applied on top of; a
+  `caughtUpLocalSeq` reaches its localSeq. For an elided `set` head the
+  promotion installs the client's own value; for a `patch` head the
+  covering frame has already delivered the post-apply document, so
+  promotion retires the overlay against delivered truth. Extrapolating the
+  post-apply state from the client's own ops remains the fallback where no
+  frame channel exists — unwatched docs, servers that still suppress; a
   conflict rejection's drop/revert is held by the read-repair gate
   (`finalizeRejection`, with a timeout backstop for lost connections).
   Visible state is unaffected by parking — the pending overlay already

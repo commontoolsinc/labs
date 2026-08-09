@@ -14,6 +14,7 @@ import {
   type EntityIdListResult,
   type EntityIdLookupRequest,
   type EntityIdLookupResult,
+  getOwnWriteEchoConfig,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryRequest,
@@ -364,9 +365,16 @@ type SessionHandle = {
   sessionId: string;
 };
 
+/** Kind of the LAST operation an origin commit applied to a doc — decides the
+ * own-write echo shape at flush (CT-1965): `set`/`delete` heads are elided
+ * (the writer provably holds their outcome), `patch` heads ride the frame as
+ * full post-apply documents. */
+type DirtyOp = "set" | "patch" | "delete";
+
 type DirtyOrigin = {
   sessionId: string;
   seq: number;
+  op: DirtyOp;
 };
 
 class Connection {
@@ -2271,19 +2279,23 @@ export class Server {
             }
           }
           // Mark dirty immediately after the durable apply so the next batch
-          // reflects this write and can carry its catch-up marker.
-          this.markSpaceDirty(
-            message.space,
-            message.commit.operations
-              .filter((operation) => operation.op !== "sqlite")
-              .map((operation) =>
-                toDirtyKey(operation.id, declaredScope(operation.scope))
-              ),
-            {
-              sessionId: message.sessionId,
-              seq: commit.seq,
-            },
-          );
+          // reflects this write and can carry its catch-up marker. Each dirty
+          // key is classified by the LAST op this commit applied to it: that
+          // op produced the head this commit leaves behind, so it alone
+          // decides the flush-time echo shape.
+          const dirtyOps = new Map<string, DirtyOp>();
+          for (const operation of message.commit.operations) {
+            if (operation.op === "sqlite") continue;
+            dirtyOps.set(
+              toDirtyKey(operation.id, declaredScope(operation.scope)),
+              operation.op,
+            );
+          }
+          this.markSpaceDirty(message.space, dirtyOps.keys(), {
+            sessionId: message.sessionId,
+            seq: commit.seq,
+            ops: dirtyOps,
+          });
           // Stage the accept's catch-up obligation with the dirty mark. The
           // verdict response leaves this request before the independently
           // scheduled batch can send its covering frame. The batched fan-out
@@ -2293,11 +2305,14 @@ export class Server {
           // pending overlay to confirmed mirror — until that marker arrives.
           // The frame therefore reflects every decided outcome ≤ W for the
           // docs it covers.
-          // The session's own accepted writes are echo-suppressed by
-          // dirty-origin tracking (the parked verdict carries their truth
-          // — with CT-1926's post-apply document where the server provides
-          // it); REJECTED commits' docs are staged origin-less
-          // (stageConflictRefreshDirtyIds), so repair frames DO cover them.
+          // Dirty-origin tracking decides the echo shape for the session's
+          // own accepted writes (CT-1965): set- and delete-produced heads are
+          // elided from the frame — the writer provably holds their outcome,
+          // and the verdict plus marker promote it — while patch-produced
+          // heads ride the frame as full post-apply documents, since merged
+          // state is truth the writer cannot extrapolate. REJECTED commits'
+          // docs are staged origin-less (stageConflictRefreshDirtyIds), so
+          // repair frames DO cover them.
           session.pendingCaughtUpLocalSeq = Math.max(
             session.pendingCaughtUpLocalSeq,
             message.commit.localSeq,
@@ -3267,11 +3282,21 @@ export class Server {
                   declaredScope(entry.scope),
                 );
                 const origin = dirtyOrigins?.get(dirtyKey);
-                if (
-                  origin === undefined ||
-                  origin.sessionId !== sessionId ||
-                  origin.seq !== entry.seq
-                ) {
+                // Include the doc unless the writer provably holds it
+                // (CT-1965). An origin matching this session AND the head seq
+                // means the head is exactly this session's own accepted
+                // write; under the per-space publication lock nothing can
+                // have moved it since, so `entry.doc` IS that commit's
+                // post-apply document. A `set`/`delete` head is then elided —
+                // the client supplied the bytes (or the absence) and the
+                // verdict + marker promote them — while a `patch` head is
+                // delivered in full: its post-apply state can contain merged
+                // foreign content the writer's own ops cannot reproduce.
+                const held = origin !== undefined &&
+                  origin.sessionId === sessionId &&
+                  origin.seq === entry.seq &&
+                  (origin.op !== "patch" || !getOwnWriteEchoConfig());
+                if (!held) {
                   upserts.push(entry);
                 }
               }
@@ -3483,7 +3508,14 @@ export class Server {
   markSpaceDirty(
     space: string,
     dirtyIds?: Iterable<string>,
-    origin?: DirtyOrigin,
+    // Op kinds are per-doc (one commit can set A and patch B), so the origin
+    // carries a per-dirty-key map; absent keys classify as "patch" — the
+    // never-elide shape.
+    origin?: {
+      sessionId: string;
+      seq: number;
+      ops: ReadonlyMap<string, DirtyOp>;
+    },
   ): void {
     if (dirtyIds !== undefined) {
       let ids = this.#dirtyDocsBySpace.get(space);
@@ -3514,7 +3546,11 @@ export class Server {
           // every session, the writer included.
           origins?.delete(id);
         } else {
-          origins?.set(id, origin);
+          origins?.set(id, {
+            sessionId: origin.sessionId,
+            seq: origin.seq,
+            op: origin.ops.get(id) ?? "patch",
+          });
         }
       }
       if (origins?.size === 0) {

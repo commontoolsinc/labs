@@ -16,11 +16,13 @@ import {
   getMemoryProtocolFlags,
   type HelloOkMessage,
   MEMORY_PROTOCOL,
+  resetOwnWriteEchoConfig,
   type ResponseMessage,
   type ServerMessage,
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
   type SessionSync,
+  setOwnWriteEchoConfig,
 } from "../v2.ts";
 import { Server } from "../v2/server.ts";
 import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
@@ -330,54 +332,63 @@ Deno.test("memory v2 server: a failed fan-out requeues the batch and the schedul
 });
 
 Deno.test("memory v2 server: same-doc foreign novelty is not echo-suppressed by the writer's own commit", async () => {
-  const context = await setup({
-    subscriptionRefreshDelayMs: 60_000,
-    store: "memory://verdict-catchup-mixed-origin",
-  });
-  const { server, space, committer, committerMessages, committerSessionId } =
-    context;
+  // Pin the mixed-provenance machinery itself: with the own-write echo on,
+  // every own patch head is delivered regardless of provenance, so this
+  // test would pass vacuously. Suppression mode is where the clearing rule
+  // is load-bearing.
+  setOwnWriteEchoConfig(false);
+  try {
+    const context = await setup({
+      subscriptionRefreshDelayMs: 60_000,
+      store: "memory://verdict-catchup-mixed-origin",
+    });
+    const { server, space, committer, committerMessages, committerSessionId } =
+      context;
 
-  // The committer patches doc:b ITSELF — the doc already carrying parked
-  // foreign novelty. Mixed provenance must clear the echo-suppression
-  // origin: suppressing would hide the foreign write from the writer while
-  // its sync cursor advances past it (unrecoverable staleness for a client
-  // without CT-1926 values).
-  await committer.receive(encodeMemoryBoundary({
-    type: "transact",
-    requestId: "committer-b",
-    space,
-    sessionId: committerSessionId,
-    commit: {
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "patch",
+    // The committer patches doc:b ITSELF — the doc already carrying parked
+    // foreign novelty. Mixed provenance must clear the echo-suppression
+    // origin: suppressing would hide the foreign write from the writer while
+    // its sync cursor advances past it (unrecoverable staleness for a client
+    // without CT-1926 values).
+    await committer.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "committer-b",
+      space,
+      sessionId: committerSessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:doc:b",
+          patches: [{ op: "add", path: "/value/mine", value: true }],
+        }],
+      },
+    }));
+    const verdict = assertResponse<{ seq: number }>(
+      shiftMessage(committerMessages),
+    );
+    assertEquals(verdict.ok?.seq, 2);
+
+    await server.flushSessions([space]);
+    const effect = assertEffect(shiftMessage(committerMessages));
+    const sync = effect.effect as SessionSync;
+    assertEquals(sync.caughtUpLocalSeq, 1);
+    assertEquals(
+      sync.upserts.map((upsert) => ({
+        id: upsert.id,
+        seq: upsert.seq,
+        doc: upsert.doc,
+      })),
+      [{
         id: "of:doc:b",
-        patches: [{ op: "add", path: "/value/mine", value: true }],
+        seq: 2,
+        doc: { value: { from: "writer", mine: true } },
       }],
-    },
-  }));
-  const verdict = assertResponse<{ seq: number }>(
-    shiftMessage(committerMessages),
-  );
-  assertEquals(verdict.ok?.seq, 2);
-
-  await server.flushSessions([space]);
-  const effect = assertEffect(shiftMessage(committerMessages));
-  const sync = effect.effect as SessionSync;
-  assertEquals(sync.caughtUpLocalSeq, 1);
-  assertEquals(
-    sync.upserts.map((upsert) => ({
-      id: upsert.id,
-      seq: upsert.seq,
-      doc: upsert.doc,
-    })),
-    [{
-      id: "of:doc:b",
-      seq: 2,
-      doc: { value: { from: "writer", mine: true } },
-    }],
-  );
+    );
+  } finally {
+    resetOwnWriteEchoConfig();
+  }
 });
 
 Deno.test("memory v2 server: a verdict precedes fan-out held by scheduler bookkeeping", async () => {
@@ -823,8 +834,11 @@ Deno.test("memory v2 server: requeue after failure does not resurrect echo suppr
         // doc:b's ACTUAL seq: echo suppression fires only when the origin's
         // seq matches the delivered upsert's seq, so a fabricated seq would
         // never suppress and the pin would pass even without the provenance
-        // rule it exists to guard.
+        // rule it exists to guard. The op must be an ELIDABLE kind
+        // ("set"): a "patch" origin is delivered under CT-1965 regardless,
+        // which would also let the pin pass vacuously.
         seq: 1,
+        ops: new Map([["space of:doc:b", "set" as const]]),
       });
       return Promise.reject(new Error("synthetic fan-out failure"));
     }
