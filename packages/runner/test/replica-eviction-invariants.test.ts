@@ -138,7 +138,9 @@ describe("a cross-replica conflict settles", () => {
   let rtB: Runtime;
 
   beforeEach(() => {
-    server = newSharedServer();
+    // Manual fan-out: the controlled staleness below is a gated state, not
+    // a timing accident — frames spread only when the test flushes.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
     storageA = EmulatedStorageManager.connectTo(server, { as: signer });
     storageB = EmulatedStorageManager.connectTo(server, { as: signer });
     rtA = new Runtime({
@@ -194,12 +196,16 @@ describe("a cross-replica conflict settles", () => {
     }
     expect(docB.get()).toEqual({ v: "v0" });
 
-    // Settling this needs a sync frame to reach B, which needs the watch behind
-    // the document. If that watch were gone the wait would never end — there is
-    // no timer on it — so this test hanging is the symptom, not a failure
-    // message.
-    const rejected = await txB.commit();
+    // The rejection receipt resolves at the verdict; the DROP still has to
+    // travel through the read-repair gate, which needs a sync frame to
+    // reach B through the watch behind the document. The flush below is
+    // that frame's release, and synced() settling is the proof the gate
+    // opened — if the watch were gone the wait would never end, so synced()
+    // hanging is the symptom, not a failure message.
+    const rejected = await txB.commit({ resolveAt: "verdict" });
     expect(rejected.error?.name).toBe("ConflictError");
+    await server.flushSessions([space]);
+    await rtB.storageManager.synced();
 
     // And B is left able to see the server's value rather than its stale one.
     await docB.sync();

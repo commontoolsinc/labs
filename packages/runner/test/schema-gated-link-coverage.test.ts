@@ -70,7 +70,9 @@ describe("schema-gated link expansion at coverage", () => {
   let rtB: Runtime;
 
   beforeEach(() => {
-    server = newSharedServer();
+    // Manual fan-out: the held state below is a gated state, not a timing
+    // accident — frames spread only when the test flushes.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
     storageA = EmulatedStorageManager.connectTo(server, { as: signer });
     storageB = EmulatedStorageManager.connectTo(server, { as: signer });
     rtA = new Runtime({
@@ -135,10 +137,10 @@ describe("schema-gated link expansion at coverage", () => {
       return result;
     });
 
-    // Drain without moving the clock: the verdict arrives over the
-    // microtask loopback, but the fan-out frame carrying doc1 (and the
-    // coverage marker) rides the server's timed batch, which a held-clock
-    // drain never fires.
+    // Drain without moving the clock: the verdict arrives promptly, but
+    // the fan-out frame carrying doc1 (and the coverage marker) rides the
+    // batched fan-out, which this manual server withholds until the test
+    // flushes.
     await clock.settle();
     expect(verdictContent, "verdict callback ran").not.toBe("unset");
     expect(
@@ -148,15 +150,16 @@ describe("schema-gated link expansion at coverage", () => {
     // Between the verdict and coverage the client notices the expansion
     // against its own optimistic state and pulls doc1 itself — the linked
     // doc can be readable well before coverage. The commit promise still
-    // waits for its coverage marker, which rides the server's timed
-    // fan-out and cannot arrive inside a held-clock drain.
+    // waits for its coverage marker, which rides the withheld
+    // fan-out and cannot arrive before the test's flush.
     expect(promiseSettled, "commit promise still waiting for coverage")
       .toBe(false);
 
-    // Real time resumes: the fan-out delivers doc1 with the marker. A
+    // The test releases the fan-out: it delivers doc1 with the marker. A
     // resolved commit means the subscribed view reflects the write AND its
     // watch-set consequences — the linked doc reads without any further
     // sync or pull.
+    await server.flushSessions([space]);
     const res = await commitP;
     expect(res.error, `commit: ${JSON.stringify(res.error)}`).toBeUndefined();
     expect(
