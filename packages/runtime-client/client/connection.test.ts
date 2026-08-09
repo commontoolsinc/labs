@@ -474,4 +474,29 @@ describe("RuntimeConnection loop-lag probe", () => {
       globalThis.clearInterval = originalClearInterval;
     }
   });
+
+  describe("the transport contract", () => {
+    it("delivers a message unshared with the sender", () => {
+      // `RuntimeTransport.send()` requires the far end to receive a value it
+      // owns, which is what lets a handler cede a byte payload rather than
+      // copy it. A double that passed the sender's object through would model
+      // something no real transport does.
+      const transport = new FakeTransport();
+      const payload = new Uint8Array([1, 2, 3]);
+      const message = {
+        msgId: 1,
+        data: { type: RequestType.Idle, payload },
+      } as unknown as IPCClientMessage;
+
+      transport.send(message);
+
+      const captured = transport.sent[0] as unknown as {
+        data: { payload: Uint8Array };
+      };
+      expect(captured).not.toBe(message);
+      expect(captured.data.payload).not.toBe(payload);
+      payload[0] = 0xff;
+      expect(captured.data.payload[0]).toBe(1);
+    });
+  });
 });

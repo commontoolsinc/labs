@@ -1396,15 +1396,17 @@ describe("RuntimeProcessor blob upload IPC", () => {
       },
     } as unknown as RuntimeProcessor;
 
+    // Freshly allocated, as the transport's clone delivers it: the handler owns
+    // its request's payload. Kept here so the test can check what became of it.
+    const payload = new Uint8Array([1, 2, 3]);
+
     try {
       await expect(
         RuntimeProcessor.prototype.handleUploadBlob.call(processor, {
           type: RequestType.UploadBlob,
           space: "did:key:test-space" as never,
           contentType: "image/png",
-          // Freshly allocated, as the transport's clone delivers it: the
-          // handler owns its request's payload.
-          body: new Uint8Array([1, 2, 3]),
+          body: payload,
           suffix: "png",
         }),
       ).resolves.toEqual({
@@ -1414,6 +1416,11 @@ describe("RuntimeProcessor blob upload IPC", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+
+    // The handler CONSUMES its payload -- `BaseRequest` entitles it to, and it
+    // does, which is what makes the transport's ownership guarantee load-
+    // bearing rather than decorative. A detached array reports zero length.
+    expect(payload.length).toBe(0);
 
     expect(requestedUrl).toBe(
       "http://toolshed.test/did:key:test-space/blobs/upload.png",
