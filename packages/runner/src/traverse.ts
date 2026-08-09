@@ -2526,7 +2526,7 @@ function schemaTypesAreDisjoint(
   );
 }
 
-function schemaTypeMatchesValueType(
+export function schemaTypeMatchesValueType(
   schemaType: JSONSchemaTypes,
   valueType: JSONSchemaTypes,
 ): boolean {

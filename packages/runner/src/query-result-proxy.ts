@@ -192,10 +192,12 @@ export function createQueryResultProxy<T>(
  * The shared proxy body.
  *
  * Reads go through `readTx()`: the transaction fixed at creation when
- * `pinned`, and one resolved per access otherwise. Writes, cell minting, and
- * the proxy cache go through `tx` — the transaction the caller actually
- * supplied, which is `undefined` when they supplied none and is what the write
- * traps test to refuse a mutation.
+ * `pinned`, and one resolved per access otherwise. Writes and cell minting go
+ * through `tx` — the transaction the caller actually supplied, which is
+ * `undefined` when they supplied none and is what the write traps test to
+ * refuse a mutation. The proxy cache is keyed on `viewTx`, the transaction the
+ * proxies in it actually read through, so a cached proxy is never handed to a
+ * caller reading through a different one.
  */
 function createViewProxy<T>(
   runtime: Runtime,

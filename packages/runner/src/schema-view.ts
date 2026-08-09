@@ -29,7 +29,11 @@
  * "argument did not resolve" gate handles it unchanged.
  */
 
-import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
+import type {
+  JSONSchema,
+  JSONSchemaObj,
+  JSONSchemaTypes,
+} from "@commonfabric/api";
 import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
@@ -44,7 +48,12 @@ import { toCell } from "./back-to-cell.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Runtime } from "./runtime.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
-import { canBranchMatch, mergeAnyOfBranchSchemas } from "./traverse.ts";
+import {
+  canBranchMatch,
+  mergeAnyOfBranchSchemas,
+  schemaTypeMatchesValueType,
+} from "./traverse.ts";
+import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import { processDefaultValue, validateAndTransform } from "./schema.ts";
 
 /**
@@ -89,11 +98,19 @@ const isExcluded = (schema: JSONSchema): boolean =>
   (schema.$comment === "emptyProperties" ||
     schema.$comment === "missingProperty");
 
-/** The JSON type name a schema's `type` keyword would use for this value. */
+/**
+ * The type name a schema's `type` keyword would use for this value.
+ *
+ * A `FabricPrimitive` answers with its own concrete name (`FabricBytes` and the
+ * rest), which is what a schema selecting one declares; `schemaTypeMatchesValueType`
+ * still lets an `object` schema accept it through its subtype rule.
+ */
 const jsonTypeOf = (value: unknown): string => {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
-  if (value instanceof FabricPrimitive) return "object";
+  if (value instanceof FabricPrimitive) {
+    return schemaTypeOfFabricPrimitive(value);
+  }
   switch (typeof value) {
     case "undefined":
       return "undefined";
@@ -111,11 +128,14 @@ const jsonTypeOf = (value: unknown): string => {
 const typeAccepts = (declared: unknown, actual: string): boolean => {
   const types = Array.isArray(declared) ? declared : [declared];
   return types.some((type) =>
-    type === actual ||
     type === "unknown" ||
-    // A schema saying "number" accepts an integer; one saying "integer" does
-    // not accept a fractional number.
-    (type === "number" && actual === "integer")
+    // The same matcher eager traversal uses, so a `FabricBytes` value is
+    // accepted both by its own type name and by an `object` schema, and a
+    // "number" schema accepts an integer while "integer" refuses a fraction.
+    schemaTypeMatchesValueType(
+      type as JSONSchemaTypes,
+      actual as JSONSchemaTypes,
+    )
   );
 };
 
@@ -191,9 +211,14 @@ export function materializeSchemaView(
   isRoot: boolean,
 ): unknown {
   const mismatch = (reason: string): undefined => {
+    // Register the read that failed before doing anything else. A refusal has
+    // to leave behind the dependency that re-triggers the reader when the data
+    // it wanted arrives; `noteSchemaRefusal` records the error, not the read.
+    // Recursive, because what failed is a value the reader asked for.
+    tx.readValueOrThrow(link);
     if (isRoot) return undefined;
     const refusal = new SchemaMismatchError(link, reason);
-    // Record before throwing: a reader can catch this and carry on, and the
+    // Record as well as throw: a reader can catch this and carry on, and the
     // run still has to be disposed of as an argument that did not resolve.
     tx.noteSchemaRefusal(refusal);
     throw refusal;
@@ -431,6 +456,14 @@ function createArrayView(
       }
       return (...args: unknown[]) =>
         (method as (...a: unknown[]) => unknown).apply(materialize(), args);
+    },
+    ownKeys: () => {
+      // Enumeration (`Object.keys`, a spread, `for...in`) has to see the same
+      // indices `getOwnPropertyDescriptor` reports as present, or a view reads
+      // as an empty array to every consumer that enumerates it.
+      const keys = Object.keys(value).filter(isArrayIndexPropertyName);
+      keys.push("length");
+      return keys;
     },
     getOwnPropertyDescriptor: (target, prop) => {
       if (prop === "length") {

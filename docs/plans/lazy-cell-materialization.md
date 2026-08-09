@@ -461,44 +461,37 @@ transaction, after `prepareCfc()` — that invalidates the prepared digest by
 design, and Stage 4 needs a test that the invalidation is what happens rather
 than a read slipping past a prepared boundary.
 
-**Escaped views.** Stage 1 turns this from a silent degradation into a throw, so
-what remains is the migration: a consumer that today reads a proxy after its
-transaction closed gets an error where it used to get committed state. Every
-such site was reading state the view never stood for, so each is a fix — but
-each still has to be found, and the sweep is part of that stage rather than a
-surprise later.
+**Escaped views.** Settled: a view keeps the transaction it was created with,
+and reading after that transaction finishes throws. `validateAndTransform` keeps
+a marked transaction rather than swapping a finished one for a fresh read, so
+the refusal is not routed around. A standing handle — every unmarked caller —
+still resolves per access and keeps tracking current state, which is what its
+long-lived consumers rely on.
 
-**Held handles disagreeing.** Every read surface bottoms out in the same
-`V2StorageTransaction.read()`, which serves `doc.current ?? doc.initial` — the
-transaction's own uncommitted writes included. So any two reads taken at the
-same instant agree, whatever surface they came through, and that stays true: a
-fresh `.get()` after a write is pinned at the post-write epoch and sees it.
+One carve-out, and it is deliberate: a finished view answers a `then` probe with
+`undefined` instead of refusing. Promise adoption probes `then` on every value
+it receives and a lift's result crosses a promise boundary by construction, so a
+view that refuses the probe cannot be returned at all.
 
-The question is only about handles held ACROSS a write, and only two kinds of
-handle have a lifetime. `getRaw()` has none — it returns a detached frozen value
-at call time, so it is already a snapshot of its own instant and cannot drift. A
-query-result proxy does have one, and tracks current state. A pinned view has
-one and does not.
+**Handles disagreeing across a write.** Not yet closed, and it needs the write
+epoch Stage 3 leaves unbuilt. Inside a marked transaction every read pins
+together, so two views agree; what they do not yet do is ignore writes the
+reader made after taking them. `getRaw()` is not a party to this — it returns a
+detached value at call time, so it has no lifetime to drift.
 
-So the divergence is between two held handles that a single `.get()` can hand
-back at once. An eager result is a detached snapshot except where the schema is
-absent or `true`, and there `TransformObjectCreator.createObject` embeds a live
-query-result proxy — so a `.get()` result is already part snapshot, part live,
-and which is which depends on the schema rather than on anything visible at the
-call site. Pinning the schema-observing view without pinning the proxy it
-delegates to preserves exactly that split.
+Nothing catches such a disagreement, which is why it wants the epoch rather than
+a test. `StorageTransactionInconsistent` is a different check: `validate()`
+claims each read document's `initial` attestation against the live replica, so
+it fires when the replica moved under the transaction. Commit preconditions do
+not catch it either — `buildReads` emits address, path and version basis, never
+the value read — so a pinned read produces exactly the precondition a live one
+would.
 
-Nothing catches it. `StorageTransactionInconsistent` is a different check:
-`validate()` claims each read document's `initial` attestation against the live
-replica, so it fires when the replica moved under the transaction, not when two
-of its own handles disagree. Commit preconditions do not catch it either —
-`buildReads` emits address, path and version basis, never the value read — so a
-pinned read produces exactly the precondition a live read would.
-
-Stage 3 therefore owes one decision, covering the schema-observing view and the
-schema-less proxy it delegates to together: pin both or pin neither. Either
-answer makes `.get()` consistent with itself. The split is the one shape that
-cannot be reasoned about at a call site, and it is what the code does today.
+**CFC label timing.** Labels join the flow as paths are touched rather than at
+materialization, so a run's label set can be narrower — more precise, and a
+change. A read issued after `prepareCfc()` invalidates the prepared digest by
+design; that a view's late read still triggers that invalidation rather than
+slipping past a prepared boundary is untested.
 
 ## Not in scope
 

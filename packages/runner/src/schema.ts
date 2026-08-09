@@ -1030,7 +1030,12 @@ export function validateAndTransform(
   // If the transaction is no longer open, read through the runtime's ambient
   // read path instead. Open transactions still take precedence so reads can see
   // their own uncommitted state.
-  tx = runtime.readTx(tx);
+  //
+  // A transaction marked for lazy materialization is kept whatever its state:
+  // a view reads the state ITS transaction saw, and swapping a finished one for
+  // a fresh read would answer from newer state where the view's contract is to
+  // refuse. The refusal comes from the marked transaction's own guard below.
+  if (tx?.isLazyMaterialize() !== true) tx = runtime.readTx(tx);
 
   // Reconstruct doc, path, schema from link and runtime
   let link = isCellViewRef(sourceRef) ? sourceRef.link : sourceRef;

@@ -6290,7 +6290,18 @@ export class Runner {
         };
 
         const postRunResult = result instanceof Promise
-          ? result.then(postRun).catch(handleErrorOutput)
+          // An async body reaches mismatching data after an `await`, so its
+          // refusal arrives as a rejection the synchronous catch below never
+          // sees. Route it to the same disposition a synchronous one gets —
+          // an undefined result through the ordinary path — before the generic
+          // error handler turns it into a reported action failure.
+          ? result
+            .then(postRun)
+            .catch((error: unknown) =>
+              isSchemaMismatchError(error)
+                ? postRun!(undefined)
+                : handleErrorOutput(error)
+            )
           : postRun(result);
         if (postRunResult instanceof Promise) {
           popFrameAfterReturn = false;
