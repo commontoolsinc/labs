@@ -74,17 +74,18 @@ export interface Signer<ID extends DID = DID> extends Principal<ID> {
   verifier: Verifier<ID>;
 
   /**
-   * Returns this signer's key material as a value the caller owns: a distinct
-   * result on every call, holding nothing through which this signer can be
-   * reached or altered. Callers may rely on that rather than defending
+   * Returns this signer's key material in a form no holder can use to reach or
+   * alter this signer. Callers may rely on that rather than defending
    * themselves.
    *
-   * The two key forms reach it differently. An `InsecureCryptoKeyPair` carries
-   * the raw private key -- the signing secret itself -- so its arrays are
-   * freshly allocated per call. A `CryptoKeyPair` carries opaque platform keys
-   * with no reachable material, but the pair object around them is ordinary,
-   * so a fresh, frozen one is returned; otherwise reassigning a member would
-   * reach the signer.
+   * Note what is *not* promised: that two calls return different values. The
+   * requirement is unreachability, and the two key forms meet it by different
+   * means. A `CryptoKeyPair` carries opaque platform keys with no reachable
+   * material, so one frozen pair can serve every call. An
+   * `InsecureCryptoKeyPair` carries the raw private key -- the signing secret
+   * itself -- and freezing does not reach `ArrayBuffer` contents, so its arrays
+   * must instead be freshly allocated per call, and a caller mutating what it
+   * receives harms only itself.
    *
    * The result is plain by design: a value of this shape travels as an IPC
    * payload, and structured cloning does not preserve a class.

@@ -29,6 +29,7 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
   #keypair: CryptoKeyPair;
   #did: ID;
   #verifier: Verifier<ID> | null = null;
+  #serialized: CryptoKeyPair | null = null;
   constructor(keypair: CryptoKeyPair, did: ID) {
     this.#keypair = keypair;
     this.#did = did;
@@ -50,7 +51,12 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
 
   /** @inheritDoc */
   serialize(): CryptoKeyPair {
-    return Object.freeze({ ...this.#keypair });
+    if (!this.#serialized) {
+      // Frozen, and holding only opaque keys, so no holder can reach this
+      // signer through it -- which is what lets one value serve every call.
+      this.#serialized = Object.freeze({ ...this.#keypair });
+    }
+    return this.#serialized;
   }
 
   async sign<T>(payload: AsBytes<T>): Promise<Result<Signature<T>, Error>> {

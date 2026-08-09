@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { Identity } from "../src/identity.ts";
 import { isNativeEd25519Supported } from "../src/ed25519/utils.ts";
 import { NobleEd25519Verifier } from "../src/ed25519/noble.ts";
@@ -101,11 +101,18 @@ Deno.test("a native signer's serialize() cannot be used to reach it", async () =
   const identity = await Identity.fromRaw(new Uint8Array(32).fill(7), {
     implementation: "webcrypto",
   });
-  const first = identity.serialize();
-  const second = identity.serialize();
+  const first = identity.serialize() as CryptoKeyPair;
 
-  assert(first !== second, "each call must yield its own pair object");
+  // One frozen pair serves every call here: the keys are opaque and the pair
+  // cannot be reassigned, so no holder can reach the signer through it. That
+  // is the requirement -- not that the calls differ.
   assert(Object.isFrozen(first), "the pair must not be reassignable");
+  assertThrows(
+    () => {
+      (first as { privateKey: CryptoKey }).privateKey = first.publicKey;
+    },
+    TypeError,
+  );
 });
 
 Deno.test("a signer copies the key material it is constructed from", async () => {
