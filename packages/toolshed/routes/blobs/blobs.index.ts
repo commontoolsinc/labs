@@ -258,9 +258,6 @@ router.get("/:spaceDid/blobs/:blobName", async (c) => {
     return c.text("Blob not found", 404);
   }
 
-  // `slice()` already yields an unshared array backed by a plain
-  // `ArrayBuffer`, which is what a body requires, so it goes to the response
-  // as-is rather than being copied again.
   const body = contents.body.slice();
   return new Response(body, {
     status: 200,
