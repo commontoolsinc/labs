@@ -258,8 +258,7 @@ router.get("/:spaceDid/blobs/:blobName", async (c) => {
     return c.text("Blob not found", 404);
   }
 
-  const bytes = contents.body.slice();
-  const body = new Uint8Array(bytes).buffer;
+  const body = contents.body.slice();
   return new Response(body, {
     status: 200,
     headers: {
