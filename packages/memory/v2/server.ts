@@ -985,7 +985,16 @@ export class Server {
     readonly options: {
       sessions?: SessionRegistry;
       store?: URL;
-      subscriptionRefreshDelayMs?: number;
+      /**
+       * Coalescing delay for the batched subscription fan-out, in
+       * milliseconds. `"manual"` never arms the refresh timer: dirty spaces
+       * accumulate and fan out only through an explicit `flushSessions()`
+       * call — the fan-out gate for controlled-staleness tests, immune to
+       * fake-clock auto-advance, which fires any armed timer regardless of
+       * its nominal delay. A partial `flushSessions(spaces)` in manual mode
+       * leaves the other dirty spaces held for the next explicit call.
+       */
+      subscriptionRefreshDelayMs?: number | "manual";
       authorizeSessionOpen: (
         message: SessionOpenRequest,
         context: SessionOpenAuthContext,
@@ -3613,7 +3622,10 @@ export class Server {
   }
 
   private scheduleRefresh(): void {
-    if (this.#dirtySpaces.size === 0 || this.#refreshTimer !== null) {
+    if (
+      this.options.subscriptionRefreshDelayMs === "manual" ||
+      this.#dirtySpaces.size === 0 || this.#refreshTimer !== null
+    ) {
       return;
     }
     this.#refreshTimer = setTimeout(
