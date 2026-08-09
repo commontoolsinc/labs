@@ -144,6 +144,29 @@ describe("v2 server manual flush mode", () => {
     }
   });
 
+  it("drains held fan-out at idle()", async () => {
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://manual-flush-idle"),
+      subscriptionRefreshDelayMs: "manual",
+    });
+    try {
+      const space = "did:key:z6Mk-manual-flush-idle";
+      const messages = await openWatchingSession(server, space, "of:doc:i");
+
+      await server.writeDocument(space, "of:doc:i", { held: true });
+      await time.tickAsync(60_000);
+      expect(deliveredDocIds(messages)).toEqual([]);
+
+      // idle() is an explicit synchronization point like flushSessions():
+      // returning with held fan-out would break its quiescence contract.
+      await server.idle();
+      expect(deliveredDocIds(messages)).toEqual(["of:doc:i"]);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("keeps other dirty spaces held across a partial flush", async () => {
     const server = new Server({
       ...testSessionOpenServerOptions,
