@@ -258,8 +258,11 @@ router.get("/:spaceDid/blobs/:blobName", async (c) => {
     return c.text("Blob not found", 404);
   }
 
-  const bytes = contents.body.slice();
-  const body = new Uint8Array(bytes).buffer;
+  // `slice()` already yields an unshared array, so it goes to the response
+  // as-is rather than being copied again. The cast says what `slice()` cannot
+  // yet declare: a typed array's `slice()` always allocates a fresh, unshared
+  // `ArrayBuffer`, never a `SharedArrayBuffer`, which is what a body requires.
+  const body = contents.body.slice() as Uint8Array<ArrayBuffer>;
   return new Response(body, {
     status: 200,
     headers: {
