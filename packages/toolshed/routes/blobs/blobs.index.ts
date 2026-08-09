@@ -60,6 +60,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * a caller may cede it to something that takes ownership of a buffer.
  */
 const toByteArray = (value: unknown): Uint8Array | undefined => {
+  // The copy is what makes the contract above hold for this arm, and so is what
+  // lets the caller cede the result.
+  // TODO(seefeldb): This arm may be unreachable. Every value reaching here is
+  // decoded from a string, and binary in a string form arrives as a
+  // `FabricBytes`, which the caller returns before asking this. Remove the arm
+  // and its copy once that is confirmed.
   if (value instanceof Uint8Array) {
     return new Uint8Array(value);
   }
