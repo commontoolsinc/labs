@@ -491,6 +491,29 @@ mergeable-commit test's move onto the fake clock is the worked example, in [the
 rationale
 document](waiting-in-tests-rationale.md#the-runner-clock-retired-exemptions-and-converted-waits).
 
+### Gating storage fan-out: manual flush, not a long delay
+
+A multi-session storage test whose premise is controlled staleness — one
+replica provably NOT having received a concurrent write — gates the shared
+in-process memory server's fan-out rather than racing it. The primitive is the
+server's `subscriptionRefreshDelayMs: "manual"` mode (via
+`newSharedServer({ subscriptionRefreshDelayMs: "manual" })` in the runner's
+test utils, or `newLoopbackServer` for other packages): the flush timer is
+never armed, dirty spaces accumulate, and frames spread only when the test
+calls `server.flushSessions([space])` at the point delivery is wanted.
+
+A large numeric delay is not a substitute. Under auto-advance the pump fires
+the earliest pending `src/`-armed timer regardless of its nominal delay, so a
+"held" 60-second flush timer fires as soon as the event loop idles — the hold
+only ever worked by accident. Manual mode has no timer to fire, on any clock.
+
+Single-manager `StorageManager.emulate()` harnesses need none of this: their
+private server flushes on a zero-delay timer, so awaited round trips deliver
+their own fan-out and there is no second session to keep stale. The loopback
+transport itself delivers each server frame on its own zero-delay timer turn,
+so `clock.settle()` drains in-flight deliveries without letting any coalescing
+window elapse.
+
 ## The background-piece-service suite: the same clock for a polling loop
 
 `packages/background-piece-service` loads the same shared harness — its

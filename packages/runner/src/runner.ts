@@ -6750,6 +6750,9 @@ export class Runner {
     const builtinResumeMode = isRawBuiltinResult(builtinResult)
       ? builtinResult.resumeMode
       : undefined;
+    const builtinOnActionRegistered = isRawBuiltinResult(builtinResult)
+      ? builtinResult.onActionRegistered
+      : undefined;
 
     // Name the raw action for debugging - use implementation name or fallback to "raw"
     const impl = module.implementation as ((...args: unknown[]) => Action) & {
@@ -6845,6 +6848,9 @@ export class Runner {
         )
         : this.runtime.scheduler.subscribe(action, schedulerOptions),
     );
+    // The scheduler is keyed by the wrapper's identity, so hand the builtin
+    // the wrapper — its own `action` cannot address the subscription.
+    builtinOnActionRegistered?.(action);
   }
 
   private instantiatePassthroughNode(

@@ -114,6 +114,10 @@ describe("cross-space value reads (CT-1667)", () => {
     r1.key("create").send({ name: "Ada" });
     await r1.pull();
     await rt1.idle();
+    // The cross-space child creation rides server->client delivery turns;
+    // drain them before reading the freshly pushed link.
+    await clock.settle();
+    await r1.pull();
     // Sanity: the child materialized in P and reads fine in the creating
     // runtime (everything is in its own replicas).
     // deno-lint-ignore no-explicit-any

@@ -113,6 +113,11 @@ export function filter(
   // input element when its predicate settled truthy, exclude it when the
   // predicate settled a defined falsy value, and treat an undefined predicate as
   // still streaming in. See resume-republish.ts for the convergence machinery.
+  // The Action the runner registered for this coordinator (a wrapper around
+  // `reconcile`) — the identity the scheduler is keyed by, so the one a
+  // re-arm must name.
+  let registeredAction: Action | undefined;
+
   const { awaitingResult, awaitPendingThenRepublish } = createResumeRepublisher(
     {
       runtime,
@@ -128,6 +133,11 @@ export function filter(
       contribute: (included, inputElement, out) => {
         if (included) out.push(inputElement);
         else if (included === undefined) return "pending";
+      },
+      rearmReconcile: () => {
+        if (registeredAction) {
+          runtime.scheduler.invalidateAction(registeredAction);
+        }
       },
     },
   );
@@ -493,5 +503,11 @@ export function filter(
   // reconcile must run to re-attach the per-element children (which then
   // rehydrate their own persisted state). See
   // docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
-  return { action: reconcile, resumeMode: "always-run" };
+  return {
+    action: reconcile,
+    resumeMode: "always-run",
+    onActionRegistered: (action) => {
+      registeredAction = action;
+    },
+  };
 }

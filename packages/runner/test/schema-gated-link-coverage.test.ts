@@ -160,6 +160,7 @@ describe("schema-gated link expansion at coverage", () => {
     // watch-set consequences — the linked doc reads without any further
     // sync or pull.
     await server.flushSessions([space]);
+    await clock.settle();
     const res = await commitP;
     expect(res.error, `commit: ${JSON.stringify(res.error)}`).toBeUndefined();
     expect(

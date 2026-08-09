@@ -147,6 +147,14 @@ const runWithAbortSignal = async <T>(
 export class Client {
   #pending = new Map<string, PromiseWithResolvers<unknown>>();
   #spaces = new Set<SpaceSession>();
+  // Effects for a session whose mount() is still between openSession
+  // resolving and #spaces registration: on any asynchronous transport a
+  // frame can land in that window, and dropping it would silently lose the
+  // session's first delivery. Bounded; leftovers (sessions that never
+  // finished mounting) drop when the last in-flight mount settles.
+  #mountsInFlight = 0;
+  #bufferedEffects: SessionEffectMessage[] = [];
+  static readonly #MAX_BUFFERED_EFFECTS = 256;
   #nextRequest = 1;
   #helloPending: PromiseWithResolvers<void> | null = null;
   #sessionOpenAuthContext: SessionOpenAuthContext | null = null;
@@ -217,37 +225,60 @@ export class Client {
     openAuthFactory?: SessionOpenAuthFactory,
     signal?: AbortSignal,
   ): Promise<SpaceSession> {
-    const auth = await runWithAbortSignal(
-      signal,
-      "memory session mount cancelled",
-      () =>
-        openAuthFactory?.(
-          space,
-          options,
-          this.sessionOpenAuthContext(),
-        ),
-    );
-    const result = await runWithAbortSignal(
-      signal,
-      "memory session mount cancelled",
-      () => this.openSession(space, options, auth),
-    );
-    if (signal?.aborted) {
-      throw signal.reason instanceof Error
-        ? signal.reason
-        : new Error("memory session mount cancelled");
+    this.#mountsInFlight++;
+    try {
+      const auth = await runWithAbortSignal(
+        signal,
+        "memory session mount cancelled",
+        () =>
+          openAuthFactory?.(
+            space,
+            options,
+            this.sessionOpenAuthContext(),
+          ),
+      );
+      const result = await runWithAbortSignal(
+        signal,
+        "memory session mount cancelled",
+        () => this.openSession(space, options, auth),
+      );
+      if (signal?.aborted) {
+        throw signal.reason instanceof Error
+          ? signal.reason
+          : new Error("memory session mount cancelled");
+      }
+      const session = new SpaceSession(
+        this,
+        space,
+        result.sessionId,
+        result.sessionToken,
+        result.serverSeq,
+        openAuthFactory,
+        signal,
+      );
+      this.#spaces.add(session);
+      // Replay effects that raced this mount: the session existed
+      // server-side from openSession's resolution, so a frame can precede
+      // the registration above.
+      const replay = this.#bufferedEffects.filter((buffered) =>
+        buffered.sessionId === result.sessionId && buffered.space === space
+      );
+      if (replay.length > 0) {
+        this.#bufferedEffects = this.#bufferedEffects.filter((buffered) =>
+          !(buffered.sessionId === result.sessionId &&
+            buffered.space === space)
+        );
+        for (const buffered of replay) {
+          session.handleEffect(buffered.effect);
+        }
+      }
+      return session;
+    } finally {
+      this.#mountsInFlight--;
+      if (this.#mountsInFlight === 0) {
+        this.#bufferedEffects = [];
+      }
     }
-    const session = new SpaceSession(
-      this,
-      space,
-      result.sessionId,
-      result.sessionToken,
-      result.serverSeq,
-      openAuthFactory,
-      signal,
-    );
-    this.#spaces.add(session);
-    return session;
   }
 
   forgetSession(session: SpaceSession): void {
@@ -432,13 +463,21 @@ export class Client {
     }
 
     if (isSessionEffect(message)) {
+      let matched = false;
       for (const session of this.#spaces) {
         if (
           session.sessionId === message.sessionId &&
           session.space === message.space
         ) {
+          matched = true;
           session.handleEffect(message.effect);
         }
+      }
+      if (
+        !matched && this.#mountsInFlight > 0 &&
+        this.#bufferedEffects.length < Client.#MAX_BUFFERED_EFFECTS
+      ) {
+        this.#bufferedEffects.push(message);
       }
       return;
     }
@@ -1167,10 +1206,11 @@ export class SpaceSession {
     if (!this.#concurrentWatchRefresh) {
       // Single-flight (default): send + apply run together, chained on the
       // prior mutation's completion. Nothing is issued until the previous
-      // mutation fully resolves. Structurally identical to the pre-concurrency
-      // path (a single `work` closure chained on the mutation promise, then
-      // `await`-ed) so its microtask timing — which some downstream ordering
-      // depends on — is unchanged.
+      // mutation fully resolves. `apply` runs in the microtask cascade
+      // rooted at the response frame's delivery, and one-frame-per-turn
+      // transports (loopback included) cannot deliver a later effect frame
+      // until that cascade completes — so no handleEffect can mutate the
+      // watch view between the response resolving and `apply` running.
       const previous = this.#watchApply;
       const current = previous.catch(() => undefined).then(async () =>
         apply(await send())
@@ -1637,24 +1677,51 @@ export class WatchView {
 
 export const connect = Client.connect;
 
-// NOTE: loopback resolves requests and delivers frames on MICROTASKS —
-// within the sender's own await cascade, which no real transport can do. A
-// real socket never responds before the event loop turns over, so timing
-// races that depend on "nothing arrives until I yield" are invisible under
-// this transport. Making loopback deliver on timer turns is the honest
-// fix, but it invalidates every test premise built on the artificial
-// quiescence (controlled-staleness fixtures foremost), which need explicit
-// fan-out gating first — tracked as follow-up work.
+// Loopback delivers server frames on zero-delay TIMER turns, one frame per
+// turn, like a socket: no response or push ever arrives inside the sender's
+// own await cascade, so code that accidentally depends on "nothing arrives
+// until I yield" fails here the way it would against a deployment. One
+// frame per macrotask also guarantees a frame's full microtask cascade
+// (response resolution, request() continuation, caller continuation)
+// completes before the next frame delivers. Client→server keeps awaiting
+// the server's processing: the server's fan-out drain-wait counts a frame
+// from receive() entry, and a send that merely enqueued would let fan-out
+// read heads that predate a write already handed to the transport. Frames
+// staged at close() are dropped — nothing arrives after the socket is
+// gone. Remaining fidelity gap: setCloseReceiver is a no-op, so a
+// server-initiated disconnect is invisible over loopback.
 export const loopback = (server: Server): Transport => {
   let receiver = (_payload: string) => {};
+  let closed = false;
+  const queue: string[] = [];
+  let pump: ReturnType<typeof setTimeout> | null = null;
+  const drainOne = () => {
+    pump = null;
+    if (closed) return;
+    const frame = queue.shift();
+    if (frame === undefined) return;
+    receiver(frame);
+    if (queue.length > 0) schedule();
+  };
+  const schedule = () => {
+    pump ??= setTimeout(drainOne, 0);
+  };
   const connection = server.connect((message) => {
-    receiver(encodeMemoryBoundary(message));
+    if (closed) return;
+    queue.push(encodeMemoryBoundary(message));
+    schedule();
   });
   return {
     async send(payload: string) {
       await connection.receive(payload);
     },
     close() {
+      closed = true;
+      if (pump !== null) {
+        clearTimeout(pump);
+        pump = null;
+      }
+      queue.length = 0;
       connection.close();
       return Promise.resolve();
     },

@@ -66,6 +66,15 @@ export interface ResumeRepublisherOptions {
   aggregateNoun: string;
   /** The per-element noun for logs, e.g. "predicate" / "result". */
   elementNoun: string;
+  /**
+   * Re-arm the coordinator's reconcile. Only a reconcile can issue an owed
+   * element setup (`needsSetup`), and it declines to while that element's
+   * result is being awaited. A republish chain that ends by confirming the
+   * document ABSENT writes nothing the reconcile journals — this callback is
+   * the only remaining trigger, so without it the owed setup would never be
+   * issued and the element would stay out of the aggregate.
+   */
+  rearmReconcile: () => void;
 }
 
 /**
@@ -102,6 +111,7 @@ export function createResumeRepublisher(
     contribute,
     aggregateNoun,
     elementNoun,
+    rearmReconcile,
   } = opts;
 
   // The element results this coordinator is waiting on, by document id. An
@@ -172,7 +182,25 @@ export function createResumeRepublisher(
         );
         return;
       }
-      if (ok && ok.length > 0) awaitPendingThenRepublish(ok, awaited);
+      if (ok && ok.length > 0) {
+        awaitPendingThenRepublish(ok, awaited);
+        return;
+      }
+      // The chain has settled, but an element may still owe its setup: a
+      // reconcile declines to issue one while that element's result is being
+      // awaited, and this chain's confirmations may have written nothing the
+      // reconcile journals (a document confirmed absent republishes an
+      // unchanged aggregate). The waits are over now, so a reconcile CAN
+      // issue it — re-arm one, or the element stays out of the aggregate
+      // with no trigger left.
+      if (isActive()) {
+        for (const entry of elementRuns.values()) {
+          if (entry.needsSetup) {
+            rearmReconcile();
+            break;
+          }
+        }
+      }
     });
 
   // Hold the durable aggregate while the still-pending elements confirm their

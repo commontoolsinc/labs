@@ -67,6 +67,7 @@ describe("own-write echo (live)", () => {
       seedCell.set(["seed"]);
       await tx0.commit({ resolveAt: "verdict" });
       await server.flushSessions([space]);
+      await clock.settle();
       await rt.storageManager.synced();
 
       const cell = rt.getCell<string[]>(
@@ -91,6 +92,7 @@ describe("own-write echo (live)", () => {
       expect(seen[seen.length - 1]).toEqual(["seed", "A"]);
 
       await server.flushSessions([space]);
+      await clock.settle();
       await rt.storageManager.synced();
       await rt.idle();
 
@@ -124,6 +126,7 @@ describe("own-write echo (live)", () => {
         .set(["seed"]);
       await tx0.commit({ resolveAt: "verdict" });
       await server.flushSessions([space]);
+      await clock.settle();
       await rt1.storageManager.synced();
 
       const cell2 = rt2.getCell<string[]>(
@@ -148,6 +151,7 @@ describe("own-write echo (live)", () => {
       await txB.commit({ resolveAt: "verdict" });
 
       await server.flushSessions([space]);
+      await clock.settle();
       await rt1.storageManager.synced();
       await rt2.storageManager.synced();
       await rt1.idle();
