@@ -541,10 +541,9 @@ export interface UploadBlobRequest extends BaseRequest {
   space: DID;
   contentType: string;
   /**
-   * The blob's bytes. A `Uint8Array` rather than a `number[]` because this
-   * protocol never leaves one runtime instantiation, and structured cloning
-   * carries a typed array intact. Boxing each byte into an array element costs
-   * both the conversion and a far more expensive clone.
+   * The blob's bytes. The type has to stay structured-clone-able, this being an
+   * IPC payload: a class does not survive the crossing, where a typed array
+   * does and carries whole rather than element by element.
    */
   body: Uint8Array;
   suffix?: string;
