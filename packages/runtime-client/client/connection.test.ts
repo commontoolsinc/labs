@@ -27,7 +27,10 @@ class FakeTransport extends EventEmitter<RuntimeTransportEvents>
     super();
   }
 
-  send(message: IPCClientMessage | IPCClientNotification): void {
+  send(original: IPCClientMessage | IPCClientNotification): void {
+    // Cloned, as a real transport delivers it, so what is captured cannot
+    // change under later mutation by the sender.
+    const message = structuredClone(original);
     this.sent.push(message);
     // Notifications carry no msgId and get no reply.
     if (!("msgId" in message)) return;
