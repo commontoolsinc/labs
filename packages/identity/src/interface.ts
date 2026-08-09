@@ -73,6 +73,22 @@ export interface Signer<ID extends DID = DID> extends Principal<ID> {
 
   verifier: Verifier<ID>;
 
+  /**
+   * Returns this signer's key material as a value the caller owns: a distinct
+   * result on every call, holding nothing through which this signer can be
+   * reached or altered. Callers may rely on that rather than defending
+   * themselves.
+   *
+   * The two key forms reach it differently. An `InsecureCryptoKeyPair` carries
+   * the raw private key -- the signing secret itself -- so its arrays are
+   * freshly allocated per call. A `CryptoKeyPair` carries opaque platform keys
+   * with no reachable material, but the pair object around them is ordinary,
+   * so a fresh, frozen one is returned; otherwise reassigning a member would
+   * reach the signer.
+   *
+   * The result is plain by design: a value of this shape travels as an IPC
+   * payload, and structured cloning does not preserve a class.
+   */
   serialize(): KeyPairRaw;
 }
 
@@ -87,6 +103,11 @@ export interface AuthorizationError extends Error {
   name: "AuthorizationError";
 }
 
+/**
+ * Raw ed25519 key material. Deliberately plain arrays rather than a richer
+ * byte type: a value of this shape crosses worker boundaries as an IPC
+ * payload, and structured cloning does not preserve a class.
+ */
 export type InsecureCryptoKeyPair = {
   privateKey: Uint8Array;
   publicKey: Uint8Array;

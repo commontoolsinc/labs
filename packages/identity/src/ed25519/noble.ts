@@ -8,13 +8,33 @@ import {
   Signer,
   Verifier,
 } from "../interface.ts";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { AuthorizationError, bytesToDid, didToBytes } from "./utils.ts";
 
 export class NobleEd25519Signer<ID extends DIDKey> implements Signer<ID> {
-  #keypair: InsecureCryptoKeyPair;
+  /**
+   * The key material, held as `FabricBytes` so that it is immutable for as
+   * long as this instance exists. Nothing the constructor was handed, and
+   * nothing handed out since, can alter what this signs with.
+   */
+  #privateKey: FabricBytes;
+  #publicKey: FabricBytes;
+
   #verifier: NobleEd25519Verifier<ID> | null = null;
+
+  /** Constructs an instance holding its own immutable copy of `keypair`. */
   constructor(keypair: InsecureCryptoKeyPair) {
-    this.#keypair = keypair;
+    this.#privateKey = new FabricBytes(keypair.privateKey);
+    this.#publicKey = new FabricBytes(keypair.publicKey);
+  }
+
+  /**
+   * The raw private key, as a fresh array the caller owns. Exposed so that
+   * `toRaw()` and `toPkcs8()` need not go through `serialize()`, which would
+   * build a pair object and a second array only to discard both.
+   */
+  rawPrivateKey(): Uint8Array {
+    return this.#privateKey.slice();
   }
 
   did() {
@@ -23,20 +43,24 @@ export class NobleEd25519Signer<ID extends DIDKey> implements Signer<ID> {
 
   get verifier(): NobleEd25519Verifier<ID> {
     if (!this.#verifier) {
-      this.#verifier = new NobleEd25519Verifier(this.#keypair.publicKey);
+      this.#verifier = new NobleEd25519Verifier(this.#publicKey);
     }
     return this.#verifier;
   }
 
+  /** @inheritDoc */
   serialize(): InsecureCryptoKeyPair {
-    return this.#keypair;
+    return {
+      privateKey: this.#privateKey.slice(),
+      publicKey: this.#publicKey.slice(),
+    };
   }
 
   async sign<T>(payload: AsBytes<T>): Promise<Result<Signature<T>, Error>> {
     try {
       const signature = await ed25519.signAsync(
         payload,
-        this.#keypair.privateKey,
+        this.#privateKey.slice(),
       );
 
       return { ok: signature as Signature<T> };
@@ -63,17 +87,26 @@ export class NobleEd25519Signer<ID extends DIDKey> implements Signer<ID> {
 }
 
 export class NobleEd25519Verifier<ID extends DIDKey> implements Verifier<ID> {
-  #publicKey: Uint8Array;
+  #publicKey: FabricBytes;
   #did: ID;
-  constructor(publicKey: Uint8Array) {
-    this.#publicKey = publicKey;
-    this.#did = bytesToDid(publicKey) as ID;
+
+  /**
+   * Constructs an instance holding its own immutable copy of `publicKey`, so
+   * that the key cannot drift from the DID derived beside it.
+   */
+  constructor(publicKey: Uint8Array | FabricBytes) {
+    this.#publicKey = publicKey instanceof FabricBytes
+      ? publicKey
+      : new FabricBytes(publicKey);
+    this.#did = bytesToDid(this.#publicKey.slice()) as ID;
   }
 
   async verify(
     { signature, payload }: { payload: Uint8Array; signature: Uint8Array },
   ) {
-    if (await ed25519.verifyAsync(signature, payload, this.#publicKey)) {
+    if (
+      await ed25519.verifyAsync(signature, payload, this.#publicKey.slice())
+    ) {
       return { ok: {} };
     } else {
       return { error: new AuthorizationError("Invalid signature") };

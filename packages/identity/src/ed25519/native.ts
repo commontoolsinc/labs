@@ -48,8 +48,9 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
     return this.#verifier;
   }
 
+  /** @inheritDoc */
   serialize(): CryptoKeyPair {
-    return this.#keypair;
+    return Object.freeze({ ...this.#keypair });
   }
 
   async sign<T>(payload: AsBytes<T>): Promise<Result<Signature<T>, Error>> {
