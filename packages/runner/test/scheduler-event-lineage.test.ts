@@ -157,7 +157,9 @@ async function waitForSchedulerCondition(
     // Yield a real timer turn: transport pumps and the emulated server's
     // zero-delay flush ride zero-delay timers, and an idle() that resolves
     // through microtasks alone would starve them (and the auto-advance
-    // pump that moves the deadline).
+    // pump that moves the deadline). Zero-delay timers are exempt from the
+    // fake clock's test-armed freeze — only positive-delay test timers
+    // freeze — so this yield fires under the preload.
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   if (!condition()) {
