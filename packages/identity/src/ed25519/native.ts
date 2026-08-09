@@ -26,11 +26,20 @@ import {
 // | spki   |   X    |         |
 
 export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
+  /**
+   * The key material, frozen at construction. `CryptoKey`s are opaque and
+   * carry no reachable material, so a frozen pair of them cannot be used to
+   * reach this signer -- which lets the same object serve both internal use
+   * and every `serialize()`.
+   */
   #keypair: CryptoKeyPair;
+
   #did: ID;
   #verifier: Verifier<ID> | null = null;
+
+  /** Constructs an instance. */
   constructor(keypair: CryptoKeyPair, did: ID) {
-    this.#keypair = keypair;
+    this.#keypair = Object.freeze({ ...keypair });
     this.#did = did;
   }
 
@@ -48,6 +57,7 @@ export class NativeEd25519Signer<ID extends DIDKey> implements Signer<ID> {
     return this.#verifier;
   }
 
+  /** @inheritDoc */
   serialize(): CryptoKeyPair {
     return this.#keypair;
   }

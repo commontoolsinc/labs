@@ -1,5 +1,8 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { Identity } from "../src/identity.ts";
+import { isNativeEd25519Supported } from "../src/ed25519/utils.ts";
+import { NobleEd25519Verifier } from "../src/ed25519/noble.ts";
+import type { InsecureCryptoKeyPair } from "../src/interface.ts";
 import { decode } from "@commonfabric/utils/encoding";
 import { entropyToMnemonic, mnemonicToEntropy } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
@@ -86,6 +89,71 @@ Deno.test("toRaw returns a COPY — mutating it cannot corrupt the identity", as
   const seed = identity.toRaw();
   seed[0] = 0xff;
   assertEquals(identity.toRaw()[0], 7, "the identity's seed must be unchanged");
+});
+
+Deno.test("a native signer's serialize() cannot be used to reach it", async () => {
+  // The native arm holds a `CryptoKeyPair`, not `FabricBytes`, so its safety
+  // comes from the object it returns rather than from the key type: the
+  // `CryptoKey`s are opaque, but the pair around them is ordinary, and
+  // reassigning a member of a shared one would reach the signer.
+  if (!await isNativeEd25519Supported()) return;
+
+  const identity = await Identity.fromRaw(new Uint8Array(32).fill(7), {
+    implementation: "webcrypto",
+  });
+  const first = identity.serialize() as CryptoKeyPair;
+
+  // One frozen pair serves every call here: the keys are opaque and the pair
+  // cannot be reassigned, so no holder can reach the signer through it. That
+  // is the requirement -- not that the calls differ.
+  assert(Object.isFrozen(first), "the pair must not be reassignable");
+  assertThrows(
+    () => {
+      (first as { privateKey: CryptoKey }).privateKey = first.publicKey;
+    },
+    TypeError,
+  );
+});
+
+Deno.test("a signer copies the key material it is constructed from", async () => {
+  const seed = new Uint8Array(32).fill(7);
+  const identity = await Identity.fromRaw(seed, { implementation: "noble" });
+  seed[0] = 0xff;
+  assertEquals(identity.toRaw()[0], 7, "the signing secret must be unchanged");
+});
+
+Deno.test("a verifier built from raw bytes copies them", async () => {
+  // `fromRaw()` is where a mutable array enters; the constructor itself takes
+  // immutable bytes and so has nothing to defend against.
+  //
+  // The observable is `verify()`, not `did()`: the DID is derived once at
+  // construction and cached, so it cannot drift whatever happens. An aliased
+  // key would instead leave this verifying against mutated material while
+  // still reporting the original DID.
+  const identity = await Identity.fromRaw(new Uint8Array(32).fill(7), {
+    implementation: "noble",
+  });
+  const publicKey = (identity.serialize() as InsecureCryptoKeyPair).publicKey;
+  const verifier = await NobleEd25519Verifier.fromRaw(publicKey);
+  const payload = new Uint8Array(32).fill(9);
+  const signature = await identity.sign(payload);
+  assert(signature.ok);
+
+  publicKey[0] ^= 0xff;
+
+  const result = await verifier.verify({ signature: signature.ok, payload });
+  assert(result.ok, "verification must be unaffected by the caller's mutation");
+});
+
+Deno.test("two toRaw() callers cannot interfere with each other", async () => {
+  const identity = await Identity.fromRaw(new Uint8Array(32).fill(7), {
+    implementation: "noble",
+  });
+  const first = identity.toRaw();
+  const second = identity.toRaw();
+  assert(first !== second, "each call must yield its own array");
+  first[0] = 0xff;
+  assertEquals(second[0], 7, "one caller must not reach another's seed");
 });
 
 Deno.test("toRaw throws cleanly for a non-noble implementation", async () => {
