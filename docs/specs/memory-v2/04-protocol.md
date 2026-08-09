@@ -873,8 +873,8 @@ All errors are returned in `response`.
 // Shown at module scope.
 interface ConflictError extends Error {
   name: "ConflictError";
-  commit: ClientCommit;
-  conflicts: ConflictDetail[];
+  /** Server head seq at rejection time (§3.6.4). */
+  retryAfterSeq: number;
 }
 
 interface TransactionError extends Error {
