@@ -985,7 +985,18 @@ export class Server {
     readonly options: {
       sessions?: SessionRegistry;
       store?: URL;
-      subscriptionRefreshDelayMs?: number;
+      /**
+       * Coalescing delay for the batched subscription fan-out, in
+       * milliseconds. `"manual"` never arms the refresh timer: dirty spaces
+       * accumulate and fan out only through the explicit synchronization
+       * points — `flushSessions()`, or `idle()`, which drains held fan-out
+       * to keep its quiescence contract. This is the fan-out gate for
+       * controlled-staleness tests, immune to fake-clock auto-advance,
+       * which fires any armed timer regardless of its nominal delay. A
+       * partial `flushSessions(spaces)` in manual mode leaves the other
+       * dirty spaces held for the next explicit call.
+       */
+      subscriptionRefreshDelayMs?: number | "manual";
       authorizeSessionOpen: (
         message: SessionOpenRequest,
         context: SessionOpenAuthContext,
@@ -1408,7 +1419,14 @@ export class Server {
   async idle(): Promise<void> {
     await this.drainSpacePublicationLocks();
     await this.drainPostCommitSchedulerSideEffects();
-    if (this.#refreshTimer !== null || this.#refreshing !== null) {
+    // Dirty spaces with no timer armed are manual mode's held fan-out.
+    // idle() is an explicit synchronization point exactly like
+    // flushSessions(), so it drains them rather than returning with
+    // pending work — "manual" gates the TIMER, not the explicit calls.
+    if (
+      this.#refreshTimer !== null || this.#refreshing !== null ||
+      this.#dirtySpaces.size > 0
+    ) {
       await this.flushSessions();
     }
   }
@@ -3613,7 +3631,10 @@ export class Server {
   }
 
   private scheduleRefresh(): void {
-    if (this.#dirtySpaces.size === 0 || this.#refreshTimer !== null) {
+    if (
+      this.options.subscriptionRefreshDelayMs === "manual" ||
+      this.#dirtySpaces.size === 0 || this.#refreshTimer !== null
+    ) {
       return;
     }
     this.#refreshTimer = setTimeout(
