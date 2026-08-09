@@ -222,6 +222,51 @@ Deno.test("memory v2 server: an accept with no watched novelty still gets its ma
   assertEquals(sync.removes, []);
 });
 
+Deno.test("memory v2 server: an accept on a doc OUTSIDE the watch set still gets its marker on an otherwise-empty frame", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://verdict-catchup-unwatched-doc",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+
+  // Drain the fixture's parked doc:b first so nothing watched is dirty.
+  await server.flushSessions([space]);
+  assertEffect(shiftMessage(committerMessages));
+
+  // The committer watches doc:a and doc:b; this set targets doc:z, which no
+  // watch covers. Its dirty mark cannot touch the session's tracked graph,
+  // so the marker cannot ride any document delivery — the catch-up
+  // obligation alone must force the frame, or the client's parked promotion
+  // (and its coverage-resolving commit promise) would wait forever.
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-z",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:z",
+        value: { value: { from: "committer" } },
+      }],
+    },
+  }));
+  const verdict = assertResponse<{ seq: number }>(
+    shiftMessage(committerMessages),
+  );
+  assertEquals(verdict.ok?.seq, 2);
+
+  await server.flushSessions([space]);
+  const effect = assertEffect(shiftMessage(committerMessages));
+  const sync = effect.effect as SessionSync;
+  assertEquals(sync.caughtUpLocalSeq, 1);
+  assertEquals(sync.upserts, []);
+  assertEquals(sync.removes, []);
+});
+
 Deno.test("memory v2 server: a rejection's read repair rides the batched frame with the rejection's marker", async () => {
   const context = await setup({
     subscriptionRefreshDelayMs: 60_000,
