@@ -1583,7 +1583,9 @@ export class RuntimeProcessor {
     // process is running with legacy memory JSON flags.
     const body = blobUploadCodec.encode({
       type: request.contentType,
-      body: new FabricBytes(bytes),
+      // `bytes` comes fresh from `Uint8Array.from()` above and is used only
+      // here, so it is ceded rather than copied.
+      body: new FabricBytes(bytes, true),
     });
     const response = await fetch(target, {
       method: "POST",

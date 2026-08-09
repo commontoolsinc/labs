@@ -153,7 +153,13 @@ async function processJsonResponse(
 async function processBinaryResponse(
   response: Response,
 ): Promise<FetchBinaryResult> {
-  const bytes = new FabricBytes(new Uint8Array(await response.arrayBuffer()));
+  // `arrayBuffer()` yields a buffer owned by nobody else, and the view over
+  // it is a temporary, so it is ceded rather than copied. A response body is
+  // unbounded, which is what makes the copy worth avoiding.
+  const bytes = new FabricBytes(
+    new Uint8Array(await response.arrayBuffer()),
+    true,
+  );
   const contentType = response.headers.get("content-type");
   const mediaType = contentType?.split(";")[0].trim().toLowerCase() ||
     "application/octet-stream";
