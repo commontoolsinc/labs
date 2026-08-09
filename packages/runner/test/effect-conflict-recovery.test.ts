@@ -27,7 +27,6 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import type {
   IStorageNotification,
   StorageNotification,
@@ -35,28 +34,12 @@ import type {
 import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("effect-conflict-recovery");
 const space = signer.did();
 
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-  private sharedServer!: MemoryV2Server.Server;
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-
+class SuppressibleStorageManager extends EmulatedStorageManager {
   // When set, forward storage notifications to subscribers with their `changes`
   // emptied, so they raise no reader-dirty — a deterministic stand-in for a
   // "dataless catch-up" (a conflict whose catch-up carries no diff). Off by
@@ -74,16 +57,6 @@ class SharedServerStorageManager extends EmulatedStorageManager {
   }
 }
 
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
-
 const waitFor = async (
   predicate: () => boolean,
   timeout = 2000,
@@ -98,8 +71,8 @@ const waitFor = async (
 
 describe("effect commit-conflict recovery (no retry budget)", () => {
   let server: MemoryV2Server.Server;
-  let storageA: SharedServerStorageManager;
-  let storageB: SharedServerStorageManager;
+  let storageA: SuppressibleStorageManager;
+  let storageB: SuppressibleStorageManager;
   let rtA: Runtime;
   let rtB: Runtime;
   let conflicts: Error[];
@@ -107,8 +80,17 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
   beforeEach(() => {
     conflicts = [];
     server = newSharedServer();
-    storageA = SharedServerStorageManager.connectTo(server, { as: signer });
-    storageB = SharedServerStorageManager.connectTo(server, { as: signer });
+    // The inherited static builds `new this(...)`, so these ARE
+    // SuppressibleStorageManager instances; its declared return type is just
+    // the base class.
+    storageA = SuppressibleStorageManager.connectTo(
+      server,
+      { as: signer },
+    ) as SuppressibleStorageManager;
+    storageB = SuppressibleStorageManager.connectTo(
+      server,
+      { as: signer },
+    ) as SuppressibleStorageManager;
     storageB.subscribe({
       next: (notification: StorageNotification) => {
         if (

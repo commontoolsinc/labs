@@ -4,55 +4,13 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("cross-space-value-read");
 const spaceH = signer.did(); // "home" — holds the link
 const spaceP = (await Identity.fromPassphrase("cross-space target P")).did();
-
-// A storage manager with its OWN per-space client replicas, loopback-connected
-// to a SHARED in-process memory server. This is what a real browser/CLI
-// session looks like: data written by another session only reaches this one
-// through an explicit per-space server query/subscription. The plain
-// `StorageManager.emulate` masks CT-1667 in the common test shape because a
-// shared manager means shared replicas — reads find data the reader never
-// fetched.
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  // The server is SHARED between managers and closed once by the test's
-  // afterEach — serve it without ever initializing the base class's private
-  // `#server`, whose `close()` would otherwise close the shared server once
-  // per manager.
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
 
 // CT-1667: a value READ through a cross-space link never materializes the
 // target's fields in a session that didn't create them. The home Profile tab
@@ -117,15 +75,15 @@ const nameSchema = {
 
 describe("cross-space value reads (CT-1667)", () => {
   let server: MemoryV2Server.Server;
-  let writerStorage: SharedServerStorageManager;
-  let readerStorage: SharedServerStorageManager;
+  let writerStorage: EmulatedStorageManager;
+  let readerStorage: EmulatedStorageManager;
 
   beforeEach(() => {
     server = newSharedServer();
-    writerStorage = SharedServerStorageManager.connectTo(server, {
+    writerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
-    readerStorage = SharedServerStorageManager.connectTo(server, {
+    readerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
   });
