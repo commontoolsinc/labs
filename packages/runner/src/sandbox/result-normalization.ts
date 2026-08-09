@@ -105,7 +105,10 @@ function normalizeSandboxNativeLeaf(value: unknown): unknown {
     brand === "[object Uint8Array]" && ArrayBuffer.isView(value) &&
     (value as Uint8Array).BYTES_PER_ELEMENT === 1
   ) {
-    return new FabricBytes(new Uint8Array(value as Uint8Array));
+    // No second argument, so the constructor makes its own copy: `value`
+    // belongs to the sandbox and cannot be ceded. Copying first and then
+    // ceding would cost the same copy and an extra buffer besides.
+    return new FabricBytes(value as Uint8Array);
   }
 
   if (isNativeError(value)) {

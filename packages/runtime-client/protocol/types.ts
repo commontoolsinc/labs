@@ -135,6 +135,17 @@ export type IPCRemoteResponse = {
 
 export type IPCRemoteMessage = IPCRemoteNotification | IPCRemoteResponse;
 
+/**
+ * Base of every request a handler receives.
+ *
+ * **Ownership.** Any value reaching a handler implementation is owned outright
+ * by the receiver: it is guaranteed not to be shared elsewhere already, and not
+ * to become shared later, except by the receiver's own action. A handler may
+ * therefore retain, mutate, or cede what it is given without defending itself.
+ *
+ * That is a requirement on whatever delivers a request, not a property of any
+ * particular transport -- see `RuntimeTransport.send()`.
+ */
 export interface BaseRequest {
   type: RequestType;
 }
@@ -529,7 +540,12 @@ export interface UploadBlobRequest extends BaseRequest {
   /** The space the blob belongs to — uploads target ITS host. */
   space: DID;
   contentType: string;
-  body: number[];
+  /**
+   * The blob's bytes. The type has to stay structured-clone-able, this being an
+   * IPC payload: a class does not survive the crossing, where a typed array
+   * does and carries whole rather than element by element.
+   */
+  body: Uint8Array;
   suffix?: string;
 }
 
