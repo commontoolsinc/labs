@@ -823,8 +823,11 @@ Deno.test("memory v2 server: requeue after failure does not resurrect echo suppr
         // doc:b's ACTUAL seq: echo suppression fires only when the origin's
         // seq matches the delivered upsert's seq, so a fabricated seq would
         // never suppress and the pin would pass even without the provenance
-        // rule it exists to guard.
+        // rule it exists to guard. The op must be an ELIDABLE kind
+        // ("set"): a "patch" origin is delivered under CT-1965 regardless,
+        // which would also let the pin pass vacuously.
         seq: 1,
+        ops: new Map([["space of:doc:b", "set" as const]]),
       });
       return Promise.reject(new Error("synthetic fan-out failure"));
     }

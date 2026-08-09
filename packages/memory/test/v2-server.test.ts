@@ -1,6 +1,7 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import type { FabricValue } from "@commonfabric/api";
 import { parseClientMessage, Server, SessionRegistry } from "../v2/server.ts";
 import {
   decodeMemoryBoundary,
@@ -10,11 +11,13 @@ import {
   type HelloOkMessage,
   MAX_ENTITY_ID_PAGE_SIZE,
   MEMORY_PROTOCOL,
+  resetOwnWriteEchoConfig,
   type ResponseMessage,
   type ServerMessage,
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
   type SessionSync,
+  setOwnWriteEchoConfig,
 } from "../v2.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
 
@@ -2653,7 +2656,7 @@ Deno.test("memory v2 server accepts cross-client commit bursts before fan-out", 
   );
 });
 
-Deno.test("memory v2 server does not echo same-session operation docs through watches", async () => {
+Deno.test("memory v2 server elides own set heads and delivers own patch heads through watches", async () => {
   const server = createServer("memory://memory-v2-server-suppress-own-watch");
   const writerMessages: ServerMessage[] = [];
   const observerMessages: ServerMessage[] = [];
@@ -2737,8 +2740,9 @@ Deno.test("memory v2 server does not echo same-session operation docs through wa
 
     await server.flushSessions([space]);
 
-    // The writer hears no echo of its own doc — only the accept's marker on
-    // an otherwise-empty frame (CT-1927).
+    // The writer hears no echo of its own SET — it provably holds those
+    // bytes (CT-1965 elision) — only the accept's marker on an
+    // otherwise-empty frame (CT-1927).
     const writerMarker = assertEffect(shiftMessage(writerMessages));
     assertEquals(writerMarker.effect.upserts, []);
     assertEquals(writerMarker.effect.caughtUpLocalSeq, 1);
@@ -2755,7 +2759,260 @@ Deno.test("memory v2 server does not echo same-session operation docs through wa
     }]);
     assertEquals(observerEffect.effect.removes, []);
     assertEquals(observerMessages, []);
+
+    // A PATCH head rides the writer's own covering frame as the full
+    // post-apply document (CT-1965): merged state is truth the writer
+    // cannot extrapolate, so the frame is the truth channel.
+    await writer.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "writer-patch",
+      space,
+      sessionId: writerSessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:doc:1",
+          patches: [{ op: "replace", path: "/value/version", value: 2 }],
+        }],
+      },
+    }));
+    const patched = nextResponse<any>(writerMessages);
+    assertEquals(patched.requestId, "writer-patch");
+    assertEquals(patched.ok?.seq, 2);
+
+    await server.flushSessions([space]);
+
+    const writerEcho = assertEffect(shiftMessage(writerMessages));
+    assertEquals(writerEcho.effect.upserts, [{
+      branch: "",
+      id: "of:doc:1",
+      scope: "space",
+      seq: 2,
+      doc: {
+        value: { version: 2 },
+      },
+    }]);
+    assertEquals(writerEcho.effect.caughtUpLocalSeq, 2);
+    assertEquals(writerMessages, []);
+    const observerPatchEffect = assertEffect(shiftMessage(observerMessages));
+    assertEquals(observerPatchEffect.effect.upserts.map((u) => u.seq), [2]);
+    assertEquals(observerMessages, []);
   } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server classifies own-write echo by the head-producing op", async () => {
+  const server = createServer("memory://memory-v2-server-echo-classification");
+  const messages: ServerMessage[] = [];
+  const writer = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-echo-classification";
+
+  try {
+    await writer.receive(encodeMemoryBoundary(HELLO));
+    const sessionOpen = expectHelloOk(messages);
+    await writer.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open",
+      space,
+      session: {},
+      invocation: authInvocation(sessionOpen),
+    }));
+    const sessionId =
+      nextResponse<{ sessionId: string }>(messages).ok!.sessionId;
+    await writer.receive(encodeMemoryBoundary({
+      type: "session.watch.set",
+      requestId: "watch",
+      space,
+      sessionId,
+      watches: [{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:c",
+            selector: { path: [], schema: false },
+          }],
+        },
+      }],
+    }));
+    shiftMessage(messages);
+
+    const transact = async (
+      requestId: string,
+      localSeq: number,
+      operations: FabricValue[],
+    ) => {
+      await writer.receive(encodeMemoryBoundary({
+        type: "transact",
+        requestId,
+        space,
+        sessionId,
+        commit: {
+          localSeq,
+          reads: { confirmed: [], pending: [] },
+          operations,
+        },
+      }));
+      return nextResponse<any>(messages).ok!.seq;
+    };
+
+    await transact("seed", 1, [{
+      op: "set",
+      id: "of:doc:c",
+      value: { value: { items: [] } },
+    }]);
+    await server.flushSessions([space]);
+    const seeded = assertEffect(shiftMessage(messages));
+    assertEquals(seeded.effect.upserts, []);
+    assertEquals(seeded.effect.caughtUpLocalSeq, 1);
+
+    // Multi-op ending in a set: the set produced the head, the writer holds
+    // its bytes — elided.
+    await transact("patch-then-set", 2, [
+      {
+        op: "patch",
+        id: "of:doc:c",
+        patches: [{ op: "replace", path: "/value/items", value: ["a"] }],
+      },
+      { op: "set", id: "of:doc:c", value: { value: { items: ["b"] } } },
+    ]);
+    await server.flushSessions([space]);
+    const elided = assertEffect(shiftMessage(messages));
+    assertEquals(elided.effect.upserts, []);
+    assertEquals(elided.effect.caughtUpLocalSeq, 2);
+
+    // Multi-op ending in a patch: the patch produced the head — full
+    // post-apply doc.
+    await transact("set-then-patch", 3, [
+      { op: "set", id: "of:doc:c", value: { value: { items: [] } } },
+      {
+        op: "patch",
+        id: "of:doc:c",
+        patches: [{ op: "replace", path: "/value/items", value: ["c"] }],
+      },
+    ]);
+    await server.flushSessions([space]);
+    const echoed = assertEffect(shiftMessage(messages));
+    assertEquals(echoed.effect.upserts, [{
+      branch: "",
+      id: "of:doc:c",
+      scope: "space",
+      seq: 3,
+      doc: { value: { items: ["c"] } },
+    }]);
+    assertEquals(echoed.effect.caughtUpLocalSeq, 3);
+
+    // Two commits coalesced into one flush: the origin tracks the latest
+    // commit — a patch head — so the frame carries the full doc at the
+    // latest seq.
+    await transact("coalesced-set", 4, [{
+      op: "set",
+      id: "of:doc:c",
+      value: { value: { items: ["d"] } },
+    }]);
+    await transact("coalesced-patch", 5, [{
+      op: "patch",
+      id: "of:doc:c",
+      patches: [{ op: "append", path: "/value/items", values: ["e"] }],
+    }]);
+    await server.flushSessions([space]);
+    const coalesced = assertEffect(shiftMessage(messages));
+    assertEquals(coalesced.effect.upserts, [{
+      branch: "",
+      id: "of:doc:c",
+      scope: "space",
+      seq: 5,
+      doc: { value: { items: ["d", "e"] } },
+    }]);
+    assertEquals(coalesced.effect.caughtUpLocalSeq, 5);
+
+    // An own DELETE head is elided: the writer trivially holds its outcome.
+    await transact("delete", 6, [{ op: "delete", id: "of:doc:c" }]);
+    await server.flushSessions([space]);
+    const deleted = assertEffect(shiftMessage(messages));
+    assertEquals(deleted.effect.upserts, []);
+    assertEquals(deleted.effect.caughtUpLocalSeq, 6);
+    assertEquals(messages, []);
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server suppresses own patch heads when the own-write echo config is off", async () => {
+  setOwnWriteEchoConfig(false);
+  const server = createServer("memory://memory-v2-server-echo-config-off");
+  const messages: ServerMessage[] = [];
+  const writer = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-echo-config-off";
+
+  try {
+    await writer.receive(encodeMemoryBoundary(HELLO));
+    const sessionOpen = expectHelloOk(messages);
+    await writer.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open",
+      space,
+      session: {},
+      invocation: authInvocation(sessionOpen),
+    }));
+    const sessionId =
+      nextResponse<{ sessionId: string }>(messages).ok!.sessionId;
+    await writer.receive(encodeMemoryBoundary({
+      type: "session.watch.set",
+      requestId: "watch",
+      space,
+      sessionId,
+      watches: [{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:k",
+            selector: { path: [], schema: false },
+          }],
+        },
+      }],
+    }));
+    shiftMessage(messages);
+
+    for (
+      const [requestId, localSeq, operations] of [
+        ["seed", 1, [{
+          op: "set",
+          id: "of:doc:k",
+          value: { value: { version: 1 } },
+        }]],
+        ["patch", 2, [{
+          op: "patch",
+          id: "of:doc:k",
+          patches: [{ op: "replace", path: "/value/version", value: 2 }],
+        }]],
+      ] as const
+    ) {
+      await writer.receive(encodeMemoryBoundary({
+        type: "transact",
+        requestId,
+        space,
+        sessionId,
+        commit: {
+          localSeq,
+          reads: { confirmed: [], pending: [] },
+          operations: operations as unknown as FabricValue[],
+        },
+      }));
+      nextResponse<any>(messages);
+      await server.flushSessions([space]);
+      // Config off restores full suppression: patch heads included.
+      const marker = assertEffect(shiftMessage(messages));
+      assertEquals(marker.effect.upserts, []);
+      assertEquals(marker.effect.caughtUpLocalSeq, localSeq);
+    }
+    assertEquals(messages, []);
+  } finally {
+    resetOwnWriteEchoConfig();
     await server.close();
   }
 });
