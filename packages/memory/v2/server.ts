@@ -2294,9 +2294,8 @@ export class Server {
           // The frame therefore reflects every decided outcome ≤ W for the
           // docs it covers.
           // The session's own accepted writes are echo-suppressed by
-          // dirty-origin tracking (the parked verdict carries their truth
-          // — with CT-1926's post-apply document where the server provides
-          // it); REJECTED commits' docs are staged origin-less
+          // dirty-origin tracking (the parked verdict carries their truth);
+          // REJECTED commits' docs are staged origin-less
           // (stageConflictRefreshDirtyIds), so repair frames DO cover them.
           session.pendingCaughtUpLocalSeq = Math.max(
             session.pendingCaughtUpLocalSeq,
