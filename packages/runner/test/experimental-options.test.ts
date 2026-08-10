@@ -39,6 +39,7 @@ describe("ExperimentalOptions", () => {
           commitPreconditions: false,
           plainResultReceipts: false,
           computedCellIds: false,
+          lazyMaterialization: false,
         },
       });
       expect(runtime.experimental).toEqual({
@@ -71,7 +72,7 @@ describe("ExperimentalOptions", () => {
         commitPreconditions: true,
         plainResultReceipts: true,
         computedCellIds: true,
-        lazyMaterialization: false,
+        lazyMaterialization: true,
         eagerSourceAnnotation: false,
       });
       await runtime.dispose();
@@ -91,7 +92,7 @@ describe("ExperimentalOptions", () => {
         commitPreconditions: true,
         plainResultReceipts: true,
         computedCellIds: true,
-        lazyMaterialization: false,
+        lazyMaterialization: true,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,

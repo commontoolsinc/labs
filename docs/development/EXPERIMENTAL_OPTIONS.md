@@ -35,7 +35,7 @@ was last checked against the code.
 | [`eagerSourceAnnotation`](#eagersourceannotation)                           | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental`                                                                    | off in production, on in shell dev builds                                            | gideon (#4458)                                        | permanent debug toggle, not slated for removal                                                                                                                                                                                    | implemented                                                                     |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate)                       | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental`                                             | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619)      | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, on in the shell                                                    |
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
-| [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | off                                                                                  | Bernhard Seefeld                                      | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, off by default; suites green both ways                                   |
+| [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-explicit`                                                                   | Bernhard Seefeld (#3263)                              | tighten default toward `enforce-strict`                                                                                                                                                                                           | active; ladder is permanent                                                     |
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4479)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
@@ -364,10 +364,11 @@ value is ignored with a warning rather than coerced. See
 
 ### `lazyMaterialization`
 
-**Last checked:** 2026-08-09. **Status:** implemented, off by default.
+**Last checked:** 2026-08-09. **Status:** implemented, on by default.
 
 - **Toggle via.** `EXPERIMENTAL_LAZY_MATERIALIZATION` environment variable, or
-  `new Runtime({ experimental: { lazyMaterialization: true } })`.
+  `new Runtime({ experimental: { lazyMaterialization: false } })` as a temporary
+  rollback override.
 - **Purpose.** Materialize a lift's argument lazily. The runner marks the
   action's transaction (`markLazyMaterialize`), and `Cell.get()` on a marked
   transaction hands back a schema-observing view instead of building everything
@@ -958,10 +959,10 @@ useful part of the remaining work for that flag.
 The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,
 `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`,
 `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION`,
-`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`,
-`EXPERIMENTAL_LAZY_MATERIALIZATION`) reach the runtime through the deployed
-processes. The runtime-only flags (`commitPreconditions`, the CFC dials) reach
-it only through the `RuntimeOptions` passed to `new Runtime(...)`.
+`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`, `EXPERIMENTAL_LAZY_MATERIALIZATION`)
+reach the runtime through the deployed processes. The runtime-only flags
+(`commitPreconditions`, the CFC dials) reach it only through the
+`RuntimeOptions` passed to `new Runtime(...)`.
 
 All first-party processes build their `RuntimeOptions` through a construction
 preset in
