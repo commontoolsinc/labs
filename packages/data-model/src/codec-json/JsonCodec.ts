@@ -4,6 +4,7 @@ import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 import { FabricSpecialObject, type FabricValue } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import {
+  CODEC,
   type ReconstructionContext,
   type SerializationContext,
 } from "@/codec-common/interface.ts";
@@ -11,8 +12,8 @@ import { deepFreeze } from "@/deep-freeze.ts";
 import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionContext.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { createDefaultRegistry } from "@/codec-common/createDefaultRegistry.ts";
 import { ENCODING_PREFIX_TAG, type JsonCodecValue } from "./interface.ts";
+import { createBaseJsonRegistry } from "./createBaseJsonRegistry.ts";
 import { type CodecRegistry, SELF_REP } from "@/codec-common/CodecRegistry.ts";
 import { CODEC_META_TAGS } from "@/codec-common/codec-meta-tags.ts";
 
@@ -39,14 +40,15 @@ export class JsonCodec implements SerializationContext<string> {
   readonly #registry: CodecRegistry;
 
   /**
-   * Constructs an instance. `options.lenient` makes a failed reconstruction
-   * produce a `ProblematicValue` instead of throwing. `options.registry`
-   * supplies the codecs this instance encodes and decodes with, defaulting to
-   * the built-in registry.
+   * Constructs an instance. `options.registry` supplies the codecs this
+   * instance encodes and decodes with, and so decides which classes it can
+   * carry; there is no default, because which classes participate is a
+   * question this class has no standing to answer. `options.lenient` makes a
+   * failed reconstruction produce a `ProblematicValue` instead of throwing.
    */
-  constructor(options?: { lenient?: boolean; registry?: CodecRegistry }) {
-    this.lenient = options?.lenient ?? false;
-    this.#registry = options?.registry ?? JsonCodec.#defaultRegistry;
+  constructor(options: { registry: CodecRegistry; lenient?: boolean }) {
+    this.lenient = options.lenient ?? false;
+    this.#registry = options.registry;
   }
 
   //
@@ -437,8 +439,32 @@ export class JsonCodec implements SerializationContext<string> {
   /** Shared text decoder, created once. */
   static readonly #textDecoder = new TextDecoder();
 
-  /** Shared default codec registry, created once. */
-  static readonly #defaultRegistry: CodecRegistry = createDefaultRegistry();
+  /**
+   * Registry for the throwaway checks in the testing helpers below: this
+   * format's primitive determination, plus the two classes the format uses to
+   * represent its own failures. No domain class is registered.
+   *
+   * That line is what makes those checks answer the question they are asked.
+   * They validate that text is well-formed in this wire format, not that any
+   * particular class is available to receive it, so a body naming any fabric
+   * class has to survive the round trip regardless of who registered what.
+   * Both fallbacks are needed for it to:
+   *
+   * * `UnknownValue` receives an unrecognized tag, and re-encodes to the tag
+   *   it came from.
+   * * `ProblematicValue` receives a state its codec rejects -- which a codec
+   *   may hand back directly rather than throwing, independent of `lenient`
+   *   -- and likewise re-encodes.
+   *
+   * A helper drawing on a fuller registry would instead accept or reject text
+   * according to a roster its caller never chose.
+   */
+  static readonly #testingRegistry: CodecRegistry = (() => {
+    const registry = createBaseJsonRegistry();
+    registry.register(UnknownValue[CODEC]);
+    registry.register(ProblematicValue[CODEC]);
+    return registry;
+  })();
 
   /**
    * Reconstruction context for the throwaway checks in the testing helpers
@@ -543,10 +569,16 @@ export class JsonCodec implements SerializationContext<string> {
    * The tag itself is still required either way. That is not a judgment about
    * the payload: removing a prefix that is not there does not produce the body,
    * it produces nonsense, so there is nothing for this to return.
+   *
+   * `registry` decides what the check is able to read, and so what counts as
+   * decodable. It defaults to the format-only registry described above, under
+   * which any tag is acceptable; pass one carrying a class roster to hold the
+   * payload to that roster's codecs as well.
    */
   static unwrapEncodedValueForTesting(
     encoded: string,
     isMalformed = false,
+    registry: CodecRegistry = JsonCodec.#testingRegistry,
   ): string {
     if (isMalformed) {
       if (!JsonCodec.seemsLikeEncoded(encoded)) {
@@ -559,7 +591,7 @@ export class JsonCodec implements SerializationContext<string> {
       // establish that `encoded` really is one of ours, rather than a string
       // that happens to begin with the right few characters. (`decode()` checks
       // the tag first, so the malformed branch above loses nothing.)
-      new JsonCodec().decode(
+      new JsonCodec({ registry }).decode(
         encoded,
         JsonCodec.#testingReconstructionContext,
       );
@@ -593,16 +625,20 @@ export class JsonCodec implements SerializationContext<string> {
    * asked to survive a decode. The result is the tag with `json` after it,
    * whatever `json` is. The flag is the call site saying out loud that the
    * badness is the point.
+   *
+   * `registry` decides what the check is able to read, exactly as for
+   * `unwrapEncodedValueForTesting()`.
    */
   static wrapEncodedValueForTesting(
     json: string,
     isMalformed = false,
+    registry: CodecRegistry = JsonCodec.#testingRegistry,
   ): string {
     const encoded = ENCODING_PREFIX_TAG + json;
 
     if (!isMalformed) {
       // Throwaway decode and re-encode; both results are discarded. See above.
-      const jsonCodec = new JsonCodec();
+      const jsonCodec = new JsonCodec({ registry });
       jsonCodec.encode(
         jsonCodec.decode(
           encoded,

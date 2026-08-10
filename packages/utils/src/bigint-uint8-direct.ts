@@ -126,7 +126,7 @@ export function bigintToMtcDirect(value: bigint): Uint8Array {
 export function bigintFromMtcDirect(bytes: Uint8Array): bigint {
   switch (bytes.length) {
     case 0: {
-      throw new Error("bigintFromMinimalTwosComplement: empty input");
+      throw new Error("`bigintFromMinimalTwosComplement()`: empty input");
     }
 
     case 1: {
