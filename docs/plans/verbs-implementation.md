@@ -51,35 +51,42 @@ driver needs to know what is already moving before scheduling anything new.
 | #5504 | `@` marks a position in a field list | open |
 | #5505 | `piece call` takes the selection flags | open |
 
-## The decision everything else waits behind
+## The decision that was waiting, and the condition it carries
 
-**1. Does a verb's declared result reach the runtime?** *(#5501, draft)*
+**1. A verb's declared result reaches the runtime.** *(#5501)* Decided — and
+the timing framing was confirmed rather than merely tolerated: the durable form
+is where this eventually lands, so the only live question was whether to wire it
+before then.
 
-The result-schema emission built in July was withdrawn for three recorded
-reasons: the value path did not need it, a keyword in durable schemas and
-append-only baselines would hard-commit a shape the Fabric-types stream
-evolution is expected to replace, and the compatibility rules built alongside it
-would have refused its later removal.
+The July emission was withdrawn because a keyword in durable schemas and
+append-only baselines would hard-commit a shape, and the compatibility rules
+built alongside it would have refused its removal. Both objections attach to
+where the shape was written. A module field enters no durable schema, so no
+baseline records it and the gate has no rule to apply — which is why this road
+was open when that one was not.
 
-#5501 is a different road to the same property — an existing field on a node's
-module rather than a new dialect keyword, with the compatibility gate untouched
-— and the first two objections are answered on that road. What it buys is
-narrower than first claimed: a `$link` marker already renders an address and
-already suppresses the fetch without it. What it adds is narrowing on field
-selection, and checking a selection before the call rather than after.
+**The approval is conditional, and the condition binds work that is not built
+yet.** It was given as: if it is easy to add now, go for it; but if it creates
+more things to chase down, revisit rather than push through.
 
-Three things hang off the answer:
+The producer half satisfies that already — #5501 is built and green. **The
+unknown is the consumer half, item 10.** A tool's pattern rides in the callable
+cell's own value, so its branch just reads it; a handler's module lives in the
+compiled graph, so the handler branch needs the verb's node looked up there.
+That lookup is new code rather than a field already sitting in reach. If it
+turns awkward, that is exactly the case the condition names, and the instruction
+is to raise it rather than absorb it. Raising it early costs nothing; absorbing
+it quietly spends the goodwill this decision was made on.
 
-- whether `cf piece verbs` can carry result schemas, which its own issue defers
-  until this exists;
-- whether a receipt for a verb returning anything reactive is describable at
-  all, since the descriptive derivation runs only where the result is plain;
-- whether items 8 and 9 below are worth their cost, since both improve a
-  description nothing yet consumes.
+*What this unblocks.* Items 8 and 10 stop being provisional, and verb discovery
+closes — `cf piece verbs` can answer both halves of its question.
 
-It is a draft rather than a proposal because it needs the owner who made the
-withdrawal call. Until then it blocks nothing, but it makes three other
-decisions provisional.
+*A correction owed to this document.* It priced the decision as "narrower than
+first claimed", naming only narrowing on field selection and the pre-call check.
+That is right about the value path and omits the command surface: the derivable
+default, completion, and a help page that currently tells a caller the opposite
+of the truth. A reader weighing the revisit condition will check it against this
+pricing, so the pricing needs to be the honest one.
 
 ## Ready to build
 
@@ -212,7 +219,7 @@ joins them.
 | 4 | 7 | publishes an address, so the address must have stopped moving |
 | 5 | 4 | the fourth and fifth arrivals inherit whatever a read costs |
 | 10 | 1 | listing rows carry a handler's `outputSchema`; the plumbing exists for tools already |
-| 1 | — | blocks nothing; makes 8 and item 10 provisional |
+| 1 | — | decided; 8 and 10 are no longer provisional, and item 10 carries the revisit condition |
 
 Items 2, 3 and 5 touch one file heavily and want to land one at a time rather
 than in parallel. Item 4 is the only one that touches the call envelope.
