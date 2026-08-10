@@ -240,10 +240,9 @@ export class Client {
     // Between openSession resolving (the session now exists server-side)
     // and the registration below, a session-scoped frame would find no
     // routing entry. Unreachable for a transport that delivers one frame
-    // per event-loop task — this continuation is synchronous-plus-
-    // microtasks, which drain before the next task — and only a
-    // resume-mount has frames to deliver that early; the reconnect audit
-    // (CT-1974) owns that window.
+    // per event-loop task: this continuation is synchronous plus
+    // microtasks, which drain before the next task, and only a
+    // resume-mount has frames to deliver that early.
     const session = new SpaceSession(
       this,
       space,

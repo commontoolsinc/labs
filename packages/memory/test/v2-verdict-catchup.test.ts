@@ -7,8 +7,8 @@
 // (04-protocol.md §4.11.2); these tests pin the server half: verdict ordering,
 // frame coverage, and eventual marker delivery.
 //
-// The long refresh delay parks the writer's novelty behind a timer so each
-// test drives delivery explicitly with flushSessions().
+// Automatic fan-out is held — a long refresh delay or the manual gate —
+// so each test drives delivery explicitly with flushSessions().
 
 import { assertEquals, assertExists } from "@std/assert";
 import {
@@ -115,8 +115,8 @@ const setup = async (options: {
   assertResponse(shiftMessage(committerMessages));
 
   // Foreign novelty the committer has NOT received: the out-of-band direct
-  // write path (the blob-upload path) marks the space dirty behind the
-  // refresh timer WITHOUT a transact verdict. seq 1 = doc:b.
+  // write path (the blob-upload path) marks the space dirty — held until
+  // the test's explicit flush — WITHOUT a transact verdict. seq 1 = doc:b.
   await server.writeDocument(space, "of:doc:b", { from: "writer" });
 
   return {
