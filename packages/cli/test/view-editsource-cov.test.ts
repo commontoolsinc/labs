@@ -93,7 +93,7 @@ describe("fileSource.save() with a read-only language", () => {
       const source = fileSource(path, binaryLanguage);
 
       expect(source.editable).toBe(false);
-      expect(source.save("replacement")).toBe(
+      expect(source.save("replacement", [])).toBe(
         "Binary data is shown as a hex dump and cannot be edited.",
       );
       expect(Deno.readFileSync(path)).toEqual(bytes);
@@ -112,7 +112,7 @@ Deno.test("readonlySource.parse: parses text into a Document without a path", ()
   assertEquals(src.label, null);
   assertEquals(src.reason, reason);
   assertEquals(
-    src.save("anything"),
+    src.save("anything", []),
     reason,
     "save is a no-op returning reason",
   );

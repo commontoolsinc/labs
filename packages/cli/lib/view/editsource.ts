@@ -50,6 +50,8 @@ export interface ExpandResult {
   cursorLine: number;
   insertedAt: number;
   inserted: number;
+  /** Exact workspace endings for the rows inserted into `text`. */
+  insertedLineEndings: readonly (LineEndingProvenance | undefined)[];
   up: boolean;
   removedAt: number | null;
   /** Which lines of the workspace file the reveal showed, as the file numbers
@@ -93,7 +95,10 @@ export interface EditableSource {
   /** Whether an empty decoded input is a complete view. */
   readonly allowsEmptyInput?: boolean;
   /** Re-parse edited text into a Document — lines, structure and definitions. */
-  parse(text: string): Document;
+  parse(
+    text: string,
+    lineEndings?: readonly (LineEndingProvenance | undefined)[],
+  ): Document;
   /**
    * Build the alternate rendered representation. Rendered documents retain the
    * source text. Most renderers keep one display line per source line;
@@ -117,19 +122,21 @@ export interface EditableSource {
   createHighlighter?(
     text: string,
     seedLines?: readonly Line[],
+    lineEndings?: readonly (LineEndingProvenance | undefined)[],
   ): Highlighter;
   /** Exact file-ending information for transformed editable rows. */
   lineEndingProvenance?(
     text: string,
   ): readonly (LineEndingProvenance | undefined)[];
-  /** Attempt to persist the edited text. `baseline` is the text at the last
+  /** Attempt to persist the edited text. `lineEndings` carries exact source
+   * endings for rows that came from a file. `baseline` is the text at the last
    * successful save. A read-only source returns its refusal reason without
    * writing. Returns a status message and throws on write failure. */
   save(
     text: string,
+    lineEndings: readonly (LineEndingProvenance | undefined)[],
     baseline?: string,
     options?: SaveOptions,
-    lineEndings?: readonly (LineEndingProvenance | undefined)[],
   ): string;
   /** The clean baseline after a successful save. Most sources persist the
    * whole buffer and omit this method. A commit view that saves files without

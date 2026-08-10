@@ -240,7 +240,7 @@ describe("view-binary", () => {
         view.doc.structure.length > 0,
         "JSON structure sees the first token",
       );
-      expect(view.editSource.save('{"value": 2}\n')).toBe("Saved 1 file");
+      expect(view.editSource.save('{"value": 2}\n', [])).toBe("Saved 1 file");
       expect(
         Deno.readFileSync(path),
       ).toEqual(

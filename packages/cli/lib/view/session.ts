@@ -73,7 +73,7 @@ import {
   findCommitMessages,
 } from "./commitmsg.ts";
 import type { Highlighter, Semantics } from "./languages/language.ts";
-import { EditBuffer } from "./editbuffer.ts";
+import { EditBuffer, type LineEndingProvenance } from "./editbuffer.ts";
 import type {
   EditableSource,
   ExpandResult,
@@ -2205,6 +2205,7 @@ export class Session {
     this.highlighter = this.source?.createHighlighter?.(
       this.buffer!.text(),
       this.currentDoc.lines,
+      this.buffer!.lineEndingProvenance(),
     );
   }
 
@@ -2997,7 +2998,9 @@ export class Session {
         this.currentDoc = this.sourceDoc;
         this.needsReparse = true;
       } else {
-        this.setSourceDocument(this.source.parse(text));
+        this.setSourceDocument(
+          this.source.parse(text, this.buffer.lineEndingProvenance()),
+        );
         this.needsReparse = false;
       }
     }
@@ -3019,7 +3022,12 @@ export class Session {
    * incremental highlighter, created lazily and seeded with the current text so
    * the first keystroke is a full highlight and each later one is incremental. */
   private liveHighlight(text: string): readonly Line[] | null {
-    if (this.highlighter) return this.highlighter.update(text);
+    if (this.highlighter) {
+      return this.highlighter.update(
+        text,
+        this.buffer?.lineEndingProvenance(),
+      );
+    }
     return this.source?.highlight?.(text) ?? null;
   }
 
@@ -3029,7 +3037,12 @@ export class Session {
    * the next edit re-seeds it from this authoritative parse. */
   reparse(): void {
     if (!this.source || !this.buffer || !this.needsReparse) return;
-    this.setSourceDocument(this.source.parse(this.buffer.text()));
+    this.setSourceDocument(
+      this.source.parse(
+        this.buffer.text(),
+        this.buffer.lineEndingProvenance(),
+      ),
+    );
     this.needsReparse = false;
     // Re-baseline the live highlighter from this authoritative parse while still
     // editing; drop it when leaving edit mode.
@@ -3295,9 +3308,9 @@ export class Session {
     try {
       this.message = this.source.save(
         current,
+        this.buffer.lineEndingProvenance(),
         baseline,
         options,
-        this.buffer.lineEndingProvenance(),
       );
       const savedBaseline = this.source.baselineAfterSave?.(
         baseline,
@@ -3305,9 +3318,15 @@ export class Session {
         options,
       ) ?? current;
       this.buffer.setBaseline(savedBaseline);
-      this.buffer.setLineEndingProvenance(
-        this.source.lineEndingProvenance?.(current),
-      );
+      const refreshedLineEndings = this.source.lineEndingProvenance?.(current);
+      if (refreshedLineEndings) {
+        const retainedLineEndings = this.buffer.lineEndingProvenance();
+        this.buffer.setLineEndingProvenance(
+          this.buffer.lines.map((_, index) =>
+            refreshedLineEndings[index] ?? retainedLineEndings[index]
+          ),
+        );
+      }
       if (target === "workspace" && this.buffer.dirty()) {
         this.message += "; commit message remains unsaved";
       }
@@ -3560,7 +3579,9 @@ export class Session {
     );
     this.splitRow = null;
     this.snapCursorToEditable();
-    this.setSourceDocument(this.source.parse(result.text));
+    this.setSourceDocument(
+      this.source.parse(result.text, this.buffer.lineEndingProvenance()),
+    );
     this.needsReparse = false;
     if (this.cursorOn) this.seedHighlighter();
     this.clampScroll();
@@ -3641,9 +3662,14 @@ export class Session {
     const moved = (n: number) =>
       n + (n >= r.insertedAt ? r.inserted : 0) -
       (r.removedAt !== null && n > r.removedAt ? 1 : 0);
-    const lineEndings = [
-      ...(this.source.lineEndingProvenance?.(r.text) ?? []),
-    ];
+    const lineEndings = r.text.split("\n").map(() => undefined) as Array<
+      LineEndingProvenance | undefined
+    >;
+    const insertedAt = r.insertedAt -
+      (r.removedAt !== null && r.up ? 1 : 0);
+    for (const [offset, ending] of r.insertedLineEndings.entries()) {
+      lineEndings[insertedAt + offset] = ending;
+    }
     for (
       let row = 0;
       row < this.buffer.lineEndingProvenance().length;
@@ -3672,7 +3698,9 @@ export class Session {
       lineEndings,
     );
     this.splitRow = null;
-    this.setSourceDocument(this.source.parse(r.text));
+    this.setSourceDocument(
+      this.source.parse(r.text, this.buffer.lineEndingProvenance()),
+    );
     this.needsReparse = false;
     this.wrapDecorations = new Map();
     this.wrapDecorationKey = "";
@@ -4325,7 +4353,12 @@ export class Session {
     this.splitRow = null;
     this.highlighter = undefined; // the old highlighter was for the previous file
     this.clearFolds(); // the previous file's fold indices do not carry over
-    this.setSourceDocument(opened.source.parse(opened.text));
+    this.setSourceDocument(
+      opened.source.parse(
+        opened.text,
+        this.buffer.lineEndingProvenance(),
+      ),
+    );
     this.semantics = undefined; // the old service was for the previous file
     this.mode = "normal";
     this.cursorOn = false;

@@ -55,6 +55,17 @@ function sourceFor(diff: string, ws: DiffWorkspace) {
   return { src: diffSource(ws, edit), edit };
 }
 
+function saveSource(
+  source: ReturnType<typeof diffSource>,
+  text: string,
+  baseline?: string,
+  options?: Parameters<ReturnType<typeof diffSource>["save"]>[3],
+): string {
+  const lineEndings = source.lineEndingProvenance?.(text) ??
+    text.split("\n").map(() => undefined);
+  return source.save(text, lineEndings, baseline, options);
+}
+
 function bomDiffSession(
   firstLine: "added" | "context" = "added",
   firstContent = "const value = 2;",
@@ -962,7 +973,7 @@ Deno.test("diffedit cov: a diff matching no file on disk yields a read-only sour
     "the reason explains the diff matches nothing",
   );
   assertEquals(
-    src.save("any text"),
+    saveSource(src, "any text"),
     "Nothing to save — this diff matches no file on disk.",
   );
   const parsed = src.parse(DIFF);
@@ -994,7 +1005,7 @@ Deno.test("diffedit cov: save skips a verified hunk whose file was not captured 
   // One hunk body, so save matches it to the (verified) recorded hunk.
   const text = "@@ -1,1 +1,1 @@\n+only line\n";
   assertEquals(
-    src.save(text),
+    saveSource(src, text),
     "Saved 0 files",
     "an uncaptured file is skipped, leaving nothing written",
   );
@@ -1007,7 +1018,7 @@ Deno.test("diffedit cov: save writes the verified hunk's new side back to the ca
     // Edit the added line's content, then save: the new side replaces the file
     // line range the hunk recorded.
     const edited = DIFF.replace("+const y = 2;", "+const y = 2; // saved");
-    const msg = src.save(edited);
+    const msg = saveSource(src, edited);
     assert(msg.startsWith("Saved"), `save reports success: ${msg}`);
     const onDisk = Deno.readTextFileSync(join(root, "m.ts")).split("\n");
     assertEquals(onDisk[1], "const y = 2; // saved");
@@ -1052,7 +1063,10 @@ describe("binary and BOM diff edits", () => {
         expect(edit.lines.size).toBe(0);
         expect(source.editable).toBe(false);
         expect(
-          source.save(diff.replace(testCase.body, `${testCase.body} changed`)),
+          saveSource(
+            source,
+            diff.replace(testCase.body, `${testCase.body} changed`),
+          ),
         ).toBe(
           "Nothing to save — this diff matches no file on disk.",
         );
@@ -1097,7 +1111,7 @@ describe("binary and BOM diff edits", () => {
         `+${bom}const value = 2;`,
         `+${bom}const value = 3;`,
       );
-      expect(source.save(edited, diff)).toBe("Saved 1 file");
+      expect(saveSource(source, edited, diff)).toBe("Saved 1 file");
       expect(Deno.readFileSync(path)).toEqual(
         new Uint8Array([
           0xef,
@@ -1908,6 +1922,109 @@ ${testCase.row}
     }
   });
 
+  it("retains a removed row's ending across repeated saves", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(path, encoder.encode("A\r\nB\nC\r\n"));
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1,3 +1,3 @@
+ A\r
+ B
+-oldC\r
++C\r
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 5;
+      for (
+        const name of [
+          "e",
+          "home",
+          "ctrl-k",
+          "backspace",
+          "f3",
+          "r",
+          "f3",
+        ]
+      ) {
+        session.handleKey({ name });
+      }
+
+      expect(Deno.readFileSync(path)).toEqual(
+        encoder.encode("A\r\nB\nC\r\n"),
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("retains a saved removed row's ending through every revert scope", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(path, encoder.encode("A\r\nC\r\n"));
+      const baseline = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1,3 +1,2 @@
+ A\r
+-B
+-oldC\r
++C\r
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(baseline, parseDiff(baseline)!, ws);
+      const source = diffSource(ws, built.edit);
+      const current = baseline.replace("+C\r", "+CX\r");
+      const lineEndings = [...source.lineEndingProvenance!(baseline)];
+      const lf = { ending: "\n", bodyCarriesCrlfEnding: false } as const;
+      lineEndings[5] = lf;
+
+      for (const scope of ["chunk", "file", "all"] as const) {
+        const reverted = source.revert!(
+          baseline,
+          current,
+          7,
+          scope,
+          lineEndings,
+        )!;
+        expect(reverted.lineEndings?.[5]).toEqual(lf);
+      }
+      const reverted = source.revert!(
+        baseline,
+        current,
+        7,
+        "all",
+        lineEndings,
+      )!;
+      const resurrected = baseline
+        .replace("@@ -1,3 +1,2 @@", "@@ -1,3 +1,3 @@")
+        .replace("-B\n", " B\n");
+      expect(source.save(resurrected, reverted.lineEndings!, baseline)).toBe(
+        "Saved 1 file",
+      );
+      expect(Deno.readFileSync(path)).toEqual(
+        encoder.encode("A\r\nB\nC\r\n"),
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
   it("rebuilds mixed endings after context expansion joins hunks", () => {
     const root = Deno.makeTempDirSync();
     try {
@@ -1933,11 +2050,131 @@ ${testCase.row}
       const expanded = source.expandContext!(diff, diff, 6, false)!;
 
       expect(parseDiff(expanded.text)!.files[0].hunks).toHaveLength(1);
-      expect(source.save(expanded.text.replace("+E", "+EE"))).toBe(
+      expect(saveSource(source, expanded.text.replace("+E", "+EE"))).toBe(
         "Saved 1 file",
       );
       expect(Deno.readFileSync(path)).toEqual(
         encoder.encode("a\r\nB\r\nc\nD\nEE\n"),
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("keeps revealed endings after an unsaved insertion", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(path, encoder.encode("A\r\nB\r\nC\n"));
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1,2 +1,2 @@
+ A\r
+-oldB\r
++B\r
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 4;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "home" });
+      session.handleKey({ name: "enter" });
+      session.handleKey({ name: "ctrl-l" });
+      session.handleKey({ name: "f3" });
+
+      expect(Deno.readFileSync(path)).toEqual(
+        encoder.encode("\r\nA\r\nB\r\nC\n"),
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("requires row provenance when saving a diff directly", () => {
+    const { root, ws, done } = tempWs({ "m.ts": FILE_TEXT });
+    try {
+      const { src } = sourceFor(DIFF, ws);
+      const saveWithoutProvenance = src.save as unknown as (
+        text: string,
+      ) => string;
+
+      expect(() => saveWithoutProvenance(DIFF)).toThrow(
+        "Edited diff row provenance is incomplete.",
+      );
+      expect(Deno.readTextFileSync(join(root, "m.ts"))).toBe(FILE_TEXT);
+    } finally {
+      done();
+    }
+  });
+
+  it("uses carried CRLF transport after a direct character edit", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(path, encoder.encode("new\r\n"));
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1 +1 @@
+-old\r
++new\r
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const source = diffSource(ws, built.edit);
+      const edited = diff.replace("+new\r", "+ne\r");
+
+      expect(
+        source.save(edited, source.lineEndingProvenance!(diff), diff),
+      ).toBe("Saved 1 file");
+      expect(Deno.readFileSync(path)).toEqual(encoder.encode("ne\r\n"));
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("keeps an edited CRLF hunk verified after reparse", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      Deno.writeFileSync(path, new TextEncoder().encode("new\r\n"));
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1 +1 @@
+-old\r
++new\r
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 5;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "end" });
+      session.handleKey({ name: "backspace" });
+      session.handleKey({ name: "escape" });
+
+      expect(JSON.stringify(session.doc.structure)).not.toContain(
+        "workspace differs",
       );
     } finally {
       Deno.removeSync(root, { recursive: true });
@@ -2405,7 +2642,8 @@ ${testCase.row}
       );
       expect(rebuilt.edit.lines.size).toBeGreaterThan(0);
       expect(
-        source.save(
+        saveSource(
+          source,
           expanded.text.replace("+third-new", "+third-edited"),
           expanded.baseline,
         ),
@@ -2513,7 +2751,8 @@ index 1111111..2222222 100644
       expect(expanded.text).toContain(` ${bom}first\n second\n`);
       expect(expanded.text).not.toContain("-first\n");
       expect(
-        source.save(
+        saveSource(
+          source,
           expanded.text.replace("+new", "+edited"),
           expanded.baseline,
         ),
@@ -2664,7 +2903,9 @@ index 1111111..2222222 100644
 
         expect(edit.lines.size).toBe(0);
         expect(source.editable).toBe(false);
-        expect(source.save(diff.replace("value = 2", "value = 3"))).toBe(
+        expect(
+          saveSource(source, diff.replace("value = 2", "value = 3")),
+        ).toBe(
           "Nothing to save — this diff matches no file on disk.",
         );
         expect(Deno.readFileSync(path)).toEqual(testCase.diskBytes);
@@ -2891,7 +3132,7 @@ Deno.test("save: rejects a diff with a different hunk count", () => {
       `@@ -3,0 +4,1 @@\n+const added = true;\n`;
 
     assertThrows(
-      () => src.save(edited, DIFF, { amendCommit: false }),
+      () => saveSource(src, edited, DIFF, { amendCommit: false }),
       Error,
       "The edited diff no longer matches its saved hunk map.",
     );

@@ -428,6 +428,9 @@ export class EditBuffer {
     if (this.lines.length === 1) {
       this.lines[0] = "";
     } else {
+      if (this.row === this.lines.length - 1) {
+        this.lineEndings[this.row - 1] = this.lineEndings[this.row];
+      }
       this.lines.splice(this.row, 1);
       this.lineEndings.splice(this.row, 1);
       if (this.row >= this.lines.length) this.row = this.lines.length - 1;

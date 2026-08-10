@@ -190,6 +190,13 @@ Deno.test("editbuffer: kill-whole-line of the last line keeps no trailing newlin
   d.yank();
   assertEquals(d.text(), "x\ny");
   assert(!d.dirty());
+
+  const crlf = { ending: "\r\n", bodyCarriesCrlfEnding: true } as const;
+  const eof = { ending: "", bodyCarriesCrlfEnding: false } as const;
+  const endings = new EditBuffer("a\nb", [crlf, eof]);
+  endings.row = 1;
+  endings.killWholeLine();
+  assertEquals(endings.lineEndingProvenance(), [eof]);
 });
 
 Deno.test("editbuffer: consecutive kills accrete into one ring entry", () => {

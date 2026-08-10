@@ -33,6 +33,7 @@ import { yamlLanguage } from "./yaml/language.ts";
 import { pythonLanguage } from "./python/language.ts";
 import { binaryLanguage } from "./binary/language.ts";
 import { plainTextLanguage } from "./plain-text/language.ts";
+import type { LineEndingProvenance } from "../editbuffer.ts";
 
 /**
  * Live syntax highlighting that re-highlights only the region an edit touches,
@@ -42,7 +43,10 @@ export interface Highlighter {
   /** The current highlighted lines. */
   readonly lines: readonly Line[];
   /** Apply the new full text and return the updated lines. */
-  update(text: string): readonly Line[];
+  update(
+    text: string,
+    lineEndings?: readonly (LineEndingProvenance | undefined)[],
+  ): readonly Line[];
 }
 
 /** A resolved definition site for a referenced symbol (jump-to-definition). */
