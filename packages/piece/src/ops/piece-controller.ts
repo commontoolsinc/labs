@@ -1936,7 +1936,12 @@ export function assertSuppliedLinkSchemasCompatible(
       // same lens, or a destination's nested `asCell` fails the exact-match
       // comparison against the sanitized source — refusing, among others,
       // every same-schema source update of a piece whose roster array stores
-      // elements with a Cell-typed `profile` field.
+      // elements with a Cell-typed `profile` field. Capability kinds such as
+      // `sqlite` strip here too: the payload proof deliberately ignores them
+      // at nested positions. Capability policing is the OUTER-level rules'
+      // job (a capability source refuses exposure as an ordinary alias
+      // above), and no supported flow places a connector wrapper below a
+      // link payload.
       const proofTargets = preservesDirectHandle
         ? targetContracts
         : targetContracts.map((contract) => ({
