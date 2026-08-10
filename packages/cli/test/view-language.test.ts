@@ -11,11 +11,11 @@ import { join } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 import {
   _internal as languageInternals,
+  decodeLanguageInput,
   diffSemanticsFor,
   distinctLanguages,
   indexLanguagesByName,
   languageForFile,
-  languageForInput,
   languageForName,
   languageForSource,
   languageForTransformedOutput,
@@ -137,22 +137,25 @@ describe("language byte decoding", () => {
     const encode = (text: string) => new TextEncoder().encode(text);
 
     expect(
-      languageForInput("asset.png", encode("printable")),
+      decodeLanguageInput("asset.png", encode("printable")).language,
     ).toBe(binaryLanguage);
     expect(
-      languageForInput("source.ts", new Uint8Array([0x61, 0x00, 0x62])),
+      decodeLanguageInput(
+        "source.ts",
+        new Uint8Array([0x61, 0x00, 0x62]),
+      ).language,
     ).toBe(binaryLanguage);
     expect(
-      languageForInput("notes.txt", new Uint8Array([0xff, 0xfe])),
+      decodeLanguageInput("notes.txt", new Uint8Array([0xff, 0xfe])).language,
     ).toBe(binaryLanguage);
     expect(
-      languageForInput("source.ts", encode("const x = 1;")),
+      decodeLanguageInput("source.ts", encode("const x = 1;")).language,
     ).toBe(typeScriptLanguage);
     expect(
-      languageForInput(
+      decodeLanguageInput(
         undefined,
         encode("#!/usr/bin/env python3\nprint('ok')\n"),
-      ),
+      ).language,
     ).toBe(pythonLanguage);
   });
 

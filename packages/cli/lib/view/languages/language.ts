@@ -4,7 +4,7 @@
  * right language and byte decoder for a file. A language is a stateless
  * strategy object: one instance describes each supported syntax, and plain
  * text handles input that has no recognized filename or shebang. The pager
- * selects the right one for a source ONCE (via {@link languageForInput}) and
+ * selects and decodes a source ONCE (via {@link decodeLanguageInput}) and
  * then dispatches every operation through that object's methods — there is no
  * per-operation branch on the file extension.
  *
@@ -420,17 +420,6 @@ export function metadataMatchesFilename(
 /** The language selected by filename metadata, with plain text as fallback. */
 export function languageForFile(fileName: string | undefined): Language {
   return languageMatchingFilename(fileName) ?? plainTextLanguage;
-}
-
-/**
- * Select a language before decoding input. Content detectors take precedence
- * over implicit filename selection, then a decoded shebang can select syntax.
- */
-export function languageForInput(
-  fileName: string | undefined,
-  bytes: Uint8Array,
-): Language {
-  return decodeLanguageInput(fileName, bytes).language;
 }
 
 /** Select a language from bytes and decode them exactly once. */
