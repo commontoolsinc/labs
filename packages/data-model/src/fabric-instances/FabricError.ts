@@ -269,11 +269,13 @@ export class FabricError extends FabricNativeWrapper<Error>
   setExtra(key: string, value: FabricValue): void {
     this.#assertNotFrozen();
     if (isUnsafeObjectKey(key)) {
-      throw new Error(`Cannot use unsafe key in FabricError extras: ${key}`);
+      throw new Error(
+        `Cannot use unsafe key in \`FabricError\` extras: \`${key}\``,
+      );
     }
     if (FABRIC_ERROR_RESERVED_KEYS.has(key)) {
       throw new Error(
-        `Cannot use fixed-schema slot name in FabricError extras: ${key}`,
+        `Cannot use fixed-schema slot name in \`FabricError\` extras: \`${key}\``,
       );
     }
     this.#extras.set(key, value);
@@ -405,7 +407,7 @@ export class FabricError extends FabricNativeWrapper<Error>
    */
   #assertNotFrozen(): void {
     if (Object.isFrozen(this)) {
-      throw new Error("Cannot modify frozen FabricError");
+      throw new Error("Cannot modify frozen `FabricError`");
     }
   }
 

@@ -85,14 +85,14 @@ export function cloneIfNecessary<T extends FabricValue>(
 
   if (frozen && force) {
     throw new Error(
-      "cloneIfNecessary: { frozen: true, force: true } is invalid " +
+      "`cloneIfNecessary()`: `{ frozen: true, force: true }` is invalid " +
         "(pointless to force-copy an immutable value)",
     );
   }
 
   if (!frozen && !force && deep) {
     throw new Error(
-      "cloneIfNecessary: { frozen: false, force: false, deep: true } is invalid " +
+      "`cloneIfNecessary()`: `{ frozen: false, force: false, deep: true }` is invalid " +
         "(ambiguous: mixed-frozenness trees have no clear shallow-thaw semantics)",
     );
   }
@@ -242,7 +242,9 @@ export function cloneHelper(
     default:
       // All valid `FabricValue` types are handled above.
       throw new Error(
-        `Cannot clone: ${(value as object).constructor?.name ?? typeof value}`,
+        `Cannot clone: \`${
+          (value as object).constructor?.name ?? typeof value
+        }\``,
       );
   }
 }
@@ -451,7 +453,9 @@ export function cloneForMutation<T extends FabricValue>(
         "non-mutable-root",
         -1,
         toDebugKindString(value),
-        `cloneForMutation: cannot mutate ${toDebugKindString(value)} at root ` +
+        `\`cloneForMutation()\`: cannot mutate ${
+          toDebugKindString(value)
+        } at root ` +
           `(empty path)`,
       );
     }
@@ -467,7 +471,9 @@ export function cloneForMutation<T extends FabricValue>(
       "non-container-root",
       -1,
       toDebugKindString(value),
-      `cloneForMutation: cannot descend into ${toDebugKindString(value)} at ` +
+      `\`cloneForMutation()\`: cannot descend into ${
+        toDebugKindString(value)
+      } at ` +
         `root (path has ${path.length} segment${path.length === 1 ? "" : "s"})`,
     );
   }
@@ -504,8 +510,8 @@ export function cloneForMutation<T extends FabricValue>(
         "missing-segment",
         i,
         "undefined",
-        `cloneForMutation: missing path segment ${JSON.stringify(key)} at ` +
-          `index ${i}`,
+        `\`cloneForMutation()\`: missing path segment \`${key}\` at ` +
+          `index \`${i}\``,
       );
     }
 
@@ -557,7 +563,7 @@ export function cloneForMutation<T extends FabricValue>(
   // Unreachable: the loop always returns on its final iteration when
   // `path.length > 0` (handled above for `path.length === 0`).
   /* c8 ignore next 3 */
-  throw new Error("cloneForMutation: unreachable");
+  throw new Error("`cloneForMutation()`: unreachable");
 }
 
 /**

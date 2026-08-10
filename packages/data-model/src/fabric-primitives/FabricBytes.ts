@@ -81,12 +81,12 @@ export class FabricBytes extends BaseFabricPrimitive {
   copyInto(target: Uint8Array, offset = 0, length?: number): number {
     if (offset < 0) {
       throw new RangeError(
-        `copyInto: offset must be non-negative, got ${offset}`,
+        `\`copyInto()\`: offset must be non-negative, got \`${offset}\``,
       );
     }
     if (length !== undefined && length < 0) {
       throw new RangeError(
-        `copyInto: length must be non-negative, got ${length}`,
+        `\`copyInto()\`: length must be non-negative, got \`${length}\``,
       );
     }
     const available = this.#bytes.length - offset;

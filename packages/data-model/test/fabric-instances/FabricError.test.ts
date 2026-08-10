@@ -85,7 +85,7 @@ describe("FabricError", () => {
           () => se.cause = "nope",
         ];
         for (const assign of assignments) {
-          expect(assign).toThrow("Cannot modify frozen FabricError");
+          expect(assign).toThrow("Cannot modify frozen `FabricError`");
         }
 
         expect(se.type).toBe("Error");
@@ -292,7 +292,7 @@ describe("FabricError", () => {
         const fe = FabricError.fromNativeError(new Error("test"));
         for (const key of ["type", "name", "message", "stack", "cause"]) {
           expect(() => fe.setExtra(key, 1)).toThrow(
-            `Cannot use fixed-schema slot name in FabricError extras: ${key}`,
+            `Cannot use fixed-schema slot name in \`FabricError\` extras: \`${key}\``,
           );
         }
       });
@@ -301,7 +301,7 @@ describe("FabricError", () => {
         const fe = FabricError.fromNativeError(new Error("test"));
         for (const key of ["__proto__", "constructor"]) {
           expect(() => fe.setExtra(key, 1)).toThrow(
-            `Cannot use unsafe key in FabricError extras: ${key}`,
+            `Cannot use unsafe key in \`FabricError\` extras: \`${key}\``,
           );
         }
         expect(fe.extraSize).toBe(0);
@@ -313,10 +313,10 @@ describe("FabricError", () => {
         Object.freeze(fe);
 
         expect(() => fe.setExtra("b", 2)).toThrow(
-          "Cannot modify frozen FabricError",
+          "Cannot modify frozen `FabricError`",
         );
         expect(() => fe.deleteExtra("a")).toThrow(
-          "Cannot modify frozen FabricError",
+          "Cannot modify frozen `FabricError`",
         );
         expect(fe.getExtra("a")).toBe(1);
         expect(fe.extraSize).toBe(1);

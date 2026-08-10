@@ -53,7 +53,7 @@ describe("FabricRegExp", () => {
         const original = /abc/g;
         (original as unknown as Record<string, unknown>).custom = 1;
         expect(() => new FabricRegExp(original)).toThrow(
-          "Not representable as a `FabricValue`: RegExp with extra enumerable properties",
+          "Not representable as a `FabricValue`: `RegExp` with extra enumerable properties",
         );
       });
     });
@@ -263,7 +263,7 @@ describe("FabricRegExp", () => {
       const re = /abc/;
       (re as unknown as Record<string, unknown>).custom = 1;
       expect(() => shallowFabricFromNativeValue(re)).toThrow(
-        "Not representable as a `FabricValue`: RegExp with extra enumerable properties",
+        "Not representable as a `FabricValue`: `RegExp` with extra enumerable properties",
       );
     });
   });

@@ -699,7 +699,7 @@ describe("native-conversion", () => {
         const date = new Date(0) as Date & { extra?: number };
         date.extra = 1;
         expect(() => shallowFabricFromNativeValue(date)).toThrow(
-          "Not representable as a `FabricValue`: Date with extra enumerable properties",
+          "Not representable as a `FabricValue`: `Date` with extra enumerable properties",
         );
       });
 

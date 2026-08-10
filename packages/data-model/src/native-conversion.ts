@@ -32,7 +32,7 @@ import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
 function rejectExtraProperties(value: object, typeName: string): void {
   if (Object.keys(value).length > 0) {
     throw new Error(
-      `Not representable as a \`FabricValue\`: ${typeName} with extra ` +
+      `Not representable as a \`FabricValue\`: \`${typeName}\` with extra ` +
         "enumerable properties",
     );
   }
@@ -354,7 +354,7 @@ export function shallowFabricFromNativeValue(
           return value;
         default:
           throw new Error(
-            `Shouldn't happen: Unrecognized type ${typeof value}`,
+            `Shouldn't happen: Unrecognized type \`${typeof value}\``,
           );
       }
     }
@@ -363,9 +363,9 @@ export function shallowFabricFromNativeValue(
       // Unrecognized object types (`Map`, `Set`, class instances, etc.) --
       // not valid `FabricValue`. Death before confusion!
       throw new Error(
-        `Not representable as a \`FabricValue\`: ${
+        `Not representable as a \`FabricValue\`: \`${
           (value as object).constructor?.name ?? typeof value
-        } (not a recognized fabric type)`,
+        }\` (not a recognized fabric type)`,
       );
   }
 }

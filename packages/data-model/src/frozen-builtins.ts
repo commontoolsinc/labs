@@ -45,7 +45,7 @@ const INTERNAL_SET_BUILDER = Symbol("FrozenSetBuilder");
  * attempt.
  */
 function throwFrozenMutation(typeName: string): never {
-  throw new TypeError(`Cannot mutate a ${typeName}`);
+  throw new TypeError(`Cannot mutate a \`${typeName}\``);
 }
 
 /**
@@ -53,7 +53,7 @@ function throwFrozenMutation(typeName: string): never {
  * attempt.
  */
 function throwFinalizedBuilderMutation(typeName: string): never {
-  throw new TypeError(`Cannot mutate a finalized ${typeName} builder`);
+  throw new TypeError(`Cannot mutate a finalized \`${typeName}\` builder`);
 }
 
 /**
@@ -66,7 +66,7 @@ function throwFinalizedBuilderMutation(typeName: string): never {
 function getMapBacking<K, V>(value: object): MapBacking<K, V> {
   const backing = MAP_BACKING.get(value);
   if (!backing) {
-    throw new TypeError("Incompatible FrozenMap receiver");
+    throw new TypeError("Incompatible `FrozenMap` receiver");
   }
   return backing as MapBacking<K, V>;
 }
@@ -79,7 +79,7 @@ function getMapBacking<K, V>(value: object): MapBacking<K, V> {
 function getSetBacking<T>(value: object): SetBacking<T> {
   const backing = SET_BACKING.get(value);
   if (!backing) {
-    throw new TypeError("Incompatible FrozenSet receiver");
+    throw new TypeError("Incompatible `FrozenSet` receiver");
   }
   return backing as SetBacking<T>;
 }
