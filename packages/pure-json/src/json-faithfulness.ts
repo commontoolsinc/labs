@@ -55,7 +55,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 export interface JsonUnfaithfulValue {
   /** RFC 6901 JSON Pointer to the value; `""` is the whole input. */
   readonly pointer: string;
-  /** Why JSON would not carry it, e.g. `NaN (becomes null)`. */
+  /** Why JSON would not carry it, e.g. `NaN` (becomes `null`). */
   readonly reason: string;
 }
 
@@ -73,10 +73,10 @@ function pointerChild(base: string, token: string | number): string {
  * faithfully, or `null` if it would.
  */
 function numberReason(value: number): string | null {
-  if (Number.isNaN(value)) return "NaN (becomes null)";
-  if (value === Infinity) return "Infinity (becomes null)";
-  if (value === -Infinity) return "-Infinity (becomes null)";
-  if (Object.is(value, -0)) return "-0 (loses its sign)";
+  if (Number.isNaN(value)) return "`NaN` (becomes `null`)";
+  if (value === Infinity) return "`Infinity` (becomes `null`)";
+  if (value === -Infinity) return "`-Infinity` (becomes `null`)";
+  if (Object.is(value, -0)) return "`-0` (loses its sign)";
   return null;
 }
 
@@ -103,19 +103,22 @@ function walk(
       return;
     }
     case "bigint":
-      out.push({ pointer, reason: `bigint ${value}n (not representable)` });
+      out.push({
+        pointer,
+        reason: `\`bigint\` value \`${value}n\` (not representable)`,
+      });
       return;
     case "undefined":
       out.push({
         pointer,
-        reason: "undefined (dropped from an object, null in an array)",
+        reason: "`undefined` (dropped from an object, `null` in an array)",
       });
       return;
     case "symbol":
-      out.push({ pointer, reason: "symbol (not representable)" });
+      out.push({ pointer, reason: "`symbol` (not representable)" });
       return;
     case "function":
-      out.push({ pointer, reason: "function (not representable)" });
+      out.push({ pointer, reason: "`function` (not representable)" });
       return;
   }
 
@@ -124,7 +127,10 @@ function walk(
   // than rejects -- is fine; only an actual cycle is reported.
   const obj = value as object;
   if (ancestors.has(obj)) {
-    out.push({ pointer, reason: "circular reference (JSON.stringify throws)" });
+    out.push({
+      pointer,
+      reason: "circular reference (`JSON.stringify()` throws)",
+    });
     return;
   }
   ancestors.add(obj);
@@ -137,7 +143,8 @@ function walk(
     if (toJson !== undefined && typeof toJson.value === "function") {
       out.push({
         pointer,
-        reason: "toJSON method (JSON.stringify would replace this value)",
+        reason:
+          "`toJSON()` method (`JSON.stringify()` would replace this value)",
       });
       return;
     }
@@ -170,7 +177,7 @@ function walk(
         if (!(i in obj)) {
           out.push({
             pointer: pointerChild(pointer, i),
-            reason: "array hole (becomes null)",
+            reason: "array hole (becomes `null`)",
           });
           continue;
         }
@@ -183,7 +190,8 @@ function walk(
       const name = obj.constructor?.name ?? "object";
       out.push({
         pointer,
-        reason: `non-plain object (${name}; JSON.stringify sees no own data)`,
+        reason:
+          `non-plain object (\`${name}\`; \`JSON.stringify()\` sees no own data)`,
       });
       return;
     }
