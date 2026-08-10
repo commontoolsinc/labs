@@ -52,7 +52,7 @@ class DenoHasher extends BaseIncrementalHasher {
         );
       }
       default: {
-        throw new Error(`Unknown encoding: ${encoding}`);
+        throw new Error(`Unknown encoding: \`${encoding}\``);
       }
     }
   }
