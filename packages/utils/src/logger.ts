@@ -655,7 +655,8 @@ export class Logger {
     // Skip reserved key name "total" to prevent corruption of breakdown totals
     if (key === "total") {
       console.warn(
-        `[Logger] Message key "total" is reserved and cannot be used. Please use a different key.`,
+        `[Logger] Message key \`total\` is reserved and cannot be used. ` +
+          `Please use a different key.`,
       );
       return;
     }
