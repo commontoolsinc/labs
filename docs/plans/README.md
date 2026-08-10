@@ -67,6 +67,13 @@ a record: archive it to `docs/history/plans/` following the procedure in
   work on verbs across both arcs that produced it: what a verb declares, what a
   caller may ask for, and what comes back. Read it for order; read the designs
   it points at for reasoning.
+- [What a declared verb result buys](declared-verb-results-case.md) is the case
+  for the one decision the verbs plan waits behind: whether a verb's declared
+  result reaches the runtime now, on an interim module field, or only when the
+  Fabric-types stream supplies a durable one. It argues timing rather than
+  principle — every consumer is already built and already working for tools, and
+  the interim road commits nothing durable, so replacing it later is an
+  assignment rather than a migration.
 - [The CLI surface — implementation plan](cli-surface-implementation.md) builds
   the rest of the command surface: positional addresses, the honest top-level
   names, deprecating the spellings they replace, and merging the commands that
