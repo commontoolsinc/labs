@@ -154,7 +154,7 @@ Deno.test("cf view --language aliases override a piped virtual filename", async 
 Deno.test("cf view --language binary renders piped bytes as a hex dump", async () => {
   const { code, stdout } = await cf(
     "view --plain --color never --language binary",
-    new Uint8Array([0x41, 0x00, 0xff]),
+    { stdin: new Uint8Array([0x41, 0x00, 0xff]) },
   );
 
   assertEquals(code, 0);
@@ -174,7 +174,7 @@ Deno.test("cf view detects binary content and binary virtual filenames", async (
       ],
     ] as const
   ) {
-    const { code, stdout } = await cf(command, input);
+    const { code, stdout } = await cf(command, { stdin: input });
     assertEquals(code, 0);
     assert(stdout[0].startsWith("00000000"), stdout.join("\n"));
   }
@@ -225,7 +225,7 @@ Deno.test("cf view --plain detects and streams a large unknown binary file", asy
 Deno.test("cf view explicit text decoding overrides a binary virtual filename", async () => {
   const { code, stdout } = await cf(
     "view --plain --color never --language plain-text --filename asset.png",
-    "PNG\n",
+    { stdin: "PNG\n" },
   );
 
   assertEquals(code, 0);
@@ -235,7 +235,7 @@ Deno.test("cf view explicit text decoding overrides a binary virtual filename", 
 Deno.test("cf view reports bytes that the selected text decoder rejects", async () => {
   const { code, stderr } = await cf(
     "view --plain --language plain-text",
-    new Uint8Array([0xff]),
+    { stdin: new Uint8Array([0xff]) },
   );
 
   assertEquals(code, 1);
