@@ -5,6 +5,8 @@
  * conditional branch is asserted on its real output.
  */
 import { assert, assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 import {
   fileSource,
   readonlySource,
@@ -81,23 +83,24 @@ Deno.test("fileSource.revert: keeps an in-range cursor unchanged", () => {
   assertEquals(reverted, { text: original, cursorLine: 1 });
 });
 
-Deno.test("fileSource.save: a read-only language leaves the file unchanged", () => {
-  const dir = Deno.makeTempDirSync();
-  const path = `${dir}/payload.data`;
-  const bytes = new Uint8Array([0x41, 0x00, 0xff]);
-  try {
-    Deno.writeFileSync(path, bytes);
-    const source = fileSource(path, binaryLanguage);
+describe("fileSource.save() with a read-only language", () => {
+  it("leaves the file unchanged", () => {
+    const dir = Deno.makeTempDirSync();
+    const path = `${dir}/payload.data`;
+    const bytes = new Uint8Array([0x41, 0x00, 0xff]);
+    try {
+      Deno.writeFileSync(path, bytes);
+      const source = fileSource(path, binaryLanguage);
 
-    assertEquals(source.editable, false);
-    assertEquals(
-      source.save("replacement"),
-      "Binary data is shown as a hex dump and cannot be edited.",
-    );
-    assertEquals(Deno.readFileSync(path), bytes);
-  } finally {
-    Deno.removeSync(dir, { recursive: true });
-  }
+      expect(source.editable).toBe(false);
+      expect(source.save("replacement")).toBe(
+        "Binary data is shown as a hex dump and cannot be edited.",
+      );
+      expect(Deno.readFileSync(path)).toEqual(bytes);
+    } finally {
+      Deno.removeSync(dir, { recursive: true });
+    }
+  });
 });
 
 Deno.test("readonlySource.parse: parses text into a Document without a path", () => {

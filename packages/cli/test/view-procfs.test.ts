@@ -1,4 +1,5 @@
 import { assert } from "@std/assert";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -6,6 +7,8 @@ import { realFileGateway } from "../lib/view/filegateway.ts";
 import { loadViewInput } from "../lib/view/loadinput.ts";
 
 const PROCFS_PATH = "/proc/self/cmdline";
+const CLI_PACKAGE_DIR = join(import.meta.dirname!, "..");
+const REPO_ROOT = join(CLI_PACKAGE_DIR, "..", "..");
 
 describe("view-procfs", () => {
   const linuxIt = Deno.build.os === "linux" ? it : it.skip;
@@ -47,10 +50,13 @@ describe("view-procfs", () => {
 
   linuxIt("renders a zero-sized procfs file through `cf view`", async () => {
     expect(Deno.statSync(PROCFS_PATH).size).toBe(0);
-    const result = await new Deno.Command(Deno.execPath(), {
-      cwd: join(import.meta.dirname!, ".."),
-      args: [
+    const result = await runDenoCommandWithTemporaryLock({
+      root: REPO_ROOT,
+      cwd: CLI_PACKAGE_DIR,
+      args: (lockPath) => [
         "run",
+        `--lock=${lockPath}`,
+        "--frozen=true",
         "--allow-all",
         "./mod.ts",
         "view",
@@ -59,9 +65,7 @@ describe("view-procfs", () => {
         "never",
         PROCFS_PATH,
       ],
-      stdout: "piped",
-      stderr: "piped",
-    }).output();
+    });
 
     const decoder = new TextDecoder();
     expect(result.code, decoder.decode(result.stderr)).toBe(0);

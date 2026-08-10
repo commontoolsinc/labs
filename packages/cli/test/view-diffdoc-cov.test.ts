@@ -1,5 +1,7 @@
-import { assert, assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
 import { join } from "@std/path";
+import { describe, it } from "@std/testing/bdd";
 import type { DiffLine, DiffModel } from "../lib/view/diff.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import {
@@ -48,138 +50,133 @@ Deno.test("realWorkspace: read of a bounded directory returns null (catch branch
   }
 });
 
-Deno.test("realWorkspace: binary files do not become editable source text", () => {
-  const root = Deno.makeTempDirSync();
-  try {
-    Deno.mkdirSync(join(root, ".git"));
-    const namedBinary = join(root, "asset.png");
-    Deno.writeTextFileSync(namedBinary, "printable bytes without a NUL\n");
-    const invalidBinary = join(root, "unknown.data");
-    Deno.writeFileSync(invalidBinary, new Uint8Array([0x61, 0xff, 0x62]));
-    const nulBinary = join(root, "nul.data");
-    Deno.writeFileSync(nulBinary, new Uint8Array([0x61, 0x00, 0x62]));
+describe("decoded workspace input", () => {
+  it("keeps binary files out of editable source text", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const namedBinary = join(root, "asset.png");
+      Deno.writeTextFileSync(namedBinary, "printable bytes without a NUL\n");
+      const invalidBinary = join(root, "unknown.data");
+      Deno.writeFileSync(invalidBinary, new Uint8Array([0x61, 0xff, 0x62]));
+      const nulBinary = join(root, "nul.data");
+      Deno.writeFileSync(nulBinary, new Uint8Array([0x61, 0x00, 0x62]));
 
-    const ws = realWorkspace(root);
-    assertEquals(ws.read(namedBinary), null);
-    assertEquals(ws.read(invalidBinary), null);
-    assertEquals(ws.read(nulBinary), null);
-  } finally {
-    Deno.removeSync(root, { recursive: true });
-  }
-});
+      const ws = realWorkspace(root);
+      expect(ws.read(namedBinary)).toBe(null);
+      expect(ws.read(invalidBinary)).toBe(null);
+      expect(ws.read(nulBinary)).toBe(null);
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
 
-Deno.test("realWorkspace: text writes retain the encoding observed on read", () => {
-  const root = Deno.makeTempDirSync();
-  try {
-    Deno.mkdirSync(join(root, ".git"));
-    const path = join(root, "value.json");
-    Deno.writeFileSync(
-      path,
-      new Uint8Array([
-        0xef,
-        0xbb,
-        0xbf,
-        ...new TextEncoder().encode('{"value": 1}\n'),
-      ]),
-    );
+  it("retains the observed encoding when writing text", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.json");
+      Deno.writeFileSync(
+        path,
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...new TextEncoder().encode('{"value": 1}\n'),
+        ]),
+      );
 
-    const ws = realWorkspace(root);
-    assertEquals(ws.read(path), '{"value": 1}\n');
-    ws.write!(path, '{"value": 2}\n');
-    assertEquals(
-      Deno.readFileSync(path),
-      new Uint8Array([
-        0xef,
-        0xbb,
-        0xbf,
-        ...new TextEncoder().encode('{"value": 2}\n'),
-      ]),
-    );
-  } finally {
-    Deno.removeSync(root, { recursive: true });
-  }
-});
+      const ws = realWorkspace(root);
+      expect(ws.read(path)).toBe('{"value": 1}\n');
+      ws.write!(path, '{"value": 2}\n');
+      expect(Deno.readFileSync(path)).toEqual(
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...new TextEncoder().encode('{"value": 2}\n'),
+        ]),
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
 
-Deno.test("realWorkspace: an uncached write preserves the file's UTF-8 BOM", () => {
-  const root = Deno.makeTempDirSync();
-  try {
-    Deno.mkdirSync(join(root, ".git"));
-    const path = join(root, "value.json");
-    Deno.writeFileSync(
-      path,
-      new Uint8Array([
-        0xef,
-        0xbb,
-        0xbf,
-        ...new TextEncoder().encode('{"value": 1}\n'),
-      ]),
-    );
+  it("preserves a UTF-8 BOM during an uncached write", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.json");
+      Deno.writeFileSync(
+        path,
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...new TextEncoder().encode('{"value": 1}\n'),
+        ]),
+      );
 
-    realWorkspace(root).write!(path, '{"value": 2}\n');
+      realWorkspace(root).write!(path, '{"value": 2}\n');
 
-    assertEquals(
-      Deno.readFileSync(path),
-      new Uint8Array([
-        0xef,
-        0xbb,
-        0xbf,
-        ...new TextEncoder().encode('{"value": 2}\n'),
-      ]),
-    );
-  } finally {
-    Deno.removeSync(root, { recursive: true });
-  }
-});
+      expect(Deno.readFileSync(path)).toEqual(
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...new TextEncoder().encode('{"value": 2}\n'),
+        ]),
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
 
-Deno.test("realWorkspace: writes reject paths outside the workspace", () => {
-  const outer = Deno.makeTempDirSync();
-  const root = join(outer, "repo");
-  const outside = join(outer, "outside.ts");
-  try {
-    Deno.mkdirSync(root);
-    Deno.mkdirSync(join(root, ".git"));
-    Deno.writeTextFileSync(outside, "sentinel\n");
-    assertThrows(
-      () => realWorkspace(root).write!(outside, "replacement\n"),
-      Error,
-      "Cannot write outside the workspace",
-    );
-    assertEquals(Deno.readTextFileSync(outside), "sentinel\n");
-  } finally {
-    Deno.removeSync(outer, { recursive: true });
-  }
-});
+  it("rejects writes outside the workspace", () => {
+    const outer = Deno.makeTempDirSync();
+    const root = join(outer, "repo");
+    const outside = join(outer, "outside.ts");
+    try {
+      Deno.mkdirSync(root);
+      Deno.mkdirSync(join(root, ".git"));
+      Deno.writeTextFileSync(outside, "sentinel\n");
+      expect(() => realWorkspace(root).write!(outside, "replacement\n"))
+        .toThrow(
+          "Cannot write outside the workspace",
+        );
+      expect(Deno.readTextFileSync(outside)).toBe("sentinel\n");
+    } finally {
+      Deno.removeSync(outer, { recursive: true });
+    }
+  });
 
-Deno.test("realWorkspace: writes reject named and detected binary files", () => {
-  const root = Deno.makeTempDirSync();
-  try {
-    Deno.mkdirSync(join(root, ".git"));
-    const named = join(root, "asset.png");
-    Deno.writeTextFileSync(named, "printable bytes\n");
-    const detected = join(root, "asset.data");
-    Deno.writeFileSync(detected, new Uint8Array([0x41, 0x00, 0x42]));
-    const ws = realWorkspace(root);
+  it("rejects writes to named and detected binary files", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const named = join(root, "asset.png");
+      Deno.writeTextFileSync(named, "printable bytes\n");
+      const detected = join(root, "asset.data");
+      Deno.writeFileSync(detected, new Uint8Array([0x41, 0x00, 0x42]));
+      const ws = realWorkspace(root);
 
-    assertThrows(
-      () => ws.write!(named, "replacement"),
-      Error,
-      "Binary data is shown as a hex dump",
-    );
-    assertThrows(
-      () => ws.write!(detected, "replacement"),
-      Error,
-      "Binary data is shown as a hex dump",
-    );
-  } finally {
-    Deno.removeSync(root, { recursive: true });
-  }
-});
+      expect(() => ws.write!(named, "replacement")).toThrow(
+        "Binary data is shown as a hex dump",
+      );
+      expect(() => ws.write!(detected, "replacement")).toThrow(
+        "Binary data is shown as a hex dump",
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
 
-Deno.test("Git batch parsing skips objects that are not blobs", () => {
-  const object = "a".repeat(40);
-  const output = new TextEncoder().encode(`${object} tree 3\nabc\n`);
+  it("skips Git batch objects that are not blobs", () => {
+    const object = "a".repeat(40);
+    const output = new TextEncoder().encode(`${object} tree 3\nabc\n`);
 
-  assertEquals(_internal.parseGitBatchOutput([object], output), new Map());
+    expect(_internal.parseGitBatchOutput([object], output)).toEqual(new Map());
+  });
 });
 
 Deno.test("realWorkspace: resolve of a bounded directory falls through to null", () => {

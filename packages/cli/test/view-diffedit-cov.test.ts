@@ -9,7 +9,9 @@
  * read-only (no-disk) source, and the defensive guards in `save`.
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
+import { expect } from "@std/expect";
 import { join } from "@std/path";
+import { describe, it } from "@std/testing/bdd";
 import { parseDiff } from "../lib/view/diff.ts";
 import {
   buildDiffDocument,
@@ -695,57 +697,58 @@ Deno.test("diffedit cov: deferred parsing preserves optional blob readers", () =
   }
 });
 
-Deno.test("diffedit cov: deferred parsing forwards blob BOM validation", () => {
-  const file = [
-    "const header = 2;",
-    "const value = 0;",
-    "hidden;",
-    "next;",
-    "",
-  ].join("\n");
-  const oldFile = [
-    "const header = 1;",
-    "const value = `",
-    "hidden",
-    "old",
-    "`;",
-    "",
-  ].join("\n");
-  const diff = [
-    "diff --git a/template.ts b/template.ts",
-    "index 1111111..2222222 100644",
-    "--- a/template.ts",
-    "+++ b/template.ts",
-    "@@ -1 +1 @@",
-    "-const header = 1;",
-    "+const header = 2;",
-    "@@ -4 +4 @@",
-    "-old",
-    "+next;",
-    "",
-  ].join("\n");
-  const { root, done } = tempWs({ "template.ts": file });
-  try {
-    const ws: DiffWorkspace = {
-      resolve: (path) => join(root, path),
-      read: (path) => Deno.readTextFileSync(path),
-      hasUtf8Bom: () => false,
-      readBlob: () => oldFile,
-      blobHasUtf8Bom: () => true,
-    };
-    const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
-    const source = diffSource(ws, built.edit);
+describe("deferred diff parsing", () => {
+  it("forwards blob BOM validation", () => {
+    const file = [
+      "const header = 2;",
+      "const value = 0;",
+      "hidden;",
+      "next;",
+      "",
+    ].join("\n");
+    const oldFile = [
+      "const header = 1;",
+      "const value = `",
+      "hidden",
+      "old",
+      "`;",
+      "",
+    ].join("\n");
+    const diff = [
+      "diff --git a/template.ts b/template.ts",
+      "index 1111111..2222222 100644",
+      "--- a/template.ts",
+      "+++ b/template.ts",
+      "@@ -1 +1 @@",
+      "-const header = 1;",
+      "+const header = 2;",
+      "@@ -4 +4 @@",
+      "-old",
+      "+next;",
+      "",
+    ].join("\n");
+    const { root, done } = tempWs({ "template.ts": file });
+    try {
+      const ws: DiffWorkspace = {
+        resolve: (path) => join(root, path),
+        read: (path) => Deno.readTextFileSync(path),
+        hasUtf8Bom: () => false,
+        readBlob: () => oldFile,
+        blobHasUtf8Bom: () => true,
+      };
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const source = diffSource(ws, built.edit);
 
-    const reparsed = source.parse(diff.replace("+next;", "+after;"));
-    const removed = reparsed.lines.find((line) => line.text === "-old");
+      const reparsed = source.parse(diff.replace("+next;", "+after;"));
+      const removed = reparsed.lines.find((line) => line.text === "-old");
 
-    assertEquals(
-      removed?.spans.find((span) => span.text === "old")?.cls,
-      "identifier",
-    );
-  } finally {
-    done();
-  }
+      expect(removed?.spans.find((span) => span.text === "old")?.cls).toBe(
+        "identifier",
+      );
+    } finally {
+      done();
+    }
+  });
 });
 
 Deno.test("diffedit cov: the highlighter recolours a Markdown body line via the +++ header scan", () => {
@@ -939,181 +942,184 @@ Deno.test("diffedit cov: save writes the verified hunk's new side back to the ca
   }
 });
 
-Deno.test("diffedit cov: known and detected binary files stay read-only", () => {
-  const root = Deno.makeTempDirSync();
-  try {
-    Deno.mkdirSync(join(root, ".git"));
-    const cases = [
-      {
-        path: "asset.png",
-        bytes: new TextEncoder().encode("new image bytes\n"),
-        body: "new image bytes",
-      },
-      {
-        path: "payload.data",
-        bytes: new Uint8Array([0x61, 0xff, 0x62, 0x0a]),
-        body: "a�b",
-      },
-    ];
-    for (const testCase of cases) {
-      const absPath = join(root, testCase.path);
-      Deno.writeFileSync(absPath, testCase.bytes);
-      const diff = `diff --git a/${testCase.path} b/${testCase.path}
+describe("binary and BOM diff edits", () => {
+  it("keeps known and detected binary files read-only", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const cases = [
+        {
+          path: "asset.png",
+          bytes: new TextEncoder().encode("new image bytes\n"),
+          body: "new image bytes",
+        },
+        {
+          path: "payload.data",
+          bytes: new Uint8Array([0x61, 0xff, 0x62, 0x0a]),
+          body: "a�b",
+        },
+      ];
+      for (const testCase of cases) {
+        const absPath = join(root, testCase.path);
+        Deno.writeFileSync(absPath, testCase.bytes);
+        const diff = `diff --git a/${testCase.path} b/${testCase.path}
 --- a/${testCase.path}
 +++ b/${testCase.path}
 @@ -1 +1 @@
 -old
 +${testCase.body}
 `;
-      const ws = realWorkspace(root);
-      const { edit } = buildDiffDocument(diff, parseDiff(diff)!, ws);
-      const source = diffSource(ws, edit);
+        const ws = realWorkspace(root);
+        const { edit } = buildDiffDocument(diff, parseDiff(diff)!, ws);
+        const source = diffSource(ws, edit);
 
-      assertEquals(edit.lines.size, 0);
-      assertEquals(source.editable, false);
-      assertEquals(
-        source.save(diff.replace(testCase.body, `${testCase.body} changed`)),
-        "Nothing to save — this diff matches no file on disk.",
-      );
-      assertEquals(Deno.readFileSync(absPath), testCase.bytes);
+        expect(edit.lines.size).toBe(0);
+        expect(source.editable).toBe(false);
+        expect(
+          source.save(diff.replace(testCase.body, `${testCase.body} changed`)),
+        ).toBe(
+          "Nothing to save — this diff matches no file on disk.",
+        );
+        expect(Deno.readFileSync(absPath)).toEqual(testCase.bytes);
+      }
+    } finally {
+      Deno.removeSync(root, { recursive: true });
     }
-  } finally {
-    Deno.removeSync(root, { recursive: true });
-  }
-});
+  });
 
-Deno.test("diffedit cov: a UTF-8 BOM is preserved once when a diff is saved", () => {
-  const root = Deno.makeTempDirSync();
-  try {
-    Deno.mkdirSync(join(root, ".git"));
-    const path = join(root, "value.ts");
-    Deno.writeFileSync(
-      path,
-      new Uint8Array([
-        0xef,
-        0xbb,
-        0xbf,
-        ...new TextEncoder().encode("const value = 2;\n"),
-      ]),
-    );
-    const bom = "\uFEFF";
-    const diff = `diff --git a/value.ts b/value.ts
+  it("preserves one UTF-8 BOM when saving a diff", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      Deno.writeFileSync(
+        path,
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...new TextEncoder().encode("const value = 2;\n"),
+        ]),
+      );
+      const bom = "\uFEFF";
+      const diff = `diff --git a/value.ts b/value.ts
 --- a/value.ts
 +++ b/value.ts
 @@ -1 +1 @@
 -${bom}const value = 1;
 +${bom}const value = 2;
 `;
-    const ws = realWorkspace(root);
-    const { edit, maps } = buildDiffDocument(diff, parseDiff(diff)!, ws);
-    const source = diffSource(ws, edit);
-    assertEquals(source.editable, true);
-    const firstContent = diff.indexOf("const value = 2;");
-    assertEquals(maps.toFile(firstContent), { path, offset: 0 });
-    assertEquals(maps.fromFile(path, 0), firstContent);
+      const ws = realWorkspace(root);
+      const { edit, maps } = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const source = diffSource(ws, edit);
+      expect(source.editable).toBe(true);
+      const firstContent = diff.indexOf("const value = 2;");
+      expect(maps.toFile(firstContent)).toEqual({ path, offset: 0 });
+      expect(maps.fromFile(path, 0)).toBe(firstContent);
 
-    const edited = diff.replace(
-      `+${bom}const value = 2;`,
-      `+${bom}const value = 3;`,
-    );
-    assertEquals(source.save(edited, diff), "Saved 1 file");
-    assertEquals(
-      Deno.readFileSync(path),
-      new Uint8Array([
-        0xef,
-        0xbb,
-        0xbf,
-        ...new TextEncoder().encode("const value = 3;\n"),
-      ]),
-    );
-  } finally {
-    Deno.removeSync(root, { recursive: true });
-  }
-});
-
-Deno.test("diffedit cov: BOM state must match before a hunk is editable", () => {
-  const root = Deno.makeTempDirSync();
-  try {
-    Deno.mkdirSync(join(root, ".git"));
-    const path = join(root, "value.ts");
-    const bom = "\uFEFF";
-    const encoder = new TextEncoder();
-    const cases = [
-      {
-        diskBytes: encoder.encode("const value = 2;\n"),
-        oldDiffBom: "",
-        newDiffBom: bom,
-      },
-      {
-        diskBytes: new Uint8Array([
+      const edited = diff.replace(
+        `+${bom}const value = 2;`,
+        `+${bom}const value = 3;`,
+      );
+      expect(source.save(edited, diff)).toBe("Saved 1 file");
+      expect(Deno.readFileSync(path)).toEqual(
+        new Uint8Array([
           0xef,
           0xbb,
           0xbf,
-          ...encoder.encode("const value = 2;\n"),
+          ...new TextEncoder().encode("const value = 3;\n"),
         ]),
-        oldDiffBom: bom,
-        newDiffBom: "",
-      },
-    ];
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
 
-    for (const testCase of cases) {
-      Deno.writeFileSync(path, testCase.diskBytes);
-      const diff = `diff --git a/value.ts b/value.ts
+  it("requires matching BOM state before making a hunk editable", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const bom = "\uFEFF";
+      const encoder = new TextEncoder();
+      const cases = [
+        {
+          diskBytes: encoder.encode("const value = 2;\n"),
+          oldDiffBom: "",
+          newDiffBom: bom,
+        },
+        {
+          diskBytes: new Uint8Array([
+            0xef,
+            0xbb,
+            0xbf,
+            ...encoder.encode("const value = 2;\n"),
+          ]),
+          oldDiffBom: bom,
+          newDiffBom: "",
+        },
+      ];
+
+      for (const testCase of cases) {
+        Deno.writeFileSync(path, testCase.diskBytes);
+        const diff = `diff --git a/value.ts b/value.ts
 --- a/value.ts
 +++ b/value.ts
 @@ -1 +1 @@
 -${testCase.oldDiffBom}const value = 1;
 +${testCase.newDiffBom}const value = 2;
 `;
-      const ws = realWorkspace(root);
-      const { edit } = buildDiffDocument(diff, parseDiff(diff)!, ws);
-      const source = diffSource(ws, edit);
+        const ws = realWorkspace(root);
+        const { edit } = buildDiffDocument(diff, parseDiff(diff)!, ws);
+        const source = diffSource(ws, edit);
 
-      assertEquals(edit.lines.size, 0);
-      assertEquals(source.editable, false);
-      assertEquals(
-        source.save(diff.replace("value = 2", "value = 3")),
-        "Nothing to save — this diff matches no file on disk.",
-      );
-      assertEquals(Deno.readFileSync(path), testCase.diskBytes);
-    }
+        expect(edit.lines.size).toBe(0);
+        expect(source.editable).toBe(false);
+        expect(source.save(diff.replace("value = 2", "value = 3"))).toBe(
+          "Nothing to save — this diff matches no file on disk.",
+        );
+        expect(Deno.readFileSync(path)).toEqual(testCase.diskBytes);
+      }
 
-    Deno.writeFileSync(path, new Uint8Array([0xef, 0xbb, 0xbf]));
-    const emptyDiff = `diff --git a/value.ts b/value.ts
+      Deno.writeFileSync(path, new Uint8Array([0xef, 0xbb, 0xbf]));
+      const emptyDiff = `diff --git a/value.ts b/value.ts
 --- a/value.ts
 +++ b/value.ts
 @@ -1 +0,0 @@
 -old
 `;
-    const ws = realWorkspace(root);
-    const { edit } = buildDiffDocument(
-      emptyDiff,
-      parseDiff(emptyDiff)!,
-      ws,
-    );
-    const source = diffSource(ws, edit);
-    assertEquals(edit.lines.size, 0);
-    assertEquals(source.editable, false);
-    assertEquals(Deno.readFileSync(path), new Uint8Array([0xef, 0xbb, 0xbf]));
+      const ws = realWorkspace(root);
+      const { edit } = buildDiffDocument(
+        emptyDiff,
+        parseDiff(emptyDiff)!,
+        ws,
+      );
+      const source = diffSource(ws, edit);
+      expect(edit.lines.size).toBe(0);
+      expect(source.editable).toBe(false);
+      expect(Deno.readFileSync(path)).toEqual(
+        new Uint8Array([0xef, 0xbb, 0xbf]),
+      );
 
-    const matchingBomOnlyDiff = `diff --git a/value.ts b/value.ts
+      const matchingBomOnlyDiff = `diff --git a/value.ts b/value.ts
 --- a/value.ts
 +++ b/value.ts
 @@ -0,0 +1 @@
 +${bom}
 \ No newline at end of file
 `;
-    const matchingWs = realWorkspace(root);
-    const matching = buildDiffDocument(
-      matchingBomOnlyDiff,
-      parseDiff(matchingBomOnlyDiff)!,
-      matchingWs,
-    );
-    assertEquals(matching.edit.lines.size, 1);
-    assertEquals(diffSource(matchingWs, matching.edit).editable, true);
-  } finally {
-    Deno.removeSync(root, { recursive: true });
-  }
+      const matchingWs = realWorkspace(root);
+      const matching = buildDiffDocument(
+        matchingBomOnlyDiff,
+        parseDiff(matchingBomOnlyDiff)!,
+        matchingWs,
+      );
+      expect(matching.edit.lines.size).toBe(1);
+      expect(diffSource(matchingWs, matching.edit).editable).toBe(true);
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
 });
 
 // --- editableStart: position/verified-aware line editability -----------------

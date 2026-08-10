@@ -5,6 +5,8 @@
  * stands in for the filesystem so this stays pure.
  */
 import { assert, assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 import { parseDocument } from "./view-helpers.ts";
 import { Session } from "../lib/view/session.ts";
 import { buildView } from "../lib/view/mod.ts";
@@ -142,34 +144,36 @@ Deno.test("filepicker: opening a file from a subdirectory works", () => {
   assertEquals(s.doc.text, FILES["/work/sub/c.ts"]);
 });
 
-Deno.test("filepicker: opening a binary source applies its rendered default", () => {
-  const opened = buildView(
-    new Uint8Array([0x41, 0x00, 0xff]),
-    "/work/payload.png",
-  );
-  const files: FileGateway = {
-    cwd: () => "/work",
-    list: () => [{ name: "payload.png", isDir: false }],
-    open: () => ({ source: opened.editSource, text: opened.doc.text }),
-    join: (dir, segment) => normalize(`${dir}/${segment}`),
-    parent: (path) => normalize(`${path}/..`),
-    base: (path) => path.split("/").filter(Boolean).pop() ?? path,
-  };
-  const path = "/work/a.ts";
-  const s = new Session(
-    parseDocument(FILES[path], path),
-    { color: false, showLineNumbers: false },
-    { width: 80, height: 20 },
-    undefined,
-    fakeSource(path),
-    files,
-  );
+describe("filepicker binary input", () => {
+  it("applies the rendered default when opening a binary source", () => {
+    const opened = buildView(
+      new Uint8Array([0x41, 0x00, 0xff]),
+      "/work/payload.png",
+    );
+    const files: FileGateway = {
+      cwd: () => "/work",
+      list: () => [{ name: "payload.png", isDir: false }],
+      open: () => ({ source: opened.editSource, text: opened.doc.text }),
+      join: (dir, segment) => normalize(`${dir}/${segment}`),
+      parent: (path) => normalize(`${path}/..`),
+      base: (path) => path.split("/").filter(Boolean).pop() ?? path,
+    };
+    const path = "/work/a.ts";
+    const s = new Session(
+      parseDocument(FILES[path], path),
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 20 },
+      undefined,
+      fakeSource(path),
+      files,
+    );
 
-  openPicker(s);
-  press(s, "down", "enter");
+    openPicker(s);
+    press(s, "down", "enter");
 
-  assert(s.doc.lines[0].text.endsWith("|A␀␦|"));
-  assertEquals(s.doc.lines.at(-1)?.text, "00000003");
+    assert(s.doc.lines[0].text.endsWith("|A␀␦|"));
+    expect(s.doc.lines.at(-1)?.text).toBe("00000003");
+  });
 });
 
 Deno.test("filepicker: the .. entry steps back up", () => {

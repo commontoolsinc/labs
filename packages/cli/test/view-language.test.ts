@@ -6,7 +6,9 @@
  * from the languages present, scoped to each one's files.
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
+import { expect } from "@std/expect";
 import { join } from "@std/path";
+import { describe, it } from "@std/testing/bdd";
 import {
   _internal as languageInternals,
   diffSemanticsFor,
@@ -50,8 +52,8 @@ Deno.test("languageForFile: named files resolve and missing names use plain text
   assertEquals(languageForFile("deno.jsonc").id, "json");
   assertEquals(languageForFile("workflow.yml").id, "yaml");
   assertEquals(languageForFile("script.py").id, "python");
-  assertEquals(languageForFile("asset.png").id, "binary");
-  assertEquals(languageForFile("payload.bin").id, "binary");
+  expect(languageForFile("asset.png").id).toBe("binary");
+  expect(languageForFile("payload.bin").id).toBe("binary");
   assertEquals(languageForFile("notes.xyz").id, "plain-text");
   assertEquals(languageForFile("LICENSE").id, "plain-text");
   assertEquals(languageForFile(undefined).id, "plain-text");
@@ -94,13 +96,13 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
   assertEquals(languageForName("yml"), yamlLanguage);
   assertEquals(languageForName("python"), pythonLanguage);
   assertEquals(languageForName("py"), pythonLanguage);
-  assertEquals(languageForName("binary"), binaryLanguage);
-  assertEquals(languageForName("bytes"), binaryLanguage);
+  expect(languageForName("binary")).toBe(binaryLanguage);
+  expect(languageForName("bytes")).toBe(binaryLanguage);
   assertEquals(languageForName("plain-text"), plainTextLanguage);
   assertEquals(languageForName("plaintext"), plainTextLanguage);
   assertEquals(languageForName("TypeScript"), undefined);
   assertEquals(languageForName("ruby"), undefined);
-  assertEquals(languageIds(), [
+  expect(languageIds()).toEqual([
     "typescript",
     "markdown",
     "json",
@@ -109,7 +111,7 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
     "binary",
     "plain-text",
   ]);
-  assertEquals(languageNames(), [
+  expect(languageNames()).toEqual([
     "typescript",
     "ts",
     "javascript",
@@ -130,76 +132,72 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
   ]);
 });
 
-Deno.test("languageForInput: binary bytes precede implicit text selection", () => {
-  const encode = (text: string) => new TextEncoder().encode(text);
+describe("language byte decoding", () => {
+  it("selects binary bytes before implicit text", () => {
+    const encode = (text: string) => new TextEncoder().encode(text);
 
-  assertEquals(
-    languageForInput("asset.png", encode("printable")),
-    binaryLanguage,
-  );
-  assertEquals(
-    languageForInput("source.ts", new Uint8Array([0x61, 0x00, 0x62])),
-    binaryLanguage,
-  );
-  assertEquals(
-    languageForInput("notes.txt", new Uint8Array([0xff, 0xfe])),
-    binaryLanguage,
-  );
-  assertEquals(
-    languageForInput("source.ts", encode("const x = 1;")),
-    typeScriptLanguage,
-  );
-  assertEquals(
-    languageForInput(
-      undefined,
-      encode("#!/usr/bin/env python3\nprint('ok')\n"),
-    ),
-    pythonLanguage,
-  );
-});
+    expect(
+      languageForInput("asset.png", encode("printable")),
+    ).toBe(binaryLanguage);
+    expect(
+      languageForInput("source.ts", new Uint8Array([0x61, 0x00, 0x62])),
+    ).toBe(binaryLanguage);
+    expect(
+      languageForInput("notes.txt", new Uint8Array([0xff, 0xfe])),
+    ).toBe(binaryLanguage);
+    expect(
+      languageForInput("source.ts", encode("const x = 1;")),
+    ).toBe(typeScriptLanguage);
+    expect(
+      languageForInput(
+        undefined,
+        encode("#!/usr/bin/env python3\nprint('ok')\n"),
+      ),
+    ).toBe(pythonLanguage);
+  });
 
-Deno.test("decodeLanguageInput: decoder failures use the byte-language fallback", () => {
-  const bytes = new TextEncoder().encode("valid UTF-8");
-  const rejectedDecoder: LanguageDecoder = {
-    ...plainTextLanguage.input.decoder,
-    decode: () => {
-      throw new TypeError("selected decoder rejected input");
-    },
-  };
-  const selectedLanguage = {
-    ...plainTextLanguage,
-    id: "selected-text",
-    input: { kind: "text", decoder: rejectedDecoder } as const,
-  };
-  const byteFallback = { ...binaryLanguage, id: "byte-fallback" };
+  it("uses the byte-language fallback after a decoder failure", () => {
+    const bytes = new TextEncoder().encode("valid UTF-8");
+    const rejectedDecoder: LanguageDecoder = {
+      ...plainTextLanguage.input.decoder,
+      decode: () => {
+        throw new TypeError("selected decoder rejected input");
+      },
+    };
+    const selectedLanguage = {
+      ...plainTextLanguage,
+      id: "selected-text",
+      input: { kind: "text", decoder: rejectedDecoder } as const,
+    };
+    const byteFallback = { ...binaryLanguage, id: "byte-fallback" };
 
-  const decoded = languageInternals.decodeTextInput(
-    typeScriptLanguage,
-    bytes,
-    byteFallback,
-  );
-  assertEquals(decoded.language, typeScriptLanguage);
-  assertEquals(decoded.source.text, "valid UTF-8");
-  assertEquals(decoded.source.encode(decoded.source.text), bytes);
+    const decoded = languageInternals.decodeTextInput(
+      typeScriptLanguage,
+      bytes,
+      byteFallback,
+    );
+    expect(decoded.language).toBe(typeScriptLanguage);
+    expect(decoded.source.text).toBe("valid UTF-8");
+    expect(decoded.source.encode(decoded.source.text)).toEqual(bytes);
 
-  const fallback = languageInternals.decodeTextInput(
-    selectedLanguage,
-    bytes,
-    byteFallback,
-  );
-  assertEquals(fallback.language, byteFallback);
-  assertEquals(fallback.source.encode(fallback.source.text), bytes);
+    const fallback = languageInternals.decodeTextInput(
+      selectedLanguage,
+      bytes,
+      byteFallback,
+    );
+    expect(fallback.language).toBe(byteFallback);
+    expect(fallback.source.encode(fallback.source.text)).toEqual(bytes);
 
-  assertThrows(
-    () =>
+    expect(() =>
       languageInternals.decodeTextInput(
         selectedLanguage,
         bytes,
         undefined,
-      ),
-    TypeError,
-    "No byte language available",
-  );
+      )
+    ).toThrow(
+      "No byte language available",
+    );
+  });
 });
 
 Deno.test("language names reject ambiguous identifiers and aliases", () => {
@@ -453,8 +451,7 @@ Deno.test("distinctLanguages: dedupes in first-seen order", () => {
     "LICENSE",
     undefined,
   ]);
-  assertEquals(
-    languages.map((l) => l.id),
+  expect(languages.map((l) => l.id)).toEqual(
     [
       "typescript",
       "markdown",
