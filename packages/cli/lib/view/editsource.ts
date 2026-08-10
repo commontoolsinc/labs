@@ -10,6 +10,7 @@
  * `diffedit.ts`) maps the single editable text back onto the files it touches.
  */
 import type { Document, Line, ViewMode } from "./model.ts";
+import type { DiffHunk, DiffModel } from "./diff.ts";
 import type {
   Highlighter,
   Language,
@@ -166,6 +167,9 @@ export interface EditableSource {
    * map to fixed file lines: edits stay within a line, past the diff marker. A
    * plain file has no policy and is edited freely. */
   readonly policy?: EditPolicy;
+  /** The last editable column on a line when the source gives a trailing
+   * carriage return meaning beyond ordinary CRLF transport. */
+  logicalEnd?(lines: readonly string[], row: number): number;
   /** When changed `git show` output contains the HEAD commit, the commit a save
    * would amend — for the confirmation prompt. Null when no such change is
    * pending. Absent on sources that never edit a commit. */
@@ -194,9 +198,6 @@ export interface EditPolicy {
    * Takes the whole set of lines because editability depends on the row's
    * region. */
   editStart(lines: readonly string[], row: number): number | null;
-  /** The column before newline transport on a source line. This differs from
-   * the stored line length when a split-on-LF buffer retains a CRLF `\r`. */
-  logicalEnd?(lines: readonly string[], row: number): number;
   /** A source-specific explanation for refusing an edit at `row`, or null to
    * use the editor's general explanation. */
   notEditableMessage?(
@@ -211,6 +212,11 @@ export interface EditPolicy {
     lines: readonly string[],
     row: number,
   ): "hunk" | "removed" | "message" | null;
+  /** The parsed diff hunk containing a body row. */
+  hunkAt?(
+    lines: readonly string[],
+    row: number,
+  ): { model: DiffModel; hunk: DiffHunk } | null;
   /** Whether the workspace file for the hunk at `row` uses a UTF-8 BOM. */
   hasUtf8Bom?(lines: readonly string[], row: number): boolean | undefined;
   /** The marker a newly inserted line is given inside a hunk (a diff adds an

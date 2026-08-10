@@ -731,6 +731,12 @@ function loadOldFile(
     };
   }
   const fileName = file.oldPath ?? file.newPath;
+  const inferredOldHasUtf8Bom = fileSideHasUtf8Bom(
+    file,
+    "old",
+    rawLines,
+    modelLines,
+  ) ?? newFile?.hasUtf8Bom;
   if (
     file.oldObject && validGitObject(file.oldObject) &&
     (oldBlobs !== undefined || ws.readBlob)
@@ -747,7 +753,9 @@ function loadOldFile(
         blobText,
         fileName,
         language,
-        blobText === null ? undefined : ws.blobHasUtf8Bom?.(file.oldObject),
+        blobText === null
+          ? undefined
+          : ws.blobHasUtf8Bom?.(file.oldObject) ?? inferredOldHasUtf8Bom,
       );
       cache?.set(blobKey, blob);
     }
@@ -777,17 +785,11 @@ function loadOldFile(
     modelLines,
     newFile?.hasUtf8Bom,
   );
-  const oldHasUtf8Bom = fileSideHasUtf8Bom(
-    file,
-    "old",
-    rawLines,
-    modelLines,
-  ) ?? newFile?.hasUtf8Bom;
   const entry = highlightedFile(
     fileText,
     fileName,
     language,
-    oldHasUtf8Bom,
+    inferredOldHasUtf8Bom,
   );
   cache?.set(key, entry);
   return entry;

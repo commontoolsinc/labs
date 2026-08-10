@@ -154,6 +154,30 @@ Deno.test("editor: backspace deletes and Enter splits the line", () => {
   assertEquals(s.view().cursor, { line: 1, col: 0 });
 });
 
+Deno.test("editor: edits text before CRLF transport but can edit a final carriage return", () => {
+  const encoder = new TextEncoder();
+  const cases = [
+    { input: "new\r\n", expected: "ne\r\n" },
+    { input: "new\r", expected: "new" },
+  ];
+  for (const testCase of cases) {
+    const path = Deno.makeTempFileSync({ suffix: ".ts" });
+    try {
+      Deno.writeFileSync(path, encoder.encode(testCase.input));
+      const source = fileSource(path);
+      const session = editSession(testCase.input, source);
+      press(session, "e", "end", "backspace", "f3");
+
+      assertEquals(
+        Deno.readFileSync(path),
+        encoder.encode(testCase.expected),
+      );
+    } finally {
+      Deno.removeSync(path);
+    }
+  }
+});
+
 Deno.test("editor: Ctrl-K kills to end of line, Ctrl-Y yanks it back", () => {
   const { src } = memSource();
   const s = editSession("hello world\n", src);

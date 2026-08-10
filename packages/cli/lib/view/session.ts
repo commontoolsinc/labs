@@ -2607,6 +2607,8 @@ export class Session {
     row: number,
   ): { model: DiffModel; hunk: DiffHunk } | null {
     if (!this.buffer) return null;
+    const policyLookup = this.source?.policy?.hunkAt;
+    if (policyLookup) return policyLookup(this.buffer.lines, row);
     const model = parseDiff(this.buffer.text());
     if (!model) return null;
     for (const file of model.files) {
@@ -2700,8 +2702,11 @@ export class Session {
   private logicalLineEnd(): number {
     const b = this.buffer!;
     const physicalEnd = b.currentLineLength();
-    const end = this.source?.policy?.logicalEnd?.(b.lines, b.row) ??
-      physicalEnd;
+    const line = b.lines[b.row] ?? "";
+    const ordinaryEnd = line.endsWith("\r") && b.row < b.lines.length - 1
+      ? physicalEnd - 1
+      : physicalEnd;
+    const end = this.source?.logicalEnd?.(b.lines, b.row) ?? ordinaryEnd;
     return clamp(end, 0, physicalEnd);
   }
 
