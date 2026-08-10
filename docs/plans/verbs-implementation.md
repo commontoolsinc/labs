@@ -248,6 +248,14 @@ already contains, and the duplicate-commit conflicts look like real ones.
 form that works. The cheapest tell that a fork point was wrong: the branch
 suddenly touches files it has no business in.
 
+**Archiving a document does not protect it from a rebase.** Git follows the
+rename, so a branch that edited the live document applies its edit inside the
+frozen copy — with no conflict, which is what makes it dangerous. Three separate
+branches did this the day the predecessors were archived, and every one of them
+rebased cleanly. After archiving anything, check whether an open branch still
+edits it; the edit belongs wherever the live successor keeps that kind of
+content, not in the record.
+
 **`deno fmt` does not check anything under `docs/`.** The directory is in the
 formatter's exclude list, so a passing `deno fmt --check` after a documentation
 edit says nothing about that edit. The gates that do apply are `check-docs` for
