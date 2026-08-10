@@ -34,7 +34,7 @@ now an ordinary `PerSpace` cell — can all be copied to another piece via the C
 ## The live pieces
 
 Two hosts run the poll, at different paces. **These are deployment pointers, not
-stable identifiers — current as of 2026-08-04.** A piece is tied to one
+stable identifiers — current as of 2026-08-10.** A piece is tied to one
 space/server and can be reset, wedged, or lost; if one 404s, `inspect` fails, or
 it stops responding, re-establish it (see "Recovering" below) and update this
 block.
@@ -46,8 +46,8 @@ pattern source. Iterate here.
 
 ```
 space:  team-lunch
-piece:  fid1:bRHO0S5yN6Zuyct8MWgmIJgYpKkj5d2yiCCjNW1QulQ
-url:    https://rapids.saga-castor.ts.net/team-lunch/fid1:bRHO0S5yN6Zuyct8MWgmIJgYpKkj5d2yiCCjNW1QulQ
+piece:  fid1:_SMX10_gPNl3FQldFenAT_vrpPnaZs7qUNXUAb_5c1c
+url:    https://rapids.saga-castor.ts.net/team-lunch/fid1:_SMX10_gPNl3FQldFenAT_vrpPnaZs7qUNXUAb_5c1c
 ```
 
 > **Build-compatibility note:** the generated-art auto-persist trigger attaches
@@ -114,7 +114,7 @@ url:    https://toolshed.saga-castor.ts.net/team-lunch/fid1:zJT0lRy-Hd6p_ZsK_h6C
 ```bash
 export CF_API_URL=https://rapids.saga-castor.ts.net/   # fast-moving instance; estuary.saga-castor.ts.net holds the populated poll; http://localhost:8000 for local dev
 export CF_IDENTITY=./your-identity.key
-PIECE=fid1:bRHO0S5yN6Zuyct8MWgmIJgYpKkj5d2yiCCjNW1QulQ    # rapids; current as of 2026-08-03
+PIECE=fid1:_SMX10_gPNl3FQldFenAT_vrpPnaZs7qUNXUAb_5c1c    # rapids; current as of 2026-08-10
 SPACE=team-lunch
 ```
 
