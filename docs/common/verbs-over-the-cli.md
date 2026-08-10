@@ -104,6 +104,36 @@ Anything the *pattern* resolved comes back too. A verb that stamps a write time
 or derives structured authorship from the event returns those in its record;
 the caller could not have computed them.
 
+### Asking for a smaller result
+
+A verb decides what it returns; the caller decides how much of it to look at.
+`--filter`, `--select`, and `--schema` — the same three flags `cf piece get`
+takes, with the same grammar — shape the `result` before it reaches stdout, and
+go before the callable name:
+
+```bash
+cf piece call --piece <topic> --select comment.writtenAt addComment \
+  '{"body":"first","agentName":"Sol"}'
+```
+
+```json
+{
+  "invocation": "0f4c…",
+  "status": "settled",
+  "result": { "comment": { "writtenAt": "2026-08-07T09:15:27Z" } }
+}
+```
+
+This shapes a result that already exists rather than deciding what travels: the
+readback has the whole receipt in hand before the selection runs. So a
+value-less verb keeps reporting no `result` at all — there is nothing for a
+selection to be about — and `--no-wait`, which never reads the receipt back,
+refuses all three flags. `--show-links` composes with a projection, because a
+projection leaves every surviving path where it was; it does not compose with
+`--filter`, which moves the positions a link names.
+
+`packages/cli/README.md` has the grammar and the supported schema subset.
+
 ### Retries are safe, and cheap to reason about
 
 `--invocation <id>` makes a call idempotent. The id is your own word for the
@@ -281,6 +311,12 @@ one, so a chain of references annotates each hop exactly once. The walk stops at
 any non-plain object: a live runtime object reached through a result gets its
 own entry and nothing below it, because its properties belong to the runtime
 rather than to the result.
+
+The links describe whatever result you were handed, so a projection composes
+with them: a path `--select` or `--schema` dropped simply gets no entry.
+`--filter` is refused alongside `--show-links` — a predicate leaves the elements
+it keeps at positions that are no longer the ones they came from, and every
+address below a filtered array would name the wrong element.
 
 A pattern should not mint identifier fields to make any of this easier —
 rendering identity is the client's job, and a pattern-authored fid is a copy
