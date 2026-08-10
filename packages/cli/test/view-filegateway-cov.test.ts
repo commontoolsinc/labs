@@ -215,7 +215,9 @@ Deno.test("realFileGateway.open: spools and restores large text files", async ()
         if (candidate !== spoolPath) return file;
         return {
           writeSync: (data: Uint8Array) =>
-            file.writeSync(data.subarray(0, Math.min(2, data.length))),
+            file.writeSync(
+              data.subarray(0, Math.max(1, data.length - 1)),
+            ),
           readSync: (data: Uint8Array) => file.readSync(data),
           seekSync: (offset: number, whence: Deno.SeekMode) =>
             file.seekSync(offset, whence),
@@ -318,10 +320,17 @@ Deno.test("file gateway spool writes reject a writer that makes no progress", as
         candidate,
         options,
       ) => {
-        if (candidate !== spoolPath) return openSync(candidate, options);
+        const file = openSync(candidate, options);
+        if (candidate !== spoolPath) return file;
         return {
           writeSync: () => 0,
-          close: () => closeCalls++,
+          readSync: (data: Uint8Array) => file.readSync(data),
+          seekSync: (offset: number, whence: Deno.SeekMode) =>
+            file.seekSync(offset, whence),
+          close: () => {
+            closeCalls++;
+            file.close();
+          },
         } as unknown as Deno.FsFile;
       };
 

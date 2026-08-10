@@ -212,7 +212,9 @@ Deno.test("large text input is restored from its temporary spool", async () => {
       if (path !== spoolPath) return file;
       return {
         write: (data: Uint8Array) =>
-          file.write(data.subarray(0, Math.min(2, data.length))),
+          file.write(
+            data.subarray(0, Math.max(1, data.length - 1)),
+          ),
         read: (data: Uint8Array) => file.read(data),
         seek: (offset: number, whence: Deno.SeekMode) =>
           file.seek(offset, whence),

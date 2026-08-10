@@ -166,10 +166,15 @@ Deno.test("decodeLanguageInput: decoder failures use the byte-language fallback"
       throw new TypeError("selected decoder rejected input");
     },
   };
+  const selectedLanguage = {
+    ...plainTextLanguage,
+    id: "selected-text",
+    input: { kind: "text", decoder: rejectedDecoder } as const,
+  };
   const byteFallback = { ...binaryLanguage, id: "byte-fallback" };
 
   const fallback = languageInternals.decodeTextInput(
-    rejectedDecoder,
+    selectedLanguage,
     bytes,
     byteFallback,
   );
@@ -177,7 +182,12 @@ Deno.test("decodeLanguageInput: decoder failures use the byte-language fallback"
   assertEquals(fallback.source.encode(fallback.source.text), bytes);
 
   assertThrows(
-    () => languageInternals.decodeTextInput(rejectedDecoder, bytes, undefined),
+    () =>
+      languageInternals.decodeTextInput(
+        selectedLanguage,
+        bytes,
+        undefined,
+      ),
     TypeError,
     "No byte language available",
   );
