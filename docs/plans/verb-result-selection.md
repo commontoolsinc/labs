@@ -452,9 +452,7 @@ first condition arrives on its own.
 
 ## Documentation owed
 
-- [Verbs over the CLI](../common/verbs-over-the-cli.md) is **already stale**:
-  its `plainResultReceipts` note describes a default that has since flipped
-  (`packages/runner/src/runtime.ts` sets it `??= true`). It documents the
+- [Verbs over the CLI](../common/verbs-over-the-cli.md) documents the
   `--show-links` shape, and its examples teach hand-written invocation ids —
   which the namespace question may make actively harmful advice.
 - `packages/cli/README.md` §"Output Conventions" is the source these notes
