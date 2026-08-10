@@ -36,6 +36,7 @@ import {
   setPatternSource,
   type SpaceCellContents,
 } from "@commonfabric/runner";
+import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 import type { CellScope } from "@commonfabric/api";
 import { cfcAtom } from "@commonfabric/api/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
@@ -2171,10 +2172,17 @@ async function getCellByIdOrPiece(
   options?: { start?: boolean; targetScope?: CellScope },
 ): Promise<{ cell: Cell<unknown>; isPiece: boolean }> {
   const start = options?.start ?? true;
+  // The registry check below compares id STRINGS, and a registered piece
+  // reports its own id as the bare tagged hash, so an `of:`-schemed address
+  // has to be reduced to that one spelling before it can match. Reducing it
+  // out here also keeps a kinded address's refusal out of the catch below,
+  // which would otherwise report it as a missing cell. Messages keep `cellId`,
+  // so they echo the address the caller actually gave.
+  const hashString = hashStringForEntityAddress(cellId);
   try {
     // Try to get as a piece first
     const piece = await pieces.getPieceCell(
-      cellId,
+      hashString,
       start,
       undefined,
       options?.targetScope,
@@ -2196,7 +2204,7 @@ async function getCellByIdOrPiece(
     // cell ID
     try {
       const cell = await pieces.getCellById(
-        entityIdFrom(cellId),
+        entityIdFrom(hashString),
         [],
         undefined,
         options?.targetScope,
@@ -2209,7 +2217,7 @@ async function getCellByIdOrPiece(
         const id = pieceId(piece);
         // An entry without a piece ID cannot establish registration.
         if (!id) return false;
-        return id === cellId;
+        return id === hashString;
       });
       return { cell, isPiece: isRegisteredPiece };
     } catch (_) {
