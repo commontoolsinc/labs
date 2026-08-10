@@ -8,9 +8,9 @@ import {
   registerDependentEdge,
   setNodeProvisionalDemand,
   unregisterDependentEdge,
-} from "../src/scheduler/dependency-graph.ts";
-import { NodeRegistry } from "../src/scheduler/node-record.ts";
-import type { Action } from "../src/scheduler/types.ts";
+} from "../../src/scheduler/dependency-graph.ts";
+import { NodeRegistry } from "../../src/scheduler/node-record.ts";
+import type { Action } from "../../src/scheduler/types.ts";
 
 /**
  * A liveness graph with a materializer set that a test can toggle, which the

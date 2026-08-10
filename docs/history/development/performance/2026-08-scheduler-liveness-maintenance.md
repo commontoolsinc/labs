@@ -112,7 +112,7 @@ re-seeding from roots inside plus live readers outside is cycle-safe and
 diamond-accurate.
 
 `recomputeLiveRefs` remains as the definition those updates implement, and as
-the reference `packages/runner/test/dependency-graph.test.ts` checks them
+the reference `packages/runner/test/scheduler/dependency-graph.test.ts` checks them
 against after every mutation in a randomized sequence.
 
 ## Notes for a future pass
