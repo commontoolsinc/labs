@@ -2061,6 +2061,53 @@ ${testCase.row}
     }
   });
 
+  it("keeps mixed-transport hunks separate when expansion makes them touch", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(path, encoder.encode("a\nB\nc\nD\r\nE\r\n"));
+      const diff = [
+        "diff --git a/value.ts b/value.ts",
+        "--- a/value.ts",
+        "+++ b/value.ts",
+        "@@ -1,2 +1,2 @@",
+        " a",
+        "-oldB",
+        "+B",
+      ].join("\n") + "\n" + [
+        "@@ -4,2 +4,2 @@",
+        " D",
+        "-oldE",
+        "+E",
+        "",
+      ].join("\r\n");
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 12 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 10;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "end" });
+      session.handleKey({ name: "Z", char: "Z" });
+      session.handleKey({ name: "ctrl-l" });
+      session.handleKey({ name: "f3" });
+
+      expect(parseDiff(session.doc.text)!.files[0].hunks).toHaveLength(2);
+      expect(Deno.readFileSync(path)).toEqual(
+        encoder.encode("a\nB\nc\nD\r\nEZ\r\n"),
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
   it("keeps revealed endings after an unsaved insertion", () => {
     const root = Deno.makeTempDirSync();
     try {
@@ -2137,6 +2184,73 @@ ${testCase.row}
       );
     } finally {
       Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("keeps literal CR provenance on resurrected expansion pairs", () => {
+    const encoder = new TextEncoder();
+    for (
+      const testCase of [
+        {
+          workspace: "A\r\nX\r\r\n",
+          expected: "AZ\r\nX\r\r\nX\r\r\n",
+        },
+        {
+          workspace: "A\r\nX\r",
+          expected: "AZ\r\nX\r\r\nX\r",
+        },
+      ]
+    ) {
+      const root = Deno.makeTempDirSync();
+      try {
+        Deno.mkdirSync(join(root, ".git"));
+        const path = join(root, "value.ts");
+        Deno.writeFileSync(
+          path,
+          new Uint8Array([
+            0xef,
+            0xbb,
+            0xbf,
+            ...encoder.encode(testCase.workspace),
+          ]),
+        );
+        const diff = [
+          "diff --git a/value.ts b/value.ts",
+          "--- a/value.ts",
+          "+++ b/value.ts",
+          "@@ -0,0 +1 @@",
+          "+\uFEFFA",
+          "",
+        ].join("\r\n");
+        const ws = realWorkspace(root);
+        const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+        const session = new Session(
+          built.doc,
+          { color: false, showLineNumbers: false },
+          { width: 80, height: 10 },
+          undefined,
+          diffSource(ws, built.edit),
+        );
+        session.top = 4;
+        session.handleKey({ name: "e" });
+        session.handleKey({ name: "end" });
+        session.handleKey({ name: "Z", char: "Z" });
+        session.handleKey({ name: "ctrl-l" });
+        session.handleKey({ name: "down" });
+        session.handleKey({ name: "R" });
+        session.handleKey({ name: "f3" });
+
+        expect(Deno.readFileSync(path)).toEqual(
+          new Uint8Array([
+            0xef,
+            0xbb,
+            0xbf,
+            ...encoder.encode(testCase.expected),
+          ]),
+        );
+      } finally {
+        Deno.removeSync(root, { recursive: true });
+      }
     }
   });
 

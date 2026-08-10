@@ -1049,7 +1049,7 @@ function expansionBodyLines(
   });
 }
 
-/** Attach each revealed workspace ending to its new-side diff row. */
+/** Attach each revealed workspace ending to its generated diff rows. */
 function expansionLineEndingProvenance(
   lines: readonly string[],
   revealed: readonly FileLineEnding[],
@@ -1057,8 +1057,11 @@ function expansionLineEndingProvenance(
 ): Array<LineEndingProvenance | undefined> {
   let newSideIndex = 0;
   return lines.map((line) => {
-    if (line[0] !== " " && line[0] !== "+") return undefined;
-    const ending = revealed[newSideIndex++];
+    if (line[0] !== " " && line[0] !== "+" && line[0] !== "-") {
+      return undefined;
+    }
+    const ending = revealed[newSideIndex];
+    if (line[0] !== "-") newSideIndex++;
     if (ending === undefined) return undefined;
     return {
       ending,
@@ -1086,9 +1089,11 @@ function appendNoNewlineMarker(lines: string[], crlfDiff: boolean): void {
 
 /** Take the `@@` header off the second of two hunks and give its counts to the
  * first, leaving one hunk where there were two. Null when the text does not hold
- * them back to back — anything between the first's last line and the second's
- * header would land inside the joined body. The counts come from the parsed
- * hunks rather than a re-read of the header line, which the parse already read. */
+ * them back to back with the same line transport. Anything between the first's
+ * last line and the second's header would land inside the joined body. Mixed
+ * transports need separate headers so each body retains its exact bytes. The
+ * counts come from the parsed hunks rather than a re-read of the header line,
+ * which the parse already read. */
 function dropHeaderBetween(
   text: string,
   first: number,
@@ -1104,6 +1109,8 @@ function dropHeaderBetween(
   // The first hunk's trailing context (its enclosing function) carries over.
   const lines = text.split("\n");
   const headerEnding = lines[a.headerLine]?.endsWith("\r") ? "\r" : "";
+  const nextHeaderEnding = lines[b.headerLine]?.endsWith("\r") ? "\r" : "";
+  if (headerEnding !== nextHeaderEnding) return null;
   const header = `@@ -${a.oldStart},${a.oldCount + b.oldCount} +${a.newStart},${
     a.newCount + b.newCount
   } @@${a.context ? ` ${a.context}` : ""}${headerEnding}`;
