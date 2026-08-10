@@ -1,7 +1,7 @@
-import { BigIntCodec } from "@/codec-common/BigIntCodec.ts";
-import { SpecialNumberCodec } from "@/codec-common/SpecialNumberCodec.ts";
-import { SymbolCodec } from "@/codec-common/SymbolCodec.ts";
-import { UndefinedCodec } from "@/codec-common/UndefinedCodec.ts";
+import { BigIntCodec } from "./BigIntCodec.ts";
+import { SpecialNumberCodec } from "./SpecialNumberCodec.ts";
+import { SymbolCodec } from "./SymbolCodec.ts";
+import { UndefinedCodec } from "./UndefinedCodec.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
 
 /**

@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 
 import { extractHashtags } from "../src/hashtags.ts";
 
-describe("extractHashtags", () => {
+describe("extractHashtags()", () => {
   it("extracts tags lowercased without the leading #", () => {
     expect(extractHashtags("A #Note about #capture")).toEqual([
       "note",
