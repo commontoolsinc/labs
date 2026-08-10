@@ -1418,7 +1418,12 @@ export function selectSourceSchema(
       purpose,
     );
   }
-  const selectedRequired = required?.filter((key) => key in properties);
+  // A rejected position holds nothing to require. Keeping it required makes
+  // the object unsatisfiable, which reads as an absent value for the whole
+  // selection rather than for the one position that declined to be read.
+  const selectedRequired = required?.filter((key) =>
+    key in properties && properties[key] !== false
+  );
   return {
     ...metadata,
     properties,
