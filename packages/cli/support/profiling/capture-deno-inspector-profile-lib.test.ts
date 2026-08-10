@@ -76,6 +76,9 @@ class FakeCelestial {
   runtimeEnableError: unknown;
   startError: unknown;
   startPromise: Promise<void> | undefined;
+  profilerEnabled = false;
+  profilerEnableGate: PromiseWithResolvers<void> | undefined;
+  profilerEnableCalled = Promise.withResolvers<void>();
   profile: unknown = { nodes: [] };
   samplingIntervals: number[] = [];
   #listeners = new Map<
@@ -110,7 +113,11 @@ class FakeCelestial {
   Profiler = {
     enable: () => {
       this.calls.push("Profiler.enable");
-      return Promise.resolve();
+      this.profilerEnableCalled.resolve();
+      const gate = this.profilerEnableGate?.promise ?? Promise.resolve();
+      return gate.then(() => {
+        this.profilerEnabled = true;
+      });
     },
     setSamplingInterval: (params: { interval: number }) => {
       this.samplingIntervals.push(params.interval);
@@ -118,6 +125,10 @@ class FakeCelestial {
     },
     start: () => {
       this.starts += 1;
+      // What the inspector answers a `Profiler.start` it has not enabled yet.
+      if (!this.profilerEnabled) {
+        return Promise.reject(new Error("Profiler is not enabled (-32000)"));
+      }
       if (this.startError) return Promise.reject(this.startError);
       return this.startPromise ?? Promise.resolve();
     },
@@ -945,6 +956,74 @@ describe("capture-deno-inspector-profile helpers", () => {
       assertEquals(celestial.starts, 1);
       assertEquals(celestial.stops, 1);
       assertEquals(logs.includes("profile: profile stop matched"), true);
+    });
+  });
+
+  it("starts from a marker that arrives before the profiler is enabled", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      const gate = Promise.withResolvers<void>();
+      celestial.profilerEnableGate = gate;
+      const logs: string[] = [];
+      const started = Promise.withResolvers<void>();
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${tmpDir}/profile.cpuprofile`,
+          "--summary-pattern=(?!)",
+          "--profile-start-pattern=profile start",
+          "--profile-stop-pattern=profile stop",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({ celestial, logs, started }),
+      );
+
+      // `Runtime.enable` has already answered, so console events reach the
+      // capture while `Profiler.enable` is still outstanding.
+      await celestial.profilerEnableCalled.promise;
+      celestial.dispatchConsole({ value: "profile start" });
+      assertEquals(celestial.starts, 0);
+
+      gate.resolve();
+      await started.promise;
+      celestial.dispatchConsole({ value: "profile stop" });
+
+      assertEquals(await done, 0);
+      assertEquals(celestial.starts, 1);
+      assertEquals(celestial.stops, 1);
+    });
+  });
+
+  it("keeps a stop seen before the start marker from ending the profile", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      const gate = Promise.withResolvers<void>();
+      celestial.profilerEnableGate = gate;
+      const logs: string[] = [];
+      const started = Promise.withResolvers<void>();
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${tmpDir}/profile.cpuprofile`,
+          "--summary-pattern=(?!)",
+          "--profile-start-pattern=profile start",
+          "--profile-stop-pattern=profile stop",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({ celestial, logs, started }),
+      );
+
+      // A stop that precedes the start marker is stale, and the deferred
+      // start carries that answer rather than the default.
+      await celestial.profilerEnableCalled.promise;
+      celestial.dispatchConsole({ value: "profile stop" });
+      celestial.dispatchConsole({ value: "profile start" });
+
+      gate.resolve();
+      await started.promise;
+      celestial.dispatchConsole({ value: "profile stop" });
+
+      assertEquals(await done, 0);
+      assertEquals(celestial.starts, 1);
+      assertEquals(celestial.stops, 1);
     });
   });
 
