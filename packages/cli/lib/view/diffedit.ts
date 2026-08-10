@@ -1470,9 +1470,10 @@ function editableStart(
   lineText: string,
   row: number,
 ): number | null {
-  return editableHunkRegion(model, saveHunks, lineText, row) === "hunk"
-    ? 1
-    : null;
+  if (editableHunkRegion(model, saveHunks, lineText, row) !== "hunk") {
+    return null;
+  }
+  return model?.lines[row]?.newLine === 0 && lineText[1] === "\uFEFF" ? 2 : 1;
 }
 
 /**

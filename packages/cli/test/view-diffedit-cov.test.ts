@@ -25,6 +25,7 @@ import {
   diffSource,
 } from "../lib/view/diffedit.ts";
 import { typeScriptLanguage } from "../lib/view/languages/typescript/language.ts";
+import { Session } from "../lib/view/session.ts";
 
 /** A workspace backed by a real temp dir. */
 function tempWs(
@@ -1030,6 +1031,59 @@ describe("binary and BOM diff edits", () => {
           ...new TextEncoder().encode("const value = 3;\n"),
         ]),
       );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("keeps edits after a decoded BOM and writes it once", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const encoder = new TextEncoder();
+      const expected = new Uint8Array([
+        0xef,
+        0xbb,
+        0xbf,
+        ...encoder.encode("Xconst value = 2;\n"),
+      ]);
+      Deno.writeFileSync(
+        path,
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...encoder.encode("const value = 2;\n"),
+        ]),
+      );
+      const bom = "\uFEFF";
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1 +1 @@
+-${bom}const value = 1;
++${bom}const value = 2;
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const source = diffSource(ws, built.edit);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        source,
+      );
+      session.top = 5;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "home" });
+      session.handleKey({ name: "X", char: "X" });
+
+      expect(session.doc.lines[5].text).toBe(`+${bom}Xconst value = 2;`);
+      session.handleKey({ name: "f3" });
+      expect(session.view().message).toBe("Saved 1 file");
+      expect(Deno.readFileSync(path)).toEqual(expected);
     } finally {
       Deno.removeSync(root, { recursive: true });
     }
