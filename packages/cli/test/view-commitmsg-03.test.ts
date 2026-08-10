@@ -120,25 +120,29 @@ Deno.test("realGit: rejects an insertion at a hidden deletion boundary", async (
   }
 });
 
-Deno.test("realGit: handles an index path beginning with a stage prefix", async () => {
-  const root = await Deno.makeTempDir();
-  try {
-    await git(root, ["init", "-q"]);
-    await git(root, ["config", "user.email", "t@t.test"]);
-    await git(root, ["config", "user.name", "Test"]);
-    const path = `${root}/1:f.txt`;
-    await Deno.writeTextFile(path, "original\n");
-    await git(root, ["add", "--", "1:f.txt"]);
-    await git(root, ["commit", "-q", "-m", "original"]);
-    const runner = realGit(root);
-    const head = runner.headSha();
-    assert(head, "repository has a HEAD commit");
+Deno.test({
+  name: "realGit: handles an index path beginning with a stage prefix",
+  ignore: Deno.build.os === "windows",
+  async fn() {
+    const root = await Deno.makeTempDir();
+    try {
+      await git(root, ["init", "-q"]);
+      await git(root, ["config", "user.email", "t@t.test"]);
+      await git(root, ["config", "user.name", "Test"]);
+      const path = `${root}/1:f.txt`;
+      await Deno.writeTextFile(path, "original\n");
+      await git(root, ["add", "--", "1:f.txt"]);
+      await git(root, ["commit", "-q", "-m", "original"]);
+      const runner = realGit(root);
+      const head = runner.headSha();
+      assert(head, "repository has a HEAD commit");
 
-    runner.amendCommit("amended", new Map([[path, "pager\n"]]), head);
-    assertEquals(await git(root, ["show", "HEAD:1:f.txt"]), "pager\n");
-  } finally {
-    await Deno.remove(root, { recursive: true });
-  }
+      runner.amendCommit("amended", new Map([[path, "pager\n"]]), head);
+      assertEquals(await git(root, ["show", "HEAD:1:f.txt"]), "pager\n");
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  },
 });
 
 Deno.test({
