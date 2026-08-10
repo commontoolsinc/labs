@@ -166,14 +166,12 @@ describe("compiled CTS action<E, R> results in receipts", () => {
     eventId: string,
     outcomes: Outcome[],
   ) {
-    // One session throughout: a caller's id addresses its outcome within the
-    // session that chose it, and every id dispatched here is distinct.
     stream.send(payload, (t: IExtendedStorageTransaction) => {
       outcomes.push({
         status: t.status().status,
         receiptLink: t.handlingReceiptLink,
       });
-    }, { eventId, session: "declared-result-e2e-session" });
+    }, { eventId });
   }
 
   it("projects the declared result into the receipt; value-less verb stays {}", async () => {

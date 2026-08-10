@@ -53,14 +53,9 @@ ARGS="--api-url=$API_URL --identity=$CF_IDENTITY --space=$SPACE"
 echo "API_URL=$API_URL"
 echo "SPACE=$SPACE"
 
-# One session for the whole walkthrough, the way an agent run carries one: an
-# invocation id names an outcome within the session it was chosen in, so the
-# replay in step 7 has to be made from the session its original call was.
-export CF_INVOCATION_SESSION=$($CF invocation-session new)
-
 # A plain-JSON result rides the plainResultReceipts option, on by default.
 # Set it explicitly anyway so the walkthrough asserts the same thing whatever a
-# host's environment carries; step 8 sets it false to show the difference
+# host's environment carries; step 7 sets it false to show the difference
 # against a result carrying a piece, which survives either way.
 export EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true
 
@@ -145,7 +140,7 @@ check "written at create
 appended through the read" "$(echo "$B" | jq -r '.result.body // empty')" \
   "the address a read returned is one a caller can call"
 
-step "7. A replayed invocation id returns the ORIGINAL result — in its session"
+step "7. A replayed invocation id returns the ORIGINAL result"
 # Captured rather than hard-coded: the property is that the replay changes
 # nothing, which stays true however many notes earlier steps created.
 BEFORE=$($CF piece get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)
@@ -157,22 +152,6 @@ check "true" "$(echo "$D" | jq -r '.deduplicated // false')" \
   "the call reports itself deduplicated"
 check "$BEFORE" "$($CF piece get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)" \
   "the replay created no note (count unchanged at $BEFORE)"
-
-# The same word, from another caller. `create-1` is this session's name for
-# its first create, and nothing stops a second agent picking it: that agent is
-# calling for itself, and must get its own call rather than a report that
-# someone else's had settled.
-OTHER=$(CF_INVOCATION_SESSION=$($CF invocation-session new) $CF piece call \
-  --quiet --piece "$BOARD" \
-  $ARGS --invocation create-1 \
-  createNote '{"title":"Another agent"}' 2>/dev/null)
-check "Another agent" "$(echo "$OTHER" | jq -r '.result.note["$NAME"] // empty')" \
-  "the same id in ANOTHER session executes and returns its own result"
-check "false" "$(echo "$OTHER" | jq -r '.deduplicated // false')" \
-  "and does not report itself deduplicated"
-check "$((BEFORE + 1))" \
-  "$($CF piece get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)" \
-  "and created its note, so the write really happened"
 
 step "8. A piece result survives the option being off; a plain record does not"
 P=$(EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false $CF piece call --quiet \
@@ -222,22 +201,6 @@ echo "$OUT" | jq -e '.status' >/dev/null 2>&1 &&
 grep -qE "[0-9]+ *ms" "$ERR" && ok "per-phase timings on stderr" ||
   bad "no timings on stderr"
 sed 's/^/    /' "$ERR" | grep timing | head -5
-
-step "13. An invocation id without a session is refused"
-# The id is the replay handle, and a session minted for this one request
-# would put that id on a different outcome next time — so the call cannot be
-# honored as it was asked, and the refusal says how to ask again.
-NO_SESSION=$(env -u CF_INVOCATION_SESSION $CF piece call --quiet \
-  --piece "$BOARD" $ARGS \
-  --invocation lonely-1 createNote '{"title":"No session"}' 2>&1)
-rc=$?
-check "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)" "the call exits nonzero"
-echo "$NO_SESSION" | grep -q -- "CF_INVOCATION_SESSION" &&
-  ok "the refusal names CF_INVOCATION_SESSION" ||
-  bad "the refusal does not name CF_INVOCATION_SESSION"
-echo "$NO_SESSION" | grep -q "invocation-session new" &&
-  ok "and the command that mints one" ||
-  bad "the refusal does not say how to mint a session"
 
 ELAPSED=$(($(date +%s) - START))
 printf '\n== %d passed, %d failed — %ds wall clock\n' "$PASS" "$FAIL" "$ELAPSED"
