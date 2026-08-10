@@ -1215,7 +1215,7 @@ export async function dispatchQueuedEvent(state: {
           );
           break;
         case "backoff":
-          logger.warn(
+          logger.debug(
             "scheduler",
             `Event handler commit failed transiently; backing off ` +
               `${Math.round(disposition.delayMs)}ms ` +
