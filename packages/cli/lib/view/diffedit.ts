@@ -1519,9 +1519,11 @@ function diffLogicalEnd(
   const length = [...line].length;
   if (!line.endsWith("\r")) return length;
   const hunk = model ? hunkAt(model, row)?.hunk : undefined;
+  const noTrailingNewline = lines[row + 1]?.replace(/\r$/, "") ===
+    "\\ No newline at end of file";
   return messageAt(messages, row) ||
       (hunk && row > hunk.headerLine &&
-        lines[hunk.headerLine]?.endsWith("\r"))
+        (lines[hunk.headerLine]?.endsWith("\r") || !noTrailingNewline))
     ? length - 1
     : length;
 }

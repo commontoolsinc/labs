@@ -1604,15 +1604,13 @@ ${body}
         Deno.mkdirSync(join(root, ".git"));
         const path = join(root, "value.ts");
         Deno.writeFileSync(path, encoder.encode("new\r\n"));
-        const diff = [
-          "diff --git a/value.ts b/value.ts",
-          "--- a/value.ts",
-          "+++ b/value.ts",
-          "@@ -1 +1 @@",
-          "-old",
-          "+new",
-          "",
-        ].join("\r\n");
+        const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1 +1 @@
+-old\r
++new\r
+`;
         const ws = realWorkspace(root);
         const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
         const session = new Session(
@@ -1648,7 +1646,7 @@ ${body}
 @@ -1 +1 @@
 -old
 +\r
-\ No newline at end of file
+\\ No newline at end of file
 `;
       const ws = realWorkspace(root);
       const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
