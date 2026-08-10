@@ -19,6 +19,7 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
+import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
 
 /**
  * Shared test `ReconstructionContext`: `getCell()` always throws (no test
@@ -112,6 +113,34 @@ function fromWireFormat(data: JsonCodecValue): FabricValue {
 }
 
 describe("JsonCodec", () => {
+  describe("`registry` constructor option", () => {
+    // An empty registry recognizes no class and no tag, so it differs from the
+    // built-in one on any fabric class. `FabricError` is the probe: the
+    // built-in registry encodes it and decodes it back, and these cases assert
+    // the empty registry's behavior instead, in both directions.
+
+    it("throws on encode for a class the supplied registry lacks", () => {
+      const jsonCodec = new JsonCodec({ registry: new CodecRegistry() });
+      const value = FabricError.fromNativeError(new Error("boom"));
+
+      expect(() => jsonCodec.encode(value)).toThrow(
+        "No codec registered for fabric object class: FabricError",
+      );
+    });
+
+    it("returns an `UnknownValue` on decode for a tag the supplied registry lacks", () => {
+      const wire = new JsonCodec().encode(
+        FabricError.fromNativeError(new Error("boom")),
+      );
+      const jsonCodec = new JsonCodec({ registry: new CodecRegistry() });
+
+      const result = jsonCodec.decode(wire, new TestReconstructionContext());
+
+      expect(result).toBeInstanceOf(UnknownValue);
+      expect((result as UnknownValue).wireTypeTag).toBe("Error@1");
+    });
+  });
+
   describe("`encodeToBytes()` / `decodeFromBytes()` (bytes entry points)", () => {
     it("returns `Uint8Array` from `encodeToBytes()`", () => {
       const { jsonCodec } = makeTestCodec();
