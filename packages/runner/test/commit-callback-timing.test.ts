@@ -2,10 +2,11 @@
 // half lives in commit-conflict-reconcile.test.ts): on accept, the verdict
 // callback fires at the verdict, while the commit callback and the commit
 // promise wait for marker coverage. The runtime talks to a real
-// MemoryV2Server through the plain loopback transport (no flush-on-send
-// nudge), so the coverage marker rides the server's timed fan-out — which
-// a held-clock drain never fires — while the verdict arrives over the
-// microtask loopback inside the drain.
+// MemoryV2Server through the plain loopback transport, so the verdict
+// arrives on a zero-delay delivery turn — inside a clock.settle() drain —
+// while the coverage marker rides the server's TIMED fan-out, whose
+// positive-delay timer the drain leaves unfired (settle pauses
+// auto-advance).
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -78,8 +79,10 @@ describe("commit callback timing", () => {
       return result;
     });
 
-    // Held-clock fixpoint: the accept verdict has arrived (microtask
-    // loopback), the coverage marker has not (timed fan-out).
+    // Held-clock fixpoint: the accept verdict has arrived (its delivery
+    // turn fires inside the drain), the coverage marker has not (the timed
+    // fan-out's positive-delay timer stays unfired while settle pauses
+    // auto-advance).
     await clock.settle();
     expect(verdictResult, "verdict callback fired at the accept verdict")
       .toBeDefined();
@@ -92,8 +95,9 @@ describe("commit callback timing", () => {
     expect(promiseSettled, "commit promise still waiting for coverage")
       .toBe(false);
 
-    // Real time resumes: the marker arrives, the promise resolves, and the
-    // commit callback fires with the same accepted result.
+    // The await yields to auto-advance: the fan-out timer fires, the
+    // marker arrives, the promise resolves, and the commit callback fires
+    // with the same accepted result.
     const res = await commitP;
     expect(res.error, `commit: ${JSON.stringify(res.error)}`).toBeUndefined();
     expect(commitCallbackFired, "commit callback fired at coverage").toBe(true);
@@ -148,11 +152,47 @@ describe("commit callback timing", () => {
       "commit callback still waiting for coverage",
     ).toBe(false);
 
-    // Real time resumes: the marker arrives and the settlement timeline —
-    // and with it the commit callback — completes.
+    // The await yields to auto-advance: the fan-out timer fires, the
+    // marker arrives, and the settlement timeline — and with it the commit
+    // callback — completes.
     await commitP;
     await commitCallbackDone.promise;
     expect(commitCallbackFired).toBe(true);
     expect(cell.get()).toEqual({ v: "v1" });
+  });
+
+  it("resolves a coverage commit on a doc outside the watch set via the marker-only frame", async () => {
+    // A live watch on an UNRELATED doc makes accepts park on coverage.
+    const watched = runtime.getCell<{ v: string }>(
+      space,
+      "unwatched-set-watched-doc",
+      undefined,
+    );
+    {
+      const tx = runtime.edit();
+      watched.withTx(tx).set({ v: "w" });
+      runtime.prepareTxForCommit(tx);
+      const res = await tx.commit({ resolveAt: "verdict" });
+      expect(res.error, `seed: ${JSON.stringify(res.error)}`).toBeUndefined();
+    }
+    await watched.sync();
+    await watched.pull();
+
+    // The set targets a doc NO watch covers: its coverage marker cannot
+    // ride any document delivery — only the otherwise-empty marker frame
+    // the accept's catch-up obligation forces. The promise resolving IS
+    // the pin: a server that stamped markers only on document-bearing
+    // frames would hold this await forever.
+    const unwatched = runtime.getCell<{ v: string }>(
+      space,
+      "unwatched-set-target-doc",
+      undefined,
+    );
+    const tx = runtime.edit();
+    unwatched.withTx(tx).set({ v: "x" });
+    runtime.prepareTxForCommit(tx);
+    const res = await tx.commit();
+    expect(res.error, `commit: ${JSON.stringify(res.error)}`).toBeUndefined();
+    expect(unwatched.get()).toEqual({ v: "x" });
   });
 });

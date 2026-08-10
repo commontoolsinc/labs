@@ -130,6 +130,7 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     const commitP = txB.commit();
     await txB.commitVerdict!();
     await server.flushSessions([space]);
+    await clock.settle();
     const resB = await commitP;
     expect(resB.error, "B's commit should be rejected (conflict)")
       .toBeDefined();
@@ -226,6 +227,7 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     // resolves with the same rejection the verdict callback saw, and the
     // commit callback fires with it.
     await server.flushSessions([space]);
+    await clock.settle();
     const resB = await commitP;
     expect(resB.error?.name).toBe("ConflictError");
     expect(commitCallbackFired, "commit callback fired at promise settlement")
@@ -297,6 +299,7 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     // The test releases the repair fan-out: the frame arrives and the
     // settlement timeline (and with it the commit callback) completes.
     await server.flushSessions([space]);
+    await clock.settle();
     await commitP;
     await commitCallbackDone.promise;
     expect(commitCallbackFired).toBe(true);

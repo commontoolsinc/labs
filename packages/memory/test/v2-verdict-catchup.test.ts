@@ -7,8 +7,8 @@
 // (04-protocol.md §4.11.2); these tests pin the server half: verdict ordering,
 // frame coverage, and eventual marker delivery.
 //
-// The long refresh delay parks the writer's novelty behind a timer so each
-// test drives delivery explicitly with flushSessions().
+// Automatic fan-out is held — a long refresh delay or the manual gate —
+// so each test drives delivery explicitly with flushSessions().
 
 import { assertEquals, assertExists } from "@std/assert";
 import {
@@ -81,7 +81,7 @@ const watchBoth = (space: string, sessionId: string) => ({
 });
 
 const setup = async (options: {
-  subscriptionRefreshDelayMs: number;
+  subscriptionRefreshDelayMs: number | "manual";
   store: string;
 }) => {
   const server = new Server({
@@ -115,8 +115,8 @@ const setup = async (options: {
   assertResponse(shiftMessage(committerMessages));
 
   // Foreign novelty the committer has NOT received: the out-of-band direct
-  // write path (the blob-upload path) marks the space dirty behind the
-  // refresh timer WITHOUT a transact verdict. seq 1 = doc:b.
+  // write path (the blob-upload path) marks the space dirty — held until
+  // the test's explicit flush — WITHOUT a transact verdict. seq 1 = doc:b.
   await server.writeDocument(space, "of:doc:b", { from: "writer" });
 
   return {
@@ -214,6 +214,51 @@ Deno.test("memory v2 server: an accept with no watched novelty still gets its ma
   // The client's parked promotion is keyed on this marker, so it MUST
   // arrive even when the session's own write is the only novelty (and is
   // echo-suppressed): the obligation forces an otherwise-empty frame.
+  await server.flushSessions([space]);
+  const effect = assertEffect(shiftMessage(committerMessages));
+  const sync = effect.effect as SessionSync;
+  assertEquals(sync.caughtUpLocalSeq, 1);
+  assertEquals(sync.upserts, []);
+  assertEquals(sync.removes, []);
+});
+
+Deno.test("memory v2 server: an accept on a doc OUTSIDE the watch set still gets its marker on an otherwise-empty frame", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: "manual",
+    store: "memory://verdict-catchup-unwatched-doc",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+
+  // Drain the fixture's parked doc:b first so nothing watched is dirty.
+  await server.flushSessions([space]);
+  assertEffect(shiftMessage(committerMessages));
+
+  // The committer watches doc:a and doc:b; this set targets doc:z, which no
+  // watch covers. Its dirty mark cannot touch the session's tracked graph,
+  // so the marker cannot ride any document delivery — the catch-up
+  // obligation alone must force the frame, or the client's parked promotion
+  // (and its coverage-resolving commit promise) would wait forever.
+  await committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-z",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:z",
+        value: { value: { from: "committer" } },
+      }],
+    },
+  }));
+  const verdict = assertResponse<{ seq: number }>(
+    shiftMessage(committerMessages),
+  );
+  assertEquals(verdict.ok?.seq, 2);
+
   await server.flushSessions([space]);
   const effect = assertEffect(shiftMessage(committerMessages));
   const sync = effect.effect as SessionSync;

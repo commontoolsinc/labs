@@ -75,6 +75,7 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
   ): Promise<boolean> => {
     for (let i = 0; i < rounds && !predicate(); i++) {
       await server.flushSessions();
+      await clock.settle();
       await rtB.idle();
     }
     return predicate();

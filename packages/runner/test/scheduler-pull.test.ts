@@ -589,8 +589,12 @@ describe("pull-based scheduling", () => {
     expect(effectRuns).toBe(1);
     expect(effectResult.get()).toBe(15);
 
+    // The commit's local notification marks the graph synchronously at
+    // commit() call time, and the cleanup pass runs inside the awaited
+    // coverage round trip — so reshape the marked-but-unrun state before
+    // awaiting, then let the single pass run it.
     source.withTx(tx).send(2);
-    await tx.commit();
+    const invalidateCommit = tx.commit();
     tx = runtime.edit();
 
     const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
@@ -599,6 +603,7 @@ describe("pull-based scheduling", () => {
     schedulerInternal.markDirty(computation);
     runtime.scheduler.queueExecution();
 
+    await invalidateCommit;
     await runtime.scheduler.idle();
 
     expect(computationRuns).toBe(2);
@@ -1310,9 +1315,12 @@ describe("pull-based scheduling", () => {
     );
     await sink.pull();
 
+    // The commit's local notification marks the graph synchronously at
+    // commit() call time; awaiting the commit would span the cleanup pass.
+    // Assert the marked-but-unrun shape before awaiting.
     const updateTx = runtime.edit();
     source.withTx(updateTx).send(2);
-    await updateTx.commit();
+    const updateCommit = updateTx.commit();
 
     const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
     expect(runtime.scheduler.isDirty(actionA)).toBe(true);
@@ -1320,6 +1328,7 @@ describe("pull-based scheduling", () => {
     expect(schedulerInternal.isInvalid(actionA)).toBe(true);
     expect(schedulerInternal.isInvalid(actionB)).toBe(false);
     expect(schedulerInternal.isInvalid(effect)).toBe(false);
+    await updateCommit;
   });
 
   it("should keep a resubscribed shallow-read effect clean until its writer changes value", async () => {
@@ -2120,18 +2129,23 @@ describe("pull-based scheduling", () => {
     await sink.pull();
     expect(sink.get()).toBe(10);
 
+    // The commit's local notification marks the graph synchronously at
+    // commit() call time; awaiting the commit would span the cleanup pass.
+    // Assert the marking at that synchronous point, on both sides.
     const updateOldSourceTx = runtime.edit();
     sourceA.withTx(updateOldSourceTx).send(2);
-    await updateOldSourceTx.commit();
+    const updateOldSourceCommit = updateOldSourceTx.commit();
 
     const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
     expect(runtime.scheduler.isDirty(action)).toBe(false);
     expect(schedulerInternal.isInvalid(action)).toBe(false);
+    await updateOldSourceCommit;
 
     const updateNewSourceTx = runtime.edit();
     sourceB.withTx(updateNewSourceTx).send(11);
-    await updateNewSourceTx.commit();
+    const updateNewSourceCommit = updateNewSourceTx.commit();
     expect(runtime.scheduler.isDirty(action)).toBe(true);
     expect(schedulerInternal.isInvalid(action)).toBe(true);
+    await updateNewSourceCommit;
   });
 });

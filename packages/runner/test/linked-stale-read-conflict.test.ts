@@ -127,6 +127,7 @@ describe("stale linked read across two clients", () => {
     // Release the repair fan-out and let the rejection settle — the doomed
     // overlay drops against the repaired mirror.
     await server.flushSessions([space]);
+    await clock.settle();
     await rtA.storageManager.synced();
 
     // The grant write never lands.

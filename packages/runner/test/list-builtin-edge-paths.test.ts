@@ -563,6 +563,10 @@ describe("cross-space link load kick", () => {
       r1.key("create").send({ name: "Ada" });
       await r1.pull();
       await rt1.idle();
+      // The cross-space child creation rides server->client delivery turns;
+      // drain them before reading the freshly pushed link.
+      await clock.settle();
+      await r1.pull();
       // deno-lint-ignore no-explicit-any
       const links = r1.key("items").asSchema(crossSpaceLinkListSchema)
         .get() as any[];

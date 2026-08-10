@@ -129,6 +129,11 @@ export function flatMap(
   // and must not wait. Cleared once a non-empty resume batch is processed.
   let resumeBatchAwaitSync = !!awaitSync;
 
+  // The Action the runner registered for this coordinator (a wrapper around
+  // `reconcile`) — the identity the scheduler is keyed by, so the one a
+  // re-arm must name.
+  let registeredAction: Action | undefined;
+
   const { awaitingResult, awaitPendingThenRepublish } = createResumeRepublisher(
     {
       runtime,
@@ -142,6 +147,11 @@ export function flatMap(
       aggregateNoun: "flatMap result",
       elementNoun: "result",
       contribute: flatMapContribution,
+      rearmReconcile: () => {
+        if (registeredAction) {
+          runtime.scheduler.invalidateAction(registeredAction);
+        }
+      },
     },
   );
 
@@ -504,5 +514,11 @@ export function flatMap(
   // reconcile must run to re-attach the per-element children (which then
   // rehydrate their own persisted state). See
   // docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
-  return { action: reconcile, resumeMode: "always-run" };
+  return {
+    action: reconcile,
+    resumeMode: "always-run",
+    onActionRegistered: (action) => {
+      registeredAction = action;
+    },
+  };
 }

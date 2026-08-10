@@ -212,6 +212,29 @@ function findEventHandler(
     ?.[1];
 }
 
+// Source of QueuedEvent.enqueueSeq stamps. Process-global monotonicity is a
+// superset of the per-queue monotonicity the ordered requeue insert needs.
+let nextEnqueueSeq = 1;
+
+/**
+ * Returns a retried event to its original dispatch slot: before the first
+ * queued event with a later enqueue stamp. A plain unshift is only order-
+ * preserving while a single (head) event is in failure at a time; with
+ * commits not awaited, several in-flight events can be rejected together,
+ * and unshifting each as its verdict arrives would make the LAST-rejected
+ * event the new head regardless of send order.
+ */
+function insertInEnqueueOrder(
+  queue: QueuedEvent[],
+  event: QueuedEvent,
+): void {
+  let index = 0;
+  while (index < queue.length && queue[index].enqueueSeq < event.enqueueSeq) {
+    index++;
+  }
+  queue.splice(index, 0, event);
+}
+
 function readyQueuedEvent(args: {
   readonly id: string;
   readonly eventLink: NormalizedFullLink;
@@ -225,6 +248,7 @@ function readyQueuedEvent(args: {
 }): QueuedEvent {
   return {
     id: args.id,
+    enqueueSeq: nextEnqueueSeq++,
     time: args.time,
     originTx: args.originTx,
     eventLink: args.eventLink,
@@ -1004,6 +1028,7 @@ export async function dispatchQueuedEvent(state: {
   const requeueForNameResolution = () => {
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
+      enqueueSeq: queuedEvent.enqueueSeq,
       time: queuedEvent.time,
       originTx: queuedEvent.originTx,
       action,
@@ -1014,7 +1039,7 @@ export async function dispatchQueuedEvent(state: {
       retry,
       onCommit,
     };
-    state.eventQueue.unshift(requeued);
+    insertInEnqueueOrder(state.eventQueue, requeued);
     if (requeued.originTx !== undefined) {
       state.recordLineageEvent(requeued.originTx, requeued);
     }
@@ -1034,6 +1059,7 @@ export async function dispatchQueuedEvent(state: {
   ) => {
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
+      enqueueSeq: queuedEvent.enqueueSeq,
       time: queuedEvent.time,
       originTx: queuedEvent.originTx,
       action,
@@ -1047,7 +1073,7 @@ export async function dispatchQueuedEvent(state: {
       retryDeadline: deadline,
       notBefore: runAt,
     };
-    state.eventQueue.unshift(requeued);
+    insertInEnqueueOrder(state.eventQueue, requeued);
     if (requeued.originTx !== undefined) {
       state.recordLineageEvent(requeued.originTx, requeued);
     }

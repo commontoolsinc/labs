@@ -205,6 +205,7 @@ describe("a cross-replica conflict settles", () => {
     const rejected = await txB.commit({ resolveAt: "verdict" });
     expect(rejected.error?.name).toBe("ConflictError");
     await server.flushSessions([space]);
+    await clock.settle();
     await rtB.storageManager.synced();
 
     // And B is left able to see the server's value rather than its stale one.

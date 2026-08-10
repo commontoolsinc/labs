@@ -36,6 +36,13 @@ export interface RawBuiltinResult {
   noDebounce?: boolean;
   throttle?: number;
   resumeMode?: "always-run";
+  /**
+   * Receives the Action the runner actually registers with the scheduler —
+   * a wrapper around `action`, so `action`'s own identity is not the
+   * scheduler's key. A builtin whose asynchronous work must re-arm its own
+   * reconcile (Scheduler.invalidateAction) captures the wrapper here.
+   */
+  onActionRegistered?: (action: Action) => void;
 }
 
 /**

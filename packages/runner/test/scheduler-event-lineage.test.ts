@@ -151,9 +151,16 @@ async function waitForSchedulerCondition(
   condition: () => boolean,
   message: string,
 ): Promise<void> {
-  const deadline = performance.now() + 1_000;
-  while (!condition() && performance.now() < deadline) {
+  // Iteration-bounded, not wall-clock-bounded: zero-delay yields do not
+  // advance the fake clock, so a time deadline could never expire and an
+  // unreachable condition would spin forever. Each round drains the
+  // scheduler and yields one real timer turn — transport pumps and the
+  // emulated server's zero-delay flush ride zero-delay timers, which are
+  // exempt from the fake clock's test-armed freeze — so a condition the
+  // system will ever reach is reached within a bounded number of rounds.
+  for (let round = 0; round < 200 && !condition(); round++) {
     await runtime.idle();
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
   if (!condition()) {
     throw new Error(message);
@@ -898,12 +905,25 @@ describe("scheduler event lineage", () => {
     const runningBefore = runtime.runner.cancels.size;
     const restoreTransact = rejectServerTransacts(storageManager);
     try {
+      // idle() can resolve inside a verdict-in-flight gap (the event leaves
+      // the queue at dispatch; its retry is requeued only when the rejection
+      // frame lands a turn later), so it cannot bound the retry chain. Wait
+      // for the chain's terminal outcome — the convergence error — instead.
+      const gotConvergenceError = Promise.withResolvers<void>();
+      runtime.scheduler.onError((error) => {
+        if (error.name === "CommitConvergenceError") {
+          gotConvergenceError.resolve();
+        }
+      });
       root.key("launch").send({});
-      await waitForSchedulerCondition(
-        runtime,
-        () => handlerAttempts >= 6,
-        "handler did not exhaust retries",
+      await waitForSignal(
+        gotConvergenceError.promise,
+        "handler retry chain did not reach its terminal outcome",
       );
+      expect(handlerAttempts).toBeGreaterThanOrEqual(6);
+      // Drain the terminal disposition's compensation (delivered on its own
+      // turns) before asserting every handler-result piece was stopped.
+      await clock.settle();
       await runtime.idle();
 
       expect(runtime.runner.cancels.size).toBe(runningBefore);
@@ -1093,6 +1113,11 @@ describe("scheduler event lineage", () => {
         rejection.rejected,
         "handler commit was not rejected before parent cancellation",
       );
+      // The rejection signal fires server-side; the client's backoff requeue
+      // happens when the verdict frame lands a delivery turn later. Drain
+      // those turns (the parked retry's positive-delay timer stays held) so
+      // the first attempt's cleanup is registered before the stop below.
+      await clock.settle();
       expect(handlerAttempts).toBe(1);
 
       // The first failed attempt registered its cleanup before this stop. The
@@ -1101,6 +1126,10 @@ describe("scheduler event lineage", () => {
       local.runtime.runner.stop(rootCell);
       expect(local.runtime.runner.cancels.size).toBe(0);
 
+      // Fire the held backoff window deterministically (baseDelayMs = 100,
+      // jitter 0) instead of leaving the parked retry to whenever
+      // auto-advance reaches its timer, then drain the retry's dispatch.
+      await clock.tick(100);
       await local.runtime.idle();
 
       expect(handlerAttempts).toBe(2);
