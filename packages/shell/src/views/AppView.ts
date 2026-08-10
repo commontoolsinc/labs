@@ -102,6 +102,31 @@ export class XAppView extends BaseView {
     args: () => [this.app, this.rt, this.space],
   });
 
+  // One-shot ?path= deep-link delivery (set after the first send so slug
+  // re-resolutions and task reruns never re-fire it).
+  #openPathDelivered = false;
+
+  /** Deliver a `?path=` deep link into the loaded piece, once.
+   *
+   * Opt-in by contract: the piece must export an `openPath` stream on its
+   * result (e.g. Mobile Loom opens the given cabinet path in its page
+   * viewer). Pieces without the stream are untouched — the field simply
+   * goes undelivered. Fire-and-forget; a failed send must never affect
+   * pattern loading. */
+  #maybeDeliverOpenPath(pattern: PageHandle<NameSchema>): void {
+    if (this.#openPathDelivered) return;
+    const view = this.app?.view;
+    if (!view || !("openPath" in view) || !view.openPath) return;
+    const data = pattern.cell().get() as Record<string, unknown> | undefined;
+    if (!data || typeof data !== "object" || !("openPath" in data)) return;
+    this.#openPathDelivered = true;
+    (pattern.cell() as unknown as {
+      key(k: string): { send(v: unknown): Promise<void> };
+    })
+      .key("openPath")
+      .send({ path: view.openPath });
+  }
+
   _selectedPattern = new Task(this, {
     task: async (
       [app, rt, space],
@@ -120,6 +145,7 @@ export class XAppView extends BaseView {
           // Track as recently visited (fire-and-forget) — but not after
           // the view moved on, or the write lands in the wrong space.
           if (!signal.aborted) rt.trackRecentPiece(space, pieceId);
+          if (!signal.aborted) this.#maybeDeliverOpenPath(pattern);
           return pattern;
         } catch (e) {
           if (!signal.aborted) {
@@ -136,6 +162,7 @@ export class XAppView extends BaseView {
           }
           // Track as recently visited (fire-and-forget)
           if (!signal.aborted) rt.trackRecentPiece(space, app.view.pieceId);
+          if (!signal.aborted) this.#maybeDeliverOpenPath(pattern);
           return pattern;
         } catch (e) {
           if (!signal.aborted) {

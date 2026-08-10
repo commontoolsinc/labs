@@ -143,6 +143,32 @@ describe("AppState", () => {
     );
   });
 
+  it("captures ?path= as a one-shot openPath deep link", () => {
+    assert(
+      JSON.stringify(
+        urlToAppView(
+          new URL("http://common.test/space/loom?path=People%2FZora%2Fabout.md"),
+        ),
+      ) === JSON.stringify({
+        spaceName: "space",
+        pieceSlug: "loom",
+        openPath: "People/Zora/about.md",
+      }),
+    );
+    // Never re-emitted: reloads and internal navigation stay clean.
+    assert(
+      appViewToUrlPath({
+        spaceName: "space",
+        pieceSlug: "loom",
+        openPath: "People/Zora/about.md",
+      }) === "/space/loom",
+    );
+    // No param, no field.
+    assert(
+      !("openPath" in urlToAppView(new URL("http://common.test/space/loom"))),
+    );
+  });
+
   it("parses and serializes embedded routes", () => {
     const spaceDid = "did:key:z6MkjosLwWEobyT9T6RqLTdaEhFrXAZUNkRZJuUae2ukgfEa";
 
