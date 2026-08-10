@@ -787,7 +787,7 @@ function loadOldFile(
     fileText,
     fileName,
     language,
-    fileText === null ? undefined : oldHasUtf8Bom,
+    oldHasUtf8Bom,
   );
   cache?.set(key, entry);
   return entry;

@@ -194,6 +194,9 @@ export interface EditPolicy {
    * Takes the whole set of lines because editability depends on the row's
    * region. */
   editStart(lines: readonly string[], row: number): number | null;
+  /** The column before newline transport on a source line. This differs from
+   * the stored line length when a split-on-LF buffer retains a CRLF `\r`. */
+  logicalEnd?(lines: readonly string[], row: number): number;
   /** A source-specific explanation for refusing an edit at `row`, or null to
    * use the editor's general explanation. */
   notEditableMessage?(

@@ -2271,7 +2271,7 @@ export class Session {
         b.moveLeft();
         return this.afterMove();
       case "right":
-        b.moveRight();
+        this.moveRightAcrossTransport();
         return this.afterMove();
       case "up":
         b.moveUp();
@@ -2291,7 +2291,7 @@ export class Session {
         b.moveLeft();
         return this.afterMove();
       case "ctrl-f":
-        b.moveRight();
+        this.moveRightAcrossTransport();
         return this.afterMove();
       case "ctrl-p":
         b.moveUp();
@@ -2352,9 +2352,8 @@ export class Session {
             const start = this.editStart() ?? 1;
             const line = b.lines[b.row] ?? "";
             const onContext = line[0] === " ";
-            const transport = line.endsWith("\r") ? "\r" : "";
-            const logicalEnd = b.currentLineLength() -
-              (transport.length > 0 ? 1 : 0);
+            const logicalEnd = this.logicalLineEnd();
+            const transport = logicalEnd < b.currentLineLength() ? "\r" : "";
             // Enter splits the line at the cursor. On a context line the result
             // is shown minimally: an empty half just adds a blank line and the
             // line stays unchanged context (start → blank above, end → blank
@@ -2422,7 +2421,7 @@ export class Session {
         return;
       case "ctrl-k":
         if (this.guardForwardEdit()) {
-          b.killLine();
+          b.killLine(this.logicalLineEnd());
           this.afterEdit();
         }
         return;
@@ -2493,8 +2492,8 @@ export class Session {
   private splitDiffLine(prefix: string): void {
     const b = this.buffer!;
     const chars = [...b.lines[b.row]];
-    const transport = chars.at(-1) === "\r" ? "\r" : "";
-    const logicalEnd = chars.length - (transport.length > 0 ? 1 : 0);
+    const logicalEnd = this.logicalLineEnd();
+    const transport = logicalEnd < chars.length ? "\r" : "";
     const split = Math.min(b.col, logicalEnd);
     const before = chars.slice(0, split).join("");
     const after = chars.slice(split, logicalEnd).join("");
@@ -2697,6 +2696,37 @@ export class Session {
     return pol.editStart(this.buffer!.lines, this.buffer!.row);
   }
 
+  /** The current line's last editable column, before source-owned transport. */
+  private logicalLineEnd(): number {
+    const b = this.buffer!;
+    const physicalEnd = b.currentLineLength();
+    const end = this.source?.policy?.logicalEnd?.(b.lines, b.row) ??
+      physicalEnd;
+    return clamp(end, 0, physicalEnd);
+  }
+
+  /** Keep a right-arrow motion able to cross a protected CRLF boundary. */
+  private moveRightAcrossTransport(): void {
+    const b = this.buffer!;
+    const logicalEnd = this.logicalLineEnd();
+    if (
+      b.col >= logicalEnd && logicalEnd < b.currentLineLength() &&
+      b.row < b.lines.length - 1
+    ) {
+      b.place(b.row + 1, 0);
+      return;
+    }
+    b.moveRight();
+  }
+
+  /** Keep source-owned transport outside the text cursor. */
+  private clampToLogicalLine(): void {
+    const b = this.buffer;
+    if (!b) return;
+    const end = this.logicalLineEnd();
+    if (b.col > end) b.place(b.row, end);
+  }
+
   /** Whether the cursor sits in an editable commit-message line — plain indented
    * text, edited without the diff's removed/added pairing. */
   private inMessageRow(): boolean {
@@ -2723,6 +2753,7 @@ export class Session {
       this.message = this.notEditableMessage();
       return false;
     }
+    this.clampToLogicalLine();
     if (b.col < start) b.place(b.row, start);
     if (split) this.prepareContextEdit();
     return true;
@@ -2739,8 +2770,9 @@ export class Session {
       this.message = this.notEditableMessage();
       return false;
     }
+    this.clampToLogicalLine();
     if (b.col < start) b.place(b.row, start);
-    if (b.col >= b.currentLineLength()) {
+    if (b.col >= this.logicalLineEnd()) {
       this.message = JOIN_MSG;
       return false;
     }
@@ -2780,28 +2812,36 @@ export class Session {
       this.message = this.notEditableMessage();
       return;
     }
+    this.clampToLogicalLine();
     if (b.col > start) {
       this.prepareContextEdit();
       b.deleteBackward();
       return this.afterEdit();
     }
-    const transportWidth = b.lines[b.row].endsWith("\r") ? 1 : 0;
-    if (b.currentLineLength() - transportWidth <= start && b.row > 0) {
+    if (this.logicalLineEnd() <= start && b.row > 0) {
       this.removeDiffLine(start);
       return this.afterEdit();
     }
     this.message = MARKER_MSG;
   }
 
-  /** Remove the cursor's (empty-content) line, joining into the previous line
-   * and stripping the marker the join carries over, then shrink the hunk header
-   * by the side(s) the removed line counted on. */
+  /** Remove an empty added line. An empty context line becomes a removal so its
+   * original old-side coordinate and content provenance remain represented. */
   private removeDiffLine(markerLen: number): void {
     const b = this.buffer!;
     const marker = b.lines[b.row][0] ?? "";
-    const transportWidth = b.lines[b.row].endsWith("\r") ? 1 : 0;
-    const hunkHeader = this.hunkHeaderAt(b.row);
-    this.transferProtectedPrefix(markerLen, hunkHeader);
+    const context = marker === " " &&
+      this.source?.policy?.regionKind(b.lines, b.row) === "hunk";
+    const parsed = this.parsedHunkAt(b.row);
+    const hunkHeader = parsed?.hunk.headerLine ?? null;
+    const transportWidth = b.currentLineLength() - this.logicalLineEnd();
+    this.transferProtectedPrefix(markerLen, parsed);
+    if (context) {
+      b.lines[b.row] = `-${b.lines[b.row].slice(1)}`;
+      b.place(b.row, 1);
+      this.adjustHunkCounts(0, -1, hunkHeader);
+      return;
+    }
     b.place(b.row, 0);
     b.deleteBackward(); // join into the previous line
     for (let i = 0; i < markerLen + transportWidth; i++) b.deleteForward();
@@ -2816,19 +2856,15 @@ export class Session {
    * successor. A context successor becomes a removed/added pair. */
   private transferProtectedPrefix(
     markerLen: number,
-    hunkHeader: number | null,
+    parsed: { model: DiffModel; hunk: DiffHunk } | null,
   ): void {
-    if (!this.buffer || markerLen <= 1 || hunkHeader === null) return;
+    if (!this.buffer || markerLen <= 1 || parsed === null) return;
     const b = this.buffer;
     const prefix = [...b.lines[b.row]].slice(1, markerLen).join("");
     if (prefix.length === 0) return;
-    const model = parseDiff(b.text());
-    const hunk = model?.files.flatMap((file) => file.hunks).find((candidate) =>
-      candidate.headerLine === hunkHeader
-    );
-    if (!hunk) return;
+    const { model, hunk } = parsed;
     for (let row = b.row + 1; row <= hunk.endLine; row++) {
-      const kind = model!.lines[row]?.kind;
+      const kind = model.lines[row]?.kind;
       if (kind !== "ctx" && kind !== "add") continue;
       const markerWidth = kind === "add" || b.lines[row][0] === " " ? 1 : 0;
       const body = b.lines[row].slice(markerWidth);
@@ -2852,6 +2888,7 @@ export class Session {
       this.message = this.notEditableMessage();
       return false;
     }
+    this.clampToLogicalLine();
     if (b.col <= start) {
       this.message = MARKER_MSG;
       return false;
@@ -2888,6 +2925,10 @@ export class Session {
       this.message = MARKER_MSG;
       return false;
     }
+    if (Math.max(b.col, mark.col) > this.logicalLineEnd()) {
+      this.message = JOIN_MSG;
+      return false;
+    }
     this.prepareContextEdit();
     return true;
   }
@@ -2903,12 +2944,14 @@ export class Session {
   }
 
   private afterMove(): void {
+    this.clampToLogicalLine();
     this.ensureCursorVisible();
   }
 
   private afterEdit(): void {
     this.selectedIndex = null;
     this.collapseUnchangedPair();
+    this.clampToLogicalLine();
     if (this.source && this.buffer) {
       const text = this.buffer.text();
       const lines = this.liveHighlight(text);

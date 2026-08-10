@@ -198,6 +198,10 @@ export function diffSource(
       // A message line is editable past its four-space indent.
       return kind === "message" ? MESSAGE_INDENT.length : null;
     },
+    logicalEnd: (lines, row) => {
+      const { model, messages } = classify(lines);
+      return diffLogicalEnd(model, messages, lines, row);
+    },
     notEditableMessage: (lines, row) => {
       if (!shownHead) return null;
       const commit = commitAt(classify(lines).commits, row);
@@ -805,14 +809,13 @@ function expandContext(
   const baseHunk = baseHunks[index];
   if (!baseHunk) return null;
   const baseCtx = expansionBodyLines(revealedLines, baseHunk, range, up);
-  const text = applyExpansion(current, index, up, ctx, k, target.endLine + 1);
+  const text = applyExpansion(current, target, up, ctx, k);
   const newBaseline = applyExpansion(
     baseline,
-    index,
+    baseHunk,
     up,
     baseCtx,
     k,
-    baseHunk.endLine + 1,
   );
   if (text === null || newBaseline === null) return null;
   const zeroCount = hunks[index].newCount === 0;
@@ -955,32 +958,18 @@ function joinAdjacent(
   return { text: joined.text, baseline: joinedBase.text };
 }
 
-/** Insert `ctx` context lines at the top (`up`) or just before `bodyEnd` (the
- * line after the hunk's last body line) of the `index`-th hunk in `text`,
- * growing that hunk header's counts by `k`. Null when the hunk or its header
- * cannot be found. */
+/** Insert `ctx` context lines at the top or bottom of a parsed hunk and grow
+ * its header counts by `k`. */
 function applyExpansion(
   text: string,
-  index: number,
+  hunk: DiffHunk,
   up: boolean,
   ctx: string[],
   k: number,
-  bodyEnd: number,
 ): string | null {
   const lines = text.split("\n");
-  let gi = -1;
-  let h = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (/^@@ -\d/.test(lines[i])) {
-      gi++;
-      if (gi === index) {
-        h = i;
-        break;
-      }
-    }
-  }
-  // `index` is a hunk index from parseDiff, whose HUNK_RE is strictly stronger
-  // than the `/^@@ -\d/` scan above, so the scan always reaches it; h is set.
+  const h = hunk.headerLine;
+  const bodyEnd = hunk.endLine + 1;
   const headerEnding = lines[h].endsWith("\r") ? "\r" : "";
   const headerText = headerEnding ? lines[h].slice(0, -1) : lines[h];
   const m = headerText.match(
@@ -1517,6 +1506,24 @@ function editableStart(
       model?.lines[row]?.newLine === 0 && lineText[1] === "\uFEFF"
     ? 2
     : 1;
+}
+
+/** The last source column before CRLF transport in editable diff text. */
+function diffLogicalEnd(
+  model: DiffModel | null,
+  messages: readonly CommitMessage[],
+  lines: readonly string[],
+  row: number,
+): number {
+  const line = lines[row] ?? "";
+  const length = [...line].length;
+  if (!line.endsWith("\r")) return length;
+  const hunk = model ? hunkAt(model, row)?.hunk : undefined;
+  return messageAt(messages, row) ||
+      (hunk && row > hunk.headerLine &&
+        lines[hunk.headerLine]?.endsWith("\r"))
+    ? length - 1
+    : length;
 }
 
 /**

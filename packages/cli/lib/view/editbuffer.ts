@@ -323,16 +323,21 @@ export class EditBuffer {
 
   // --- kill / yank ----------------------------------------------------------
 
-  /** C-k: kill to end of line; at end of line, kill the newline (join next). */
-  killLine(): void {
+  /** C-k: kill to end of line; at end of line, kill the newline (join next).
+   * `endColumn` can keep source-owned transport after the editable text. */
+  killLine(endColumn?: number): void {
     this.resetGoal();
     this.endYank();
     const cps = this.chars(this.row);
-    if (this.col < cps.length) {
-      const killed = cps.slice(this.col).join("");
-      this.lines[this.row] = cps.slice(0, this.col).join("");
+    const end = clamp(endColumn ?? cps.length, 0, cps.length);
+    if (this.col < end) {
+      const killed = cps.slice(this.col, end).join("");
+      this.lines[this.row] = [
+        ...cps.slice(0, this.col),
+        ...cps.slice(end),
+      ].join("");
       this.pushKill(killed, "append");
-    } else if (this.row < this.lines.length - 1) {
+    } else if (end === cps.length && this.row < this.lines.length - 1) {
       this.lines[this.row] += this.lines[this.row + 1];
       this.lines.splice(this.row + 1, 1);
       this.pushKill("\n", "append");

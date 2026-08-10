@@ -456,15 +456,11 @@ Deno.test("diffedit cov: expandContext returns null when the baseline has fewer 
   }
 });
 
-Deno.test("diffedit cov: expandContext returns null when the hunk header is malformed for the expansion regex", () => {
+Deno.test("diffedit cov: expandContext ignores orphan hunk-like text", () => {
   const { ws, done } = tempWs({ "m.ts": EXPAND_FILE });
   try {
-    // A bare "@@ -3 noise" line sits before the file header. parseDiff treats it
-    // as "other" (it has no `+` side), so the model still finds the real hunk at
-    // global index 0 and the cursor maps into it. But applyExpansion scans for
-    // any line matching /^@@ -\d/ and reaches this orphan first; the strict
-    // header regex then rejects it, so applyExpansion returns null and the whole
-    // expansion bails out.
+    // A bare "@@ -3 noise" line sits before the file header. It is not a parsed
+    // hunk and must not displace the real hunk that expansion updates.
     const diff = `@@ -3 noise
 diff --git a/m.ts b/m.ts
 --- a/m.ts
@@ -477,8 +473,9 @@ diff --git a/m.ts b/m.ts
 `;
     const { src } = sourceFor(diff, ws);
     const cursor = diff.split("\n").indexOf(" epsilon");
-    const out = src.expandContext!(diff, diff, cursor);
-    assertEquals(out, null, "a malformed hunk header cannot be expanded");
+    const out = src.expandContext!(diff, diff, cursor)!;
+    assert(out.text.startsWith("@@ -3 noise\n"));
+    assert(out.text.includes(" zeta"), "the real hunk expands downward");
   } finally {
     done();
   }
@@ -1238,6 +1235,134 @@ describe("binary and BOM diff edits", () => {
     }
   });
 
+  it("keeps literal BOM provenance after deleting earlier context", () => {
+    const bom = "\uFEFF";
+    const encoder = new TextEncoder();
+    const cases = [
+      {
+        separator: "\n",
+        fileText: "\nnew\n",
+        diffLines: [
+          "@@ -1,2 +1,2 @@",
+          " ",
+          `-${bom}second`,
+          "+new",
+        ],
+        expected: `${bom}second\nnew\n`,
+      },
+      {
+        separator: "\r\n",
+        fileText: "\r\nnew\r\n",
+        diffLines: [
+          "@@ -1,2 +1,2 @@",
+          " ",
+          `-${bom}second`,
+          "+new",
+        ],
+        expected: `${bom}second\r\nnew\r\n`,
+      },
+    ];
+    for (const testCase of cases) {
+      const root = Deno.makeTempDirSync();
+      try {
+        Deno.mkdirSync(join(root, ".git"));
+        const path = join(root, "value.ts");
+        Deno.writeFileSync(path, encoder.encode(testCase.fileText));
+        const diff = [
+          "diff --git a/value.ts b/value.ts",
+          "--- a/value.ts",
+          "+++ b/value.ts",
+          ...testCase.diffLines,
+          "",
+        ].join(testCase.separator);
+        const ws = realWorkspace(root);
+        const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+        const session = new Session(
+          built.doc,
+          { color: false, showLineNumbers: false },
+          { width: 80, height: 10 },
+          undefined,
+          diffSource(ws, built.edit),
+        );
+        session.top = 4;
+        session.handleKey({ name: "e" });
+        session.handleKey({ name: "home" });
+        session.handleKey({ name: "backspace" });
+
+        expect(session.doc.lines[4].text).toBe(
+          `-${testCase.separator === "\r\n" ? "\r" : ""}`,
+        );
+        session.handleKey({ name: "down" });
+        session.handleKey({ name: "r", char: "r" });
+        session.handleKey({ name: "f3" });
+        expect(session.view().message).toBe("Saved 1 file");
+        expect(Deno.readFileSync(path)).toEqual(
+          encoder.encode(testCase.expected),
+        );
+      } finally {
+        Deno.removeSync(root, { recursive: true });
+      }
+    }
+  });
+
+  it("keeps both BOM markers after deleting encoded empty context", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const bom = "\uFEFF";
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(
+        path,
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...encoder.encode(`\n${bom}second\nnew\n`),
+        ]),
+      );
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1,3 +1,3 @@
+ ${bom}
+ ${bom}second
+-old
++new
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 4;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "home" });
+      session.handleKey({ name: "backspace" });
+
+      expect(session.doc.lines[4].text).toBe(`-${bom}`);
+      expect(session.doc.lines[5].text).toBe(`-${bom}second`);
+      expect(session.doc.lines[6].text).toBe(`+${bom}${bom}second`);
+      session.handleKey({ name: "down" });
+      session.handleKey({ name: "r", char: "r" });
+      session.handleKey({ name: "f3" });
+      expect(Deno.readFileSync(path)).toEqual(
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...encoder.encode(`${bom}second\n${bom}second\nnew\n`),
+        ]),
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
   it("splits a shared BOM carrier when resurrecting the first line", () => {
     const root = Deno.makeTempDirSync();
     try {
@@ -1449,6 +1574,101 @@ ${body}
       } finally {
         Deno.removeSync(root, { recursive: true });
       }
+    }
+  });
+
+  it("keeps CRLF transport outside line editing operations", () => {
+    const encoder = new TextEncoder();
+    const cases: Array<{
+      keys: Array<{ name: string }>;
+      expected: string;
+    }> = [
+      { keys: [{ name: "end" }, { name: "backspace" }], expected: "ne\r\n" },
+      { keys: [{ name: "end" }, { name: "delete" }], expected: "new\r\n" },
+      { keys: [{ name: "home" }, { name: "ctrl-k" }], expected: "\r\n" },
+      {
+        keys: [
+          { name: "home" },
+          { name: "right" },
+          { name: "ctrl-space" },
+          { name: "right" },
+          { name: "right" },
+          { name: "ctrl-w" },
+        ],
+        expected: "w\r\n",
+      },
+    ];
+    for (const testCase of cases) {
+      const root = Deno.makeTempDirSync();
+      try {
+        Deno.mkdirSync(join(root, ".git"));
+        const path = join(root, "value.ts");
+        Deno.writeFileSync(path, encoder.encode("new\r\n"));
+        const diff = [
+          "diff --git a/value.ts b/value.ts",
+          "--- a/value.ts",
+          "+++ b/value.ts",
+          "@@ -1 +1 @@",
+          "-old",
+          "+new",
+          "",
+        ].join("\r\n");
+        const ws = realWorkspace(root);
+        const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+        const session = new Session(
+          built.doc,
+          { color: false, showLineNumbers: false },
+          { width: 80, height: 10 },
+          undefined,
+          diffSource(ws, built.edit),
+        );
+        session.top = 5;
+        session.handleKey({ name: "e" });
+        for (const key of testCase.keys) session.handleKey(key);
+        session.handleKey({ name: "f3" });
+
+        expect(Deno.readFileSync(path)).toEqual(
+          encoder.encode(testCase.expected),
+        );
+      } finally {
+        Deno.removeSync(root, { recursive: true });
+      }
+    }
+  });
+
+  it("keeps a literal final carriage return editable", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      Deno.writeFileSync(path, new Uint8Array([0x0d]));
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1 +1 @@
+-old
++\r
+\ No newline at end of file
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 5;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "home" });
+      session.handleKey({ name: "right" });
+      session.handleKey({ name: "backspace" });
+      session.handleKey({ name: "f3" });
+
+      expect(Deno.readFileSync(path)).toEqual(new Uint8Array([0x0d]));
+    } finally {
+      Deno.removeSync(root, { recursive: true });
     }
   });
 
@@ -1690,6 +1910,44 @@ ${body}
           ...encoder.encode(`${bom}first\nsecond\nthird-edited\n`),
         ]),
       );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("keeps inferred old BOM state when another hunk is stale", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const bom = "\uFEFF";
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(
+        path,
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...encoder.encode("first\ncurrent\nthird\ndifferent\n"),
+        ]),
+      );
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -2 +2 @@
+-old
++current
+@@ -4 +4 @@
+-old-fourth
++expected-fourth
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const source = diffSource(ws, built.edit);
+      const expanded = source.expandContext!(diff, diff, 4, true)!;
+
+      expect(expanded.text).toContain(` ${bom}first\n-old\n+current`);
+      expect(expanded.baseline).toContain(` ${bom}first\n-old\n+current`);
     } finally {
       Deno.removeSync(root, { recursive: true });
     }
