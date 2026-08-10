@@ -645,11 +645,12 @@ const findSelfIndex = lift((
  * persisted view.
  */
 const outboundEdges = lift((
-  { siblings, body, comments, links }: {
+  { siblings, body, comments, links, me }: {
     siblings: Writable<TopicMention[] | Default<[]>>;
     body: string | Default<"">;
     comments: { body: string }[] | Default<[]>;
     links: { url: string }[] | Default<[]>;
+    me: number;
   },
 ): { refsOut: TopicReference[]; refsOutLinks: TopicNavigationLink[] } => {
   const sibs = siblings.sample();
@@ -671,7 +672,11 @@ const outboundEdges = lift((
     const ref = (siblings.key(index) as any).resolveAsCell?.()?.entityId;
     const payload = ref ? fidPayload(entityRefToString(ref)) : "";
     payloads.push(payload);
-    if (payload && mentioned.has(payload)) hits.push(index);
+    // `index !== me` is `crossrefJoin`'s `j === i`: a topic that pastes its own
+    // fid into its own prose is not referencing a sibling, and a self-link is
+    // not an edge. The board's join drops it, so this must too, or the same
+    // topic renders one graph on the board and another on its own page.
+    if (payload && index !== me && mentioned.has(payload)) hits.push(index);
   }
   return {
     // HACK, as elsewhere: read the narrow projection, publish the deployed
@@ -971,16 +976,20 @@ export default pattern<TopicInput, TopicOutput>(
     // Split by direction: outbound depends on this topic's prose, inbound on
     // one row of the board's table. Neither depends on the sibling list, so an
     // unrelated topic being added re-runs nothing here.
+    // Both directions need to know which sibling is this topic — inbound to
+    // read its row, outbound to skip itself — so find it once.
+    const me = findSelfIndex({ siblings: mentionable, title });
     const outbound = outboundEdges({
       siblings: mentionable,
       body,
       comments,
       links,
+      me,
     });
     const inbound = inboundEdges({
       boardCrossrefs,
       siblings: mentionable,
-      me: findSelfIndex({ siblings: mentionable, title }),
+      me,
     });
     const crossrefs = joinEdges({ outbound, inbound });
 
