@@ -7,7 +7,7 @@ import {
   type FabricValue,
 } from "./interface.ts";
 import { hashStringOf } from "./value-hash.ts";
-import { toCompactDebugString } from "./value-debug.ts";
+import { backtickQuote, toCompactDebugString } from "./value-debug.ts";
 
 /**
  * Compares two `FabricValue`s for logical (content) equality.
@@ -146,6 +146,8 @@ function objectSubtypeOf(
   } else if (isPlainObject(value)) {
     return "plain";
   } else {
-    throw new Error(`Cannot compare value ${toCompactDebugString(value)}`);
+    throw new Error(
+      `Cannot compare value ${backtickQuote(toCompactDebugString(value))}`,
+    );
   }
 }

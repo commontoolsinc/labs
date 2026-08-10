@@ -4,7 +4,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { FabricInstance, FabricValue } from "./interface.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "./deep-freeze.ts";
-import { toDebugKindString } from "./value-debug.ts";
+import { backtickQuote, toDebugKindString } from "./value-debug.ts";
 
 /** Options for `cloneIfNecessary()`. */
 export interface CloneOptions {
@@ -454,7 +454,7 @@ export function cloneForMutation<T extends FabricValue>(
         -1,
         toDebugKindString(value),
         `\`cloneForMutation()\`: cannot mutate ${
-          toDebugKindString(value)
+          backtickQuote(toDebugKindString(value))
         } at root ` +
           `(empty path)`,
       );
@@ -472,7 +472,7 @@ export function cloneForMutation<T extends FabricValue>(
       -1,
       toDebugKindString(value),
       `\`cloneForMutation()\`: cannot descend into ${
-        toDebugKindString(value)
+        backtickQuote(toDebugKindString(value))
       } at ` +
         `root (path has ${path.length} segment${path.length === 1 ? "" : "s"})`,
     );
@@ -521,10 +521,10 @@ export function cloneForMutation<T extends FabricValue>(
           "non-mutable-leaf",
           i,
           toDebugKindString(next),
-          `cloneForMutation: cannot mutate ${
-            toDebugKindString(next)
+          `\`cloneForMutation()\`: cannot mutate ${
+            backtickQuote(toDebugKindString(next))
           } at path ` +
-            `index ${i} (final segment)`,
+            `index \`${i}\` (final segment)`,
         );
       }
     } else {
@@ -533,10 +533,10 @@ export function cloneForMutation<T extends FabricValue>(
           "non-container-descent",
           i,
           toDebugKindString(next),
-          `cloneForMutation: cannot descend into ${
-            toDebugKindString(next)
+          `\`cloneForMutation()\`: cannot descend into ${
+            backtickQuote(toDebugKindString(next))
           } at ` +
-            `path index ${i}`,
+            `path index \`${i}\``,
         );
       }
     }
