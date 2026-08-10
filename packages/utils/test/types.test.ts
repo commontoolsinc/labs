@@ -191,7 +191,7 @@ describe("types", () => {
       expect(isInstance(true)).toBe(false);
     });
 
-    it("returns `false` for `Object.create(`null`)`", () => {
+    it("returns `false` for `Object.create(null)`", () => {
       expect(isInstance(Object.create(null))).toBe(false);
     });
   });
