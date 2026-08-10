@@ -1430,12 +1430,25 @@ function shiftCompleteLineSpans(
 ): Span[] | null {
   const code = lineText.slice(1);
   const sourceText = spans.map((span) => span.text).join("");
-  if (code !== sourceText && code !== `${sourceText}\r`) return null;
-  const shifted = shiftSpans(markerSpan(lineText), spans);
-  if (code.length > sourceText.length) {
+  const restoresUtf8Bom = code.startsWith("\uFEFF") &&
+    (code.slice(1) === sourceText || code.slice(1) === `${sourceText}\r`);
+  const completeSourceText = restoresUtf8Bom
+    ? `\uFEFF${sourceText}`
+    : sourceText;
+  if (code !== completeSourceText && code !== `${completeSourceText}\r`) {
+    return null;
+  }
+  const completeSpans = restoresUtf8Bom
+    ? [
+      { col: 0, text: "\uFEFF", cls: "whitespace" } satisfies Span,
+      ...spans.map((span) => ({ ...span, col: span.col + 1 })),
+    ]
+    : spans;
+  const shifted = shiftSpans(markerSpan(lineText), completeSpans);
+  if (code.length > completeSourceText.length) {
     shifted.push({
-      col: cpLen(sourceText) + 1,
-      text: code.slice(sourceText.length),
+      col: cpLen(completeSourceText) + 1,
+      text: code.slice(completeSourceText.length),
       cls: "whitespace",
     });
   }

@@ -236,6 +236,33 @@ describe("decoded Markdown diff input", () => {
     expect(line.text).toBe(`+${bom}plain text`);
     expect(line.spans.map((span) => span.text).join("")).toBe(line.text);
   });
+
+  it("retains heading syntax when restoring a rendered BOM line", () => {
+    const bom = "\uFEFF";
+    const diff = `diff --git a/notes.md b/notes.md
+--- a/notes.md
++++ b/notes.md
+@@ -0,0 +1 @@
++${bom}# Heading
+`;
+    const ws: DiffWorkspace = { resolve: () => null, read: () => null };
+    const { doc } = buildDiffDocument(
+      diff,
+      parseDiff(diff)!,
+      ws,
+      new Map(),
+      "rendered",
+    );
+    const line = doc.lines[4];
+
+    expect(line.text).toBe(`+${bom}# Heading`);
+    expect(line.spans.map((span) => span.text).join("")).toBe(line.text);
+    expect(
+      line.spans.some((span) =>
+        span.cls === "sectionHeader" && span.text === "# Heading"
+      ),
+    ).toBe(true);
+  });
 });
 
 Deno.test("markdown: a deeper-then-shallower diff window keeps a navigable depth tree", () => {
