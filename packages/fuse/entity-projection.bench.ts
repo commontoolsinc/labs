@@ -1,10 +1,20 @@
 // Entity projection scaling benchmark. The scheduled benchmark workflow stores
 // its operation timings and additional resource diagnostics.
 
-import type {
-  PieceController,
+import type { CellScope } from "@commonfabric/api";
+import { createSession, Identity } from "@commonfabric/identity";
+import {
+  type PieceController,
   PiecesController,
 } from "@commonfabric/piece/ops";
+import {
+  type EntityIdListOptions,
+  type EntityIdListResult,
+  type JSONSchema,
+  Runtime,
+  type Schema,
+} from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CfcProjectionAnnotator } from "./annotations.ts";
 import { CellBridge, type SpaceState } from "./cell-bridge.ts";
 import {
@@ -19,16 +29,107 @@ import { FsTree } from "./tree.ts";
 const encoder = new TextEncoder();
 const PAGE_SIZE = 1_000;
 
-interface FakeCell {
-  schema: Record<string, unknown> | undefined;
-  get(): unknown;
-  getRaw(): unknown;
-  asSchemaFromLinks(): FakeCell;
-  key(segment: string): FakeCell;
+declare const gc: (() => void) | undefined;
+
+const benchmarkIdentity = await Identity.fromPassphrase(
+  "fuse entity projection benchmark",
+);
+const benchmarkSession = await createSession({
+  identity: benchmarkIdentity,
+  spaceName: "fuse-entity-projection-benchmark",
+});
+const benchmarkRuntime = new Runtime({
+  apiUrl: new URL(import.meta.url),
+  storageManager: StorageManager.emulate({ as: benchmarkIdentity }),
+});
+
+class BenchmarkPiecesController extends PiecesController {
+  readonly #ids: readonly string[];
+  #entityGets = 0;
+  #existenceRequests = 0;
+  #listRequests = 0;
+  #wireBytes = 0;
+
+  constructor(ids: readonly string[]) {
+    super(benchmarkSession, benchmarkRuntime, { deferSpaceCellSync: true });
+    this.#ids = ids;
+  }
+
+  entityGetRequests(): number {
+    return this.#entityGets;
+  }
+
+  existenceRequests(): number {
+    return this.#existenceRequests;
+  }
+
+  listRequests(): number {
+    return this.#listRequests;
+  }
+
+  wireBytes(): number {
+    return this.#wireBytes;
+  }
+
+  override listEntityIdPage(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult> {
+    this.#listRequests++;
+    const start = firstIndexAfter(this.#ids, options.after);
+    const pageIds = this.#ids.slice(
+      start,
+      start + (options.limit ?? PAGE_SIZE),
+    );
+    const hasMore = start + pageIds.length < this.#ids.length;
+    const result: EntityIdListResult = {
+      serverSeq: 1,
+      ids: pageIds,
+    };
+    if (hasMore) {
+      const nextAfter = pageIds.at(-1);
+      if (nextAfter === undefined) {
+        throw new Error("non-final entity page was empty");
+      }
+      result.nextAfter = nextAfter;
+    }
+    this.#wireBytes += encoder.encode(JSON.stringify(result)).length;
+    return Promise.resolve(result);
+  }
+
+  override entityIdExists(id: string): Promise<boolean> {
+    this.#existenceRequests++;
+    const index = firstIndexAfter(this.#ids, id);
+    const exists = index > 0 && this.#ids[index - 1] === id;
+    this.#wireBytes += encoder.encode(JSON.stringify({ exists })).length;
+    return Promise.resolve(exists);
+  }
+
+  override async get<S extends JSONSchema = JSONSchema>(
+    pieceId: string,
+    runIt: boolean,
+    schema: S,
+    scope?: CellScope,
+  ): Promise<PieceController<Schema<S>>>;
+  override async get<T = unknown>(
+    pieceId: string,
+    runIt?: boolean,
+    schema?: JSONSchema,
+    scope?: CellScope,
+  ): Promise<PieceController<T>>;
+  override async get(
+    pieceId: string,
+    runIt: boolean = false,
+    schema?: JSONSchema,
+    scope?: CellScope,
+  ): Promise<PieceController> {
+    this.#entityGets++;
+    return await super.get(pieceId, runIt, schema, scope);
+  }
 }
 
 interface ConnectedFixture {
   bridge: CellBridge;
+  entityGetRequests: () => number;
   existenceRequests: () => number;
   ids: string[];
   listRequests: () => number;
@@ -56,8 +157,7 @@ function entityIds(count: number): string[] {
 }
 
 function forceGc(): void {
-  const gc = (globalThis as { gc?: () => void }).gc;
-  if (!gc) return;
+  if (typeof gc !== "function") return;
   for (let pass = 0; pass < 3; pass++) gc();
 }
 
@@ -100,37 +200,7 @@ async function connect(
   ids: string[],
   cfcAnnotations: boolean,
 ): Promise<ConnectedFixture> {
-  let requests = 0;
-  let lookups = 0;
-  let transferredBytes = 0;
-  const spacePieces = {
-    getSpace: () => "did:key:zFuseEntityProjectionBenchmark",
-    listEntityIdPage: (options: {
-      after?: string;
-      limit?: number;
-      expectedServerSeq?: number;
-    }) => {
-      requests++;
-      const start = firstIndexAfter(ids, options.after);
-      const pageIds = ids.slice(start, start + (options.limit ?? PAGE_SIZE));
-      const hasMore = start + pageIds.length < ids.length;
-      const result = {
-        serverSeq: 1,
-        ids: pageIds,
-        ...(hasMore ? { nextAfter: pageIds.at(-1)! } : {}),
-      };
-      transferredBytes += encoder.encode(JSON.stringify(result)).length;
-      return Promise.resolve(result);
-    },
-    entityIdExists: (id: string) => {
-      lookups++;
-      const index = firstIndexAfter(ids, id);
-      const exists = index > 0 && ids[index - 1] === id;
-      transferredBytes += encoder.encode(JSON.stringify({ exists })).length;
-      return Promise.resolve(exists);
-    },
-    runtime: { dispose: () => Promise.resolve() },
-  } as unknown as PiecesController;
+  const spacePieces = new BenchmarkPiecesController(ids);
   const tree = new FsTree(() => 0);
   const bridge = new CellBridge(tree, "", {
     cfcAnnotations,
@@ -141,12 +211,13 @@ async function connect(
   const state = await bridge.connectSpace("home");
   return {
     bridge,
-    existenceRequests: () => lookups,
+    entityGetRequests: () => spacePieces.entityGetRequests(),
+    existenceRequests: () => spacePieces.existenceRequests(),
     ids,
-    listRequests: () => requests,
+    listRequests: () => spacePieces.listRequests(),
     state,
     tree,
-    wireBytes: () => transferredBytes,
+    wireBytes: () => spacePieces.wireBytes(),
   };
 }
 
@@ -340,18 +411,6 @@ for (
   });
 }
 
-function fakeCell(value: unknown): FakeCell {
-  return {
-    schema: undefined,
-    get: () => value,
-    getRaw: () => value,
-    asSchemaFromLinks() {
-      return this;
-    },
-    key: () => fakeCell(undefined),
-  };
-}
-
 let hydrationInvocation = 0;
 Deno.bench({
   name: "1000-entity-recursive-walk",
@@ -360,44 +419,6 @@ Deno.bench({
   fn: async (benchmark) => {
     const count = 1_000;
     const fixture = await connect(entityIds(count), false);
-    let entityGets = 0;
-    let inputGets = 0;
-    let resultGets = 0;
-    const payload = {
-      metadata: { title: "benchmark", tags: ["one", "two", "three"] },
-      records: Array.from(
-        { length: 10 },
-        (_, index) => ({ index, text: "x".repeat(128) }),
-      ),
-    };
-
-    fixture.state.pieces = {
-      get: (id: string) => {
-        entityGets++;
-        const inputCell = fakeCell(payload);
-        const resultCell = fakeCell(payload);
-        return Promise.resolve({
-          id,
-          name: () => "",
-          getPatternRef: () => Promise.resolve(undefined),
-          input: {
-            getCell: () => Promise.resolve(inputCell),
-            get: () => {
-              inputGets++;
-              return Promise.resolve(payload);
-            },
-          },
-          result: {
-            getCell: () => Promise.resolve(resultCell),
-            get: () => {
-              resultGets++;
-              return Promise.resolve(payload);
-            },
-          },
-        } as unknown as PieceController);
-      },
-    } as unknown as PiecesController;
-
     forceGc();
     const before = Deno.memoryUsage();
     const { wallMs } = await measureOperation(benchmark, async () => {
@@ -406,23 +427,24 @@ Deno.bench({
       );
       for (const { name } of entries?.slice(2) ?? []) {
         await fixture.bridge.prepareLookup(fixture.state.entitiesIno, name);
-        const ino = fixture.tree.lookup(fixture.state.entitiesIno, name)!;
+        const ino = fixture.tree.lookup(fixture.state.entitiesIno, name);
+        if (ino === undefined) {
+          throw new Error(`entity projection was missing for ${name}`);
+        }
         await fixture.bridge.prepareDirectorySnapshot(ino);
       }
     });
     forceGc();
     const after = Deno.memoryUsage();
-    if (entityGets !== 0 || inputGets !== 0 || resultGets !== 0) {
+    if (fixture.entityGetRequests() !== 0) {
       throw new Error("recursive directory walk hydrated entity values");
     }
     diagnostic("recursive-hydration-1000", hydrationInvocation++, {
-      entityGets,
+      entityGets: fixture.entityGetRequests(),
       existenceRequests: fixture.existenceRequests(),
       heapMiB: mib(after.heapUsed - before.heapUsed),
       inodes: fixture.tree.inodes.size,
-      inputGets,
       listRequests: fixture.listRequests(),
-      resultGets,
       rssMiB: mib(after.rss - before.rss),
       wallMs: Math.round(wallMs * 10) / 10,
     });
