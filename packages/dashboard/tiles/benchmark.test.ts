@@ -14,6 +14,7 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
+import { expect } from "@std/expect";
 import type { Ctx, TileView } from "../types.ts";
 import { REPO } from "../config.ts";
 import { BenchmarkHistoryStore } from "../benchmark-history-cache.ts";
@@ -1054,203 +1055,81 @@ Deno.test("benchmark: the trend reads the recent window only, not the whole hist
   });
 });
 
-Deno.test("benchmark: the tile paints its headline from cache before the backfill finishes", async () => {
-  const directory = await Deno.makeTempDir({ prefix: "benchmark-early-" });
+Deno.test("benchmark: returns a failed rising view without publishing intermediate data", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "benchmark-settled-view-",
+  });
   const previousCacheDirectory = Deno.env.get("DASHBOARD_CACHE_DIR");
   const originalFetch = globalThis.fetch;
-  const token = `benchmark-early-${crypto.randomUUID()}`;
+  const token = `benchmark-settled-view-${crypto.randomUUID()}`;
   Deno.env.set("DASHBOARD_CACHE_DIR", directory);
-  // Seed a warm cache: two runs whose one benchmark averages 5ms, so a restart has
-  // a 5.0ms total to headline immediately, before the new run's artifact arrives.
   const key = "packages/a/x.bench.ts > b";
-  const stats = {
-    min: 5e6,
-    avg: 5e6,
-    max: 5e6,
-    p75: 5e6,
-    p99: 5e6,
-    p995: 5e6,
-    p999: 5e6,
-  };
   const seed = new BenchmarkHistoryStore();
   await seed.load();
-  const cachedRuns = [
-    {
-      runId: 84_001,
+  const cachedRuns = Array.from({ length: 8 }, (_, day) => {
+    const avg = (5 + day) * 1e6;
+    return {
+      runId: 84_001 + day,
       runAttempt: 1,
-      at: BASE - 2 * DAY,
+      at: SAMPLED_BASE - (7 - day) * DAY,
       cpu: TEST_CPU,
-      metrics: new Map([[key, stats]]),
-    },
-    {
-      runId: 84_002,
-      runAttempt: 1,
-      at: BASE - DAY,
-      cpu: TEST_CPU,
-      metrics: new Map([[key, stats]]),
-    },
-  ];
+      metrics: new Map([[key, {
+        min: avg,
+        avg,
+        max: avg,
+        p75: avg,
+        p99: avg,
+        p995: avg,
+        p999: avg,
+      }]]),
+    };
+  });
   for (const cachedRun of cachedRuns) seed.set(cachedRun);
-  seed.markRefreshed(BASE - DAY, cachedRuns);
-  await seed.save(BASE - DAY);
+  seed.markRefreshed(Date.now(), cachedRuns);
+  await seed.save();
 
-  const runId = 84_003;
-  let releaseArtifact!: (response: Response) => void;
-  const heldArtifact = new Promise<Response>((resolve) => {
-    releaseArtifact = resolve;
-  });
-  globalThis.fetch = ((input: RequestInfo | URL) => {
-    const url = new URL(input instanceof Request ? input.url : String(input));
-    if (url.pathname.endsWith("/actions/workflows/benchmarks.yml/runs")) {
-      return Promise.resolve(Response.json({
-        workflow_runs: [
-          ghRun(runId, BASE),
-          ghRun(84_002, BASE - DAY),
-          ghRun(84_001, BASE - 2 * DAY),
-        ],
-      }));
-    }
-    if (url.pathname.endsWith(`/actions/runs/${runId}/artifacts`)) {
-      return heldArtifact; // the drill-down backfill blocks here
-    }
-    throw new Error(`unexpected request ${url.pathname}`);
-  }) as typeof fetch;
-  let collection: Promise<TileView> | undefined;
-  try {
-    const isolated = await import(`./benchmark.ts?early=${crypto.randomUUID()}`);
-    let published: TileView | undefined;
-    let markPublished!: () => void;
-    const painted = new Promise<void>((resolve) => {
-      markPublished = resolve;
-    });
-    const active: Promise<TileView> = isolated.benchmark.collect(
-      ctx({ GH_TOKEN: token }),
-      (view: TileView) => {
-        published = view;
-        markPublished();
-      },
-    );
-    collection = active;
-    // The headline is painted from the seeded cache while the new artifact is held.
-    await painted;
-    assertStringIncludes(published?.value ?? "", "new"); // two seeded runs: the trend reads "new"
-    assertEquals(published?.status, "good");
-
-    releaseArtifact(Response.json({ artifacts: [] })); // the new run has no usable artifact
-    const final = await active;
-    assertStringIncludes(final.value ?? "", "new"); // still the cached runs' trend
-  } finally {
-    releaseArtifact(Response.json({ artifacts: [] }));
-    await collection?.catch(() => {});
-    globalThis.fetch = originalFetch;
-    if (previousCacheDirectory === undefined) {
-      Deno.env.delete("DASHBOARD_CACHE_DIR");
-    } else Deno.env.set("DASHBOARD_CACHE_DIR", previousCacheDirectory);
-    await Deno.remove(directory, { recursive: true });
-  }
-});
-
-Deno.test("benchmark: a cold fetch reads 'collecting…' in flight, then reports empty", async () => {
-  // Cold cache, no seed. The early paint has the run list but no artifacts yet, so
-  // the tile says it is collecting — distinct from a finished, empty fetch.
-  const directory = await Deno.makeTempDir({ prefix: "benchmark-collecting-" });
-  const previousCacheDirectory = Deno.env.get("DASHBOARD_CACHE_DIR");
-  const originalFetch = globalThis.fetch;
-  const token = `benchmark-collecting-${crypto.randomUUID()}`;
-  Deno.env.set("DASHBOARD_CACHE_DIR", directory);
-  const runId = 85_001;
-  let releaseArtifact!: (response: Response) => void;
-  const heldArtifact = new Promise<Response>((resolve) => {
-    releaseArtifact = resolve;
-  });
-  globalThis.fetch = ((input: RequestInfo | URL) => {
-    const url = new URL(input instanceof Request ? input.url : String(input));
-    if (url.pathname.endsWith("/actions/workflows/benchmarks.yml/runs")) {
-      return Promise.resolve(
-        Response.json({ workflow_runs: [ghRun(runId, BASE)] }),
-      );
-    }
-    if (url.pathname.endsWith(`/actions/runs/${runId}/artifacts`)) {
-      return heldArtifact;
-    }
-    throw new Error(`unexpected request ${url.pathname}`);
-  }) as typeof fetch;
-  let collection: Promise<TileView> | undefined;
-  try {
-    const isolated = await import(`./benchmark.ts?collecting=${crypto.randomUUID()}`);
-    let published: TileView | undefined;
-    let markPublished!: () => void;
-    const painted = new Promise<void>((resolve) => {
-      markPublished = resolve;
-    });
-    const active: Promise<TileView> = isolated.benchmark.collect(
-      ctx({ GH_TOKEN: token }),
-      (view: TileView) => {
-        published = view;
-        markPublished();
-      },
-    );
-    collection = active;
-    await painted;
-    assertEquals(published?.status, "unknown");
-    assertEquals(published?.sub, "collecting…"); // fetch still in flight
-
-    // The listing errors, so nothing settles; the finished fetch found no data.
-    releaseArtifact(new Response("no", { status: 500 }));
-    const final = await active;
-    assertEquals(final.status, "unknown");
-    assertEquals(final.sub, "benchmark data unavailable"); // done, and empty
-  } finally {
-    releaseArtifact(new Response("no", { status: 500 }));
-    await collection?.catch(() => {});
-    globalThis.fetch = originalFetch;
-    if (previousCacheDirectory === undefined) {
-      Deno.env.delete("DASHBOARD_CACHE_DIR");
-    } else Deno.env.set("DASHBOARD_CACHE_DIR", previousCacheDirectory);
-    await Deno.remove(directory, { recursive: true });
-  }
-});
-
-Deno.test("benchmark: the tile reads 'collecting…' from the first paint, before the run list arrives", async () => {
-  // Cold cache, and even the run-list fetch is held open. The tile paints
-  // "collecting…" at once — before GitHub has answered with any runs — so a freshly
-  // loaded dashboard is never blank while the first collection gets under way.
-  const directory = await Deno.makeTempDir({ prefix: "benchmark-start-" });
-  const previousCacheDirectory = Deno.env.get("DASHBOARD_CACHE_DIR");
-  const originalFetch = globalThis.fetch;
-  const token = `benchmark-start-${crypto.randomUUID()}`;
-  Deno.env.set("DASHBOARD_CACHE_DIR", directory);
+  const failedRun = ghRun(84_099, SAMPLED_BASE + HOUR, "failure");
   let releaseRuns!: (response: Response) => void;
   const heldRuns = new Promise<Response>((resolve) => {
     releaseRuns = resolve;
   });
+  let markRunsRequested!: () => void;
+  const runsRequested = new Promise<void>((resolve) => {
+    markRunsRequested = resolve;
+  });
   globalThis.fetch = ((input: RequestInfo | URL) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
-    if (url.pathname === "/rate_limit") return Promise.resolve(serve({})(url));
     if (url.pathname.endsWith("/actions/workflows/benchmarks.yml/runs")) {
-      return heldRuns; // the run list stays held until the finally block
+      markRunsRequested();
+      return heldRuns;
     }
     throw new Error(`unexpected request ${url.pathname}`);
   }) as typeof fetch;
   let collection: Promise<TileView> | undefined;
   try {
-    const isolated = await import(`./benchmark.ts?start=${crypto.randomUUID()}`);
-    let first: TileView | undefined;
-    let markPublished!: () => void;
-    const painted = new Promise<void>((resolve) => {
-      markPublished = resolve;
-    });
-    collection = isolated.benchmark.collect(
-      ctx({ GH_TOKEN: token }),
-      (view: TileView) => {
-        first ??= view; // capture the very first paint
-        markPublished();
-      },
+    const isolated = await import(
+      `./benchmark.ts?settled-view=${crypto.randomUUID()}`
     );
-    await painted;
-    assertEquals(first?.status, "unknown");
-    assertEquals(first?.sub, "collecting…"); // painted before any run list arrives
-    assertEquals(first?.label, "benchmarks"); // and under the new name
+    expect(isolated.benchmark.showOnlyCompletedViews).toBe(true);
+    const published: TileView[] = [];
+    const active: Promise<TileView> = isolated.benchmark.collect(
+      ctx({ GH_TOKEN: token }),
+      (view: TileView) => published.push(view),
+    );
+    collection = active;
+    await runsRequested;
+    expect(published).toEqual([]);
+
+    releaseRuns(Response.json({
+      workflow_runs: [
+        failedRun,
+        ...cachedRuns.toReversed().map((run) => ghRun(run.runId, run.at)),
+      ],
+    }));
+    const final = await active;
+    expect(published).toEqual([]);
+    expect(final.status).toBe("bad");
+    expect(final.value).toContain("▲");
   } finally {
     releaseRuns(Response.json({ workflow_runs: [] }));
     await collection?.catch(() => {});
@@ -2975,54 +2854,6 @@ Deno.test("benchmark: a fresh marker then an unreachable direct read grays with 
   }
 });
 
-Deno.test("benchmark: an early-paint publish that throws is caught, and the collection still finishes", async () => {
-  // The immediate paint publishes once; when the run list is paged, paintEarly
-  // publishes again. A publish that throws on that second call is swallowed by the
-  // run-list notifier, so one bad paint never breaks the collection.
-  const directory = await Deno.makeTempDir({ prefix: "benchmark-paint-throw-" });
-  const previousCacheDirectory = Deno.env.get("DASHBOARD_CACHE_DIR");
-  const originalFetch = globalThis.fetch;
-  const token = `benchmark-paint-throw-${crypto.randomUUID()}`;
-  Deno.env.set("DASHBOARD_CACHE_DIR", directory);
-  const key = "packages/a/x.bench.ts";
-  const healthy = serve({
-    pages: { 1: [ghRun(7_801, BASE - DAY), ghRun(7_802, BASE)] },
-    artifacts: {
-      7_801: [{ id: 78_010, name: "bench-results", expired: false }],
-      7_802: [{ id: 78_020, name: "bench-results", expired: false }],
-    },
-    zips: {
-      78_010: await benchZip(report([bench(key, null, "b", timings(1_000))])),
-      78_020: await benchZip(report([bench(key, null, "b", timings(1_000))])),
-    },
-  });
-  try {
-    const isolated = await import(
-      `./benchmark.ts?paint-throw=${crypto.randomUUID()}`
-    );
-    globalThis.fetch = ((input: RequestInfo | URL) => {
-      const url = new URL(input instanceof Request ? input.url : String(input));
-      if (url.pathname === "/rate_limit") return Promise.resolve(serve({})(url));
-      return Promise.resolve(healthy(url));
-    }) as typeof fetch;
-    let calls = 0;
-    const final = await isolated.benchmark.collect(
-      ctx({ GH_TOKEN: token }),
-      () => {
-        if (++calls > 1) throw new Error("publish boom"); // throw on paintEarly
-      },
-    );
-    assert(calls >= 2); // the immediate paint and the paged-run-list paintEarly
-    assertEquals(final.status, "good"); // the thrown paint did not break the run
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (previousCacheDirectory === undefined) {
-      Deno.env.delete("DASHBOARD_CACHE_DIR");
-    } else Deno.env.set("DASHBOARD_CACHE_DIR", previousCacheDirectory);
-    await Deno.remove(directory, { recursive: true });
-  }
-});
-
 Deno.test("benchmark: the drill-down keeps one-sample benchmarks", async () => {
   // Each run reports a different benchmark. The tile still indexes both runs.
   // The drill-down shows each benchmark's one sample as a point.
@@ -3547,6 +3378,119 @@ Deno.test("a queued runtime history refresh reuses a dashboard refresh that just
   } finally {
     resolveRuns(Response.json({ workflow_runs: [] }));
     await dashboard?.catch(() => {});
+    globalThis.fetch = originalFetch;
+    if (previousCacheDirectory === undefined) {
+      Deno.env.delete("DASHBOARD_CACHE_DIR");
+    } else Deno.env.set("DASHBOARD_CACHE_DIR", previousCacheDirectory);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("a queued dashboard refresh checks that the drill-down covers its runs", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "benchmark-queued-dashboard-",
+  });
+  const previousCacheDirectory = Deno.env.get("DASHBOARD_CACHE_DIR");
+  const originalFetch = globalThis.fetch;
+  const oldRun = ghRun(131_001, SAMPLED_BASE - DAY);
+  const newRun = ghRun(131_002, SAMPLED_BASE);
+  const oldArchive = await totalZip(5e6);
+  const newArchive = await totalZip(10e6);
+  let releaseOldArtifact!: (response: Response) => void;
+  const heldOldArtifact = new Promise<Response>((resolve) => {
+    releaseOldArtifact = resolve;
+  });
+  let markOldArtifactRequested!: () => void;
+  const oldArtifactRequested = new Promise<void>((resolve) => {
+    markOldArtifactRequested = resolve;
+  });
+  let markDashboardRunsRequested!: () => void;
+  const dashboardRunsRequested = new Promise<void>((resolve) => {
+    markDashboardRunsRequested = resolve;
+  });
+  let workflowRequests = 0;
+  let newArtifactRequests = 0;
+  Deno.env.set("DASHBOARD_CACHE_DIR", directory);
+  globalThis.fetch = ((input: RequestInfo | URL) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.pathname === "/rate_limit") {
+      return Promise.resolve(serve({})(url));
+    }
+    if (url.pathname.endsWith("/actions/workflows/benchmarks.yml/runs")) {
+      workflowRequests++;
+      if (workflowRequests === 1) {
+        return Promise.resolve(Response.json({ workflow_runs: [oldRun] }));
+      }
+      if (workflowRequests === 2) {
+        markDashboardRunsRequested();
+        return Promise.resolve(Response.json({
+          workflow_runs: [newRun, oldRun],
+        }));
+      }
+      throw new Error("unexpected third workflow request");
+    }
+    if (url.pathname.endsWith(`/actions/runs/${oldRun.id}/artifacts`)) {
+      markOldArtifactRequested();
+      return heldOldArtifact;
+    }
+    if (url.pathname.endsWith(`/actions/runs/${newRun.id}/artifacts`)) {
+      newArtifactRequests++;
+      return Promise.resolve(Response.json({
+        artifacts: [{
+          id: newRun.id * 10,
+          name: "bench-results",
+          expired: false,
+        }],
+      }));
+    }
+    if (url.pathname.endsWith(`/actions/artifacts/${oldRun.id * 10}/zip`)) {
+      return Promise.resolve(new Response(oldArchive));
+    }
+    if (url.pathname.endsWith(`/actions/artifacts/${newRun.id * 10}/zip`)) {
+      return Promise.resolve(new Response(newArchive));
+    }
+    throw new Error(`unexpected request ${url.pathname}`);
+  }) as typeof fetch;
+
+  let dashboard: Promise<TileView> | undefined;
+  let drillDown: Promise<string> | undefined;
+  try {
+    const isolated = await import(
+      `./benchmark.ts?queued-dashboard=${crypto.randomUUID()}`
+    );
+    const tokenContext = ctx({
+      GH_TOKEN: `queued-dashboard-${crypto.randomUUID()}`,
+    });
+    const page = await isolated.benchmarkHistoryResponse(
+      new URL("http://x/bench?view=runtime"),
+      tokenContext,
+    );
+    const html = await page.text();
+    const id = html.match(/runtime-progress\?id=([^"&]+)/)?.[1];
+    assert(id);
+    drillDown = isolated.benchmarkHistoryProgressResponse(
+      new URL(`http://x/bench/runtime-progress?id=${id}`),
+    ).text();
+    await oldArtifactRequested;
+
+    dashboard = isolated.benchmark.collect(tokenContext);
+    await dashboardRunsRequested;
+    releaseOldArtifact(Response.json({
+      artifacts: [{
+        id: oldRun.id * 10,
+        name: "bench-results",
+        expired: false,
+      }],
+    }));
+
+    await dashboard;
+    await drillDown;
+    expect(workflowRequests).toBe(2);
+    expect(newArtifactRequests).toBe(1);
+  } finally {
+    releaseOldArtifact(Response.json({ artifacts: [] }));
+    await dashboard?.catch(() => {});
+    await drillDown?.catch(() => {});
     globalThis.fetch = originalFetch;
     if (previousCacheDirectory === undefined) {
       Deno.env.delete("DASHBOARD_CACHE_DIR");
