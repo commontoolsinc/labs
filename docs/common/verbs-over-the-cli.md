@@ -363,10 +363,11 @@ cf piece get --piece <board> notes --schema \
 [{ "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" }]
 ```
 
-A field list unions the same way, and its two paths meet at the one position:
+A field list unions the same way, and its two paths meet at the one position.
+`noteCount` is computed, so the read steps the piece to bring it up to date:
 
 ```bash
-cf piece get --piece <board> --select 'notes@,noteCount'
+cf piece get --piece <board> --step --select 'notes@,noteCount'
 ```
 
 ```json

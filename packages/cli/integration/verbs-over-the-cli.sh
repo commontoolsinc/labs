@@ -147,7 +147,8 @@ appended through the read" "$(echo "$B" | jq -r '.result.body // empty')" \
 # A field list spells the same marker with a trailing @, so one read asks for
 # an address at one position and projects at another. The list is element-wise
 # across an array, so the marked collection answers with one address per note.
-AT=$($CF piece get --quiet --piece "$BOARD" $ARGS \
+# noteCount is computed, so --step brings it up to date the way step 7 does.
+AT=$($CF piece get --quiet --piece "$BOARD" $ARGS --step \
   --select 'notes@,noteCount' 2>/dev/null)
 check "true" "$(echo "$AT" | jq -c \
   '(.notes | length > 0) and ([.notes[] | has("$link")] | all)')" \
