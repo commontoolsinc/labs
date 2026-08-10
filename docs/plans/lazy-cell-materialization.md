@@ -409,30 +409,25 @@ diffing and the scheduler's own reads keep eager semantics.
       runtime-internal reads kept out of the scheduler's view of what the ACTION
       read. This fixed `incremental observation adoption (live)`,
       `Pattern Runner - Dynamic Patterns` and `scheduler cold-replica startup`.
-- [ ] Finish carrying `asCell` through a `$ref` union. The chain is now traced,
-      and two of its three links are fixed.
+- [x] Carry `asCell` through a `$ref` union. Two facts hid the marker, and each
+      was enough on its own.
 
-      1. The union's branches are bare `$ref`s. `canBranchMatch` resolves a ref
-         on its own but has no `$defs` to resolve it against, so every branch
-         matched and the union never narrowed at all — the narrowed schema came
-         back byte-identical to the input. **Fixed:** branches resolve against
-         the union's own `$defs` before matching.
-      2. Where several branches still match, merging their SCHEMAS leaves
-         `asCell` off the merged top level, while an eager read evaluates each
-         branch and picks the cell among the RESULTS (`mergeMatches`).
-         **Fixed:** a matching branch that declares `asCell` is preferred over
-         the merge, and a view mints the handle when narrowing reveals one that
-         the entry point could not see.
-      3. **Open:** resolving a `$ref` strips `asCell`. Before resolution the
-         `$defs` entry reads
-         `authorProfile: {anyOf: [undefined, {anyOf: [...], asCell: ["cell"]}]}`;
-         after, the `asCell` is gone. So the marker is lost inside resolution
-         itself, before any narrowing decision sees it. That is where the
-         remaining work is, and it is worth checking whether the eager path
-         depends on the same resolution keeping it.
+      A branch written as a bare `$ref` declares nothing — no `type`, no
+      `required`, no `asCell` — and `canBranchMatch` resolves a ref on its own
+      but has no `$defs` to resolve it against. Every branch matched, so the
+      union never narrowed and the narrowed schema came back identical to its
+      input. Branches now resolve against the union's own `$defs` first.
 
-      Effect so far: `multi-user.test.tsx` went from 3 failures to 2. The
-      symptom is unchanged for the rest — `profile?.get is not a function`.
+      And an optional handle, `Cell<T> | undefined`, generates as a union whose
+      one branch carries the marker and whose other is the absent case.
+      `hasAsCell` answers for a union only when EVERY branch declares one, so
+      that shape read as "not a cell". A union with any `asCell` branch now
+      collapses onto it, which is the same answer an eager read reaches by
+      evaluating each branch and picking the cell among the results
+      (`mergeMatches`).
+
+      `$ref` resolution was NOT dropping the marker — an earlier note said so
+      and was wrong; resolution preserves it, and a direct test says so.
 - [ ] Decide the forwarding case (`Pattern Runner - Lift`): a lift that forwards
       its argument without reading it takes no dependency on the values inside
       and re-runs once rather than twice. Its computed result is unchanged.

@@ -139,6 +139,37 @@ const typeAccepts = (declared: unknown, actual: string): boolean => {
   );
 };
 
+/**
+ * Collapse a union onto a branch that declares `asCell`, when one does.
+ *
+ * An optional handle — `Cell<T> | undefined` — generates as a union whose one
+ * branch carries the marker and whose other is the absent case. `hasAsCell`
+ * answers for a union only when EVERY branch declares one, so that shape reads
+ * as "not a cell" and the reader gets a plain value where the pattern declared
+ * a handle. An eager read survives it by evaluating every branch and picking
+ * the cell among the results (`mergeMatches`); collapsing to the branch is the
+ * same answer, decided on the schema instead.
+ */
+const preferAsCellBranch = (schema: JSONSchema): JSONSchema => {
+  if (!isRecord(schema)) return schema;
+  const branches = schema.anyOf ?? schema.oneOf;
+  if (!Array.isArray(branches)) return schema;
+  const resolved = branches.map((branch) => resolveBranch(branch, schema));
+  if (
+    resolved.some((branch) =>
+      ContextualFlowControl.getAsCellValues(branch).length > 0
+    )
+  ) {
+    const chosen = resolved.find((branch) =>
+      ContextualFlowControl.getAsCellValues(branch).length > 0
+    )!;
+    return isRecord(chosen) && isRecord(schema.$defs)
+      ? { ...chosen as JSONSchemaObj, $defs: schema.$defs }
+      : chosen;
+  }
+  return schema;
+};
+
 /** A branch with its `$ref` resolved against the union's own `$defs`. */
 const resolveBranch = (
   branch: JSONSchema,
@@ -220,7 +251,9 @@ const childSchema = (
     EXCLUDED_EMPTY,
     EXCLUDED_MISSING,
   );
-  if (narrowed !== false || !isRecord(schema)) return narrowed;
+  if (narrowed !== false || !isRecord(schema)) {
+    return preferAsCellBranch(narrowed);
+  }
   // `schemaAtPath` decides which children exist from the schema's `type`, so a
   // schema that declares `properties` or `items` and omits `type` narrows to
   // `false` — no child selected. An eager read reaches those children, and the

@@ -378,33 +378,15 @@ value is ignored with a warning rather than coerced. See
 - **Design, measurements and staging.**
   [`../plans/lazy-cell-materialization.md`](../plans/lazy-cell-materialization.md).
 
-**Before it can graduate**, one runner unit test and five patterns integration
-tests fail with the flag forced on.
+**Before it can graduate**, one runner unit test fails with the flag forced on:
+a lift that forwards its argument without reading it takes no dependency on the
+values inside and re-runs once rather than twice (`Pattern Runner - Lift`). Its
+computed result is unchanged, so whether the reduced re-run is wanted is a
+scheduling decision rather than a defect.
 
-The five patterns failures share one symptom: `profile?.get is not a function`.
-A pattern declares `authorProfile: ProfileCell` — an `asCell` — and a view hands
-back a plain value instead of a `Cell`. Every one of the five is a multi-user
-pattern reaching shared state through `SharedChatMessage`, a discriminated union
-of two object shapes (`TrustedSentChatMessage | ImportedClaimedChatMessage`,
-tagged by `origin`) in which BOTH branches declare `authorProfile` as `asCell`.
-
-The mechanism is not yet established. Narrowing a union at the point of access
-is the obvious suspect, but a direct reproduction of that shape — two object
-branches both declaring the same `asCell` property, including with the branches
-written as `$ref`s into `$defs`, which reproduces the "Unresolved $ref in
-schema" warnings the failing run emits — returns a working `Cell` under the flag
-in every variation tried. Something else about the real schema is responsible.
-Whoever picks this up should get the actual narrowed schema out of the failing
-pattern rather than reasoning from its TypeScript types.
-
-The remaining unit failure is separate: a lift that forwards its argument
-without reading it takes no dependency on the values inside and re-runs once
-rather than twice (`Pattern Runner - Lift`). Its computed result is unchanged,
-so whether the reduced re-run is wanted is a scheduling decision rather than a
-defect.
-
-Everything else in the runner suite passes with the flag on, and the whole
-integration suite passes with it off.
+Everything else in the runner suite passes with the flag on, the group-chat
+pattern tests pass with it on, and the whole integration suite passes with it
+off.
 
 ## Category 2: Contextual Flow Control enforcement rollout dials
 

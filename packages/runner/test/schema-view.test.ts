@@ -372,6 +372,68 @@ describe("schema-view", () => {
     });
   });
 
+  describe("handles", () => {
+    // An optional handle — `Cell<T> | undefined` — generates as a union whose
+    // one branch carries `asCell` and whose other is the absent case, and the
+    // branches arrive as `$ref`s into `$defs`. Both facts hid the marker: a
+    // union answers `hasAsCell` only when EVERY branch declares one, and a bare
+    // `$ref` declares nothing until it is resolved. A reader got a plain value
+    // where the pattern declared a handle.
+    it("returns a Cell for an optional handle declared through $ref branches", async () => {
+      const read = await seeded(
+        "optional-handle",
+        { entry: { origin: "sent", author: { name: "ada" } } },
+        {
+          $defs: {
+            Author: {
+              type: "object",
+              properties: { name: { type: "string" } },
+              required: ["name"],
+            },
+            Sent: {
+              type: "object",
+              required: ["origin", "author"],
+              properties: {
+                origin: { type: "string" },
+                author: {
+                  anyOf: [
+                    { anyOf: [{ $ref: "#/$defs/Author" }], asCell: ["cell"] },
+                    {
+                      anyOf: [
+                        { type: "undefined" },
+                        {
+                          anyOf: [{ $ref: "#/$defs/Author" }],
+                          asCell: ["cell"],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          type: "object",
+          properties: { entry: { $ref: "#/$defs/Sent" } },
+        } as const,
+      );
+
+      const lazy = read(true);
+      const eager = read(false);
+      try {
+        const lazyAuthor =
+          (lazy.get() as { entry: { author: { get?: unknown } } }).entry.author;
+        const eagerAuthor =
+          (eager.get() as { entry: { author: { get?: unknown } } }).entry
+            .author;
+        expect(typeof eagerAuthor?.get).toBe("function");
+        expect(typeof lazyAuthor?.get).toBe("function");
+      } finally {
+        await lazy.tx.commit();
+        await eager.tx.commit();
+      }
+    });
+  });
+
   describe("a view is a read", () => {
     it("refuses assignment", async () => {
       const read = await seeded(
