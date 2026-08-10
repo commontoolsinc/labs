@@ -143,7 +143,6 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 | Step + get         | `deno task cf piece get --piece ID fieldPath --step ...`                                             |
 | Set field          | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
 | Call handler       | `deno task cf piece call --piece ID handlerName ...`                                                 |
-| Shape a result     | `deno task cf piece call --piece ID --select topic.title addTopic ...`                               |
 | List verbs         | `deno task cf piece verbs --piece ID --json ...`                                                     |
 | Trigger recompute  | `deno task cf piece step --piece ID ...`                                                             |
 | List pieces        | `deno task cf piece ls -i key -a url -s space`                                                       |
@@ -273,25 +272,6 @@ is never fetched, so a marked collection costs one document read rather than one
 per element; the rendered `id` minus its `of:` prefix is what `--piece` accepts.
 Markers do not compose with `--filter`. See `packages/cli/README.md` for the
 exact syntax and supported schema subset.
-
-`piece call` takes the same three flags, before the callable name, with the same
-grammar, the same `--select`/`--schema` conflict, and the same error messages.
-They shape the result of the call — a handler's `result` inside the Invocation
-JSON, or a tool's JSON on stdout:
-
-```bash
-deno task cf piece call --piece ID --select topic.title addTopic '{"title":"Ship it"}'
-```
-
-A selection shapes a result that already exists; it does not narrow what the
-call fetches, because the readback materializes the whole receipt first and a
-receipt declares no schema to narrow against. A value-less verb therefore still
-reports no `result` at all rather than `{}` — but a selection that keeps nothing
-from a result that does exist is refused, so the two stay distinguishable.
-`--no-wait` refuses all three flags, since it skips the receipt readback they
-are answered from. `--show-links` composes with a projection — links are
-collected after the selection, so each address names a position in the value you
-were handed — but not with `--filter`, which moves the positions a link names.
 
 For `piece call`, options before the callable name configure `piece call`.
 Arguments after the callable name configure the invoked handler or tool. The

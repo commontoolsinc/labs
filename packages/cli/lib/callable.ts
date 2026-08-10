@@ -17,11 +17,6 @@ import {
   type CallableKind,
   classifyCallableEntry,
 } from "../../fuse/callables.ts";
-import {
-  type CellSelection,
-  CellSelectionError,
-  deriveSelectedValue,
-} from "./cell-selection.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
@@ -104,18 +99,6 @@ export interface CallableExecutionDeps {
    * document, so plain JSON inside one doc adds nothing. Rides the receipt
    * readback, which is why it cannot combine with `--no-wait`. */
   showLinks?: boolean;
-  /** `--filter`/`--select`/`--schema`: the shape the caller asked the result
-   * to arrive in. Answered by the same selection step `cf piece get` reads
-   * through, so one grammar covers reads and calls.
-   *
-   * It shapes a result that exists rather than deciding what is fetched: the
-   * readback has already materialized the whole receipt by the time this
-   * applies, and a receipt declares no schema for a selector to narrow
-   * against. A verb that returns nothing keeps returning nothing — there is
-   * no value for a selection to be about. */
-  selection?: CellSelection;
-  /** @internal Seam for tests, mirroring `getCellValue`'s. */
-  deriveSelectedValue?: typeof deriveSelectedValue;
 }
 
 /** A backing-cell address in an Invocation's `links` dictionary: the same
@@ -590,44 +573,6 @@ export function collectInvocationResultLinks(
   return links;
 }
 
-/**
- * Shape a call's result the way the caller asked for it, through the same step
- * `cf piece get` reads through — the one place a `--filter`/`--select`/
- * `--schema` grammar is interpreted, so a caller learns it once.
- *
- * `resultCell` is the cell the value was produced from: a handling's receipt,
- * or a tool's result cell. The step reads through it and therefore reports the
- * source's own links and Fabric metadata, which is what makes an address a
- * caller can act on come back rather than a copy.
- *
- * A selection that materializes nothing over a result that exists is refused
- * rather than reported as an absent result: an omitted `result` key means the
- * verb returned nothing, and a projection that kept nothing is a different
- * fact. `cf piece get` refuses the same condition on the same grounds.
- */
-async function selectCallResult(
-  resolved: CallableResolution,
-  resultCell: Cell<any>,
-  selection: CellSelection,
-  deps: CallableExecutionDeps,
-): Promise<unknown> {
-  const selected = await (deps.deriveSelectedValue ?? deriveSelectedValue)(
-    resolved.pieces.runtime,
-    resolved.space,
-    resultCell,
-    selection,
-  );
-  if (selected === undefined) {
-    throw new CellSelectionError(
-      `Cannot shape the result of "${resolved.cellKey}": the filter/schema ` +
-        "expression did not materialize a JSON-renderable value. This is " +
-        "not JSON null, and it is not the empty receipt a value-less verb " +
-        "settles with — inspect the result and the selection.",
-    );
-  }
-  return selected;
-}
-
 export async function executeResolvedCallable(
   resolved: CallableResolution,
   input: unknown,
@@ -727,24 +672,9 @@ export async function executeResolvedCallable(
       ) {
         result = value;
       }
-      if (deps.selection !== undefined && result !== undefined) {
-        // Only where a result exists. Shaping the empty witness would report
-        // `{}` for a verb whose whole answer is that it returned nothing, and
-        // that omission is the distinction the empty receipt exists to draw.
-        result = await selectCallResult(
-          resolved,
-          receipt,
-          deps.selection,
-          deps,
-        );
-      }
       if (deps.showLinks) {
-        // After readback and after the selection, off the same receipt the
-        // result came from: the links annotate exactly the value the caller
-        // is holding. A projection keeps every surviving path where it was,
-        // so each address still names the position it annotates; a `--filter`
-        // does not, which is why the command refuses that pair rather than
-        // handing back addresses for elements the predicate moved.
+        // After readback, off the same receipt the result came from: the
+        // links annotate exactly the value the caller is holding.
         links = collectInvocationResultLinks(link, receipt, result);
       }
     }
@@ -843,18 +773,6 @@ export async function executeResolvedCallable(
     }
   } finally {
     cancelSink();
-  }
-
-  if (deps.selection !== undefined) {
-    // A tool's result reaches stdout through the same selection a handler's
-    // does. It is read off the cell the tool wrote, which is where the value
-    // above came from, so the shaped answer describes the same result.
-    outputValue = await selectCallResult(
-      resolved,
-      resultCell,
-      deps.selection,
-      deps,
-    );
   }
 
   // The result cell's durable address rides along: today the cell is
