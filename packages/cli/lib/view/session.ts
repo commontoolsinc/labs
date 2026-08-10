@@ -2350,7 +2350,11 @@ export class Session {
           if (this.allowEdit(false, false)) {
             const hunkHeader = this.hunkHeaderAt(b.row);
             const start = this.editStart() ?? 1;
-            const onContext = b.lines[b.row]?.[0] === " ";
+            const line = b.lines[b.row] ?? "";
+            const onContext = line[0] === " ";
+            const transport = line.endsWith("\r") ? "\r" : "";
+            const logicalEnd = b.currentLineLength() -
+              (transport.length > 0 ? 1 : 0);
             // Enter splits the line at the cursor. On a context line the result
             // is shown minimally: an empty half just adds a blank line and the
             // line stays unchanged context (start → blank above, end → blank
@@ -2362,30 +2366,44 @@ export class Session {
               // Empty head: the blank added line goes above and the cursor
               // follows the content onto the line below, keeping its place at
               // the line start (past the marker).
-              const chars = [...b.lines[b.row]];
+              const chars = [...line];
               const protectedPrefix = chars.slice(1, start).join("");
               if (protectedPrefix.length > 0) {
-                const content = chars.slice(start).join("");
+                const content = chars.slice(start, logicalEnd).join("");
                 b.spliceLines(
                   b.row,
                   1,
                   [
-                    `-${protectedPrefix}${content}`,
-                    `${prefix}${protectedPrefix}`,
-                    `${prefix}${content}`,
+                    `-${protectedPrefix}${content}${transport}`,
+                    `${prefix}${protectedPrefix}${transport}`,
+                    `${prefix}${content}${transport}`,
                   ],
                   2,
                   1,
                 );
               } else {
-                b.spliceLines(b.row, 0, [prefix], 1, start);
+                b.spliceLines(
+                  b.row,
+                  0,
+                  [`${prefix}${transport}`],
+                  1,
+                  start,
+                );
               }
               this.splitRow = null;
-            } else if (onContext && b.col < b.currentLineLength()) {
+            } else if (onContext && b.col < logicalEnd) {
               this.prepareContextEdit();
-              b.insert(`\n${prefix}`);
+              this.splitDiffLine(prefix);
+            } else if (onContext) {
+              b.spliceLines(
+                b.row + 1,
+                0,
+                [`${prefix}${transport}`],
+                0,
+                [...prefix].length,
+              );
             } else {
-              b.insert(`\n${prefix}`);
+              this.splitDiffLine(prefix);
             }
             this.adjustHunkCounts(0, 1, hunkHeader);
             this.afterEdit();
@@ -2471,6 +2489,24 @@ export class Session {
     this.splitRow = b.row; // the added line, so undoing the edit can collapse it
   }
 
+  /** Split an added diff line while retaining its newline transport. */
+  private splitDiffLine(prefix: string): void {
+    const b = this.buffer!;
+    const chars = [...b.lines[b.row]];
+    const transport = chars.at(-1) === "\r" ? "\r" : "";
+    const logicalEnd = chars.length - (transport.length > 0 ? 1 : 0);
+    const split = Math.min(b.col, logicalEnd);
+    const before = chars.slice(0, split).join("");
+    const after = chars.slice(split, logicalEnd).join("");
+    b.spliceLines(
+      b.row,
+      1,
+      [`${before}${transport}`, `${prefix}${after}${transport}`],
+      1,
+      [...prefix].length,
+    );
+  }
+
   /** Whether the cursor is on a removed line in a hunk whose new side can be
    * saved back to disk. */
   private canResurrectRemovedLine(): boolean {
@@ -2480,46 +2516,58 @@ export class Session {
       pol.regionKind(b.lines, b.row) === "removed";
   }
 
-  /** Carry a removed line back onto the diff's new side as unchanged context.
-   * Its old-side count is unchanged and its new-side count grows by one. */
+  /** Carry a removed line back onto the diff's new side. Lines whose old and
+   * new encoding markers differ remain a removed/added pair. */
   private resurrectRemovedLine(): boolean {
     if (!this.canResurrectRemovedLine()) return false;
     const b = this.buffer!;
+    const targetRow = b.row;
     const hunkHeader = this.hunkHeaderAt(b.row);
     const line = b.lines[b.row];
     const model = parseDiff(b.text());
-    const resurrectsFirstBom = model?.lines[b.row]?.oldLine === 0 &&
+    const oldHasUtf8Bom = model?.lines[b.row]?.oldLine === 0 &&
       line[1] === "\uFEFF";
-    const newSideBom = resurrectsFirstBom
+    const newHasUtf8Bom = this.source?.policy?.hasUtf8Bom?.(
+      b.lines,
+      b.row,
+    ) === true;
+    const carriesNewUtf8Bom = newHasUtf8Bom &&
+      !this.hasNewSideBefore(b.row, hunkHeader);
+    const newSideBom = carriesNewUtf8Bom
       ? this.newSideBomCarrier(hunkHeader)
       : null;
     if (!this.adjustHunkCounts(0, 1, hunkHeader)) {
       this.message = "This hunk could not be updated.";
       return true;
     }
+    const decodedContent = [...line].slice(oldHasUtf8Bom ? 2 : 1).join("");
+    const newContent = `${carriesNewUtf8Bom ? "\uFEFF" : ""}${decodedContent}`;
+    const context = oldHasUtf8Bom === carriesNewUtf8Bom;
     b.spliceLines(
-      b.row,
+      targetRow,
       1,
-      [` ${line.slice(1)}`],
-      0,
-      Math.max(1, b.col),
+      context ? [` ${newContent}`] : [line, `+${newContent}`],
+      context ? 0 : 1,
+      1 + (carriesNewUtf8Bom ? 1 : 0),
     );
     if (newSideBom !== null) {
-      const carrier = b.lines[newSideBom];
+      const carrierRow = newSideBom +
+        (context || newSideBom < targetRow ? 0 : 1);
+      const carrier = b.lines[carrierRow];
       if (carrier?.[0] === "+") {
-        b.lines[newSideBom] = `+${[...carrier].slice(2).join("")}`;
+        b.lines[carrierRow] = `+${[...carrier].slice(2).join("")}`;
       } else if (carrier?.[0] === " ") {
         const cursor = { row: b.row, col: b.col };
         const content = [...carrier].slice(2).join("");
         b.spliceLines(
-          newSideBom,
+          carrierRow,
           1,
           [`-\uFEFF${content}`, `+${content}`],
           0,
           1,
         );
         b.place(
-          cursor.row + (newSideBom < cursor.row ? 1 : 0),
+          cursor.row + (carrierRow < cursor.row ? 1 : 0),
           cursor.col,
         );
       }
@@ -2586,6 +2634,23 @@ export class Session {
       }
     }
     return null;
+  }
+
+  /** Whether a hunk has a new-side line before `row`. */
+  private hasNewSideBefore(row: number, hunkHeader: number | null): boolean {
+    if (!this.buffer || hunkHeader === null) return false;
+    const model = parseDiff(this.buffer.text());
+    for (const file of model?.files ?? []) {
+      const hunk = file.hunks.find((candidate) =>
+        candidate.headerLine === hunkHeader
+      );
+      if (!hunk) continue;
+      for (let candidate = hunk.headerLine + 1; candidate < row; candidate++) {
+        const kind = model!.lines[candidate]?.kind;
+        if (kind === "ctx" || kind === "add") return true;
+      }
+    }
+    return false;
   }
 
   /** Grow or shrink a parsed hunk header after its body changes. A zero-count
@@ -2667,7 +2732,7 @@ export class Session {
     return true;
   }
 
-  /** Gate a delete-forward edit (delete, M-d, C-k): refuse the diff marker and
+  /** Gate a delete-forward edit (delete, C-k): refuse the diff marker and
    * a delete at end of line, which would join the next line — removing a line
    * is Backspace at its start instead. */
   private guardForwardEdit(): boolean {
@@ -2738,6 +2803,7 @@ export class Session {
     const b = this.buffer!;
     const marker = b.lines[b.row][0] ?? "";
     const hunkHeader = this.hunkHeaderAt(b.row);
+    this.transferProtectedPrefix(markerLen, hunkHeader);
     b.place(b.row, 0);
     b.deleteBackward(); // join into the previous line
     for (let i = 0; i < markerLen; i++) b.deleteForward(); // drop the marker
@@ -2746,6 +2812,37 @@ export class Session {
       marker === " " || marker === "+" ? -1 : 0,
       hunkHeader,
     );
+  }
+
+  /** Move an encoding prefix from a removed first new-side line to its
+   * successor. A context successor becomes a removed/added pair. */
+  private transferProtectedPrefix(
+    markerLen: number,
+    hunkHeader: number | null,
+  ): void {
+    if (!this.buffer || markerLen <= 1 || hunkHeader === null) return;
+    const b = this.buffer;
+    const prefix = [...b.lines[b.row]].slice(1, markerLen).join("");
+    if (prefix.length === 0) return;
+    const model = parseDiff(b.text());
+    const hunk = model?.files.flatMap((file) => file.hunks).find((candidate) =>
+      candidate.headerLine === hunkHeader
+    );
+    if (!hunk) return;
+    for (let row = b.row + 1; row <= hunk.endLine; row++) {
+      const kind = model!.lines[row]?.kind;
+      if (kind !== "ctx" && kind !== "add") continue;
+      const markerWidth = kind === "add" || b.lines[row][0] === " " ? 1 : 0;
+      const body = b.lines[row].slice(markerWidth);
+      if (kind === "add") {
+        b.lines[row] = `+${prefix}${body}`;
+      } else {
+        const cursor = { row: b.row, col: b.col };
+        b.spliceLines(row, 1, [`-${body}`, `+${prefix}${body}`], 0, 1);
+        b.place(cursor.row, cursor.col);
+      }
+      return;
+    }
   }
 
   /** Gate a backward word kill (M-Backspace): refuse reaching the marker. */

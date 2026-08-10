@@ -208,6 +208,8 @@ export interface EditPolicy {
     lines: readonly string[],
     row: number,
   ): "hunk" | "removed" | "message" | null;
+  /** Whether the workspace file for the hunk at `row` uses a UTF-8 BOM. */
+  hasUtf8Bom?(lines: readonly string[], row: number): boolean | undefined;
   /** The marker a newly inserted line is given inside a hunk (a diff adds an
    * added line, so `"+"`), keeping the diff well-formed as the user adds lines.
    * A commit message uses its own indent instead. */

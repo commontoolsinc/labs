@@ -206,6 +206,9 @@ export function diffSource(
         : null;
     },
     regionKind: kindOf,
+    hasUtf8Bom: (lines, row) =>
+      editableHunkInfo(classify(lines).model, saveHunks, row)
+        ?.newFileHasUtf8Bom,
     insertPrefix: "+",
     messageIndent: MESSAGE_INDENT,
   };
@@ -787,10 +790,13 @@ function expandContext(
   const k = Math.min(amount, up ? upAvail : downAvail);
   if (k <= 0) return null;
 
-  const ctx =
-    (up
-      ? fileLines.slice(spliceStart(range) - k, spliceStart(range))
-      : fileLines.slice(downFrom, downFrom + k)).map((l) => ` ${l}`);
+  const contextStart = up ? spliceStart(range) - k : downFrom;
+  const ctx = fileLines.slice(contextStart, contextStart + k).map(
+    (line, offset) =>
+      ` ${
+        contextStart + offset === 0 && range.newFileHasUtf8Bom ? "\uFEFF" : ""
+      }${line}`,
+  );
   // Which file lines those are, counting from one, while `range` still holds
   // where the hunk started — growing it upwards moves that.
   const revealed = up
@@ -1439,16 +1445,26 @@ function editableHunkRegion(
   lineText: string,
   row: number,
 ): "hunk" | "removed" | null {
+  const info = editableHunkInfo(model, saveHunks, row);
+  if (!info) return null;
+  const c = lineText[0];
+  if (c === "+" || c === " ") return "hunk";
+  return c === "-" && canResurrect(info) ? "removed" : null;
+}
+
+/** The writable hunk containing a diff row. */
+function editableHunkInfo(
+  model: DiffModel | null,
+  saveHunks: readonly MutableHunk[],
+  row: number,
+): MutableHunk | null {
   if (!model) return null;
   let gi = 0;
   for (const f of model.files) {
     for (const h of f.hunks) {
       if (row > h.headerLine && row <= h.endLine) {
         const info = saveHunks[gi];
-        if (!info || !isWritable(info)) return null;
-        const c = lineText[0];
-        if (c === "+" || c === " ") return "hunk";
-        return c === "-" && canResurrect(info) ? "removed" : null;
+        return info && isWritable(info) ? info : null;
       }
       gi++;
     }
@@ -1465,22 +1481,14 @@ function editableStart(
   lineText: string,
   row: number,
 ): number | null {
-  if (editableHunkRegion(model, saveHunks, lineText, row) !== "hunk") {
+  const info = editableHunkInfo(model, saveHunks, row);
+  if (!info || (lineText[0] !== "+" && lineText[0] !== " ")) {
     return null;
   }
-  let hunkIndex = 0;
-  for (const file of model?.files ?? []) {
-    for (const hunk of file.hunks) {
-      if (row > hunk.headerLine && row <= hunk.endLine) {
-        return saveHunks[hunkIndex]?.newFileHasUtf8Bom === true &&
-            model?.lines[row]?.newLine === 0 && lineText[1] === "\uFEFF"
-          ? 2
-          : 1;
-      }
-      hunkIndex++;
-    }
-  }
-  return 1;
+  return info.newFileHasUtf8Bom === true &&
+      model?.lines[row]?.newLine === 0 && lineText[1] === "\uFEFF"
+    ? 2
+    : 1;
 }
 
 /**

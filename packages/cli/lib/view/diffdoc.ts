@@ -25,12 +25,7 @@ import type {
   ViewMode,
 } from "./model.ts";
 import { flattenStructure } from "./model.ts";
-import {
-  decodedDiffBodyLine,
-  type DiffFile,
-  type DiffHunk,
-  type DiffModel,
-} from "./diff.ts";
+import { type DiffFile, type DiffHunk, type DiffModel } from "./diff.ts";
 import { computeLineStarts, lineIndexOf } from "./lines.ts";
 import type { Language } from "./languages/language.ts";
 import {
@@ -431,15 +426,23 @@ function diffBodyMatches(
   ) {
     return false;
   }
-  const exact = decodedDiffBodyLine(
+  const exact = decodedInitialDiffBodyLine(
     exactBody,
     sourceLine,
   );
-  const transportStripped = decodedDiffBodyLine(
+  const transportStripped = decodedInitialDiffBodyLine(
     diffBodyText(rawLines, hunk, line, true),
     sourceLine,
   );
   return sourceText === exact || sourceText === transportStripped;
+}
+
+/** Remove the encoding marker while reading an original diff body. */
+function decodedInitialDiffBodyLine(
+  body: string,
+  sourceLine: number | undefined,
+): string {
+  return sourceLine === 0 ? body.replace(/^\uFEFF/, "") : body;
 }
 
 function contentLines(text: string, hasUtf8Bom = false): string[] {
@@ -561,7 +564,7 @@ function hunkSideLines(
         ? modelLines[i]?.oldLine
         : modelLines[i]?.newLine;
       const text = diffBodyText(rawLines, hunk, i, stripTransport);
-      out.push(decodedDiffBodyLine(text, sourceLine));
+      out.push(decodedInitialDiffBodyLine(text, sourceLine));
     }
   }
   return out;
@@ -1119,8 +1122,8 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
       continue;
     }
     const body = t.slice(1);
-    const oldCode = decodedDiffBodyLine(body, entry.oldLine);
-    const newCode = decodedDiffBodyLine(body, entry.newLine);
+    const oldCode = decodedInitialDiffBodyLine(body, entry.oldLine);
+    const newCode = decodedInitialDiffBodyLine(body, entry.newLine);
     if (entry.kind === "add") lines[i].bg = "add";
     if (entry.kind === "del") lines[i].bg = "del";
 

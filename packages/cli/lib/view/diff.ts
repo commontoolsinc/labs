@@ -62,14 +62,6 @@ export interface DiffModel {
   readonly lines: readonly DiffLine[];
 }
 
-/** Normalize a decoded hunk body line into its source-file representation. */
-export function decodedDiffBodyLine(
-  body: string,
-  sourceLine: number | undefined,
-): string {
-  return sourceLine === 0 ? body.replace(/^\uFEFF/, "") : body;
-}
-
 const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)$/;
 
 /** A line with any trailing carriage return removed, for classification only.
