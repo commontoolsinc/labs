@@ -1,0 +1,1109 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "AddCommentEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "AddLinkEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/TopicLinkKind"
+          },
+          "label": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url",
+          "label"
+        ],
+        "type": "object"
+      },
+      "SetBodyEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "TopicAuthor": {
+        "properties": {
+          "avatar": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "person",
+              "agent"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "type": "object"
+      },
+      "TopicComment": {
+        "properties": {
+          "author": {
+            "$ref": "#/$defs/TopicAuthor",
+            "description": "Snapshot taken at write time (profile enrichment comes later; never gate\nauthorship on a profile wish — CT-1879). Comments carry no minted id:\narray elements have stable entity identity; future editing addresses\nelements by reference (`equals()`), not by a synthetic key."
+          },
+          "authorName": {
+            "default": "",
+            "type": "string"
+          },
+          "body": {
+            "default": "",
+            "type": "string"
+          },
+          "sentAt": {
+            "default": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "authorName",
+          "body",
+          "sentAt"
+        ],
+        "type": "object"
+      },
+      "TopicEdges": {
+        "properties": {
+          "referencedBy": {
+            "description": "Sibling topics whose prose mentions this topic's fid.",
+            "items": {
+              "$ref": "#/$defs/TopicReference"
+            },
+            "type": "array"
+          },
+          "refsOut": {
+            "description": "Sibling topics whose fids this topic's prose mentions.",
+            "items": {
+              "$ref": "#/$defs/TopicReference"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "refsOut",
+          "referencedBy"
+        ],
+        "type": "object"
+      },
+      "TopicLink": {
+        "properties": {
+          "addedAt": {
+            "type": "number"
+          },
+          "addedBy": {
+            "$ref": "#/$defs/TopicAuthor"
+          },
+          "kind": {
+            "$ref": "#/$defs/TopicLinkKind",
+            "default": "web"
+          },
+          "label": {
+            "default": "",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url",
+          "label"
+        ],
+        "type": "object"
+      },
+      "TopicLinkKind": {
+        "enum": [
+          "session",
+          "pr",
+          "topic",
+          "web"
+        ]
+      },
+      "TopicPiece": {
+        "properties": {
+          "$NAME": {
+            "default": "",
+            "description": "The topic's display name. Like the other derived display fields, a cold\nretained sibling may not have produced this path yet; its persisted title\nremains authoritative until it does.",
+            "type": [
+              "string",
+              "undefined"
+            ]
+          },
+          "addComment": {
+            "$ref": "#/$defs/AddCommentEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "addLink": {
+            "$ref": "#/$defs/AddLinkEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "body": {
+            "type": "string"
+          },
+          "bodyUpdatedAt": {
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "bodyUpdatedBy": {
+            "anyOf": [
+              {
+                "type": "undefined"
+              },
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              }
+            ]
+          },
+          "commentCount": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/$defs/TopicComment"
+            },
+            "type": "array"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "kind": "person",
+              "name": ""
+            }
+          },
+          "createdByName": {
+            "type": "string"
+          },
+          "crossrefs": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicEdges"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "referencedBy": [],
+              "refsOut": []
+            },
+            "description": "This topic's own place in the board's prose graph, derived read-side\nfrom `mentionable` (the sibling pieces it links, resolved from the\nboard's own list). Both sets stay empty until `mentionable` is wired.\nOptional (2026-07-21 deploy): pieces healed before their `mentionable`\nlink exists carry a session-scoped crossrefs indirection that resolves\nundefined outside the minting session; the list projection must accept\nthat rather than fail argument validation."
+          },
+          "lastActivityAt": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "links": {
+            "items": {
+              "$ref": "#/$defs/TopicLink"
+            },
+            "type": "array"
+          },
+          "setBody": {
+            "$ref": "#/$defs/SetBodyEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "createdByName",
+          "comments",
+          "links",
+          "addComment",
+          "addLink",
+          "setBody",
+          "$NAME",
+          "createdAt",
+          "commentCount",
+          "lastActivityAt",
+          "title",
+          "body"
+        ],
+        "type": "object"
+      },
+      "TopicReference": {
+        "properties": {
+          "$NAME": {
+            "default": "",
+            "description": "The topic's display name. Like the other derived display fields, a cold\nretained sibling may not have produced this path yet; its persisted title\nremains authoritative until it does.",
+            "type": [
+              "string",
+              "undefined"
+            ]
+          },
+          "addComment": {
+            "$ref": "#/$defs/AddCommentEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "addLink": {
+            "$ref": "#/$defs/AddLinkEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "body": {
+            "type": "string"
+          },
+          "bodyUpdatedAt": {
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "bodyUpdatedBy": {
+            "anyOf": [
+              {
+                "type": "undefined"
+              },
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              }
+            ]
+          },
+          "commentCount": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/$defs/TopicComment"
+            },
+            "type": "array"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "kind": "person",
+              "name": ""
+            }
+          },
+          "createdByName": {
+            "type": "string"
+          },
+          "lastActivityAt": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "links": {
+            "items": {
+              "$ref": "#/$defs/TopicLink"
+            },
+            "type": "array"
+          },
+          "setBody": {
+            "$ref": "#/$defs/SetBodyEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "createdByName",
+          "comments",
+          "links",
+          "addComment",
+          "addLink",
+          "setBody",
+          "$NAME",
+          "createdAt",
+          "commentCount",
+          "lastActivityAt",
+          "title",
+          "body"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "myName": {
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "user"
+          }
+        ],
+        "default": "",
+        "type": "string"
+      },
+      "topics": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/TopicPiece"
+        },
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "topics/main.tsx",
+  "resultSchema": {
+    "$defs": {
+      "AddCommentEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "AddLinkEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/TopicLinkKind"
+          },
+          "label": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url",
+          "label"
+        ],
+        "type": "object"
+      },
+      "AddTopicEvent": {
+        "properties": {
+          "agentName": {
+            "description": "The agent making this mutation. The authenticated principal remains the\nhuman whose identity key invoked the stream; this is the agent's explicit\ncontent-level signature under that shared principal. Optional only so\ncallers of the previous deployed schema remain valid; new callers must\nprovide a non-blank name.",
+            "type": "string"
+          },
+          "body": {
+            "description": "The topic's initial living-document body. A topic born with a body\nappears with it atomically — no reader observes the title-only halfway\nstate, and no follow-up `setBody` call is needed to finish a create\n(verb contract: the atomic-unit rule).",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "SetBodyEvent": {
+        "properties": {
+          "agentName": {
+            "description": "Explicit content-level signature for an agent using its human user's\nidentity key. Optional only so callers of the previous deployed schema\nremain valid; new callers must provide a non-blank name.",
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "TopicAuthor": {
+        "properties": {
+          "avatar": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "person",
+              "agent"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "type": "object"
+      },
+      "TopicComment": {
+        "properties": {
+          "author": {
+            "$ref": "#/$defs/TopicAuthor",
+            "description": "Snapshot taken at write time (profile enrichment comes later; never gate\nauthorship on a profile wish — CT-1879). Comments carry no minted id:\narray elements have stable entity identity; future editing addresses\nelements by reference (`equals()`), not by a synthetic key."
+          },
+          "authorName": {
+            "default": "",
+            "type": "string"
+          },
+          "body": {
+            "default": "",
+            "type": "string"
+          },
+          "sentAt": {
+            "default": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "authorName",
+          "body",
+          "sentAt"
+        ],
+        "type": "object"
+      },
+      "TopicCrossref": {
+        "properties": {
+          "commentCount": {
+            "description": "Coalesced to 0 for a cold or older sibling whose derived path is absent,\nso the row itself never carries the mixed-version undefined.",
+            "type": "number"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "kind": "person",
+              "name": ""
+            },
+            "description": "Authorship has no honest zero, so absence stays declared rather than\nbeing coalesced to an empty author."
+          },
+          "fid": {
+            "description": "The topic's own fid in tagged form (`fid1:…`); \"\" until known.",
+            "type": "string"
+          },
+          "lastActivityAt": {
+            "type": "number"
+          },
+          "referencedBy": {
+            "description": "Sibling topics whose prose mentions this topic's fid.",
+            "items": {
+              "$ref": "#/$defs/TopicPiece"
+            },
+            "type": "array"
+          },
+          "referencedByLinks": {
+            "items": {
+              "$ref": "#/$defs/TopicNavigationLink"
+            },
+            "type": "array"
+          },
+          "refsOut": {
+            "description": "Sibling topics whose fids this topic's prose mentions.",
+            "items": {
+              "$ref": "#/$defs/TopicPiece"
+            },
+            "type": "array"
+          },
+          "refsOutLinks": {
+            "description": "The same two edge sets as durable fid/title snapshots, so rendered\nnavigation survives a cold load without resolving a sibling.",
+            "items": {
+              "$ref": "#/$defs/TopicNavigationLink"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          },
+          "topic": {
+            "$ref": "#/$defs/TopicPiece"
+          }
+        },
+        "required": [
+          "fid",
+          "topic",
+          "title",
+          "createdAt",
+          "commentCount",
+          "lastActivityAt",
+          "refsOut",
+          "referencedBy",
+          "refsOutLinks",
+          "referencedByLinks"
+        ],
+        "type": "object"
+      },
+      "TopicEdges": {
+        "properties": {
+          "referencedBy": {
+            "description": "Sibling topics whose prose mentions this topic's fid.",
+            "items": {
+              "$ref": "#/$defs/TopicReference"
+            },
+            "type": "array"
+          },
+          "refsOut": {
+            "description": "Sibling topics whose fids this topic's prose mentions.",
+            "items": {
+              "$ref": "#/$defs/TopicReference"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "refsOut",
+          "referencedBy"
+        ],
+        "type": "object"
+      },
+      "TopicIndexRef": {
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "TopicIndexRow": {
+        "properties": {
+          "commentCount": {
+            "type": "number"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "kind": "person",
+              "name": ""
+            }
+          },
+          "lastActivityAt": {
+            "type": "number"
+          },
+          "referencedBy": {
+            "description": "Sibling topics whose prose mentions this topic's fid.",
+            "items": {
+              "$ref": "#/$defs/TopicIndexRef"
+            },
+            "type": "array"
+          },
+          "refsOut": {
+            "description": "Sibling topics whose fids this topic's prose mentions.",
+            "items": {
+              "$ref": "#/$defs/TopicIndexRef"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          },
+          "topic": {
+            "$ref": "#/$defs/TopicIndexRef"
+          }
+        },
+        "required": [
+          "topic",
+          "title",
+          "createdAt",
+          "commentCount",
+          "lastActivityAt",
+          "refsOut",
+          "referencedBy"
+        ],
+        "type": "object"
+      },
+      "TopicLink": {
+        "properties": {
+          "addedAt": {
+            "type": "number"
+          },
+          "addedBy": {
+            "$ref": "#/$defs/TopicAuthor"
+          },
+          "kind": {
+            "$ref": "#/$defs/TopicLinkKind",
+            "default": "web"
+          },
+          "label": {
+            "default": "",
+            "type": "string"
+          },
+          "url": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "url",
+          "label"
+        ],
+        "type": "object"
+      },
+      "TopicLinkKind": {
+        "enum": [
+          "session",
+          "pr",
+          "topic",
+          "web"
+        ]
+      },
+      "TopicNavigationLink": {
+        "properties": {
+          "fid": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fid",
+          "title"
+        ],
+        "type": "object"
+      },
+      "TopicPiece": {
+        "properties": {
+          "$NAME": {
+            "default": "",
+            "description": "The topic's display name. Like the other derived display fields, a cold\nretained sibling may not have produced this path yet; its persisted title\nremains authoritative until it does.",
+            "type": [
+              "string",
+              "undefined"
+            ]
+          },
+          "addComment": {
+            "$ref": "#/$defs/AddCommentEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "addLink": {
+            "$ref": "#/$defs/AddLinkEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "body": {
+            "type": "string"
+          },
+          "bodyUpdatedAt": {
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "bodyUpdatedBy": {
+            "anyOf": [
+              {
+                "type": "undefined"
+              },
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              }
+            ]
+          },
+          "commentCount": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/$defs/TopicComment"
+            },
+            "type": "array"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "kind": "person",
+              "name": ""
+            }
+          },
+          "createdByName": {
+            "type": "string"
+          },
+          "crossrefs": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicEdges"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "referencedBy": [],
+              "refsOut": []
+            },
+            "description": "This topic's own place in the board's prose graph, derived read-side\nfrom `mentionable` (the sibling pieces it links, resolved from the\nboard's own list). Both sets stay empty until `mentionable` is wired.\nOptional (2026-07-21 deploy): pieces healed before their `mentionable`\nlink exists carry a session-scoped crossrefs indirection that resolves\nundefined outside the minting session; the list projection must accept\nthat rather than fail argument validation."
+          },
+          "lastActivityAt": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "links": {
+            "items": {
+              "$ref": "#/$defs/TopicLink"
+            },
+            "type": "array"
+          },
+          "setBody": {
+            "$ref": "#/$defs/SetBodyEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "createdByName",
+          "comments",
+          "links",
+          "addComment",
+          "addLink",
+          "setBody",
+          "$NAME",
+          "createdAt",
+          "commentCount",
+          "lastActivityAt",
+          "title",
+          "body"
+        ],
+        "type": "object"
+      },
+      "TopicReference": {
+        "properties": {
+          "$NAME": {
+            "default": "",
+            "description": "The topic's display name. Like the other derived display fields, a cold\nretained sibling may not have produced this path yet; its persisted title\nremains authoritative until it does.",
+            "type": [
+              "string",
+              "undefined"
+            ]
+          },
+          "addComment": {
+            "$ref": "#/$defs/AddCommentEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "addLink": {
+            "$ref": "#/$defs/AddLinkEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "body": {
+            "type": "string"
+          },
+          "bodyUpdatedAt": {
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "bodyUpdatedBy": {
+            "anyOf": [
+              {
+                "type": "undefined"
+              },
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              }
+            ]
+          },
+          "commentCount": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/$defs/TopicComment"
+            },
+            "type": "array"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TopicAuthor"
+              },
+              {
+                "type": "undefined"
+              }
+            ],
+            "default": {
+              "kind": "person",
+              "name": ""
+            }
+          },
+          "createdByName": {
+            "type": "string"
+          },
+          "lastActivityAt": {
+            "default": 0,
+            "type": [
+              "number",
+              "undefined"
+            ]
+          },
+          "links": {
+            "items": {
+              "$ref": "#/$defs/TopicLink"
+            },
+            "type": "array"
+          },
+          "setBody": {
+            "$ref": "#/$defs/SetBodyEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "createdByName",
+          "comments",
+          "links",
+          "addComment",
+          "addLink",
+          "setBody",
+          "$NAME",
+          "createdAt",
+          "commentCount",
+          "lastActivityAt",
+          "title",
+          "body"
+        ],
+        "type": "object"
+      }
+    },
+    "description": "Topics — a tracker over #topic pieces: durable units of shared attention\n(CT-1878). Deliberately minimal: no statuses, labels, or assignees; topics\nsort by last activity. Replaces Linear / GitHub issues / loose process docs\nfor the team; PR workflows stay in GitHub and arrive here as links.",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "addTopic": {
+        "$ref": "#/$defs/AddTopicEvent",
+        "asCell": [
+          "stream"
+        ]
+      },
+      "crossrefs": {
+        "default": [],
+        "description": "The prose reference graph. Rows carry their topic, so consumers never\nneed to correlate by index — indices are not a stable address.",
+        "items": {
+          "$ref": "#/$defs/TopicCrossref"
+        },
+        "type": "array"
+      },
+      "index": {
+        "default": [],
+        "description": "The documented full-board survey surface: the same rows as `crossrefs`,\ndeclared through the tighter title-only reference type.",
+        "items": {
+          "$ref": "#/$defs/TopicIndexRow"
+        },
+        "type": "array"
+      },
+      "mentionable": {
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/TopicPiece"
+        },
+        "type": "array"
+      },
+      "myName": {
+        "type": "string"
+      },
+      "newTitle": {
+        "description": "Session-local draft for the footer composer (exposed for embedding and\nheadless driving, like the chat exemplar's drafts).",
+        "type": "string"
+      },
+      "setMyName": {
+        "asCell": [
+          "stream"
+        ],
+        "deprecated": true,
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "submitTopic": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "description": "Submit the footer composer as the current viewer's canonical Profile.",
+        "tier": "wrapper"
+      },
+      "topicCount": {
+        "type": "number"
+      },
+      "topics": {
+        "items": {
+          "$ref": "#/$defs/TopicPiece"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "topics",
+      "mentionable",
+      "topicCount",
+      "crossrefs",
+      "index",
+      "addTopic",
+      "myName",
+      "setMyName",
+      "submitTopic",
+      "$NAME",
+      "$UI"
+    ],
+    "tags": [
+      "topic"
+    ],
+    "type": "object"
+  }
+}
