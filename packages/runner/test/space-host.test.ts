@@ -112,7 +112,12 @@ describe("space-host", () => {
 
     it("returns an HTTP origin for a requested loopback route", () => {
       for (
-        const authority of ["localhost:8787", "127.0.0.1:8787", "[::1]:8787"]
+        const authority of [
+          "localhost:8787",
+          "localhost.:8787",
+          "127.0.0.1:8787",
+          "[::1]:8787",
+        ]
       ) {
         expect(
           spaceHostFromFabricAuthority(authority, {
