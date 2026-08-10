@@ -409,13 +409,23 @@ diffing and the scheduler's own reads keep eager semantics.
       runtime-internal reads kept out of the scheduler's view of what the ACTION
       read. This fixed `incremental observation adoption (live)`,
       `Pattern Runner - Dynamic Patterns` and `scheduler cold-replica startup`.
-- [ ] Carry `asCell` through a union narrowing. A view narrows `anyOf` at the
-      point of access and merges the surviving branches' schemas; the merge
-      drops a child's `asCell` marker, so a pattern declaring a `Cell` inside a
-      union-typed element reads it back as a plain view. An eager read merges
-      matched VALUES and prefers the cell among them, which is the behavior to
-      match. This is the whole of the remaining patterns integration failure
-      set.
+- [ ] Find why an `asCell` property reads back as a plain value under the flag.
+      All five patterns integration failures show it:
+      `profile?.get is not a
+      function`, where the pattern declares
+      `authorProfile: ProfileCell`. The containing type is a discriminated union
+      of two object shapes, and both branches declare that property as `asCell`,
+      so there is nothing ambiguous for a narrowing to resolve — a constraint
+      forbidding object-valued non-`asCell` branches would not apply, and would
+      not help.
+
+      Union narrowing is the obvious suspect and is so far unconfirmed: a
+      direct reproduction of the shape — two object branches both declaring the
+      same `asCell` property, and again with the branches as `$ref`s into
+      `$defs` (which reproduces the "Unresolved $ref in schema" warnings the
+      failing run emits) — hands back a working `Cell` under the flag in every
+      variation tried. Get the actual narrowed schema out of the failing pattern
+      before theorizing further.
 - [ ] Decide the forwarding case (`Pattern Runner - Lift`): a lift that forwards
       its argument without reading it takes no dependency on the values inside
       and re-runs once rather than twice. Its computed result is unchanged.
