@@ -23,20 +23,20 @@ describe("SchemaAndHash", () => {
       );
     });
 
-    it("accepts a deep-frozen schema", () => {
+    it("keeps the deep-frozen schema and hash it was given", () => {
       const schema = toDeepFrozenSchema({ type: "number" });
       const sah = new SchemaAndHash(schema, HASH_A);
       expect(sah.schema).toBe(schema);
       expect(sah.hash).toBe(HASH_A);
     });
 
-    it("rejects a non-deep-frozen schema", () => {
+    it("throws given a non-deep-frozen schema", () => {
       expect(() => new SchemaAndHash({ type: "number" }, HASH_A)).toThrow(
         /deep-frozen/,
       );
     });
 
-    it("accepts both boolean schemas", () => {
+    it("keeps either boolean schema", () => {
       const sahTrue = new SchemaAndHash(true, HASH_A);
       expect(sahTrue.schema).toBe(true);
 
@@ -44,7 +44,7 @@ describe("SchemaAndHash", () => {
       expect(sahFalse.schema).toBe(false);
     });
 
-    it("accepts `schema === undefined`", () => {
+    it("reports `.schemaOrUndefined` as `undefined` when constructed with `undefined`", () => {
       const sah = new SchemaAndHash(undefined, HASH_A);
       expect(sah.schemaOrUndefined).toBe(undefined);
     });

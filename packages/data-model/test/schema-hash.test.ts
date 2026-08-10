@@ -121,7 +121,7 @@ describe("schema-hash", () => {
           expect(result).toBe(schema);
         });
 
-        it("preserves identity for a schema holding NaN", () => {
+        it("preserves identity for a schema holding `NaN`", () => {
           // `NaN` never `===`-equals itself; identity preservation must not
           // depend on leaf self-equality.
           const schema = toDeepFrozenSchema({
@@ -133,7 +133,7 @@ describe("schema-hash", () => {
           expect(result).toBe(schema);
         });
 
-        it("preserves identity for a schema holding NaN in an array", () => {
+        it("preserves identity for a schema holding `NaN` in an array", () => {
           // As above, with the leaf inside an array (`examples`).
           const schema = toDeepFrozenSchema({
             examples: [NaN],
@@ -156,22 +156,22 @@ describe("schema-hash", () => {
           expect(isDeepFrozen(result)).toBe(true);
         });
 
-        it("handles boolean schema `true`", () => {
+        it("returns `true` for the schema `true`", () => {
           const result = callIntern(true);
           expect(result).toBe(true);
         });
 
-        it("handles boolean schema `false`", () => {
+        it("returns `false` for the schema `false`", () => {
           const result = callIntern(false);
           expect(result).toBe(false);
         });
 
-        it("handles schema `undefined`", () => {
+        it("returns `undefined` for the schema `undefined`", () => {
           const result = callIntern(undefined);
           expect(result).toBe(undefined);
         });
 
-        it("handles empty object schema", () => {
+        it("returns an equal empty object for an empty object schema", () => {
           const result = callIntern({});
           expect(result).toEqual({});
         });
@@ -203,7 +203,7 @@ describe("schema-hash", () => {
           expect(result1).not.toBe(result2);
         });
 
-        it("ignores property order when interning", () => {
+        it("interns two property orderings to the same object", () => {
           const result1 = callIntern(
             { type: "object", title: "foo" },
             true,
