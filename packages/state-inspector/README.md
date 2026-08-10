@@ -62,7 +62,8 @@ failure mode it guards against:
   concurrency." The writer-timeline / `multiUser` contention view is the
   normal-history side.
 - **`converge` is server-view only** — durable values compared; client cursor
-  lag and optimistic writes aren't visible.
+  lag and optimistic writes aren't visible. A reconstruction failure produces an
+  `unknown` verdict instead of treating unavailable data as equal or different.
 - **Same id across spaces is usually independent instances**, not replica drift
   (content-addressed ids). The scan labels `cross-space-linked` (real replica →
   drift bug) vs `no-cross-space-link` (likely instance).
@@ -142,6 +143,25 @@ deno task cf space reset  <dir>
 deno task cf space fingerprint <space> [--per-entity] [--include-generated]
 ```
 
+The `cf inspect value-at`, `diff`, and `converge` commands accept `--path-json`
+when a path must preserve its segments exactly. The standalone `value-at` and
+`converge` commands accept the same option. The value is a JSON array of
+strings, such as `--path-json '["value","a/b",""]'`. Use this form for property
+names that contain `/` or are empty strings. The shorter `--path value/count`
+form splits on `/`. Path options cannot be combined with `--doc`, which selects
+the whole document. Array segments use canonical decimal indexes such as `"0"`
+and `"1"`; a segment such as `"01"` does not select an array element.
+
+Diff results contain a slash-delimited `path` field and an exact `pathSegments`
+JSON string array. Human output keeps the slash form for safe, ordinary paths.
+It uses an ASCII-escaped JSON array for ambiguous or terminal-unsafe property
+names. Value inspection JSON includes `pathExists`, which distinguishes a
+missing property from a stored `undefined` value.
+
+Diffs compare stored values rather than their display annotations. When two
+different values have the same annotation, the change includes
+`annotationCollision` and the stored value kind for each side.
+
 ### Remote (`--remote`) — inspect a staging/server without SSH
 
 Any command takes `--remote [url]` (defaults to `CF_API_URL`). Instead of
@@ -188,9 +208,9 @@ A standalone `cli.ts` entry exists for use outside the `cf` CLI (local only;
 - **Lists and the HTML bundle are capped** for cost; un-analyzed cells are
   marked rather than shown as clean. A count at a round cap may be truncated —
   narrow with flags or a per-entity command.
-- **Reads DBs it didn't write**: a corrupt/partial row degrades that one entity,
-  not the whole command. If a value looks absent where you expect data, check
-  for a decode error before concluding the entity is empty.
+- **Reads DBs it didn't write**: cross-space comparisons identify an unavailable
+  view and return `unknown`. Per-entity diffs stop with the reconstruction error
+  instead of reporting the value as absent.
 
 ## Not yet built
 

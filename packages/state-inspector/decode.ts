@@ -18,6 +18,7 @@ import { seemsLikeJsonEncodedFabricValue } from "@commonfabric/data-model/codec-
 import { valueFromJson } from "@commonfabric/data-model/codecs";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 /** Decode a stored payload string, routing the `data-model` codec envelope. */
@@ -47,6 +48,15 @@ type Json = unknown;
  */
 function isNameWalkable(v: Json): v is Record<string, Json> {
   return isPlainObject(v);
+}
+
+function setOwn(target: Record<string, Json>, key: string, value: Json): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
 }
 
 function payloadToLink(payload: Record<string, Json>): DecodedLink {
@@ -127,11 +137,46 @@ function shortId(id?: string): string | undefined {
   return body.length > 14 ? `${body.slice(0, 8)}…${body.slice(-4)}` : body;
 }
 
+const SAFE_SUMMARY_SEGMENT = /^[A-Za-z0-9_$@.:%+~-]+$/;
+const UNSAFE_TERMINAL_UNICODE =
+  /[\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g;
+
+function escapeUnsafeTerminalUnicode(value: string): string {
+  return value.replace(
+    UNSAFE_TERMINAL_UNICODE,
+    (character) =>
+      `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
+/** Escape text for safe inclusion within one line of terminal output. */
+export function escapeTerminalText(value: string): string {
+  const quoted = escapeUnsafeTerminalUnicode(JSON.stringify(value));
+  return quoted.slice(1, -1);
+}
+
+function quoteTerminalText(value: string): string {
+  return escapeUnsafeTerminalUnicode(JSON.stringify(value));
+}
+
+function summarizePath(path: readonly string[]): string {
+  if (path.every((segment) => SAFE_SUMMARY_SEGMENT.test(segment))) {
+    return `/${path.join("/")}`;
+  }
+  return escapeUnsafeTerminalUnicode(JSON.stringify(path));
+}
+
+function summarizeKey(key: string): string {
+  return SAFE_SUMMARY_SEGMENT.test(key) ? key : quoteTerminalText(key);
+}
+
 /** One-line, human-readable summary of a link for tables. */
 export function summarizeLink(link: DecodedLink): string {
-  const id = shortId(link.id) ?? "?";
-  const path = link.path && link.path.length ? `/${link.path.join("/")}` : "";
-  const space = link.space ? ` @${shortDid(link.space)}` : "";
+  const id = escapeTerminalText(shortId(link.id) ?? "?");
+  const path = link.path && link.path.length ? summarizePath(link.path) : "";
+  const space = link.space
+    ? ` @${escapeTerminalText(shortDid(link.space) ?? "")}`
+    : "";
   const schema = link.hasSchema ? " +schema" : "";
   return `🔗 ${id}${path}${space}${schema}`;
 }
@@ -170,11 +215,38 @@ export function annotate(v: Json, maxDepth = 8): Json {
   if (typeof v === "symbol") return String(v);
   if (typeof v === "function") return "[function]";
 
-  if (Array.isArray(v)) return v.map((x) => annotate(x, maxDepth - 1));
+  if (Array.isArray(v)) {
+    const keys = Object.keys(v);
+    if (
+      keys.length === v.length && keys.every(isArrayIndexPropertyName)
+    ) {
+      return v.map((x) => annotate(x, maxDepth - 1));
+    }
+    const entries: Record<string, Json> = {};
+    const properties: Record<string, Json> = {};
+    for (const key of keys) {
+      const target = isArrayIndexPropertyName(key) ? entries : properties;
+      setOwn(
+        target,
+        key,
+        annotate(
+          (v as unknown as Record<string, Json>)[key],
+          maxDepth - 1,
+        ),
+      );
+    }
+    return {
+      $sparseArray: {
+        length: v.length,
+        entries,
+        ...(Object.keys(properties).length > 0 ? { properties } : {}),
+      },
+    };
+  }
   if (isNameWalkable(v)) {
     const out: Record<string, Json> = {};
     for (const [k, val] of Object.entries(v)) {
-      out[k] = annotate(val, maxDepth - 1);
+      setOwn(out, k, annotate(val, maxDepth - 1));
     }
     return out;
   }
@@ -192,16 +264,21 @@ export function summarize(v: Json): string {
   if (link) return summarizeLink(link);
   if (isStream(v)) return "⊙ stream";
   const ref = parseEntityRef(v);
-  if (ref !== null) return `#${shortId(ref) ?? ref}`;
+  if (ref !== null) return `#${escapeTerminalText(shortId(ref) ?? ref)}`;
   if (v === null) return "null";
   if (typeof v === "bigint") return `${v}n`;
   if (Array.isArray(v)) return `[${v.length}]`;
-  if (isNameWalkable(v)) return `{${Object.keys(v).join(", ")}}`;
-  if (typeof v === "object") return toCompactDebugString(v);
-  if (typeof v === "string") {
-    return v.length > 40 ? `"${v.slice(0, 37)}…"` : `"${v}"`;
+  if (isNameWalkable(v)) {
+    return `{${Object.keys(v).map(summarizeKey).join(", ")}}`;
   }
-  return String(v);
+  if (typeof v === "object") {
+    return escapeTerminalText(toCompactDebugString(v));
+  }
+  if (typeof v === "string") {
+    const preview = v.length > 40 ? `${v.slice(0, 37)}…` : v;
+    return quoteTerminalText(preview);
+  }
+  return escapeTerminalText(String(v));
 }
 
 /** Collect every link reachable in a value (does not descend into links). */

@@ -20,6 +20,7 @@
 import { applyPatch } from "@commonfabric/memory/v2/patch";
 import type { PatchOp } from "@commonfabric/memory/v2";
 import type { FabricValue } from "@commonfabric/api";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
 import type { SpaceDb } from "./db.ts";
 import { decodeStored } from "./decode.ts";
@@ -42,20 +43,52 @@ export type EntityDocument =
     unknown
   >;
 
-/** Navigate into a value by a JSON path (array of keys). Display-only. */
-export function getAtPath(root: unknown, path: string[]): unknown {
+export interface PathSelection {
+  /** Whether every segment selected an own property. */
+  found: boolean;
+  /** The selected value. This can be `undefined` when `found` is true. */
+  value: unknown;
+}
+
+/**
+ * Navigates own properties using exact string segments and reports whether the
+ * selected property exists. Array segments must be canonical array-index
+ * property names.
+ */
+export function selectAtPath(
+  root: unknown,
+  path: string[],
+): PathSelection {
   let cur: unknown = root;
   for (const key of path) {
-    if (cur == null) return undefined;
+    if (cur == null) return { found: false, value: undefined };
     if (Array.isArray(cur)) {
-      cur = cur[key === "-" ? cur.length : Number(key)];
+      if (!isArrayIndexPropertyName(key)) {
+        return { found: false, value: undefined };
+      }
+      const index = Number(key);
+      if (!Object.hasOwn(cur, index)) {
+        return { found: false, value: undefined };
+      }
+      cur = cur[index];
     } else if (typeof cur === "object") {
+      if (!Object.hasOwn(cur, key)) {
+        return { found: false, value: undefined };
+      }
       cur = (cur as Record<string, unknown>)[key];
     } else {
-      return undefined;
+      return { found: false, value: undefined };
     }
   }
-  return cur;
+  return { found: true, value: cur };
+}
+
+/**
+ * Navigates own properties using exact string segments. Array segments must be
+ * canonical array-index property names.
+ */
+export function getAtPath(root: unknown, path: string[]): unknown {
+  return selectAtPath(root, path).value;
 }
 
 interface RevRow {
@@ -245,14 +278,28 @@ export interface ValueAtResult {
   value?: unknown;
 }
 
+/** A reconstructed value result that distinguishes a missing selected path. */
+export interface SelectedValueAtResult extends ValueAtResult {
+  /** Whether the requested path exists within a reconstructed document. */
+  pathExists: boolean;
+}
+
 /** Reconstruct then navigate into `document.value` by path. */
 export function getValueAt(
   space: SpaceDb,
   opts: ReconstructOptions,
   path: string[] = [],
-): ValueAtResult {
+): SelectedValueAtResult {
   const document = reconstructDocument(space, opts);
-  if (document === undefined) return { exists: false };
-  const value = getAtPath(document.value, path);
-  return { exists: true, document, value };
+  if (document === undefined) return { exists: false, pathExists: false };
+  if (!Object.hasOwn(document, "value")) {
+    return { exists: true, document, pathExists: false };
+  }
+  const selected = selectAtPath(document.value, path);
+  return {
+    exists: true,
+    document,
+    pathExists: selected.found,
+    value: selected.value,
+  };
 }

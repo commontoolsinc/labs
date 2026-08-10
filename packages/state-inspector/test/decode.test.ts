@@ -141,3 +141,45 @@ Deno.test("decode: a present `undefined` is not silently dropped on export", () 
     "the undefined field survives JSON round-trip",
   );
 });
+
+Deno.test("decode: sparse arrays keep holes without scanning their length", () => {
+  const sparse: unknown[] = [];
+  sparse.length = 1_000_000_000;
+  sparse[5] = undefined;
+  Object.defineProperty(sparse, "__proto__", {
+    value: "own property",
+    enumerable: true,
+  });
+
+  const annotated = annotate(sparse) as {
+    $sparseArray: {
+      length: number;
+      entries: Record<string, unknown>;
+      properties: Record<string, unknown>;
+    };
+  };
+  assertEquals(annotated, {
+    $sparseArray: {
+      length: 1_000_000_000,
+      entries: { "5": { $undefined: true } },
+      properties: JSON.parse('{"__proto__":"own property"}'),
+    },
+  });
+  assert(Object.hasOwn(annotated.$sparseArray.properties, "__proto__"));
+  const ordinary = annotate(
+    JSON.parse('{"ordinary":true,"__proto__":"own property"}'),
+  ) as Record<string, unknown>;
+  assertEquals(Object.getPrototypeOf(ordinary), Object.prototype);
+  assert(Object.hasOwn(ordinary, "__proto__"));
+});
+
+Deno.test("decode: summaries escape terminal control characters", () => {
+  assertEquals(
+    summarize("\u001b[2Jforged\nline"),
+    '"\\u001b[2Jforged\\nline"',
+  );
+  assertEquals(
+    summarize(JSON.parse('{"line\\nforged":1,"bidi‮forged":2}')),
+    '{"line\\nforged", "bidi\\u202eforged"}',
+  );
+});

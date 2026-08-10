@@ -3,13 +3,14 @@
 // surface the per-scope divergence of one cell. Scope keys are stored %-encoded
 // (as in real DBs) to exercise the encode/decode path.
 
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { Database } from "@db/sqlite";
 
 import { openSpace } from "../db.ts";
 import {
   listScopes,
   parseScope,
+  resolveScopeChain,
   scopeOverlay,
   spaceParticipants,
   valueAsIdentity,
@@ -55,7 +56,11 @@ function seed(path: string) {
   put("of:B", "space", "space-B");
   put("of:B", USER, "user-B");
   put("of:B", SESS, "session-B");
-  put("of:C", USER, "user-only-C");
+  put("of:C", USER, {
+    "a/b": "literal slash key",
+    a: { b: "nested key" },
+    "": "empty key",
+  });
   db.close();
 }
 
@@ -111,6 +116,63 @@ Deno.test("scope awareness: enumerate, compose, diverge", async (t) => {
         const userOnly = valueAsIdentity(space, { id: "of:C", identity: DID });
         assert(userOnly.exists);
         assertEquals(userOnly.resolvedKind, "user");
+
+        const slashKey = valueAsIdentity(space, {
+          id: "of:C",
+          identity: DID,
+          path: ["a/b"],
+        });
+        assertEquals(slashKey.value, "literal slash key");
+        assertEquals(slashKey.pathExists, true);
+
+        const emptyKey = valueAsIdentity(space, {
+          id: "of:C",
+          identity: DID,
+          path: [""],
+        });
+        assertEquals(emptyKey.value, "empty key");
+        assertEquals(emptyKey.pathExists, true);
+
+        const missingKey = valueAsIdentity(space, {
+          id: "of:C",
+          identity: DID,
+          path: ["missing"],
+        });
+        assertEquals(missingKey.pathExists, false);
+
+        const document = valueAsIdentity(space, {
+          id: "of:C",
+          identity: DID,
+          doc: true,
+        });
+        assertEquals(document.value, {
+          value: {
+            "a/b": "literal slash key",
+            a: { b: "nested key" },
+            "": "empty key",
+          },
+        });
+        assertThrows(
+          () =>
+            valueAsIdentity(space, {
+              id: "of:C",
+              identity: DID,
+              doc: true,
+              path: [],
+            }),
+          Error,
+          "cannot be used together",
+        );
+        assertThrows(
+          () => resolveScopeChain(""),
+          Error,
+          "`identity` must not be empty",
+        );
+        assertThrows(
+          () => resolveScopeChain(DID, ""),
+          Error,
+          "`sessionId` must not be empty",
+        );
       });
 
       await t.step("spaceParticipants lists the space's identities", () => {
