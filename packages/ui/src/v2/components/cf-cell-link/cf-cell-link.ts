@@ -354,7 +354,7 @@ export class CFCellLink extends BaseElement {
 
     this.classList.add("dragging");
 
-    const preview = createDragPreview(this._resolvedCell);
+    const { preview, cleanup } = createDragPreview(this._resolvedCell);
     document.body.appendChild(preview);
 
     preview.style.left = `${e.clientX + 10}px`;
@@ -366,6 +366,7 @@ export class CFCellLink extends BaseElement {
       type: "cell-link",
       sourceElement: this,
       preview,
+      previewCleanup: cleanup,
       pointerX: e.clientX,
       pointerY: e.clientY,
     });

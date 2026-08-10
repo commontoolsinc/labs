@@ -258,11 +258,11 @@ Deno.test(
   },
 );
 
-// memberBodyReadsReactiveValue: a toJSON method whose body reads a reactive
-// input captured from the enclosing pattern still freezes a snapshot at store
-// time, so the object member creation is rejected.
+// validateObjectMemberCreation: `toJSON` is an ordinary member name, so a
+// method carrying it is rejected like any other object-literal method -- the
+// data model stores no function-valued member whatever it is called.
 Deno.test(
-  "toJSON member reading a reactive input is rejected",
+  "toJSON member on a pattern object literal is rejected",
   async () => {
     const source = `      import { pattern, UI } from "commonfabric";
 
@@ -279,7 +279,7 @@ Deno.test(
       types: COMMONFABRIC_TYPES,
     });
     const errors = getErrors(diagnostics);
-    assertGreater(errors.length, 0, "Expected an error for reactive toJSON");
+    assertGreater(errors.length, 0, "Expected an error for a toJSON member");
   },
 );
 

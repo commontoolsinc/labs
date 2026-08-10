@@ -9,7 +9,6 @@ import { join } from "@std/path";
 import { createSession, Identity } from "@commonfabric/identity";
 import { markRendererInputTx, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 
@@ -34,9 +33,8 @@ describe("cell-flip shaping (plan B)", () => {
         actingPrincipal: session.as.did(),
       }),
     });
-    const manager = new PieceManager(session, runtime);
-    await manager.synced();
-    cc = new PiecesController(manager);
+    cc = new PiecesController(session, runtime);
+    await cc.synced();
   });
 
   afterEach(async () => {
@@ -45,7 +43,7 @@ describe("cell-flip shaping (plan B)", () => {
   });
 
   it("shapes a renderer-input write's wake but not an internal write's", async () => {
-    const runtime = cc.manager().runtime;
+    const runtime = cc.runtime;
     const program = await runtime.harness.resolve(
       new FileSystemProgramResolver(
         join(ROOT, "integration/fixtures/shape-input-echo.tsx"),
@@ -53,7 +51,7 @@ describe("cell-flip shaping (plan B)", () => {
       ),
     );
     const piece = await cc.create(program, { start: true });
-    const result = cc.manager().getResult(piece.getCell());
+    const result = cc.getResult(piece.getCell());
     cancel = result.sink(() => {}); // materialize the computed
     await runtime.idle();
     const doubled = () => result.key("doubled").get();

@@ -13,10 +13,9 @@
 
 import { action, assert, computed, pattern, UI, wish } from "commonfabric";
 import {
-  findNode,
+  findNodeByProp,
   hasExactText,
-  propsOf,
-  readValue,
+  propValue,
 } from "../test/vnode-helpers.ts";
 import CozyPoll, {
   dayKeyOf,
@@ -37,16 +36,6 @@ export const fetchMocks = [
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
   },
 ];
-
-const findNodeByProp = (
-  root: unknown,
-  prop: string,
-  expected: unknown,
-): unknown | undefined =>
-  findNode(root, (node) => {
-    const props = propsOf(node);
-    return props !== undefined && readValue(props[prop]) === expected;
-  });
 
 const SEEDED_OPTION: Option = {
   id: "opt-seeded",
@@ -631,12 +620,10 @@ export default pattern(() => {
       "data-vote-swatch-name",
       "👩🏽‍💻Bob",
     );
-    return readValue(propsOf(daffodil)?.role) === "img" &&
-      readValue(propsOf(daffodil)?.["aria-label"]) ===
-        "Daffodil: green vote" &&
-      readValue(propsOf(emojiBob)?.role) === "img" &&
-      readValue(propsOf(emojiBob)?.["aria-label"]) ===
-        "👩🏽‍💻Bob: red vote";
+    return propValue(daffodil, "role") === "img" &&
+      propValue(daffodil, "aria-label") === "Daffodil: green vote" &&
+      propValue(emojiBob, "role") === "img" &&
+      propValue(emojiBob, "aria-label") === "👩🏽‍💻Bob: red vote";
   });
 
   // The seeded stale vote is stored but hidden: absent from `todaysVotes`,

@@ -88,6 +88,7 @@ on the Common Fabric runtime.
 - [workflows/pattern-testing.md](workflows/pattern-testing.md) — writing and running pattern tests
 - [workflows/handlers-cli-testing.md](workflows/handlers-cli-testing.md) — invoking mounted callables from the CLI
 - [verbs-over-the-cli.md](verbs-over-the-cli.md) — what a verb hands back: declared results, piece references, idempotent retries, and a runnable walkthrough
+- [verb-session-walkthrough.md](verb-session-walkthrough.md) — a whole session driven through `cf`: discovery, help, completion, and carrying an address from one call into the next, with each step marked for what works today and what is still blocked
 
 [INTRODUCTION.md](INTRODUCTION.md) is a stub kept for older links; this README
 replaces it.

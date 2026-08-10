@@ -27,7 +27,6 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import type {
   IStorageNotification,
   StorageNotification,
@@ -35,28 +34,12 @@ import type {
 import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("effect-conflict-recovery");
 const space = signer.did();
 
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-  private sharedServer!: MemoryV2Server.Server;
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-
+class SuppressibleStorageManager extends EmulatedStorageManager {
   // When set, forward storage notifications to subscribers with their `changes`
   // emptied, so they raise no reader-dirty — a deterministic stand-in for a
   // "dataless catch-up" (a conflict whose catch-up carries no diff). Off by
@@ -74,41 +57,47 @@ class SharedServerStorageManager extends EmulatedStorageManager {
   }
 }
 
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
-
-const waitFor = async (
-  predicate: () => boolean,
-  timeout = 2000,
-): Promise<boolean> => {
-  const started = Date.now();
-  while (!predicate()) {
-    if (Date.now() - started > timeout) return false;
-    await clock.tick(5);
-  }
-  return true;
-};
-
 describe("effect commit-conflict recovery (no retry budget)", () => {
   let server: MemoryV2Server.Server;
-  let storageA: SharedServerStorageManager;
-  let storageB: SharedServerStorageManager;
+  let storageA: SuppressibleStorageManager;
+  let storageB: SuppressibleStorageManager;
   let rtA: Runtime;
   let rtB: Runtime;
   let conflicts: Error[];
 
+  // Recovery is a multi-round conversation — conflict, repair frame,
+  // re-run, commit — and each round's delivery is released by an explicit
+  // fan-out flush. Iteration-bounded rather than time-bounded: each round
+  // either makes real progress or the predicate is unreachable.
+  const converge = async (
+    predicate: () => boolean,
+    rounds = 25,
+  ): Promise<boolean> => {
+    for (let i = 0; i < rounds && !predicate(); i++) {
+      await server.flushSessions();
+      await clock.settle();
+      await rtB.idle();
+    }
+    return predicate();
+  };
+
   beforeEach(() => {
     conflicts = [];
-    server = newSharedServer();
-    storageA = SharedServerStorageManager.connectTo(server, { as: signer });
-    storageB = SharedServerStorageManager.connectTo(server, { as: signer });
+    // Manual fan-out: the controlled staleness these tests are built on is
+    // a gated state, not a timing accident — frames spread only through
+    // converge()'s explicit flushes.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    // The inherited static builds `new this(...)`, so these ARE
+    // SuppressibleStorageManager instances; its declared return type is just
+    // the base class.
+    storageA = SuppressibleStorageManager.connectTo(
+      server,
+      { as: signer },
+    ) as SuppressibleStorageManager;
+    storageB = SuppressibleStorageManager.connectTo(
+      server,
+      { as: signer },
+    ) as SuppressibleStorageManager;
     storageB.subscribe({
       next: (notification: StorageNotification) => {
         if (
@@ -153,9 +142,12 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
       srcA.withTx(tx).set(1);
       resA.withTx(tx).set(0);
       rtA.prepareTxForCommit(tx);
-      const res = await tx.commit();
+      // Verdict-marked, no synced(): the barrier would hold on A's parked
+      // accept and force the shared fan-out through — to B too, destroying
+      // the controlled staleness. The awaited verdict is durably accepted,
+      // which is all B's explicit sync/pull needs.
+      const res = await tx.commit({ resolveAt: "verdict" });
       expect(res.error, `seed: ${JSON.stringify(res.error)}`).toBeUndefined();
-      await storageA.synced();
     }
 
     // B converges to source=1, result=0.
@@ -172,9 +164,8 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
       const tx = rtA.edit();
       srcA.withTx(tx).set(2);
       rtA.prepareTxForCommit(tx);
-      const res = await tx.commit();
+      const res = await tx.commit({ resolveAt: "verdict" });
       expect(res.error, `bump: ${JSON.stringify(res.error)}`).toBeUndefined();
-      await storageA.synced();
     }
     expect(srcB.get(), "B is provably stale (still 1) before the effect runs")
       .toBe(1);
@@ -200,7 +191,7 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
     await rtB.idle();
     expect(seen[0], "effect first ran against the stale value").toBe(1);
 
-    const recovered = await waitFor(() => seen.includes(2));
+    const recovered = await converge(() => seen.includes(2));
     await rtB.idle();
 
     expect(
@@ -256,9 +247,12 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
       srcA.withTx(tx).set(1);
       resA.withTx(tx).set(0);
       rtA.prepareTxForCommit(tx);
-      const res = await tx.commit();
+      // Verdict-marked, no synced(): the barrier would hold on A's parked
+      // accept and force the shared fan-out through — to B too, destroying
+      // the controlled staleness. The awaited verdict is durably accepted,
+      // which is all B's explicit sync/pull needs.
+      const res = await tx.commit({ resolveAt: "verdict" });
       expect(res.error, `seed: ${JSON.stringify(res.error)}`).toBeUndefined();
-      await storageA.synced();
     }
 
     // B converges to source=1.
@@ -314,9 +308,8 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
       const tx = rtA.edit();
       srcA.withTx(tx).set(2);
       rtA.prepareTxForCommit(tx);
-      const res = await tx.commit();
+      const res = await tx.commit({ resolveAt: "verdict" });
       expect(res.error, `bump: ${JSON.stringify(res.error)}`).toBeUndefined();
-      await storageA.synced();
     }
 
     // Release the parked run; its commit now carries the stale source basis.
@@ -326,7 +319,7 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
 
     // On a no-requeue handler the action is stranded here (no reader-dirty, no
     // re-queue); with #4343's re-queue it re-runs against the caught-up state.
-    const recovered = await waitFor(() => runs >= 2 && resB.get() === 20);
+    const recovered = await converge(() => runs >= 2 && resB.get() === 20);
     await rtB.idle();
 
     expect(

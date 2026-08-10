@@ -89,7 +89,9 @@ sparse.length = 100_000;
 sparse[0] = "first";
 sparse[99_999] = "last";
 
-/** The same two elements in a small extent, as the comparison that isolates it. */
+/**
+ * The same two elements in a small extent, as the comparison that isolates it.
+ */
 const compact: unknown[] = ["first", "last"];
 
 /** Rejected for a named property, which short-circuits on the last key. */

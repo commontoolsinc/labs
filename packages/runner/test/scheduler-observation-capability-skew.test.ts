@@ -23,10 +23,7 @@
  */
 
 import { assertEquals } from "@std/assert";
-import {
-  jsonFromValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
+import { jsonFromValue, valueFromJson } from "@commonfabric/data-model/codecs";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { Identity } from "@commonfabric/identity";
 import type { FabricValue } from "@commonfabric/api";

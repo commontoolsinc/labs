@@ -57,6 +57,14 @@ async function removeIfPresent(path: string, options?: Deno.RemoveOptions) {
   }
 }
 
+// Both helpers below spawn `Deno.execPath()`, the Deno running the test, rather
+// than the program name `deno`, which resolves through `PATH`. A test that
+// spawned the `PATH` copy would exercise a different toolchain than the one
+// under test whenever the two differ, and the two share one cache directory: a
+// coverage profile written by one version cannot be reported by the other,
+// because each version reads transpiled sources only from its own part of the
+// cache.
+
 export async function runDenoCommandWithTemporaryLock(
   options: DenoCommandWithTemporaryLockOptions,
 ): Promise<Deno.CommandOutput> {
@@ -76,7 +84,7 @@ export async function runDenoCommandWithTemporaryLock(
     if (options.env) {
       commandOptions.env = options.env;
     }
-    return await new Deno.Command("deno", commandOptions).output();
+    return await new Deno.Command(Deno.execPath(), commandOptions).output();
   } finally {
     await removeIfPresent(tempDir, { recursive: true });
   }
@@ -142,7 +150,7 @@ export async function runFrozenDriftCheck(
 
   const runCheck = async (imports: Record<string, string>, frozen: boolean) => {
     await Deno.writeTextFile(configPath, JSON.stringify({ imports }, null, 2));
-    return await new Deno.Command("deno", {
+    return await new Deno.Command(Deno.execPath(), {
       cwd: tempDir,
       args: [
         "check",

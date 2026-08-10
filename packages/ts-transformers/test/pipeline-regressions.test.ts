@@ -254,6 +254,7 @@ Deno.test(
       "SchemaInjectionTransformer",
       "BuilderCallHoistingTransformer",
       "SchemaGeneratorTransformer",
+      "VerbTierMarkTransformer",
       "ReactiveVariableForTransformer",
       "ModuleScopeShadowingTransformer",
       "ModuleScopeCfDataTransformer",
@@ -687,7 +688,6 @@ export default pattern<{
 `;
 
     const { diagnostics } = await validateSource(source, {
-      mode: "error",
       types: COMMONFABRIC_TYPES,
     });
     const output = await transformSource(source, {

@@ -26,6 +26,18 @@ describe("createRef fail-closed", () => {
     expect(a.taggedHashString).toEqual(b.taggedHashString);
   });
 
+  it('derives distinct ids for the encodable forms `7` and `"7"`', () => {
+    // An encodable form reaches the walk in place of the value it came from, so
+    // a primitive form arrives past the point where a primitive INPUT is
+    // answered. Stringifying one would make these two name one document.
+    const asNumber = createRef({ held: { toEncodableForm: () => 7 } }, "cause");
+    const asString = createRef(
+      { held: { toEncodableForm: () => "7" } },
+      "cause",
+    );
+    expect(asNumber.toString()).not.toBe(asString.toString());
+  });
+
   it("still mints a fresh id when no cause is given (documented behavior)", () => {
     const a = createRef({ x: 1 });
     const b = createRef({ x: 1 });

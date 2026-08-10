@@ -31,13 +31,14 @@ deno task test
 dashboard/
   types.ts      the interface: Tile, TileView, Status, Ctx, Route
   config.ts     port, repo, tunable status thresholds
+  palette.ts    THE ONE PLACE status colors, washes and dot shapes are chosen
   lib.ts        shared helpers (github, memo, escapeHtml, sparkline, strip, …)
   blacksmith.ts authenticated read client for Blacksmith billing data
   ctx.ts        shared, memoized data sources handed to every tile (ctx.runs)
   favicon.ts    runtime status priority and access to generated PNG favicon copies
   favicon-png.generated.ts  generated runtime PNG favicon copies
   favicon-artwork.ts  build/test-only SVG source for those favicon copies
-  version.ts    Git commit used as the browser/server compatibility version
+  version.ts    the browser/server compatibility version a page reloads on
   render.ts     renderTile(view) + the page shell/CSS
   server.ts     generic runtime: scheduler, SSE, route mounting, page assembly
   registry.ts   THE ONE REGISTRATION POINT — the array of tiles
@@ -77,11 +78,60 @@ snapshot for that source and shows the combined list in gray with the error.
 Each event connection receives the current tile snapshot before it waits for
 new collections. The browser reconciles that snapshot by tile ID, leaving
 unchanged elements, focus, and scroll positions in place. Routine data updates
-never navigate the page. The server uses the current Git commit as its
-compatibility version. Local development reads the checked-out commit from Git.
-A deployed image receives the commit that its publishing workflow checked out.
-An unattended display reloads when it reconnects to a server running a
-different commit.
+never navigate the page. The page shell — the styles and the client script —
+arrives only with a full page load, so the server hands the browser a
+compatibility version and the page reloads itself as soon as the server reports
+a different one. A deployed image uses the commit its publishing workflow
+checked out, which is fixed for the life of the image, so every display on that
+image agrees. A server started from a checkout reports the moment it started
+instead, because the code under it changes between one start and the next: a
+watched restart therefore pulls every open page onto the code that restart is
+serving, and the version in the page source says which start served it.
+An unattended display reloads when it reconnects to a server reporting a
+different version.
+
+An unattended display also survives the server going away. Every serving tick
+sends a heartbeat down each open event connection, so a browser can tell a
+server with nothing new to report from a stream that has stopped delivering.
+The page watches its own stream from the same one-second tick that paints the
+freshness indicator, and reopens the stream once the server has been silent for
+the length of time it takes that indicator to turn red. That covers each way a
+stream dies. The browser reconnects one that ended in a network error by
+itself. It gives up for good on one whose reconnect was answered by an error
+page, which is what the Tailscale proxy in front of the pod returns while the
+server restarts. And a connection that outlives a sleeping laptop stays open
+with nothing ever coming down it, which the browser never reports at all.
+
+A stream that was delivering and then closed is reopened immediately. One that
+has never delivered is reopened once per silence interval, so a server that
+refuses or fails connections costs one request an interval however long it is
+away, while one that accepts a connection and then drops it is followed as fast
+as it flaps. The silence interval is the fastest tile's collection interval
+plus a serving tick plus ten seconds. That keeps it clear of the heartbeat
+period, which is one serving tick, by the whole of the fastest tile's interval.
+A heartbeat slower than the silence interval would replace a healthy stream on
+every page tick.
+
+The indicator and the reconnect run off different clocks and mean different
+things. The indicator counts from the last tile update, so red means the data
+is old. The reconnect counts from the last event of any kind, heartbeats
+included, so reaching the interval means the server cannot be heard at all. A
+page can be red on a perfectly good stream, when every collector has been slow
+at once. The header badge is what tells the two apart, reading OFFLINE instead
+of LIVE whenever the page has no stream it is hearing the server on.
+
+Reopening the stream and saying whether the server can be heard are separate
+questions and get separate answers. Reopening is paced, because each attempt
+costs a request. Saying so is not. The browser reports a connection dropping as
+it drops, whether it means to retry or has given up, and the badge turns over on
+the next tick — a second, not an interval. Stopping the server therefore stands
+the page down almost at once, and the badge comes back the moment any event
+arrives on a stream again, including a heartbeat. The elapsed interval is only
+the last resort, for a connection that stays open with nothing coming down it,
+which is the one case the browser reports nothing about at all. A background
+tab's timers are throttled to about one a minute and a sleeping machine's stop
+altogether, so the page checks its stream on becoming visible and on the browser
+regaining the network as well as on its own tick.
 
 The tab favicon follows the most urgent visible tile. It is red when any tile is
 red, orange when there are no red tiles but at least one orange tile, and green
@@ -142,6 +192,55 @@ little in between worth manufacturing. Red has to stay rare and trustworthy: if
 tiles sit red or amber most of the time, people stop seeing them, and a board
 everyone has learned to ignore is worse than no board. A tile earns a color
 change; it never reaches for one to get attention.
+
+A signal is carried by four things at once, so that no one of them has to be
+read on its own. Losing any single cue still leaves a state legible, which is
+what a person who cannot separate red from green is doing all day.
+
+The first is color, chosen so the four stay apart for that person too. Green
+sits at a teal and amber at an orange rather than at a yellow, which puts the
+two on the blue/yellow axis; red/green color blindness leaves that axis
+working, and good against warn is otherwise the hardest pair on the wall. Every
+pair of statuses is measured in `palette.test.ts`, which simulates the two
+common forms of red/green color blindness and fails if any pair comes within
+reach of reading as one color.
+
+The second is the shape of the header dot: a circle for good, a triangle for
+warn, a diamond for bad, and a hollow ring for unknown. A shape survives any
+kind of color vision, and any distance at which the dot is still visible at all.
+
+The third is weight. A tile's background wash and its border both get stronger
+as its status gets more serious, so a good tile is the quietest thing on the
+wall and a red one the loudest. That ordering holds with the color taken away
+altogether.
+
+The fourth is texture, behind the tile. A gray tile is covered in a grid of
+tiny dots, an amber tile in broad wavy lines, and a red tile in zig-zags. The
+lines are wide and faint rather than fine and dark, which puts enough of the
+pattern on the tile to catch the eye without any one line drawing it. The
+zig-zag covers a little under half of a red tile, and the longer, gentler wave
+about a third of an amber one. Green tiles
+are left plain, which is the calm the rest of the wall is measured against.
+Every texture fades out down the tile: it is whole for the tile's top seventh,
+thins from there, and is gone seven tenths of the way down, which leaves the
+sub line and the foot of a chart on plain color.
+
+Everything the wall draws over a texture has to stay legible against it, and
+the faintest marks are the ones that decide how strong a texture can be: a
+tile's title, its drill-down hint, its running badge, and the times, dividers
+and pop-out arrows down the recent-runs list. Those are set against the lightest the background
+reaches under a texture band rather than against the tile's flat color. The
+dividers and the arrows are fractions of white rather than fixed grays,
+because the surface they sit on is tinted by the status and a gray that reads
+on one wash washes out on another.
+
+`palette.ts` holds all of this, and it is the only place any of it is chosen.
+A status color that appears anywhere — a tile, a dot, a headline, a run cell,
+a sparkline's fade, a drill-down row, the favicon — comes from there. A shade
+that follows from another, like the one a sparkline fades up out of, is worked
+out there too rather than written down beside it, so a change to a color or to
+a tile's wash carries to it without a second edit. The shape a dot takes is
+geometry rather than color, and lives with the rest of the tile's CSS.
 
 Think about how a tile makes someone feel before you think about what it
 measures. Prefer an honest gray "unknown" over a false green — a tile that
@@ -519,7 +618,21 @@ Notes:
   benchmarks the latest run measured and the highlighted window when applicable.
   **Red** marks the **most recent run failing outright, or finishing green on CI
   with no readable benchmark data**. A successful run with no usable output is
-  treated as failed. This
+  treated as failed. Either failure takes over that second line, in place of the
+  count and the window. A run that failed outright dates the outage and counts
+  it: **last good 2 days ago · 12 runs failed**. The count reads back through
+  the newest-first run list. It stops at the first completed run that did not
+  fail, so a cancelled run ends it. The date comes from the newest run that
+  passed, including one that passed on a later attempt, and it is read from the
+  run list the collection paged rather than from the trend's 45-day window. That
+  list runs to the end of the first page past 45 days, so an older outage is
+  dated whenever the run that ended it is still on the last page fetched. With
+  no passing run anywhere on the list there is nothing to date the outage from,
+  and the line is the count alone: **last 12 runs failed**. A run that finished green
+  with nothing readable reads **no benchmark data**. A **running** badge sits in
+  the header while a run is under way, wherever in the list it sits — a rerun
+  keeps its original place instead of moving to the head. The badge says the
+  colour may be about to move; the runs that have finished still set it. The red
   state reads the workflow-run list and the latest run's cached result. It
   therefore fires when the artifacts cannot be read. **Orange** means at least
   one CPU index is **trending up** past 5%. Each CPU trend uses the runs in the
@@ -542,17 +655,33 @@ Notes:
   CPU's line. Any sample isolated by those breaks appears as a point. A CPU
   with one sample also appears as a point until another sample can form a line.
   A large rise reads as a fold multiplier (`▲44×`) once it passes 4x. This
-  avoids a long percentage. The trend is a robust
-  **daily-median Theil–Sen** fit: the sub-daily samples are first collapsed to one
-  median per calendar day, then the trend is the median of the pairwise log-slopes
-  between days, projected across the day span. The daily median absorbs within-day
-  spikes, the median-of-slopes tolerates roughly a third of the days being outliers,
-  and working per calendar day (not per sample or per millisecond) keeps it
-  time-aware without letting two noisy runs a few hours apart blow up the slope —
-  which is what naive per-millisecond weighting does. With fewer than 7 distinct
+  avoids a long percentage. The trend is the difference between the start and
+  the end of whichever of **two robust fits** describes the samples more
+  closely, measured on the samples themselves rather than extended past them.
+  The first fit is a run of **flat levels meeting at change points**, which is
+  the shape a series takes when a change lands and shifts it. Levels are
+  medians, so a lone spike moves none of them, and a boundary counts as a change
+  point only when the two levels either side sit more than 4 standard errors of
+  their difference apart, with at least 3 samples supporting each — so noise
+  produces no levels, and one stray sample is not a level. The second fit is a
+  **straight line** through the median of the pairwise log-slopes, which is the
+  shape a series takes when it drifts, and it answers when its total deviation
+  is at least a tenth smaller. Reporting the difference across the fit rather
+  than a slope extended over the window means a shift reads at its true size
+  wherever in the window it sits: a shift in the newest samples is the one worth
+  catching soonest, and a slope through it would report a fraction of it. The
+  samples are first grouped into at most 64 equal-sized runs, each replaced by
+  its median, which bounds the change-point search and gives every group the
+  same weight however unevenly the runs arrive. With fewer than 7 distinct
   days in the window the trend is marked new: there is too little data to claim one.
   The window is capped by the 90-day artifact retention, so it shows at most ~45
   days and only as far back as the job has run.
+  - The tile collects every minute, which is what the run state needs: a
+    benchmark run lasts about an hour, so a slower collection could miss one from
+    start to finish and never show its **running** badge. Each collection pages
+    the run list. The artifact history behind it is left alone while the last
+    refresh is recent and already covers the runs that list names — nothing new
+    has been sampled, so there is nothing to download.
   - The tile drills through to the per-benchmark history behind `/bench`, which the
     tile's collection keeps warm in the background. The collection lists
     benchmark runs on main. It samples one run per shortest-view bucket,
@@ -595,7 +724,13 @@ Notes:
     Idle between
     collections. During collection it shows cached, queued, requested,
     responded, outstanding, and failed artifact checks. Changing the range
-    leaves the server collection running and joins it from the new page.
+    leaves the server collection running and joins it from the new page. The
+    page closes with a **rerun hand-off**: a link to GitHub, where the run is
+    started. It targets the newest completed run when that run failed, whose
+    **Re-run all jobs** repeats it, and the workflow otherwise, whose **Run
+    workflow** starts a fresh run. The dashboard's GitHub token is read-only, so
+    the board cannot start a run itself, and GitHub decides whether the viewer
+    may start one.
   - The **CI duration history** view at `/bench?view=ci` selects either labs
     `deno.yml` or loom `test-fast.yml`. It charts every job's start-to-finish
     duration on one calendar-time axis. An overall row measures the workflow
@@ -635,9 +770,36 @@ Notes:
     are represented by SHA-256 hashes in that file. Only `/bench` collection
     reserves capacity or can be stopped by the ledger. Other dashboard GitHub
     requests do not read or update it and proceed normally.
-  - Completed workflow-attempt run, job, and step timings are written
-    atomically to the fixed `fabric-wall-ci-job-history.json` file in the
-    dashboard cache directory.
+  - Completed workflow-attempt timings are written atomically to two places in
+    the dashboard cache directory, split by how much of each attempt a view
+    needs. The fixed `fabric-wall-ci-run-index.json` file holds one entry per
+    attempt: its run metadata and the duration of each job. That is everything
+    the CI duration charts read, and it is small enough to hold in memory for
+    the whole retention window. The `fabric-wall-ci-gantt` directory beside it
+    holds one gzipped file per attempt carrying every job's steps, which is
+    around forty times larger per attempt before compression and is what the
+    Gantt views draw. Steps repeat the same few names and the same timestamp
+    prefixes over and over, so an attempt compresses to roughly a twentieth of
+    its size, and every attempt the run index keeps can afford to keep its
+    detail. An attempt loses its detail only when it leaves the index
+    altogether, so nothing GitHub would have to serve again is discarded early.
+    A Gantt request reads only the attempt files for the runs on its chart, at
+    most the 150 the range slider allows, and a duration refresh reads none of
+    them. The runs on a chart are read and handed to the renderer one at a time,
+    so serving a chart never holds all of its timings at once.
+    An attempt whose file is missing, or holds a layout this version cannot
+    read, is collected from GitHub again, so a chart never draws a run with no
+    timings and a damaged file repairs itself.
+    A `fabric-wall-ci-job-history.json` file in the cache directory holds a
+    layout the dashboard does not read, and reaches hundreds of megabytes. A
+    process that finds one deletes it, along with its lock and any temporary
+    file left beside it, without parsing it, and collects the current window
+    from GitHub instead.
+    A workflow run is kept as the fields the dashboard reads rather than as
+    GitHub returns it. A run in a query result carries its repository, head
+    repository, whole head commit, and both actors, which is around fifty times
+    the size of the fields any view uses, and a discovery window is thousands of
+    runs held for the length of the freshness window.
     CI history and the detailed `/bench?view=gantt` view use the same entries.
     The three performance views share one selector and preserve the applicable
     repository, range, sort, and runtime statistic while moving between them.

@@ -393,6 +393,9 @@ describe("generateText with queue", () => {
     tx.commit();
 
     await waitForLlmSettled(runtime, result);
+    // The queue records completion after the writeback's commit round trip;
+    // drain the in-flight transport frames before reading the stats.
+    await clock.settle();
 
     // Verify the queue was created in the runtime registry
     const queue = runtime.getOrCreateQueue("my-named-queue");

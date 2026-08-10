@@ -8,20 +8,21 @@ import {
   SlugResolutionError,
   validateSlug,
 } from "@commonfabric/runner";
-import { pieceId, PieceManager } from "./manager.ts";
+import { pieceId } from "./piece-id.ts";
+import type { PiecesController } from "./ops/pieces-controller.ts";
 
 export { SlugResolutionError };
 
 export async function assignSlug(
-  manager: PieceManager,
+  pieces: PiecesController,
   piece: Cell<unknown>,
   slug: string,
 ): Promise<void> {
-  await setSlugLink(manager, slug, piece, { writeTargetMetadata: true });
+  await setSlugLink(pieces, slug, piece, { writeTargetMetadata: true });
 }
 
 export async function setSlugLink(
-  manager: PieceManager,
+  pieces: PiecesController,
   slug: string,
   source: Cell<unknown>,
   options?: {
@@ -40,12 +41,12 @@ export async function setSlugLink(
     : undefined;
   await metadataTarget?.sync();
 
-  const slugCell = manager.runtime.getCellFromEntityId(
-    manager.getSpace(),
-    entityIdFrom(slugIdForSpace(manager.getSpace(), validSlug)),
+  const slugCell = pieces.runtime.getCellFromEntityId(
+    pieces.getSpace(),
+    entityIdFrom(slugIdForSpace(pieces.getSpace(), validSlug)),
   );
 
-  await manager.runtime.editWithRetry((tx) => {
+  await pieces.runtime.editWithRetry((tx) => {
     const targetWithTx = target.withTx(tx);
     const slugWithTx = slugCell.withTx(tx);
     const metadataTargetWithTx = metadataTarget?.withTx(tx);
@@ -64,19 +65,19 @@ export async function setSlugLink(
     );
   });
 
-  await manager.runtime.idle();
-  await manager.synced();
+  await pieces.runtime.idle();
+  await pieces.synced();
 }
 
 export async function resolvePieceAddress(
-  manager: PieceManager,
+  pieces: PiecesController,
   token: string,
 ): Promise<string> {
   if (!isSlugAddress(token)) {
     return token;
   }
 
-  const target = await resolveSlugTargetCell(manager, token);
+  const target = await resolveSlugTargetCell(pieces, token);
   if (getPatternIdentityRef(target) === undefined) {
     throw new SlugResolutionError(
       `Slug "${token}" redirects to a document that is not a piece.`,
@@ -95,12 +96,12 @@ export async function resolvePieceAddress(
 }
 
 export async function resolveSlugTargetCell(
-  manager: PieceManager,
+  pieces: PiecesController,
   token: string,
 ): Promise<Cell<unknown>> {
   return await resolveRuntimeSlugTargetCell(
-    manager.runtime,
-    manager.getSpace(),
+    pieces.runtime,
+    pieces.getSpace(),
     token,
   );
 }

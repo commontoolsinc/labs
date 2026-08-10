@@ -8,7 +8,6 @@ import {
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { readStoredCfcMetadata } from "@commonfabric/runner/cfc";
-import { PieceManager } from "../src/manager.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 // `cf piece setsrc <main>` replaces the source of a LIVE piece. Until now the
@@ -223,7 +222,6 @@ function strengthenedProgram(): RuntimeProgram {
 describe("setsrc compatibility preflight", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
   let pieces: PiecesController;
 
   beforeEach(async () => {
@@ -232,15 +230,14 @@ describe("setsrc compatibility preflight", () => {
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
     });
-    manager = new PieceManager(
+    pieces = new PiecesController(
       await createSession({
         identity: signer,
         spaceName: `pattern-compat-check-${crypto.randomUUID()}`,
       }),
       runtime,
     );
-    await manager.synced();
-    pieces = new PiecesController(manager);
+    await pieces.synced();
   });
 
   afterEach(async () => {
@@ -340,7 +337,7 @@ describe("setsrc compatibility preflight", () => {
       input: { seed: "hello" },
     });
     await runtime.idle();
-    const argument = manager.getArgument(piece.getCell());
+    const argument = pieces.getArgument(piece.getCell());
     const { error } = await runtime.editWithRetry((tx) => {
       argument.withTx(tx).asSchema({
         type: "object",
@@ -470,7 +467,7 @@ describe("setsrc compatibility preflight", () => {
     await runtime.idle();
 
     // Serve a different schema at the content address the metadata names.
-    const link = manager.getArgument(piece.getCell())
+    const link = pieces.getArgument(piece.getCell())
       .getAsNormalizedFullLink();
     const metadata = readStoredCfcMetadata(runtime.readTx(), {
       space: link.space,

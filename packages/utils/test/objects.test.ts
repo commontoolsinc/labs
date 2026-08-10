@@ -157,7 +157,7 @@ describe("objects", () => {
         expect(isInertPlainObject(fake)).toBe(false);
       });
 
-      it("rejects a null-prototype object", () => {
+      it("rejects a `null`-prototype object", () => {
         // A record has one shape here, the one the natural syntax produces. A
         // prototype has no representation in any encoding, so accepting this
         // would mean carrying a distinction that stops existing at the first
@@ -169,14 +169,14 @@ describe("objects", () => {
         expect(isInertPlainObject(Object.create(null))).toBe(false);
       });
 
-      it("answers rather than throwing for `null` and `undefined`", () => {
+      it("returns rather than throwing for `null` and `undefined`", () => {
         expect(isInertPlainObject(null)).toBe(false);
         expect(isInertPlainObject(undefined)).toBe(
           false,
         );
       });
 
-      it("answers rather than throwing for primitives", () => {
+      it("returns rather than throwing for primitives", () => {
         expect(isInertPlainObject("abc")).toBe(false);
         expect(isInertPlainObject(42)).toBe(false);
         expect(isInertPlainObject(true)).toBe(false);
@@ -202,6 +202,21 @@ describe("objects", () => {
       expect(
         isInertPlainObject(new Proxy(withSymbol, {})),
       ).toBe(false);
+    });
+
+    it("returns `false` for a `Proxy` that disowns a key it reported", () => {
+      // A proxy whose `ownKeys()` names a key its `getOwnPropertyDescriptor()`
+      // then answers `undefined` for. Inertness cannot be established, so the
+      // answer is `false`; only a trap that throws on its own account takes
+      // this check off its "answers rather than throws" contract.
+      const ghosted = new Proxy({ a: 1 }, {
+        ownKeys: () => ["a", "ghost"],
+        getOwnPropertyDescriptor: (target, key) =>
+          key === "ghost"
+            ? undefined
+            : Object.getOwnPropertyDescriptor(target, key),
+      });
+      expect(isInertPlainObject(ghosted)).toBe(false);
     });
   });
 });

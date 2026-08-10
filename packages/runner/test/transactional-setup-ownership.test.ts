@@ -131,6 +131,12 @@ describe("transactional setup ownership", () => {
       held[0].result = abortedCommit;
       held[0].resolve(abortedCommit);
       await initialPull;
+      // The abort's take-back re-materializes the child (possibly under a new
+      // id); drain the in-flight re-setup before resolving the child, so the
+      // captured argument link belongs to the live child rather than the
+      // doomed one.
+      await clock.settle();
+      await runtime.scheduler.idleWithPendingCommits();
 
       const child = result.key("child").resolveAsCell();
       expect(await child.key("doubled").pull()).toBe(6);

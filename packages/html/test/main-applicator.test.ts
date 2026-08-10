@@ -11,7 +11,7 @@ import {
   assertNotStrictEquals,
   assertStrictEquals,
 } from "@std/assert";
-import { createDomApplicator } from "../src/main/applicator.ts";
+import { DomApplicator } from "../src/main/applicator.ts";
 import type { DomEventMessage } from "../src/main/events.ts";
 import type { VDomBatch } from "../src/vdom-ops.ts";
 import { $conn, type CellRef } from "@commonfabric/runtime-client";
@@ -156,7 +156,7 @@ function createMockDocument() {
 Deno.test("DomApplicator - create elements", async (t) => {
   await t.step("creates an element from create-element op", () => {
     const doc = createMockDocument();
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: () => {},
@@ -176,7 +176,7 @@ Deno.test("DomApplicator - create elements", async (t) => {
 
   await t.step("creates a text node from create-text op", () => {
     const doc = createMockDocument();
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: () => {},
@@ -196,7 +196,7 @@ Deno.test("DomApplicator - create elements", async (t) => {
 
   await t.step("creates multiple elements in one batch", () => {
     const doc = createMockDocument();
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: () => {},
@@ -221,7 +221,7 @@ Deno.test("DomApplicator - create elements", async (t) => {
 
   await t.step("updates text nodes without DOM globals", () => {
     const doc = createMockDocument();
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: () => {},
@@ -250,7 +250,7 @@ Deno.test("DomApplicator - create elements", async (t) => {
 Deno.test("DomApplicator - child operations", async (t) => {
   await t.step("inserts child at end", () => {
     const doc = createMockDocument();
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: () => {},
@@ -274,7 +274,7 @@ Deno.test("DomApplicator - child operations", async (t) => {
 
   await t.step("inserts child before another", () => {
     const doc = createMockDocument();
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: () => {},
@@ -301,7 +301,7 @@ Deno.test("DomApplicator - child operations", async (t) => {
     "replays insert when child is created later in the batch",
     () => {
       const doc = createMockDocument();
-      const applicator = createDomApplicator({
+      const applicator = new DomApplicator({
         document: doc,
         runtimeClient: createMockRuntimeClient(),
         onEvent: () => {},
@@ -328,7 +328,7 @@ Deno.test("DomApplicator - child operations", async (t) => {
     "does not replay stale placement after child moves elsewhere",
     () => {
       const doc = createMockDocument();
-      const applicator = createDomApplicator({
+      const applicator = new DomApplicator({
         document: doc,
         runtimeClient: createMockRuntimeClient(),
         onEvent: () => {},
@@ -362,7 +362,7 @@ Deno.test("DomApplicator - child operations", async (t) => {
     "waits for beforeId to attach before replaying placement",
     () => {
       const doc = createMockDocument();
-      const applicator = createDomApplicator({
+      const applicator = new DomApplicator({
         document: doc,
         runtimeClient: createMockRuntimeClient(),
         onEvent: () => {},
@@ -392,34 +392,11 @@ Deno.test("DomApplicator - child operations", async (t) => {
     },
   );
 
-  await t.step("replays deferred move-child when nodes appear", () => {
-    const doc = createMockDocument();
-    const applicator = createDomApplicator({
-      document: doc,
-      runtimeClient: createMockRuntimeClient(),
-      onEvent: () => {},
-    });
-
-    applicator.applyBatch({
-      batchId: 1,
-      ops: [
-        { op: "move-child", parentId: 1, childId: 2, beforeId: null },
-        { op: "create-element", nodeId: 1, tagName: "div" },
-        { op: "create-element", nodeId: 2, tagName: "span" },
-      ],
-    });
-
-    const parent = applicator.getNode(1) as unknown as {
-      childNodes: Array<{ tagName: string }>;
-    };
-    assertEquals(parent.childNodes.map((child) => child.tagName), ["SPAN"]);
-  });
-
   await t.step(
     "does not replay insert after child is removed before creation",
     () => {
       const doc = createMockDocument();
-      const applicator = createDomApplicator({
+      const applicator = new DomApplicator({
         document: doc,
         runtimeClient: createMockRuntimeClient(),
         onEvent: () => {},
@@ -448,7 +425,7 @@ Deno.test("DomApplicator - child operations", async (t) => {
 
   await t.step("drops pending inserts that target removed descendants", () => {
     const doc = createMockDocument();
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: () => {},
@@ -484,7 +461,7 @@ Deno.test("DomApplicator - child operations", async (t) => {
     "appends pending insert when only beforeId anchor is removed",
     () => {
       const doc = createMockDocument();
-      const applicator = createDomApplicator({
+      const applicator = new DomApplicator({
         document: doc,
         runtimeClient: createMockRuntimeClient(),
         onEvent: () => {},
@@ -520,9 +497,9 @@ Deno.test("DomApplicator - child operations", async (t) => {
     },
   );
 
-  await t.step("moves child to new position", () => {
+  await t.step("re-inserting an attached child moves it", () => {
     const doc = createMockDocument();
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: () => {},
@@ -544,7 +521,7 @@ Deno.test("DomApplicator - child operations", async (t) => {
     // Move first child to end
     applicator.applyBatch({
       batchId: 2,
-      ops: [{ op: "move-child", parentId: 1, childId: 2, beforeId: null }],
+      ops: [{ op: "insert-child", parentId: 1, childId: 2, beforeId: null }],
     });
 
     const parent = applicator.getNode(1) as any;
@@ -556,7 +533,7 @@ Deno.test("DomApplicator - child operations", async (t) => {
 
   await t.step("removes a node", () => {
     const doc = createMockDocument();
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: () => {},
@@ -584,7 +561,7 @@ Deno.test("DomApplicator - child operations", async (t) => {
   await t.step("removes listeners from removed descendants", () => {
     const doc = createMockDocument();
     const events: DomEventMessage[] = [];
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: (msg) => events.push(msg),
@@ -642,7 +619,7 @@ Deno.test("DomApplicator - event handling", async (t) => {
   await t.step("sets event listener and dispatches events", () => {
     const doc = createMockDocument();
     const events: DomEventMessage[] = [];
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: (msg) => events.push(msg),
@@ -674,7 +651,7 @@ Deno.test("DomApplicator - event handling", async (t) => {
   await t.step("serializes data-ui dataset markers with trusted events", () => {
     const doc = createMockDocument();
     const events: DomEventMessage[] = [];
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: (msg) => events.push(msg),
@@ -698,9 +675,10 @@ Deno.test("DomApplicator - event handling", async (t) => {
       ops: [
         { op: "create-element", nodeId: 1, tagName: "button" },
         {
-          op: "set-attrs",
+          op: "set-prop",
           nodeId: 1,
-          attrs: { "data-ui-action": "SubmitDirectCommand" },
+          key: "data-ui-action",
+          value: "SubmitDirectCommand",
         },
         { op: "set-event", nodeId: 1, eventType: "click", handlerId: 42 },
       ],
@@ -717,7 +695,7 @@ Deno.test("DomApplicator - event handling", async (t) => {
   await t.step("attests nearest trusted UI pattern provenance", () => {
     const doc = createMockDocument();
     const events: DomEventMessage[] = [];
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: (msg) => events.push(msg),
@@ -741,18 +719,23 @@ Deno.test("DomApplicator - event handling", async (t) => {
       ops: [
         { op: "create-element", nodeId: 1, tagName: "section" },
         {
-          op: "set-attrs",
+          op: "set-prop",
           nodeId: 1,
-          attrs: {
-            "data-ui-pattern": "TrustedDirectCommandSurface",
-            "data-ui-event-integrity": "TrustedDirectCommandSurface",
-          },
+          key: "data-ui-pattern",
+          value: "TrustedDirectCommandSurface",
+        },
+        {
+          op: "set-prop",
+          nodeId: 1,
+          key: "data-ui-event-integrity",
+          value: "TrustedDirectCommandSurface",
         },
         { op: "create-element", nodeId: 2, tagName: "button" },
         {
-          op: "set-attrs",
+          op: "set-prop",
           nodeId: 2,
-          attrs: { "data-ui-action": "SubmitDirectCommand" },
+          key: "data-ui-action",
+          value: "SubmitDirectCommand",
         },
         {
           op: "insert-child",
@@ -783,7 +766,7 @@ Deno.test("DomApplicator - event handling", async (t) => {
   await t.step("removes event listener", () => {
     const doc = createMockDocument();
     const events: DomEventMessage[] = [];
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: (msg) => events.push(msg),
@@ -812,7 +795,7 @@ Deno.test("DomApplicator - event handling", async (t) => {
   await t.step("replaces event handler when setting same event type", () => {
     const doc = createMockDocument();
     const events: DomEventMessage[] = [];
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: (msg) => events.push(msg),
@@ -851,7 +834,7 @@ Deno.test("DomApplicator - cell bindings", async (t) => {
 
   await t.step("does not replace a binding for the same cell ref", () => {
     const doc = createMockDocument();
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: () => {},
@@ -893,7 +876,7 @@ Deno.test("DomApplicator - cell bindings", async (t) => {
 Deno.test("DomApplicator - batch with rootId", async (t) => {
   await t.step("tracks root node ID", () => {
     const doc = createMockDocument();
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: () => {},
@@ -912,7 +895,7 @@ Deno.test("DomApplicator - batch with rootId", async (t) => {
 
   await t.step("updates root when rootId changes", () => {
     const doc = createMockDocument();
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: () => {},
@@ -935,33 +918,10 @@ Deno.test("DomApplicator - batch with rootId", async (t) => {
   });
 });
 
-Deno.test("DomApplicator - mountInto", async (t) => {
-  await t.step("mounts root into parent element", () => {
-    const doc = createMockDocument();
-    const applicator = createDomApplicator({
-      document: doc,
-      runtimeClient: createMockRuntimeClient(),
-      onEvent: () => {},
-    });
-
-    applicator.applyBatch({
-      batchId: 1,
-      ops: [{ op: "create-element", nodeId: 1, tagName: "div" }],
-      rootId: 1,
-    });
-
-    const container = doc.createElement("section") as unknown as HTMLElement;
-    applicator.mountInto(container, 1);
-
-    assertEquals((container as any).childNodes.length, 1);
-    assertEquals((container as any).childNodes[0].tagName, "DIV");
-  });
-});
-
 Deno.test("DomApplicator - setContainer", async (t) => {
   await t.step("registers container element with CONTAINER_NODE_ID (0)", () => {
     const doc = createMockDocument();
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: () => {},
@@ -976,7 +936,7 @@ Deno.test("DomApplicator - setContainer", async (t) => {
 
   await t.step("allows inserting children directly into container", () => {
     const doc = createMockDocument();
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: () => {},
@@ -1003,7 +963,7 @@ Deno.test("DomApplicator - dispose", async (t) => {
   await t.step("cleans up all nodes and listeners", () => {
     const doc = createMockDocument();
     const events: DomEventMessage[] = [];
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: (msg) => events.push(msg),
@@ -1032,7 +992,7 @@ Deno.test("DomApplicator - error handling", async (t) => {
   await t.step("continues processing batch after operation error", () => {
     const doc = createMockDocument();
     const errors: Error[] = [];
-    const applicator = createDomApplicator({
+    const applicator = new DomApplicator({
       document: doc,
       runtimeClient: createMockRuntimeClient(),
       onEvent: () => {},
@@ -1069,7 +1029,7 @@ Deno.test("DomApplicator - bindings", async (t) => {
       });
 
       const doc = createMockDocument();
-      const applicator = createDomApplicator({
+      const applicator = new DomApplicator({
         document: doc,
         runtimeClient: createMockRuntimeClient(),
         onEvent: () => {},
