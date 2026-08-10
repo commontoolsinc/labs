@@ -37,7 +37,7 @@ export function createBaseJsonRegistry(): CodecRegistry {
 
   // Self-representing primitives: emitted as-is (their own wire form).
   // `number` is registered both ways -- finite numbers self-represent, while
-  // `-0` / `NaN` / `±Infinity` go through the SpecialNumber codec above (which
+  // `-0` / `NaN` / `±Infinity` go through `SpecialNumberCodec` above (which
   // `codecFromValue()` tries first).
   registry.registerSelfRep("null");
   registry.registerSelfRep("boolean");
