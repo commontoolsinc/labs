@@ -231,6 +231,7 @@ Deno.test("the Gantt page shares the performance view selector", async () => {
   );
   assertStringIncludes(html, '<option value="labs" selected>labs</option>');
   assertStringIncludes(html, "/bench/gantt.svg?"); // the controls point at the image route
+  assertStringIncludes(html, "p.set('theme', document.documentElement.dataset.theme");
   assertStringIncludes(html, 'id="fetch-progress"');
   assertStringIncludes(html, 'id="fetch-title">Idle</strong>');
   assertStringIncludes(html, 'aria-label="CI Gantt fetch progress"');
@@ -355,10 +356,14 @@ Deno.test("the commit Gantt page contains only one commit selection", () => {
   assertStringIncludes(html, "const image = new Image()");
   assertStringIncludes(html, "image.onerror = () =>");
   assertStringIncludes(html, "URL.revokeObjectURL(src)");
+  assertStringIncludes(html, "url.searchParams.set('theme'");
   assertStringIncludes(html, "if (chartSrc) URL.revokeObjectURL(chartSrc)");
   assertStringIncludes(html, "if (chartSettled) return");
   assertStringIncludes(html, "chartSettled = true");
-  assertStringIncludes(html, "stream.close();\n    chartSrc = src");
+  assertStringIncludes(
+    html,
+    "stream.close();\n    if (chartSrc) URL.revokeObjectURL(chartSrc);\n    chartSrc = src",
+  );
   assert(!html.includes('class="controls"'));
   assert(!html.includes('aria-label="Performance view"'));
 
@@ -449,6 +454,7 @@ Deno.test("/bench/gantt.svg: a successful render returns SVG uncached", async ()
   assertEquals(opt(args, "--repo"), REPO);
   assertEquals(opt(args, "--workflow"), CI_WORKFLOW);
   assertEquals(opt(args, "--limit"), "30");
+  assertEquals(opt(args, "--theme"), "dark");
   assertEquals(opt(args, "--out"), "/fake-tmp/ci-gantt-2.svg"); // the bytes come from where it was told to write
   assertEquals(opt(args, "--input"), "/fake-tmp/ci-gantt-input-1.json");
   assert(!args.includes("--allow-net"));
@@ -468,6 +474,9 @@ Deno.test("/bench/gantt.svg: a successful render returns SVG uncached", async ()
     allConclusions: false,
   });
   assertEquals(leftover, []); // the temp file is cleaned up on the way out
+
+  const light = await gantt("?limit=1&theme=light");
+  assertEquals(opt(light.args, "--theme"), "default");
 });
 
 Deno.test("/bench/gantt.svg includes chart labels without server fonts", async () => {

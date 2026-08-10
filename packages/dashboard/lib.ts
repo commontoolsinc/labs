@@ -2,6 +2,7 @@
 import type { Status } from "./types.ts";
 import { PROD_SERVICE } from "./config.ts";
 import { RUNNING_COLOR, STATUS_COLOR } from "./palette.ts";
+import { CHART_HIGHLIGHT } from "./theme.ts";
 import {
   type GitHubPrimaryRateLimit,
   performanceGitHubRateLimit,
@@ -151,7 +152,7 @@ export const STATUS_DOT: Record<Status, string> = { good: "green", warn: "amber"
 export const escapeHtml = (s: string) =>
   s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
 
-export { SPARK_FADE } from "./palette.ts";
+export { SPARK_FADE_CSS as SPARK_FADE } from "./palette.ts";
 
 // How a sparkline caption spells a day span, consistently across tiles:
 // "5 days", "1 day", "<1 day".
@@ -247,7 +248,7 @@ export function lighten(hex: string, amount = 0.6): string {
 // slot; standalone chart pages (the bench drill-down) reuse it directly. Its
 // container must be position:relative.
 export function durationTag(ms: number): string {
-  return `<span style="position:absolute;left:1px;bottom:0;font-size:9px;line-height:1;color:#c7ccd4;pointer-events:none">${escapeHtml(humanSpan(ms))}</span>`;
+  return `<span style="position:absolute;left:1px;bottom:0;font-size:9px;line-height:1;color:${CHART_HIGHLIGHT};pointer-events:none">${escapeHtml(humanSpan(ms))}</span>`;
 }
 
 function scaleValues(
@@ -348,6 +349,7 @@ export function multiSparkline(
   series: {
     vals: number[];
     color: string;
+    highlightColor?: string;
     label?: string;
     xs?: number[];
     highlightCount?: number;
@@ -479,7 +481,9 @@ export function multiSparkline(
     if (start === undefined) return "";
     return splitPoints(points.slice(start), s.maxXGap)
       .filter((segment) => segment.length >= 2)
-      .map((segment) => poly(segment.map(svgPoint), lighten(s.color)))
+      .map((segment) =>
+        poly(segment.map(svgPoint), s.highlightColor ?? lighten(s.color))
+      )
       .join("");
   }).join("");
   const isolatedMarkers = drawn.map(({ s, points, segments }) => {
@@ -491,7 +495,7 @@ export function multiSparkline(
         const point = segment[0];
         const color = highlightStart !== undefined &&
             point.index >= highlightStart
-          ? lighten(s.color)
+          ? s.highlightColor ?? lighten(s.color)
           : s.color;
         return marker(point, color);
       })

@@ -6,10 +6,14 @@ import type { Ctx, TileView } from "../types.ts";
 import { REPO } from "../config.ts";
 import { blacksmithRoutes } from "../blacksmith.ts";
 import { projectMonthly } from "../spend.ts";
+import { themedChartSeries } from "../theme.ts";
 import { githubCiSpend } from "./github-ci-spend.ts";
 
 const ORG = "acme";
 const D = 86_400_000;
+
+const themedSwatch = (color: string) =>
+  `<span class="swatch" style="background:${themedChartSeries(color).color}"></span>`;
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -372,7 +376,7 @@ Deno.test("ci spend: both billing endpoints unreachable -> gray with a calm reas
   );
   assertStringIncludes(
     v.extra ?? "",
-    '<span class="swatch" style="background:#58a6ff"></span> GitHub $??? • Budget $???',
+    `${themedSwatch("#58a6ff")} GitHub $??? • Budget $???`,
   );
 });
 
@@ -394,7 +398,7 @@ Deno.test("ci spend: every failed provider retains the combined middle line", as
   assertEquals(result.value, "—");
   assertStringIncludes(
     result.extra ?? "",
-    '<p class="sub"><span class="swatch" style="background:#58a6ff"></span> GitHub $??? • <span class="swatch" style="background:#f59e0b"></span> Blacksmith $??? • Budget $500</p>',
+    `<p class="sub">${themedSwatch("#58a6ff")} GitHub $??? • ${themedSwatch("#f59e0b")} Blacksmith $??? • Budget $500</p>`,
   );
 });
 
@@ -461,7 +465,7 @@ Deno.test("ci spend: a Blacksmith invoice without daily history still supplies M
   assertEquals(early.status, "warn");
   assertEquals(
     early.extra,
-    '<p class="sub"><span class="swatch" style="background:#f59e0b"></span> Blacksmith $150 • Budget $300</p>',
+    `<p class="sub">${themedSwatch("#f59e0b")} Blacksmith $150 • Budget $300</p>`,
   );
   assertEquals(early.duration, 0);
   assertEquals(early.href, "https://app.blacksmith.sh/");
@@ -715,7 +719,7 @@ Deno.test("ci spend: GitHub and Blacksmith share totals, chart, and combined bud
   assertEquals(v.href, undefined);
   assertStringIncludes(
     v.extra ?? "",
-    '<p class="sub"><span class="swatch" style="background:#58a6ff"></span> GitHub • <span class="swatch" style="background:#f59e0b"></span> Blacksmith • Budget $350</p>',
+    `<p class="sub">${themedSwatch("#58a6ff")} GitHub • ${themedSwatch("#f59e0b")} Blacksmith • Budget $350</p>`,
   );
   assertStringIncludes(v.extra ?? "", "$180");
   assertStringIncludes(v.extra ?? "", "$50");
@@ -806,7 +810,7 @@ Deno.test("ci spend: one failed configured source leaves a gray lower bound", as
   assertEquals(v.status, "unknown");
   assertStringIncludes(
     v.extra ?? "",
-    '<span class="swatch" style="background:#f59e0b"></span> Blacksmith $???',
+    `${themedSwatch("#f59e0b")} Blacksmith $???`,
   );
   assertStringIncludes(v.extra ?? "", "GitHub");
   assertStringIncludes(v.extra ?? "", "Budget $1");

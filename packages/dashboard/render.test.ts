@@ -251,11 +251,12 @@ Deno.test("shell: the page watches its own stream and reopens one that stops del
 // anything outside the function is a name the page does not have. Neither
 // property is visible to a test that only looks for substrings.
 Deno.test("shell: the injected script is JavaScript, and each injected function stands alone", () => {
-  const script = shell("", "", 0, 45_000, TEST_VERSION, "good")
-    .match(/<script>([\s\S]*)<\/script>/)![1];
-  // Parses the whole body without running it, which is where a leftover type
+  const scripts = [...shell("", "", 0, 45_000, TEST_VERSION, "good")
+    .matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+  // Parses every script without running it, which is where a leftover type
   // annotation or generic parameter would show up.
-  new Function(script);
+  for (const script of scripts) new Function(script);
+  const script = scripts.at(-1)!;
 
   // Evaluated on its own, outside its module, so a reference to anything at
   // module scope throws instead of quietly resolving.
@@ -449,7 +450,10 @@ Deno.test("shell: a tile's wash and border grow with the seriousness of its stat
     assert(alphas[i].wash > alphas[i - 1].wash, "each wash is stronger than the last");
   }
   // A tile that cannot tell takes no color at all.
-  assertStringIncludes(html, ".tile.unknown,.tile.wide.unknown{border-color:#2f333c}");
+  assertStringIncludes(
+    html,
+    ".tile.unknown,.tile.wide.unknown{border-color:var(--border-strong)}",
+  );
 });
 
 Deno.test("shell: server-measured red age changes the favicon after one hour", () => {
