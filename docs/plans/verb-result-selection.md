@@ -149,17 +149,15 @@ cause           = { ...inputs, $event: tx.dispatchedEventId ?? <random uuid> }
 result cell's space**, not necessarily the caller's, and is created with **no
 scope argument**, so receipts are space-scoped today.
 
-**`$event` is not the caller's id.** A caller-supplied id is bound to the
-session that chose it and to the stream it was sent to before it becomes an
-event id: `scopeCallerEventId`
+**`$event` is not the caller's id.** A caller-supplied id is bound to the stream
+it was sent to before it becomes an event id: `scopeCallerEventId`
 (`packages/runner/src/scheduler/event-identity.ts`) hashes
-`{caller, id, path, scope, session, space}` — the id string, the session, and
-the whole stream link — into `evt:caller:<hash>`, and `Cell.send` routes every
-supplied id through it. That binding is deliberate: two verbs sharing input
-bindings must not collide on one receipt, and neither must two callers that
-picked the same word for their own invocation. The hash is deterministic
-across processes, so a retry from a fresh CLI invocation derives the same id —
-which is what makes any re-derivation scheme possible at all.
+`{caller, id, path, space}` — the id string plus the stream link — into
+`evt:caller:<hash>`, and `Cell.send` routes every supplied id through it. That
+binding is deliberate: two verbs sharing input bindings must not collide on one
+receipt. The hash is deterministic across processes, so a retry from a fresh CLI
+invocation derives the same id — which is what makes any re-derivation scheme
+possible at all.
 
 Where no id is supplied, `mintEventId` produces
 `evt:<per-transaction key>:<seq>:<stream link id>` or

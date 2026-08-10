@@ -47,35 +47,17 @@ export type InvocationPhase =
   | "committed"
   | "readback";
 
-/**
- * What names one handler invocation: the caller's idempotency key for a
- * dispatch, and the session that key was chosen within (`newSessionId`,
- * ./session.ts).
- *
- * The two travel as a pair because an id is the caller's own word — an agent
- * picks `add-comment-1` — and another caller can pick the same one. The pair
- * reaches the durable event id, so a retry naming both collides on the
- * handling's create-only receipt and reads the original outcome back (verb
- * contract WS-D), while the same id under another session is a different
- * invocation entirely.
- *
- * The guarantee is at-most-once *commit*, not at-most-once *execution* — a
- * redelivered event re-runs the handler body and loses the race for the
- * receipt, so a verb whose body has effects outside its transaction (an LLM
- * call, a fetch) repeats those effects on retry even though nothing commits
- * twice.
- */
-export interface InvocationIdentity {
-  id: string;
-  session: string;
-}
-
 export interface CallableExecutionDeps {
   uuid?: () => string;
-  /** The id and session naming this call's invocation, for a handler send.
-   * Absent for a call that names no invocation, which is then dispatched
-   * under a runtime-minted event id and has no receipt to come back for. */
-  invocation?: InvocationIdentity;
+  /** Caller-supplied idempotency key for handler sends: threads through as
+   * the durable event id, so a retry of the same id collides on the
+   * handling's create-only receipt and reads the original outcome back
+   * (verb contract WS-D). The guarantee is at-most-once *commit*, not
+   * at-most-once *execution* — a redelivered event re-runs the handler body
+   * and loses the race for the receipt, so a verb whose body has effects
+   * outside its transaction (an LLM call, a fetch) repeats those effects on
+   * retry even though nothing commits twice. */
+  invocationId?: string;
   /** Phase observer for early-exit reporting. */
   onPhase?: (phase: InvocationPhase) => void;
   /** `--no-wait`: await this handling's transaction-local commit
@@ -590,24 +572,19 @@ export async function executeResolvedCallable(
     );
     const runtimeErrors = runtimeErrorLog(resolved.pieces.runtime);
     const errorCountBefore = runtimeErrors.length;
-    const invocation = deps.invocation;
-    const invocationId = invocation?.id;
-    if (deps.skipReadback && invocation === undefined) {
-      // Refused before dispatch: skipping the readback is only sound when a
-      // later call can fetch the outcome, and that needs the pair naming it.
+    const invocationId = deps.invocationId;
+    if (deps.skipReadback && invocationId === undefined) {
+      // Refused before dispatch: skipping the readback is only sound when
+      // a later same-id call can fetch the outcome, and that needs the id.
       throw new Error("--no-wait requires an invocation id");
     }
     deps.onPhase?.("dispatched");
     const tx = await new Promise<IExtendedStorageTransaction>(
       (resolve, reject) => {
         try {
-          if (invocation !== undefined) {
+          if (invocationId !== undefined) {
             resolved.callableCell.send(dispatchInput, resolve, {
-              // The id and the session that chose it travel together: an id
-              // is the caller's own word, and only the pair decides which
-              // receipt this handling files under.
-              eventId: invocation.id,
-              session: invocation.session,
+              eventId: invocationId,
             });
           } else {
             resolved.callableCell.send(dispatchInput, resolve);
