@@ -553,6 +553,49 @@ const UNSUPPORTED_PROJECTION_KEYS = new Set([
   "contentSchema",
 ]);
 
+/**
+ * The keywords that apply to exactly one container. Naming one says which
+ * container the position describes, so the traversal that reads the projection
+ * back needs no separate `type` from the caller.
+ */
+const OBJECT_PROJECTION_KEYS = [
+  "properties",
+  "additionalProperties",
+  "required",
+  "minProperties",
+  "maxProperties",
+];
+const ARRAY_PROJECTION_KEYS = [
+  "items",
+  "minItems",
+  "maxItems",
+  "uniqueItems",
+];
+
+/**
+ * The container a projection position describes but did not state. Schema
+ * traversal descends `properties` only under `type: "object"` and `items` only
+ * under `type: "array"`, so an omitted `type` silently empties the position —
+ * and a nested position is where a caller omits it. Filling it in here keeps
+ * that requirement out of what a caller has to know, and keeps traversal's
+ * meaning of a stated type intact for every other reader.
+ *
+ * Arrays are tested first, matching {@link projectionMask}, so a position that
+ * names both vocabularies reads as the array it named rather than disagreeing
+ * with the selector built from it.
+ */
+function impliedProjectionType(
+  declared: Record<string, unknown>,
+): "object" | "array" | undefined {
+  if (declared.type !== undefined) return undefined;
+  if (ARRAY_PROJECTION_KEYS.some((key) => declared[key] !== undefined)) {
+    return "array";
+  }
+  return OBJECT_PROJECTION_KEYS.some((key) => declared[key] !== undefined)
+    ? "object"
+    : undefined;
+}
+
 /** A projection schema with its `$link` markers lifted out of it. */
 interface NormalizedProjectionSchema {
   schema: JSONSchema;
@@ -597,7 +640,14 @@ function normalizeProjectionSchema(
 
   const { [LINK_MARKER_KEY]: _marker, ...declared } = schema;
   const markers: LinkMarkers = marker === true ? { marked: true } : {};
-  const result: Record<string, unknown> = { ...declared };
+  const implied = impliedProjectionType(declared);
+  // An implied `type` leads the result, so a normalized schema reads the way a
+  // caller would have written it out in full. A position that declared nothing
+  // gains nothing: `{}` stays the wildcard it already is, and a bare marker
+  // still reduces to `false` below.
+  const result: Record<string, unknown> = implied === undefined
+    ? { ...declared }
+    : { type: implied, ...declared };
   if (declared.properties !== undefined) {
     if (!isRecord(declared.properties) || Array.isArray(declared.properties)) {
       throw new CellSelectionError(
@@ -619,7 +669,7 @@ function normalizeProjectionSchema(
       result.additionalProperties = false;
     }
   } else if (
-    schemaTypes(declared as JSONSchema).includes("object") &&
+    schemaTypes(result as JSONSchema).includes("object") &&
     declared.additionalProperties === undefined
   ) {
     result.additionalProperties = true;
@@ -978,12 +1028,6 @@ function projectionMask(schema: JSONSchema): ProjectionMask {
   if (schema === true) return true;
   if (schema === false) return false;
   const objectSchema = schema as Exclude<JSONSchema, boolean>;
-  if (
-    objectSchema.additionalProperties === true ||
-    isRecord(objectSchema.additionalProperties)
-  ) {
-    return true;
-  }
   if (objectSchema.type === "array" || objectSchema.items !== undefined) {
     const items = objectSchema.items === undefined
       ? true
@@ -994,6 +1038,18 @@ function projectionMask(schema: JSONSchema): ProjectionMask {
     // schema, so a rejection one level down arrives after the load it was
     // meant to prevent.
     return items === false ? false : { type: "array", items };
+  }
+  // An object that admits keys it does not name cannot be narrowed: the
+  // selector has to read whatever is there. The array branch above takes a
+  // position that names both vocabularies, the same way
+  // `impliedProjectionType()` types one: `additionalProperties` describes no
+  // part of an array, and deciding an array position by it reads the whole
+  // source over a keyword that says nothing about that position.
+  if (
+    objectSchema.additionalProperties === true ||
+    isRecord(objectSchema.additionalProperties)
+  ) {
+    return true;
   }
   if (
     objectSchema.type === "object" || objectSchema.properties !== undefined

@@ -466,6 +466,46 @@ describe("cf piece get transforms", () => {
     expect((await parseSelectionProjection("true")).schema).toBe(true);
   });
 
+  it("normalizes an untyped projection to the container its keywords name", async () => {
+    expect(
+      (await parseSelectionProjection('{"properties":{"label":true}}')).schema,
+    ).toEqual({
+      type: "object",
+      properties: { label: true },
+      additionalProperties: false,
+    });
+    expect(
+      (await parseSelectionProjection(
+        '{"additionalProperties":{"type":"string"}}',
+      )).schema,
+    ).toEqual({ type: "object", additionalProperties: { type: "string" } });
+    expect(
+      (await parseSelectionProjection('{"required":["id"]}')).schema,
+    ).toEqual({ type: "object", required: ["id"], additionalProperties: true });
+    expect(
+      (await parseSelectionProjection('{"items":{"properties":{"id":true}}}'))
+        .schema,
+    ).toEqual({
+      type: "array",
+      items: {
+        type: "object",
+        properties: { id: true },
+        additionalProperties: false,
+      },
+    });
+  });
+
+  it("keeps `true`, `{}`, `false`, and a bare marker distinct from an inferred object", async () => {
+    expect((await parseSelectionProjection("true")).schema).toBe(true);
+    expect((await parseSelectionProjection("{}")).schema).toEqual({});
+    expect((await parseSelectionProjection('{"$link":true}')).schema).toBe(
+      false,
+    );
+    await expect(parseSelectionProjection("false")).rejects.toThrow(
+      "false cannot project a value",
+    );
+  });
+
   it("does not let caller projection schemas forge CFC metadata", async () => {
     for (const key of ["asCell", "default", "ifc", "scope"]) {
       await expect(parseSelectionProjection(JSON.stringify({
@@ -983,6 +1023,75 @@ describe("cf piece get transforms", () => {
       title: "Visible",
       subtitle: null,
     });
+  });
+
+  it("projects an untyped `properties` at every level of nesting", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "inferred-object-projection-source",
+      {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          hidden: { type: "string" },
+          topic: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              body: { type: "string" },
+            },
+          },
+          notes: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                body: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+      tx,
+    );
+    source.set({
+      label: "Visible",
+      hidden: "not returned",
+      topic: { title: "First", body: "not returned" },
+      notes: [{ title: "Note", body: "not returned" }],
+    });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection(
+          '{"properties":{"label":true}}',
+        ),
+      }),
+    ).toEqual({ label: "Visible" });
+    expect(
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection(
+          '{"type":"object","properties":{"topic":{"properties":{"title":true}}}}',
+        ),
+      }),
+    ).toEqual({ topic: { title: "First" } });
+    expect(
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection(
+          '{"properties":{"topic":{"properties":{"title":true}}}}',
+        ),
+      }),
+    ).toEqual({ topic: { title: "First" } });
+    expect(
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection(
+          '{"properties":{"notes":{"items":{"properties":{"title":true}}}}}',
+        ),
+      }),
+    ).toEqual({ notes: [{ title: "Note" }] });
   });
 
   it("projects nested arrays with explicit item schemas", async () => {
@@ -1610,6 +1719,131 @@ describe("cf piece get transforms", () => {
     );
   });
 
+  it("projects an untyped `items` root through an array value", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "untyped-items-root-array-source",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            body: { type: "string" },
+          },
+        },
+      },
+      tx,
+    );
+    source.set([{ title: "First", body: "not returned" }]);
+    expect((await tx.commit()).ok).toBeDefined();
+
+    expect(
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection(
+          '{"items":{"properties":{"title":true}}}',
+        ),
+      }),
+    ).toEqual([{ title: "First" }]);
+  });
+
+  it("masks the read of an array projection that also names `additionalProperties`", async () => {
+    const listSchema = {
+      type: "object",
+      properties: {
+        notes: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string" },
+              body: { type: "string" },
+            },
+          },
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    const tx = runtime.edit();
+    // The bodies are left unwritten: reading one has to reach storage, which
+    // is what makes a read of a field nobody asked for observable.
+    const bodies = ["a", "b"].map((suffix) =>
+      runtime.getCell(space, `array-extra-props-body-${suffix}`, {
+        type: "string",
+      }, tx)
+    );
+    const source = runtime.getCell(
+      space,
+      "array-extra-props-source",
+      listSchema,
+      tx,
+    );
+    source.setRaw({
+      notes: bodies.map((body, index) => ({
+        title: ["a", "b"][index],
+        body: body.getAsLink(),
+      })),
+    } as never);
+    expect((await tx.commit()).ok).toBeDefined();
+
+    const provider = storageManager.open(space);
+    const originalSync = provider.sync.bind(provider);
+    const syncedUris: string[] = [];
+    provider.sync = ((uri, selector, scope) => {
+      syncedUris.push(uri);
+      return originalSync(uri, selector, scope);
+    }) as typeof provider.sync;
+    const bodyUris: string[] = bodies.map((body) =>
+      body.getAsNormalizedFullLink().id
+    );
+
+    const read = runtime.getCell(space, "array-extra-props-source", listSchema);
+    expect(
+      await deriveSelectedValue(runtime, space, read, {
+        projection: await parseSelectionProjection(
+          '{"properties":{"notes":{"items":{"properties":{"title":true}},' +
+            '"additionalProperties":{"type":"string"}}}}',
+        ),
+      }),
+    ).toEqual({ notes: [{ title: "a" }, { title: "b" }] });
+    // `additionalProperties` describes an object, and `items` says this
+    // position is an array. Reading it as an object that admits anything
+    // loads every document behind a field the caller did not name.
+    expect(syncedUris.filter((uri) => bodyUris.includes(uri))).toEqual([]);
+  });
+
+  it("rejects an untyped `items` root against a non-array value", async () => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "untyped-items-root-object-source",
+      {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          body: { type: "string" },
+        },
+      },
+      tx,
+    );
+    source.set({ title: "First", body: "not returned" });
+    expect((await tx.commit()).ok).toBeDefined();
+
+    // A root naming `items` is an array projection, so it meets the same
+    // root-shape refusal a stated `{"type":"array"}` does. The refusal is what
+    // keeps the read selector and the output schema agreeing on the container:
+    // where they disagree, the transform computes a value that neither of them
+    // describes and hands back an empty answer that looks like a real one.
+    await expect(deriveSelectedValue(runtime, space, source, {
+      projection: await parseSelectionProjection(
+        '{"items":{"properties":{"title":true}}}',
+      ),
+    })).rejects.toThrow(
+      "An array-rooted JSON --schema can only be applied to an array value.",
+    );
+  });
+
   it("treats a missing filter path as a non-match", async () => {
     const tx = runtime.edit();
     const source = runtime.getCell(
@@ -1973,6 +2207,17 @@ describe("cf piece get transforms", () => {
           projection: await parseSelectionProjection(
             '{"type":"object","properties":{"topic":' +
               '{"$link":true,"type":"object","properties":{"title":true}}}}',
+          ),
+        }),
+      ).toEqual({ topic: { $link: addressOf(notes[0]), title: "a" } });
+    });
+
+    it("returns both when the marked position's projection states no type", async () => {
+      const { board, notes } = await seedBoard("link-marker-untyped", true);
+      expect(
+        await deriveSelectedValue(runtime, space, board, {
+          projection: await parseSelectionProjection(
+            '{"properties":{"topic":{"$link":true,"properties":{"title":true}}}}',
           ),
         }),
       ).toEqual({ topic: { $link: addressOf(notes[0]), title: "a" } });
