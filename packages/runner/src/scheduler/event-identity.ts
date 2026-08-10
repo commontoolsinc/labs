@@ -36,18 +36,7 @@ export function mintEventId(
 }
 
 /**
- * Binds a caller-supplied delivery id to the session that chose it and to the
- * stream it was sent to.
- *
- * The session is the half that says WHOSE invocation this is. An ingress
- * caller's id is its own word — an agent picks `add-comment-1` — and nothing
- * stops a second caller picking that same word for its own call on the same
- * verb, so the id alone names no one invocation. Two such callers scoped by
- * session derive two addresses and each settle on their own receipt; sharing
- * one address, the second would be told its call settled when it never ran.
- * The session is also the only unguessable component of the address, so a
- * caller minting an unguessable one keeps its outcomes out of reach of anyone
- * who can guess a piece, a verb, and a word like that id.
+ * Binds a caller-supplied delivery id to the stream it was sent to.
  *
  * Every minted id above ends in `eventLink.id`, and that is load-bearing: the
  * handling's receipt derives from the handler's input bindings plus the event
@@ -59,35 +48,29 @@ export function mintEventId(
  * collide on the first's receipt and be reported as an already-settled
  * success it never made.
  *
- * Scoping keeps the property the protocol actually wants: the same id, in the
- * same session, sent to the same stream is the same invocation (retries
- * deduplicate), while that id under another session or sent elsewhere is a
- * different one.
+ * Scoping keeps the property the protocol actually wants: the same id sent to
+ * the same stream is the same invocation (retries deduplicate), while the same
+ * id sent elsewhere is a different one.
  *
  * The binding is a content hash of a structured value rather than delimited
- * concatenation, because the caller's halves are opaque: with `a:b` joined by
+ * concatenation, because the caller's half is opaque: with `a:b` joined by
  * `:`, the pair (`x`, `y:z`) and the pair (`x:y`, `z`) render identically, and
  * a caller choosing its own id chooses which side of that ambiguity to sit on.
- * Hashing also lets the whole link identify the stream — id, path, scope, and
- * space. That keeps this from quietly depending on stream links always being
- * whole documents at the empty path, which is true today and is not a stated
- * invariant, and it keeps a per-user stream apart from a per-space one at the
- * same id and path: those are two streams, and one address across both would
- * settle one caller's retry on the other's outcome. `hashOf` is type-tagged
- * and length-prefixed, so no component can impersonate another, and it is
- * deterministic across processes: a retry from a fresh CLI invocation derives
- * the same id.
+ * Hashing also lets the whole link identify the stream — id, path, and space —
+ * so this does not quietly depend on stream links always being whole documents
+ * at the empty path, which is true today and is not a stated invariant.
+ * `hashOf` is type-tagged and length-prefixed, so no component can impersonate
+ * another, and it is deterministic across processes: a retry from a fresh CLI
+ * invocation derives the same id.
  *
- * The result deliberately does not carry the caller's id or session in the
- * clear. That costs some greppability — an operator correlating a CLI
- * invocation id with a scheduler log line has to re-derive it — but both are
- * caller-controlled text that would otherwise reach logs and telemetry
- * verbatim, and the session is a secret in the sense above. Do not append
- * either back for convenience.
+ * The result deliberately does not carry the caller's id in the clear. That
+ * costs some greppability — an operator correlating a CLI invocation id with a
+ * scheduler log line has to re-derive it — but the id is caller-controlled
+ * text that would otherwise reach logs and telemetry verbatim. Do not append
+ * the raw id back for convenience.
  */
 export function scopeCallerEventId(
   callerEventId: string,
-  session: string,
   eventLink: NormalizedFullLink,
 ): string {
   return `evt:caller:${
@@ -95,8 +78,6 @@ export function scopeCallerEventId(
       caller: callerEventId,
       id: eventLink.id,
       path: [...eventLink.path],
-      scope: eventLink.scope,
-      session,
       space: eventLink.space,
     })
   }`;
