@@ -5,16 +5,16 @@ import { Identity } from "@commonfabric/identity";
 import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
-  derivePieceGetValue,
-  evaluatePieceGetPredicate,
+  CellSelectionError,
+  deriveSelectedValue,
+  evaluateSelectionPredicate,
   mergeMasks,
-  parsePieceGetFilter,
-  parsePieceGetProjection,
-  PieceGetTransformError,
+  parseSelectionFilter,
+  parseSelectionProjection,
   schemaMayBeArray,
   schemaRootKind,
   selectSourceSchema,
-} from "../lib/piece-get-transform.ts";
+} from "../lib/cell-selection.ts";
 
 const signer = await Identity.fromPassphrase("cf-piece-get-transform");
 const space = signer.did();
@@ -44,7 +44,7 @@ describe("cf piece get transforms", () => {
   });
 
   it("parses and evaluates jq-inspired predicates", () => {
-    const parsed = parsePieceGetFilter(
+    const parsed = parseSelectionFilter(
       '.status == "open" and (.score >= 10 or .priority == true)',
     );
     expect(parsed.paths).toEqual([
@@ -52,12 +52,12 @@ describe("cf piece get transforms", () => {
       ["score"],
       ["priority"],
     ]);
-    expect(evaluatePieceGetPredicate(parsed.predicate, {
+    expect(evaluateSelectionPredicate(parsed.predicate, {
       status: "open",
       score: 12,
       priority: false,
     })).toBe(true);
-    expect(evaluatePieceGetPredicate(parsed.predicate, {
+    expect(evaluateSelectionPredicate(parsed.predicate, {
       status: "closed",
       score: 12,
       priority: true,
@@ -65,10 +65,10 @@ describe("cf piece get transforms", () => {
   });
 
   it("supports bracket paths, negative indices, and not", () => {
-    const parsed = parsePieceGetFilter(
+    const parsed = parseSelectionFilter(
       'not .disabled and .["tags"][-1] == "current"',
     );
-    expect(evaluatePieceGetPredicate(parsed.predicate, {
+    expect(evaluateSelectionPredicate(parsed.predicate, {
       disabled: false,
       tags: ["old", "current"],
     })).toBe(true);
@@ -93,14 +93,14 @@ describe("cf piece get transforms", () => {
         ".disabled == false",
       ]
     ) {
-      expect(evaluatePieceGetPredicate(
-        parsePieceGetFilter(source).predicate,
+      expect(evaluateSelectionPredicate(
+        parseSelectionFilter(source).predicate,
         value,
       )).toBe(true);
     }
     for (const source of [".disabled", ".nil", ".unset", ".missing"]) {
-      expect(evaluatePieceGetPredicate(
-        parsePieceGetFilter(source).predicate,
+      expect(evaluateSelectionPredicate(
+        parseSelectionFilter(source).predicate,
         value,
       )).toBe(false);
     }
@@ -121,13 +121,13 @@ describe("cf piece get transforms", () => {
         ".tags[-3]",
       ]
     ) {
-      expect(evaluatePieceGetPredicate(
-        parsePieceGetFilter(source).predicate,
+      expect(evaluateSelectionPredicate(
+        parseSelectionFilter(source).predicate,
         value,
       )).toBe(false);
     }
-    expect(evaluatePieceGetPredicate(
-      parsePieceGetFilter(".tags[0]").predicate,
+    expect(evaluateSelectionPredicate(
+      parseSelectionFilter(".tags[0]").predicate,
       value,
     )).toBe(true);
   });
@@ -149,14 +149,14 @@ describe("cf piece get transforms", () => {
         ".tags != null",
       ]
     ) {
-      expect(evaluatePieceGetPredicate(
-        parsePieceGetFilter(source).predicate,
+      expect(evaluateSelectionPredicate(
+        parseSelectionFilter(source).predicate,
         value,
       )).toBe(true);
     }
     expect(() =>
-      evaluatePieceGetPredicate(
-        parsePieceGetFilter(".score > true").predicate,
+      evaluateSelectionPredicate(
+        parseSelectionFilter(".score > true").predicate,
         value,
       )
     ).toThrow("--filter > requires two numbers or two strings");
@@ -177,14 +177,14 @@ describe("cf piece get transforms", () => {
         "unknown",
       ]
     ) {
-      expect(() => parsePieceGetFilter(source)).toThrow(
-        PieceGetTransformError,
+      expect(() => parseSelectionFilter(source)).toThrow(
+        CellSelectionError,
       );
     }
   });
 
   it("parses concise, inline, and file projection schemas", async () => {
-    const concise = await parsePieceGetProjection("id,author.name");
+    const concise = await parseSelectionProjection("id,author.name");
     expect(concise.kind).toBe("concise");
     expect(concise.schema).toEqual({
       type: "object",
@@ -199,7 +199,7 @@ describe("cf piece get transforms", () => {
       additionalProperties: false,
     });
 
-    const inline = await parsePieceGetProjection(
+    const inline = await parseSelectionProjection(
       '{"type":"object","properties":{"title":{"type":"string"}}}',
     );
     expect(inline.schema).toEqual({
@@ -208,7 +208,7 @@ describe("cf piece get transforms", () => {
       additionalProperties: false,
     });
 
-    const fromFile = await parsePieceGetProjection("@projection.json", {
+    const fromFile = await parseSelectionProjection("@projection.json", {
       readTextFile: () =>
         Promise.resolve(
           '{"type":"array","items":{"type":"object","properties":{"id":true}}}',
@@ -227,7 +227,7 @@ describe("cf piece get transforms", () => {
     const path = await Deno.makeTempFile({ suffix: ".json" });
     try {
       await Deno.writeTextFile(path, '{"type":"object"}');
-      expect((await parsePieceGetProjection(`@${path}`)).schema).toEqual({
+      expect((await parseSelectionProjection(`@${path}`)).schema).toEqual({
         type: "object",
         additionalProperties: true,
       });
@@ -343,6 +343,25 @@ describe("cf piece get transforms", () => {
     });
   });
 
+  it("keeps predicate reads a rejecting projection declines", () => {
+    const predicate = {
+      type: "object",
+      properties: { status: true },
+      additionalProperties: false,
+    } as const;
+    expect(mergeMasks(predicate, false)).toEqual(predicate);
+    expect(mergeMasks(true, false)).toBe(true);
+    expect(mergeMasks(predicate, {
+      type: "object",
+      properties: { topic: false },
+      additionalProperties: false,
+    })).toEqual({
+      type: "object",
+      properties: { status: true, topic: false },
+      additionalProperties: false,
+    });
+  });
+
   it("narrows referenced source schemas without dropping Fabric metadata", () => {
     const source: JSONSchema = {
       $ref: "#/$defs/Item",
@@ -389,7 +408,7 @@ describe("cf piece get transforms", () => {
 
   it("collapses overlapping concise paths without exposing siblings", async () => {
     for (const source of ["author,author.name", "author.name,author"]) {
-      expect((await parsePieceGetProjection(source)).schema).toEqual({
+      expect((await parseSelectionProjection(source)).schema).toEqual({
         type: "object",
         properties: { author: true },
         additionalProperties: false,
@@ -398,63 +417,63 @@ describe("cf piece get transforms", () => {
   });
 
   it("validates projection schema roots and nested schema objects", async () => {
-    await expect(parsePieceGetProjection("")).rejects.toThrow(
+    await expect(parseSelectionProjection("")).rejects.toThrow(
       "--schema must not be empty",
     );
-    await expect(parsePieceGetProjection("@")).rejects.toThrow(
+    await expect(parseSelectionProjection("@")).rejects.toThrow(
       "--schema @file requires a file path",
     );
-    await expect(parsePieceGetProjection("@missing.json", {
+    await expect(parseSelectionProjection("@missing.json", {
       readTextFile: () => Promise.reject(new Error("gone")),
     })).rejects.toThrow('Could not read --schema file "missing.json": gone');
-    await expect(parsePieceGetProjection("@bad.json", {
+    await expect(parseSelectionProjection("@bad.json", {
       readTextFile: () => Promise.resolve("{"),
     })).rejects.toThrow('Invalid JSON in --schema file "bad.json"');
-    await expect(parsePieceGetProjection("@array.json", {
+    await expect(parseSelectionProjection("@array.json", {
       readTextFile: () => Promise.resolve("[]"),
     })).rejects.toThrow("expected a JSON Schema object");
-    await expect(parsePieceGetProjection("{")).rejects.toThrow(
+    await expect(parseSelectionProjection("{")).rejects.toThrow(
       "Invalid JSON passed to --schema",
     );
-    await expect(parsePieceGetProjection("false")).rejects.toThrow(
+    await expect(parseSelectionProjection("false")).rejects.toThrow(
       "false cannot project a value",
     );
-    await expect(parsePieceGetProjection(
+    await expect(parseSelectionProjection(
       '{"type":"object","properties":[]}',
     )).rejects.toThrow('"properties" must be an object');
-    await expect(parsePieceGetProjection("a,,b")).rejects.toThrow(
+    await expect(parseSelectionProjection("a,,b")).rejects.toThrow(
       "expected comma-separated field paths",
     );
-    await expect(parsePieceGetProjection("a.0")).rejects.toThrow(
+    await expect(parseSelectionProjection("a.0")).rejects.toThrow(
       "Invalid --schema field path",
     );
   });
 
   it("normalizes identity and additional-property projection schemas", async () => {
-    expect((await parsePieceGetProjection('{"type":"object"}')).schema)
+    expect((await parseSelectionProjection('{"type":"object"}')).schema)
       .toEqual({
         type: "object",
         additionalProperties: true,
       });
     expect(
-      (await parsePieceGetProjection(
+      (await parseSelectionProjection(
         '{"type":"object","additionalProperties":{"type":"string"}}',
       )).schema,
     ).toEqual({
       type: "object",
       additionalProperties: { type: "string" },
     });
-    expect((await parsePieceGetProjection("true")).schema).toBe(true);
+    expect((await parseSelectionProjection("true")).schema).toBe(true);
   });
 
   it("does not let caller projection schemas forge CFC metadata", async () => {
     for (const key of ["asCell", "default", "ifc", "scope"]) {
-      await expect(parsePieceGetProjection(JSON.stringify({
+      await expect(parseSelectionProjection(JSON.stringify({
         type: "object",
         properties: {
           secret: { type: "string", [key]: key === "asCell" ? ["cell"] : {} },
         },
-      }))).rejects.toThrow(PieceGetTransformError);
+      }))).rejects.toThrow(CellSelectionError);
     }
   });
 
@@ -479,7 +498,7 @@ describe("cf piece get transforms", () => {
         "contentSchema",
       ]
     ) {
-      await expect(parsePieceGetProjection(JSON.stringify({
+      await expect(parseSelectionProjection(JSON.stringify({
         type: "object",
         [key]: {},
       }))).rejects.toThrow(`"${key}" is not supported`);
@@ -511,9 +530,9 @@ describe("cf piece get transforms", () => {
     ]);
     expect((await tx.commit()).ok).toBeDefined();
 
-    const result = await derivePieceGetValue(runtime, space, source, {
-      filter: parsePieceGetFilter('.status == "open"'),
-      projection: await parsePieceGetProjection("id,title"),
+    const result = await deriveSelectedValue(runtime, space, source, {
+      filter: parseSelectionFilter('.status == "open"'),
+      projection: await parseSelectionProjection("id,title"),
     });
 
     expect(result).toEqual([
@@ -521,8 +540,8 @@ describe("cf piece get transforms", () => {
       { id: 3, title: "Third" },
     ]);
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection(
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection(
           '{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"title":true}}}',
         ),
       }),
@@ -595,9 +614,9 @@ describe("cf piece get transforms", () => {
     }) as typeof provider.sync;
 
     expect(
-      await derivePieceGetValue(runtime, space, sourceRead, {
-        filter: parsePieceGetFilter('.status == "open"'),
-        projection: await parsePieceGetProjection("id,title"),
+      await deriveSelectedValue(runtime, space, sourceRead, {
+        filter: parseSelectionFilter('.status == "open"'),
+        projection: await parseSelectionProjection("id,title"),
       }),
     ).toEqual([{ id: 1, title: "First" }]);
     const initialSelector = sourceSelectors.at(0) as {
@@ -673,9 +692,9 @@ describe("cf piece get transforms", () => {
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
-      await derivePieceGetValue(runtime, space, container.key("items"), {
-        filter: parsePieceGetFilter(".id == 2"),
-        projection: await parsePieceGetProjection("title"),
+      await deriveSelectedValue(runtime, space, container.key("items"), {
+        filter: parseSelectionFilter(".id == 2"),
+        projection: await parseSelectionProjection("title"),
       }),
     ).toEqual([{ title: "Second" }]);
   });
@@ -732,19 +751,19 @@ describe("cf piece get transforms", () => {
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection("title,createdBy.name"),
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection("title,createdBy.name"),
       }),
     ).toEqual([{ title: "T1", createdBy: { name: "Sol" } }]);
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        filter: parsePieceGetFilter('.createdBy.name == "Sol"'),
-        projection: await parsePieceGetProjection("title"),
+      await deriveSelectedValue(runtime, space, source, {
+        filter: parseSelectionFilter('.createdBy.name == "Sol"'),
+        projection: await parseSelectionProjection("title"),
       }),
     ).toEqual([{ title: "T1" }]);
     expect(
-      await derivePieceGetValue(runtime, space, direct, {
-        projection: await parsePieceGetProjection("title,createdBy.name"),
+      await deriveSelectedValue(runtime, space, direct, {
+        projection: await parseSelectionProjection("title,createdBy.name"),
       }),
     ).toEqual({ title: "T1", createdBy: { name: "Sol" } });
   });
@@ -780,8 +799,8 @@ describe("cf piece get transforms", () => {
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
-      await derivePieceGetValue(runtime, space, container.key("topic"), {
-        projection: await parsePieceGetProjection("title"),
+      await deriveSelectedValue(runtime, space, container.key("topic"), {
+        projection: await parseSelectionProjection("title"),
       }),
     ).toEqual({ title: "Visible" });
   });
@@ -805,8 +824,8 @@ describe("cf piece get transforms", () => {
 
     let outputCell: Cell<unknown> | undefined;
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection("title"),
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection("title"),
       }, {
         onOutputCell: (cell) => outputCell = cell,
       }),
@@ -869,9 +888,9 @@ describe("cf piece get transforms", () => {
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        filter: parsePieceGetFilter(".id == 2"),
-        projection: await parsePieceGetProjection("title"),
+      await deriveSelectedValue(runtime, space, source, {
+        filter: parseSelectionFilter(".id == 2"),
+        projection: await parseSelectionProjection("title"),
       }),
     ).toEqual([{ title: "Second" }]);
   });
@@ -905,8 +924,8 @@ describe("cf piece get transforms", () => {
     }]);
     expect((await tx.commit()).ok).toBeDefined();
 
-    const result = await derivePieceGetValue(runtime, space, source, {
-      projection: await parsePieceGetProjection(
+    const result = await deriveSelectedValue(runtime, space, source, {
+      projection: await parseSelectionProjection(
         "author.name,author.name.first",
       ),
     });
@@ -934,18 +953,18 @@ describe("cf piece get transforms", () => {
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection("id"),
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection("id"),
       }),
     ).toEqual({ id: 1 });
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection("missing"),
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection("missing"),
       }),
     ).toEqual({});
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection(JSON.stringify({
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection(JSON.stringify({
           type: "object",
           properties: {
             subtitle: { type: ["string", "null"] },
@@ -955,11 +974,11 @@ describe("cf piece get transforms", () => {
       }),
     ).toEqual({ subtitle: null });
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection('{"type":"object"}'),
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection('{"type":"object"}'),
       }),
     ).toEqual({ id: 1, title: "Visible", subtitle: null });
-    expect(await derivePieceGetValue(runtime, space, source, {})).toEqual({
+    expect(await deriveSelectedValue(runtime, space, source, {})).toEqual({
       id: 1,
       title: "Visible",
       subtitle: null,
@@ -1010,8 +1029,8 @@ describe("cf piece get transforms", () => {
       additionalProperties: false,
     };
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection(JSON.stringify(projection)),
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection(JSON.stringify(projection)),
       }),
     ).toEqual({ comments: [{ body: "Hello" }] });
   });
@@ -1036,23 +1055,23 @@ describe("cf piece get transforms", () => {
     source.set([{ name: "a", secret: "hidden" }, null]);
     expect((await tx.commit()).ok).toBeDefined();
 
-    expect(await derivePieceGetValue(runtime, space, source, {})).toEqual([
+    expect(await deriveSelectedValue(runtime, space, source, {})).toEqual([
       { name: "a", secret: "hidden" },
       null,
     ]);
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        filter: parsePieceGetFilter('.name == "a"'),
+      await deriveSelectedValue(runtime, space, source, {
+        filter: parseSelectionFilter('.name == "a"'),
       }),
     ).toEqual([{ name: "a", secret: "hidden" }]);
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection("name"),
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection("name"),
       }),
     ).toEqual([{ name: "a" }, null]);
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection(JSON.stringify({
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection(JSON.stringify({
           type: "array",
           items: {
             type: ["object", "null"],
@@ -1106,8 +1125,8 @@ describe("cf piece get transforms", () => {
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection(
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection(
           "comments.body,comments.replies.body",
         ),
       }),
@@ -1157,8 +1176,8 @@ describe("cf piece get transforms", () => {
       expect((await tx.commit()).ok).toBeDefined();
 
       expect(
-        await derivePieceGetValue(runtime, space, source, {
-          projection: await parsePieceGetProjection("profiles.profile.name"),
+        await deriveSelectedValue(runtime, space, source, {
+          projection: await parseSelectionProjection("profiles.profile.name"),
         }),
       ).toEqual({
         profiles: [{ profile: { name: "Ada" } }, { profile: null }],
@@ -1192,8 +1211,8 @@ describe("cf piece get transforms", () => {
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection("name"),
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection("name"),
       }),
     ).toEqual([{ name: "Ada" }, null]);
   });
@@ -1224,8 +1243,8 @@ describe("cf piece get transforms", () => {
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection("name"),
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection("name"),
       }),
     ).toEqual([{ name: "Ada" }]);
   });
@@ -1273,8 +1292,8 @@ describe("cf piece get transforms", () => {
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection("comments.body"),
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection("comments.body"),
       }),
     ).toEqual({ comments: [{ body: "Visible" }] });
   });
@@ -1319,8 +1338,8 @@ describe("cf piece get transforms", () => {
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection("comments.body"),
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection("comments.body"),
       }),
     ).toEqual({ comments: [{ body: "Visible" }] });
   });
@@ -1342,8 +1361,8 @@ describe("cf piece get transforms", () => {
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection("comments.body"),
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection("comments.body"),
       }),
     ).toEqual({ comments: [{ body: "Visible" }] });
   });
@@ -1404,8 +1423,8 @@ describe("cf piece get transforms", () => {
       expect((await tx.commit()).ok).toBeDefined();
 
       expect(
-        await derivePieceGetValue(runtime, space, source, {
-          projection: await parsePieceGetProjection("entry.body"),
+        await deriveSelectedValue(runtime, space, source, {
+          projection: await parseSelectionProjection("entry.body"),
         }),
       ).toEqual({ entry: { body: "Visible" } });
     }
@@ -1482,58 +1501,58 @@ describe("cf piece get transforms", () => {
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
-      await derivePieceGetValue(runtime, space, schemaLess, {
-        filter: parsePieceGetFilter("true"),
+      await deriveSelectedValue(runtime, space, schemaLess, {
+        filter: parseSelectionFilter("true"),
       }),
     ).toEqual([1, 2]);
     expect(
-      await derivePieceGetValue(runtime, space, schemaLess, {
-        filter: parsePieceGetFilter("."),
+      await deriveSelectedValue(runtime, space, schemaLess, {
+        filter: parseSelectionFilter("."),
       }),
     ).toEqual([1, 2]);
     expect(
-      await derivePieceGetValue(runtime, space, nestedArrays, {
-        filter: parsePieceGetFilter(".[0]"),
+      await deriveSelectedValue(runtime, space, nestedArrays, {
+        filter: parseSelectionFilter(".[0]"),
       }),
     ).toEqual([[1]]);
     expect(
-      await derivePieceGetValue(runtime, space, nestedArrays, {
-        filter: parsePieceGetFilter(".length"),
-        projection: await parsePieceGetProjection(
+      await deriveSelectedValue(runtime, space, nestedArrays, {
+        filter: parseSelectionFilter(".length"),
+        projection: await parseSelectionProjection(
           '{"type":"array","items":{"type":"array","items":true}}',
         ),
       }),
     ).toEqual([]);
     expect(
-      await derivePieceGetValue(runtime, space, schemaLess, {
-        projection: await parsePieceGetProjection("true"),
+      await deriveSelectedValue(runtime, space, schemaLess, {
+        projection: await parseSelectionProjection("true"),
       }),
     ).toEqual([1, 2]);
     expect(
-      await derivePieceGetValue(runtime, space, schemaLess, {
-        projection: await parsePieceGetProjection('{"type":"array"}'),
+      await deriveSelectedValue(runtime, space, schemaLess, {
+        projection: await parseSelectionProjection('{"type":"array"}'),
       }),
     ).toEqual([1, 2]);
     expect(
-      await derivePieceGetValue(runtime, space, schemaLess, {
-        projection: await parsePieceGetProjection(
+      await deriveSelectedValue(runtime, space, schemaLess, {
+        projection: await parseSelectionProjection(
           '{"type":["array","null"],"items":true}',
         ),
       }),
     ).toEqual([1, 2]);
     expect(
-      await derivePieceGetValue(runtime, space, scalar, {
-        projection: await parsePieceGetProjection('{"type":"string"}'),
+      await deriveSelectedValue(runtime, space, scalar, {
+        projection: await parseSelectionProjection('{"type":"string"}'),
       }),
     ).toBe("visible");
     expect(
-      await derivePieceGetValue(runtime, space, permissiveArray, {
-        projection: await parsePieceGetProjection("id"),
+      await deriveSelectedValue(runtime, space, permissiveArray, {
+        projection: await parseSelectionProjection("id"),
       }),
     ).toEqual([{ id: 1 }]);
     expect(
-      await derivePieceGetValue(runtime, space, composedObject, {
-        projection: await parsePieceGetProjection("id"),
+      await deriveSelectedValue(runtime, space, composedObject, {
+        projection: await parseSelectionProjection("id"),
       }),
     ).toEqual({ id: 2 });
   });
@@ -1553,8 +1572,8 @@ describe("cf piece get transforms", () => {
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection(
+      await deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection(
           '{"type":"object","additionalProperties":false}',
         ),
       }),
@@ -1579,11 +1598,11 @@ describe("cf piece get transforms", () => {
     objectSource.set({ id: 1 });
     expect((await tx.commit()).ok).toBeDefined();
 
-    await expect(derivePieceGetValue(runtime, space, arraySource, {
-      projection: await parsePieceGetProjection('{"type":"object"}'),
+    await expect(deriveSelectedValue(runtime, space, arraySource, {
+      projection: await parseSelectionProjection('{"type":"object"}'),
     })).rejects.toThrow("must describe the returned array");
-    await expect(derivePieceGetValue(runtime, space, objectSource, {
-      projection: await parsePieceGetProjection(
+    await expect(deriveSelectedValue(runtime, space, objectSource, {
+      projection: await parseSelectionProjection(
         '{"type":"array","items":true}',
       ),
     })).rejects.toThrow(
@@ -1609,8 +1628,8 @@ describe("cf piece get transforms", () => {
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
-      await derivePieceGetValue(runtime, space, source, {
-        filter: parsePieceGetFilter(".missing"),
+      await deriveSelectedValue(runtime, space, source, {
+        filter: parseSelectionFilter(".missing"),
       }),
     ).toEqual([]);
   });
@@ -1626,8 +1645,8 @@ describe("cf piece get transforms", () => {
     source.set({ id: 1 });
     expect((await tx.commit()).ok).toBeDefined();
 
-    await expect(derivePieceGetValue(runtime, space, source, {
-      filter: parsePieceGetFilter(".id == 1"),
+    await expect(deriveSelectedValue(runtime, space, source, {
+      filter: parseSelectionFilter(".id == 1"),
     })).rejects.toThrow("--filter can only be applied to an array");
   });
 
@@ -1642,8 +1661,8 @@ describe("cf piece get transforms", () => {
     expect((await tx.commit()).ok).toBeDefined();
 
     expect(
-      await derivePieceGetValue(runtime, space, unsetSource, {
-        filter: parsePieceGetFilter("true"),
+      await deriveSelectedValue(runtime, space, unsetSource, {
+        filter: parseSelectionFilter("true"),
       }),
     ).toEqual([]);
   });
@@ -1666,15 +1685,15 @@ describe("cf piece get transforms", () => {
     objectSource.set({ id: 1 } as never);
     expect((await tx.commit()).ok).toBeDefined();
 
-    await expect(derivePieceGetValue(runtime, space, nullSource, {
-      filter: parsePieceGetFilter("true"),
+    await expect(deriveSelectedValue(runtime, space, nullSource, {
+      filter: parseSelectionFilter("true"),
     })).rejects.toThrow(/^--filter can only be applied to an array$/);
-    await expect(derivePieceGetValue(runtime, space, nullSource, {
-      filter: parsePieceGetFilter("true"),
-      projection: await parsePieceGetProjection("id"),
+    await expect(deriveSelectedValue(runtime, space, nullSource, {
+      filter: parseSelectionFilter("true"),
+      projection: await parseSelectionProjection("id"),
     })).rejects.toThrow(/^--filter can only be applied to an array$/);
-    await expect(derivePieceGetValue(runtime, space, objectSource, {
-      projection: await parsePieceGetProjection("id"),
+    await expect(deriveSelectedValue(runtime, space, objectSource, {
+      projection: await parseSelectionProjection("id"),
     })).rejects.toThrow(
       /^--schema can only project array items from an array value$/,
     );
@@ -1697,8 +1716,8 @@ describe("cf piece get transforms", () => {
     source.set([{ score: true }]);
     expect((await tx.commit()).ok).toBeDefined();
 
-    await expect(derivePieceGetValue(runtime, space, source, {
-      filter: parsePieceGetFilter(".score > 1"),
+    await expect(deriveSelectedValue(runtime, space, source, {
+      filter: parseSelectionFilter(".score > 1"),
     })).rejects.toThrow("Could not apply piece get transform");
   });
 
@@ -1724,8 +1743,8 @@ describe("cf piece get transforms", () => {
       return tx;
     };
     try {
-      await expect(derivePieceGetValue(runtime, space, source, {
-        projection: await parsePieceGetProjection("id"),
+      await expect(deriveSelectedValue(runtime, space, source, {
+        projection: await parseSelectionProjection("id"),
       })).rejects.toThrow(
         "Could not apply piece get transform: forced commit failure",
       );
@@ -1772,8 +1791,8 @@ describe("cf piece get transforms", () => {
     );
 
     let outputCell: Cell<unknown> | undefined;
-    const result = await derivePieceGetValue(runtime, space, sourceRead, {
-      filter: parsePieceGetFilter('.status == "open"'),
+    const result = await deriveSelectedValue(runtime, space, sourceRead, {
+      filter: parseSelectionFilter('.status == "open"'),
     }, {
       onOutputCell: (cell) => outputCell = cell,
     });
@@ -1822,8 +1841,8 @@ describe("cf piece get transforms", () => {
     expect((await setup.commit()).ok).toBeDefined();
 
     let outputCell: Cell<unknown> | undefined;
-    const result = await derivePieceGetValue(runtime, space, source, {
-      projection: await parsePieceGetProjection("id"),
+    const result = await deriveSelectedValue(runtime, space, source, {
+      projection: await parseSelectionProjection("id"),
     }, {
       onOutputCell: (cell) => outputCell = cell,
     });
@@ -1878,6 +1897,339 @@ describe("cf piece get transforms", () => {
     });
     expect((await seed.commit()).ok).toBeDefined();
   }
+
+  describe("$link projection marker", () => {
+    const noteSchema = {
+      type: "object",
+      properties: { title: { type: "string" }, body: { type: "string" } },
+    } as const satisfies JSONSchema;
+    const boardSchema = {
+      type: "object",
+      properties: {
+        notes: { type: "array", items: noteSchema },
+        topic: noteSchema,
+        label: { type: "string" },
+      },
+    } as const satisfies JSONSchema;
+
+    /**
+     * A board whose `topic` and `notes` entries are stored as links, the shape
+     * a verb produces when it hands back the piece it created. `written` says
+     * whether the note documents exist: reading an unwritten one has to reach
+     * storage, which is what makes a read of it observable.
+     */
+    async function seedBoard(
+      cause: string,
+      written: boolean,
+    ): Promise<{ board: Cell<unknown>; notes: Cell<unknown>[] }> {
+      const tx = runtime.edit();
+      const notes = ["a", "b", "c"].map((suffix) => {
+        const note = runtime.getCell(
+          space,
+          `${cause}-note-${suffix}`,
+          noteSchema,
+          tx,
+        );
+        if (written) note.set({ title: suffix, body: `body ${suffix}` });
+        return note;
+      });
+      const board = runtime.getCell(space, `${cause}-board`, boardSchema, tx);
+      board.setRaw({
+        notes: notes.map((note) => note.getAsLink()),
+        topic: notes[0].getAsLink(),
+        label: "Field notes",
+      } as never);
+      expect((await tx.commit()).ok).toBeDefined();
+      return {
+        board: runtime.getCell(space, `${cause}-board`, boardSchema),
+        notes,
+      };
+    }
+
+    function addressOf(cell: Cell<unknown>) {
+      return {
+        id: cell.getAsNormalizedFullLink().id,
+        space,
+        scope: "space",
+        path: [],
+      };
+    }
+
+    it("returns a marked position's address instead of its contents", async () => {
+      const { board, notes } = await seedBoard("link-marker-instead", true);
+      expect(
+        await deriveSelectedValue(runtime, space, board, {
+          projection: await parseSelectionProjection(
+            '{"properties":{"topic":{"$link":true}}}',
+          ),
+        }),
+      ).toEqual({ topic: { $link: addressOf(notes[0]) } });
+    });
+
+    it("returns the address and the contents asked for beside it", async () => {
+      const { board, notes } = await seedBoard("link-marker-beside", true);
+      expect(
+        await deriveSelectedValue(runtime, space, board, {
+          projection: await parseSelectionProjection(
+            '{"type":"object","properties":{"topic":' +
+              '{"$link":true,"type":"object","properties":{"title":true}}}}',
+          ),
+        }),
+      ).toEqual({ topic: { $link: addressOf(notes[0]), title: "a" } });
+    });
+
+    it("returns an address per element for a marked collection", async () => {
+      const { board, notes } = await seedBoard("link-marker-collection", true);
+      expect(
+        await deriveSelectedValue(runtime, space, board, {
+          projection: await parseSelectionProjection(
+            '{"properties":{"notes":{"type":"array","items":{"$link":true}}}}',
+          ),
+        }),
+      ).toEqual({ notes: notes.map((note) => ({ $link: addressOf(note) })) });
+    });
+
+    it("returns the link crossed above a marked position, plus the segments below it", async () => {
+      const { board, notes } = await seedBoard("link-marker-below", true);
+      expect(
+        await deriveSelectedValue(runtime, space, board, {
+          projection: await parseSelectionProjection(
+            '{"properties":{"notes":{"type":"array","items":' +
+              '{"properties":{"title":{"$link":true}}}}}}',
+          ),
+        }),
+      ).toEqual({
+        notes: notes.map((note) => ({
+          title: { $link: { ...addressOf(note), path: ["title"] } },
+        })),
+      });
+    });
+
+    it("returns the link stored at the read's own source for a marked position below it", async () => {
+      const { board, notes } = await seedBoard(
+        "link-marker-below-source",
+        true,
+      );
+      expect(
+        await deriveSelectedValue(runtime, space, board.key("topic"), {
+          projection: await parseSelectionProjection(
+            '{"properties":{"title":{"$link":true}}}',
+          ),
+        }),
+      ).toEqual({
+        title: { $link: { ...addressOf(notes[0]), path: ["title"] } },
+      });
+    });
+
+    it("returns a stored link's own path followed by the segments below it", async () => {
+      const tx = runtime.edit();
+      const note = runtime.getCell(
+        space,
+        "link-marker-nested-note",
+        { type: "object", properties: { content: noteSchema } } as const,
+        tx,
+      );
+      note.set({ content: { title: "a", body: "body a" } });
+      const board = runtime.getCell(
+        space,
+        "link-marker-nested-board",
+        boardSchema,
+        tx,
+      );
+      board.setRaw({
+        notes: [],
+        topic: note.key("content").getAsLink(),
+        label: "Field notes",
+      } as never);
+      expect((await tx.commit()).ok).toBeDefined();
+
+      expect(
+        await deriveSelectedValue(
+          runtime,
+          space,
+          runtime.getCell(space, "link-marker-nested-board", boardSchema),
+          {
+            projection: await parseSelectionProjection(
+              '{"properties":{"topic":{"properties":{"title":{"$link":true}}}}}',
+            ),
+          },
+        ),
+      ).toEqual({
+        topic: {
+          title: {
+            $link: { ...addressOf(note), path: ["content", "title"] },
+          },
+        },
+      });
+    });
+
+    it("reads one document for a marked collection, not one per element", async () => {
+      const { board, notes } = await seedBoard("link-marker-reads", false);
+      const provider = storageManager.open(space);
+      const originalSync = provider.sync.bind(provider);
+      let syncedUris: string[] = [];
+      provider.sync = ((uri, selector, scope) => {
+        syncedUris.push(uri);
+        return originalSync(uri, selector, scope);
+      }) as typeof provider.sync;
+      const boardUri = board.getAsNormalizedFullLink().id;
+      const noteUris: string[] = notes.map((note) =>
+        note.getAsNormalizedFullLink().id
+      );
+      // A read of the transform's own session documents says nothing about
+      // which of the board's data this selection reached.
+      const boardDocuments = (uris: string[]) =>
+        uris.filter((uri) => uri === boardUri || noteUris.includes(uri));
+
+      syncedUris = [];
+      await deriveSelectedValue(runtime, space, board, {
+        projection: await parseSelectionProjection(
+          '{"properties":{"notes":{"type":"array","items":{"$link":true}}}}',
+        ),
+      });
+      const marked = boardDocuments(syncedUris);
+
+      syncedUris = [];
+      await deriveSelectedValue(
+        runtime,
+        space,
+        runtime.getCell(space, "link-marker-reads-board", boardSchema),
+        {
+          projection: await parseSelectionProjection(
+            '{"properties":{"notes":{"type":"array","items":' +
+              '{"type":"object","properties":{"title":true}}}}}',
+          ),
+        },
+      );
+
+      expect(marked).toEqual([boardUri]);
+      // `syncedUris` is a push-order log of concurrent syncs, so which
+      // documents were reached is the fact here and the order they resolved
+      // in is not.
+      expect(boardDocuments(syncedUris).toSorted()).toEqual(
+        noteUris.toSorted(),
+      );
+    });
+
+    it("returns the address of the position it was read at for a marked root", async () => {
+      const { board, notes } = await seedBoard("link-marker-root", true);
+      expect(
+        await deriveSelectedValue(runtime, space, board.key("topic"), {
+          projection: await parseSelectionProjection('{"$link":true}'),
+        }),
+      ).toEqual({ $link: addressOf(notes[0]) });
+    });
+
+    it("returns where an inline value lives when nothing is linked there", async () => {
+      const tx = runtime.edit();
+      const board = runtime.getCell(
+        space,
+        "link-marker-inline",
+        boardSchema,
+        tx,
+      );
+      board.set({
+        notes: [],
+        topic: { title: "a", body: "inline" },
+        label: "L",
+      });
+      expect((await tx.commit()).ok).toBeDefined();
+
+      const read = runtime.getCell(space, "link-marker-inline", boardSchema);
+      expect(
+        await deriveSelectedValue(runtime, space, read, {
+          projection: await parseSelectionProjection(
+            '{"properties":{"topic":{"$link":true}}}',
+          ),
+        }),
+      ).toEqual({
+        topic: {
+          $link: {
+            id: read.getAsNormalizedFullLink().id,
+            space,
+            scope: "space",
+            path: ["topic"],
+          },
+        },
+      });
+    });
+
+    it("returns the address alone where the contents are not an object", async () => {
+      const { board } = await seedBoard("link-marker-scalar", true);
+      expect(
+        await deriveSelectedValue(runtime, space, board, {
+          projection: await parseSelectionProjection(
+            '{"type":"object","properties":{"label":{"$link":true,"type":"string"}}}',
+          ),
+        }),
+      ).toEqual({
+        label: {
+          $link: {
+            id: board.getAsNormalizedFullLink().id,
+            space,
+            scope: "space",
+            path: ["label"],
+          },
+        },
+      });
+    });
+
+    it("leaves a marked collection alone when nothing is stored at it", async () => {
+      const tx = runtime.edit();
+      const board = runtime.getCell(
+        space,
+        "link-marker-unset",
+        boardSchema,
+        tx,
+      );
+      board.set({ topic: { title: "a", body: "b" }, label: "L" } as never);
+      expect((await tx.commit()).ok).toBeDefined();
+
+      expect(
+        await deriveSelectedValue(
+          runtime,
+          space,
+          runtime.getCell(space, "link-marker-unset", boardSchema),
+          {
+            projection: await parseSelectionProjection(
+              '{"type":"object","properties":{"label":true,"notes":' +
+                '{"type":"array","items":{"$link":true}}}}',
+            ),
+          },
+        ),
+      ).toEqual({ label: "L" });
+    });
+
+    it("refuses a marker combined with a filter", async () => {
+      const { board } = await seedBoard("link-marker-filter", true);
+      await expect(
+        deriveSelectedValue(runtime, space, board.key("notes"), {
+          filter: parseSelectionFilter('.title == "a"'),
+          projection: await parseSelectionProjection(
+            '{"type":"array","items":{"$link":true}}',
+          ),
+        }),
+      ).rejects.toThrow("--filter cannot be combined");
+    });
+
+    it("refuses a marker that is not `true`", async () => {
+      await expect(parseSelectionProjection('{"$link":"yes"}')).rejects
+        .toThrow('"$link" must be `true`');
+    });
+
+    it("refuses a marker under `additionalProperties`", async () => {
+      await expect(
+        parseSelectionProjection('{"additionalProperties":{"$link":true}}'),
+      ).rejects.toThrow(
+        '"$link" is not supported under "additionalProperties"',
+      );
+    });
+
+    it("still refuses `asCell` in a projection", async () => {
+      await expect(parseSelectionProjection('{"asCell":["cell"]}')).rejects
+        .toThrow('"asCell" is controlled by the source schema');
+    });
+  });
 
   function derivedConfidentiality(id: string): string[] {
     type StoredEntry = {

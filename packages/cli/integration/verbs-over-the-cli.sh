@@ -107,7 +107,39 @@ check "first line
 second line" "$(echo "$A" | jq -r '.result.body // empty')" \
   "calling a verb ON the returned piece works, and returns what it wrote"
 
-step "6. A replayed invocation id returns the ORIGINAL result"
+step "6. Read an address instead of what is behind it"
+# A read follows a link onward unless the selection says where to stop, so a
+# created note arrives as a copy of its contents with no address in it. A
+# "$link" marker at a position asks for that position's address instead.
+ADDR=$($CF piece get --quiet --piece "$BOARD" $ARGS notes \
+  --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null)
+check "true" "$(echo "$ADDR" | jq -c '[.[] | has("$link")] | all')" \
+  "every element carries an address"
+check "false" "$(echo "$ADDR" | jq -c '[.[] | has("title")] | any')" \
+  "and none of them carries the note's contents"
+check '["id","path","scope","space"]' \
+  "$(echo "$ADDR" | jq -c '[.[0]["$link"] | keys] | first')" \
+  "the address is id, space, scope, and path — no inlined schema"
+# A marker beside a projection asks for both, because both were asked for.
+BOTH=$($CF piece get --quiet --piece "$BOARD" $ARGS notes --schema \
+  '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}' \
+  2>/dev/null)
+check "true" "$(echo "$BOTH" | jq -c \
+  '[.[] | has("$link") and (.title | length > 0)] | all')" \
+  "a marker beside a projection returns the address AND the fields"
+# The point of an address: act on the child, rather than read a copy of it.
+FIRST=$(echo "$BOTH" | jq -r \
+  '.[] | select(.title == "First note") | .["$link"].id' | sed 's/^of://')
+if [ -n "$FIRST" ]; then ok "the read names the first note: $FIRST"; else
+  bad "no address for the first note in the projected read"
+fi
+B=$($CF piece call --quiet --piece "$FIRST" $ARGS --invocation append-read \
+  append '{"text":"appended through the read"}' 2>/dev/null)
+check "written at create
+appended through the read" "$(echo "$B" | jq -r '.result.body // empty')" \
+  "the address a read returned is one a caller can call"
+
+step "7. A replayed invocation id returns the ORIGINAL result"
 # Captured rather than hard-coded: the property is that the replay changes
 # nothing, which stays true however many notes earlier steps created.
 BEFORE=$($CF piece get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)
@@ -120,7 +152,7 @@ check "true" "$(echo "$D" | jq -r '.deduplicated // false')" \
 check "$BEFORE" "$($CF piece get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)" \
   "the replay created no note (count unchanged at $BEFORE)"
 
-step "7. A piece result needs no option; a plain record does"
+step "8. A piece result needs no option; a plain record does"
 P=$(EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false $CF piece call --quiet \
   --piece "$BOARD" $ARGS --invocation create-flagoff \
   createNote '{"title":"Flag-off note"}' 2>/dev/null)
@@ -135,13 +167,13 @@ check "Written anyway" \
   "$($CF piece get --quiet --piece "$BOARD" $ARGS label --input 2>/dev/null | jq -r '.')" \
   "but the write landed regardless — an absent result is not a failed mutation"
 
-step "8. A value-less verb settles with no result"
+step "9. A value-less verb settles with no result"
 V=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation touch-1 \
   touch '{}' 2>/dev/null)
 check "settled" "$(echo "$V" | jq -r '.status')" "the value-less verb settled"
 check "{}" "$(echo "$V" | jq -c '.result // {}')" "its result is the empty witness"
 
-step "9. A refused call does not spend its invocation id"
+step "10. A refused call does not spend its invocation id"
 $CF piece call --quiet --piece "$BOARD" $ARGS --invocation reuse-1 \
   createNote '{"title":""}' >/dev/null 2>&1
 rc=$?
@@ -151,7 +183,7 @@ C=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation reuse-1 \
 check "Corrected" "$(echo "$C" | jq -r '.result.note["$NAME"] // empty')" \
   "the SAME id then executes, because the refusal never consumed it"
 
-step "10. Reading a verb redirects to cf piece call"
+step "11. Reading a verb redirects to cf piece call"
 OUT=$($CF piece get --piece "$BOARD" $ARGS createNote 2>&1)
 rc=$?
 check "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)" "a verb read exits nonzero"
@@ -159,7 +191,7 @@ echo "$OUT" | grep -qi "piece call" &&
   ok "the refusal names cf piece call" ||
   bad "the refusal does not name the right command"
 
-step "11. --verbose times the phases on stderr; stdout stays JSON"
+step "12. --verbose times the phases on stderr; stdout stays JSON"
 ERR=$(mktemp)
 OUT=$($CF piece call --quiet --verbose --piece "$BOARD" $ARGS \
   --invocation timed-1 createNote '{"title":"Timed note"}' 2>"$ERR")
