@@ -5,6 +5,24 @@ import type { Line, TokenClass } from "../../model.ts";
 const BYTES_PER_LINE = 16;
 export const MAX_BINARY_VIEW_BYTES = 256 * 1024;
 
+/** Describe a bounded preview after refreshing the source's byte count. */
+export function binaryPreviewExtent(
+  shownByteLength: number,
+  totalBytesRead: number,
+  reachedEof: boolean,
+  reportedByteLength: number | undefined,
+): RenderInputExtent {
+  if (reachedEof) {
+    return { byteLength: totalBytesRead, complete: true };
+  }
+  if (
+    reportedByteLength !== undefined && reportedByteLength >= totalBytesRead
+  ) {
+    return { byteLength: reportedByteLength, complete: true };
+  }
+  return { byteLength: shownByteLength, complete: false };
+}
+
 /** Format a bounded raw-byte string as canonical `hexdump -C` style rows. */
 export function renderBinaryLines(
   raw: string,

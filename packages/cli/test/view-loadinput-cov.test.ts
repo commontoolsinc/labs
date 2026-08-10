@@ -1,8 +1,23 @@
 import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
-import { _internal } from "../lib/view/loadinput.ts";
+import { _internal, loadViewInput } from "../lib/view/loadinput.ts";
 import { MAX_BINARY_VIEW_BYTES } from "../lib/view/languages/binary/binary.ts";
 
-type ChunkSource = Parameters<typeof _internal.captureInput>[0];
+type LoadFromSource = typeof _internal.loadViewInputFromSource;
+type ChunkSource = Parameters<LoadFromSource>[0];
+type LoadOptions = Parameters<LoadFromSource>[1];
+
+function loadFromSource(
+  source: ChunkSource,
+  options: Partial<LoadOptions> = {},
+) {
+  return _internal.loadViewInputFromSource(source, {
+    knownByteLanguage: undefined,
+    detectByteLanguage: true,
+    interactive: true,
+    streamRendered: true,
+    ...options,
+  });
+}
 
 function streamSource(
   values: readonly Uint8Array[],
@@ -19,15 +34,16 @@ function streamSource(
 
 function regularSource(
   values: readonly Uint8Array[],
-  reportedBytes: number | undefined,
+  snapshotBytes: number | undefined,
+  currentBytes: number | undefined = snapshotBytes,
 ): ChunkSource {
   return {
     kind: "regular-file",
     chunks: (async function* () {
       for (const value of values) yield value;
     })(),
-    snapshotBytes: reportedBytes,
-    byteCount: () => reportedBytes,
+    snapshotBytes,
+    byteCount: () => currentBytes,
     dispose: () => {},
   };
 }
@@ -71,7 +87,7 @@ Deno.test("load input closes a file when its initial stat fails", async () => {
     (Deno as { open: typeof Deno.open }).open = () => Promise.resolve(fakeFile);
 
     await assertRejects(
-      () => _internal.openFileChunkSource("unused"),
+      () => loadViewInput("unused", undefined, undefined, true),
       Error,
       "stat failed",
     );
@@ -81,37 +97,54 @@ Deno.test("load input closes a file when its initial stat fails", async () => {
   }
 });
 
-Deno.test("regular file sources report their current nonzero byte count", async () => {
-  const dir = await Deno.makeTempDir();
-  const path = `${dir}/value.data`;
+Deno.test("regular file input refreshes its byte count", async () => {
+  const open = Deno.open;
   try {
-    await Deno.writeFile(path, new Uint8Array([1, 2, 3]));
-    const file = await Deno.open(path, { read: true });
-    const source = _internal.fileChunkSource(file, undefined, true);
-    assertEquals(source.kind, "regular-file");
-    if (source.kind !== "regular-file") return;
+    for (const currentBytes of [MAX_BINARY_VIEW_BYTES - 1, 0]) {
+      const bytes = new Uint8Array(MAX_BINARY_VIEW_BYTES + 16);
+      bytes[0] = 0;
+      let offset = 0;
+      let statCalls = 0;
+      let closeCalls = 0;
+      const file = {
+        stat: () =>
+          Promise.resolve({
+            isFile: true,
+            size: statCalls++ === 0 ? bytes.length : currentBytes,
+          }),
+        read: (target: Uint8Array) => {
+          if (offset >= bytes.length) return Promise.resolve(null);
+          const length = Math.min(target.length, bytes.length - offset);
+          target.set(bytes.subarray(offset, offset + length));
+          offset += length;
+          return Promise.resolve(length);
+        },
+        close: () => closeCalls++,
+      } as unknown as Deno.FsFile;
+      (Deno as { open: typeof Deno.open }).open = () => Promise.resolve(file);
 
-    assertEquals(await source.byteCount(), 3);
-    await Deno.truncate(path, 0);
-    assertEquals(await source.byteCount(), undefined);
-    source.dispose();
-    source.dispose();
+      const input = await loadViewInput("unused", undefined, undefined, true);
+
+      assert(input.kind === "bytes");
+      assertEquals(input.extent, {
+        byteLength: MAX_BINARY_VIEW_BYTES,
+        complete: false,
+      });
+      assertEquals(statCalls, 2);
+      assertEquals(closeCalls, 1);
+    }
   } finally {
-    await Deno.remove(dir, { recursive: true });
+    (Deno as { open: typeof Deno.open }).open = open;
   }
 });
 
 Deno.test("interactive streams discard text retained before binary detection", async () => {
   let disposeCalls = 0;
-  const input = await _internal.captureInput(
+  const input = await loadFromSource(
     streamSource(
       [new TextEncoder().encode("text"), new Uint8Array([0])],
       () => disposeCalls++,
     ),
-    undefined,
-    true,
-    true,
-    true,
   );
 
   assert(input.kind === "bytes");
@@ -122,12 +155,8 @@ Deno.test("interactive streams discard text retained before binary detection", a
 });
 
 Deno.test("interactive streams detect truncated UTF-8 when input ends", async () => {
-  const input = await _internal.captureInput(
+  const input = await loadFromSource(
     streamSource([new Uint8Array([0xe2])]),
-    undefined,
-    true,
-    true,
-    true,
   );
 
   assert(input.kind === "bytes");
@@ -138,13 +167,9 @@ Deno.test("interactive streams detect truncated UTF-8 when input ends", async ()
 
 Deno.test("interactive regular files distinguish stale and complete sizes", async () => {
   const bytes = new Uint8Array(MAX_BINARY_VIEW_BYTES + 16);
-  for (const reportedBytes of [MAX_BINARY_VIEW_BYTES - 1, bytes.length]) {
-    const input = await _internal.captureInput(
-      regularSource([bytes], reportedBytes),
-      undefined,
-      true,
-      true,
-      true,
+  for (const currentBytes of [MAX_BINARY_VIEW_BYTES - 1, bytes.length]) {
+    const input = await loadFromSource(
+      regularSource([bytes], bytes.length, currentBytes),
     );
 
     assert(input.kind === "bytes");
@@ -152,7 +177,7 @@ Deno.test("interactive regular files distinguish stale and complete sizes", asyn
     assertEquals(input.bytes.length, MAX_BINARY_VIEW_BYTES);
     assertEquals(
       input.extent,
-      reportedBytes < bytes.length
+      currentBytes < bytes.length
         ? { byteLength: MAX_BINARY_VIEW_BYTES, complete: false }
         : { byteLength: bytes.length, complete: true },
     );
@@ -160,12 +185,9 @@ Deno.test("interactive regular files distinguish stale and complete sizes", asyn
 });
 
 Deno.test("noninteractive EOF detection returns a rendered byte stream", async () => {
-  const input = await _internal.captureInput(
+  const input = await loadFromSource(
     streamSource([new Uint8Array([0xe2])]),
-    undefined,
-    true,
-    false,
-    true,
+    { interactive: false },
   );
 
   assert(input.kind === "rendered-stream");
@@ -174,43 +196,89 @@ Deno.test("noninteractive EOF detection returns a rendered byte stream", async (
 });
 
 Deno.test("large text input is restored from its temporary spool", async () => {
+  const makeTempFile = Deno.makeTempFile;
+  const open = Deno.open;
   const values = [ascii(200 * 1024), ascii(100 * 1024), ascii(16 * 1024)];
-  const input = await _internal.captureInput(
-    streamSource(values),
-    undefined,
-    true,
-    false,
-    false,
-  );
+  let spoolPath: string | undefined;
+  try {
+    (Deno as { makeTempFile: typeof Deno.makeTempFile }).makeTempFile = async (
+      options,
+    ) => {
+      spoolPath = await makeTempFile(options);
+      return spoolPath;
+    };
+    (Deno as { open: typeof Deno.open }).open = async (path, options) => {
+      const file = await open(path, options);
+      if (path !== spoolPath) return file;
+      return {
+        write: (data: Uint8Array) =>
+          file.write(data.subarray(0, Math.min(2, data.length))),
+        read: (data: Uint8Array) => file.read(data),
+        seek: (offset: number, whence: Deno.SeekMode) =>
+          file.seek(offset, whence),
+        close: () => file.close(),
+      } as unknown as Deno.FsFile;
+    };
 
-  assert(input.kind === "bytes");
-  assertEquals(input.language, undefined);
-  assertEquals(input.bytes.length, 316 * 1024);
-  assertEquals(input.bytes[0], 0x41);
-  assertEquals(input.bytes.at(-1), 0x41);
+    const input = await loadFromSource(
+      streamSource(values),
+      { interactive: false, streamRendered: false },
+    );
+
+    assert(input.kind === "bytes");
+    assertEquals(input.language, undefined);
+    assertEquals(input.bytes.length, 316 * 1024);
+    assertEquals(input.bytes[0], 0x41);
+    assertEquals(input.bytes.at(-1), 0x41);
+    assert(spoolPath !== undefined);
+    assertThrows(() => Deno.statSync(spoolPath!), Deno.errors.NotFound);
+  } finally {
+    (Deno as { makeTempFile: typeof Deno.makeTempFile }).makeTempFile =
+      makeTempFile;
+    (Deno as { open: typeof Deno.open }).open = open;
+    if (spoolPath !== undefined) {
+      await removeIfPresent(spoolPath);
+    }
+  }
 });
 
 Deno.test("late binary detection streams the spool and remaining source", async () => {
+  const makeTempFile = Deno.makeTempFile;
   const values = [
     ascii(200 * 1024),
     ascii(100 * 1024),
     new Uint8Array([0]),
     new Uint8Array([0x42]),
   ];
-  const input = await _internal.captureInput(
-    streamSource(values),
-    undefined,
-    true,
-    false,
-    true,
-  );
+  let spoolPath: string | undefined;
+  try {
+    (Deno as { makeTempFile: typeof Deno.makeTempFile }).makeTempFile = async (
+      options,
+    ) => {
+      spoolPath = await makeTempFile(options);
+      return spoolPath;
+    };
+    const input = await loadFromSource(
+      streamSource(values),
+      { interactive: false },
+    );
 
-  assert(input.kind === "rendered-stream");
-  assertEquals(input.language.id, "binary");
-  const collected = await collect(input.chunks);
-  assertEquals(collected.length, 300 * 1024 + 2);
-  assertEquals(collected[300 * 1024], 0);
-  assertEquals(collected.at(-1), 0x42);
+    assert(input.kind === "rendered-stream");
+    assertEquals(input.language.id, "binary");
+    assert(spoolPath !== undefined);
+    assertEquals(Deno.statSync(spoolPath).isFile, true);
+    const collected = await collect(input.chunks);
+    assertEquals(collected.length, 300 * 1024 + 2);
+    assertEquals(collected[300 * 1024], 0);
+    assertEquals(collected.at(-1), 0x42);
+    assertThrows(() => Deno.statSync(spoolPath!), Deno.errors.NotFound);
+  } finally {
+    (Deno as { makeTempFile: typeof Deno.makeTempFile }).makeTempFile =
+      makeTempFile;
+    if (spoolPath !== undefined) {
+      await removeIfPresent(spoolPath);
+    }
+  }
 });
 
 Deno.test("a failed asynchronous spool open removes its temporary file", async () => {
@@ -233,12 +301,9 @@ Deno.test("a failed asynchronous spool open removes its temporary file", async (
 
     await assertRejects(
       () =>
-        _internal.captureInput(
+        loadFromSource(
           streamSource([ascii(MAX_BINARY_VIEW_BYTES + 1)]),
-          undefined,
-          true,
-          false,
-          false,
+          { interactive: false, streamRendered: false },
         ),
       Error,
       "spool open failed",
@@ -256,55 +321,89 @@ Deno.test("a failed asynchronous spool open removes its temporary file", async (
 });
 
 Deno.test("a failed spool rewind closes and removes the spool", async () => {
+  const makeTempFile = Deno.makeTempFile;
   const open = Deno.open;
   let closeCalls = 0;
+  let spoolPath: string | undefined;
   try {
-    (Deno as { open: typeof Deno.open }).open = () =>
-      Promise.resolve({
+    (Deno as { makeTempFile: typeof Deno.makeTempFile }).makeTempFile = async (
+      options,
+    ) => {
+      spoolPath = await makeTempFile(options);
+      return spoolPath;
+    };
+    (Deno as { open: typeof Deno.open }).open = (path, options) => {
+      if (path !== spoolPath) return open(path, options);
+      return Promise.resolve({
         write: (data: Uint8Array) => Promise.resolve(data.length),
         seek: () => Promise.reject(new Error("seek failed")),
         close: () => closeCalls++,
       } as unknown as Deno.FsFile);
+    };
 
     await assertRejects(
       () =>
-        _internal.captureInput(
+        loadFromSource(
           streamSource([
             ascii(MAX_BINARY_VIEW_BYTES + 1),
             new Uint8Array([0]),
           ]),
-          undefined,
-          true,
-          false,
-          true,
+          { interactive: false },
         ),
       Error,
       "seek failed",
     );
     assertEquals(closeCalls, 1);
+    assert(spoolPath !== undefined);
+    assertThrows(() => Deno.statSync(spoolPath!), Deno.errors.NotFound);
   } finally {
+    (Deno as { makeTempFile: typeof Deno.makeTempFile }).makeTempFile =
+      makeTempFile;
     (Deno as { open: typeof Deno.open }).open = open;
+    if (spoolPath !== undefined) {
+      await removeIfPresent(spoolPath);
+    }
   }
 });
 
-Deno.test("asynchronous spool writes handle short writes and reject zero", async () => {
-  const written: number[] = [];
-  await _internal.writeAll({
-    write(data: Uint8Array): Promise<number> {
-      const length = Math.min(2, data.length);
-      written.push(...data.subarray(0, length));
-      return Promise.resolve(length);
-    },
-  }, new Uint8Array([1, 2, 3, 4, 5]));
-  assertEquals(written, [1, 2, 3, 4, 5]);
+Deno.test("asynchronous spool writes reject a writer that makes no progress", async () => {
+  const makeTempFile = Deno.makeTempFile;
+  const open = Deno.open;
+  let closeCalls = 0;
+  let spoolPath: string | undefined;
+  try {
+    (Deno as { makeTempFile: typeof Deno.makeTempFile }).makeTempFile = async (
+      options,
+    ) => {
+      spoolPath = await makeTempFile(options);
+      return spoolPath;
+    };
+    (Deno as { open: typeof Deno.open }).open = (path, options) => {
+      if (path !== spoolPath) return open(path, options);
+      return Promise.resolve({
+        write: () => Promise.resolve(0),
+        close: () => closeCalls++,
+      } as unknown as Deno.FsFile);
+    };
 
-  await assertRejects(
-    () =>
-      _internal.writeAll(
-        { write: () => Promise.resolve(0) },
-        new Uint8Array([1]),
-      ),
-    Error,
-    "temporary file accepted no bytes",
-  );
+    await assertRejects(
+      () =>
+        loadFromSource(
+          streamSource([ascii(MAX_BINARY_VIEW_BYTES + 1)]),
+          { interactive: false, streamRendered: false },
+        ),
+      Error,
+      "temporary file accepted no bytes",
+    );
+    assertEquals(closeCalls, 1);
+    assert(spoolPath !== undefined);
+    assertThrows(() => Deno.statSync(spoolPath!), Deno.errors.NotFound);
+  } finally {
+    (Deno as { makeTempFile: typeof Deno.makeTempFile }).makeTempFile =
+      makeTempFile;
+    (Deno as { open: typeof Deno.open }).open = open;
+    if (spoolPath !== undefined) {
+      await removeIfPresent(spoolPath);
+    }
+  }
 });

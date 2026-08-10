@@ -12,6 +12,7 @@ import {
   decodeLanguageInput,
   languageForFile,
 } from "./languages/language.ts";
+import { binaryPreviewExtent } from "./languages/binary/binary.ts";
 import {
   closeSync,
   fstatSync,
@@ -193,11 +194,12 @@ function openFileSync(
       );
       const current = fstatSync(file);
       const reportedBytes = current.size > 0 ? current.size : undefined;
-      const complete = reachedEof || reportedBytes !== undefined;
-      const extent = {
-        byteLength: reportedBytes ?? (reachedEof ? totalBytes : shownLength),
-        complete,
-      };
+      const extent = binaryPreviewExtent(
+        shownLength,
+        totalBytes,
+        reachedEof,
+        reportedBytes,
+      );
       const decoded = selectedInput.decoder.decode(
         prefix.subarray(0, shownLength),
       );
@@ -293,5 +295,3 @@ function isDir(dir: string, e: Deno.DirEntry): boolean {
     return false;
   }
 }
-
-export const _internal = { writeAllSync };

@@ -6,7 +6,7 @@
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
-import { _internal, realFileGateway } from "../lib/view/filegateway.ts";
+import { realFileGateway } from "../lib/view/filegateway.ts";
 import { MAX_BINARY_VIEW_BYTES } from "../lib/view/languages/binary/binary.ts";
 
 /** Make a fresh temp directory and ensure it is removed after `fn` runs. */
@@ -198,12 +198,47 @@ Deno.test("realFileGateway.open: spools and restores large text files", async ()
     ).fill(0x41);
     Deno.writeFileSync(path, bytes);
 
-    const opened = realFileGateway().open(path);
+    const makeTempFileSync = Deno.makeTempFileSync;
+    const openSync = Deno.openSync;
+    let spoolPath: string | undefined;
+    try {
+      (Deno as { makeTempFileSync: typeof Deno.makeTempFileSync })
+        .makeTempFileSync = (options) => {
+          spoolPath = makeTempFileSync(options);
+          return spoolPath;
+        };
+      (Deno as { openSync: typeof Deno.openSync }).openSync = (
+        candidate,
+        options,
+      ) => {
+        const file = openSync(candidate, options);
+        if (candidate !== spoolPath) return file;
+        return {
+          writeSync: (data: Uint8Array) =>
+            file.writeSync(data.subarray(0, Math.min(2, data.length))),
+          readSync: (data: Uint8Array) => file.readSync(data),
+          seekSync: (offset: number, whence: Deno.SeekMode) =>
+            file.seekSync(offset, whence),
+          close: () => file.close(),
+        } as unknown as Deno.FsFile;
+      };
 
-    assert(opened !== null);
-    assertEquals(opened.text.length, bytes.length);
-    assertEquals(opened.text, "A".repeat(bytes.length));
-    assertEquals(opened.source.editable, true);
+      const opened = realFileGateway().open(path);
+
+      assert(opened !== null);
+      assertEquals(opened.text.length, bytes.length);
+      assertEquals(opened.text, "A".repeat(bytes.length));
+      assertEquals(opened.source.editable, true);
+      assert(spoolPath !== undefined);
+      assertThrows(() => Deno.statSync(spoolPath!), Deno.errors.NotFound);
+    } finally {
+      (Deno as { makeTempFileSync: typeof Deno.makeTempFileSync })
+        .makeTempFileSync = makeTempFileSync;
+      (Deno as { openSync: typeof Deno.openSync }).openSync = openSync;
+      if (spoolPath !== undefined) {
+        removeIfPresent(spoolPath);
+      }
+    }
   });
 });
 
@@ -262,16 +297,47 @@ Deno.test("realFileGateway.open: removes a spool whose open fails", async () => 
   });
 });
 
-Deno.test("file gateway spool writes reject a writer that makes no progress", () => {
-  assertThrows(
-    () =>
-      _internal.writeAllSync(
-        { writeSync: () => 0 } as unknown as Deno.FsFile,
-        new Uint8Array([1]),
-      ),
-    Error,
-    "temporary file accepted no bytes",
-  );
+Deno.test("file gateway spool writes reject a writer that makes no progress", async () => {
+  await withTempDir((dir) => {
+    const path = join(dir, "large.data");
+    Deno.writeFileSync(
+      path,
+      new Uint8Array(MAX_BINARY_VIEW_BYTES + 1).fill(0x41),
+    );
+    const makeTempFileSync = Deno.makeTempFileSync;
+    const openSync = Deno.openSync;
+    let closeCalls = 0;
+    let spoolPath: string | undefined;
+    try {
+      (Deno as { makeTempFileSync: typeof Deno.makeTempFileSync })
+        .makeTempFileSync = (options) => {
+          spoolPath = makeTempFileSync(options);
+          return spoolPath;
+        };
+      (Deno as { openSync: typeof Deno.openSync }).openSync = (
+        candidate,
+        options,
+      ) => {
+        if (candidate !== spoolPath) return openSync(candidate, options);
+        return {
+          writeSync: () => 0,
+          close: () => closeCalls++,
+        } as unknown as Deno.FsFile;
+      };
+
+      assertEquals(realFileGateway().open(path), null);
+      assertEquals(closeCalls, 1);
+      assert(spoolPath !== undefined);
+      assertThrows(() => Deno.statSync(spoolPath!), Deno.errors.NotFound);
+    } finally {
+      (Deno as { makeTempFileSync: typeof Deno.makeTempFileSync })
+        .makeTempFileSync = makeTempFileSync;
+      (Deno as { openSync: typeof Deno.openSync }).openSync = openSync;
+      if (spoolPath !== undefined) {
+        removeIfPresent(spoolPath);
+      }
+    }
+  });
 });
 
 Deno.test({

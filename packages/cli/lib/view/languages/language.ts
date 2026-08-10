@@ -453,23 +453,38 @@ export function decodeLanguageInput(
       source: detected.input.decoder.decode(bytes),
     };
   }
-  let source: DecodedLanguageSource;
-  try {
-    source = (byFilename?.input.decoder ?? utf8Decoder).decode(bytes);
-  } catch {
-    const fallback = allLanguages().find((language) =>
-      language.input.kind === "bytes"
-    );
-    if (fallback === undefined) {
-      throw new TypeError("No byte language available.");
-    }
-    return { language: fallback, source: fallback.input.decoder.decode(bytes) };
+  const decoded = decodeTextInput(
+    byFilename?.input.decoder ?? utf8Decoder,
+    bytes,
+    allLanguages().find((language) => language.input.kind === "bytes"),
+  );
+  if (decoded.language !== undefined) {
+    return { language: decoded.language, source: decoded.source };
   }
+  const source = decoded.source;
   return {
     language: byFilename ?? languageForShebang(source.text) ??
       plainTextLanguage,
     source,
   };
+}
+
+function decodeTextInput(
+  decoder: LanguageDecoder,
+  bytes: Uint8Array,
+  byteFallback: Language | undefined,
+): { language: Language | undefined; source: DecodedLanguageSource } {
+  try {
+    return { language: undefined, source: decoder.decode(bytes) };
+  } catch {
+    if (byteFallback === undefined) {
+      throw new TypeError("No byte language available.");
+    }
+    return {
+      language: byteFallback,
+      source: byteFallback.input.decoder.decode(bytes),
+    };
+  }
 }
 
 function languageMatchingFilename(
@@ -886,3 +901,5 @@ export function diffSemanticsFor(
   }
   return undefined;
 }
+
+export const _internal = { decodeTextInput };

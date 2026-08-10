@@ -3,6 +3,7 @@ import { _internal as viewInternals, buildView } from "../lib/view/mod.ts";
 import { binaryLanguage } from "../lib/view/languages/binary/language.ts";
 import {
   binaryLinesFrom,
+  binaryPreviewExtent,
   MAX_BINARY_VIEW_BYTES,
   renderBinaryLines,
 } from "../lib/view/languages/binary/binary.ts";
@@ -161,6 +162,21 @@ Deno.test("binary language: marks an incomplete preview without inventing a size
     lines[1].text,
     "00000003  … preview stopped; total byte count unavailable …",
   );
+});
+
+Deno.test("binary language: preview extents reject stale refreshed sizes", () => {
+  assertEquals(binaryPreviewExtent(256, 300, false, 299), {
+    byteLength: 256,
+    complete: false,
+  });
+  assertEquals(binaryPreviewExtent(256, 300, false, 320), {
+    byteLength: 320,
+    complete: true,
+  });
+  assertEquals(binaryPreviewExtent(256, 300, true, 299), {
+    byteLength: 300,
+    complete: true,
+  });
 });
 
 Deno.test("binary language: rejects strings that cannot represent raw bytes", () => {

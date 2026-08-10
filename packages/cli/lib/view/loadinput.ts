@@ -4,6 +4,7 @@ import {
   createByteLanguageDetector,
   languageForFile,
 } from "./languages/language.ts";
+import { binaryPreviewExtent } from "./languages/binary/binary.ts";
 
 const MAX_RETAINED_INPUT_BYTES = 256 * 1024;
 
@@ -47,13 +48,12 @@ export async function loadViewInput(
   ) {
     return directRenderedStream(source, knownByteLanguage);
   }
-  return await captureInput(
-    source,
+  return await loadViewInputFromSource(source, {
     knownByteLanguage,
-    explicitLanguage === undefined,
+    detectByteLanguage: explicitLanguage === undefined,
     interactive,
     streamRendered,
-  );
+  });
 }
 
 interface ChunkSourceBase {
@@ -177,13 +177,23 @@ interface Spool {
   readonly path: string;
 }
 
-async function captureInput(
+interface LoadViewInputFromSourceOptions {
+  readonly knownByteLanguage: Language | undefined;
+  readonly detectByteLanguage: boolean;
+  readonly interactive: boolean;
+  readonly streamRendered: boolean;
+}
+
+async function loadViewInputFromSource(
   source: ChunkSource,
-  knownByteLanguage: Language | undefined,
-  detectByteLanguage: boolean,
-  interactive: boolean,
-  streamRendered: boolean,
+  options: LoadViewInputFromSourceOptions,
 ): Promise<LoadedViewInput> {
+  const {
+    knownByteLanguage,
+    detectByteLanguage,
+    interactive,
+    streamRendered,
+  } = options;
   const snapshotBytes = source.kind === "regular-file"
     ? source.snapshotBytes
     : undefined;
@@ -313,19 +323,17 @@ async function captureInput(
         }
         if (prefixLength >= selectedInput.previewByteLimit) {
           const currentBytes = await source.byteCount();
-          if (currentBytes === undefined || currentBytes < totalBytes) {
-            return bufferedByteInput(
-              prefix!.subarray(0, selectedInput.previewByteLimit),
-              selectedByteLanguage,
-              prefixLength,
-              false,
-            );
-          }
+          const extent = binaryPreviewExtent(
+            prefixLength,
+            totalBytes,
+            false,
+            currentBytes,
+          );
           return bufferedByteInput(
             prefix!.subarray(0, selectedInput.previewByteLimit),
             selectedByteLanguage,
-            currentBytes,
-            true,
+            extent.byteLength,
+            extent.complete,
           );
         }
         continue;
@@ -541,8 +549,5 @@ async function* readOpenFileChunks(
 }
 
 export const _internal = {
-  captureInput,
-  fileChunkSource,
-  openFileChunkSource,
-  writeAll,
+  loadViewInputFromSource,
 };

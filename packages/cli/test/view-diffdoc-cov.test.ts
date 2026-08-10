@@ -132,16 +132,21 @@ Deno.test("realWorkspace: an uncached write preserves the file's UTF-8 BOM", () 
 });
 
 Deno.test("realWorkspace: writes reject paths outside the workspace", () => {
-  const root = Deno.makeTempDirSync();
+  const outer = Deno.makeTempDirSync();
+  const root = join(outer, "repo");
+  const outside = join(outer, "outside.ts");
   try {
+    Deno.mkdirSync(root);
     Deno.mkdirSync(join(root, ".git"));
+    Deno.writeTextFileSync(outside, "sentinel\n");
     assertThrows(
-      () => realWorkspace(root).write!(join(root, "..", "outside.ts"), "x"),
+      () => realWorkspace(root).write!(outside, "replacement\n"),
       Error,
       "Cannot write outside the workspace",
     );
+    assertEquals(Deno.readTextFileSync(outside), "sentinel\n");
   } finally {
-    Deno.removeSync(root, { recursive: true });
+    Deno.removeSync(outer, { recursive: true });
   }
 });
 

@@ -8,11 +8,10 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import {
-  decodeLanguageInput,
+  _internal as languageInternals,
   diffSemanticsFor,
   distinctLanguages,
   indexLanguagesByName,
-  type Language,
   languageForFile,
   languageForInput,
   languageForName,
@@ -24,10 +23,7 @@ import {
   metadataMatchesFilename,
   renderedLinesFor,
 } from "../lib/view/languages/language.ts";
-import {
-  type LanguageDecoder,
-  rawBytesDecoder,
-} from "../lib/view/languages/decoder.ts";
+import { type LanguageDecoder } from "../lib/view/languages/decoder.ts";
 import { typeScriptLanguage } from "../lib/view/languages/typescript/language.ts";
 import { markdownLanguage } from "../lib/view/languages/markdown/language.ts";
 import { jsonLanguage } from "../lib/view/languages/json/language.ts";
@@ -163,38 +159,28 @@ Deno.test("languageForInput: binary bytes precede implicit text selection", () =
 });
 
 Deno.test("decodeLanguageInput: decoder failures use the byte-language fallback", () => {
-  const textInput = plainTextLanguage.input;
-  assertEquals(textInput.kind, "text");
-  const mutableTextInput = textInput as { decoder: LanguageDecoder };
-  const textDecoder = mutableTextInput.decoder;
-  const mutableBinaryLanguage = binaryLanguage as { input: Language["input"] };
-  const binaryInput = mutableBinaryLanguage.input;
   const bytes = new TextEncoder().encode("valid UTF-8");
-  mutableTextInput.decoder = {
-    ...textDecoder,
+  const rejectedDecoder: LanguageDecoder = {
+    ...plainTextLanguage.input.decoder,
     decode: () => {
       throw new TypeError("selected decoder rejected input");
     },
   };
+  const byteFallback = { ...binaryLanguage, id: "byte-fallback" };
 
-  try {
-    const fallback = decodeLanguageInput("notes.txt", bytes);
-    assertEquals(fallback.language, binaryLanguage);
-    assertEquals(fallback.source.encode(fallback.source.text), bytes);
+  const fallback = languageInternals.decodeTextInput(
+    rejectedDecoder,
+    bytes,
+    byteFallback,
+  );
+  assertEquals(fallback.language, byteFallback);
+  assertEquals(fallback.source.encode(fallback.source.text), bytes);
 
-    mutableBinaryLanguage.input = {
-      kind: "text",
-      decoder: rawBytesDecoder,
-    };
-    assertThrows(
-      () => decodeLanguageInput("notes.txt", bytes),
-      TypeError,
-      "No byte language available",
-    );
-  } finally {
-    mutableBinaryLanguage.input = binaryInput;
-    mutableTextInput.decoder = textDecoder;
-  }
+  assertThrows(
+    () => languageInternals.decodeTextInput(rejectedDecoder, bytes, undefined),
+    TypeError,
+    "No byte language available",
+  );
 });
 
 Deno.test("language names reject ambiguous identifiers and aliases", () => {

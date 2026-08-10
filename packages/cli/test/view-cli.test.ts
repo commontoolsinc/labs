@@ -91,9 +91,12 @@ Deno.test("cf view preserves a UTF-8 BOM when formatting redirected text", async
     }).output();
 
     assertEquals(result.code, 0, new TextDecoder().decode(result.stderr));
-    assertEquals(result.stdout.subarray(0, 3), bom);
-    assert(
-      new TextDecoder().decode(result.stdout.subarray(3)).includes("1 value"),
+    assertEquals(
+      result.stdout,
+      new Uint8Array([
+        ...bom,
+        ...new TextEncoder().encode("  1 value\n  2 "),
+      ]),
     );
   } finally {
     Deno.removeSync(dir, { recursive: true });
