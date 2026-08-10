@@ -95,7 +95,7 @@ describe("buffers", () => {
       expect(result[0]).toBe(3);
     });
 
-    it("copies rather than detaching, for a source whose view starts at 0 but is short", () => {
+    it("copies rather than detaching, for a source whose view starts at `0` but is short", () => {
       const buffer = new ArrayBuffer(8);
       const source = new Uint8Array(buffer, 0, 3);
       source.set([1, 2, 3]);
