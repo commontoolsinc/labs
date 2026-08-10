@@ -90,9 +90,10 @@ deno task cf piece setsrc pattern.tsx --test pattern.test.tsx \
 Deployment resolves and type-checks each test and its imports, but does not run
 the tests. Run them locally with `cf test`. The attached files are included by
 `cf piece getsrc`, so another checkout of the piece receives the source and its
-tests together. Test paths use the same `--root` as the main entry. A test-only
-change creates a new source revision, so history and recovery keep each test
-package separate.
+tests together. Without `--root`, the CLI infers the common directory that
+contains the main entry and every test entry. An explicit `--root` applies to
+all of them. A test-only change creates a new source revision, so history and
+recovery keep each test package separate.
 
 ## Drive a deployed piece from the CLI
 

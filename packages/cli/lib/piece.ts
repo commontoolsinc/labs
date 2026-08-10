@@ -39,7 +39,7 @@ import {
   type PiecePatternRef,
   PiecesController,
 } from "@commonfabric/piece/ops";
-import { dirname, join } from "@std/path";
+import { common, dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { setLLMUrl } from "@commonfabric/llm";
 import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
@@ -437,9 +437,11 @@ export async function getProgramFromFile(
   pieces: PiecesController,
   entry: EntryConfig,
 ): Promise<RuntimeProgram> {
-  const rootPath = entry.rootPath ?? dirname(entry.mainPath);
+  const entryPaths = [entry.mainPath, ...(entry.testPaths ?? [])];
+  const rootPath = entry.rootPath ??
+    join(common(entryPaths.map((path) => dirname(path))), ".");
   const programs: RuntimeProgram[] = await Promise.all(
-    [entry.mainPath, ...(entry.testPaths ?? [])].map((path) =>
+    entryPaths.map((path) =>
       pieces.runtime.harness.resolve(
         new FileSystemProgramResolver(path, rootPath),
       )

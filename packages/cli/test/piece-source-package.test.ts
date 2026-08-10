@@ -5,13 +5,65 @@ import type {
   ProgramResolver,
   Source,
 } from "@commonfabric/js-compiler";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { getProgramFromFile } from "../lib/piece.ts";
 
 describe("piece source package", () => {
+  it("infers a shared root for sibling main and test directories", async () => {
+    const root = await Deno.makeTempDir();
+    const patternsDirectory = join(root, "patterns");
+    const testsDirectory = join(root, "tests");
+    await Deno.mkdir(patternsDirectory);
+    await Deno.mkdir(testsDirectory);
+    const mainPath = join(patternsDirectory, "main.tsx");
+    const testPath = join(testsDirectory, "main.test.tsx");
+    await Deno.writeTextFile(mainPath, "export default {};");
+    await Deno.writeTextFile(
+      testPath,
+      'import "../patterns/main.tsx"; export default {};',
+    );
+
+    const resolve = async (resolver: ProgramResolver): Promise<Program> => {
+      const main = await resolver.main();
+      const siblingMain = main.name.endsWith("/tests/main.test.tsx")
+        ? await resolver.resolveSource(
+          main.name.replace(
+            /\/tests\/main\.test\.tsx$/,
+            "/patterns/main.tsx",
+          ),
+        )
+        : undefined;
+      return {
+        main: main.name,
+        files: siblingMain === undefined ? [main] : [main, siblingMain],
+      };
+    };
+
+    try {
+      const inferred = await getProgramFromFile(
+        { runtime: { harness: { resolve } } } as any,
+        { mainPath, testPaths: [testPath] },
+      );
+      expect(inferred.main).toBe("/patterns/main.tsx");
+      expect(inferred.sourceRoots).toEqual(["/tests/main.test.tsx"]);
+
+      const explicit = await getProgramFromFile(
+        { runtime: { harness: { resolve } } } as any,
+        { mainPath, rootPath: dirname(root), testPaths: [testPath] },
+      );
+      const rootName = root.slice(dirname(root).length);
+      expect(explicit.main).toBe(`${rootName}/patterns/main.tsx`);
+      expect(explicit.sourceRoots).toEqual([
+        `${rootName}/tests/main.test.tsx`,
+      ]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
   it("includes attached tests and their imports in the authored program", async () => {
     const root = await Deno.makeTempDir();
     const testsDirectory = join(root, "tests");
