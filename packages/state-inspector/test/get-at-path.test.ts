@@ -32,6 +32,25 @@ describe("getAtPath()", () => {
     expect(getAtPath({ "": "empty" }, [""])).toBe("empty");
   });
 
+  it("reads own properties exposed by primitive values", () => {
+    expect(selectAtPath("tea", ["length"])).toEqual({
+      found: true,
+      value: 3,
+    });
+    expect(selectAtPath("tea", ["1"])).toEqual({
+      found: true,
+      value: "e",
+    });
+    expect(selectAtPath({ title: "tea" }, ["title", "length"])).toEqual({
+      found: true,
+      value: 3,
+    });
+    expect(selectAtPath("tea", ["toString"])).toEqual({
+      found: false,
+      value: undefined,
+    });
+  });
+
   it("distinguishes stored undefined from a missing property", () => {
     expect(selectAtPath({ value: undefined }, ["value"])).toEqual({
       found: true,

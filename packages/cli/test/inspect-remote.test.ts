@@ -301,6 +301,24 @@ describe("cf inspect --remote", () => {
     assertEquals(identitySlashPath.resolvedKind, "user");
     assertEquals(identitySlashPath.value, "identity nested key");
 
+    const primitivePath = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--as",
+        VIEWER_DID,
+        "--path",
+        "nested/leaf/length",
+        "--json",
+      ]),
+    );
+    assertEquals(primitivePath.resolvedKind, "user");
+    assertEquals(primitivePath.pathExists, true);
+    assertEquals(primitivePath.value, 19);
+
     const sessionPath = JSON.parse(
       await run([
         "value-at",

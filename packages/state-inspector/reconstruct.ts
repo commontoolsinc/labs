@@ -71,13 +71,12 @@ export function selectAtPath(
         return { found: false, value: undefined };
       }
       cur = cur[index];
-    } else if (typeof cur === "object") {
-      if (!Object.hasOwn(cur, key)) {
+    } else {
+      const boxed = Object(cur) as Record<string, unknown>;
+      if (!Object.hasOwn(boxed, key)) {
         return { found: false, value: undefined };
       }
-      cur = (cur as Record<string, unknown>)[key];
-    } else {
-      return { found: false, value: undefined };
+      cur = boxed[key];
     }
   }
   return { found: true, value: cur };

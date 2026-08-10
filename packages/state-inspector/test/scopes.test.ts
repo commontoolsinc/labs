@@ -112,6 +112,14 @@ Deno.test("scope awareness: enumerate, compose, diverge", async (t) => {
         assertEquals(spaceOnly.value, "shared-A");
         assertEquals(spaceOnly.overrides, false);
 
+        const stringLength = valueAsIdentity(space, {
+          id: "of:A",
+          identity: DID,
+          path: ["length"],
+        });
+        assertEquals(stringLength.pathExists, true);
+        assertEquals(stringLength.value, 8);
+
         // C: user-only — still visible AS the identity (space would miss it).
         const userOnly = valueAsIdentity(space, { id: "of:C", identity: DID });
         assert(userOnly.exists);
