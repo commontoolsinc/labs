@@ -75,14 +75,6 @@ new_invocation_id() {
   fi
 }
 
-# The session this run's invocation ids are chosen within. `cf piece call`
-# takes it from CF_INVOCATION_SESSION, and an id addresses an outcome only
-# within its session — so every retry below has to name the session its
-# original call named. Minted the way an invocation id is: a session is an
-# unguessable string and nothing more, and going through
-# `cf invocation-session new` for it would cost a CLI process.
-export CF_INVOCATION_SESSION="$(new_invocation_id)"
-
 # Kill a backgrounded `cf` invocation. `cf` is a shell function, so $! is the
 # subshell rather than the Deno process doing the work; killing only the
 # subshell would leave that child running and still able to commit. Take the

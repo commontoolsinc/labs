@@ -104,79 +104,23 @@ Anything the *pattern* resolved comes back too. A verb that stamps a write time
 or derives structured authorship from the event returns those in its record;
 the caller could not have computed them.
 
-### Asking for a smaller result
-
-A verb decides what it returns; the caller decides how much of it to look at.
-`--filter`, `--select`, and `--schema` — the same three flags `cf piece get`
-takes, with the same grammar — shape the `result` before it reaches stdout, and
-go before the callable name:
-
-```bash
-cf piece call --piece <topic> --select comment.writtenAt addComment \
-  '{"body":"first","agentName":"Sol"}'
-```
-
-```json
-{
-  "invocation": "0f4c…",
-  "status": "settled",
-  "result": { "comment": { "writtenAt": "2026-08-07T09:15:27Z" } }
-}
-```
-
-This shapes a result that already exists rather than deciding what travels: the
-readback has the whole receipt in hand before the selection runs. So a
-value-less verb keeps reporting no `result` at all — there is nothing for a
-selection to be about — and `--no-wait`, which never reads the receipt back,
-refuses all three flags. `--show-links` composes with a projection, because a
-projection leaves every surviving path where it was; it does not compose with
-`--filter`, which moves the positions a link names.
-
-`packages/cli/README.md` has the grammar and the supported schema subset.
-
 ### Retries are safe, and cheap to reason about
 
-`--invocation <id>` makes a call idempotent. The id is your own word for the
-call — and `add-comment-1` is a word two agents both reach for, so an id on its
-own does not say whose invocation it is. An **invocation session** does. Mint
-one per agent run and carry it on every call of that run:
-
-```bash
-export CF_INVOCATION_SESSION=$(cf invocation-session new)
-```
-
-The environment is where a session belongs, because it is closer to a secret
-than a setting: it is what keeps an outcome's address out of reach of a
-stranger, and a command's arguments are readable in a process listing where its
-environment is not. `--invocation-session <id>` overrides it for one call.
-
-The pair is what names an invocation. Replaying a settled id **from the session
-that chose it** returns the **original** result rather than re-executing:
+`--invocation <id>` makes a call idempotent. Replaying a settled id returns the
+**original** result rather than re-executing:
 
 ```bash
 cf piece call --piece <topic> --invocation add-comment-1 \
   addComment '{"body":"first","agentName":"Sol"}'
 
-# Same id, same session, different payload: the original result comes back,
-# and no second comment is recorded.
+# Same id, different payload: the original result comes back, and no second
+# comment is recorded.
 cf piece call --piece <topic> --invocation add-comment-1 \
   addComment '{"body":"different","agentName":"Sol"}'
 ```
 
 That is the property an agent depends on when it retries a call whose response
 it never saw.
-
-That same id under a **different** session is a different invocation: it
-executes, and returns its own result. So two agents that pick the same word are
-never told each other's calls have settled, and knowing a piece, a verb and an
-id is not enough to read someone else's outcome — the session is the part a
-stranger cannot guess.
-
-`--invocation` therefore requires a session, and a call naming an id without one
-is refused, pointing you at `cf invocation-session new` and
-`CF_INVOCATION_SESSION`. Pass neither and both are minted for that one call: a
-random id names an outcome nothing else will ask for, and a call that never
-intended to replay loses nothing.
 
 A **rejected** call is different from a settled one: it never spends its id. If
 a verb refuses the payload, correct it and retry under the same id.
@@ -259,7 +203,7 @@ API_URL=http://localhost:8000 packages/cli/integration/verbs-over-the-cli.sh
 ```
 
 CI runs it in the `piece-call` shard. It takes under half a minute and around
-two dozen `cf` invocations against a warm local toolshed.
+twenty `cf` invocations against a warm local toolshed.
 
 Each step demonstrates one use case:
 
@@ -270,13 +214,12 @@ Each step demonstrates one use case:
 | 4 | A verb returns what it wrote, including what only it could compute |
 | 5 | A call's result names the document behind each path, and that address calls |
 | 6 | A read returns an address in place of what is behind it |
-| 7 | A replayed id returns the original result within its session, and executes as its own call in another |
+| 7 | A replayed id returns the original result; nothing runs twice |
 | 8 | A piece result survives `plainResultReceipts=false`; a plain record does not — and the write lands either way |
 | 9 | A value-less verb settles with the empty witness |
 | 10 | A refused call does not spend its invocation id |
 | 11 | Reading a verb redirects to `cf piece call` |
 | 12 | Timings on stderr, Invocation JSON still clean on stdout |
-| 13 | An invocation id without a session is refused, and the refusal says how to mint one |
 
 ## Addressing a piece you were handed
 
@@ -311,12 +254,6 @@ one, so a chain of references annotates each hop exactly once. The walk stops at
 any non-plain object: a live runtime object reached through a result gets its
 own entry and nothing below it, because its properties belong to the runtime
 rather than to the result.
-
-The links describe whatever result you were handed, so a projection composes
-with them: a path `--select` or `--schema` dropped simply gets no entry.
-`--filter` is refused alongside `--show-links` — a predicate leaves the elements
-it keeps at positions that are no longer the ones they came from, and every
-address below a filtered array would name the wrong element.
 
 A pattern should not mint identifier fields to make any of this easier —
 rendering identity is the client's job, and a pattern-authored fid is a copy
