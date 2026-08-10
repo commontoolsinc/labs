@@ -129,7 +129,7 @@ to a smaller shape:
 cf piece get --piece ID items --filter '.status == "open"'
 cf piece get --piece ID items \
   --filter '.status == "open" and .score >= 10' \
-  --schema id,title,author.name
+  --select id,title,author.name
 ```
 
 `--filter` is jq-inspired rather than a full jq interpreter. It applies only to
@@ -139,13 +139,16 @@ arrays and accepts value paths (`.status`, `.author.name`, `.["display-name"]`,
 missing path simply does not match. A stored `undefined` is treated like a
 missing value and is also falsey. Filtering happens before schema projection.
 
-`--schema` accepts one of three forms:
+Two flags project, one per input language:
 
-- a comma-separated field projection such as `id,title,author.name`;
-- an inline JSON Schema object;
-- `@path/to/schema.json`.
+- `--select` takes a comma-separated field list such as `id,title,author.name`;
+- `--schema` takes an inline JSON Schema object or `@path/to/schema.json`, and
+  also accepts the same field list `--select` takes.
 
-For an array result, the concise form describes each item. An inline/file JSON
+A command that names both has not said which shape it wants, and is refused
+before the read.
+
+For an array result, the field list describes each item. An inline/file JSON
 Schema describes the complete returned value, so a schema combined with
 `--filter` must have an array root. Object `properties` are an allowlist by
 default; use `"additionalProperties": true` to retain unspecified properties.

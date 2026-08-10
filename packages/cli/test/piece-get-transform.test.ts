@@ -11,6 +11,7 @@ import {
   mergeMasks,
   parseSelectionFilter,
   parseSelectionProjection,
+  parseSelectProjection,
   schemaMayBeArray,
   schemaRootKind,
   selectSourceSchema,
@@ -2473,6 +2474,102 @@ describe("cf piece get transforms", () => {
     it("still refuses `asCell` in a projection", async () => {
       await expect(parseSelectionProjection('{"asCell":["cell"]}')).rejects
         .toThrow('"asCell" is controlled by the source schema');
+    });
+  });
+
+  describe("--select", () => {
+    it("parses the concise spelling into the projection --schema parses", async () => {
+      const selected = parseSelectProjection("id,author.name");
+      const schema = await parseSelectionProjection("id,author.name");
+
+      expect(selected.kind).toBe("concise");
+      expect(selected.flag).toBe("--select");
+      expect(schema.flag).toBe("--schema");
+      expect(selected.schema).toEqual(schema.schema);
+      expect(selected.source).toBe(schema.source);
+    });
+
+    it("projects an array through the same step --schema projects through", async () => {
+      const tx = runtime.edit();
+      const source = runtime.getCell(
+        space,
+        "select-flag-source",
+        {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "number" },
+              title: { type: "string" },
+              status: { type: "string" },
+            },
+          },
+        },
+        tx,
+      );
+      source.set([
+        { id: 1, title: "First", status: "open" },
+        { id: 2, title: "Second", status: "closed" },
+      ]);
+      expect((await tx.commit()).ok).toBeDefined();
+
+      expect(
+        await deriveSelectedValue(runtime, space, source, {
+          filter: parseSelectionFilter('.status == "open"'),
+          projection: parseSelectProjection("id,title"),
+        }),
+      ).toEqual([{ id: 1, title: "First" }]);
+    });
+
+    it("points a JSON Schema or @file argument at --schema", () => {
+      for (
+        const source of [
+          '{"type":"object","properties":{"id":true}}',
+          "@projection.json",
+          "true",
+          "false",
+        ]
+      ) {
+        expect(() => parseSelectProjection(source)).toThrow(
+          "--select takes comma-separated field paths",
+        );
+      }
+    });
+
+    it("names itself in the errors its own argument causes", async () => {
+      expect(() => parseSelectProjection("")).toThrow(
+        "--select must not be empty",
+      );
+      expect(() => parseSelectProjection("a,,b")).toThrow(
+        "Invalid --select concise projection",
+      );
+      expect(() => parseSelectProjection("a.0")).toThrow(
+        'Invalid --select field path "a.0"',
+      );
+
+      const tx = runtime.edit();
+      const objectSource = runtime.getCell(
+        space,
+        "select-flag-root-mismatch-source",
+        { type: "array", items: { type: "object" } },
+        tx,
+      );
+      objectSource.set({ id: 1 } as never);
+      expect((await tx.commit()).ok).toBeDefined();
+
+      await expect(deriveSelectedValue(runtime, space, objectSource, {
+        projection: parseSelectProjection("id"),
+      })).rejects.toThrow(
+        /^--select can only project array items from an array value$/,
+      );
+    });
+
+    it("names itself when a source reference cannot resolve", () => {
+      expect(() => schemaMayBeArray({ $ref: "#/$defs/Missing", $defs: {} }))
+        .toThrow("Could not resolve source schema reference for --schema");
+      expect(() =>
+        schemaMayBeArray({ $ref: "#/$defs/Missing", $defs: {} }, "--select")
+      ).toThrow("Could not resolve source schema reference for --select");
     });
   });
 
