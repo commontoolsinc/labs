@@ -178,6 +178,7 @@ describe("view-loadinput", () => {
     assert(input.kind === "bytes");
     expect(input.bytes).toEqual(bytes);
     expect(input.language).toBe(undefined);
+    expect(input.byteLanguageDetectionComplete).toBe(true);
     expect(input.extent).toEqual({
       byteLength: bytes.length,
       complete: true,
@@ -264,6 +265,7 @@ describe("view-loadinput", () => {
 
       assert(input.kind === "bytes");
       expect(input.language).toBe(undefined);
+      expect(input.byteLanguageDetectionComplete).toBe(true);
       expect(input.bytes.length).toBe(316 * 1024);
       expect(input.bytes[0]).toBe(0x41);
       expect(input.bytes.at(-1)).toBe(0x41);

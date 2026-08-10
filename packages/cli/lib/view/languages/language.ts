@@ -421,10 +421,17 @@ export function languageForFile(fileName: string | undefined): Language {
   return languageMatchingFilename(fileName) ?? plainTextLanguage;
 }
 
+export interface DecodeLanguageInputOptions {
+  /** A streamed detector already consumed the complete input without selecting
+   * a byte language. */
+  readonly byteLanguageDetectionComplete?: boolean;
+}
+
 /** Select a language from bytes and decode them exactly once. */
 export function decodeLanguageInput(
   fileName: string | undefined,
   bytes: Uint8Array,
+  options: DecodeLanguageInputOptions = {},
 ): { language: Language; source: DecodedLanguageSource } {
   const byFilename = languageMatchingFilename(fileName);
   if (byFilename?.input.kind === "bytes") {
@@ -433,13 +440,15 @@ export function decodeLanguageInput(
       source: byFilename.input.decoder.decode(bytes),
     };
   }
-  const detector = createByteLanguageDetector();
-  const detected = detector.write(bytes) ?? detector.finish();
-  if (detected !== undefined) {
-    return {
-      language: detected,
-      source: detected.input.decoder.decode(bytes),
-    };
+  if (!options.byteLanguageDetectionComplete) {
+    const detector = createByteLanguageDetector();
+    const detected = detector.write(bytes) ?? detector.finish();
+    if (detected !== undefined) {
+      return {
+        language: detected,
+        source: detected.input.decoder.decode(bytes),
+      };
+    }
   }
   return decodeTextInput(
     byFilename,

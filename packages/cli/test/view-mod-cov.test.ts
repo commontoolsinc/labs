@@ -43,6 +43,24 @@ Deno.test("buildView: an ordinary pipe with no file is read-only plain text", ()
   assertEquals(r.editSource.editable, false);
 });
 
+Deno.test("buildView: decodes buffered text after byte detection completes", () => {
+  const text = "#!/usr/bin/env python3\ndef greet():\n    pass\n";
+  const bytes = new TextEncoder().encode(text);
+  const view = buildView({
+    kind: "bytes",
+    bytes,
+    byteLanguageDetectionComplete: true,
+    extent: { byteLength: bytes.length, complete: true },
+  });
+
+  assert(
+    view.doc.lines.flatMap((line) => line.spans).some((span) =>
+      span.cls === "storageKeyword" && span.text === "def"
+    ),
+    "text decoding still applies shebang language selection",
+  );
+});
+
 Deno.test("buildView: source syntax is not guessed from content", () => {
   const examples = [
     ["JSON", '{"value": true}\n'],

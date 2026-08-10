@@ -13,6 +13,9 @@ export interface BufferedViewInput {
   readonly bytes: Uint8Array;
   /** A raw-byte language established before the retained preview was decoded. */
   readonly language?: Language;
+  /** The streamed detector consumed all bytes without selecting a byte
+   * language. Later decoding can proceed directly as text. */
+  readonly byteLanguageDetectionComplete?: boolean;
   readonly extent: RenderInputExtent;
 }
 
@@ -380,6 +383,9 @@ async function loadViewInputFromSource(
       kind: "bytes",
       bytes,
       ...(selectedByteLanguage ? { language: selectedByteLanguage } : {}),
+      ...(detector !== undefined && selectedByteLanguage === undefined
+        ? { byteLanguageDetectionComplete: true }
+        : {}),
       extent: { byteLength: bytes.length, complete: true },
     };
   } finally {

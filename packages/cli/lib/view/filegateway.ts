@@ -219,7 +219,9 @@ function openFileSync(
     } else {
       bytes = mergeChunks(chunks, totalBytes);
     }
-    const decoded = decodeLanguageInput(path, bytes);
+    const decoded = decodeLanguageInput(path, bytes, {
+      byteLanguageDetectionComplete: true,
+    });
     return {
       source: fileSource(path, decoded.language, {
         encode: decoded.source.encode,

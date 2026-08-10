@@ -233,7 +233,10 @@ export function buildView(
   const fileName = selection.fileName ?? file;
   const selectedDecoder = selection.language ?? loaded.language;
   const decoded = selectedDecoder === undefined
-    ? decodeLanguageInput(fileName, bytes)
+    ? decodeLanguageInput(fileName, bytes, {
+      byteLanguageDetectionComplete:
+        loaded.byteLanguageDetectionComplete === true,
+    })
     : {
       language: selectedDecoder,
       source: decodeInput(selectedDecoder, bytes, fileName),
