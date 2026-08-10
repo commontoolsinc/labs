@@ -2137,26 +2137,11 @@ export class Server {
   private async decideTransaction(
     message: TransactRequest,
   ): Promise<TransactDecision> {
-    const session = this.#sessions.get(message.space, message.sessionId);
-    if (session === null) {
-      return {
-        response: respondTypedError<Engine.AppliedCommit>(
-          message.requestId,
-          toError("SessionError", "Unknown session for space"),
-        ),
-      };
-    }
     let postCommit: (() => Promise<void>) | undefined;
     const response = await tracer.startActiveSpan(
       "memory.transact",
       async (span): Promise<ResponseMessage<Engine.AppliedCommit>> => {
         span.setAttribute("space.did", message.space);
-        if (
-          session.principal !== undefined &&
-          session.principal !== ANYONE_USER
-        ) {
-          span.setAttribute("user.did", session.principal);
-        }
         if (message.requestId !== undefined) {
           span.setAttribute("request.id", message.requestId);
         }
@@ -2188,6 +2173,20 @@ export class Server {
           "sqlite.operation.count",
           commitTelemetry.sqliteOperationCount,
         );
+        const session = this.#sessions.get(message.space, message.sessionId);
+        if (session === null) {
+          span.end();
+          return respondTypedError<Engine.AppliedCommit>(
+            message.requestId,
+            toError("SessionError", "Unknown session for space"),
+          );
+        }
+        if (
+          session.principal !== undefined &&
+          session.principal !== ANYONE_USER
+        ) {
+          span.setAttribute("user.did", session.principal);
+        }
         try {
           const engine = await this.openEngine(message.space);
           // The session may be revoked or replaced while openEngine awaits.
