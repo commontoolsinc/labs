@@ -130,6 +130,19 @@ one document per feature or per aspect of the runtime — collection writes,
 identity, ingest, host embedding, and the rest. Read the relevant one before you
 change a subsystem you have not worked on before.
 
+#### Browser tests in agent sandboxes
+
+On macOS, an agent must request unsandboxed execution before its first attempt
+to run a command that can launch a browser. This includes the root
+`deno task test`; the unfiltered root `deno task integration` command;
+unfiltered integration runs for `shell`, `patterns`, or `patterns-reload`;
+`deno task demo`; `deno-web-test`; and focused or filtered tests whose setup
+launches Chrome through Astral or `ShellIntegration`. Never try the command in
+the agent sandbox first. Deno's `-A` flag does not escape the outer sandbox, and
+a browser startup failure caused by that sandbox is not test evidence. The
+complete rule is in
+[`docs/development/TESTING.md`](docs/development/TESTING.md#browser-tests-in-agent-sandboxes).
+
 Three obligations that are easy to miss:
 
 - `docs/README.md` governs everything this repository writes down. It says how
