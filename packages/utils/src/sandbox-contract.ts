@@ -43,10 +43,10 @@ export const SANDBOX_WITHHELD_GLOBALS = Object.freeze(
     // `Float32Array` and `Float64Array` carry the NaN side channel. A NaN's
     // unused mantissa bits can hold a payload, and storing one into a float
     // typed array writes those bits through to the underlying buffer, where a
-    // second view reads them back. Lockdown repairs `DataView.prototype.setFloat*`
-    // to write only canonical NaNs, but a typed-array element store is not a
-    // method and nothing can intercept it, so SES withholds the constructors
-    // instead.
+    // second view reads them back. Lockdown repairs
+    // `DataView.prototype.setFloat*` to write only canonical NaNs, but a
+    // typed-array element store is not a method and nothing can intercept it,
+    // so SES withholds the constructors instead.
     "Float32Array",
     "Float64Array",
     // `Atomics` and `SharedArrayBuffer` combine shared memory with a timing
@@ -73,19 +73,20 @@ export const SANDBOX_WITHHELD_GLOBALS = Object.freeze(
     // `Intl` reaches the host's default locale and time zone whenever a
     // formatter is constructed without explicit arguments, which is both
     // nondeterministic across runtimes and a fingerprinting channel. The
-    // sanitized `toLocale*` methods in `locale-taming.ts` pin those defaults for
-    // the surface a pattern actually uses; the `Intl` constructors have no such
-    // taming, and no pattern needs them, so they stay out. Stripping removes the
-    // namespace's value members (`var Collator`, `var NumberFormat`, ...) while
-    // its interfaces remain, so a pattern can still annotate an
-    // `Intl.NumberFormatOptions` even though it cannot construct a formatter.
+    // sanitized `toLocale*` methods in `locale-taming.ts` pin those defaults
+    // for the surface a pattern actually uses; the `Intl` constructors have no
+    // such taming, and no pattern needs them, so they stay out. Stripping
+    // removes the namespace's value members (`var Collator`,
+    // `var NumberFormat`, ...) while its interfaces remain, so a pattern can
+    // still annotate an `Intl.NumberFormatOptions` even though it cannot
+    // construct a formatter.
     //
-    // If patterns need locale-specific formatting, the intended path is not to
-    // endow `Intl` but to add a capability that carries the user's preferred
-    // locale(s) — a `wish("#locale")` reading them from the user's profile and
-    // falling back to the platform defaults. A pattern passes that locale
-    // explicitly to the sanitized `toLocale*` methods, which already honor one,
-    // so common number, date, and currency formatting needs no `Intl`.
+    // Locale-specific formatting is served by a capability carrying the user's
+    // preferred locales -- a `wish("#locale")` reading them from the user's
+    // profile and falling back to the platform defaults -- rather than by
+    // endowing `Intl`. A pattern passes that locale explicitly to the
+    // sanitized `toLocale*` methods, which already honor one, so common
+    // number, date, and currency formatting needs no `Intl`.
     "Intl",
 
     // Web globals the runtime has never endowed. Unlike the entries above,

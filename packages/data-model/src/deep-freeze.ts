@@ -119,10 +119,10 @@ export function isDeepFrozen(value: unknown): boolean {
       // `check`, which shares this call's cycle state. Gating via
       // `BaseFabricInstance.isInstance()` keeps this generic (and enforces the
       // "every `FabricInstance` is a `BaseFabricInstance`" invariant); the
-      // member is abstract on `BaseFabricInstance`, so every instance implements
-      // it. (A `FabricPrimitive` never reaches here: it is necessarily frozen,
-      // so it short-circuits at the `isNecessarilyOrKnownDeepFrozen` check
-      // above.)
+      // member is abstract on `BaseFabricInstance`, so every instance
+      // implements it. (A `FabricPrimitive` never reaches here: it is
+      // necessarily frozen, so it short-circuits at the
+      // `isNecessarilyOrKnownDeepFrozen` check above.)
       result = obj[IS_DEEP_FROZEN](check);
     } else if (Array.isArray(obj)) {
       for (let i = 0; i < obj.length; i++) {

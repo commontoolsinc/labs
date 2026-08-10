@@ -27,9 +27,9 @@ export function fromBase64url(encoded: string): Uint8Array {
     : Uint8Array.fromBase64(encoded, { alphabet: "base64url" });
 }
 
-// ---------------------------------------------------------------------------
+//
 // Polyfill
-// ---------------------------------------------------------------------------
+//
 
 /** Base64url alphabet (RFC 4648 section 5): `+` -> `-`, `/` -> `_`. */
 const B64_CHARS =

@@ -61,8 +61,8 @@ describe("structural predicate narrowing", () => {
     it("narrows an `object`-typed caller too", () => {
       // `object` is assignable to neither narrow target, so it selects the
       // narrowing overload rather than the first one. That is what lets
-      // `data-model`'s `type-check.ts` walk a value typed `object` with no cast,
-      // and the module header claims it in as many words.
+      // `data-model`'s `type-check.ts` walk a value typed `object` with no
+      // cast, and the module header claims it in as many words.
       const record: object = { a: 1 };
       const array: object = [1];
 
@@ -78,8 +78,9 @@ describe("structural predicate narrowing", () => {
     });
 
     it("narrows `unknown` for `isPlainContainer()`", () => {
-      // This one narrowed before it was overloaded, so it is the only predicate
-      // here whose existing narrowing could have been *lost* rather than gained.
+      // `isPlainContainer()` is an overload pair, and an overload set can fail
+      // to narrow where a lone predicate does. This pins that `unknown` still
+      // narrows through it.
       const value: unknown = { a: 1 };
 
       if (isPlainContainer(value)) {
@@ -123,9 +124,9 @@ describe("structural predicate narrowing", () => {
     });
 
     it("keeps an array usable after a `false` result from `isArrayWithOnlyIndexProperties()`", () => {
-      // This predicate got the overload pair for family consistency rather than
-      // to fix a call site, which makes it the likeliest of the five to have the
-      // pair "simplified away" later. Hence a guard of its own.
+      // This predicate carries the overload pair for consistency with its
+      // family rather than to serve a call site, which makes it the likeliest
+      // one here to have the pair "simplified away". Hence a guard of its own.
       const array: number[] = [1, 2, 3];
       Object.defineProperty(array, "named", { value: 1, enumerable: true });
 

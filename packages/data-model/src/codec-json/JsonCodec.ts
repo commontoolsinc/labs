@@ -307,7 +307,8 @@ export class JsonCodec implements SerializationContext<string> {
         return Object.freeze(result);
       }
 
-      // Except for `/quote` and `/object`, the `state` needs to be fully decoded.
+      // Except for `/quote` and `/object`, the `state` needs to be fully
+      // decoded.
       const state = this.#decodeValue(rawState, context, registry);
 
       // A bare `"/"` key (empty tag after stripping the leading slash) is
