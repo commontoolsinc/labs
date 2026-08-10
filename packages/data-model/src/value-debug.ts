@@ -324,10 +324,8 @@ export function backtickQuote(text: string): string {
   // A code span's delimiter must be a longer backtick run than any inside it,
   // or the content closes the span early.
   let longestRun = 0;
-  let run = 0;
-  for (const ch of text) {
-    run = (ch === "`") ? (run + 1) : 0;
-    longestRun = Math.max(longestRun, run);
+  for (const [run] of text.matchAll(/`+/g)) {
+    longestRun = Math.max(longestRun, run.length);
   }
 
   // A reader drops one leading and one trailing space from a span that has
