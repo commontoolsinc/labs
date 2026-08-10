@@ -28,6 +28,36 @@ except one field.
 session in full, marking each step for whether it works today, is built and
 merging, or is blocked. This document takes the one step the decision turns on.
 
+## The ask, up front
+
+**Does a verb's declared result reach the runtime now, by the module-field
+road, rather than waiting for the Fabric-types stream?**
+
+The producer half is built: #5501 carries the declared result type to
+`module.resultSchema` and onto the receipt's write-once schema metadata,
+end-to-end tested, gates green. It sits in draft because the decision waits,
+not the code.
+
+**The one exposure worth your judgement** is the case only the Fabric-types
+design can rule on: that design concluding declared results should not reach
+the runtime *at all*. In that world the derived default disappears and a caller
+supplies the same selection by hand — which is the status quo this document
+describes, not a new cost. Every other outcome replaces the wire's source
+without changing what a caller sees, because both sources are the pattern
+author's declared result type.
+
+**Reversal is cheap in wall-clock, not just in principle.** Reverting #5501
+touches two runner files, six transformer files, and one golden fixture
+(`stream-declared-result.expected.jsx`) that re-records. **No baseline moves**
+— a pattern baseline carries the pattern's own `argumentSchema` and
+`resultSchema`, never a verb's `module.resultSchema`, and #5501 touches no
+baseline file. The schema compatibility gate never sees the field, so it has
+no rule to refuse its removal. That is the specific fear that withdrew this in
+July, and it does not attach to this road.
+
+The rest of this document is the evidence. The full decision, including what
+happens if it waits, is in [What is actually being asked](#what-is-actually-being-asked).
+
 ## The claim
 
 **`cf` is already a schema-driven command surface. It is finished on the input
@@ -333,23 +363,13 @@ which is the expensive order: a consumer requirement found late against a
 published contract is the one case where the permanence objection genuinely
 bites.
 
-## The plan's accounting is incomplete
+## What is actually being asked
 
 The verbs plan prices this decision as "narrower than first claimed," naming
 what it adds as narrowing on field selection and checking a selection before
-the call.
-
-That is accurate as far as it reaches, and it reaches two of the five gaps
-above — the narrowing and the pre-flight check. It is also right about the
-value path: a `$link` marker already renders an address and already suppresses
-the fetch without a declared result, so nothing here is about the value path.
-What the pricing omits is the command surface: the derivable default, the
-completion, the shape half of skew detection, and a help page that currently
-tells a caller the opposite of the truth. The plan does carry the listing half
-as its own item and sizes it small — what it does not do is weigh any of this
-where the decision is priced, which is where a reader deciding it will look.
-
-## What is actually being asked
+the call. That is accurate about the value path and reaches two of the five
+gaps above; it omits the command surface. That is a correction owed to the
+plan rather than part of this ask.
 
 Two halves, one of which is already built.
 
