@@ -47,17 +47,18 @@ export type SpacesList = Schema<typeof spacesListSchema>;
  * data.
  *
  * Table semantics: an array with no uniqueness constraint. During initial
- * hydration, the last valid HTTP or HTTPS entry for a DID is the candidate
- * route. A seed or accepted hint remains fixed. A default-host fallback is
- * provisional until the first hint is accepted. Removing an entry does not
- * unregister an accepted route until the runtime restarts.
+ * hydration, the last entry for a DID that contains only an HTTP or HTTPS
+ * origin is the candidate route. Credentials, paths, queries, and fragments
+ * make an entry invalid. A seed or accepted hint remains fixed. A default-host
+ * fallback is provisional until the first hint is accepted. Removing an entry
+ * does not unregister an accepted route until the runtime restarts.
  */
 export const spaceHostEntrySchema = {
   type: "object",
   properties: {
     /** The space DID this fact is about — the table key. */
     did: { type: "string" },
-    /** Base URL of the host currently serving the space. */
+    /** HTTP or HTTPS origin currently serving the space. */
     host: { type: "string" },
     /** ISO timestamp of when this fact was recorded. */
     updatedAt: { type: "string" },

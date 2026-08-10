@@ -40,6 +40,7 @@ import {
   setBlindStructuralTarget,
   setPatternEnvironment,
   type SigilLink,
+  SpaceHostValidationError,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
 import { linkRefPayload } from "@commonfabric/runner/shared";
@@ -657,9 +658,9 @@ export class RuntimeProcessor {
   #siteTableWarned = new Set<string>();
 
   /**
-   * Subscribe to the home-space site table and register the last valid HTTP or
-   * HTTPS entry for each space as a host hint. Fire-and-forget: resolution
-   * hints are an enhancement, never a boot dependency.
+   * Subscribes to the home-space site table and registers the last entry for
+   * each space that contains only an HTTP or HTTPS origin. Fire-and-forget:
+   * resolution hints are an enhancement, never a boot dependency.
    *
    * ORDERING CONTRACT for embedders: push a newly learned hint through the
    * RegisterSpaceHost IPC before relying on that space, and proceed only when
@@ -695,18 +696,21 @@ export class RuntimeProcessor {
               ) {
                 continue;
               }
+              let host: URL;
               try {
-                const host = normalizeSpaceHost(entry.host);
-                latestEntries.set(entry.did, {
-                  did: entry.did as DID,
-                  host: host.toString(),
-                });
+                host = normalizeSpaceHost(entry.host);
               } catch (error) {
+                if (!(error instanceof SpaceHostValidationError)) throw error;
                 console.warn(
                   `[RuntimeProcessor] Ignoring invalid site-table entry for ${entry.did}:`,
-                  error instanceof Error ? error.message : error,
+                  error.message,
                 );
+                continue;
               }
+              latestEntries.set(entry.did, {
+                did: entry.did as DID,
+                host: host.toString(),
+              });
             }
             for (const entry of latestEntries.values()) {
               try {
