@@ -125,7 +125,7 @@ describe("JsonCodec", () => {
       const value = FabricError.fromNativeError(new Error("boom"));
 
       expect(() => jsonCodec.encode(value)).toThrow(
-        "No codec registered for fabric object class: FabricError",
+        "No codec registered for fabric object class: `FabricError`",
       );
     });
 
@@ -158,7 +158,7 @@ describe("JsonCodec", () => {
       expect(JSON.parse(json)).toEqual({ a: 1 });
     });
 
-    it("accepts `Uint8Array` in `decodeFromBytes()`", () => {
+    it("decodes a `Uint8Array` through `decodeFromBytes()`", () => {
       const { jsonCodec, runtime } = makeTestCodec();
       const bytes = new TextEncoder().encode(JSON.stringify({ a: 1 }));
       const result = jsonCodec.decodeFromBytes(
@@ -1114,7 +1114,7 @@ describe("JsonCodec", () => {
         );
     });
 
-    it("allows shared references (same object at multiple positions)", () => {
+    it("duplicates a shared reference into equal subtrees", () => {
       const shared = { val: 42 };
       const obj = { a: shared, b: shared };
       // Should not throw -- shared references are fine, and only cycles are
@@ -1541,26 +1541,26 @@ describe("JsonCodec", () => {
         expect(rebuilt.i).toBe(-Infinity);
       });
 
-      it("rejects a string carrying no tag", () => {
+      it("throws given a string carrying no tag", () => {
         // The whole point of the tag: untagged JSON is not one of ours, however
         // well-formed it happens to be.
         expect(() => JsonCodec.unwrapEncodedValueForTesting("42"))
           .toThrow();
       });
 
-      it("rejects an empty string", () => {
+      it("throws given an empty string", () => {
         expect(() => JsonCodec.unwrapEncodedValueForTesting(""))
           .toThrow();
       });
 
-      it("rejects a tag with nothing after it", () => {
+      it("throws given a tag with nothing after it", () => {
         // `seemsLikeEncoded()` accepts this, so only the throwaway decode
         // catches it.
         expect(() => JsonCodec.unwrapEncodedValueForTesting(ENCODING_PREFIX))
           .toThrow();
       });
 
-      it("rejects a tag followed by text that will not parse", () => {
+      it("throws given a tag followed by text that will not parse", () => {
         expect(() =>
           JsonCodec.unwrapEncodedValueForTesting(
             `${ENCODING_PREFIX}{nope`,
@@ -1586,7 +1586,7 @@ describe("JsonCodec", () => {
           .toBe(`${ENCODING_PREFIX}${body}`);
       });
 
-      it("accepts a pretty-printed body", () => {
+      it("decodes a pretty-printed body", () => {
         // The re-encoded form is not compared against the input, so whitespace
         // is immaterial -- which is what lets a golden file be readable.
         const pretty = JSON.stringify({ a: 1, b: [2, 3] }, null, 2);
@@ -1596,17 +1596,17 @@ describe("JsonCodec", () => {
           .toEqual({ a: 1, b: [2, 3] });
       });
 
-      it("rejects text that will not parse", () => {
+      it("throws given text that will not parse", () => {
         expect(() => JsonCodec.wrapEncodedValueForTesting("{nope"))
           .toThrow();
       });
 
-      it("rejects an empty body", () => {
+      it("throws given an empty body", () => {
         expect(() => JsonCodec.wrapEncodedValueForTesting(""))
           .toThrow();
       });
 
-      it("rejects an already-tagged string", () => {
+      it("throws given an already-tagged string", () => {
         // Double-tagging is a mistake worth catching: the tag is not part of
         // the JSON, so the result would not parse.
         const encoded = newDefaultJsonCodec().encode(42);
@@ -1632,12 +1632,12 @@ describe("JsonCodec", () => {
         ).toThrow();
       });
 
-      it("accepts a tag no registered codec claims", () => {
+      it("wraps a tag no registered codec claims", () => {
         expect(JsonCodec.wrapEncodedValueForTesting(undecodable))
           .toBe(`${ENCODING_PREFIX}${undecodable}`);
       });
 
-      it("accepts an undecodable payload when told it is deliberate", () => {
+      it("wraps an undecodable payload when told it is deliberate", () => {
         expect(
           JsonCodec.wrapEncodedValueForTesting(undecodable, true),
         ).toBe(`${ENCODING_PREFIX}${undecodable}`);

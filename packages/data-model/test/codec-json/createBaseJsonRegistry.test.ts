@@ -12,7 +12,7 @@ describe("createBaseJsonRegistry", () => {
 
   it("returns a registry that refuses further registration", () => {
     expect(() => createBaseJsonRegistry().registerSelfRep("string"))
-      .toThrow("Cannot modify frozen CodecRegistry");
+      .toThrow("Cannot modify frozen `CodecRegistry`");
   });
 
   it("returns a fresh registry on each call", () => {

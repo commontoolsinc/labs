@@ -112,7 +112,7 @@ describe("cell-rep link-ref (legacy envelope form)", () => {
     expect(isLinkRef(linkRefFrom(PAYLOAD))).toBe(true);
   });
 
-  it("rejects everything that is not a link-ref envelope", () => {
+  it("returns `false` for everything that is not a link-ref envelope", () => {
     // The `{ "/": string }` entity-ref form is deliberately NOT a link ref.
     expect(isLinkRef({ "/": "fid1:abc" })).toBe(false);
     // Envelope with extra keys, or missing the tag, or wrong shape.
@@ -196,7 +196,7 @@ describe("cell-rep link storage-tree probe (legacy)", () => {
     expect(linkPayloadAtProbe({})).toEqual({});
   });
 
-  it("returns undefined when the probed value is not a record", () => {
+  it("returns `undefined` when the probed value is not a record", () => {
     expect(linkPayloadAtProbe(undefined)).toBeUndefined();
     expect(linkPayloadAtProbe(null)).toBeUndefined();
     expect(linkPayloadAtProbe("redirect")).toBeUndefined();
@@ -223,7 +223,7 @@ describe("cell-rep link storage-tree probe (modern)", () => {
     expect(linkPayloadAtProbe(linkRefFrom(PAYLOAD))).toEqual(PAYLOAD);
   });
 
-  it("returns undefined for a non-link value at the probe", () => {
+  it("returns `undefined` for a non-link value at the probe", () => {
     setModernCellRepConfig(true);
     // A bare record is the payload in legacy mode, but in modern mode only a
     // FabricLink denotes a link — plain data and the legacy envelope do not.
@@ -287,7 +287,7 @@ describe("cell-rep link-ref payload wire serialization", () => {
       expect(() => linkRefPayloadFromString('fcl1:{"a":["ok",2]}')).toThrow();
     });
 
-    it("rejects prototype-pollution keys carried on the wire", () => {
+    it("throws given prototype-pollution keys carried on the wire", () => {
       expect(() => linkRefPayloadFromString('fcl1:{"__proto__":"x"}'))
         .toThrow();
       expect(() => linkRefPayloadFromString('fcl1:{"constructor":"x"}'))

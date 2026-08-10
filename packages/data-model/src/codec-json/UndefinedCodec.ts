@@ -32,7 +32,7 @@ export class UndefinedCodec extends BaseFabricCodec {
   ): FabricValue {
     if (state !== null) {
       throw new Error(
-        `${typeTag}: expected \`null\` state, got ${typeof state}`,
+        `\`${typeTag}\`: expected \`null\` state, got \`${typeof state}\``,
       );
     }
     return undefined;
