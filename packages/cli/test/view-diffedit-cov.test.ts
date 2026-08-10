@@ -2100,6 +2100,46 @@ ${testCase.row}
     }
   });
 
+  it("keeps a literal CR in expanded CRLF-transport context", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(path, encoder.encode("A\r\nX\r\r\n"));
+      const diff = [
+        "diff --git a/value.ts b/value.ts",
+        "--- a/value.ts",
+        "+++ b/value.ts",
+        "@@ -1 +1 @@",
+        "-oldA",
+        "+A",
+        "",
+      ].join("\r\n");
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 5;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "end" });
+      session.handleKey({ name: "Z", char: "Z" });
+      session.handleKey({ name: "ctrl-l" });
+      session.handleKey({ name: "f3" });
+
+      expect(Deno.readFileSync(path)).toEqual(
+        encoder.encode("AZ\r\nX\r\r\n"),
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
   it("requires row provenance when saving a diff directly", () => {
     const { root, ws, done } = tempWs({ "m.ts": FILE_TEXT });
     try {

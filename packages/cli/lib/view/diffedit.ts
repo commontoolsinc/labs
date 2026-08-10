@@ -762,7 +762,7 @@ function hunkFooting(
   index: number,
 ): {
   fileLines: string[];
-  fileLineEndings: LineEndingProvenance[];
+  fileLineEndings: FileLineEnding[];
   fileHasTrailingNewline: boolean;
   range: MutableHunk;
   downFrom: number;
@@ -774,10 +774,7 @@ function hunkFooting(
   const content = cache?.get(absPath)?.fileText ?? ws.read(absPath);
   if (content === null) return null;
   const fileLines = content.split("\n");
-  const fileLineEndings = fileContentLines(content).map((line) => ({
-    ending: line.ending,
-    bodyCarriesCrlfEnding: line.ending === "\r\n",
-  }));
+  const fileLineEndings = fileContentLines(content).map((line) => line.ending);
   const fileLen = fileLines.length > 0 && fileLines[fileLines.length - 1] === ""
     ? fileLines.length - 1
     : fileLines.length;
@@ -930,17 +927,17 @@ function expandContext(
     contextStart + k,
   );
   const ctx = expansionBodyLines(revealedLines, target, range, up);
+  const currentUsesCrlfTransport = current.split("\n")[target.headerLine]
+    ?.endsWith("\r") === true;
   const revealsUnterminatedEof = !up && !fileHasTrailingNewline &&
     contextStart + k === fileLines.length;
   if (revealsUnterminatedEof) {
-    appendNoNewlineMarker(
-      ctx,
-      current.split("\n")[target.headerLine]?.endsWith("\r") === true,
-    );
+    appendNoNewlineMarker(ctx, currentUsesCrlfTransport);
   }
   const insertedLineEndings = expansionLineEndingProvenance(
     ctx,
     revealedLineEndings,
+    currentUsesCrlfTransport,
   );
   // Which file lines those are, counting from one, while `range` still holds
   // where the hunk started — growing it upwards moves that.
@@ -1055,12 +1052,18 @@ function expansionBodyLines(
 /** Attach each revealed workspace ending to its new-side diff row. */
 function expansionLineEndingProvenance(
   lines: readonly string[],
-  revealed: readonly LineEndingProvenance[],
+  revealed: readonly FileLineEnding[],
+  diffUsesCrlfTransport: boolean,
 ): Array<LineEndingProvenance | undefined> {
   let newSideIndex = 0;
   return lines.map((line) => {
     if (line[0] !== " " && line[0] !== "+") return undefined;
-    return revealed[newSideIndex++];
+    const ending = revealed[newSideIndex++];
+    if (ending === undefined) return undefined;
+    return {
+      ending,
+      bodyCarriesCrlfEnding: ending === "\r\n" && !diffUsesCrlfTransport,
+    };
   });
 }
 
