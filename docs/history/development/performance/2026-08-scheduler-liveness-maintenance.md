@@ -70,16 +70,22 @@ edges have not been replaced yet, so there is nothing to recount.
 
 | board | maintenance ops | node writes | edge visits | node writes/op |
 | --- | --- | --- | --- | --- |
-| 10 | 320 | 145 | 0 | 0.5 |
-| 20 | 1,240 | 590 | 0 | 0.5 |
-| 30 | 2,760 | 1,335 | 0 | 0.5 |
-| 40 | 4,880 | 2,380 | 0 | 0.5 |
+| 10 | 320 | 255 | 0 | 0.8 |
+| 20 | 1,240 | 1,010 | 0 | 0.8 |
+| 30 | 2,760 | 2,265 | 0 | 0.8 |
+| 40 | 4,880 | 4,020 | 0 | 0.8 |
 
-Log-log slopes over board size 10→40: maintenance ops 1.97, node writes 2.02,
-node writes per operation 0.05.
+Log-log slopes over board size 10→40: maintenance ops 1.97, node writes 1.99,
+node writes per operation 0.02.
 
-Work per operation is flat. At board 40 the totals are 82× fewer node writes
-(195,200 → 2,380) and no edge visits at all.
+Work per operation is flat. At board 40 the totals are 49× fewer node writes
+(195,200 → 4,020) and no edge visits at all.
+
+Two of those 0.8 writes per operation are the price of correctness rather than
+of maintenance: a node that loses a root status is re-derived even when it still
+looks live, and a registering node recounts the references its readers already
+hold. An earlier revision skipped both and measured 0.5, which was wrong in ways
+counted work cannot show — see the note below.
 
 The remaining quadratic in the total is the workload's own — N appends each
 remounting N cards, visible as the unchanged 1.97 slope on maintenance ops. The
@@ -123,4 +129,17 @@ against after every mutation in a randomized sequence.
   skipped a decrement when the writer was itself a root. Sixteen further hits
   were the same defect. Checking an incremental algorithm against its reference
   across an existing suite is cheap and finds what targeted tests miss.
+- A randomized equivalence test only reaches the shapes its generator can build.
+  The first version registered a quarter of its nodes as effects, which makes
+  almost every node root-reachable, so rootless cycles never formed and the
+  release path went unexercised across 30,000 mutations. Two defects lived in
+  exactly that blind spot: losing a materializer root inside a cycle never
+  withdrew, and a node registering with edges already naming it never collected
+  the references its readers held. Both were found by adversarial review, not by
+  the fuzz. The generator now parameterizes which root kinds exist, and the
+  root-free runs are the ones that reach the release path.
+- Removing a global rebuild removes a repair mechanism. Both defects above
+  predate this change, and both were harmless while every edge mutation
+  rederived the whole graph from the roots. An incremental replacement inherits
+  the correctness obligations its predecessor was papering over.
 - Wall clock cannot adjudicate this workload. Counts can.

@@ -889,10 +889,17 @@ export class Scheduler {
       isEffect: observation.actionKind === "effect",
     });
     if (observation.materializerWriteEnvelopes.length > 0) {
+      // Becoming a materializer makes the action a demand root, which the
+      // liveness graph only learns about when it is told.
+      const record = this.nodes.get(action);
+      const wasLive = record
+        ? isLive(this.dependencyGraphState, record)
+        : false;
       this.materializers.registerAddresses(
         action,
         observation.materializerWriteEnvelopes,
       );
+      notifyNodeLivenessChange(this.dependencyGraphState, action, wasLive);
     }
 
     const { actionOptions } = observation;

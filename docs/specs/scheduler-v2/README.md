@@ -386,10 +386,18 @@ node is enqueued only on that crossing, so a cycle settles instead of looping.
 Each arm of a diamond hands over its own reference, so the shared writer counts
 two.
 
+A reference is granted only while the writer is registered, so an edge naming a
+node that has not registered yet leaves it holding none. Registration therefore
+recounts the node's own references from its live readers before deciding whether
+it came alive, which keeps edge and registration order independent of each
+other.
+
 **Withdrawing** — an edge removed, or a root status lost — can strand nodes, and
 a reference count cannot tell a genuine supporter from a rootless cycle holding
-itself up. So withdrawal re-derives, over the region that can be affected and no
-further: `origin`'s transitive upstream, which is closed under the writer edge.
+itself up. A node that loses a root status is therefore re-derived even when it
+still looks live, because the references it holds may be exactly that cycle. So
+withdrawal re-derives, over the region that can be affected and no further:
+`origin`'s transitive upstream, which is closed under the writer edge.
 Any node whose support routes through `origin` is upstream of it, so a live
 reader *outside* that region cannot owe its own liveness to anything inside, and
 its support is taken at face value. Clearing the region and re-seeding from the

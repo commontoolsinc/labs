@@ -77,6 +77,16 @@ export function resetLivenessWork(): void {
   livenessWork.operations = 0;
 }
 
+/**
+ * Take account of a node whose root status or registration changed underneath
+ * the graph — it became an effect, gained or lost materializer envelopes, or
+ * (re-)registered.
+ *
+ * A node that was live is re-derived rather than compared: it may have lost a
+ * root status while references that are only circular keep it looking live, and
+ * no local check can tell those apart. `withdrawDemandFrom` returns at once
+ * when the node still holds demand of its own, so the common case stays cheap.
+ */
 export function notifyNodeLivenessChange(
   state: SchedulerDemandState,
   action: Action,
@@ -84,12 +94,30 @@ export function notifyNodeLivenessChange(
 ): void {
   livenessWork.operations++;
   const node = state.nodes.get(action);
-  if (!node || wasLive === isLive(state, node)) return;
-  if (isLive(state, node)) {
-    grantDemandFrom(state, action);
-  } else {
+  if (!node) return;
+
+  if (wasLive) {
     withdrawDemandFrom(state, action);
+    return;
   }
+
+  // A reference is granted only while the writer is registered, so edges that
+  // already name a node registering now hold none. Recover them from the
+  // readers before deciding whether the node came alive.
+  if (isRegisteredNode(state, node)) {
+    let liveReaders = 0;
+    const readers = state.dependents.get(action);
+    if (readers) {
+      for (const reader of readers) {
+        livenessWork.edgeVisits++;
+        const readerRecord = state.nodes.get(reader);
+        if (readerRecord && isLive(state, readerRecord)) liveReaders++;
+      }
+    }
+    livenessWork.nodeWrites++;
+    node.liveRefs = liveReaders;
+  }
+  if (isLive(state, node)) grantDemandFrom(state, action);
 }
 
 export function setNodeProvisionalDemand(
@@ -356,15 +384,14 @@ export function updateDependentEdgesForLog(
     log,
   );
 
-  let changed = false;
   for (const dependency of previousDependencies) {
     if (!newDependencies.has(dependency)) {
-      changed = unregisterDependentEdge(state, dependency, action) || changed;
+      unregisterDependentEdge(state, dependency, action);
     }
   }
   for (const dependency of newDependencies) {
     if (!previousDependencies.has(dependency)) {
-      changed = registerDependentEdge(state, dependency, action) || changed;
+      registerDependentEdge(state, dependency, action);
     }
   }
 
