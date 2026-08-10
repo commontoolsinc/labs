@@ -2408,7 +2408,10 @@ export class Session {
             this.afterEdit();
           }
         } else {
-          b.insertNewline(this.logicalLineEnd());
+          b.insertNewline(
+            this.logicalLineEnd(),
+            this.plainNewlineSuffix(),
+          );
           this.afterEdit();
         }
         return;
@@ -2708,6 +2711,20 @@ export class Session {
       : physicalEnd;
     const end = this.source?.logicalEnd?.(b.lines, row) ?? ordinaryEnd;
     return clamp(end, 0, physicalEnd);
+  }
+
+  /** The character before LF in the nearest newline of an ordinary file. */
+  private plainNewlineSuffix(): string {
+    const b = this.buffer!;
+    if (b.row < b.lines.length - 1) {
+      const line = b.lines[b.row] ?? "";
+      return line.endsWith("\r") ? "\r" : "";
+    }
+    if (b.row > 0) {
+      const previous = b.lines[b.row - 1] ?? "";
+      return previous.endsWith("\r") ? "\r" : "";
+    }
+    return "";
   }
 
   /** Keep a right-arrow motion able to cross a protected CRLF boundary. */

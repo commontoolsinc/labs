@@ -197,6 +197,10 @@ Deno.test("editor: structural edits treat CRLF as one line boundary", () => {
       keys: ["end", "ctrl-k"],
       expected: "abcd\r\n",
     },
+    {
+      keys: ["down", "down", "enter"],
+      expected: "ab\r\ncd\r\n\r\n",
+    },
   ];
   for (const testCase of cases) {
     const path = Deno.makeTempFileSync({ suffix: ".ts" });
@@ -206,6 +210,28 @@ Deno.test("editor: structural edits treat CRLF as one line boundary", () => {
       const source = fileSource(path);
       const session = editSession(input, source);
       press(session, "e", ...testCase.keys, "f3");
+
+      assertEquals(Deno.readFileSync(path), encoder.encode(testCase.expected));
+    } finally {
+      Deno.removeSync(path);
+    }
+  }
+});
+
+Deno.test("editor: Enter at an unterminated EOF inherits nearby CRLF", () => {
+  const encoder = new TextEncoder();
+  for (
+    const testCase of [
+      { input: "first\r\nlast", expected: "first\r\nlast\r\n" },
+      { input: "first\r\nlast\r", expected: "first\r\nlast\r\r\n" },
+    ]
+  ) {
+    const path = Deno.makeTempFileSync({ suffix: ".ts" });
+    try {
+      Deno.writeFileSync(path, encoder.encode(testCase.input));
+      const source = fileSource(path);
+      const session = editSession(testCase.input, source);
+      press(session, "e", "down", "end", "enter", "f3");
 
       assertEquals(Deno.readFileSync(path), encoder.encode(testCase.expected));
     } finally {

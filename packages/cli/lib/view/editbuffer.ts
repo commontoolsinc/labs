@@ -271,20 +271,21 @@ export class EditBuffer {
     this.col += 1;
   }
 
-  insertNewline(endColumn?: number): void {
+  insertNewline(endColumn?: number, newBoundarySuffix = ""): void {
     this.resetGoal();
     this.endKill();
     this.endYank();
-    this.splitLine(endColumn);
+    this.splitLine(endColumn, newBoundarySuffix);
   }
 
   /** Split before source-owned characters that terminate the physical row. */
-  private splitLine(endColumn?: number): void {
+  private splitLine(endColumn?: number, newBoundarySuffix = ""): void {
     const cps = this.chars(this.row);
     const end = clamp(endColumn ?? cps.length, 0, cps.length);
     const split = Math.min(this.col, end);
     const suffix = cps.slice(end);
-    const before = [...cps.slice(0, split), ...suffix].join("");
+    const boundarySuffix = suffix.length > 0 ? suffix : [...newBoundarySuffix];
+    const before = [...cps.slice(0, split), ...boundarySuffix].join("");
     const after = [...cps.slice(split, end), ...suffix].join("");
     this.lines.splice(this.row, 1, before, after);
     this.row += 1;

@@ -103,6 +103,7 @@ export function diffSource(
   const completeFiles: DiffHighlightFiles = {
     fileText: expectedFiles,
     hunks: saveHunks,
+    sourceText: edit.sourceText,
   };
 
   // No file on disk backs this diff (nothing resolved or verified): read-only.
@@ -251,6 +252,7 @@ export function diffSource(
           expectedFiles,
           saveHunks,
           changedHunkIndices(original, current),
+          original,
         ).keys(),
       ].map(shortName),
     revert: (original, current, cursorLine, scope) =>
@@ -273,6 +275,7 @@ export function diffSource(
         expectedFiles,
         saveHunks,
         changedHunks,
+        baseline ?? completeFiles.sourceText,
       );
       const advancedHunks = changes.size === 0
         ? []
@@ -342,6 +345,7 @@ export function diffSource(
           expectedFiles,
           saveHunks,
           amendedHunks,
+          baseline ?? completeFiles.sourceText,
         );
         for (const path of amendedPaths) {
           const committed = commitBase.get(path);
@@ -405,6 +409,9 @@ export function diffSource(
           hunk.newStart = newStart;
           hunk.newCount = newCount;
         }
+        completeFiles.sourceText = options?.amendCommit === false && baseline
+          ? baselineWithCurrentHunks(baseline, text)
+          : text;
         return saveStatus(writes.length, amended);
       } catch (error) {
         const rollbackErrors: string[] = [];
@@ -1148,6 +1155,7 @@ export function createDiffHighlighter(
 interface DiffHighlightFiles {
   readonly fileText: ReadonlyMap<string, string>;
   readonly hunks: readonly MutableHunk[];
+  sourceText?: string;
 }
 
 interface TouchedHunk {
@@ -1347,6 +1355,8 @@ function rehighlightTouchedHunks(
           rawLines.join("\n"),
           completeFiles.fileText,
           completeFiles.hunks,
+          undefined,
+          completeFiles.sourceText,
         )).get(path)
         : undefined;
       if (completeText !== undefined && path && completeFiles) {
@@ -1708,6 +1718,8 @@ function reparse(
     text,
     completeFiles.fileText,
     completeFiles.hunks,
+    undefined,
+    completeFiles.sourceText,
   );
   const statefulPaths = new Set<string>();
   let hunkIndex = 0;
@@ -1793,8 +1805,8 @@ interface FileSplice {
   startIndex: number;
   newCount: number;
   newSide: string[];
+  baselineSide: string[];
   noTrailingNewline?: boolean;
-  newFileHasUtf8Bom?: boolean;
   fallbackEnding: "\n" | "\r\n";
 }
 
@@ -1805,14 +1817,14 @@ interface FileContentLine {
   ending: FileLineEnding;
 }
 
+interface FileLineProvenance {
+  ending: FileLineEnding;
+  bodyCarriesCrlfEnding: boolean;
+}
+
 /** Split file contents while keeping each line's exact newline separate. */
-function fileContentLines(
-  text: string,
-  encodedEmptyLine: boolean,
-): FileContentLine[] {
-  if (text.length === 0) {
-    return encodedEmptyLine ? [{ text: "", ending: "" }] : [];
-  }
+function fileContentLines(text: string): FileContentLine[] {
+  if (text.length === 0) return [];
   const raw = text.split("\n");
   const trailingNewline = text.endsWith("\n");
   if (trailingNewline) raw.pop();
@@ -1823,6 +1835,73 @@ function fileContentLines(
     }
     return { text: line, ending: hasNewline ? "\n" : "" };
   });
+}
+
+function linePositions(lines: readonly string[]): Map<string, number[]> {
+  const positions = new Map<string, number[]>();
+  for (const [index, line] of lines.entries()) {
+    const entries = positions.get(line) ?? [];
+    entries.push(index);
+    positions.set(line, entries);
+  }
+  return positions;
+}
+
+function nextLinePosition(
+  positions: ReadonlyMap<string, readonly number[]>,
+  line: string,
+  from: number,
+): number {
+  const entries = positions.get(line) ?? [];
+  let low = 0;
+  let high = entries.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (entries[middle] < from) low = middle + 1;
+    else high = middle;
+  }
+  return entries[low] ?? -1;
+}
+
+/** Match surviving rows to the baseline while leaving inserted rows unmapped. */
+function alignBaselineLines(
+  baseline: readonly string[],
+  current: readonly string[],
+): Array<number | undefined> {
+  const aligned = new Array<number | undefined>(current.length);
+  const baselinePositions = linePositions(baseline);
+  const currentPositions = linePositions(current);
+  let baselineIndex = 0;
+  let currentIndex = 0;
+  while (baselineIndex < baseline.length && currentIndex < current.length) {
+    if (baseline[baselineIndex] === current[currentIndex]) {
+      aligned[currentIndex++] = baselineIndex++;
+      continue;
+    }
+    const sameBaselineLater = nextLinePosition(
+      currentPositions,
+      baseline[baselineIndex],
+      currentIndex + 1,
+    );
+    const sameCurrentLater = nextLinePosition(
+      baselinePositions,
+      current[currentIndex],
+      baselineIndex + 1,
+    );
+    if (
+      sameBaselineLater >= 0 &&
+      (sameCurrentLater < 0 ||
+        sameBaselineLater - currentIndex <=
+          sameCurrentLater - baselineIndex)
+    ) {
+      currentIndex++;
+    } else if (sameCurrentLater >= 0) {
+      baselineIndex++;
+    } else {
+      aligned[currentIndex++] = baselineIndex++;
+    }
+  }
+  return aligned;
 }
 
 /** Choose the closest newline style to a replaced file range. */
@@ -1846,21 +1925,53 @@ function nearbyLineEnding(
   return fallback;
 }
 
-/** Give an edited diff row the file newline it represents. */
-function fileContentLine(
+function nearbyAlignedEnding(
+  index: number,
+  alignment: readonly (number | undefined)[],
+  provenance: readonly (FileLineProvenance | undefined)[],
+  fallback: Exclude<FileLineEnding, "">,
+): Exclude<FileLineEnding, ""> {
+  for (let current = index - 1; current >= 0; current--) {
+    const baseline = alignment[current];
+    const ending = baseline === undefined
+      ? undefined
+      : provenance[baseline]?.ending;
+    if (ending) return ending;
+  }
+  for (let current = index + 1; current < alignment.length; current++) {
+    const baseline = alignment[current];
+    const ending = baseline === undefined
+      ? undefined
+      : provenance[baseline]?.ending;
+    if (ending) return ending;
+  }
+  return fallback;
+}
+
+function baselineLineProvenance(
   body: string,
   original: FileContentLine | undefined,
+): FileLineProvenance | undefined {
+  if (!original) return undefined;
+  return {
+    ending: original.ending,
+    bodyCarriesCrlfEnding: original.ending === "\r\n" &&
+      body === `${original.text}\r`,
+  };
+}
+
+/** Give an edited diff row the newline carried by its baseline row. */
+function reconstructedFileLine(
+  body: string,
+  provenance: FileLineProvenance | undefined,
   needsEnding: boolean,
   nearbyEnding: Exclude<FileLineEnding, "">,
 ): FileContentLine {
   let text = body;
-  let ending: FileLineEnding = "";
-  if (original?.ending === "\r\n") {
-    if (text.endsWith("\r")) text = text.slice(0, -1);
-    ending = "\r\n";
-  } else if (original?.ending === "\n") {
-    ending = "\n";
-  } else if (original === undefined && needsEnding && text.endsWith("\r")) {
+  let ending = provenance?.ending ?? "";
+  if (provenance?.bodyCarriesCrlfEnding && text.endsWith("\r")) {
+    text = text.slice(0, -1);
+  } else if (!provenance && needsEnding && text.endsWith("\r")) {
     text = text.slice(0, -1);
     ending = "\r\n";
   }
@@ -2000,6 +2111,53 @@ function hunkCommitOwners(
   });
 }
 
+function hunkNewSide(
+  rawLines: readonly string[],
+  model: DiffModel,
+  hunk: DiffHunk,
+  info: MutableHunk,
+): {
+  lines: string[];
+  noTrailingNewline?: boolean;
+  fallbackEnding: "\n" | "\r\n";
+} {
+  const lines: string[] = [];
+  let noTrailingNewline: boolean | undefined;
+  const crlfTransport = rawLines[hunk.headerLine]?.endsWith("\r") === true;
+  let finalNewSideLine = -1;
+  for (let line = hunk.headerLine + 1; line <= hunk.endLine; line++) {
+    const kind = model.lines[line]?.kind;
+    if (kind === "ctx" || kind === "add") finalNewSideLine = line;
+  }
+  for (let line = hunk.headerLine + 1; line <= hunk.endLine; line++) {
+    const kind = model.lines[line]?.kind;
+    if (kind === "ctx" || kind === "add") {
+      let body = rawLines[line].slice(1);
+      if (crlfTransport && body.endsWith("\r")) {
+        body = body.slice(0, -1);
+      }
+      const sourceLine = model.lines[line]?.newLine;
+      lines.push(
+        sourceLine === 0 && info.newFileHasUtf8Bom === true
+          ? body.replace(/^\uFEFF/, "")
+          : body,
+      );
+    }
+    if (
+      kind === "meta" && line - 1 === finalNewSideLine &&
+      (info.oldNoTrailingNewline || info.newNoTrailingNewline) &&
+      rawLines[line].replace(/\r$/, "") === "\\ No newline at end of file"
+    ) {
+      noTrailingNewline = true;
+    }
+  }
+  return {
+    lines,
+    noTrailingNewline,
+    fallbackEnding: crlfTransport ? "\r\n" : "\n",
+  };
+}
+
 /**
  * Rebuild each changed file from the edited diff. The edited diff's hunks are
  * matched to the hunks recorded at open, in document order — robust to `git log
@@ -2024,9 +2182,16 @@ function collectFileOutputs(
   fileText: ReadonlyMap<string, string>,
   hunks: readonly MutableHunk[],
   changedHunks?: ReadonlySet<number>,
+  baselineText?: string,
 ): Map<string, string> {
   const model = parseDiff(text);
   const rawLines = text.split("\n");
+  const baselineModel = baselineText === undefined
+    ? null
+    : parseDiff(baselineText);
+  const baselineRawLines = baselineText?.split("\n") ?? [];
+  const baselineHunks = baselineModel?.files.flatMap((file) => file.hunks) ??
+    [];
   const byFile = new Map<string, FileSplice[]>();
   let hunkIndex = 0;
   for (const file of model?.files ?? []) {
@@ -2035,49 +2200,24 @@ function collectFileOutputs(
       const info = hunks[index];
       const include = changedHunks === undefined || changedHunks.has(index);
       if (!include || !info || !isWritable(info) || !info.absPath) continue;
-      const newSide: string[] = [];
-      let noTrailingNewline: boolean | undefined;
-      const crlfTransport = rawLines[hunk.headerLine].endsWith("\r");
-      let finalNewSideLine = -1;
-      for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
-        const kind = model!.lines[i]?.kind;
-        if (kind === "ctx" || kind === "add") finalNewSideLine = i;
-      }
-      for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
-        const kind = model!.lines[i]?.kind;
-        // Context and added lines are the new side; the leading marker is
-        // stripped (an empty context line carries none, so slicing it stays
-        // empty). The no-newline marker applies to the new file only after its
-        // final new-side line.
-        if (kind === "ctx" || kind === "add") {
-          let body = rawLines[i].slice(1);
-          if (crlfTransport && body.endsWith("\r")) {
-            body = body.slice(0, -1);
-          }
-          const sourceLine = model!.lines[i]?.newLine;
-          newSide.push(
-            sourceLine === 0 && info.newFileHasUtf8Bom === true
-              ? body.replace(/^\uFEFF/, "")
-              : body,
-          );
-        }
-        if (
-          kind === "meta" && i - 1 === finalNewSideLine &&
-          (info.oldNoTrailingNewline || info.newNoTrailingNewline) &&
-          rawLines[i].replace(/\r$/, "") ===
-            "\\ No newline at end of file"
-        ) {
-          noTrailingNewline = true;
-        }
-      }
+      const current = hunkNewSide(rawLines, model!, hunk, info);
+      const baselineHunk = baselineHunks[index];
+      const baselineSide = baselineModel && baselineHunk
+        ? hunkNewSide(
+          baselineRawLines,
+          baselineModel,
+          baselineHunk,
+          info,
+        ).lines
+        : current.lines;
       const list = byFile.get(info.absPath) ?? [];
       list.push({
         startIndex: spliceStart(info),
         newCount: info.newCount,
-        newSide,
-        noTrailingNewline,
-        newFileHasUtf8Bom: info.newFileHasUtf8Bom,
-        fallbackEnding: crlfTransport ? "\r\n" : "\n",
+        newSide: current.lines,
+        baselineSide,
+        noTrailingNewline: current.noTrailingNewline,
+        fallbackEnding: current.fallbackEnding,
       });
       byFile.set(info.absPath, list);
     }
@@ -2087,11 +2227,17 @@ function collectFileOutputs(
   for (const [path, splices] of byFile) {
     const base = fileText.get(path);
     if (base === undefined) continue;
-    const encodedEmptyLine = base === "" &&
-      splices.some((splice) =>
-        splice.newFileHasUtf8Bom === true && splice.newCount > 0
-      );
-    const fileLines = fileContentLines(base, encodedEmptyLine);
+    const fileLines = fileContentLines(base);
+    const representedLineCount = Math.max(
+      0,
+      ...splices.map((splice) => splice.startIndex + splice.newCount),
+    );
+    if (
+      representedLineCount === fileLines.length + 1 &&
+      (base === "" || base.endsWith("\n"))
+    ) {
+      fileLines.push({ text: "", ending: "" });
+    }
     const baseLineCount = fileLines.length;
     for (const h of [...splices].sort((a, b) => b.startIndex - a.startIndex)) {
       const original = fileLines.slice(
@@ -2104,6 +2250,10 @@ function collectFileOutputs(
         h.newCount,
         h.fallbackEnding,
       );
+      const provenance = h.baselineSide.map((body, index) =>
+        baselineLineProvenance(body, original[index])
+      );
+      const alignment = alignBaselineLines(h.baselineSide, h.newSide);
       const reachesEof = h.startIndex + h.newCount === baseLineCount;
       const hasTrailingNewline = reachesEof
         ? h.noTrailingNewline === true
@@ -2115,7 +2265,16 @@ function collectFileOutputs(
       const replacement = h.newSide.map((body, index) => {
         const needsEnding = !reachesEof || index < h.newSide.length - 1 ||
           hasTrailingNewline;
-        return fileContentLine(body, original[index], needsEnding, ending);
+        const baselineIndex = alignment[index];
+        const inherited = baselineIndex === undefined
+          ? undefined
+          : provenance[baselineIndex];
+        return reconstructedFileLine(
+          body,
+          inherited,
+          needsEnding,
+          nearbyAlignedEnding(index, alignment, provenance, ending),
+        );
       });
       fileLines.splice(h.startIndex, h.newCount, ...replacement);
     }

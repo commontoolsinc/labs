@@ -94,6 +94,11 @@ Deno.test("editbuffer: structural edits preserve source-owned CRLF transport", (
   assertEquals(killed.killRing[0], "\r\n");
   killed.yank();
   assertEquals(killed.text(), "ab\r\ncd\r\n");
+
+  const terminal = new EditBuffer("ab\r\n");
+  terminal.moveBufferEnd();
+  terminal.insertNewline(0, "\r");
+  assertEquals(terminal.text(), "ab\r\n\r\n");
 });
 
 Deno.test("editbuffer: dirty tracks against the original", () => {

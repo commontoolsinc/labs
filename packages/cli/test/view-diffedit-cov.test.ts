@@ -1757,6 +1757,133 @@ ${testCase.row}
     }
   });
 
+  it("keeps mixed workspace endings attached to surviving rows", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(path, encoder.encode("alpha\r\nbeta\n"));
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1,2 +1,2 @@
+ alpha\r
+-old
++beta
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 4;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "end" });
+      session.handleKey({ name: "enter" });
+      session.handleKey({ name: "f3" });
+
+      expect(Deno.readFileSync(path)).toEqual(
+        encoder.encode("alpha\r\n\r\nbeta\n"),
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("separates literal CR content from CRLF diff transport", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(path, encoder.encode("new\r\r\n"));
+      const diff = [
+        "diff --git a/value.ts b/value.ts",
+        "--- a/value.ts",
+        "+++ b/value.ts",
+        "@@ -1 +1 @@",
+        "-old\r",
+        "+new\r",
+        "",
+      ].join("\r\n");
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 5;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "home" });
+      session.handleKey({ name: "right" });
+      session.handleKey({ name: "right" });
+      session.handleKey({ name: "delete" });
+      session.handleKey({ name: "f3" });
+
+      expect(Deno.readFileSync(path)).toEqual(encoder.encode("nw\r\r\n"));
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("preserves represented empty EOF rows across repeated saves", () => {
+    const encoder = new TextEncoder();
+    for (const edit of ["newline", "empty"] as const) {
+      const root = Deno.makeTempDirSync();
+      try {
+        Deno.mkdirSync(join(root, ".git"));
+        const path = join(root, "value.ts");
+        Deno.writeFileSync(path, encoder.encode("new"));
+        const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1 +1 @@
+-old
++new
+\\ No newline at end of file
+`;
+        const ws = realWorkspace(root);
+        const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+        const session = new Session(
+          built.doc,
+          { color: false, showLineNumbers: false },
+          { width: 80, height: 10 },
+          undefined,
+          diffSource(ws, built.edit),
+        );
+        session.top = 5;
+        session.handleKey({ name: "e" });
+        if (edit === "newline") {
+          session.handleKey({ name: "end" });
+          session.handleKey({ name: "enter" });
+          session.handleKey({ name: "f3" });
+          session.handleKey({ name: "up" });
+          session.handleKey({ name: "end" });
+          session.handleKey({ name: "backspace" });
+          session.handleKey({ name: "f3" });
+          expect(Deno.readFileSync(path)).toEqual(encoder.encode("ne\n"));
+        } else {
+          session.handleKey({ name: "home" });
+          session.handleKey({ name: "ctrl-k" });
+          session.handleKey({ name: "f3" });
+          session.handleKey({ name: "y", char: "y" });
+          session.handleKey({ name: "f3" });
+          expect(Deno.readFileSync(path)).toEqual(encoder.encode("y"));
+        }
+      } finally {
+        Deno.removeSync(root, { recursive: true });
+      }
+    }
+  });
+
   it("keeps a literal final carriage return editable", () => {
     const root = Deno.makeTempDirSync();
     try {
