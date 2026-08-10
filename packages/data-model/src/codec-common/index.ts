@@ -22,6 +22,5 @@ export { BigIntCodec } from "./BigIntCodec.ts";
 export { SpecialNumberCodec } from "./SpecialNumberCodec.ts";
 export { SymbolCodec } from "./SymbolCodec.ts";
 
-// Codec registry and factory.
+// Codec registry.
 export { CodecRegistry } from "./CodecRegistry.ts";
-export { createDefaultRegistry } from "./createDefaultRegistry.ts";

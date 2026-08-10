@@ -2,7 +2,7 @@ import { DID, Identity, type Session } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { JsonCodec } from "@commonfabric/data-model/codec-json";
+import { newDefaultJsonCodec } from "@commonfabric/data-model/codecs";
 import {
   PieceController,
   PiecesController,
@@ -172,7 +172,7 @@ import {
 } from "./runtime-error.ts";
 
 const MAX_SERIALIZATION_DEPTH = 5;
-const blobUploadCodec = new JsonCodec();
+const blobUploadCodec = newDefaultJsonCodec();
 
 // Split-timing for the CFC label IPC path. Counts/timing are readable via
 // getLoggerCounts(); enabled silently so the hot path pays only the timestamp.

@@ -2439,14 +2439,23 @@ registered codecs:
 
 #### The default registry
 
-`createDefaultRegistry()` (`codec-common/createDefaultRegistry.ts`) builds
-the registry the shared JSON codec uses. The wire-format surface is
-**explicit and curated**: fabric classes whose instances have a fixed wire
-tag supply their codec via the static `[CODEC]`, and the curated
-`codecClasses()` list from each of `fabric-primitives/` and
-`fabric-instances/` is the source of truth for which classes participate —
-the wire surface is curated there, in one obvious place per area, rather
-than implied by scattered registrations.
+Building a registry takes two decisions, held apart because they belong to
+different things.
+
+`createBaseJsonRegistry()` (`codec-json/createBaseJsonRegistry.ts`) makes the
+one the JSON format owns: which of JavaScript's primitive types are their own
+wire form, and which need a tagged encoding. It registers no fabric class, so
+another wire format supplies its own counterpart here without disturbing
+anything below.
+
+`createDefaultJsonRegistry()` (`codecs.ts`) adds the classes, and is the
+registry the shared JSON codec uses. The wire-format surface is **explicit and
+curated**: fabric classes whose instances have a fixed wire tag supply their
+codec via the static `[CODEC]`, and the curated `codecClasses()` list from each
+of `fabric-primitives/` and `fabric-instances/` is the source of truth for
+which classes participate — the wire surface is curated there, in one obvious
+place per area, rather than implied by scattered registrations. A caller
+needing classes of its own extends what this returns.
 
 | Registration | Codec / type | Tag | Notes |
 |--------------|--------------|-----|-------|
