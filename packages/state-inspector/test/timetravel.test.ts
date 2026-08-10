@@ -437,6 +437,15 @@ Deno.test("time travel: diff + timelines", async (t) => {
             }),
           SyntaxError,
         );
+        assertThrows(
+          () =>
+            diffEntity(space, {
+              id: "of:E",
+              fromSeq: 2,
+              toSeq: 4,
+            }),
+          SyntaxError,
+        );
       });
 
       await t.step("entityTimeline lists each write with change counts", () => {

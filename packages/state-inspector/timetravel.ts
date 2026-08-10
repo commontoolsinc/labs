@@ -349,6 +349,7 @@ export interface ExactEntityDiff extends EntityDiff {
  * include the whole document or a `path` to focus within `value`.
  *
  * @throws {Error} When `doc` and `path` are both provided.
+ * @throws {Error} When either selected document cannot be reconstructed.
  */
 export function diffEntity(
   space: SpaceDb,
