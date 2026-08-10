@@ -35,12 +35,18 @@ export class JsonCodec implements SerializationContext<string> {
    */
   readonly lenient: boolean;
 
+  /** Registry consulted for per-type encoding and decoding. */
+  readonly #registry: CodecRegistry;
+
   /**
-   * Constructs an instance, optionally configured for lenient mode (which
-   * produces `ProblematicValue` on failed reconstruction instead of throwing).
+   * Constructs an instance. `options.lenient` makes a failed reconstruction
+   * produce a `ProblematicValue` instead of throwing. `options.registry`
+   * supplies the codecs this instance encodes and decodes with, defaulting to
+   * the built-in registry.
    */
-  constructor(options?: { lenient?: boolean }) {
+  constructor(options?: { lenient?: boolean; registry?: CodecRegistry }) {
     this.lenient = options?.lenient ?? false;
+    this.#registry = options?.registry ?? JsonCodec.#defaultRegistry;
   }
 
   //
@@ -137,9 +143,8 @@ export class JsonCodec implements SerializationContext<string> {
   #encodeValue(
     value: FabricValue,
     _seen?: Set<object>,
-    registry: CodecRegistry = JsonCodec.#defaultRegistry,
   ): JsonCodecValue {
-    const codec = registry.codecFromValue(value);
+    const codec = this.#registry.codecFromValue(value);
 
     if (codec === SELF_REP) {
       // A self-representing primitive is its own wire form.
@@ -163,7 +168,7 @@ export class JsonCodec implements SerializationContext<string> {
       const tag = codec.tagForValue(value);
 
       const unprocessedState = codec.encode(value);
-      const finalState = this.#encodeValue(unprocessedState, seen, registry);
+      const finalState = this.#encodeValue(unprocessedState, seen);
       const result: JsonCodecValue = { [`/${tag}`]: finalState };
 
       if (addedToSeen) {
@@ -204,7 +209,7 @@ export class JsonCodec implements SerializationContext<string> {
           result.push(this.wrapTag(CODEC_META_TAGS.hole, count));
         } else {
           result.push(
-            this.#encodeValue(value[i], seen, registry),
+            this.#encodeValue(value[i], seen),
           );
           i++;
         }
@@ -241,7 +246,7 @@ export class JsonCodec implements SerializationContext<string> {
     const result: Record<string, JsonCodecValue> = {};
     const valueRec = value as Record<string, FabricValue>;
     for (const key of utf8SortedKeysOf(valueRec)) {
-      result[key] = this.#encodeValue(valueRec[key], seen, registry);
+      result[key] = this.#encodeValue(valueRec[key], seen);
     }
     seen.delete(value as object);
 
@@ -277,7 +282,6 @@ export class JsonCodec implements SerializationContext<string> {
   #decodeValue(
     data: JsonCodecValue,
     context: ReconstructionContext,
-    registry: CodecRegistry = JsonCodec.#defaultRegistry,
   ): FabricValue {
     const decoded = this.unwrapTag(data);
     if (decoded !== null) {
@@ -302,14 +306,14 @@ export class JsonCodec implements SerializationContext<string> {
               `object contains a key this runtime reserves: "${key}"`,
             );
           }
-          result[key] = this.#decodeValue(val, context, registry);
+          result[key] = this.#decodeValue(val, context);
         }
         return Object.freeze(result);
       }
 
       // Except for `/quote` and `/object`, the `state` needs to be fully
       // decoded.
-      const state = this.#decodeValue(rawState, context, registry);
+      const state = this.#decodeValue(rawState, context);
 
       // A bare `"/"` key (empty tag after stripping the leading slash) is
       // always an encoding error per spec §9 — no valid tag has an empty
@@ -333,7 +337,7 @@ export class JsonCodec implements SerializationContext<string> {
       // lenient-mode `ProblematicValue` fallback. The class-registry
       // fallback below is a separate arm and is intentionally NOT covered by
       // this contract.
-      const codec = registry.codecFromTag(tag);
+      const codec = this.#registry.codecFromTag(tag);
       if (codec) {
         if (this.lenient) {
           try {
@@ -387,7 +391,7 @@ export class JsonCodec implements SerializationContext<string> {
         ) {
           targetIndex += entryDecoded.state as number;
         } else {
-          result[targetIndex] = this.#decodeValue(entry, context, registry);
+          result[targetIndex] = this.#decodeValue(entry, context);
           targetIndex++;
         }
       }
@@ -418,7 +422,7 @@ export class JsonCodec implements SerializationContext<string> {
           `object contains a key this runtime reserves: "${key}"`,
         );
       }
-      result[key] = this.#decodeValue(val, context, registry);
+      result[key] = this.#decodeValue(val, context);
     }
     return Object.freeze(result);
   }
