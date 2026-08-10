@@ -147,7 +147,9 @@ describe("AppState", () => {
     assert(
       JSON.stringify(
         urlToAppView(
-          new URL("http://common.test/space/loom?path=People%2FZora%2Fabout.md"),
+          new URL(
+            "http://common.test/space/loom?path=People%2FZora%2Fabout.md",
+          ),
         ),
       ) === JSON.stringify({
         spaceName: "space",
