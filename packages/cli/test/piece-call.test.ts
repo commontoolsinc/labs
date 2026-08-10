@@ -33,13 +33,17 @@ import {
   pieceLinkDataErrorReport,
   renderPieceCallOutcome,
   reportVerbInputErrorOrRethrow,
-  resolveInvocationId,
+  resolveInvocationIdentity,
   resolveWaitControl,
   verbInputErrorReport,
   WaitBoundExpired,
 } from "../commands/piece.ts";
 import { LinkValidationError } from "../lib/piece.ts";
 import { CellSelectionError } from "../lib/cell-selection.ts";
+
+// The session an invocation id is chosen within, for the calls whose subject
+// is something else: a call names the pair or it names no invocation.
+const callerSession = "ses:piece-call-test";
 
 describe("executePieceCallable", () => {
   it("reports not-found when the piece cell has no schema-cast surface", async () => {
@@ -249,7 +253,7 @@ describe("executePieceCallable", () => {
           loadPiece: () => Promise.resolve(harness.piece),
           isStdinTerminal: () => false,
           readTextInput: () => Promise.resolve('{"mesage":"milk"}'),
-          invocationId: "inv-typo-retry",
+          invocation: { id: "inv-typo-retry", session: callerSession },
         },
       ),
     ).rejects.toThrow(/Invalid input for "recordMessage"/);
@@ -301,7 +305,7 @@ describe("executePieceCallable", () => {
           loadPieces: () => Promise.resolve(harness.pieces),
           loadPiece: () => Promise.resolve(harness.piece),
           isStdinTerminal: () => true,
-          invocationId: "inv-absent-retry",
+          invocation: { id: "inv-absent-retry", session: callerSession },
         },
       ),
     ).rejects.toThrow(
@@ -348,7 +352,7 @@ describe("executePieceCallable", () => {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => true,
-        invocationId: "inv-defaulted",
+        invocation: { id: "inv-defaulted", session: callerSession },
       },
     );
 
@@ -932,12 +936,14 @@ describe("executePieceCallable", () => {
       {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-123",
+        invocation: { id: "inv-123", session: callerSession },
         onPhase: (phase) => phases.push(phase),
       },
     );
 
-    expect(harness.tracker.sendOptions).toEqual([{ eventId: "inv-123" }]);
+    expect(harness.tracker.sendOptions).toEqual([
+      { eventId: "inv-123", session: callerSession },
+    ]);
     expect(result.invocation).toEqual({
       id: "inv-123",
       status: "settled",
@@ -949,6 +955,86 @@ describe("executePieceCallable", () => {
     // off this handling's commit — never from draining the whole graph.
     expect(harness.tracker.idleCalls).toBe(0);
     expect(harness.tracker.syncedCalls).toBe(0);
+  });
+
+  it("carries the caller's session beside the invocation id to send", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptValue: { commentId: "c-1" },
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocation: { id: "inv-123", session: "ses-abc" },
+      },
+    );
+
+    // An invocation id is the caller's own word, so the session that chose it
+    // travels with it: they reach the send together or the id says nothing
+    // about whose invocation it is.
+    expect(harness.tracker.sendOptions).toEqual([
+      { eventId: "inv-123", session: "ses-abc" },
+    ]);
+    // The outcome a caller reads is its own invocation's, and reports the id
+    // the caller named rather than anything derived from the pair.
+    expect(result.invocation).toEqual({
+      id: "inv-123",
+      status: "settled",
+      result: { commentId: "c-1" },
+    });
+  });
+
+  it("sends no options at all for a call that names no invocation", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptValue: { commentId: "c-1" },
+    });
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+      },
+    );
+
+    // Absent, not substituted: the runtime mints the delivery id for such a
+    // call, and nothing downstream is handed a stand-in id or session it
+    // would have to tell apart from a caller's own.
+    expect(harness.tracker.sendOptions).toEqual([undefined]);
   });
 
   it("reclassifies a receipt-exists collision as the original settled outcome", async () => {
@@ -978,7 +1064,7 @@ describe("executePieceCallable", () => {
       {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-dup",
+        invocation: { id: "inv-dup", session: callerSession },
       },
     );
 
@@ -1011,7 +1097,7 @@ describe("executePieceCallable", () => {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => true,
-        invocationId: "inv-empty",
+        invocation: { id: "inv-empty", session: callerSession },
       },
     );
 
@@ -1082,7 +1168,9 @@ function createPieceCallableHarness(options: {
       path: (string | number)[] | undefined;
       value: unknown;
     }>,
-    sendOptions: [] as Array<{ eventId?: string } | undefined>,
+    sendOptions: [] as Array<
+      { eventId?: string; session?: string } | undefined
+    >,
     receiptLinkRequested: undefined as { id?: string } | undefined,
     idleCalls: 0,
     syncedCalls: 0,
@@ -1128,7 +1216,7 @@ function createPieceCallableHarness(options: {
                 handlingReceiptLink?: NormalizedFullLink;
               },
             ) => void,
-            sendOptions?: { eventId?: string },
+            sendOptions?: { eventId?: string; session?: string },
           ) => {
             tracker.handlerWrites.push({
               cellProp: "result",
@@ -1524,21 +1612,65 @@ describe("piece call stdin payloads", () => {
     });
   });
 
-  it("mints an invocation id when none is given and rejects a blank one", () => {
-    expect(resolveInvocationId(undefined, () => "minted-1")).toBe("minted-1");
-    expect(resolveInvocationId("caller-supplied")).toBe("caller-supplied");
-    // A blank id would claim caller-supplied idempotency while carrying
-    // nothing that distinguishes deliveries — the retry it promises would
-    // not be safe.
-    expect(() => resolveInvocationId("")).toThrow(/non-blank id/);
-    expect(() => resolveInvocationId("   ")).toThrow(/non-blank id/);
+  it("carries an id named within a named session", () => {
+    expect(
+      resolveInvocationIdentity("add-comment-1", "ses-7"),
+    ).toEqual({ id: "add-comment-1", session: "ses-7" });
   });
 
-  it("announces the invocation id once, at dispatch", () => {
+  it("mints an id for a caller that names only a session", () => {
+    expect(
+      resolveInvocationIdentity(undefined, "ses-7", () => "minted-1"),
+    ).toEqual({ id: "minted-1", session: "ses-7" });
+  });
+
+  it("mints both for a caller that names neither", () => {
+    // A minted id is random, so it addresses an outcome nothing else will
+    // ask for, and minting the session it belongs to alongside it costs such
+    // a call nothing: every call then derives its address the one way.
+    expect(
+      resolveInvocationIdentity(
+        undefined,
+        undefined,
+        () => "minted-1",
+        () => "minted-session-1",
+      ),
+    ).toEqual({ id: "minted-1", session: "minted-session-1" });
+  });
+
+  it("refuses an id named without a session, naming the remedy", () => {
+    // Naming an id asks for an outcome to be replayable, and a session
+    // minted per request would move that outcome each time — so the request
+    // cannot be honored as it was made, and the refusal says what to do.
+    expect(() => resolveInvocationIdentity("add-comment-1", undefined))
+      .toThrow(ValidationError);
+    expect(() => resolveInvocationIdentity("add-comment-1", undefined))
+      .toThrow(/`cf invocation-session new` and set `CF_INVOCATION_SESSION`/);
+  });
+
+  it("rejects a blank id or a blank session", () => {
+    // Either would read as "the caller named one" while carrying nothing
+    // that tells two deliveries apart, so the retry an id promises to make
+    // safe would not be.
+    expect(() => resolveInvocationIdentity("", "ses-7")).toThrow(
+      /--invocation requires a non-blank id/,
+    );
+    expect(() => resolveInvocationIdentity("   ", "ses-7")).toThrow(
+      /--invocation requires a non-blank id/,
+    );
+    expect(() => resolveInvocationIdentity("inv-1", "")).toThrow(
+      /--invocation-session requires a non-blank id/,
+    );
+    expect(() => resolveInvocationIdentity("inv-1", "   ")).toThrow(
+      /--invocation-session requires a non-blank id/,
+    );
+  });
+
+  it("announces the invocation id and its session once, at dispatch", () => {
     const announced: string[] = [];
     const seen: string[] = [];
     const report = invocationPhaseReporter(
-      "inv-9",
+      { id: "inv-9", session: "ses-9" },
       (p) => seen.push(p),
       (m) => announced.push(m),
     );
@@ -1547,13 +1679,15 @@ describe("piece call stdin payloads", () => {
     report("initial_sync");
     expect(announced).toEqual([]);
     report("dispatched");
-    expect(announced).toEqual(["invocation: inv-9"]);
+    // Both halves, because an id deduplicates only under its session: a caller
+    // holding one without the other holds nothing it can retry with.
+    expect(announced).toEqual(["invocation: inv-9", "session: ses-9"]);
     // Later phases, and a second dispatch, must not re-announce — a caller
     // scraping stderr should not have to pick among several ids.
     report("committed");
     report("dispatched");
     report("readback");
-    expect(announced).toEqual(["invocation: inv-9"]);
+    expect(announced).toEqual(["invocation: inv-9", "session: ses-9"]);
     expect(seen).toEqual([
       "initial_sync",
       "dispatched",
@@ -1782,17 +1916,17 @@ describe("piece call stdin payloads", () => {
 
   it("announces per-phase lines only under the test hook", () => {
     // Disabled (the default): no phase lines — normal output stays exactly
-    // the single dispatch announcement.
+    // the dispatch announcement and its session.
     const silent: string[] = [];
     const off = invocationPhaseReporter(
-      "inv-10",
+      { id: "inv-10", session: "ses-10" },
       () => {},
       (m) => silent.push(m),
     );
     off("initial_sync");
     off("dispatched");
     off("committed");
-    expect(silent).toEqual(["invocation: inv-10"]);
+    expect(silent).toEqual(["invocation: inv-10", "session: ses-10"]);
 
     // Enabled: every advance also carries `invocation: <id> phase: <phase>`,
     // the shape failure exits already print. The `committed` line is the one
@@ -1801,7 +1935,7 @@ describe("piece call stdin payloads", () => {
     const announced: string[] = [];
     const seen: string[] = [];
     const on = invocationPhaseReporter(
-      "inv-11",
+      { id: "inv-11", session: "ses-11" },
       (p) => seen.push(p),
       (m) => announced.push(m),
       true,
@@ -1814,6 +1948,7 @@ describe("piece call stdin payloads", () => {
     expect(announced).toEqual([
       "invocation: inv-11 phase: initial_sync",
       "invocation: inv-11",
+      "session: ses-11",
       "invocation: inv-11 phase: dispatched",
       "invocation: inv-11 phase: committed",
       "invocation: inv-11 phase: readback",
@@ -2117,7 +2252,7 @@ describe("piece call wait control", () => {
       {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-no-readback",
+        invocation: { id: "inv-no-readback", session: callerSession },
         skipReadback: true,
         onPhase: (phase) => phases.push(phase),
       },
@@ -2132,7 +2267,7 @@ describe("piece call wait control", () => {
     });
     expect(phases).toEqual(["dispatched", "committed"]);
     expect(harness.tracker.sendOptions).toEqual([
-      { eventId: "inv-no-readback" },
+      { eventId: "inv-no-readback", session: callerSession },
     ]);
     // The receipt was never opened — the readback (sync + read) is the whole
     // saving — and no quiescence drain crept in either.
@@ -2163,7 +2298,7 @@ describe("piece call wait control", () => {
       executePieceCallable(config, "addComment", ["--message", "milk"], {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-held-commit",
+        invocation: { id: "inv-held-commit", session: callerSession },
         skipReadback: true,
         onPhase: (phase) => phases.push(phase),
       }),
@@ -2199,7 +2334,7 @@ describe("piece call wait control", () => {
       {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-dup-no-readback",
+        invocation: { id: "inv-dup-no-readback", session: callerSession },
         skipReadback: true,
       },
     );
@@ -2235,7 +2370,7 @@ describe("piece call wait control", () => {
       executePieceCallable(config, "recordMessage", ["--message", "milk"], {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-failed-commit",
+        invocation: { id: "inv-failed-commit", session: callerSession },
         skipReadback: true,
       }),
     ).rejects.toThrow(/Handler "recordMessage" failed: Bad message payload/);
@@ -2283,7 +2418,7 @@ describe("piece call wait control", () => {
         {
           loadPieces: () => Promise.resolve(harness.pieces),
           loadPiece: () => Promise.resolve(harness.piece),
-          invocationId: "inv-no-wait-typo",
+          invocation: { id: "inv-no-wait-typo", session: callerSession },
           skipReadback: true,
         },
       ),
@@ -2324,7 +2459,7 @@ describe("piece call wait control", () => {
       executePieceCallable(config, "search", ["--query", "tea"], {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-tool-no-wait",
+        invocation: { id: "inv-tool-no-wait", session: callerSession },
         skipReadback: true,
       }),
     ).rejects.toThrow(/--no-wait is not available for tool "search"/);
@@ -2830,7 +2965,7 @@ describe("piece call --show-links", () => {
       {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-links",
+        invocation: { id: "inv-links", session: callerSession },
         showLinks: true,
       },
     );
@@ -2872,7 +3007,7 @@ describe("piece call --show-links", () => {
       {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-no-links",
+        invocation: { id: "inv-no-links", session: callerSession },
       },
     );
 
@@ -2899,7 +3034,7 @@ describe("piece call --show-links", () => {
       loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
       isStdinTerminal: () => true,
-      invocationId: "inv-void-links",
+      invocation: { id: "inv-void-links", session: callerSession },
       showLinks: true,
     });
 
@@ -3571,6 +3706,32 @@ describe("renderPieceCallOutcome", () => {
     assertEquals(finishes, [undefined]);
     assertEquals(JSON.parse(rendered[0]).invocation, "inv-1");
     assertStringIncludes(hinted[0], "NEXT STEPS");
+  });
+
+  it("names the session as well as the id in the detached next step", () => {
+    const { observer } = observerRecorder();
+    const { deps, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        invocation: { id: "inv-1", status: "committed" },
+      } as unknown as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      deps,
+      { detached: true, invocation: { id: "inv-1", session: "ses-7" } },
+    );
+    // The hint is a command the caller runs to collect the outcome it chose
+    // not to wait for, and an id reaches that outcome only within the
+    // session it was chosen in — so the hint has to carry both. The session
+    // travels in the environment because it is what makes that outcome's
+    // address unguessable, and an argument is readable in a process listing.
+    assertStringIncludes(
+      hinted[0],
+      "CF_INVOCATION_SESSION=ses-7 cf piece call",
+    );
+    assertStringIncludes(hinted[0], "--invocation inv-1");
   });
 
   it("confirmations route to stderr under JSON input, stdout otherwise", () => {

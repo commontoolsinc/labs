@@ -36,7 +36,12 @@ import {
 } from "../lib/piece.ts";
 import type { ExecutedPieceCallable } from "../lib/piece.ts";
 import type { PatternCompatibilityReport } from "@commonfabric/piece/ops";
-import type { InvocationOutcome, InvocationPhase } from "../lib/callable.ts";
+import type {
+  InvocationIdentity,
+  InvocationOutcome,
+  InvocationPhase,
+} from "../lib/callable.ts";
+import { newSessionId } from "../lib/session.ts";
 import { renderPiece } from "../lib/piece-render.ts";
 import { parseSqliteSource } from "../lib/sqlite-source.ts";
 import { render, safeStringify } from "../lib/render.ts";
@@ -420,21 +425,52 @@ export function pieceCallInvocation(
 }
 
 /**
- * Resolve the invocation id for a handler call: the caller's own id, or a
- * freshly minted one. A blank id is rejected rather than passed down — it
- * would read as "the caller supplied one" while carrying nothing that can
- * distinguish one delivery from another, so the retry it promises to make
- * safe would not be (verb contract WS-D).
+ * Resolve what names a handler call's invocation: the id for this dispatch
+ * and the session it was chosen within (`CF_INVOCATION_SESSION`, or
+ * `--invocation-session`). Both reach the durable event id the handling's
+ * receipt is filed under, so a later call settles on that receipt only by
+ * naming the same pair (verb contract WS-D).
+ *
+ * A caller that names neither gets both minted for this one request. The id
+ * is random, so it names an outcome nothing else will ask for; scoping it to
+ * a session minted alongside it costs such a call nothing, and keeps every
+ * call deriving its address the one way.
+ *
+ * A caller that names an id but no session is refused. Naming an id asks for
+ * an outcome that is addressable and replayable, and a session minted per
+ * request would put that same id on a different outcome next time — so the
+ * request cannot be honored as it was made. Saying so beats accepting it and
+ * letting the caller find out at the retry it was preparing for, when the
+ * verb runs a second time.
+ *
+ * A blank id or session is rejected rather than passed down: either would
+ * read as "the caller named one" while carrying nothing that tells two
+ * deliveries apart.
  */
-export function resolveInvocationId(
-  raw: string | undefined,
-  mint: () => string = () => crypto.randomUUID(),
-): string {
-  if (raw === undefined) return mint();
-  if (!raw.trim()) {
+export function resolveInvocationIdentity(
+  rawInvocation: string | undefined,
+  rawSession: string | undefined,
+  mintInvocationId: () => string = () => crypto.randomUUID(),
+  mintSession: () => string = newSessionId,
+): InvocationIdentity {
+  if (rawInvocation !== undefined && !rawInvocation.trim()) {
     throw new ValidationError("--invocation requires a non-blank id");
   }
-  return raw;
+  if (rawSession !== undefined && !rawSession.trim()) {
+    throw new ValidationError("--invocation-session requires a non-blank id");
+  }
+  if (rawSession === undefined) {
+    if (rawInvocation !== undefined) {
+      throw new ValidationError(
+        "--invocation names an id to replay, and an id is replayable only " +
+          "within the session it was chosen in. Mint a session with " +
+          "`cf invocation-session new` and set `CF_INVOCATION_SESSION`, or " +
+          "pass it as `--invocation-session <id>`.",
+      );
+    }
+    return { id: mintInvocationId(), session: mintSession() };
+  }
+  return { id: rawInvocation ?? mintInvocationId(), session: rawSession };
 }
 
 /**
@@ -444,6 +480,15 @@ export function resolveInvocationId(
  * still holds the exact id to retry with, and the retry deduplicates instead
  * of executing a second time. Announcing once matters: a caller scraping
  * stderr for its id should not have to decide which of several to trust.
+ *
+ * The id is half of what a retry names: it deduplicates only under the session
+ * it was chosen in. So the session is announced beside it, on its own line —
+ * a caller that named no session was minted one for this call, and without
+ * reading it here would hold an id that names nothing it can return to.
+ *
+ * Two lines rather than one because `invocation: <id> phase: <phase>` below is
+ * a parsed shape: appending to the id line would change what a scenario
+ * blocking on a phase reads.
  *
  * `announcePhases` is a test-harness hook (reached via the
  * `CF_TEST_ANNOUNCE_INVOCATION_PHASES` env var at the call site): every phase
@@ -456,7 +501,7 @@ export function resolveInvocationId(
  * byte-identical with the hook absent.
  */
 export function invocationPhaseReporter(
-  invocationId: string,
+  invocation: InvocationIdentity,
   onAdvance: (phase: InvocationPhase) => void,
   announce: (message: string) => void = console.error,
   announcePhases = false,
@@ -465,10 +510,11 @@ export function invocationPhaseReporter(
   return (next) => {
     if (next === "dispatched" && !announced) {
       announced = true;
-      announce(`invocation: ${invocationId}`);
+      announce(`invocation: ${invocation.id}`);
+      announce(`session: ${invocation.session}`);
     }
     if (announcePhases) {
-      announce(`invocation: ${invocationId} phase: ${next}`);
+      announce(`invocation: ${invocation.id} phase: ${next}`);
     }
     onAdvance(next);
   };
@@ -540,7 +586,7 @@ export function renderPieceCallOutcome(
     hint?: (text: string, prefix?: boolean) => void;
     printError?: (text: string) => void;
   } = {},
-  opts: { detached?: boolean; invocationId?: string } = {},
+  opts: { detached?: boolean; invocation?: InvocationIdentity } = {},
 ): void {
   const renderOut = deps.render ?? render;
   const hintOut = deps.hint ?? hint;
@@ -575,11 +621,18 @@ export function renderPieceCallOutcome(
     // prose stays on stderr via hint().
     renderOut(JSON.stringify(invocationJson(result.invocation), null, 2));
     hintOut(
+      // The readback names its session through the environment rather than
+      // `--invocation-session`, because a session is what keeps an outcome's
+      // address out of reach of anyone who can guess a piece, a verb and an
+      // id — and an argument is readable in a process listing where an
+      // environment variable is not.
       opts.detached
         ? cliText(`NEXT STEPS:
-  → Read the outcome: cf piece call --piece ${piece} --invocation ${
-          opts.invocationId ?? "<id>"
-        } ${callableName} ... (the commit is durable; a same-id call deduplicates and returns the settled outcome)
+  → Read the outcome: CF_INVOCATION_SESSION=${
+          opts.invocation?.session ?? "<session>"
+        } cf piece call --piece ${piece} --invocation ${
+          opts.invocation?.id ?? "<id>"
+        } ${callableName} ... (the commit is durable; a call naming this same pair deduplicates and returns the settled outcome)
   → Verify state:     cf piece get --piece ${piece} <path> ...`)
         : nextSteps,
     );
@@ -1580,10 +1633,29 @@ after --. Handlers interpret piped input when no input argument is present.`,
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option(
     "--invocation <id:string>",
-    "Idempotency key for a handler call (before the callable name). A " +
-      "same-id retry cannot commit twice — it settles on the original " +
-      "outcome — but the handler body does re-run, so effects outside the " +
-      "transaction repeat. Minted automatically when omitted.",
+    "Idempotency key for a handler call (before the callable name), and " +
+      "requires an invocation session. A retry naming the same pair cannot " +
+      "commit twice — it settles on the original outcome — but the " +
+      "handler body does re-run, so effects outside the transaction " +
+      "repeat. Both are minted for the one call when neither is given.",
+  )
+  .env(
+    "CF_INVOCATION_SESSION=<id:string>",
+    "Invocation session that this run's invocation ids belong to. The form " +
+      "to reach for: a session is what makes an outcome's address " +
+      "unguessable, and an environment variable stays out of the process " +
+      "listing an argument shows up in.",
+    { prefix: "CF_" },
+  )
+  .option(
+    "--invocation-session <id:string>",
+    "Override CF_INVOCATION_SESSION for this one call (before the callable " +
+      "name): the session this call's invocation id was chosen within, " +
+      "since an invocation id is the caller's own word and another caller " +
+      "can pick the same one. The pair decides which outcome a replay " +
+      "reads, so the same id under another session is another invocation. " +
+      "Mint a session per agent run with `cf invocation-session new`, and " +
+      "carry that one session on every call of the run.",
   )
   .option(
     "--verbose",
@@ -1601,17 +1673,17 @@ after --. Handlers interpret piped input when no input argument is present.`,
     "Bound the settlement wait by a chosen patience, in seconds (before " +
       "the callable name). On expiry the exit is nonzero with the " +
       "invocation id and furthest phase on stderr; the invocation may not " +
-      "have executed or committed, and re-invoking with the same id is " +
-      "safe in every phase — it finishes the work or reads the outcome " +
-      "back.",
+      "have executed or committed, and re-invoking under the same id and " +
+      "session is safe in every phase — it finishes the work or reads the " +
+      "outcome back.",
   )
   .option(
     "--no-wait",
     "Exit once this handling's commit is acknowledged (before the callable " +
       "name), skipping only the receipt readback: stdout reports status " +
-      '"committed", and a later call with the same --invocation id reads ' +
-      "the outcome back. The handler still executes here and its commit " +
-      "is durable. Handler invocations only.",
+      '"committed", and a later call naming the same invocation session and ' +
+      "--invocation reads the outcome back. The handler still executes here " +
+      "and its commit is durable. Handler invocations only.",
   )
   .option(
     "--show-links",
@@ -1626,7 +1698,11 @@ after --. Handlers interpret piped input when no input argument is present.`,
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
-    const invocationId = resolveInvocationId(options.invocation);
+    const identity = resolveInvocationIdentity(
+      options.invocation,
+      options.invocationSession,
+    );
+    const invocationId = identity.id;
     const waitControl = resolveWaitControl(options);
     let phase: InvocationPhase = "initial_sync";
     const observer = pieceCallPhaseObserver(
@@ -1649,11 +1725,11 @@ after --. Handlers interpret piped input when no input argument is present.`,
           callableName,
           invocation.rawArgs,
           {
-            invocationId,
+            invocation: identity,
             skipReadback: waitControl.mode === "commit",
             showLinks: !!options.showLinks,
             onPhase: invocationPhaseReporter(
-              invocationId,
+              identity,
               observer.onPhase,
               undefined,
               Boolean(Deno.env.get("CF_TEST_ANNOUNCE_INVOCATION_PHASES")),
@@ -1675,7 +1751,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
         callableName,
         pieceConfig.piece,
         {},
-        { detached: waitControl.mode === "commit", invocationId },
+        { detached: waitControl.mode === "commit", invocation: identity },
       );
     } catch (error) {
       if (error instanceof ValidationError) {
