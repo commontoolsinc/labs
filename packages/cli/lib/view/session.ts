@@ -4023,7 +4023,9 @@ export class Session {
       return;
     }
     this.source = opened.source;
-    this.viewMode = opened.source.defaultViewMode ?? "source";
+    if (opened.source.defaultViewMode === "rendered") {
+      this.viewMode = "rendered";
+    }
     this.buffer = new EditBuffer(opened.text);
     this.splitRow = null;
     this.highlighter = undefined; // the old highlighter was for the previous file
