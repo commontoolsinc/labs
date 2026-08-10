@@ -455,7 +455,11 @@ const handlers: Record<
   async action({ index }) {
     const stepCell = stepCells[index as number];
     const stream = stepCell.key("action" as never) as unknown as {
-      send?: (value: unknown) => void;
+      send?: (
+        value: unknown,
+        onCommit?: undefined,
+        sendOptions?: { runtimeInjectedEventKeys?: readonly string[] },
+      ) => void;
     };
     if (typeof stream?.send !== "function") {
       throw new Error(`Test step ${index} action is not a stream`);
@@ -464,7 +468,8 @@ const handlers: Record<
       event?: unknown;
       trustedUi?: unknown;
     };
-    stream.send(buildActionEvent(meta?.event, meta?.trustedUi));
+    const action = buildActionEvent(meta?.event, meta?.trustedUi);
+    stream.send(action.value, undefined, action.sendOptions);
     await settle();
     return {};
   },

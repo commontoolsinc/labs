@@ -7,6 +7,10 @@
 
 import type { JSONValue } from "@commonfabric/runtime-client";
 import {
+  ALLOWLISTED_EVENT_PROPERTIES,
+  ALLOWLISTED_TARGET_PROPERTIES,
+} from "../event-envelope.ts";
+import {
   type EventProvenance,
   getEventProvenance,
   getEventTargetDataset,
@@ -96,36 +100,6 @@ export function isDomEventMessage(value: unknown): value is DomEventMessage {
     typeof msg.nodeId === "number"
   );
 }
-
-/**
- * Allowlisted event properties that can be serialized.
- * These are the standard properties we copy from events.
- */
-export const ALLOWLISTED_EVENT_PROPERTIES = [
-  "type",
-  "key",
-  "code",
-  "repeat",
-  "altKey",
-  "ctrlKey",
-  "metaKey",
-  "shiftKey",
-  "inputType",
-  "data",
-  "button",
-  "buttons",
-] as const;
-
-/**
- * Allowlisted event target properties that can be serialized.
- */
-export const ALLOWLISTED_TARGET_PROPERTIES = [
-  "name",
-  "value",
-  "checked",
-  "selected",
-  "selectedIndex",
-] as const;
 
 /**
  * Serialize a DOM event for IPC transmission.

@@ -13,7 +13,10 @@ import {
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
-import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
+import {
+  markRendererTrustedEvent,
+  markRuntimeInjectedEventKeys,
+} from "@commonfabric/runner/cfc";
 import { Identity, type KeyPairRaw } from "@commonfabric/identity";
 import {
   initializePiecesController,
@@ -252,13 +255,19 @@ const handlers: Record<
   async send({ handler, event, trustedUi, idle: doIdle }) {
     const trusted = trustedUi as TrustedUiDescriptor | undefined;
     let eventValue: unknown = event ?? {};
+    // Keys this harness put in the event rather than the caller, declared to
+    // the send so a verb's closed event schema judges only the caller's own
+    // fields — the same declaration the html worker reconciler makes for the
+    // envelope it builds around a real DOM event.
+    let injectedKeys: readonly string[] | undefined;
     if (trusted) {
       // Equivalent of a genuine user interaction on a trusted surface: DOM
       // provenance plus the renderer-trusted mark the html worker reconciler
       // applies when delivering real DOM events.
+      const authored = isRecord(event) ? event : undefined;
       eventValue = {
         type: "click",
-        ...(isRecord(event) ? event : {}),
+        ...(authored ?? {}),
         provenance: {
           origin: "dom",
           trusted: true,
@@ -270,11 +279,20 @@ const handlers: Record<
         },
       };
       markRendererTrustedEvent(eventValue);
+      injectedKeys = markRuntimeInjectedEventKeys(
+        authored && Object.hasOwn(authored, "type")
+          ? ["provenance"]
+          : ["type", "provenance"],
+      );
     }
     const target = result();
     const { error } = await controller().runtime.editWithRetry(
       (tx) => {
-        target.key(handler as never).withTx(tx).send(eventValue as never);
+        target.key(handler as never).withTx(tx).send(
+          eventValue as never,
+          undefined,
+          { runtimeInjectedEventKeys: injectedKeys },
+        );
       },
     );
     if (error) {

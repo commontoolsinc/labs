@@ -254,6 +254,7 @@ export {
 } from "./sink-inventory.ts";
 export type { SinkMaxConfidentiality } from "./sink-inventory.ts";
 export { markRendererTrustedEvent } from "./ui-contract.ts";
+export { markRuntimeInjectedEventKeys } from "../cell.ts";
 export {
   cfcObjectSchemaIsClosed,
   INJECTION_SAFE_ATOM,

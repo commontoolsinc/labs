@@ -15,9 +15,8 @@ export type { VDomRendererOptions } from "./renderer.ts";
 export {
   ALLOWLISTED_EVENT_PROPERTIES,
   ALLOWLISTED_TARGET_PROPERTIES,
-  isDomEventMessage,
-  serializeEvent,
-} from "./events.ts";
+} from "../event-envelope.ts";
+export { isDomEventMessage, serializeEvent } from "./events.ts";
 export type {
   DomEventMessage,
   EventProvenance,

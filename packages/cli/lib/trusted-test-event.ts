@@ -14,7 +14,10 @@
  * `packages/html/src/worker/reconciler.ts`.
  */
 
-import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
+import {
+  markRendererTrustedEvent,
+  markRuntimeInjectedEventKeys,
+} from "@commonfabric/runner/cfc";
 
 export interface TrustedUiDescriptor {
   /** `data-ui-pattern` / `data-ui-event-integrity` of the trusted surface. */
@@ -33,24 +36,43 @@ export const isTrustedUiDescriptor = (
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** An action step's event value together with the send options it needs. */
+export interface ActionEvent {
+  /** The value to hand `stream.send`. */
+  value: unknown;
+  /**
+   * Send options naming the keys this runner injected, so a verb's closed
+   * event schema judges only what the step itself supplied. Names nothing
+   * when the step's payload passes through untouched.
+   */
+  sendOptions: { runtimeInjectedEventKeys?: readonly string[] };
+}
+
 /**
  * Resolve the event value to send for an action step: the step's literal
  * `event` payload (if any), wrapped with trusted DOM provenance and the
  * renderer-trusted mark when a `trustedUi` descriptor is present.
  *
  * A trusted gesture without a payload sends `{ type: "click" }` (renderer
- * parity). An explicit record payload is sent exactly as authored — handlers
- * may branch on fields like `type`, so none are injected.
+ * parity). An explicit record payload keeps every field the step authored —
+ * handlers may branch on fields like `type`, so none are overwritten.
+ *
+ * The wrapper's own fields are declared as runtime-injected, the same way the
+ * renderer declares the envelope it builds around a real gesture: `provenance`
+ * always, and the synthesized `type` when the step supplied no payload to take
+ * it from. A step's own fields are never declared — an undeclared one is the
+ * step's mistake, and the verb's closed event schema must still catch it.
  */
 export function buildActionEvent(
   event: unknown,
   trustedUi: unknown,
-): unknown {
+): ActionEvent {
   if (!isTrustedUiDescriptor(trustedUi)) {
-    return event;
+    return { value: event, sendOptions: {} };
   }
+  const authored = isRecord(event) ? event : undefined;
   const eventValue = {
-    ...(isRecord(event) ? event : { type: "click" }),
+    ...(authored ?? { type: "click" }),
     provenance: {
       origin: "dom",
       trusted: true,
@@ -62,5 +84,12 @@ export function buildActionEvent(
     },
   };
   markRendererTrustedEvent(eventValue);
-  return eventValue;
+  return {
+    value: eventValue,
+    sendOptions: {
+      runtimeInjectedEventKeys: markRuntimeInjectedEventKeys(
+        authored ? ["provenance"] : ["type", "provenance"],
+      ),
+    },
+  };
 }

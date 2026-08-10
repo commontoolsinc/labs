@@ -65,10 +65,12 @@ import {
   cfcLabelViewForCell,
   clauseAlternatives,
   markRendererTrustedEvent,
+  markRuntimeInjectedEventKeys,
   type RenderConfidentialityResolver,
   spaceAtomIdsInConfidentiality,
   type SpaceMembershipProvider,
 } from "@commonfabric/runner/cfc";
+import { SERIALIZED_EVENT_KEYS } from "../event-envelope.ts";
 import type { VDomOp } from "../vdom-ops.ts";
 import { generateChildKeys } from "./keying.ts";
 import {
@@ -120,6 +122,57 @@ const CFC_CAVEAT_ATOM_TYPE = "https://commonfabric.org/cfc/atom/Caveat";
  * The main thread registers the actual container DOM element with this ID.
  */
 export const CONTAINER_NODE_ID = 0;
+
+/**
+ * Injection provenance for the event values this reconciler delivers.
+ *
+ * A pattern wires a stream to `onClick`; the runtime decides what a click
+ * looks like. Every key of the value that arrives at `dispatchEvent` was put
+ * there by the renderer's serializer, so the send that carries it to a verb
+ * declares them as runtime-injected and the closed-world gate leaves them
+ * unjudged instead of refusing an envelope no author's event type describes.
+ *
+ * The declaration is a capability, not a shape: `markRuntimeInjectedEventKeys`
+ * mints an array the stream-send path recognizes, and only a minted one is
+ * honored. Keying it off the event object — the way `markRendererTrustedEvent`
+ * keys DOM trust — keeps the marker tied to the value the renderer produced
+ * rather than to any value that happens to look like one.
+ */
+const rendererInjectedEventKeys = new WeakMap<object, readonly string[]>();
+
+/**
+ * Record which envelope keys the renderer put in `event`. Bounded by
+ * `SERIALIZED_EVENT_KEYS`, so a key no serializer writes is never exempted,
+ * however the event value reached the worker.
+ */
+const markRendererInjectedEventKeys = (event: unknown): void => {
+  if (!isRecord(event)) return;
+  const injected = SERIALIZED_EVENT_KEYS.filter((key) =>
+    Object.hasOwn(event, key)
+  );
+  if (injected.length === 0) return;
+  rendererInjectedEventKeys.set(
+    event,
+    markRuntimeInjectedEventKeys(injected),
+  );
+};
+
+/**
+ * Send a delivered DOM event to the stream an event prop resolved to, naming
+ * the keys the renderer injected so the verb's closed event schema judges only
+ * what a caller could have supplied.
+ */
+const sendRendererEvent = (
+  target: Cell<unknown> | Stream<unknown>,
+  event: unknown,
+): void => {
+  const keys = isRecord(event)
+    ? rendererInjectedEventKeys.get(event)
+    : undefined;
+  target.withTx(undefined).send(event, undefined, {
+    runtimeInjectedEventKeys: keys,
+  });
+};
 
 const logger = getLogger("worker-reconciler", {
   enabled: false,
@@ -394,6 +447,7 @@ export class WorkerReconciler {
     if (handler) {
       try {
         markRendererTrustedEvent(event);
+        markRendererInjectedEventKeys(event);
         handler(event);
       } catch (error) {
         this.onError?.(
@@ -1952,7 +2006,7 @@ export class WorkerReconciler {
     if (isStream(value)) {
       const stream = value as Stream<unknown>;
       const handlerId = ctx.registerHandler((event) => {
-        stream.withTx(undefined).send(event);
+        sendRendererEvent(stream, event);
       });
       state.eventHandlers.set(eventType, handlerId);
       this.queueOps([{
@@ -2154,7 +2208,7 @@ export class WorkerReconciler {
           if (existingState) existingState.cancel();
 
           const handlerId = ctx.registerHandler((event) =>
-            resolvedTarget.withTx(undefined).send(event)
+            sendRendererEvent(resolvedTarget, event)
           );
           state.eventHandlers.set(eventType, handlerId);
           this.queueOps([{
@@ -2927,7 +2981,7 @@ export class WorkerReconciler {
         if (isStream(value)) {
           const stream = value as Stream<unknown>;
           const handlerId = ctx.registerHandler((event) => {
-            stream.withTx(undefined).send(event);
+            sendRendererEvent(stream, event);
           });
           state.eventHandlers.set(eventType, handlerId);
           this.queueOps([{

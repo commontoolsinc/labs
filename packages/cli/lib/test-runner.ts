@@ -1491,9 +1491,11 @@ export async function runTestPattern(
         // Send the step's event (undefined for plain void actions), wrapped
         // with renderer-trusted provenance when the step declares `trustedUi`.
         await withPhase(["runTestPattern", "step", actionName, "send"], () => {
-          actionStream.send(
-            buildActionEvent(stepValue.event, stepValue.trustedUi),
+          const action = buildActionEvent(
+            stepValue.event,
+            stepValue.trustedUi,
           );
+          actionStream.send(action.value, undefined, action.sendOptions);
         });
 
         // Wait for idle, then settle commits and re-idle.

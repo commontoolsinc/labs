@@ -285,8 +285,12 @@ export const recordRelevantSchemaWritePolicyInput = (
  * same-id retry collides on the handling's create-only receipt.
  *
  * `runtimeInjectedEventKeys` names payload keys the RUNTIME itself merged
- * into this send's event value (the LLM tool-call path injects a `result`
- * cell: `builtins/llm-dialog.ts` sends `{ ...input, result }`). The
+ * into this send's event value. Two paths inject: the LLM tool-call path
+ * adds a `result` cell (`builtins/llm-dialog.ts` sends `{ ...input, result }`),
+ * and the renderer builds a whole DOM-event envelope — `type`, `provenance`,
+ * the allowlisted key/modifier/button properties, `target`, `detail` — from
+ * the browser's event (`packages/html/src/event-envelope.ts` names that set,
+ * and the worker reconciler mints the subset actually present). The
  * dispatch-side closed-world gate exempts exactly these keys — and only
  * these — from an `additionalProperties: false` event schema. The marker is
  * PROVENANCE, not shape, and must stay unforgeable: it rides this
@@ -296,10 +300,13 @@ export const recordRelevantSchemaWritePolicyInput = (
  * send options itself and puts only `eventId` in them. In-process callers are
  * gated too: the value must be an
  * array MINTED by {@link markRuntimeInjectedEventKeys} — the stream-send
- * path drops any other value — and the mint lives in runner internals no
- * pattern compartment can import, so sandboxed pattern code holding a real
- * stream cell still cannot smuggle an undeclared key past closed-world by
- * passing a plain array here. Adding any data-expressible way to set it
+ * path drops any other value — and the mint reaches only host code that can
+ * import runner internals or `@commonfabric/runner/cfc`. A pattern
+ * compartment resolves neither: its module graph admits `commonfabric`,
+ * `commonfabric/cfc`, `commonfabric/schema` and `turndown` alone
+ * (`sandbox/runtime-module-policy.ts`), so sandboxed pattern code holding a
+ * real stream cell still cannot smuggle an undeclared key past closed-world
+ * by passing a plain array here. Adding any data-expressible way to set it
  * would reopen the accepted-and-ignored hole C5 closes.
  */
 export type StreamSendOptions = {
@@ -309,9 +316,10 @@ export type StreamSendOptions = {
 
 // The mint registry backing `runtimeInjectedEventKeys` (see
 // StreamSendOptions): membership here is the capability. Only code that can
-// call `markRuntimeInjectedEventKeys` — runner-internal modules and
-// same-package tests; never a pattern compartment, whose module graph cannot
-// import runner internals — can produce an array the send path accepts.
+// call `markRuntimeInjectedEventKeys` — runner-internal modules, same-package
+// tests, and the host packages that import it through
+// `@commonfabric/runner/cfc`; never a pattern compartment, whose module graph
+// resolves neither — can produce an array the send path accepts.
 const mintedRuntimeInjectedKeys = new WeakSet<readonly string[]>();
 
 /**
