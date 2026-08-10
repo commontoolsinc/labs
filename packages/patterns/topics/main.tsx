@@ -27,6 +27,7 @@ import Topic, {
   topicAuthorLabel,
   topicCellLink,
   topicCorpus,
+  type TopicCrossrefs,
   type TopicNavigationLink,
   type TopicPiece,
   TOPICS_THEME,
@@ -313,6 +314,7 @@ export { crossrefLinkRow, topicCellLink } from "./topic.tsx";
 export const submitProfileTopic = handler<void, {
   topics: Writable<TopicPiece[] | Default<[]>>;
   mentionable: Writable<TopicPiece[] | Default<[]>>;
+  boardCrossrefs: Writable<TopicCrossrefs[] | Default<[]>>;
   newTitle: Writable<string>;
   myName: Writable<string | Default<"">>;
   profileName: string;
@@ -320,6 +322,7 @@ export const submitProfileTopic = handler<void, {
 }>((_, {
   topics,
   mentionable,
+  boardCrossrefs,
   newTitle,
   myName,
   profileName,
@@ -335,6 +338,11 @@ export const submitProfileTopic = handler<void, {
     createdByName: topicAuthorLabel(author),
     myName,
     mentionable,
+    // Same wiring `addTopic` gives its children. Without it a topic composed
+    // in the browser — which is most of them — derives `referencedBy` from the
+    // whole corpus locally, so the read bound this pattern is built around
+    // would apply only to topics an agent created.
+    boardCrossrefs,
   });
   topics.push(piece);
   newTitle.set("");
@@ -413,6 +421,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   const submitTopic = submitProfileTopic({
     topics,
     mentionable: topics,
+    boardCrossrefs: rows,
     newTitle,
     myName,
     profileName,
