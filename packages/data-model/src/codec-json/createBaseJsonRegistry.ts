@@ -25,6 +25,9 @@ import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
  * Another wire format makes different choices here, which is what separates
  * this from the class rosters it gets combined with: those stay the same
  * whatever the format.
+ *
+ * The result is frozen, so add classes with `CodecRegistry.extend()` rather
+ * than by registering onto it.
  */
 export function createBaseJsonRegistry(): CodecRegistry {
   const registry = new CodecRegistry();
@@ -44,5 +47,6 @@ export function createBaseJsonRegistry(): CodecRegistry {
   registry.registerSelfRep("number");
   registry.registerSelfRep("string");
 
+  Object.freeze(registry);
   return registry;
 }
