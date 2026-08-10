@@ -409,23 +409,30 @@ diffing and the scheduler's own reads keep eager semantics.
       runtime-internal reads kept out of the scheduler's view of what the ACTION
       read. This fixed `incremental observation adoption (live)`,
       `Pattern Runner - Dynamic Patterns` and `scheduler cold-replica startup`.
-- [ ] Find why an `asCell` property reads back as a plain value under the flag.
-      All five patterns integration failures show it:
-      `profile?.get is not a
-      function`, where the pattern declares
-      `authorProfile: ProfileCell`. The containing type is a discriminated union
-      of two object shapes, and both branches declare that property as `asCell`,
-      so there is nothing ambiguous for a narrowing to resolve — a constraint
-      forbidding object-valued non-`asCell` branches would not apply, and would
-      not help.
+- [ ] Finish carrying `asCell` through a `$ref` union. The chain is now traced,
+      and two of its three links are fixed.
 
-      Union narrowing is the obvious suspect and is so far unconfirmed: a
-      direct reproduction of the shape — two object branches both declaring the
-      same `asCell` property, and again with the branches as `$ref`s into
-      `$defs` (which reproduces the "Unresolved $ref in schema" warnings the
-      failing run emits) — hands back a working `Cell` under the flag in every
-      variation tried. Get the actual narrowed schema out of the failing pattern
-      before theorizing further.
+      1. The union's branches are bare `$ref`s. `canBranchMatch` resolves a ref
+         on its own but has no `$defs` to resolve it against, so every branch
+         matched and the union never narrowed at all — the narrowed schema came
+         back byte-identical to the input. **Fixed:** branches resolve against
+         the union's own `$defs` before matching.
+      2. Where several branches still match, merging their SCHEMAS leaves
+         `asCell` off the merged top level, while an eager read evaluates each
+         branch and picks the cell among the RESULTS (`mergeMatches`).
+         **Fixed:** a matching branch that declares `asCell` is preferred over
+         the merge, and a view mints the handle when narrowing reveals one that
+         the entry point could not see.
+      3. **Open:** resolving a `$ref` strips `asCell`. Before resolution the
+         `$defs` entry reads
+         `authorProfile: {anyOf: [undefined, {anyOf: [...], asCell: ["cell"]}]}`;
+         after, the `asCell` is gone. So the marker is lost inside resolution
+         itself, before any narrowing decision sees it. That is where the
+         remaining work is, and it is worth checking whether the eager path
+         depends on the same resolution keeping it.
+
+      Effect so far: `multi-user.test.tsx` went from 3 failures to 2. The
+      symptom is unchanged for the rest — `profile?.get is not a function`.
 - [ ] Decide the forwarding case (`Pattern Runner - Lift`): a lift that forwards
       its argument without reading it takes no dependency on the values inside
       and re-runs once rather than twice. Its computed result is unchanged.

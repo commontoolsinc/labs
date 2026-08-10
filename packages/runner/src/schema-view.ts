@@ -139,6 +139,27 @@ const typeAccepts = (declared: unknown, actual: string): boolean => {
   );
 };
 
+/** A branch with its `$ref` resolved against the union's own `$defs`. */
+const resolveBranch = (
+  branch: JSONSchema,
+  parent: JSONSchemaObj,
+): JSONSchema => {
+  if (!isRecord(branch) || !("$ref" in branch) || !isRecord(parent.$defs)) {
+    return branch;
+  }
+  try {
+    const resolved = ContextualFlowControl.resolveSchemaRefsOrThrow(
+      branch as JSONSchemaObj,
+      { $defs: parent.$defs } as JSONSchemaObj,
+    );
+    return isRecord(resolved) ? resolved : branch;
+  } catch {
+    // An unresolvable ref stays as it was; matching then keeps the branch,
+    // which is the same answer as before and never narrows away real data.
+    return branch;
+  }
+};
+
 /**
  * Narrow a union against the value in front of it.
  *
@@ -152,15 +173,33 @@ const narrowForValue = (
   value: FabricValue,
 ): JSONSchema | undefined => {
   if (!isRecord(schema)) return schema;
-  const branches = schema.anyOf ?? schema.oneOf;
-  if (!Array.isArray(branches) || branches.length === 0) return schema;
+  const rawBranches = schema.anyOf ?? schema.oneOf;
+  if (!Array.isArray(rawBranches) || rawBranches.length === 0) return schema;
+  // Resolve `$ref` branches against this schema's own `$defs` first. A branch
+  // written as a bare `$ref` carries no `type`, no `required` and no `asCell`,
+  // so matching it decides nothing: every branch survives, the union never
+  // narrows, and whatever the branches declared — including a property the
+  // pattern declared as a `Cell` — is unreachable. `canBranchMatch` resolves a
+  // ref on its own but has no `$defs` to resolve it against, which is where the
+  // "Unresolved $ref in schema" warnings come from.
+  const branches = rawBranches.map((branch) => resolveBranch(branch, schema));
   const matching = branches.filter((branch) => canBranchMatch(branch, value));
   if (matching.length === 0) return false;
-  if (matching.length === 1) {
-    return isRecord(matching[0]) && isRecord(schema.$defs)
-      ? { ...matching[0] as JSONSchemaObj, $defs: schema.$defs }
-      : matching[0];
-  }
+  const withDefs = (branch: JSONSchema): JSONSchema =>
+    isRecord(branch) && isRecord(schema.$defs)
+      ? { ...branch as JSONSchemaObj, $defs: schema.$defs }
+      : branch;
+  if (matching.length === 1) return withDefs(matching[0]);
+  // Prefer a branch that declares `asCell`. An eager read evaluates every
+  // matching branch and picks the cell among the results (`mergeMatches`);
+  // merging the SCHEMAS instead leaves the marker off the merged top level, so
+  // a property the pattern declared as a `Cell` — `authorProfile: ProfileCell`
+  // on a message union — comes back as a plain value and `.get()` is not a
+  // function. Preferring the branch keeps the two reads agreeing.
+  const asCellBranch = matching.find((branch) =>
+    ContextualFlowControl.getAsCellValues(branch).length > 0
+  );
+  if (asCellBranch !== undefined) return withDefs(asCellBranch);
   return mergeAnyOfBranchSchemas(matching as JSONSchema[], schema) ?? schema;
 };
 
@@ -241,6 +280,22 @@ export function materializeSchemaView(
   const schema = narrowForValue(link.schema, value);
   if (schema === false) {
     return mismatch("no branch of the schema matches this value");
+  }
+
+  const asCellValues = ContextualFlowControl.getAsCellValues(schema);
+  if (asCellValues.length > 0) {
+    // `validateAndTransform` dispatches `asCell` before handing over, but only
+    // on what it can see at the top of the schema. Narrowing a union against
+    // the value can surface a branch that declares one, and the reader is owed
+    // the same handle either route would have produced.
+    return createCell(
+      runtime,
+      { ...link, schema },
+      tx,
+      synced,
+      ContextualFlowControl.getAsCellKind(asCellValues.at(0)),
+      cfcLabelView,
+    );
   }
 
   const actualType = jsonTypeOf(value);
