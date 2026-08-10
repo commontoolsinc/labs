@@ -33,23 +33,20 @@ belongs in one document even when the reasoning belongs in two.
 
 ## State
 
-Twelve pull requests are open against this work. They are listed here because a
-driver needs to know what is already moving before scheduling anything new.
+Three pull requests remain open against this work. They are listed here because
+a driver needs to know what is already moving before scheduling anything new.
 
 | PR | What | State |
 | --- | --- | --- |
-| #5307 | closed-world verb event schemas | code is gate-clear, 336/336 patterns; held for confirmation of the recorded skew policy, the one question named open |
-| #5309 | wrapper-tier and deprecated listing marks | current; compat classification landed ahead of emission. Shipped as specced with one measured narrowing — the inference needs a **void event** as well as a session-scoped binding, or the rule marks `topics.addTopic`, a headless verb that merely clears the composer draft after a create. That conjunct is the PR's named veto point |
-| #5458 | the shared read step, factored out | open |
-| #5459 | `--piece` accepts the `of:` entity URI | open |
-| #5468 | receipts carry a descriptive schema | open |
-| #5469 | invocation ids scoped to a session | open |
-| #5470 | `$link` marks a position for its address | open |
-| #5497 | a projection keyword names its container | open |
-| #5500 | `--select` and `--schema` split | open |
-| #5501 | a verb's declared result reaches its module | **draft — the open decision** |
-| #5504 | `@` marks a position in a field list | open |
-| #5505 | `piece call` takes the selection flags | open |
+| #5501 | a verb's declared result reaches its module | ready; the decision below is made, and the producer half is green |
+| #5504 | `@` marks a position in a field list | open; two `notes@` per-element walkthrough assertions fail against a live toolshed — the behaviour's first contact with a real server |
+| #5307 | closed-world verb event schemas | open; the emission is written and four Pattern Update Compatibility shards fail, so baselines want re-recording. Carries the item 11 question |
+
+**The read layer has landed.** #5309, #5459, #5468, #5469, #5470, #5497, #5500
+and #5505 are merged, and #5504 is the last of it still open. #5458 is closed
+rather than merged because its rename was folded into #5470's squash; the shared
+read step it factored out is on main as `packages/cli/lib/cell-selection.ts`.
+A reader who goes looking for #5458 should not conclude the step was dropped.
 
 ## The decision that was waiting, and the condition it carries
 
@@ -174,20 +171,19 @@ other command accepts, which this is the occasion to make the declared shape.
 *Exit:* the same cell, reached four ways, renders identically under the same
 selection.
 
-## Landed, pending merge
+## Landed, and what consumes it
 
-**6. The read layer.** #5458, #5470, #5497, #5500, #5504, #5505, #5459 — the
-shared read step, address markers with the deepest-link rule, container
-inference, the flag split, the `@` suffix, call selection, and entity-URI
-intake. All built and restacked onto current main. The first six are one
-stack; #5459 is independent of it and of everything else here.
+**6. The read layer.** The shared read step, address markers with the
+deepest-link rule, container inference, the flag split, call selection, and
+entity-URI intake are on main. The `@` suffix (#5504) is the last piece still
+open.
 
-**7. Session-scoped invocation ids.** #5469. The one address-changing commit;
-it lands alone, ahead of anything that publishes a receipt address, so no caller
-holds one that moves.
+**7. Session-scoped invocation ids.** On main. The one address-changing commit,
+and it landed ahead of anything that publishes a receipt address, so no caller
+holds one that moves. That ordering is what item 4 was waiting for.
 
-**8. Descriptive receipt schemas.** #5468. Plain results only — a verb returning
-anything reactive gets none, which is what item 1 decides.
+**8. Descriptive receipt schemas.** On main. Plain results only — a verb
+returning anything reactive gets none, which is what item 1 decides.
 
 **9. Closed-world event schemas and listing marks.** #5307 and #5309, from the
 verb contract arc. Both unblocked; both wanted a courtesy review rather than a
@@ -210,9 +206,8 @@ joins them.
 
 | Item | After | Why |
 | --- | --- | --- |
-| 6 (stack) | — | the stack merges bottom-up: #5458 → #5470 → #5497 → #5500 → {#5504, #5505} |
-| 6 (#5459) | — | not in the stack; entity-URI intake stands alone and merges whenever |
-| 7 | — | independent of 6; must precede 4 |
+| 6 | — | landed but for #5504, which merges whenever it is green |
+| 7 | — | landed, and it preceded 4 as required |
 | 8, 9 | — | independent |
 | 2 | 6 | changes what the flags accept |
 | 3 | 6 | completes the suppression property |
@@ -280,8 +275,8 @@ July result-schema work, and what #5309 got right by hand.
 
 ## What comes after
 
-This plan is exhausted when items 1-5 are decided or built and the twelve open
-pull requests have landed. Two arcs are queued behind it, and naming their
+This plan is exhausted when items 1-5 are decided or built and the open pull
+requests have landed. Two arcs are queued behind it, and naming their
 triggers here is what keeps them from being dropped when this document stops
 being read.
 
