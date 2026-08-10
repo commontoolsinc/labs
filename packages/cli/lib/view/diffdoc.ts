@@ -987,6 +987,8 @@ interface MutableLine {
 interface FragmentLine {
   diffLine: number;
   code: string;
+  /** Whether decoding removed a BOM before parsing this source line. */
+  omitsUtf8Bom?: boolean;
   /** Context can establish old-side state without replacing new-side colours. */
   render?: boolean;
 }
@@ -1113,15 +1115,27 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     if (entry.kind !== "ctx" && entry.kind !== "add" && entry.kind !== "del") {
       continue;
     }
-    const code = t.slice(1);
+    const body = t.slice(1);
+    const oldCode = decodedDiffBodyLine(body, entry.oldLine);
+    const newCode = decodedDiffBodyLine(body, entry.newLine);
     if (entry.kind === "add") lines[i].bg = "add";
     if (entry.kind === "del") lines[i].bg = "del";
 
     if (entry.kind === "ctx") {
-      oldFragment.push({ diffLine: i, code, render: false });
+      oldFragment.push({
+        diffLine: i,
+        code: oldCode,
+        omitsUtf8Bom: oldCode !== body,
+        render: false,
+      });
     }
     if (entry.kind === "del") {
-      const fragment = { diffLine: i, code, render: false };
+      const fragment = {
+        diffLine: i,
+        code: oldCode,
+        omitsUtf8Bom: oldCode !== body,
+        render: false,
+      };
       oldFragment.push(fragment);
       const sourceLine = ctx.oldSourceLines?.[entry.oldLine!];
       if (sourceLine) sourceFallbacks.set(i, sourceLine);
@@ -1176,10 +1190,18 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
         }
         lines[i].spans = shifted;
       } else {
-        newFragment.push({ diffLine: i, code });
+        newFragment.push({
+          diffLine: i,
+          code: newCode,
+          omitsUtf8Bom: newCode !== body,
+        });
       }
     } else {
-      newFragment.push({ diffLine: i, code });
+      newFragment.push({
+        diffLine: i,
+        code: newCode,
+        omitsUtf8Bom: newCode !== body,
+      });
     }
   }
 
@@ -1249,7 +1271,7 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
       doc: newParsed,
       lineToDiff: new Map(newFragment.map((f, i) => [i, f.diffLine])),
       lineStarts: computeLineStarts(newFragment.map((f) => f.code).join("\n")),
-      omitsUtf8Bom: false,
+      omitsUtf8Bom: newFragment.some((fragment) => fragment.omitsUtf8Bom),
     };
   }
   if (source) {
@@ -1438,12 +1460,15 @@ function applyFragmentSpans(
   if (fragment.length === 0) return null;
   const text = fragment.map((f) => f.code).join("\n");
   const parsed = language.parseDocument(text, fileName);
+  const sourceLines = language.renderLineTopology === "independent"
+    ? language.highlightLines(text, fileName)
+    : parsed.lines;
   const rendered = viewMode === "rendered" &&
     canRenderDiffLines(language) &&
     (!language.renderNeedsCompleteFile || completeFileContext);
   const displayed = rendered
-    ? renderedLinesFor(language, text, fileName) ?? parsed.lines
-    : parsed.lines;
+    ? renderedLinesFor(language, text, fileName) ?? sourceLines
+    : sourceLines;
   for (let i = 0; i < fragment.length; i++) {
     if (fragment[i].render === false) continue;
     const { diffLine } = fragment[i];
@@ -1454,12 +1479,25 @@ function applyFragmentSpans(
     if (rendered && displayed[i]?.renderedSourceHidden) {
       lines[diffLine].renderedSourceHidden = true;
     }
-    lines[diffLine].spans = shiftSpans(
-      markerSpan(lineText),
+    lines[diffLine].spans = shiftFragmentSpans(
+      lineText,
       displayed[i]?.spans ?? [],
+      fragment[i].omitsUtf8Bom === true,
     );
   }
   return parsed;
+}
+
+function shiftFragmentSpans(
+  lineText: string,
+  spans: readonly Span[],
+  omitsUtf8Bom: boolean,
+): Span[] {
+  if (!omitsUtf8Bom) return shiftSpans(markerSpan(lineText), spans);
+  return shiftSpans(markerSpan(lineText), [
+    { col: 0, text: "\uFEFF", cls: "whitespace" },
+    ...spans.map((span) => ({ ...span, col: span.col + 1 })),
+  ]);
 }
 
 // --- offset maps for semantics ----------------------------------------------
