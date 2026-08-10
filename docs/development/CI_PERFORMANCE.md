@@ -67,16 +67,19 @@ before optimizing there.
 
 ### Pattern Integration Sharding
 
-Pattern Integration runs four jobs. Most integration test files run in exactly
-one job. Tests that sweep a pattern list run in every job and divide their own
-cases with `PATTERN_INTEGRATION_SHARD`. An unset variable selects every case, so
-the ordinary local command remains unsharded.
+Pattern Integration runs as a job matrix. Most integration test files run in
+exactly one job. Tests that sweep a pattern list run in every job and divide
+their own cases with `PATTERN_INTEGRATION_SHARD`. An unset variable selects
+every case, so the ordinary local command remains unsharded.
 
 `INTERNALLY_SHARDED_PATTERN_INTEGRATION_FILES` in
 `tasks/select-pattern-integration-files.ts` is the list of files that run in
 every job. Those files select their cases through
 `packages/patterns/integration/pattern-integration-shard.ts`. The selector tests
 verify that every real integration file follows one of these two contracts.
+Measured file assignments for the current matrix live in
+`PATTERN_INTEGRATION_SHARD_ASSIGNMENTS`. Files added after the latest timing
+profile are distributed round-robin until the table assigns them.
 
 Use internal sharding for a single file with many independent, expensive cases.
 Moving that file intact between jobs moves the delay without dividing it. Keep
@@ -198,11 +201,11 @@ missing marker is easy to find and fix.
 
 ## Root Test Job Shape
 
-The `Test (n/6)` jobs in `.github/workflows/deno.yml` run the root
-`deno task test` on standard runners, sharded six ways with `TEST_SHARD` and
-with `TEST_DISABLED_PACKAGES=runner`. The runner package has its own sharded
-CI job, so the root jobs skip it. Each shard collects workspace coverage for
-its packages with `DENO_COVERAGE_DIR` and uploads it as
+The `Test` matrix jobs in `.github/workflows/deno.yml` run the root
+`deno task test` on standard runners, sharded with `TEST_SHARD` and with
+`TEST_DISABLED_PACKAGES=runner`. The runner package has its own sharded CI job,
+so the root jobs skip it. Each shard collects workspace coverage for its
+packages with `DENO_COVERAGE_DIR` and uploads it as
 `coverage-profile-workspace-<shard>`.
 
 The root task is `tasks/test.ts`. It reads the workspace list from
@@ -229,9 +232,9 @@ the weighted assignment. A shard-count change must also update the
 `tasks/coverage-check.ts`, which the Coverage Check gate uses to require every
 shard's coverage artifact.
 
-A package too heavy for any single shard can be split internally: the cli,
-piece, and tasks packages run as three units via their package-specific shard
-variables (see
+A package too heavy for any single shard can be split internally. The CLI,
+piece, and tasks packages run as multiple units via their package-specific
+shard variables (see
 `INTERNALLY_SHARDED_PACKAGES` in `tasks/workspace-tests.ts` and
 `packages/cli/test/run-tests.ts` or `tasks/run-sharded-test-files.ts`), so their
 slices spread across workspace shards. Slices of one package occupy distinct
@@ -241,9 +244,17 @@ running many independent test modules serially. Deno's `--parallel` mode can
 reduce that package's wall time, but only after checking for tests that share
 process-wide state.
 
+The CLI's commit-message tests are split across numbered
+`view-commitmsg-*.test.ts` files. Some of these tests change process environment
+while installing Git shims, so every file in the family stays in the serial
+group. Their numbered filenames are consecutive in the sorted test inventory,
+so ordinary file assignment places one in each CLI slice. An unsharded local
+CLI test run executes every file.
+
 ### Runner Test Sharding
 
-Runner test modules are assigned across five jobs by observed per-file cost.
+Runner test modules are assigned across the job matrix by observed per-file
+cost.
 `RUNNER_TEST_WEIGHTS` in `tasks/test-timing-weights.ts` records only files whose
 cost materially affects placement; every other file receives a unit weight.
 The longest-processing-time assignment in `tasks/weighted-shards.ts` places
@@ -268,10 +279,12 @@ Known serial CLI tests:
   `test/fuse.test.ts`, `test/inspect-remote.test.ts`,
   `test/log-level.test.ts`, `test/main-command.test.ts`,
   `test/test-runner-compile-byte-cache.test.ts`,
-  `test/test-runner-pattern-coverage.test.ts`, `test/view-commitmsg.test.ts`
-  and `test/wish-command.test.ts` set an environment variable that the test
-  process itself then reads, so another file setting the same name would
-  decide what they read.
+  `test/test-runner-pattern-coverage.test.ts`, and `test/wish-command.test.ts`
+  set an
+  environment variable that the test process itself then reads, so another
+  file setting the same name would decide what they read.
+- Every `test/view-commitmsg-*.test.ts` file remains serial because some tests
+  in the family install Git shims by changing process environment.
 - `test/json-command.test.ts` and `test/runtime-creation.test.ts` replace
   globals — the console methods and runtime prototype methods.
 - `test/view-mod-gate.test.ts` changes into a removed directory to test the

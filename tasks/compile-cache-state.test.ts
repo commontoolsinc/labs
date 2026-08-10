@@ -147,7 +147,7 @@ Deno.test("COMPILE_CACHE_KEY_GLOBS matches the cc-* cache keys in deno.yml", asy
   }
 });
 
-Deno.test("pattern integration cache rotates for .ts and .tsx changes", async () => {
+Deno.test("pattern integration cache follows sources and shard selector", async () => {
   const workflow = await Deno.readTextFile(
     new URL("../.github/workflows/deno.yml", import.meta.url),
   );
@@ -158,9 +158,9 @@ Deno.test("pattern integration cache rotates for .ts and .tsx changes", async ()
   const job = workflow.slice(start, end);
   assert(
     job.includes(
-      "hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx')",
+      "hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'tasks/select-pattern-integration-files.ts')",
     ),
-    "pattern integration cache must rotate when either TypeScript extension changes",
+    "pattern integration cache must rotate when source or file assignment changes",
   );
 });
 

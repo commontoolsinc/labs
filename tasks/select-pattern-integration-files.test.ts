@@ -1,9 +1,10 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import {
   assignPatternIntegrationShards,
-  FOUR_SHARD_ASSIGNMENTS,
   INTERNALLY_SHARDED_PATTERN_INTEGRATION_FILES,
   listPatternIntegrationTests,
+  PATTERN_INTEGRATION_SHARD_ASSIGNMENTS,
+  PATTERN_INTEGRATION_SHARD_COUNT,
   selectPatternIntegrationFiles,
 } from "./select-pattern-integration-files.ts";
 import { parseShard } from "./shard-utils.ts";
@@ -12,7 +13,7 @@ import {
   selectPatternIntegrationShard,
 } from "../packages/patterns/integration/pattern-integration-shard.ts";
 
-const TOTAL_SHARDS = 4;
+const TOTAL_SHARDS = PATTERN_INTEGRATION_SHARD_COUNT;
 const INTERNALLY_SHARDED_FILE_NAMES = new Set<string>(
   INTERNALLY_SHARDED_PATTERN_INTEGRATION_FILES,
 );
@@ -70,13 +71,14 @@ Deno.test("pattern integration shard rejects an explicitly empty setting", () =>
 });
 
 Deno.test("pattern integration shard divides items exactly once", () => {
+  const total = 4;
   const items = ["a", "b", "c", "d", "e", "f", "g"];
   const selections = Array.from(
-    { length: TOTAL_SHARDS },
+    { length: total },
     (_, index) =>
       selectPatternIntegrationShard(
         items,
-        parsePatternIntegrationShard(`${index + 1}/${TOTAL_SHARDS}`),
+        parsePatternIntegrationShard(`${index + 1}/${total}`),
       ),
   );
   assertEquals(selections, [
@@ -131,48 +133,102 @@ Deno.test("pattern integration shard rejects unsafe integer values", () => {
   }
 });
 
-Deno.test("pattern integration profile separates a fixed round-robin collision", () => {
-  const cfCodeEditor = "cf-code-editor.test.ts";
-  const convergenceStorm = "convergence-storm.test.ts";
-  const files = [
-    "a-round-robin-control.test.ts",
-    cfCodeEditor,
-    "cfc-round-robin-control-a.test.ts",
-    "cfc-round-robin-control-b.test.ts",
-    "cfc-round-robin-control-c.test.ts",
-    convergenceStorm,
-  ];
-  const roundRobin = new Map(
-    files.toSorted().map((name, index) => [name, index % TOTAL_SHARDS + 1]),
-  );
-  const assignment = assignPatternIntegrationShards(files, TOTAL_SHARDS);
-
-  assertEquals(
-    {
-      cfCodeEditor: roundRobin.get(cfCodeEditor),
-      convergenceStorm: roundRobin.get(convergenceStorm),
-    },
-    { cfCodeEditor: 2, convergenceStorm: 2 },
-    "the fixed round-robin control should reproduce the collision",
-  );
-  assertEquals(
-    {
-      cfCodeEditor: assignment.get(cfCodeEditor),
-      convergenceStorm: assignment.get(convergenceStorm),
-    },
-    { cfCodeEditor: 1, convergenceStorm: 3 },
-    "the profiled assignment should separate the two expensive files",
-  );
+Deno.test("pattern integration assignments reject other shard counts", () => {
+  for (const total of [TOTAL_SHARDS - 1, TOTAL_SHARDS + 1]) {
+    assertThrows(
+      () => assignPatternIntegrationShards([], total),
+      Error,
+      `require ${TOTAL_SHARDS} shards`,
+    );
+  }
 });
 
-Deno.test("profiled pattern integration assignments name real files", async () => {
+Deno.test("pattern integration assignments name real files", async () => {
   const files = new Set(await listPatternIntegrationTests());
-  for (const name of Object.keys(FOUR_SHARD_ASSIGNMENTS)) {
+  for (const name of Object.keys(PATTERN_INTEGRATION_SHARD_ASSIGNMENTS)) {
     assertEquals(
       files.has(name),
       true,
-      `profiled assignment ${name} should name a real integration test`,
+      `assignment ${name} should name a real integration test`,
     );
+  }
+});
+
+Deno.test("pattern integration assignments separate expensive files", async () => {
+  const expensiveFiles = [
+    "cf-code-editor.test.ts",
+    "home-profile.test.ts",
+    "convergence-storm.test.ts",
+  ];
+  const assignments = assignPatternIntegrationShards(
+    await listPatternIntegrationTests(),
+    TOTAL_SHARDS,
+  );
+  const assignedShards = expensiveFiles.map((name) => assignments.get(name));
+
+  assertEquals(
+    assignedShards.every((shard) => shard !== undefined),
+    true,
+    "every expensive file should have an assignment",
+  );
+  assertEquals(
+    new Set(assignedShards).size,
+    expensiveFiles.length,
+    "expensive files should run in distinct shards",
+  );
+});
+
+Deno.test("profiled pattern files avoid shard one", async () => {
+  const assignments = assignPatternIntegrationShards(
+    await listPatternIntegrationTests(),
+    TOTAL_SHARDS,
+  );
+  const profiledFiles = new Set(
+    Object.keys(PATTERN_INTEGRATION_SHARD_ASSIGNMENTS),
+  );
+  const ordinaryFiles = [...assignments]
+    .filter(([name, shard]) => profiledFiles.has(name) && shard === 1)
+    .map(([name]) => name);
+
+  assertEquals(
+    ordinaryFiles,
+    [],
+    "profiled files should not be assigned to shard one",
+  );
+});
+
+Deno.test("pattern integration assignments select their declared shard", () => {
+  const files = Object.keys(PATTERN_INTEGRATION_SHARD_ASSIGNMENTS);
+  for (
+    const [name, declaredShard] of Object.entries(
+      PATTERN_INTEGRATION_SHARD_ASSIGNMENTS,
+    )
+  ) {
+    assertEquals(
+      Number.isSafeInteger(declaredShard) && declaredShard >= 1 &&
+        declaredShard <= TOTAL_SHARDS,
+      true,
+      `${name} must name a shard between 1 and ${TOTAL_SHARDS}`,
+    );
+  }
+  for (let index = 1; index <= TOTAL_SHARDS; index++) {
+    const selected = new Set(
+      selectPatternIntegrationFiles(files, {
+        index,
+        total: TOTAL_SHARDS,
+      }).map((path) => path.replace("./integration/", "")),
+    );
+    for (
+      const [name, declaredShard] of Object.entries(
+        PATTERN_INTEGRATION_SHARD_ASSIGNMENTS,
+      )
+    ) {
+      assertEquals(
+        selected.has(name),
+        declaredShard === index,
+        `${name} should run in shard ${declaredShard}`,
+      );
+    }
   }
 });
 
@@ -183,8 +239,11 @@ Deno.test("internally sharded files run in every shard", () => {
     "default-app.test.ts",
     "parking-coordinator-admin-view.test.ts",
   ];
-  for (let index = 1; index <= 4; index++) {
-    const selected = selectPatternIntegrationFiles(files, { index, total: 4 });
+  for (let index = 1; index <= TOTAL_SHARDS; index++) {
+    const selected = selectPatternIntegrationFiles(files, {
+      index,
+      total: TOTAL_SHARDS,
+    });
     for (const name of INTERNALLY_SHARDED_PATTERN_INTEGRATION_FILES) {
       assertEquals(
         selected.includes(`./integration/${name}`),
@@ -206,8 +265,11 @@ Deno.test("every file without internal sharding is assigned to one shard", () =>
     "new-unmapped-file.test.ts",
   ];
   const counts = new Map<string, number>();
-  for (let index = 1; index <= 4; index++) {
-    const selected = selectPatternIntegrationFiles(files, { index, total: 4 });
+  for (let index = 1; index <= TOTAL_SHARDS; index++) {
+    const selected = selectPatternIntegrationFiles(files, {
+      index,
+      total: TOTAL_SHARDS,
+    });
     for (const path of selected) {
       const name = path.replace("./integration/", "");
       if (INTERNALLY_SHARDED_FILE_NAMES.has(name)) continue;
@@ -258,7 +320,7 @@ Deno.test("every real integration file follows its sharding contract", async () 
     if (INTERNALLY_SHARDED_FILE_NAMES.has(name)) {
       assertEquals(
         shards,
-        [1, 2, 3, 4],
+        Array.from({ length: TOTAL_SHARDS }, (_, index) => index + 1),
         `${name} should run in every shard`,
       );
     } else {

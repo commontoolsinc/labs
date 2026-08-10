@@ -15,68 +15,85 @@ const INTERNALLY_SHARDED_FILE_SET = new Set<string>(
   INTERNALLY_SHARDED_PATTERN_INTEGRATION_FILES,
 );
 
-// Explicit assignments balance the canonical four browser-integration shards
-// using observed CI per-file timings. Files added after the latest profile fall
-// back to round-robin over the unlisted files.
-export const FOUR_SHARD_ASSIGNMENTS: Readonly<Record<string, number>> = {
-  // shard 1
-  "parking-coordinator-admin-view.test.ts": 1,
-  "nested-counter.test.ts": 1,
-  "chat-note.test.ts": 1,
-  "fetch-json.test.ts": 1,
-  "cell-flip-shaping.test.ts": 1,
-  "cf-code-editor.test.ts": 1,
-  "home-profile-reload-durability.test.ts": 1,
-  "sqlite-db-owner-multi-runtime.test.ts": 1,
+export const PATTERN_INTEGRATION_SHARD_COUNT = 8;
 
+// The assignment includes the measured work from the files that run in
+// every job. Its measured files leave shard 1 with only internally sharded
+// work.
+export const PATTERN_INTEGRATION_SHARD_ASSIGNMENTS: Readonly<
+  Record<string, number>
+> = {
   // shard 2
-  "cfc-group-chat-demo-two-browsers.test.ts": 2,
-  "cfc-staged-publish.test.ts": 2,
-  "cfc-group-chat-demo-multi-runtime.test.ts": 2,
+  "cf-code-editor.test.ts": 2,
   "cfc-authorship-chat.test.ts": 2,
-  "cellset-lww-lost-update.test.ts": 2,
-  "cf-render.test.ts": 2,
-  "home-rehydration-churn.test.ts": 2,
-  "sqlite-read-clearance-multi-runtime.test.ts": 2,
+  "cfc-group-chat-demo-multi-runtime.test.ts": 2,
+  "cfc-spec-gallery.test.ts": 2,
+  "chat-note.test.ts": 2,
+  "llm.test.ts": 2,
 
   // shard 3
-  "cfc-spec-gallery.test.ts": 3,
-  "shared-profile.test.ts": 3,
-  "cfc-render-policy-demo.test.ts": 3,
-  "counter.test.ts": 3,
-  "cellset-lww.test.ts": 3,
+  "cf-checkbox.test.ts": 3,
+  "cfc-authorized-save.test.ts": 3,
+  "cfc-group-chat-demo-two-browsers.test.ts": 3,
+  "chatbot.test.ts": 3,
   "convergence-storm.test.ts": 3,
-  "lunch-poll-vote.test.ts": 3,
-  "profile-embed.test.ts": 3,
-  "time-capability-intrinsics.test.ts": 3,
+  "fetch-json.test.ts": 3,
+  "group-chat-adoption-bench.test.ts": 3,
 
   // shard 4
-  "cfc-authorized-save.test.ts": 4,
-  "cfc-group-chat-demo.test.ts": 4,
+  "cell-flip-shaping.test.ts": 4,
   "default-app.test.ts": 4,
-  "home-profile.test.ts": 4,
-  "instantiate-pattern.test.ts": 4,
-  "llm.test.ts": 4,
-  "chatbot.test.ts": 4,
-  "cf-checkbox.test.ts": 4,
-  "group-chat-adoption-bench.test.ts": 4,
-  "note-append-link.test.ts": 4,
+  "shared-profile.test.ts": 4,
+  "sqlite-db-owner-multi-runtime.test.ts": 4,
+  "topics-navigation.test.ts": 4,
+
+  // shard 5
+  "cfc-group-chat-demo.test.ts": 5,
+  "cfc-render-policy-demo.test.ts": 5,
+  "instantiate-pattern.test.ts": 5,
+  "lunch-poll-vote.test.ts": 5,
+  "sqlite-read-clearance-multi-runtime.test.ts": 5,
+
+  // shard 6
+  "cellset-lww.test.ts": 6,
+  "cfc-browser-helpers.test.ts": 6,
+  "cfc-staged-publish.test.ts": 6,
+  "nested-counter.test.ts": 6,
+  "record-module-chrome.test.ts": 6,
+
+  // shard 7
+  "cf-render.test.ts": 7,
+  "counter.test.ts": 7,
+  "home-profile.test.ts": 7,
+  "parking-coordinator-admin-view.test.ts": 7,
+  "time-capability-intrinsics.test.ts": 7,
+
+  // shard 8
+  "cellset-lww-lost-update.test.ts": 8,
+  "home-profile-reload-durability.test.ts": 8,
+  "home-rehydration-churn.test.ts": 8,
+  "note-append-link.test.ts": 8,
+  "profile-embed.test.ts": 8,
 };
 
-// Assign each file without internal sharding to one shard: the explicit table
-// when running the canonical four-way split, else round-robin over the unlisted
-// files so a newly added file still lands somewhere even.
+// Assign each file without internal sharding to one shard. Unlisted files use
+// round-robin assignment.
 export function assignPatternIntegrationShards(
   files: string[],
   total: number,
 ): Map<string, number> {
+  if (total !== PATTERN_INTEGRATION_SHARD_COUNT) {
+    throw new Error(
+      `Pattern integration assignments require ${PATTERN_INTEGRATION_SHARD_COUNT} shards, got ${total}`,
+    );
+  }
   const assignment = new Map<string, number>();
   let roundRobin = 0;
   for (
     const name of files.filter((name) => !INTERNALLY_SHARDED_FILE_SET.has(name))
       .sort()
   ) {
-    const pinned = total === 4 ? FOUR_SHARD_ASSIGNMENTS[name] : undefined;
+    const pinned = PATTERN_INTEGRATION_SHARD_ASSIGNMENTS[name];
     assignment.set(name, pinned ?? (roundRobin++ % total) + 1);
   }
   return assignment;
