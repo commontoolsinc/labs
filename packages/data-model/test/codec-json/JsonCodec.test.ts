@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { JsonCodec } from "@/codec-json/JsonCodec.ts";
+import { createDefaultJsonRegistry, newDefaultJsonCodec } from "@/codecs.ts";
 import { FabricInstance, type FabricValue } from "@/interface.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
@@ -76,7 +77,7 @@ const ENCODING_PREFIX = "fvj1:";
 
 /** Creates a standard test codec (non-lenient) and a mock runtime. */
 function makeTestCodec() {
-  const jsonCodec = new JsonCodec();
+  const jsonCodec = newDefaultJsonCodec();
   const runtime = new TestReconstructionContext();
   return { jsonCodec, runtime };
 }
@@ -129,7 +130,7 @@ describe("JsonCodec", () => {
     });
 
     it("returns an `UnknownValue` on decode for a tag the supplied registry lacks", () => {
-      const wire = new JsonCodec().encode(
+      const wire = newDefaultJsonCodec().encode(
         FabricError.fromNativeError(new Error("boom")),
       );
       const jsonCodec = new JsonCodec({ registry: new CodecRegistry() });
@@ -622,7 +623,7 @@ describe("JsonCodec", () => {
         const obj1 = { x: 1, y: 2, z: 3 };
         const obj2 = { z: 3, x: 1, y: 2 };
         const obj3 = { y: 2, z: 3, x: 1 };
-        const jsonCodec = new JsonCodec();
+        const jsonCodec = newDefaultJsonCodec();
         expect(jsonCodec.encode(obj1)).toBe(jsonCodec.encode(obj2));
         expect(jsonCodec.encode(obj1)).toBe(jsonCodec.encode(obj3));
       });
@@ -1135,7 +1136,7 @@ describe("JsonCodec", () => {
     });
 
     it("lenient mode wraps failed handler reconstruction", () => {
-      const jsonCodec = new JsonCodec({ lenient: true });
+      const jsonCodec = newDefaultJsonCodec({ lenient: true });
       const runtime = new TestReconstructionContext();
 
       // BigInt@1 with a non-string state produces ProblematicValue
@@ -1151,7 +1152,7 @@ describe("JsonCodec", () => {
     });
 
     it("lenient mode wraps failed class-registry reconstruction", () => {
-      const jsonCodec = new JsonCodec({ lenient: true });
+      const jsonCodec = newDefaultJsonCodec({ lenient: true });
       const runtime = new TestReconstructionContext();
 
       // Map@1's codec always throws on decode ("not yet implemented"),
@@ -1245,7 +1246,7 @@ describe("JsonCodec", () => {
       // lenient catch produces a ProblematicValue -- still a codec-arm return,
       // so the contract deep-freezes it (not a crash: it is the value
       // lenient mode produces precisely to avoid crashing).
-      const jsonCodec = new JsonCodec({ lenient: true });
+      const jsonCodec = newDefaultJsonCodec({ lenient: true });
       const runtime = new TestReconstructionContext();
       const result = jsonCodec.decode(
         JsonCodec.wrapEncodedValueForTesting(
@@ -1382,7 +1383,7 @@ describe("JsonCodec", () => {
 
   describe("JsonCodec", () => {
     it("`encode()` returns a prefixed JSON string", () => {
-      const jsonCodec = new JsonCodec();
+      const jsonCodec = newDefaultJsonCodec();
       const result = jsonCodec.encode(42);
       expect(typeof result).toBe("string");
       expect(JsonCodec.seemsLikeEncoded(result)).toBe(true);
@@ -1392,7 +1393,7 @@ describe("JsonCodec", () => {
     });
 
     it("`decode()` parses a prefixed JSON string back to a value", () => {
-      const jsonCodec = new JsonCodec();
+      const jsonCodec = newDefaultJsonCodec();
       const runtime = new TestReconstructionContext();
       const result = jsonCodec.decode(
         JsonCodec.wrapEncodedValueForTesting("42"),
@@ -1402,7 +1403,7 @@ describe("JsonCodec", () => {
     });
 
     it("`encode()`/`decode()` round-trip for tagged types", () => {
-      const jsonCodec = new JsonCodec();
+      const jsonCodec = newDefaultJsonCodec();
       const runtime = new TestReconstructionContext();
       const se = FabricError.fromNativeError(new Error("test"));
       const encoded = jsonCodec.encode(se);
@@ -1412,7 +1413,7 @@ describe("JsonCodec", () => {
     });
 
     it("`encodeToBytes()`/`decodeFromBytes()` round-trip", () => {
-      const jsonCodec = new JsonCodec();
+      const jsonCodec = newDefaultJsonCodec();
       const runtime = new TestReconstructionContext();
       const data = {
         name: "test",
@@ -1429,12 +1430,12 @@ describe("JsonCodec", () => {
     });
 
     it("`.lenient` defaults to `false`", () => {
-      const jsonCodec = new JsonCodec();
+      const jsonCodec = newDefaultJsonCodec();
       expect(jsonCodec.lenient).toBe(false);
     });
 
     it("`.lenient` can be set to `true`", () => {
-      const jsonCodec = new JsonCodec({ lenient: true });
+      const jsonCodec = newDefaultJsonCodec({ lenient: true });
       expect(jsonCodec.lenient).toBe(true);
     });
   });
@@ -1509,13 +1510,13 @@ describe("JsonCodec", () => {
   describe("test-only prefix helpers", () => {
     describe("`unwrapEncodedValueForTesting()`", () => {
       it("yields the JSON text under the tag", () => {
-        const encoded = new JsonCodec().encode(42);
+        const encoded = newDefaultJsonCodec().encode(42);
         expect(JsonCodec.unwrapEncodedValueForTesting(encoded))
           .toBe("42");
       });
 
       it("round-trips with `wrapEncodedValueForTesting()`", () => {
-        const encoded = new JsonCodec().encode(
+        const encoded = newDefaultJsonCodec().encode(
           { b: 1, a: [true, null] },
         );
         const json = JsonCodec.unwrapEncodedValueForTesting(encoded);
@@ -1526,10 +1527,10 @@ describe("JsonCodec", () => {
       it("preserves a value plain JSON could not carry", () => {
         // The case that motivates having a golden format at all: these survive
         // the trip only as tagged forms.
-        const encoded = new JsonCodec().encode(
+        const encoded = newDefaultJsonCodec().encode(
           { z: -0, n: NaN, i: -Infinity },
         );
-        const rebuilt = new JsonCodec().decode(
+        const rebuilt = newDefaultJsonCodec().decode(
           JsonCodec.wrapEncodedValueForTesting(
             JsonCodec.unwrapEncodedValueForTesting(encoded),
           ),
@@ -1575,7 +1576,7 @@ describe("JsonCodec", () => {
           JSON.stringify({ a: 1 }),
         );
         expect(JsonCodec.seemsLikeEncoded(encoded)).toBe(true);
-        expect(new JsonCodec().decode(encoded, runtime))
+        expect(newDefaultJsonCodec().decode(encoded, runtime))
           .toEqual({ a: 1 });
       });
 
@@ -1591,7 +1592,7 @@ describe("JsonCodec", () => {
         const pretty = JSON.stringify({ a: 1, b: [2, 3] }, null, 2);
         const encoded = JsonCodec.wrapEncodedValueForTesting(pretty);
         const { runtime } = makeTestCodec();
-        expect(new JsonCodec().decode(encoded, runtime))
+        expect(newDefaultJsonCodec().decode(encoded, runtime))
           .toEqual({ a: 1, b: [2, 3] });
       });
 
@@ -1608,7 +1609,7 @@ describe("JsonCodec", () => {
       it("rejects an already-tagged string", () => {
         // Double-tagging is a mistake worth catching: the tag is not part of
         // the JSON, so the result would not parse.
-        const encoded = new JsonCodec().encode(42);
+        const encoded = newDefaultJsonCodec().encode(42);
         expect(() => JsonCodec.wrapEncodedValueForTesting(encoded))
           .toThrow();
       });
@@ -1616,12 +1617,24 @@ describe("JsonCodec", () => {
 
     describe("`isMalformed`", () => {
       // `Map@1`'s codec always throws on decode, so it stands in for any
-      // payload the codec cannot reconstruct.
+      // payload the codec cannot reconstruct. Reaching that codec takes a
+      // registry that has it: against the format-only default, `Map@1` is
+      // merely an unrecognized tag and decodes to an `UnknownValue`.
       const undecodable = JSON.stringify({ "/Map@1": [["key", "value"]] });
 
-      it("refuses an undecodable payload by default", () => {
-        expect(() => JsonCodec.wrapEncodedValueForTesting(undecodable))
-          .toThrow();
+      it("refuses a payload undecodable by the given registry's codecs", () => {
+        expect(() =>
+          JsonCodec.wrapEncodedValueForTesting(
+            undecodable,
+            false,
+            createDefaultJsonRegistry(),
+          )
+        ).toThrow();
+      });
+
+      it("accepts a tag no registered codec claims", () => {
+        expect(JsonCodec.wrapEncodedValueForTesting(undecodable))
+          .toBe(`${ENCODING_PREFIX}${undecodable}`);
       });
 
       it("accepts an undecodable payload when told it is deliberate", () => {

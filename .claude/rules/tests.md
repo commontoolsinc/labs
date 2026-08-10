@@ -14,6 +14,17 @@ section routing to coverage, benchmarks, shadow DOM, language-model tests, and
 the pattern-update gates. What follows is only the part you would otherwise
 learn by failing CI, or by shipping a file in the wrong shape.
 
+## Run browser tests outside the macOS agent sandbox
+
+Before the first command that can launch a browser, request unsandboxed
+execution. Known browser-launching paths include the root `deno task test`,
+`deno task demo`, unfiltered browser targets of `deno task integration`,
+`deno-web-test`, `Browser.launch()`, and a bound `ShellIntegration` lifecycle.
+For a filtered integration run, inspect the selected suite's launch path. An
+Astral import alone is not proof that a test starts Chrome. Never try the
+command in the agent sandbox first. The full rule is in
+`docs/development/TESTING.md#browser-tests-in-agent-sandboxes`.
+
 ## Shape of a unit test file
 
 First check which kind of file you are in. A `*.test.tsx` under

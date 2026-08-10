@@ -7,13 +7,13 @@ import { memoryServer } from "@/routes/storage/memory.ts";
 import { isDID } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { JsonCodec } from "@commonfabric/data-model/codec-json";
+import { newDefaultJsonCodec } from "@commonfabric/data-model/codecs";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import type { Context } from "@hono/hono";
 
 const router = createRouter();
-const blobUploadCodec = new JsonCodec();
+const blobUploadCodec = newDefaultJsonCodec();
 const blobReconstructionContext = new EmptyReconstructionContext(
   true,
   "blob upload payloads cannot contain cell references",

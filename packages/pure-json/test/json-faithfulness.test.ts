@@ -3,8 +3,8 @@ import { expect } from "@std/expect";
 
 import { findJsonUnfaithfulValues, isPureJson } from "@commonfabric/pure-json";
 
-describe("findJsonUnfaithfulValues", () => {
-  it("accepts JSON-faithful shapes", () => {
+describe("findJsonUnfaithfulValues()", () => {
+  it("returns an empty list for JSON-faithful shapes", () => {
     // The whitelist: null, booleans, strings, finite numbers other than -0,
     // dense arrays of accepted values, plain objects of accepted values.
     const schema = {
@@ -23,12 +23,12 @@ describe("findJsonUnfaithfulValues", () => {
     expect(findJsonUnfaithfulValues(schema)).toEqual([]);
   });
 
-  it("treats a bare boolean as faithful", () => {
+  it("returns an empty list for a bare boolean", () => {
     expect(findJsonUnfaithfulValues(true)).toEqual([]);
     expect(findJsonUnfaithfulValues(false)).toEqual([]);
   });
 
-  it("catches each non-finite and signed zero", () => {
+  it("reports each non-finite and signed zero", () => {
     for (const value of [NaN, Infinity, -Infinity, -0]) {
       const found = findJsonUnfaithfulValues({
         type: "number",
@@ -39,17 +39,17 @@ describe("findJsonUnfaithfulValues", () => {
     }
   });
 
-  it("catches a bigint", () => {
+  it("reports a `bigint`", () => {
     // JSON.stringify throws on a bigint; caught here so the failure names the
     // value rather than surfacing as an opaque serialization error.
     const found = findJsonUnfaithfulValues({ default: 42n });
     expect(found).toEqual([{
       pointer: "/default",
-      reason: "bigint 42n (not representable)",
+      reason: "`bigint` value `42n` (not representable)",
     }]);
   });
 
-  it("catches undefined -- dropped, not a bad number", () => {
+  it("reports `undefined` -- dropped, not a bad number", () => {
     // A blacklist of bad numbers would miss this: `{ default: undefined }`
     // serializes to `{}`, silently losing the default.
     const found = findJsonUnfaithfulValues({ default: undefined });
@@ -57,13 +57,13 @@ describe("findJsonUnfaithfulValues", () => {
     expect(found[0]!.pointer).toBe("/default");
   });
 
-  it("catches undefined inside an array (becomes null)", () => {
+  it("reports `undefined` inside an array (becomes `null`)", () => {
     const found = findJsonUnfaithfulValues({ default: [1, undefined, 3] });
     expect(found).toHaveLength(1);
     expect(found[0]!.pointer).toBe("/default/1");
   });
 
-  it("catches a sparse array hole (becomes null)", () => {
+  it("reports a sparse array hole (becomes `null`)", () => {
     // A hole is exactly what is under test.
     // deno-lint-ignore no-sparse-arrays
     const holed = [1, , 3];
@@ -73,18 +73,18 @@ describe("findJsonUnfaithfulValues", () => {
     expect(found[0]!.reason).toContain("hole");
   });
 
-  it("catches symbol and function values", () => {
+  it("reports `symbol` and `function` values", () => {
     expect(findJsonUnfaithfulValues({ a: Symbol("s") })).toHaveLength(1);
     expect(findJsonUnfaithfulValues({ a: () => 1 })).toHaveLength(1);
   });
 
-  it("catches a symbol-keyed property", () => {
+  it("reports a symbol-keyed property", () => {
     const found = findJsonUnfaithfulValues({ [Symbol("s")]: 1, ok: 2 });
     expect(found).toHaveLength(1);
     expect(found[0]!.reason).toContain("symbol-keyed");
   });
 
-  it("catches a non-index property on an array", () => {
+  it("reports a non-index property on an array", () => {
     // `JSON.stringify` serializes an array's indices only; an extra own
     // property is dropped. The indices themselves stay faithful.
     const withExtra = Object.assign([1, 2], { foo: 3 });
@@ -94,7 +94,7 @@ describe("findJsonUnfaithfulValues", () => {
     expect(found[0]!.reason).toContain("non-index");
   });
 
-  it("catches a NON-enumerable non-index property on an array", () => {
+  it("reports a _non-enumerable_ non-index property on an array", () => {
     // `JSON.stringify` drops it just the same, so an enumerable-only walk
     // would certify a value that JSON demonstrably mangles.
     const withHidden: unknown[] = [1, 2];
@@ -123,7 +123,7 @@ describe("findJsonUnfaithfulValues", () => {
     expect(findJsonUnfaithfulValues({ default: arr })).toHaveLength(0);
   });
 
-  it("catches a toJSON hook, even non-enumerable", () => {
+  it("reports a `toJSON()` hook, even non-enumerable", () => {
     // `toJSON` replaces the value before JSON sees its contents, so the walk
     // cannot certify what would be sent.
     expect(findJsonUnfaithfulValues({ a: 1, toJSON: () => 5 })).toHaveLength(1);
@@ -139,7 +139,7 @@ describe("findJsonUnfaithfulValues", () => {
     expect(found[0]!.reason).toContain("toJSON");
   });
 
-  it("catches a non-plain object (a class instance)", () => {
+  it("reports a non-plain object (a class instance)", () => {
     // A class instance keeps its data in private fields, so `JSON.stringify`
     // finds nothing to emit. Any class instance is rejected.
     class Holder {
@@ -176,7 +176,7 @@ describe("findJsonUnfaithfulValues", () => {
     ]);
   });
 
-  it("escapes ~ and / in pointer tokens", () => {
+  it("escapes `~` and `/` in pointer tokens", () => {
     // RFC 6901: `~` -> `~0`, `/` -> `~1`. A property named `a/b` must not read
     // as two path steps.
     const found = findJsonUnfaithfulValues({ "a/b~c": NaN });
@@ -184,8 +184,8 @@ describe("findJsonUnfaithfulValues", () => {
   });
 });
 
-describe("isPureJson", () => {
-  it("accepts what JSON carries faithfully", () => {
+describe("isPureJson()", () => {
+  it("returns `true` for what JSON carries faithfully", () => {
     expect(isPureJson(null)).toBe(true);
     expect(isPureJson("text")).toBe(true);
     expect(isPureJson(1)).toBe(true);
@@ -193,7 +193,7 @@ describe("isPureJson", () => {
     expect(isPureJson({ a: [1, "two", { b: null }] })).toBe(true);
   });
 
-  it("rejects what JSON would alter or drop", () => {
+  it("returns `false` for what JSON would alter or drop", () => {
     expect(isPureJson(undefined)).toBe(false);
     expect(isPureJson(Number.NaN)).toBe(false);
     expect(isPureJson(-0)).toBe(false);

@@ -20,12 +20,13 @@ const MAX_UINT32 = 0xFFFFFFFF;
 export function encodeULEB128(value: number): Uint8Array {
   if (value < 0 || !Number.isInteger(value)) {
     throw new Error(
-      `encodeULEB128: expected non-negative integer, got ${value}`,
+      `\`encodeULEB128()\`: expected non-negative integer, got \`${value}\``,
     );
   }
   if (value > MAX_UINT32) {
     throw new Error(
-      `encodeULEB128: value ${value} exceeds 32-bit range (max ${MAX_UINT32})`,
+      `\`encodeULEB128()\`: value \`${value}\` exceeds 32-bit range ` +
+        `(max \`${MAX_UINT32}\`)`,
     );
   }
 
@@ -71,16 +72,16 @@ export function decodeULEB128(
 
   do {
     if (index >= buffer.length) {
-      throw new Error("decodeULEB128: unexpected end of buffer");
+      throw new Error("`decodeULEB128()`: unexpected end of `buffer`");
     }
     byte = buffer[index]!;
     // At shift 28, only 4 bits remain in a 32-bit value; reject if
     // the payload bits would overflow.
     if (shift >= 28 && (byte & 0x7f) > 0x0f) {
-      throw new Error("decodeULEB128: value exceeds 32-bit range");
+      throw new Error("`decodeULEB128()`: value exceeds 32-bit range");
     }
     if (shift >= 35) {
-      throw new Error("decodeULEB128: value exceeds 32-bit range");
+      throw new Error("`decodeULEB128()`: value exceeds 32-bit range");
     }
     result |= (byte & 0x7f) << shift;
     shift += 7;
@@ -102,11 +103,12 @@ const MAX_INT32 = 0x7FFFFFFF;
  */
 export function encodeSLEB128(value: number): Uint8Array {
   if (!Number.isInteger(value)) {
-    throw new Error(`encodeSLEB128: expected integer, got ${value}`);
+    throw new Error(`\`encodeSLEB128()\`: expected integer, got \`${value}\``);
   }
   if (value < MIN_INT32 || value > MAX_INT32) {
     throw new Error(
-      `encodeSLEB128: value ${value} exceeds signed 32-bit range (${MIN_INT32}..${MAX_INT32})`,
+      `\`encodeSLEB128()\`: value \`${value}\` exceeds signed 32-bit range ` +
+        `(\`${MIN_INT32}..${MAX_INT32}\`)`,
     );
   }
 
@@ -150,11 +152,11 @@ export function decodeSLEB128(
 
   do {
     if (index >= buffer.length) {
-      throw new Error("decodeSLEB128: unexpected end of buffer");
+      throw new Error("`decodeSLEB128()`: unexpected end of `buffer`");
     }
     byte = buffer[index]!;
     if (shift >= 35) {
-      throw new Error("decodeSLEB128: value exceeds signed 32-bit range");
+      throw new Error("`decodeSLEB128()`: value exceeds signed 32-bit range");
     }
     result |= (byte & 0x7f) << shift;
     shift += 7;
