@@ -117,8 +117,11 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     poll.options?.[0]?.title === "Sushi Palace"
   );
 
-  // The assertion's settle-retry loop drives the mocked generation fetch;
-  // once the bytes land the hidden trigger img renders with a wired onLoad.
+  // The render step above this assertion materializes the card's VDOM —
+  // the demand that starts the host-gated generation — and settles, driving
+  // the mocked fetch; once the bytes land the hidden trigger img renders
+  // with a wired onLoad. Assertions are read once (markers are the data
+  // barrier), so the demand must exist before the read.
   const assert_trigger_renders = computed(() =>
     findTriggerIn(poll[UI], readValue(poll.options?.[0]?.id)) !== undefined
   );
@@ -141,6 +144,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       { action: action_join },
       { action: action_add_sushi },
       { assertion: assert_option_added },
+      { render: poll[UI] },
       { assertion: assert_trigger_renders },
       { action: action_fire_trigger_load },
       { assertion: assert_art_persisted },
