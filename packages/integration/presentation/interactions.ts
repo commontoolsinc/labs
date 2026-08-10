@@ -52,7 +52,7 @@ export class PresentationInteractions {
     this.#page.setDefaultTypeDelay(this.#config.typingDelayMs);
     const observer: InteractionObserver = {
       beforeClick: (_element, point) => this.#moveCursor(point.x, point.y),
-      afterClick: () => this.#pulseCursor(),
+      afterClick: (_element, point) => this.#pulseCursor(point.x, point.y),
       beforeType: (element) => this.#moveCursorToElement(element),
     };
     this.#page.setInteractionObserver(observer);
@@ -262,15 +262,19 @@ export class PresentationInteractions {
     }, { args: [this.#participant.label, this.#participant.color] });
   }
 
-  async #pulseCursor(): Promise<void> {
-    await this.#page.evaluate(async (duration) => {
+  async #pulseCursor(x: number, y: number): Promise<void> {
+    await this.#page.evaluate(async (x, y, duration) => {
       const host = document.getElementById("__cf_demo_presentation_overlay");
-      const cursor = host?.shadowRoot?.getElementById("cursor");
+      const cursor = host?.shadowRoot?.getElementById("cursor") as
+        | HTMLElement
+        | undefined;
       if (!cursor) return;
+      cursor.style.transitionDuration = "0ms";
+      cursor.style.transform = `translate3d(${x}px, ${y}px, 0)`;
       cursor.classList.add("pulse");
       await new Promise((resolve) => setTimeout(resolve, duration));
       cursor.classList.remove("pulse");
-    }, { args: [this.#config.clickPulseMs] });
+    }, { args: [x, y, this.#config.clickPulseMs] });
   }
 }
 
