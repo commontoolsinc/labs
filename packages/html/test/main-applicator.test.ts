@@ -15,6 +15,7 @@ import { DomApplicator } from "../src/main/applicator.ts";
 import type { DomEventMessage } from "../src/main/events.ts";
 import type { VDomBatch } from "../src/vdom-ops.ts";
 import { $conn, type CellRef } from "@commonfabric/runtime-client";
+import { getPieceBoundary } from "../src/main/space-context.ts";
 
 // Mock RuntimeClient for testing
 const createMockRuntimeClient = () => {
@@ -871,6 +872,61 @@ Deno.test("DomApplicator - cell bindings", async (t) => {
 
     assertNotStrictEquals(node.cell, firstHandle);
   });
+
+  await t.step(
+    "keeps a nested pattern binding out of authored properties",
+    () => {
+      const doc = createMockDocument();
+      const applicator = new DomApplicator({
+        document: doc,
+        runtimeClient: createMockRuntimeClient(),
+        onEvent: () => {},
+      });
+
+      applicator.applyBatch({
+        batchId: 1,
+        ops: [
+          { op: "create-element", nodeId: 1, tagName: "section" },
+          { op: "set-piece-boundary", nodeId: 1, cellRef },
+        ],
+      });
+
+      const node = applicator.getNode(1) as Element & Record<string, unknown>;
+      assertExists(getPieceBoundary(node));
+
+      applicator.applyBatch({
+        batchId: 2,
+        ops: [{ op: "clear-piece-boundary", nodeId: 1 }],
+      });
+      assertEquals(getPieceBoundary(node), undefined);
+
+      applicator.applyBatch({
+        batchId: 3,
+        ops: [{
+          op: "set-binding",
+          nodeId: 1,
+          propName: "__commonFabricPieceBoundary",
+          cellRef,
+        }],
+      });
+      assertEquals(
+        getPieceBoundary(node),
+        undefined,
+        "authored bindings cannot create a trusted nested pattern boundary",
+      );
+
+      applicator.applyBatch({
+        batchId: 4,
+        ops: [{ op: "set-piece-boundary", nodeId: 1, cellRef }],
+      });
+      assertExists(getPieceBoundary(node));
+      applicator.applyBatch({
+        batchId: 5,
+        ops: [{ op: "remove-node", nodeId: 1 }],
+      });
+      assertEquals(getPieceBoundary(node), undefined);
+    },
+  );
 });
 
 Deno.test("DomApplicator - batch with rootId", async (t) => {
