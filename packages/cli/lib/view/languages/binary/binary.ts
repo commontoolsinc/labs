@@ -36,7 +36,7 @@ export function renderBinaryLines(
 }
 
 /** Produce dump rows without retaining the expanded document. */
-export function* binaryLines(
+function* binaryLines(
   raw: string,
   byteLength: number = raw.length,
   complete = true,

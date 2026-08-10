@@ -74,7 +74,7 @@ export interface SaveOptions {
 }
 
 export interface EditableSource {
-  /** A short label for the editable target (the filename), or null. */
+  /** A short label for the backing target (the filename), or null. */
   readonly label: string | null;
   /** True for a diff view, whether or not it is editable. Absent or false for a
    * plain file or a non-diff pipe. */

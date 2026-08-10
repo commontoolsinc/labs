@@ -1441,13 +1441,7 @@ function shiftCompleteLineSpans(
   if (code !== completeSourceText && code !== `${completeSourceText}\r`) {
     return null;
   }
-  const completeSpans = restoresUtf8Bom
-    ? [
-      { col: 0, text: "\uFEFF", cls: "whitespace" } satisfies Span,
-      ...spans.map((span) => ({ ...span, col: span.col + 1 })),
-    ]
-    : spans;
-  const shifted = shiftSpans(markerSpan(lineText), completeSpans);
+  const shifted = shiftFragmentSpans(lineText, spans, restoresUtf8Bom);
   if (code.length > completeSourceText.length) {
     shifted.push({
       col: cpLen(completeSourceText) + 1,

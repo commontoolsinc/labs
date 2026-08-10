@@ -2,11 +2,10 @@
  * The contract every source language plugs into so the `cf view` pager can
  * colour, navigate, edit and (optionally) reason about it, plus selecting the
  * right language and byte decoder for a file. A language is a stateless
- * strategy object: one instance describes each supported syntax, and plain
- * text handles input that has no recognized filename or shebang. The pager
- * selects and decodes a source ONCE (via {@link decodeLanguageInput}) and
- * then dispatches every operation through that object's methods — there is no
- * per-operation branch on the file extension.
+ * strategy object: one instance describes each supported syntax. Selection
+ * combines explicit language choices, filename or shebang metadata, and byte
+ * content detection. Once selected, the pager dispatches every operation
+ * through that object's methods.
  *
  * Per-file mutable state (a warm incremental parse, a language service) is not
  * held on the language; the language is a factory for the small stateful
