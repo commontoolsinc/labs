@@ -3,12 +3,7 @@
 // directly via `deno.jsonc`.
 
 // Public entry-point functions.
-export {
-  jsonFromValue,
-  plainObjectFromJson,
-  seemsLikeJsonEncodedFabricValue,
-  valueFromJson,
-} from "./impl.ts";
+export { seemsLikeJsonEncodedFabricValue } from "./impl.ts";
 
 // Whole-value codec for the wire format.
 export { JsonCodec } from "./JsonCodec.ts";

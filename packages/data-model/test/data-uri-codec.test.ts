@@ -7,9 +7,9 @@ import {
 } from "@commonfabric/utils/base64url";
 import {
   JsonCodec,
-  jsonFromValue,
   seemsLikeJsonEncodedFabricValue,
 } from "@/codec-json/index.ts";
+import { jsonFromValue } from "@/codecs.ts";
 import {
   DATA_URI_MEDIA_TYPE,
   dataUriFromValue,

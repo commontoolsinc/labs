@@ -2590,12 +2590,15 @@ version requirements.
 
 The storage boundary routes through functions that bridge between the
 storage layer (JSON strings) and the runtime layer (`FabricValue`). These
-functions live in a dedicated module
-(`packages/data-model/codec-json/impl.ts`).
+functions live in the package's codec-defaults module
+(`packages/data-model/src/codecs.ts`), which pairs the JSON format with the
+set of fabric classes this package defines. The format itself, and the
+recognizer for text in it, live one layer down in
+`packages/data-model/src/codec-json/`.
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/codec-json/impl.ts
+// file: packages/data-model/src/codecs.ts
 
 /**
  * Encodes a fabric value to a JSON string in the standard `FabricValue`
@@ -2622,16 +2625,20 @@ export function plainObjectFromJson<T extends object = object>(
   json: string,
   context?: ReconstructionContext,
 ): T;
+```
+
+```typescript
+// Shown for illustration only.
+// file: packages/data-model/src/codec-json/impl.ts
 
 /**
- * Indicates if the given text has a "first-blush" appearance as valid
- * encoded JSON as defined by this module (i.e., carries the `fvj1:`
- * prefix).
+ * Indicates if the given text has a "first-blush" appearance as text in the
+ * JSON-embedded encoding (i.e., carries the `fvj1:` prefix).
  */
 export function seemsLikeJsonEncodedFabricValue(value: string): boolean;
 ```
 
-The module creates a single stateless `JsonCodec` instance at module load
+`codecs.ts` creates a single stateless `JsonCodec` instance at module load
 time and reuses it for all encode/decode operations.
 
 The `memory` package wraps these at its serialization boundary

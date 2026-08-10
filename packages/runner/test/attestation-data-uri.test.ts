@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { JsonCodec, jsonFromValue } from "@commonfabric/data-model/codec-json";
+import { JsonCodec } from "@commonfabric/data-model/codec-json";
+import { jsonFromValue } from "@commonfabric/data-model/codecs";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
 import { load } from "../src/storage/transaction/attestation.ts";
