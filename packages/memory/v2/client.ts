@@ -147,14 +147,6 @@ const runWithAbortSignal = async <T>(
 export class Client {
   #pending = new Map<string, PromiseWithResolvers<unknown>>();
   #spaces = new Set<SpaceSession>();
-  // Effects for a session whose mount() is still between openSession
-  // resolving and #spaces registration: on any asynchronous transport a
-  // frame can land in that window, and dropping it would silently lose the
-  // session's first delivery. Bounded; leftovers (sessions that never
-  // finished mounting) drop when the last in-flight mount settles.
-  #mountsInFlight = 0;
-  #bufferedEffects: SessionEffectMessage[] = [];
-  static readonly #MAX_BUFFERED_EFFECTS = 256;
   #nextRequest = 1;
   #helloPending: PromiseWithResolvers<void> | null = null;
   #sessionOpenAuthContext: SessionOpenAuthContext | null = null;
@@ -225,60 +217,44 @@ export class Client {
     openAuthFactory?: SessionOpenAuthFactory,
     signal?: AbortSignal,
   ): Promise<SpaceSession> {
-    this.#mountsInFlight++;
-    try {
-      const auth = await runWithAbortSignal(
-        signal,
-        "memory session mount cancelled",
-        () =>
-          openAuthFactory?.(
-            space,
-            options,
-            this.sessionOpenAuthContext(),
-          ),
-      );
-      const result = await runWithAbortSignal(
-        signal,
-        "memory session mount cancelled",
-        () => this.openSession(space, options, auth),
-      );
-      if (signal?.aborted) {
-        throw signal.reason instanceof Error
-          ? signal.reason
-          : new Error("memory session mount cancelled");
-      }
-      const session = new SpaceSession(
-        this,
-        space,
-        result.sessionId,
-        result.sessionToken,
-        result.serverSeq,
-        openAuthFactory,
-        signal,
-      );
-      this.#spaces.add(session);
-      // Replay effects that raced this mount: the session existed
-      // server-side from openSession's resolution, so a frame can precede
-      // the registration above.
-      const replay = this.#bufferedEffects.filter((buffered) =>
-        buffered.sessionId === result.sessionId && buffered.space === space
-      );
-      if (replay.length > 0) {
-        this.#bufferedEffects = this.#bufferedEffects.filter((buffered) =>
-          !(buffered.sessionId === result.sessionId &&
-            buffered.space === space)
-        );
-        for (const buffered of replay) {
-          session.handleEffect(buffered.effect);
-        }
-      }
-      return session;
-    } finally {
-      this.#mountsInFlight--;
-      if (this.#mountsInFlight === 0) {
-        this.#bufferedEffects = [];
-      }
+    const auth = await runWithAbortSignal(
+      signal,
+      "memory session mount cancelled",
+      () =>
+        openAuthFactory?.(
+          space,
+          options,
+          this.sessionOpenAuthContext(),
+        ),
+    );
+    const result = await runWithAbortSignal(
+      signal,
+      "memory session mount cancelled",
+      () => this.openSession(space, options, auth),
+    );
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error
+        ? signal.reason
+        : new Error("memory session mount cancelled");
     }
+    // Between openSession resolving (the session now exists server-side)
+    // and the registration below, a session-scoped frame would find no
+    // routing entry. Unreachable for a transport that delivers one frame
+    // per event-loop task — this continuation is synchronous-plus-
+    // microtasks, which drain before the next task — and only a
+    // resume-mount has frames to deliver that early; the reconnect audit
+    // (CT-1974) owns that window.
+    const session = new SpaceSession(
+      this,
+      space,
+      result.sessionId,
+      result.sessionToken,
+      result.serverSeq,
+      openAuthFactory,
+      signal,
+    );
+    this.#spaces.add(session);
+    return session;
   }
 
   forgetSession(session: SpaceSession): void {
@@ -463,21 +439,13 @@ export class Client {
     }
 
     if (isSessionEffect(message)) {
-      let matched = false;
       for (const session of this.#spaces) {
         if (
           session.sessionId === message.sessionId &&
           session.space === message.space
         ) {
-          matched = true;
           session.handleEffect(message.effect);
         }
-      }
-      if (
-        !matched && this.#mountsInFlight > 0 &&
-        this.#bufferedEffects.length < Client.#MAX_BUFFERED_EFFECTS
-      ) {
-        this.#bufferedEffects.push(message);
       }
       return;
     }

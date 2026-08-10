@@ -79,8 +79,10 @@ describe("commit callback timing", () => {
       return result;
     });
 
-    // Held-clock fixpoint: the accept verdict has arrived (microtask
-    // loopback), the coverage marker has not (timed fan-out).
+    // Held-clock fixpoint: the accept verdict has arrived (its delivery
+    // turn fires inside the drain), the coverage marker has not (the timed
+    // fan-out's positive-delay timer stays unfired while settle pauses
+    // auto-advance).
     await clock.settle();
     expect(verdictResult, "verdict callback fired at the accept verdict")
       .toBeDefined();
@@ -93,8 +95,9 @@ describe("commit callback timing", () => {
     expect(promiseSettled, "commit promise still waiting for coverage")
       .toBe(false);
 
-    // Real time resumes: the marker arrives, the promise resolves, and the
-    // commit callback fires with the same accepted result.
+    // The await yields to auto-advance: the fan-out timer fires, the
+    // marker arrives, the promise resolves, and the commit callback fires
+    // with the same accepted result.
     const res = await commitP;
     expect(res.error, `commit: ${JSON.stringify(res.error)}`).toBeUndefined();
     expect(commitCallbackFired, "commit callback fired at coverage").toBe(true);
@@ -149,8 +152,9 @@ describe("commit callback timing", () => {
       "commit callback still waiting for coverage",
     ).toBe(false);
 
-    // Real time resumes: the marker arrives and the settlement timeline —
-    // and with it the commit callback — completes.
+    // The await yields to auto-advance: the fan-out timer fires, the
+    // marker arrives, and the settlement timeline — and with it the commit
+    // callback — completes.
     await commitP;
     await commitCallbackDone.promise;
     expect(commitCallbackFired).toBe(true);

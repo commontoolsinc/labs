@@ -81,7 +81,7 @@ const watchBoth = (space: string, sessionId: string) => ({
 });
 
 const setup = async (options: {
-  subscriptionRefreshDelayMs: number;
+  subscriptionRefreshDelayMs: number | "manual";
   store: string;
 }) => {
   const server = new Server({
@@ -224,7 +224,7 @@ Deno.test("memory v2 server: an accept with no watched novelty still gets its ma
 
 Deno.test("memory v2 server: an accept on a doc OUTSIDE the watch set still gets its marker on an otherwise-empty frame", async () => {
   const context = await setup({
-    subscriptionRefreshDelayMs: 60_000,
+    subscriptionRefreshDelayMs: "manual",
     store: "memory://verdict-catchup-unwatched-doc",
   });
   const { server, space, committer, committerMessages, committerSessionId } =

@@ -151,15 +151,15 @@ async function waitForSchedulerCondition(
   condition: () => boolean,
   message: string,
 ): Promise<void> {
-  const deadline = performance.now() + 1_000;
-  while (!condition() && performance.now() < deadline) {
+  // Iteration-bounded, not wall-clock-bounded: zero-delay yields do not
+  // advance the fake clock, so a time deadline could never expire and an
+  // unreachable condition would spin forever. Each round drains the
+  // scheduler and yields one real timer turn — transport pumps and the
+  // emulated server's zero-delay flush ride zero-delay timers, which are
+  // exempt from the fake clock's test-armed freeze — so a condition the
+  // system will ever reach is reached within a bounded number of rounds.
+  for (let round = 0; round < 200 && !condition(); round++) {
     await runtime.idle();
-    // Yield a real timer turn: transport pumps and the emulated server's
-    // zero-delay flush ride zero-delay timers, and an idle() that resolves
-    // through microtasks alone would starve them (and the auto-advance
-    // pump that moves the deadline). Zero-delay timers are exempt from the
-    // fake clock's test-armed freeze — only positive-delay test timers
-    // freeze — so this yield fires under the preload.
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   if (!condition()) {
