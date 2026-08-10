@@ -192,8 +192,7 @@ stronger boundary: `packages/iframe-sandbox` runs guest HTML/JS inside a
 double iframe (an outer `srcdoc` iframe that pins a strict
 Content-Security-Policy, enclosing an inner iframe with the guest code),
 with all data access mediated by a postMessage IPC protocol
-(read/write/subscribe/LLM request). Chapter 10 covers the security model in
-full.
+(read/write/subscribe). Chapter 10 covers the security model in full.
 
 ---
 

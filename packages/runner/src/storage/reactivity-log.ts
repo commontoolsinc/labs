@@ -2,6 +2,7 @@ import type {
   Activity,
   IMemorySpaceAddress,
   Metadata,
+  StorageTransactionRejected,
   TransactionReactivityLog,
 } from "./interface.ts";
 import { normalizeCellScope } from "../scope.ts";
@@ -116,6 +117,67 @@ export function isReadIgnoredForCommit(meta?: Metadata): boolean {
 // Both the wrapper and the inner storage transaction(s) are marked, since
 // read()/buildReads run on the inner one; the chain walk tolerates extra wrapper
 // layers.
+// Rejection listeners, registered per inner transaction (CT-1950). A
+// rejected commit's promise resolves only after finalizeRejection's
+// read-repair gate — the caller's retry needs the repaired base — but the
+// commit's FATE is sealed the moment the rejection is received, and the
+// verdict-gated effect layer (verdict callbacks, outbox clearing) must not
+// wait out the repair round trip; commit callbacks ride the promise and DO
+// wait. The transaction registers its verdict resolver at commit() entry;
+// the push path notifies every contributing source at rejection receipt,
+// and finalizeRejection covers the cascade paths. Rejections only: an
+// accept does not seal a multi-space commit's aggregate fate, so accepts
+// keep resolving the verdict with the final result.
+const commitRejectionListeners = new WeakMap<
+  object,
+  (rejection: StorageTransactionRejected) => void
+>();
+
+export function registerCommitRejectionListener(
+  tx: object,
+  listener: (rejection: StorageTransactionRejected) => void,
+): void {
+  commitRejectionListeners.set(tx, listener);
+}
+
+export function notifyCommitRejected(
+  tx: object,
+  rejection: StorageTransactionRejected,
+): void {
+  const listener = commitRejectionListeners.get(tx);
+  if (listener !== undefined) {
+    commitRejectionListeners.delete(tx);
+    listener(rejection);
+  }
+}
+
+// Fan-out coverage waits, recorded per transaction (CT-1950). The push path
+// resolves its result at the server verdict and records the parked
+// application's promise here; the transaction layer drains the record so
+// that its commit() promise resolves only once the subscribed view reflects
+// the committed write. The split exists so post-commit effects gated on
+// durability alone (verdict callbacks, the outbox flush) can hook the
+// verdict instead of inheriting the fan-out window.
+const coverageWaits = new WeakMap<object, Promise<void>[]>();
+
+export function recordCoverageWait(tx: object, wait: Promise<void>): void {
+  const waits = coverageWaits.get(tx);
+  if (waits === undefined) {
+    coverageWaits.set(tx, [wait]);
+  } else {
+    waits.push(wait);
+  }
+}
+
+export function takeCoverageWaits(tx: object): Promise<void>[] {
+  const waits = coverageWaits.get(tx);
+  if (waits === undefined) {
+    return [];
+  }
+  coverageWaits.delete(tx);
+  return waits;
+}
+
 const uiInputBlindWriteTxs = new WeakSet<object>();
 
 function* blindWriteTxChain(tx: object): Generator<object> {

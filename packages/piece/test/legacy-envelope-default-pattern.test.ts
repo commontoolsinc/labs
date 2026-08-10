@@ -29,14 +29,15 @@ import {
   setCompileCacheRuntimeVersionForTesting,
   writeSourceDocs,
 } from "../../runner/src/compilation-cache/cell-cache.ts";
-import { pieceId, PieceManager } from "../src/manager.ts";
+import { pieceId } from "../src/piece-id.ts";
+import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase(
   "legacy envelope default pattern",
 );
 
 // A minimal transformed default pattern with the retired registry export:
-// `allPieces` plus the `addPiece` handler stream `PieceManager.add` sends into.
+// `allPieces` plus the `addPiece` handler stream `PiecesController.add` sends into.
 const defaultPatternProgram: RuntimeProgram = {
   main: "/main.tsx",
   files: [
@@ -156,9 +157,9 @@ describe("piece layer over a legacy-envelope default pattern (CT-1838)", () => {
     // --- Session 1: build the poisoned space. ---
     const runtime1 = newRuntime();
     const session1 = await createSession({ identity: signer, spaceName });
-    const manager1 = new PieceManager(session1, runtime1);
-    await manager1.synced();
-    const space = manager1.getSpace();
+    const pieces1 = new PiecesController(session1, runtime1);
+    await pieces1.synced();
+    const space = pieces1.getSpace();
 
     // Persist the default pattern in LEGACY form (injected bytes, injected
     // identities — what a pre-#4158 pipeline stored).
@@ -186,28 +187,28 @@ describe("piece layer over a legacy-envelope default pattern (CT-1838)", () => {
       space,
     );
     expect(typeof healed).toBe("function");
-    const defaultPiece = await manager1.runPersistent(
+    const defaultPiece = await pieces1.runPersistent(
       healed!,
       { allPieces: [] },
       "legacy-default-pattern-piece",
     );
-    await manager1.linkDefaultPattern(defaultPiece);
-    await manager1.runtime.idle();
-    await manager1.synced();
+    await pieces1.linkDefaultPattern(defaultPiece);
+    await pieces1.runtime.idle();
+    await pieces1.synced();
 
     // Register one regular piece through the (healed) default pattern.
     const simple = await runtime1.patternManager.compilePattern(
       simplePieceProgram,
       { space },
     );
-    const persisted = await manager1.runPersistent(
+    const persisted = await pieces1.runPersistent(
       simple,
       { value: 42 },
       "persisted-piece-t7",
     );
-    await manager1.add([persisted]);
-    await manager1.runtime.idle();
-    await manager1.synced();
+    await pieces1.add([persisted]);
+    await pieces1.runtime.idle();
+    await pieces1.synced();
     await runtime1.patternManager.flushCompileCacheWrites();
     await runtime1.storageManager.synced();
     const persistedId = pieceId(persisted)!;
@@ -222,13 +223,13 @@ describe("piece layer over a legacy-envelope default pattern (CT-1838)", () => {
     try {
       const runtime2 = newRuntime();
       const session2 = await createSession({ identity: signer, spaceName });
-      const manager2 = new PieceManager(session2, runtime2);
-      await manager2.synced();
+      const pieces2 = new PiecesController(session2, runtime2);
+      await pieces2.synced();
 
       // The CT-1838 headline symptom was getPieceRegistry degrading to the
       // detached "empty-pieces" placeholder. With tolerance, the registry
       // loads.
-      const piecesCell = await manager2.getPieceRegistry();
+      const piecesCell = await pieces2.getPieceRegistry();
       const ids = piecesCell.get().map((piece) => pieceId(piece)).filter(
         Boolean,
       );
@@ -241,16 +242,16 @@ describe("piece layer over a legacy-envelope default pattern (CT-1838)", () => {
         simplePieceProgram,
         { space },
       );
-      const added = await manager2.runPersistent(
+      const added = await pieces2.runPersistent(
         simple2,
         { value: 7 },
         "added-after-bump-t7",
       );
-      await manager2.add([added]);
-      await manager2.runtime.idle();
-      await manager2.synced();
+      await pieces2.add([added]);
+      await pieces2.runtime.idle();
+      await pieces2.synced();
 
-      const afterAdd = await manager2.getPieceRegistry();
+      const afterAdd = await pieces2.getPieceRegistry();
       const afterIds = afterAdd.get().map((piece) => pieceId(piece)).filter(
         Boolean,
       );

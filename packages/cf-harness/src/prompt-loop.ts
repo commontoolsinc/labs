@@ -46,7 +46,6 @@ import {
 } from "./contracts/policy-trace.ts";
 import {
   createHarnessRunReport,
-  type HarnessGatewayAttempt,
   type HarnessModelAttempt,
   type HarnessModelTurnUsage,
   type HarnessRunTimelineEntryInput,
@@ -130,6 +129,7 @@ export interface CreateHarnessPromptLoopOptions
   cacheAffinityKey?: string;
   promptCacheMode?: "implicit" | "explicit";
   reasoningEffort?: string;
+  compactThreshold?: number;
 }
 
 export interface RunHarnessPromptOptions {
@@ -1656,6 +1656,7 @@ export class CfHarnessPromptLoop {
   readonly #cacheAffinityKey?: string;
   readonly #promptCacheMode?: "implicit" | "explicit";
   readonly #reasoningEffort?: string;
+  readonly #compactThreshold?: number;
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
     this.engine = options.engine ?? new CfHarnessEngine(options);
@@ -1736,6 +1737,7 @@ export class CfHarnessPromptLoop {
     this.#cacheAffinityKey = options.cacheAffinityKey;
     this.#promptCacheMode = options.promptCacheMode;
     this.#reasoningEffort = options.reasoningEffort;
+    this.#compactThreshold = options.compactThreshold;
   }
 
   /** @deprecated Prefer `modelClient`; unavailable for `openai-codex`. */
@@ -1851,7 +1853,6 @@ export class CfHarnessPromptLoop {
     const transcript: HarnessTranscriptMessage[] = [...options.transcript];
     const maxModelTurns = options.maxModelTurns ?? this.#maxModelTurns;
     const toolActivity: HarnessToolActivity[] = [];
-    const gatewayAttempts: HarnessGatewayAttempt[] = [];
     const modelAttempts: HarnessModelAttempt[] = [];
     const modelUsage: HarnessModelTurnUsage[] = [];
     const descendantUsage: HarnessModelUsage[] = [];
@@ -1899,7 +1900,6 @@ export class CfHarnessPromptLoop {
           ...(finalAssistantText !== undefined ? { finalAssistantText } : {}),
           timeline: reportTimeline,
           toolActivity,
-          gatewayAttempts,
           modelAttempts,
           ...(modelUsage.length > 0
             ? {
@@ -1929,29 +1929,6 @@ export class CfHarnessPromptLoop {
         ...attempt,
         runId: this.engine.getRunState().runId,
         sequence: modelAttempts.length + 1,
-        modelTurn: modelTurns,
-      });
-      if (
-        attempt.providerId !== "openai-compatible-gateway" ||
-        (attempt.operation !== "chat.completions" &&
-          attempt.operation !== "responses")
-      ) {
-        return;
-      }
-      const {
-        providerId: _providerId,
-        type: _type,
-        operation,
-        ...rest
-      } = attempt;
-      gatewayAttempts.push({
-        ...rest,
-        type: "cf-harness.gateway.chat-completion-attempt",
-        // Preserve which API served the turn: gpt-* goes to the Responses API,
-        // provider-native tools and non-OpenAI models stay on chat completions.
-        operation,
-        runId: this.engine.getRunState().runId,
-        sequence: gatewayAttempts.length + 1,
         modelTurn: modelTurns,
       });
     };
@@ -1996,6 +1973,9 @@ export class CfHarnessPromptLoop {
             : {}),
           ...(this.#reasoningEffort !== undefined
             ? { reasoningEffort: this.#reasoningEffort }
+            : {}),
+          ...(this.#compactThreshold !== undefined
+            ? { compactThreshold: this.#compactThreshold }
             : {}),
           signal: options.signal,
           onAttempt: recordModelAttempt,
@@ -2836,6 +2816,15 @@ export class CfHarnessPromptLoop {
       engine: childEngine,
       modelClient: this.modelClient,
       cacheAffinityKey: childRunId,
+      // A positive threshold is calibrated to the parent model's input
+      // budget, so it follows only a child that inherits that model; a
+      // profile-overridden child keeps its own model's derived default (and a
+      // chat-routed override like web_search could not honour it at all).
+      // `0` is model-independent — the off-switch stays run-wide.
+      ...(this.#compactThreshold !== undefined &&
+          (this.#compactThreshold === 0 || childModel.source === "parent")
+        ? { compactThreshold: this.#compactThreshold }
+        : {}),
       ...(this.#promptCacheMode !== undefined
         ? { promptCacheMode: this.#promptCacheMode }
         : {}),

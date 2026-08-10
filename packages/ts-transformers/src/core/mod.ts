@@ -214,7 +214,6 @@ export type {
   SchemaHints,
   TransformationDiagnostic,
   TransformationOptions,
-  TransformMode,
   TypeRegistry,
   UnreadableCellArgument,
 } from "./transformers.ts";

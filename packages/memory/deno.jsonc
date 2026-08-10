@@ -22,11 +22,6 @@
       "command": "deno bench --allow-read --allow-write --allow-ffi --allow-env test/v2-entity-id-list.bench.ts"
     }
   },
-  "test": {
-    "include": [
-      "test/*-test.ts"
-    ]
-  },
   "exports": {
     ".": "./lib.ts",
     "./acl": "./acl.ts",

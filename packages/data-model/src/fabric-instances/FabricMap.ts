@@ -21,19 +21,20 @@ import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
  */
 export class FabricMap
   extends FabricNativeWrapper<Map<FabricValue, FabricValue>> {
+  /** Constructs an instance wrapping `map`. */
   constructor(readonly map: Map<FabricValue, FabricValue>) {
     super();
   }
 
   /**
-   * Stub -- throws until `Map` support is fully implemented. `FabricMap` is
-   * not yet used and is being reworked separately; the protocol methods are
-   * deliberately left as throwing stubs (per Dan's PR #3612 review).
+   * Stub -- throws until `Map` support is fully implemented. The protocol
+   * methods throw rather than approximate, so that no caller can come to depend
+   * on an answer that would have to be taken back.
    */
   [DEEP_FREEZE](
     _subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
-    throw new Error("FabricMap: not yet implemented");
+    throw new Error("`FabricMap`: not yet implemented");
   }
 
   /**
@@ -43,7 +44,7 @@ export class FabricMap
   [IS_DEEP_FROZEN](
     _subIsDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
-    throw new Error("FabricMap: not yet implemented");
+    throw new Error("`FabricMap`: not yet implemented");
   }
 
   /** @inheritDoc */
@@ -68,6 +69,7 @@ export class FabricMap
 
   static #codec = Object.freeze(
     new (class FabricMapCodec extends BaseFabricCodec {
+      /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Map, FabricMap);
       }
@@ -78,7 +80,7 @@ export class FabricMap
        * Stub -- throws until `Map` support is implemented.
        */
       encode(_value: FabricMap): FabricValue {
-        throw new Error("FabricMap: not yet implemented");
+        throw new Error("`FabricMap`: not yet implemented");
       }
 
       /**
@@ -91,7 +93,7 @@ export class FabricMap
         _state: FabricValue,
         _context: ReconstructionContext,
       ): FabricValue {
-        throw new Error("FabricMap: not yet implemented");
+        throw new Error("`FabricMap`: not yet implemented");
       }
     })(),
   );

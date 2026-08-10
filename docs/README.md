@@ -14,24 +14,13 @@ Write a new one — it is historical.
 ## Comments in code
 
 A comment carries what the code cannot say on its own. The code speaks for
-itself, so a comment describes rather than defends it.
+itself, so a comment describes rather than defends it, and public interfaces
+additionally carry descriptive JSDoc.
 
-- Say what the behavior is. Do not argue for this approach over one that was
-  not taken.
-- Do not describe what the code would otherwise do, or what it used to do. A
-  reader has the code in front of them and the history a command away.
-- Leave issue and ticket numbers out. The commit message and the branch name
-  carry that trail, and they stay accurate when the tracker changes.
-- Leave asides out. A comment is read by people who were not present for the
-  conversation that produced it.
-- When the reasoning is longer than a comment can hold, write it down under
-  `docs/features/` and have the comment name that document. Several invariants
-  in this repository are held that way, and the pairing is what keeps a subtle
-  constraint from being edited away by someone who never saw the argument for
-  it.
-
-Public interfaces additionally carry descriptive JSDoc; see the style section
-of [`development/DEVELOPMENT.md`](development/DEVELOPMENT.md).
+[`development/code-comment-style.md`](development/code-comment-style.md) is the
+guide to both kinds: what earns a comment, what a doc comment carries, the
+markup they share with error and log messages, and the shapes that make a
+comment go stale or mislead. The spelling rule below reaches comments too.
 
 ## Live documentation
 
@@ -91,6 +80,40 @@ created directly in `docs/history/`, with the metadata header, rather than
 created as live documents and archived later. A plan you intend to execute
 starts in `docs/plans/` (a pending plan is live) and is archived when it is
 done.
+
+## Examples in documentation
+
+An example that illustrates a general rule is invented. Donuts, glazes, and
+flavors do the job, and code lifted from this repository does it worse for two
+reasons that compound. Real code moves, and nothing about moving it brings
+anyone back to the document that quoted it. And while it sits there it answers
+searches for the identifier it names, with a hit that is not a use of it —
+the same reason [the spelling rule](#spelling) exists, pointed at a different
+target.
+
+An example that documents a specific hazard is the exception, because the
+hazard is the real thing: a guide to what goes wrong with a particular
+function has to name that function. Such an example takes both costs
+knowingly. `deno task check-docs` covers only the first half of the first one,
+catching drift that stops the block compiling and never drift that compiles
+and is no longer true.
+
+## Spelling
+
+Prose written here — comments, documents, error and log messages, test
+descriptions — uses American spellings: `behavior`, `color`, `center`,
+`serialize`, `analyze`, `gray`.
+
+This is standardization rather than a claim about which English is better: one
+spelling per word means a search for a word finds all of it, and this is the
+variety already in overwhelming use in these files.
+
+Two carve-outs. Material quoted from outside — a dependency's name, a message
+relayed from another system, a specification's wording, a data file's contents
+— keeps whatever spelling it arrived with. And an identifier vocabulary
+already established in the codebase, `cancelled` among them, is a rename
+rather than a spelling fix: match the surrounding code, and treat a change to
+it as the code change it is.
 
 ## Map of this tree
 

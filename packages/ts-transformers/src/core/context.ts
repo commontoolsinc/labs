@@ -21,11 +21,6 @@ import {
 import { CrossStageState } from "./cross-stage-state.ts";
 import { CFHelpers } from "./cf-helpers.ts";
 
-const DEFAULT_OPTIONS: TransformationOptions = {
-  mode: "transform",
-  debug: false,
-};
-
 export interface TransformationContextConfig {
   program: ts.Program;
   sourceFile: ts.SourceFile;
@@ -69,7 +64,6 @@ export class TransformationContext {
     });
     this.state = config.options?.state ?? new CrossStageState();
     this.options = {
-      ...DEFAULT_OPTIONS,
       ...config.options,
       state: this.state,
     };

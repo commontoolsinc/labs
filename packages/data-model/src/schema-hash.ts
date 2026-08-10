@@ -263,7 +263,7 @@ export function findInternedSchema(
     default: {
       // Shouldn't happen!
       throw new Error(
-        `Unexpected type in schema intern table: ${typeof refOrPrim}`,
+        `Unexpected type in schema intern table: \`${typeof refOrPrim}\``,
       );
     }
   }

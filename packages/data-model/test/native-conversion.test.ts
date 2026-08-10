@@ -699,7 +699,7 @@ describe("native-conversion", () => {
         const date = new Date(0) as Date & { extra?: number };
         date.extra = 1;
         expect(() => shallowFabricFromNativeValue(date)).toThrow(
-          "Not representable as a `FabricValue`: Date with extra enumerable properties",
+          "Not representable as a `FabricValue`: `Date` with extra enumerable properties",
         );
       });
 
@@ -790,9 +790,8 @@ describe("native-conversion", () => {
 
       it("throws for `constructor`, naming it as the cause", () => {
         // Type dispatch reads the constructor from the prototype, so an own
-        // `constructor` property no longer decides the value's type: it
-        // reaches the object rule and is named, rather than failing as some
-        // unrecognized type or being rebuilt as whatever class it held.
+        // `constructor` property does not decide the value's type. It reaches
+        // the object rule, which names it as the reserved property it is.
         expect(() => fabricFromNativeValue({ ["constructor"]: "c" })).toThrow(
           "Not representable as a `FabricValue`: object with a property name " +
             "this runtime reserves (`constructor`)",
@@ -1349,7 +1348,8 @@ describe("native-conversion", () => {
         const outer = new Error("outer", { cause: inner });
         fabricFromNativeValue(outer);
 
-        // Original Error's cause should still be the raw Error, not FabricError.
+        // The original `Error`'s cause is still the raw `Error`, not a
+        // `FabricError`.
         expect(outer.cause).toBe(inner);
         expect(outer.cause).not.toBeInstanceOf(FabricError);
       });

@@ -212,11 +212,28 @@ export function createQueryResultProxy<T>(
     return value;
   }
 
-  // TODO(danfuzz): This may have to do something special to handle concrete
-  // instances of `FabricInstance` so that they get perceived as such by the
-  // proxy's clients. Unlike `FabricPrimitive`, `FabricInstance`s are not
-  // necessarily frozen and _do_ expose outgoing references (just as plain
-  // objects and arrays do).
+  // A `FabricInstance` is _not_ exempted here the way a `FabricPrimitive` is
+  // above, so one gets wrapped in a proxy -- and that has a consequence outside
+  // this file which is easy to miss from here.
+  //
+  // The proxy target is an empty stub and there is no `getPrototypeOf` trap, so
+  // a proxied instance's prototype is `Object.prototype` and
+  // `instanceof FabricInstance` is _false_ for it. Every
+  // `instanceof FabricInstance` guard in the runner is therefore blind to an
+  // instance that arrives through a cell read -- the refusal does not fire and
+  // the walk proceeds to rebuild the value as a bare `{}`. That is around ten
+  // sites and counting, so they are not listed here to go stale;
+  // `grep -rn 'instanceof FabricInstance' packages/runner/src` finds them.
+  //
+  // `test/llm-dialog-special-objects.test.ts` pins that end to end, so closing
+  // this turns that test red rather than letting it pass silently.
+  //
+  // TODO(danfuzz): make a proxied `FabricInstance` perceived as one by the
+  // proxy's clients. Note this is not simply extending the raw-return exemption
+  // above: unlike a primitive, an instance is not necessarily frozen and _does_
+  // expose outgoing references (just as plain objects and arrays do), so the
+  // proxy is here on purpose and something has to preserve type identity
+  // without losing member resolution.
 
   // Stored objects are deep-frozen during storage normalization
   // (fabricFromNativeValueModern). A frozen proxy target would force every
@@ -511,8 +528,18 @@ export function createQueryResultProxy<T>(
       // `toString`. Storage traversal deliberately considers own properties
       // only; keeping the same boundary here also avoids recording spurious
       // reactive dependencies for prototype members.
+      //
+      // The receiver is the container, not this proxy: a prototype accessor
+      // has to run against the object that actually holds the state. Every
+      // `FabricInstance` keeps its state in private fields behind accessors,
+      // and a private field is unreachable from a proxy that does not declare
+      // it. (The receiver is immaterial for a data property, which is what
+      // every prototype member of a plain object or array is, so this costs
+      // those nothing.) A `FabricInstance` leafs through storage traversal
+      // whole, so the read of the container already covers what an accessor
+      // returns.
       if (!Object.hasOwn(value, prop) && prop in value) {
-        return Reflect.get(value, prop, receiver);
+        return Reflect.get(value, prop);
       }
 
       return createQueryResultProxy(
@@ -571,8 +598,11 @@ export function createQueryResultProxy<T>(
           // keys, ahead of any other name -- rather than appending it. Own-key
           // order is load-bearing: a consumer can tell an index-only array from
           // one carrying named properties by asking whether `length` comes
-          // last (`isArrayWithOnlyIndexProperties()` does exactly that), and
-          // appending would make a named property look like an index-only one.
+          // last, and appending would make a named property look like an
+          // index-only one. `isInertArray()` reads exactly that, and fabric
+          // membership (`isFabricValue()`) is decided by it for every array,
+          // so the order here is what makes a proxied array carrying a named
+          // property fail membership instead of passing as index-only.
           const firstNonIndex = keys.findIndex((key) =>
             !((typeof key === "string") && isArrayIndexPropertyName(key))
           );
@@ -625,7 +655,25 @@ export function createQueryResultProxy<T>(
       }
       const readTx = runtime.readTx(tx);
       const current = readTx.readValueOrThrow(link, SHAPE_READ) as typeof value;
-      if ((isRecord(current) || Array.isArray(current)) && prop in current) {
+      // `Object.hasOwn`, not `in`: this trap answers about OWN properties, and
+      // `in` walks the prototype chain. Because the underlying value is an
+      // ordinary `Object.prototype`-rooted record, `in` reported every member of
+      // `Object.prototype` -- `toString`, `valueOf`, `constructor`, `__proto__`
+      // -- as an own property of the proxy, while `ownKeys` (which uses
+      // `Reflect.ownKeys`) listed none of them. Two traps describing the same
+      // value disagreed by construction, so every consumer that reasons about a
+      // read-back value's shape was being told it carries names it does not.
+      //
+      // That is not academic: `unsafeObjectKeyIn()` refuses a `FabricValue`
+      // carrying own `__proto__`/`constructor` and tests with `Object.hasOwn()`,
+      // so writing a read-back record back to a cell was rejected for a key the
+      // record never had, and every read-modify-write against a cell failed
+      // (loom CT-1949). The `has` trap below keeps `in` -- there it is correct,
+      // being the `in` operator's own trap.
+      if (
+        (isRecord(current) || Array.isArray(current)) &&
+        Object.hasOwn(current, prop)
+      ) {
         return {
           configurable: true,
           enumerable: true,
@@ -773,6 +821,11 @@ export function isCellResult(value: any): value is CellResult<any> {
 export function snapshotQueryResult<T>(value: T): T {
   const seen = new WeakMap<object, unknown>();
   const snapshot = (current: unknown): unknown => {
+    // TODO(danfuzz): the leaf test covers `FabricPrimitive` but not
+    // `FabricInstance`, so an instance (live traffic — the fetch builtins
+    // store a `FabricError` result) falls to the `Object.keys` rebuild below
+    // and snapshots as `{}`, its codec contents lost. It wants the same
+    // leaf-through treatment until a codec-contents walk exists.
     if (
       current === null || typeof current !== "object" ||
       current instanceof FabricPrimitive

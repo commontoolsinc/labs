@@ -1304,6 +1304,18 @@ export class Scheduler {
     });
   }
 
+  /**
+   * Marks a subscribed action invalid and schedules an execution pass, exactly
+   * as a change to one of its journaled reads would. For an asynchronous
+   * completion whose terminal step writes nothing the action journals — the
+   * only remaining signal that the action must run again is the completion
+   * itself (e.g. a list coordinator's owed element setup after every awaited
+   * result document confirmed absent). No-op for an unsubscribed action.
+   */
+  invalidateAction(action: Action): void {
+    this.markAndScheduleInvalidAction(action);
+  }
+
   queueExecution(): void {
     if (this.disposed) return;
     if (this.scheduled) {

@@ -1,9 +1,11 @@
 import {
   fabricFromNativeValue,
+  FabricInstance,
   type FabricValue,
   nativeFromFabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   getPersistentSchedulerStateConfig,
@@ -14,7 +16,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
+import { isPlainObject, isRecord } from "@commonfabric/utils/types";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { PatternManager } from "./pattern-manager.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
@@ -41,6 +43,7 @@ import {
   pushFrameFromCause,
 } from "./builder/pattern.ts";
 import { type Cell, createCell, isCell } from "./cell.ts";
+import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import { type Action } from "./scheduler.ts";
 import {
   isSchedulerActionObservation,
@@ -90,6 +93,10 @@ import type {
   URI,
 } from "./storage/interface.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
+import {
+  isConflictRejection,
+  isStorageTransactionInconsistent,
+} from "./storage/rejection.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import {
   machineryRead,
@@ -196,6 +203,9 @@ type StartAttempt = {
   readonly schedulePatternUpdate: boolean;
   readonly generationsByDoc: Map<string, number>;
   readonly preResolutionStopKeys: Set<string>;
+  // The result this attempt resolved to, which a link start only learns by
+  // following the link.
+  targetKey?: `${MemorySpace}/${CellScope}/${URI}`;
 };
 
 // The debug-name builders reuse the action's already-computed
@@ -263,6 +273,41 @@ function patternDefaultScope(pattern: Pattern): CellScope | undefined {
   return schemaCellScope(pattern.resultSchema) ?? pattern.defaultScope;
 }
 
+/**
+ * Structural description of `value` for the durable `schema` metadata of the
+ * receipt cell it is about to be written into: the root container kind, plus
+ * the property names when that kind is a record. Returns `undefined` for a
+ * value with no container kind of its own — a scalar, a `FabricSpecialObject`,
+ * or a link, whose kind belongs to whatever it resolves to rather than to the
+ * receipt.
+ *
+ * A `data:` link is the exception among links: it carries its value inside
+ * its own identifier, and the write inlines it, so the receipt holds that
+ * value rather than a link to it. The description comes from the same
+ * inlining, so it describes what is stored.
+ *
+ * This is DESCRIPTIVE — what this one receipt holds — and never a contract
+ * bearing on anything written later. Description and authority cannot diverge
+ * here, because the receipt's create-only mark means the value it describes is
+ * the only value the document ever holds.
+ *
+ * The root kind is what lets a reader's selection become a fetch selector
+ * instead of a filter applied after loading, since the same selection means
+ * different things over a record and over an array. The property schemas are
+ * left as `true` — everything is admissible at every position — which is what
+ * keeps a link position honest: spelling one out means `asCell`, and `["cell"]`
+ * asserts a writable handle on a document nothing can be written through.
+ */
+function receiptShapeSchema(value: unknown): JSONSchema | undefined {
+  const stored = isCellLink(value) ? findAndInlineDataUriLinks(value) : value;
+  if (isCellLink(stored)) return undefined;
+  if (Array.isArray(stored)) return { type: "array" };
+  if (!isPlainObject(stored)) return undefined;
+  const properties: Record<string, JSONSchema> = {};
+  for (const key of Object.keys(stored)) properties[key] = true;
+  return { type: "object", properties };
+}
+
 const recordOutputSchemaPolicyInputs = (
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
@@ -328,6 +373,29 @@ const recordOutputSchemaPolicyInputs = (
       )
     );
     return;
+  }
+
+  // A `FabricInstance` is refused. `isRecord` admits one, and its enumerable
+  // properties are empty, so descent would stop without reaching its codec
+  // contents -- and a write-redirect link nested inside one would record no
+  // `kind: "schema"` entry.
+  //
+  // Unlike the argument walks below, what that costs is not a hole: these
+  // entries GRANT, so a missing one leaves a later write refused rather than
+  // wrongly allowed, and the gap fails _closed_. The refusal is here because a
+  // write refused far away for a reason nothing names is worse to diagnose
+  // than a throw at the site that owes the work.
+  //
+  // Nothing reaches this in production today, de facto rather than by
+  // construction.
+  //
+  // TODO(danfuzz): descend by codec-mediated traversal into instance state, at
+  // which point this becomes a walk rather than a refusal.
+  if (outputBinding instanceof FabricInstance) {
+    refuseFabricInstance(
+      outputBinding,
+      "when recording output-schema policy inputs",
+    );
   }
 
   if (isRecord(outputBinding) && !isCellLink(outputBinding)) {
@@ -406,6 +474,10 @@ const recordRawBuiltinBindingSchemaPolicyInputs = (
     return;
   }
 
+  // TODO(danfuzz): same gap as `recordOutputSchemaPolicyInputs()` above:
+  // `isRecord` admits a `FabricSpecialObject`, whose empty entries end the
+  // descent, so a link inside a `FabricInstance`'s codec contents records no
+  // policy input. Fails closed, as there.
   if (isRecord(outputBinding) && !isCellLink(outputBinding)) {
     for (const child of Object.values(outputBinding)) {
       recordRawBuiltinBindingSchemaPolicyInputs(
@@ -527,6 +599,11 @@ export function firstResolvedOutputRedirect(
     }
     return undefined;
   }
+  // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, whose empty
+  // entries end the descent, so a write-redirect link inside a
+  // `FabricInstance`'s codec contents is invisible here. The caller then
+  // sees no redirect and silently skips the sub-pattern's owned-cell
+  // pre-sync keyed off it.
   if (isRecord(binding) && !isCellLink(binding)) {
     for (const child of Object.values(binding)) {
       const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
@@ -619,6 +696,21 @@ const recordSetupProjectionPolicyInputs = (
       )
     );
     return;
+  }
+
+  // Refused for the same reason as `recordOutputSchemaPolicyInputs()` above,
+  // and this site is the more reachable of the two: `projection` is the _raw_
+  // pattern argument, so a `FabricSpecialObject` a pattern actually wrote is
+  // what arrives here. Fails _closed_ as well, so the throw buys diagnosis
+  // rather than safety.
+  //
+  // TODO(danfuzz): descend by codec-mediated traversal into instance state, at
+  // which point this becomes a walk rather than a refusal.
+  if (projection instanceof FabricInstance) {
+    refuseFabricInstance(
+      projection,
+      "when recording setup-projection policy inputs",
+    );
   }
 
   if (isRecord(projection) && !isCellLink(projection)) {
@@ -1168,6 +1260,19 @@ export class Runner {
   private locallyCommittedHandlerResultStarts = new Set<
     `${MemorySpace}/${CellScope}/${URI}`
   >();
+  // Results started in their own right rather than as part of an enclosing
+  // pattern, which is what navigating to a nested result does. An enclosing
+  // pattern releasing such a result leaves it running; only stopping it
+  // directly ends it.
+  private independentlyStartedResults = new Set<
+    `${MemorySpace}/${CellScope}/${URI}`
+  >();
+  // Commit-gated starts that have not installed a registration yet, indexed by
+  // result so an explicit stop can tombstone them before installation.
+  private pendingDeferredStarts = new Map<
+    `${MemorySpace}/${CellScope}/${URI}`,
+    Set<DeferredCancelOwnership>
+  >();
   // Map whose key is the result cell's full key, and whose values are a hash
   // of the pattern's encodable form -- what `writeJavaScriptActionResult`
   // compares to decide whether a returned sub-pattern has changed.
@@ -1600,7 +1705,7 @@ export class Runner {
     // but a piece whose `schema` meta is missing or stale-but-same-version
     // still gets it repaired, which is what keeps its reads typed and its
     // durable write contract present. Both branches need it: a caller may
-    // re-run a running piece WITH an argument (`PieceManager.runWithPattern`),
+    // re-run a running piece WITH an argument (`PiecesController.runWithPattern`),
     // and that piece's metadata is no less worth repairing.
     if (setupState.storedSetupMatches) {
       this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
@@ -2142,7 +2247,9 @@ export class Runner {
    * Start scheduling nodes for a previously set up piece.
    * If already started, this is a no-op.
    *
-   * Returns a Promise that resolves to true on success, or rejects with an error.
+   * Returns a Promise that resolves to true when this start left the piece
+   * running with a lifetime of its own, false when it was superseded or the
+   * piece was stopped while the start resolved, or rejects with an error.
    * Runs synchronously when data is available (important for tests).
    */
   start<T = any>(
@@ -2159,13 +2266,72 @@ export class Runner {
     this.activeStartAttempts.add(attempt);
     this.trackStartAttempt(attempt, startKey);
     try {
-      return this.doStart(resultCell, new Set(), attempt).finally(() => {
-        this.finishStartAttempt(attempt);
-      });
+      return this.doStart(resultCell, new Set(), attempt)
+        .then((started) => {
+          // This start gives the result a lifetime of its own, so an enclosing
+          // pattern releasing it later leaves it running. An attempt whose
+          // target a stop superseded claims nothing: the registration under
+          // the key belongs to whatever replaced it, and a stop that won the
+          // race leaves no registration at all. Both cases report that this
+          // start is not running. The check is scoped to the target: a stop of
+          // an intermediate link doc after the target's registration installed
+          // does not touch that registration, so it neither voids the claim
+          // nor the report.
+          const target = attempt.targetKey;
+          const stillRunning = started && target !== undefined &&
+            this.isStartAttemptCurrentFor(attempt, target) &&
+            this.cancels.has(target);
+          if (stillRunning) {
+            this.independentlyStartedResults.add(target);
+          }
+          return stillRunning;
+        })
+        .finally(() => {
+          this.finishStartAttempt(attempt);
+        });
     } catch (error) {
       this.finishStartAttempt(attempt);
       return Promise.reject(error);
     }
+  }
+
+  /**
+   * Releases a child an enclosing pattern is done with. Stops only the exact
+   * registration this invocation installed — a later attempt that replaced it
+   * owns itself — and leaves a result that has a lifetime of its own running.
+   */
+  releaseChild<T>(
+    resultCell: Cell<T>,
+    installedCancel: Cancel | undefined,
+  ): void {
+    const key = this.getDocKey(resultCell);
+    const registration = this.cancels.get(key);
+    if (installedCancel !== undefined && registration !== installedCancel) {
+      return;
+    }
+    if (this.independentlyStartedResults.has(key)) return;
+    // A start still resolving may be about to give this result a lifetime of
+    // its own, and it cannot say so until it finishes. Declining here keeps a
+    // page that is still opening from being closed by its parent. An attempt
+    // that then fails leaves the result registered until the runtime stops it,
+    // which is the same bound the scheduler already accepts for a start that
+    // exhausts its retries.
+    if ((this.activeStartAttemptsByDoc.get(key)?.size ?? 0) > 0) return;
+    if (registration === undefined) {
+      // A commit-gated start installs nothing until its transaction commits,
+      // so a launch whose child is still gated holds that child through the
+      // pending start alone. Cancelling it is what keeps the child from
+      // starting after the pattern that launched it is gone. The width is the
+      // one the TODO in stopResult() describes: every pending start for the
+      // result goes, not only the one this launch scheduled.
+      this.cancelPendingDeferredStarts(key);
+      return;
+    }
+    // A link start that has not yet followed its link is not indexed under
+    // `key`, so the check above cannot see it. An explicit stop is
+    // authoritative over such a start and tombstones it; a release is not, and
+    // leaves it to resolve into a result of its own.
+    this.stopResult(resultCell);
   }
 
   /**
@@ -2773,6 +2939,7 @@ export class Runner {
       : resultCell;
 
     const key = this.getDocKey(rootCell);
+    attempt.targetKey = key;
     // Step 2: Already started? Return success
     if (this.cancels.has(key)) return Promise.resolve(true);
 
@@ -2997,13 +3164,51 @@ export class Runner {
     resultCell: Cell<T>,
   ): DeferredCancelOwnership {
     const key = this.getDocKey(resultCell);
-    return useDeferredCancelOwnership((installedCancel) => {
+    const base = useDeferredCancelOwnership((installedCancel) => {
       // A result key can be stopped and restarted while deferred startup is
       // re-entering runner code. Only stop if this attempt's exact cancel
       // registration is still current; a later replacement owns itself.
       if (this.cancels.get(key) !== installedCancel) return;
       this.stop(resultCell);
     });
+    // Ownership of a commit-gated start begins when the start is scheduled,
+    // not when its callback installs it, so a stop before that commit has to
+    // reach the pending start and tombstone it. The entry goes as soon as the
+    // start settles either way: it installed a registration, which owns itself
+    // from then on, or it was cancelled.
+    const ownership: DeferredCancelOwnership = {
+      cancel: () => {
+        unregister();
+        base.cancel();
+      },
+      isCancelled: base.isCancelled,
+      markInstalled: (registration) => {
+        unregister();
+        return base.markInstalled(registration);
+      },
+    };
+    const unregister = () => {
+      const pending = this.pendingDeferredStarts.get(key);
+      if (pending === undefined) return;
+      pending.delete(ownership);
+      if (pending.size === 0) this.pendingDeferredStarts.delete(key);
+    };
+    let pending = this.pendingDeferredStarts.get(key);
+    if (pending === undefined) {
+      pending = new Set();
+      this.pendingDeferredStarts.set(key, pending);
+    }
+    pending.add(ownership);
+    return ownership;
+  }
+
+  private cancelPendingDeferredStarts(
+    key: `${MemorySpace}/${CellScope}/${URI}`,
+  ): void {
+    const pending = this.pendingDeferredStarts.get(key);
+    if (pending === undefined) return;
+    this.pendingDeferredStarts.delete(key);
+    for (const ownership of pending) ownership.cancel();
   }
 
   private startAfterSuccessfulCommit<T = any>(
@@ -3016,9 +3221,15 @@ export class Runner {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const ownership = this.createDeferredStartOwnership(resultCell);
     tx.addCommitCallback((_committedTx, result) => {
-      if (result.error || ownership.isCancelled()) {
+      if (result.error) {
+        // The callback that would install this start is the one running now,
+        // so a failed transaction leaves nothing to reach the pending entry
+        // later. Settle it here, which also drops it from the index of starts
+        // pending under this result's key.
+        ownership.cancel();
         return;
       }
+      if (ownership.isCancelled()) return;
 
       const startTx = this.runtime.edit();
       const committedResultCell = this.runtime.getCellFromLink<T>(
@@ -3083,7 +3294,14 @@ export class Runner {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const ownership = this.createDeferredStartOwnership(resultCell);
     tx.addCommitCallback((_committedTx, result) => {
-      if (result.error || ownership.isCancelled()) return;
+      if (result.error) {
+        // Settled here for the same reason as the start above: this callback
+        // is the only thing that reaches the pending entry, so a failed
+        // transaction would otherwise strand it under the result's key.
+        ownership.cancel();
+        return;
+      }
+      if (ownership.isCancelled()) return;
 
       const startTx = this.runtime.edit();
       const committedResultCell = this.runtime.getCellFromLink<T>(
@@ -3258,6 +3476,24 @@ export class Runner {
           this.pullCellOnceAfterSuccessfulCommit(tx, resultCell);
         }
       }
+    }
+
+    // The setup writes are staged in this transaction; the registration is
+    // not, so a transaction that does not become durable would otherwise leave
+    // a piece running over writes that never landed. A stale basis is the
+    // exception: the re-run that follows reuses what is already there.
+    if (installedCancel !== undefined) {
+      const startedCancel = installedCancel;
+      tx.addCommitCallback((_settledTx, result) => {
+        if (!result.error) return;
+        if (
+          isConflictRejection(result.error) ||
+          isStorageTransactionInconsistent(result.error)
+        ) {
+          return;
+        }
+        this.releaseChild(resultCell, startedCancel);
+      });
     }
 
     if (!providedTx) {
@@ -3690,6 +3926,10 @@ export class Runner {
       if (link) {
         promises.add(this.runtime.getCellFromLink(link).sync());
       } else if (isRecord(value)) {
+        // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, and
+        // `for..in` sees none of its state, so a link nested in a
+        // `FabricInstance`'s codec contents is never synced here — the cold
+        // target this pre-sync exists to warm.
         for (const key in value) syncAllMentionedCells(value[key]);
       }
     };
@@ -3887,6 +4127,11 @@ export class Runner {
               ),
           );
         } else if (isRecord(value)) {
+          // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, and
+          // `for..in` sees none of its state, so a link inside a
+          // `FabricInstance` held in a raw argument value is never pre-synced
+          // — a cold target can then enter the commit basis, the exact
+          // failure this walk exists to prevent.
           for (const key in value) collectLinkTargets(value[key], base);
         }
       };
@@ -4054,7 +4299,32 @@ export class Runner {
    * @param resultCell - The result doc or cell to stop.
    */
   stop<T>(resultCell: Cell<T>): void {
+    // An unresolved link start does not know its target yet, so it cannot be
+    // indexed under the target's key. An explicit stop records the target on
+    // every active attempt that has not discovered it; an attempt that later
+    // resolves to the target observes the tombstone and terminates. The
+    // tombstone lives only on the active token and is released when that start
+    // settles. This step is what makes a stop authoritative over a start still
+    // resolving; releaseChild() calls stopResult() directly and leaves such a
+    // start to resolve into a result of its own.
     const key = this.getDocKey(resultCell);
+    for (const attempt of this.activeStartAttempts) {
+      if (!attempt.generationsByDoc.has(key)) {
+        attempt.preResolutionStopKeys.add(key);
+      }
+    }
+    this.stopResult(resultCell);
+  }
+
+  private stopResult<T>(resultCell: Cell<T>): void {
+    const key = this.getDocKey(resultCell);
+    this.independentlyStartedResults.delete(key);
+    // TODO(hixie): This reaches every pending commit-gated start for the result,
+    // which is wider than a release's authority: one that another launch
+    // scheduled goes too. Narrowing it needs the release to name the pending
+    // start its own launch created, the way it already names the registration
+    // it installed.
+    this.cancelPendingDeferredStarts(key);
     if ((this.activeStartAttemptsByDoc.get(key)?.size ?? 0) > 0) {
       this.startGenerationByDoc.set(
         key,
@@ -4064,16 +4334,6 @@ export class Runner {
       // No asynchronous continuation can observe this generation. Avoid
       // retaining one entry per stopped piece for the runtime's lifetime.
       this.startGenerationByDoc.delete(key);
-    }
-    // An unresolved link start does not know its target yet, so it cannot be
-    // indexed under `key`. Snapshot this stop onto every currently active
-    // attempt that has not discovered the doc. If one later resolves to `key`,
-    // it observes the tombstone and terminates. The tombstone lives only on the
-    // active token and is released when that start settles.
-    for (const attempt of this.activeStartAttempts) {
-      if (!attempt.generationsByDoc.has(key)) {
-        attempt.preResolutionStopKeys.add(key);
-      }
     }
     const cancel = this.cancels.get(key);
     try {
@@ -4140,6 +4400,26 @@ export class Runner {
   }
 
   /**
+   * True when the attempt's view of one doc is still current: the doc was
+   * discovered, and no stop has tombstoned it or moved its generation since.
+   * The whole-attempt check above ranges over every doc a link chain visited,
+   * which is the right guard while the cascade is still resolving; claiming
+   * the target's lifetime at settle time asks about the target alone, because
+   * a stop of an intermediate link doc does not touch the target's
+   * registration.
+   */
+  private isStartAttemptCurrentFor(
+    attempt: StartAttempt,
+    key: `${MemorySpace}/${CellScope}/${URI}`,
+  ): boolean {
+    if (attempt.lifecycleEpoch !== this.lifecycleEpoch) return false;
+    if (attempt.preResolutionStopKeys.has(key)) return false;
+    const generation = attempt.generationsByDoc.get(key);
+    return generation !== undefined &&
+      (this.startGenerationByDoc.get(key) ?? 0) === generation;
+  }
+
+  /**
    * Settle in-flight pointer roll-forward COMMITS — bounded local work,
    * awaited by dispose() before the storage sessions they write through
    * close. Deliberately excludes watcher pattern LOADS: a load can be
@@ -4180,6 +4460,11 @@ export class Runner {
     this.lifecycleEpoch++;
     this.resumeSnapshotsBySpace.clear();
     this.resumeSnapshotLoads.clear();
+    this.independentlyStartedResults.clear();
+    for (const key of [...this.pendingDeferredStarts.keys()]) {
+      this.cancelPendingDeferredStarts(key);
+    }
+    this.pendingDeferredStarts.clear();
     // Cancel all tracked operations
     for (const cancel of this.allCancels) {
       try {
@@ -4517,6 +4802,35 @@ export class Runner {
         seen.set(schema, new Set([pathKey]));
       }
 
+      // Ahead of the `asCell` branch below, deliberately. That branch collects
+      // and returns, so a guard placed after it never sees a value standing at
+      // an `asCell` or `writeonly` node -- and a link nested in an instance
+      // there would be missed while the walk reported success.
+      //
+      // A `FabricSpecialObject` at a container position is INDEXED rather than
+      // rebuilt, so nothing is decomposed. For a `FabricPrimitive` that settles
+      // it: zero enumerable own properties, every keyed read yields
+      // `undefined`, and a leaf holds no link to collect anyway.
+      //
+      // A `FabricInstance` is refused. A write-redirect link nested in its
+      // codec contents is unreachable by property name, so passing one through
+      // _misses_ that link -- and over-collection is this walker's safe
+      // direction, which makes a miss the unsafe one.
+      //
+      // Nothing reaches this in production today, de facto rather than by
+      // construction: a `FabricError` is ungated and exposed to pattern
+      // authors, so what keeps this safe is that no action argument yet
+      // carries one.
+      //
+      // TODO(danfuzz): descend by codec-mediated traversal into instance
+      // state, at which point this becomes a walk rather than a refusal.
+      if (currentValue instanceof FabricInstance) {
+        refuseFabricInstance(
+          currentValue,
+          "when collecting writable cell links from an argument",
+        );
+      }
+
       const asCell = schema.asCell;
       if (
         Array.isArray(asCell) &&
@@ -4541,10 +4855,6 @@ export class Runner {
       // could let an asCell marker escape tracking; over-collection is this
       // walker's safe direction (mirrors joinSchema's `not` union).
       //
-      // TODO(danfuzz): The properties/additionalProperties cases descend
-      // live `FabricValue` action inputs with no `FabricSpecialObject`
-      // guard, decomposing `FabricPrimitive` values and walking
-      // `FabricInstance` values by internal slots.
       forEachSubschema(schema as JSONSchema, (child, keyword, key, index) => {
         switch (keyword) {
           case "properties":
@@ -4654,10 +4964,25 @@ export class Runner {
       seenValues.add(currentValue);
       seen.set(schema, seenValues);
 
-      // TODO(danfuzz): This descends live `FabricValue` action inputs via
-      // `Object.entries` (guards only `isWriteRedirectLink`/`isCellLink`, not
-      // `FabricSpecialObject`), so `FabricPrimitive`/`FabricInstance` values are
-      // mishandled.
+      // Indexed, not rebuilt. Right for a `FabricPrimitive`: zero enumerable
+      // own properties, and a leaf holds no link to collect.
+      //
+      // A `FabricInstance` is refused, for the same reason as the sibling walk
+      // in `collectWritableCellArgumentLinks()`: a link in its codec contents
+      // is unreachable by property name, so passing one through misses it, and
+      // a miss is the unsafe direction here.
+      //
+      // Nothing reaches this in production today, de facto rather than by
+      // construction.
+      //
+      // TODO(danfuzz): descend by codec-mediated traversal into instance
+      // state, at which point this becomes a walk rather than a refusal.
+      if (currentValue instanceof FabricInstance) {
+        refuseFabricInstance(
+          currentValue,
+          "when collecting scheduler read links from an argument",
+        );
+      }
       if (isRecord(schema.properties) && isRecord(currentValue)) {
         for (const [key, propertySchema] of Object.entries(schema.properties)) {
           visit(propertySchema, currentValue[key]);
@@ -5052,7 +5377,15 @@ export class Runner {
             result !== undefined
             ? result
             : {};
-        receiptCell.withTx(tx).set(receiptValue);
+        const receipt = receiptCell.withTx(tx);
+        receipt.set(receiptValue);
+        // The receipt says what it holds, the way any other cell does. The
+        // shape is only knowable here: the cell is minted at the top of the
+        // dispatch, before the handler runs. Both writes ride this one
+        // transaction, which the create-only mark below gates, so the schema
+        // and the value it describes commit together or not at all.
+        const shape = receiptShapeSchema(receiptValue);
+        if (shape !== undefined) receipt.setMetaRaw("schema", shape);
         tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
       }
       return result;
@@ -5384,22 +5717,25 @@ export class Runner {
         undefined,
         resultCell,
       );
-      addCancel(() => this.stop(resultCell));
+      addCancel(() => this.releaseChild(resultCell, undefined));
 
       tx.addCommitCallback((_committedTx, result) => {
         if (!result.error) return;
-        // Stopping the child is only half of the rollback: this memo of what
+        // Releasing the child is only half of the rollback: this memo of what
         // the result cell holds decides whether the next run materializes the
         // child again. A rejected commit rolls the child's links back and the
         // notification for that rollback clears the memo, but an abort settles
         // without reaching storage, so clear it here. Left set, the memo makes
         // the next run treat the pattern as unchanged and skip a child that
-        // now exists nowhere. Cleared ahead of the stop, so a materialization
-        // that stopping re-enters keeps the memo it writes.
+        // now exists nowhere. Cleared ahead of the release, so a
+        // materialization that releasing re-enters keeps the memo it writes.
+        // A rollback carries a release's authority, not a stop's: it lets go
+        // of the registration this materialization installed and is not
+        // authoritative over a lifetime or a start it does not own.
         if (this.resultPatternCache.get(cacheKey) === resultPatternKey) {
           this.resultPatternCache.delete(cacheKey);
         }
-        this.stop(resultCell);
+        this.releaseChild(resultCell, undefined);
       });
       this.pullCellOnceAfterSuccessfulCommit(tx, resultCell);
     }
@@ -6458,6 +6794,9 @@ export class Runner {
     const builtinResumeMode = isRawBuiltinResult(builtinResult)
       ? builtinResult.resumeMode
       : undefined;
+    const builtinOnActionRegistered = isRawBuiltinResult(builtinResult)
+      ? builtinResult.onActionRegistered
+      : undefined;
 
     // Name the raw action for debugging - use implementation name or fallback to "raw"
     const impl = module.implementation as ((...args: unknown[]) => Action) & {
@@ -6553,6 +6892,9 @@ export class Runner {
         )
         : this.runtime.scheduler.subscribe(action, schedulerOptions),
     );
+    // The scheduler is keyed by the wrapper's identity, so hand the builtin
+    // the wrapper — its own `action` cannot address the subscription.
+    builtinOnActionRegistered?.(action);
   }
 
   private instantiatePassthroughNode(
@@ -6760,11 +7102,17 @@ export class Runner {
         parentResultCell.space,
       );
     }
-    this.run(tx, patternImpl, inputs, childResultCell, {
-      awaitSyncBeforeInitialRun: defersInitialRunUntilSynced(
-        schedulerRehydration,
-      ),
-    });
+    const childRun = this.runWithStartOwnership(
+      tx,
+      patternImpl,
+      inputs,
+      childResultCell,
+      {
+        awaitSyncBeforeInitialRun: defersInitialRunUntilSynced(
+          schedulerRehydration,
+        ),
+      },
+    );
 
     if (sendToBindings) {
       sendValueToBinding(
@@ -6777,10 +7125,9 @@ export class Runner {
       );
     }
 
-    // TODO(seefeld): Make sure to not cancel after a pattern is elevated to a
-    // piece, e.g. via navigateTo. Nothing is cancelling right now, so leaving
-    // this as TODO.
-    addCancel(() => this.stop(childResultCell));
+    addCancel(() =>
+      this.releaseChild(childResultCell, childRun.installedCancel)
+    );
   }
 }
 

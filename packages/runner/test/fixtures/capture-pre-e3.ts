@@ -31,8 +31,9 @@ const runtime = new Runtime({
 const compiled = await runtime.patternManager.compilePattern(PROGRAM);
 await runtime.idle();
 
-// JSON.stringify fires Pattern.toJSON() — the exact serialization a pattern
-// value undergoes when written to a cell (native-conversion HasToJSON).
+// JSON.stringify fires Pattern.toJSON(), which delegates to the same
+// serialization a pattern value undergoes when written to a cell (the
+// runtime's artifact walk, reading `toEncodableForm`).
 const serialized = JSON.parse(JSON.stringify(compiled));
 
 const fixtureUrl = new URL(

@@ -1,5 +1,5 @@
 import { createBuilder } from "../builder/factory.ts";
-import { StaticCache } from "@commonfabric/static";
+import type { StaticCache } from "@commonfabric/static";
 import turndown from "turndown";
 import { freezeSandboxValue } from "./hardening.ts";
 import * as cfcModule from "@commonfabric/api/cfc-authoring";

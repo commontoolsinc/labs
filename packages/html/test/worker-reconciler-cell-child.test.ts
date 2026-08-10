@@ -1395,25 +1395,30 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       const reconciler = new WorkerReconciler({
         onOps: collector.onOps,
       });
+      // A subpattern's output reaches the reconciler as a cell, and a cell
+      // keys by the link it names rather than by the payload behind it. That
+      // is what holds this child's key still while its payload changes, which
+      // is the situation under test.
       const subpatternOutput = (node: WorkerVNode): WorkerRenderNode => ({
         [UI]: node,
-        toJSON: () => "stable-subpattern-output",
       } as unknown as WorkerRenderNode);
+
+      const outputCell = new MockCell(
+        subpatternOutput({
+          type: "vnode",
+          name: "span",
+          props: { "data-row": "same", "data-count": "1" },
+          children: ["one"],
+        }),
+      );
 
       const rootCell = new MockCell(
         {
           type: "vnode",
           name: "div",
           props: {},
-          children: [
-            subpatternOutput({
-              type: "vnode",
-              name: "span",
-              props: { "data-row": "same", "data-count": "1" },
-              children: ["one"],
-            }),
-          ],
-        } satisfies WorkerVNode,
+          children: [outputCell],
+        } as unknown as WorkerVNode,
       );
 
       reconciler.mount(rootCell as unknown as Cell<unknown>);
@@ -1428,20 +1433,13 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       const spanNodeId = spanCreate.nodeId;
       collector.clear();
 
-      rootCell.set(
-        {
+      outputCell.set(
+        subpatternOutput({
           type: "vnode",
-          name: "div",
-          props: {},
-          children: [
-            subpatternOutput({
-              type: "vnode",
-              name: "span",
-              props: { "data-row": "same", "data-count": "2" },
-              children: ["two"],
-            }),
-          ],
-        } satisfies WorkerVNode,
+          name: "span",
+          props: { "data-row": "same", "data-count": "2" },
+          children: ["two"],
+        }),
       );
       await t.settle();
 

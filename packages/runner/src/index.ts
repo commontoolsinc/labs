@@ -52,6 +52,7 @@ export type {
   ChangeGroup,
   IExtendedStorageTransaction,
   MemorySpace,
+  TransactionCommitOptions,
 } from "./storage/interface.ts";
 export type {
   EntityIdListOptions,
@@ -64,6 +65,7 @@ export {
   type TransactionSummary,
 } from "./storage/transaction-summary.ts";
 export {
+  type CellLinkInput,
   convertCellsToLinks,
   isCell,
   isReadableCell,

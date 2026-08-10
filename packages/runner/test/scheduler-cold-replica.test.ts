@@ -8,7 +8,6 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 
 const signer = await Identity.fromPassphrase("scheduler cold replica");
 const space = signer.did();
@@ -40,30 +39,10 @@ const PROGRAM: RuntimeProgram = {
   }],
 };
 
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
 const newSharedServer = () =>
   new MemoryV2Server.Server(TEST_MEMORY_SERVER_AUTH);
 
-const newRuntime = (storageManager: SharedServerStorageManager) =>
+const newRuntime = (storageManager: EmulatedStorageManager) =>
   new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
@@ -71,15 +50,15 @@ const newRuntime = (storageManager: SharedServerStorageManager) =>
 
 describe("scheduler cold-replica startup", () => {
   let server: MemoryV2Server.Server;
-  let writerStorage: SharedServerStorageManager;
-  let readerStorage: SharedServerStorageManager;
+  let writerStorage: EmulatedStorageManager;
+  let readerStorage: EmulatedStorageManager;
 
   beforeEach(() => {
     server = newSharedServer();
-    writerStorage = SharedServerStorageManager.connectTo(server, {
+    writerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
-    readerStorage = SharedServerStorageManager.connectTo(server, {
+    readerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
   });

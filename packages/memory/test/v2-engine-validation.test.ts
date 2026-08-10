@@ -58,6 +58,7 @@ Deno.test("rejects mixing schedulerObservation with schedulerObservationBatch", 
       () =>
         applyCommit(engine, {
           sessionId: "s:a",
+          principal: "did:key:alice",
           commit: commit(1, {
             schedulerObservation: { x: 1 },
             schedulerObservationBatch: [{ y: 1 }],
@@ -75,6 +76,7 @@ Deno.test("rejects semantic operations on an observation-batch commit", async ()
       () =>
         applyCommit(engine, {
           sessionId: "s:a",
+          principal: "did:key:alice",
           commit: commit(1, {
             operations: [setOp("of:fid1:a", 1)],
             schedulerObservationBatch: [{ y: 1 }],

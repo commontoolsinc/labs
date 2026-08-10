@@ -33,6 +33,14 @@ The authoritative field inventory is the `JSONSchema` type in
   data.)
 - **`scope`**: storage-partition selector emitted for `PerSpace<T>` /
   `PerUser<T>` / `PerSession<T>` wrappers.
+- **`tier`**: verb listing mark on stream properties. `tier: "wrapper"` names
+  a UI affordance outside the headless contract, inferred at compile time
+  from session-scoped handler bindings plus a void event
+  (ts-transformers current-behavior spec §12.1). `cf piece verbs` hides
+  marked verbs by default; everything stays callable, and `cf piece call`
+  never consults the mark. Annotation-class in the piece compat checker
+  (adds and removes freely). Standard `deprecated: true` is the companion
+  mark on the other axis, produced from `@deprecated` JSDoc.
 - **`ifc`**: Information Flow Control (IFC) annotations (see [IFC](#ifc))
 
 ### IFC
@@ -184,8 +192,7 @@ anything and will not be accessed.
 
 ### Non-standard `type` values
 
-Two deliberate extensions beyond the 2020-12 vocabulary appear in generated
-schemas:
+Deliberate extensions beyond the 2020-12 vocabulary:
 
 - `{ "type": "unknown" }` — emitted for TypeScript `unknown` and for
   unresolved/degraded generics. Distinct from `true` (which is what `any`
@@ -193,6 +200,30 @@ schemas:
   anything".
 - `{ "type": "undefined" }` — preserved as an explicit union member (e.g.
   `string | undefined`) so optionality survives schema round-trips.
+- Fabric-primitive types — `"FabricBytes"`, `"FabricEpochDays"`,
+  `"FabricEpochNsec"`, `"FabricHash"`, `"FabricRegExp"` — each naming a
+  concrete `FabricPrimitive` class from the data-model. A value matches by
+  prototype (`instanceof`), not by structure: these values are opaque leaves
+  with no enumerable properties, and they are never property-walked.
+  Each fabric-primitive type is a subtype of `"object"` (the way `"integer"`
+  is a subtype of `"number"`): a `FabricBytes` value satisfies both
+  `{ "type": "FabricBytes" }` and `{ "type": "object" }`, while a plain
+  object satisfies only the latter. One structural keyword gates the subtype
+  match: an object-typed schema's `required` keys must exist on the
+  primitive, where class accessors count (`FabricBytes` satisfies
+  `required: ["length"]` but not `required: ["x"]`) — mirroring the
+  TypeScript structural rule that a `FabricBytes` is assignable to
+  `{length: number}`. The nominal brand key
+  (`FABRIC_SPECIAL_OBJECT_BRAND` in `packages/api/index.ts`), which
+  generated schemas name in `required`, has no runtime existence and counts
+  as present on any fabric value. Property sub-schemas are still not walked
+  against a primitive: presence is checked, shapes are not, so
+  `{ "type": "object", "properties": { "source": { "type": "number" } } }`
+  matches a `FabricRegExp` even though its `source` is a string. Schemas
+  generated from the real class types cannot express such a mismatch; only
+  hand-written schemas can, and they get no shape enforcement on opaque
+  leaves. The authoritative name list is `FABRIC_PRIMITIVE_SCHEMA_TYPES` in
+  `packages/api/index.ts`.
 
 Generated schemas also hoist named types into `$defs` and reference them via
 `#/$defs/...`. The full TypeScript→schema mapping is specified in the

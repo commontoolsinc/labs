@@ -30,6 +30,7 @@ import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { ANYONE_USER } from "@commonfabric/memory/acl";
+import { ACLManager } from "@commonfabric/runner";
 import {
   initializePiecesController,
   PieceController,
@@ -119,12 +120,12 @@ describe("cf-code-editor cursor stability", () => {
     );
 
     // Add permissions for ANYONE
-    await cc.acl().set(ANYONE_USER, "WRITE");
+    await new ACLManager(cc.runtime, cc.getSpace()).set(ANYONE_USER, "WRITE");
 
     // In pull mode, create a sink to keep the piece reactive when inputs
     // change. The sink also drives awaitCellContent: it records the latest
     // committed content and resolves a pending waiter when its target lands.
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink((value) => {
       latestContent = (value as { content?: string } | undefined)?.content;
       if (contentWaiter && latestContent === contentWaiter.target) {
@@ -1276,11 +1277,11 @@ describe("cf-code-editor backlink title sync", () => {
       { start: true },
     );
 
-    await cc.acl().set(ANYONE_USER, "WRITE");
+    await new ACLManager(cc.runtime, cc.getSpace()).set(ANYONE_USER, "WRITE");
 
     // Keep the piece reactive (pull mode) and track its committed content, so a
     // browser-side write to the value cell is observed here.
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     sinkCancel = resultCell.sink((value) => {
       latestContent = (value as { content?: string } | undefined)?.content;
       if (contentWaiter && latestContent === contentWaiter.target) {

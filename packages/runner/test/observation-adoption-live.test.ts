@@ -6,11 +6,10 @@ import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value"
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 // Incremental observation adoption
 // (docs/specs/scheduler-v2/incremental-observation-adoption.md): two LIVE
@@ -24,36 +23,6 @@ import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("observation adoption live");
 const space = signer.did();
-
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
 
 const VALUE_SCHEMA: JSONSchema = { type: "number" };
 
@@ -71,7 +40,7 @@ const PROGRAM: RuntimeProgram = {
   }],
 };
 
-function newRuntime(storageManager: SharedServerStorageManager) {
+function newRuntime(storageManager: EmulatedStorageManager) {
   return new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
@@ -102,13 +71,13 @@ function opRuns(
 
 describe("incremental observation adoption (live)", () => {
   let server: MemoryV2Server.Server;
-  let managerA: SharedServerStorageManager;
-  let managerB: SharedServerStorageManager;
+  let managerA: EmulatedStorageManager;
+  let managerB: EmulatedStorageManager;
 
   beforeEach(() => {
     server = newSharedServer();
-    managerA = SharedServerStorageManager.connectTo(server, { as: signer });
-    managerB = SharedServerStorageManager.connectTo(server, { as: signer });
+    managerA = EmulatedStorageManager.connectTo(server, { as: signer });
+    managerB = EmulatedStorageManager.connectTo(server, { as: signer });
   });
 
   afterEach(async () => {

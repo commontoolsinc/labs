@@ -1290,7 +1290,11 @@ Deno.test("diffedit: Ctrl-L expands context in pager mode (no text cursor)", () 
       { line: 4, kind: "diffMetadata" },
     ]);
     const rows = renderFrame(s.displayDoc(), view).map(stripAnsi);
-    for (let row = 0; row < 4; row++) {
+    assert(
+      rows[0].endsWith("+1 −1"),
+      "the first line carries the whole-diff totals, not a marker",
+    );
+    for (let row = 1; row < 4; row++) {
       assertEquals(rows[row].at(-1), " ", "earlier metadata is not marked");
     }
     assert(

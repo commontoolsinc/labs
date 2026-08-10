@@ -459,8 +459,8 @@ live) on PR #5009's review threads; paraphrased.
   [#4950] (Topics workload diagnostics — churn's live-runtime neighbor).
 - The interview: [PR #5009 review threads](https://github.com/commontoolsinc/labs/pull/5009)
   (Wilk; Gideon confirmed live).
-- `docs/plans/pattern-verb-contract-implementation.md` — Risks, the write-storm
-  gate.
+- `docs/history/plans/pattern-verb-contract-implementation.md` — Risks, the
+  write-storm gate.
 - `docs/development/LOCAL_DEV_SERVERS.md` — toolshed over a store dir, port
   offsets.
 

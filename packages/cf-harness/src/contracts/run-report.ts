@@ -13,7 +13,6 @@ import type { HarnessSubagentRunRef } from "./subagent.ts";
 import type { HarnessToolEffectClass } from "./tool-descriptor.ts";
 import type { HarnessTranscriptMessage } from "./transcript.ts";
 import type { ToolResultRef } from "./tool-result.ts";
-import type { OpenAIChatCompletionAttemptDiagnostic } from "../gateway/openai-client.ts";
 import type {
   HarnessModelAttemptDiagnostic,
   HarnessModelUsage,
@@ -51,13 +50,6 @@ export interface HarnessToolActivity {
   policyEventIndexes?: number[];
   resultRef?: ToolResultRef;
   errorDetail?: string;
-}
-
-export interface HarnessGatewayAttempt
-  extends OpenAIChatCompletionAttemptDiagnostic {
-  runId: string;
-  sequence: number;
-  modelTurn: number;
 }
 
 export interface HarnessModelAttempt extends HarnessModelAttemptDiagnostic {
@@ -144,7 +136,6 @@ export interface HarnessRunReport {
   policyDecisions: HarnessPolicyDecisionRecord[];
   timeline: HarnessRunTimelineEntry[];
   toolActivity: HarnessToolActivity[];
-  gatewayAttempts?: HarnessGatewayAttempt[];
   modelAttempts?: HarnessModelAttempt[];
   toolOutputs: ToolResultRef[];
   subagentRuns?: HarnessSubagentRunRef[];
@@ -182,7 +173,6 @@ export interface CreateHarnessRunReportOptions {
   finalAssistantText?: string;
   timeline?: readonly HarnessRunTimelineEntryInput[];
   toolActivity: readonly HarnessToolActivity[];
-  gatewayAttempts?: readonly HarnessGatewayAttempt[];
   modelAttempts?: readonly HarnessModelAttempt[];
   usage?: HarnessModelUsage;
   totalUsage?: HarnessModelUsage;
@@ -380,9 +370,6 @@ export const createHarnessRunReport = (
       toolActivity: options.toolActivity,
     }),
     toolActivity: [...options.toolActivity],
-    ...((options.gatewayAttempts?.length ?? 0) > 0
-      ? { gatewayAttempts: [...(options.gatewayAttempts ?? [])] }
-      : {}),
     ...((options.modelAttempts?.length ?? 0) > 0
       ? { modelAttempts: [...(options.modelAttempts ?? [])] }
       : {}),

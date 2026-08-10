@@ -50,12 +50,12 @@ describe("cfc render policy demo integration test", () => {
       "main.tsx",
     );
     const rootPath = join(import.meta.dirname!, "..");
-    const program = await cc.manager().runtime.harness.resolve(
+    const program = await cc.runtime.harness.resolve(
       new FileSystemProgramResolver(sourcePath, rootPath),
     );
     piece = await cc.create(program, { start: true });
 
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink(() => {});
   });
 

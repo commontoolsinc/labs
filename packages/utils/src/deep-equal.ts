@@ -18,10 +18,10 @@ import { isRecord } from "./types.ts";
  * `FabricInstance` values compare by internal slots rather than logical
  * contents. Use `data-model`'s `valueEqual()` for any `FabricValue` comparison.
  *
- * This is a property of the function, not a defect awaiting repair: `utils` sits
- * below `data-model` and cannot reach the codecs that decide fabric equality, and
- * a second implementation here would duplicate `valueEqual()` rather than extend
- * it. The scope is the fix.
+ * This is a property of the function, not a defect awaiting repair: `utils`
+ * sits below `data-model` and cannot reach the codecs that decide fabric
+ * equality, and a second implementation here would duplicate `valueEqual()`
+ * rather than extend it. The scope is the fix.
  */
 export function deepEqual(a: any, b: any): boolean {
   if (Object.is(a, b)) return true;

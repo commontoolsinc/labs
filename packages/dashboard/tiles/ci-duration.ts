@@ -5,9 +5,9 @@
 // exposes scripts/ci-gantt.ts controls for both repositories.
 import { fromFileUrl } from "@std/path";
 import {
-  runSource,
   type Route,
   type Run,
+  runSource,
   type Status,
   type Tile,
   type TileView,
@@ -26,7 +26,6 @@ import {
 import {
   ciCommitGanttProgressResponse,
   ciFetchProgressPanel,
-  type CiGanttInput,
   type CiGanttOptions,
   ciGanttOptions,
   ciGanttProgressResponse,
@@ -48,10 +47,14 @@ const CIGANTT = fromFileUrl(
 );
 const GANTT_REFRESH_MS = 30 * 60_000;
 
+// Writes the renderer's input to `destination` and reports how many runs it
+// holds. The chart is written a run at a time rather than returned, so a
+// hundred and fifty runs of job and step timings never sit in this process.
 export type CiGanttDataProvider = (
   source: CiHistorySource,
   options: CiGanttOptions,
-) => Promise<CiGanttInput>;
+  destination: string,
+) => Promise<number>;
 
 export async function renderGantt(
   p: URLSearchParams,
@@ -64,7 +67,11 @@ export async function renderGantt(
   let out: string | undefined;
   let input: string | undefined;
   try {
-    const data = await dataProvider(source, options);
+    input = await Deno.makeTempFile({
+      prefix: "ci-gantt-input-",
+      suffix: ".json",
+    });
+    const runCount = await dataProvider(source, options, input);
     if (signal?.aborted) {
       return new Response(null, {
         status: 204,
@@ -72,11 +79,6 @@ export async function renderGantt(
       });
     }
     out = await Deno.makeTempFile({ prefix: "ci-gantt-", suffix: ".svg" });
-    input = await Deno.makeTempFile({
-      prefix: "ci-gantt-input-",
-      suffix: ".json",
-    });
-    await Deno.writeTextFile(input, JSON.stringify(data));
     const args = [
       "run",
       `--allow-read=${input}`,
@@ -104,10 +106,10 @@ export async function renderGantt(
       ? 1
       : mainOnly
       ? 2
-      : Math.max(5, Math.round(0.1 * data.runs.length));
+      : Math.max(5, Math.round(0.1 * runCount));
     args.push(
       "--min-runs",
-      String(Math.min(defaultMinimum, Math.max(1, data.runs.length))),
+      String(Math.min(defaultMinimum, Math.max(1, runCount))),
     );
     const { success, stderr } = await new Deno.Command(Deno.execPath(), {
       args,
@@ -678,8 +680,7 @@ function makeCiDuration(
       // Median window = the successful runs in the last DUR_MAX_AGE_HOURS, or the
       // most recent DUR_MIN_RUNS — whichever has more runs.
       const cutoff = Date.now() - DUR_MAX_AGE_HOURS * 3_600_000;
-      const inTimeCount =
-        passed.filter((run) => run.landedAt >= cutoff).length;
+      const inTimeCount = passed.filter((run) => run.landedAt >= cutoff).length;
       const usingTime = inTimeCount >= DUR_MIN_RUNS; // time window wins when it has enough runs
       // A count-based prefix (not the filter set itself) so the median runs are
       // always the newest slice of passed — which is what the sparkline

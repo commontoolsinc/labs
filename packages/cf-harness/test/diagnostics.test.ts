@@ -22,7 +22,13 @@ import type {
 } from "../src/sandbox/types.ts";
 
 class FakeSandboxRuntime implements SandboxRuntime {
-  readonly kind = "docker-runsc-cfc" as const;
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: this.defaultWorkingDirectory(),
+      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+    };
+  }
 
   resolvePath(path: string, cwd = this.defaultWorkingDirectory()): string {
     return path.startsWith("/") ? path : `${cwd}/${path}`;
@@ -30,6 +36,10 @@ class FakeSandboxRuntime implements SandboxRuntime {
 
   isPathWithinWorkspace(path: string): boolean {
     return path === "/workspace" || path.startsWith("/workspace/");
+  }
+
+  isPathWithinAllowedRoots(path: string): boolean {
+    return this.isPathWithinWorkspace(path);
   }
 
   defaultWorkingDirectory(): string {
@@ -82,7 +92,7 @@ class FakeFabricSandboxRuntime extends FakeSandboxRuntime {
     return super.runShell(request);
   }
 
-  describe(): SandboxRuntimeDescription {
+  override describe(): SandboxRuntimeDescription {
     return {
       kind: "docker-runsc-cfc",
       defaultWorkingDirectory: "/workspace",
@@ -208,7 +218,7 @@ Deno.test("collectHarnessCapabilitySnapshot reports configured Fabric mounts", a
 });
 
 class FakeHostBindSandboxRuntime extends FakeSandboxRuntime {
-  describe(): SandboxRuntimeDescription {
+  override describe(): SandboxRuntimeDescription {
     return {
       kind: "docker-runsc-cfc",
       defaultWorkingDirectory: "/workspace",
