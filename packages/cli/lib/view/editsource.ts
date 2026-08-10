@@ -78,8 +78,9 @@ export interface EditableSource {
   /** True for a diff view, whether or not it is editable. Absent or false for a
    * plain file or a non-diff pipe. */
   readonly isDiff?: boolean;
-  /** False when there is no underlying file to edit. `reason` is shown when a
-   * cursor move is attempted on a non-editable view. */
+  /** False when there is no underlying file to edit or the selected language
+   * is read-only. `reason` is shown when a cursor move is attempted on a
+   * non-editable view. */
   readonly editable: boolean;
   readonly reason?: string;
   /** Representation used when the caller did not choose one explicitly. */
@@ -220,7 +221,8 @@ export interface FileSourceOptions {
   readonly renderExtent?: RenderInputExtent;
 }
 
-/** An on-disk file: the document text is the file, edits write straight back. */
+/** An on-disk file. Writable languages persist edits to the file. Read-only
+ * languages expose the document without allowing edits or writes. */
 export function fileSource(
   path: string,
   language: Language = languageForFile(path),
