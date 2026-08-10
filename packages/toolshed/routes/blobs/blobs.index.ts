@@ -9,10 +9,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { JsonCodec } from "@commonfabric/data-model/codec-json";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
-import {
-  decodeMemoryBoundary,
-  encodeMemoryBoundary,
-} from "@commonfabric/memory/v2";
+import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import type { Context } from "@hono/hono";
 
 const router = createRouter();
@@ -109,18 +106,6 @@ const asBlobContents = (value: unknown): BlobContents | undefined => {
   }
   return undefined;
 };
-
-const memoryBoundaryPreservesBlobContents = (contents: BlobContents): boolean =>
-  asBlobContents(decodeMemoryBoundary(encodeMemoryBoundary(contents))) !==
-    undefined;
-
-const storedBlobValue = (contents: BlobContents): BlobContents | {
-  type: string;
-  body: number[];
-} =>
-  memoryBoundaryPreservesBlobContents(contents)
-    ? contents
-    : { type: contents.type, body: Array.from(contents.body.slice()) };
 
 const parseBlobName = (
   blobName: string,
@@ -230,11 +215,7 @@ const upload = async (c: Context) => {
   const blobName = c.req.param("blobName") as string | undefined;
   const suffix = suffixFor(blobName, contents.type);
   const hash = id.slice("fid1:".length);
-  await memoryServer.writeDocument(
-    spaceDid,
-    `cid:${id}`,
-    storedBlobValue(contents),
-  );
+  await memoryServer.writeDocument(spaceDid, `cid:${id}`, contents);
 
   return c.json({ id, url: `blobs/${hash}.${suffix}` }, 201);
 };
