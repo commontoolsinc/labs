@@ -12,6 +12,7 @@ import {
 import { FabricHash } from "@/fabric-primitives/index.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import type { FabricPlainObject } from "@/interface.ts";
+import { backtickQuote } from "@/value-debug.ts";
 
 //
 // Configuration flags
@@ -262,14 +263,16 @@ function assertWireLinkRefPayloadShape(
   }
   for (const [key, val] of Object.entries(value)) {
     if (isUnsafeObjectKey(key)) {
-      throw new Error(`Cell-link wire payload has a forbidden key: "${key}".`);
+      throw new Error(
+        `Cell-link wire payload has a forbidden key: ${backtickQuote(key)}.`,
+      );
     }
     const ok = typeof val === "string" ||
       (Array.isArray(val) && val.every((e) => typeof e === "string"));
     if (!ok) {
       throw new Error(
-        `Cell-link wire payload field "${key}" must be a \`string\` or ` +
-          `\`string[]\`.`,
+        `Cell-link wire payload field ${backtickQuote(key)} must be a ` +
+          `\`string\` or \`string[]\`.`,
       );
     }
   }
@@ -296,7 +299,7 @@ export function linkRefPayloadToString(payload: WireLinkRefPayload): string {
 export function linkRefPayloadFromString(wire: string): WireLinkRefPayload {
   if (!wire.startsWith(CELL_LINK_WIRE_PREFIX)) {
     throw new Error(
-      `Not a cell-link wire string (missing "${CELL_LINK_WIRE_PREFIX}" prefix).`,
+      `Not a cell-link wire string (missing \`${CELL_LINK_WIRE_PREFIX}\` prefix).`,
     );
   }
   let parsed: unknown;

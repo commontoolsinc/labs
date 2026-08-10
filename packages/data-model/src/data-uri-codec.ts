@@ -12,6 +12,7 @@ import {
 import { EmptyReconstructionContext } from "./codec-common/index.ts";
 import { jsonFromValue, valueFromJson } from "./codecs.ts";
 import type { FabricValue } from "./fabric-value.ts";
+import { backtickQuote } from "./value-debug.ts";
 
 /**
  * A URI in string form. Structurally identical to (and hence
@@ -105,7 +106,7 @@ export function extractDataUriPayloadText(
 ): { mediaType: string; text: string } {
   const commaIndex = uri.indexOf(",");
   if (!hasDataUriScheme(uri) || commaIndex === -1) {
-    throw new Error(`Invalid data URI format: ${uri}`);
+    throw new Error(`Invalid data URI format: ${backtickQuote(uri)}`);
   }
 
   const mediaType = uri.substring("data:".length, commaIndex);
@@ -125,7 +126,9 @@ export function extractDataUriPayloadText(
     const bytes = fromBase64url(data);
     return { mediaType, text: textDecoder.decode(bytes) };
   } catch {
-    throw new Error(`Invalid data URI payload (not base64url): ${uri}`);
+    throw new Error(
+      `Invalid data URI payload (not base64url): ${backtickQuote(uri)}`,
+    );
   }
 }
 
@@ -168,7 +171,7 @@ export function valueFromDataUriPayloadText(text: string): FabricValue {
 export function valueFromDataUri(uri: UriString | string): any {
   const { mediaType, text } = extractDataUriPayloadText(uri);
   if (!isDataUriMediaType(mediaType)) {
-    throw new Error(`Invalid URI: ${uri}`);
+    throw new Error(`Invalid URI: ${backtickQuote(uri)}`);
   }
   return valueFromDataUriPayloadText(text);
 }

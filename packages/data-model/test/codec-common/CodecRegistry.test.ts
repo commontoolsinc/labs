@@ -125,7 +125,7 @@ describe("CodecRegistry", () => {
       });
     }
 
-    it("returns undefined for a null-prototype object", () => {
+    it("returns `undefined` for a `null`-prototype object", () => {
       const { registry } = buildRegistry(
         FabricRegExp,
         new FabricRegExp(/x/),
@@ -146,7 +146,7 @@ describe("CodecRegistry", () => {
       expect(registry.codecFromTag("Big@1")).toBe(codec);
     });
 
-    it("returns undefined when the codec's `canEncode()` rejects", () => {
+    it("returns `undefined` when the codec's `canEncode()` says no", () => {
       const registry = new CodecRegistry();
       registry.registerPrimitive(
         "bigint",
@@ -230,20 +230,20 @@ describe("CodecRegistry", () => {
     it("`register()` throws", () => {
       const registry = Object.freeze(new CodecRegistry());
       expect(() => registry.register(new TestCodec("nope@1", undefined)))
-        .toThrow("Cannot modify frozen CodecRegistry");
+        .toThrow("Cannot modify frozen `CodecRegistry`");
     });
 
     it("`registerPrimitive()` throws", () => {
       const registry = Object.freeze(new CodecRegistry());
       expect(() =>
         registry.registerPrimitive("bigint", new TestCodec("nope@1", undefined))
-      ).toThrow("Cannot modify frozen CodecRegistry");
+      ).toThrow("Cannot modify frozen `CodecRegistry`");
     });
 
     it("`registerSelfRep()` throws", () => {
       const registry = Object.freeze(new CodecRegistry());
       expect(() => registry.registerSelfRep("string"))
-        .toThrow("Cannot modify frozen CodecRegistry");
+        .toThrow("Cannot modify frozen `CodecRegistry`");
     });
 
     it("still answers lookups", () => {
@@ -264,7 +264,7 @@ describe("CodecRegistry", () => {
       expect(registry.codecFromTag("Foo@1")).toBe(codec);
     });
 
-    it("returns undefined for an unregistered tag", () => {
+    it("returns `undefined` for an unregistered tag", () => {
       const registry = new CodecRegistry();
       registry.register(new TestCodec("Foo@1", undefined));
       expect(registry.codecFromTag("Bar@2")).toBeUndefined();

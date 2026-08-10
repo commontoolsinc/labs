@@ -168,7 +168,7 @@ export class CodecRegistry {
    */
   #assertNotFrozen(): void {
     if (Object.isFrozen(this)) {
-      throw new Error("Cannot modify frozen CodecRegistry");
+      throw new Error("Cannot modify frozen `CodecRegistry`");
     }
   }
 

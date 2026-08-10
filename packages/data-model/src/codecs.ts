@@ -102,15 +102,15 @@ export function plainObjectFromJson<T extends object = object>(
 
   if ((result === null) || (typeof result !== "object")) {
     throw new Error(
-      "plainObjectFromJson: Decoded to primitive (not a plain object)",
+      "`plainObjectFromJson()`: decoded to a primitive, not a plain object",
     );
   } else if (Array.isArray(result)) {
     throw new Error(
-      "plainObjectFromJson: Decoded to array (not a plain object)",
+      "`plainObjectFromJson()`: decoded to an array, not a plain object",
     );
   } else if (isInstance(result)) {
     throw new Error(
-      "plainObjectFromJson: Decoded to instance (not a plain object)",
+      "`plainObjectFromJson()`: decoded to an instance, not a plain object",
     );
   }
 

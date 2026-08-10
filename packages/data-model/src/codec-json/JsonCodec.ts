@@ -2,7 +2,7 @@ import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import { FabricSpecialObject, type FabricValue } from "@/interface.ts";
-import { toCompactDebugString } from "@/value-debug.ts";
+import { backtickQuote, toCompactDebugString } from "@/value-debug.ts";
 import {
   type ReconstructionContext,
   type SerializationContext,
@@ -183,7 +183,7 @@ export class JsonCodec implements SerializationContext<string> {
       // recognized by a registered codec. Complain here since we didn't find a
       // `codec` above.
       throw new Error(
-        `No codec registered for fabric object class: ${value.constructor.name}`,
+        `No codec registered for fabric object class: \`${value.constructor.name}\``,
       );
     }
 
@@ -228,7 +228,7 @@ export class JsonCodec implements SerializationContext<string> {
     if (!isPlainObject(value)) {
       throw new Error(
         `Cannot encode ${
-          toCompactDebugString(value, 50)
+          backtickQuote(toCompactDebugString(value, 50))
         }: no applicable codec.`,
       );
     }
