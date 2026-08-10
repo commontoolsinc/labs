@@ -1280,8 +1280,11 @@ describe("piece pull materialization", () => {
     expect(isLink(raw.participants[0])).toBe(true);
     expect(isCell(raw.participants[0])).toBe(false);
 
-    // The source-update restore path: identical contract on both sides,
-    // envelopes preserved verbatim.
+    // The source-update call-site shape: `setPattern` declares
+    // `linksPreservedVerbatim`, but the element's slot declares no outer Cell
+    // wrapper, so the preserve branch never engages and the link faces the
+    // sanitizing proof regardless — which is exactly how a source update
+    // reaches the asymmetry this test pins.
     expect(() =>
       assertSuppliedLinkSchemasCompatible(
         [{ path: ["participants", 0], value: raw.participants[0] }],
@@ -1295,8 +1298,8 @@ describe("piece pull materialization", () => {
       )
     ).not.toThrow();
 
-    // The rebuild path agrees: a nested wrapper the destination declares does
-    // not demand one from the source's payload contract.
+    // Without the flag the same proof runs: a nested wrapper the destination
+    // declares does not demand one from the source's payload contract.
     expect(() =>
       assertSuppliedLinkSchemasCompatible(
         [{ path: ["participants", 0], value: raw.participants[0] }],
