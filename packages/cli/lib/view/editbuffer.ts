@@ -233,6 +233,16 @@ export class EditBuffer {
     this.col = pos.col;
   }
 
+  /** Destination of a forward word operation without moving the cursor. */
+  wordEndForward(): { row: number; col: number } {
+    return this.nextWordEnd(this.row, this.col);
+  }
+
+  /** Destination of a backward word operation without moving the cursor. */
+  wordStartBackward(): { row: number; col: number } {
+    return this.prevWordStart(this.row, this.col);
+  }
+
   setMark(): void { // C-Space
     this.mark = { row: this.row, col: this.col };
   }

@@ -2224,7 +2224,7 @@ export class Session {
           b.moveBufferEnd();
           return this.afterMove();
         case "d":
-          if (this.guardForwardEdit()) {
+          if (this.guardForwardWordEdit()) {
             b.killWordForward();
             this.afterEdit();
           }
@@ -2362,7 +2362,24 @@ export class Session {
               // Empty head: the blank added line goes above and the cursor
               // follows the content onto the line below, keeping its place at
               // the line start (past the marker).
-              b.spliceLines(b.row, 0, [prefix], 1, start);
+              const chars = [...b.lines[b.row]];
+              const protectedPrefix = chars.slice(1, start).join("");
+              if (protectedPrefix.length > 0) {
+                const content = chars.slice(start).join("");
+                b.spliceLines(
+                  b.row,
+                  1,
+                  [
+                    `-${protectedPrefix}${content}`,
+                    `${prefix}${protectedPrefix}`,
+                    `${prefix}${content}`,
+                  ],
+                  2,
+                  1,
+                );
+              } else {
+                b.spliceLines(b.row, 0, [prefix], 1, start);
+              }
               this.splitRow = null;
             } else if (onContext && b.col < b.currentLineLength()) {
               this.prepareContextEdit();
@@ -2469,11 +2486,17 @@ export class Session {
     if (!this.canResurrectRemovedLine()) return false;
     const b = this.buffer!;
     const hunkHeader = this.hunkHeaderAt(b.row);
+    const line = b.lines[b.row];
+    const model = parseDiff(b.text());
+    const resurrectsFirstBom = model?.lines[b.row]?.oldLine === 0 &&
+      line[1] === "\uFEFF";
+    const newSideBom = resurrectsFirstBom
+      ? this.newSideBomCarrier(hunkHeader)
+      : null;
     if (!this.adjustHunkCounts(0, 1, hunkHeader)) {
       this.message = "This hunk could not be updated.";
       return true;
     }
-    const line = b.lines[b.row];
     b.spliceLines(
       b.row,
       1,
@@ -2481,6 +2504,26 @@ export class Session {
       0,
       Math.max(1, b.col),
     );
+    if (newSideBom !== null) {
+      const carrier = b.lines[newSideBom];
+      if (carrier?.[0] === "+") {
+        b.lines[newSideBom] = `+${[...carrier].slice(2).join("")}`;
+      } else if (carrier?.[0] === " ") {
+        const cursor = { row: b.row, col: b.col };
+        const content = [...carrier].slice(2).join("");
+        b.spliceLines(
+          newSideBom,
+          1,
+          [`-\uFEFF${content}`, `+${content}`],
+          0,
+          1,
+        );
+        b.place(
+          cursor.row + (newSideBom < cursor.row ? 1 : 0),
+          cursor.col,
+        );
+      }
+    }
     this.afterEdit();
     this.message = "Resurrected the removed line.";
     return true;
@@ -2515,6 +2558,30 @@ export class Session {
       for (const hunk of file.hunks) {
         if (row > hunk.headerLine && row <= hunk.endLine) {
           return hunk.headerLine;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** The first new-side line carrying the file's decoded UTF-8 BOM. */
+  private newSideBomCarrier(hunkHeader: number | null): number | null {
+    if (!this.buffer || hunkHeader === null) return null;
+    const lines = this.buffer.lines;
+    const model = parseDiff(this.buffer.text());
+    for (const file of model?.files ?? []) {
+      const hunk = file.hunks.find((candidate) =>
+        candidate.headerLine === hunkHeader
+      );
+      if (!hunk) continue;
+      for (let row = hunk.headerLine + 1; row <= hunk.endLine; row++) {
+        const kind = model!.lines[row]?.kind;
+        if (
+          (kind === "ctx" || kind === "add") &&
+          model!.lines[row]?.newLine === 0 &&
+          this.source?.policy?.editStart(lines, row) === 2
+        ) {
+          return row;
         }
       }
     }
@@ -2620,6 +2687,24 @@ export class Session {
     return true;
   }
 
+  /** Gate a forward word kill that would consume a diff line boundary. */
+  private guardForwardWordEdit(): boolean {
+    if (!this.source?.policy) return true;
+    const b = this.buffer!;
+    const start = this.editStart();
+    if (start === null) {
+      this.message = this.notEditableMessage();
+      return false;
+    }
+    if (b.col < start) b.place(b.row, start);
+    if (b.wordEndForward().row !== b.row) {
+      this.message = JOIN_MSG;
+      return false;
+    }
+    this.prepareContextEdit();
+    return true;
+  }
+
   /** Backspace under the source's policy: delete a character past the marker,
    * remove the whole line when its content is empty (an added line taken back),
    * else protect the marker. A plain file just deletes backward. */
@@ -2673,6 +2758,11 @@ export class Session {
       return false;
     }
     if (b.col <= start) {
+      this.message = MARKER_MSG;
+      return false;
+    }
+    const destination = b.wordStartBackward();
+    if (destination.row !== b.row || destination.col < start) {
       this.message = MARKER_MSG;
       return false;
     }

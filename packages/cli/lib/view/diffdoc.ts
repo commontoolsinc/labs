@@ -323,6 +323,8 @@ export interface DiffHunkInfo {
   readonly newStart: number;
   readonly newCount: number;
   readonly verified: boolean;
+  /** Whether the captured new file is encoded with a UTF-8 BOM. */
+  readonly newFileHasUtf8Bom?: boolean;
   /** The original diff marks the old side as having no final newline. */
   readonly oldNoTrailingNewline?: boolean;
   /** The original diff marks the new side as having no final newline. */
@@ -1091,6 +1093,7 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     newStart: hunk.newStart,
     newCount: hunk.newCount,
     verified,
+    newFileHasUtf8Bom: ctx.newFileHasUtf8Bom,
     oldNoTrailingNewline,
     newNoTrailingNewline,
   });

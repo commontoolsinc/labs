@@ -18,12 +18,7 @@ import {
   type DiffWorkspace,
   type WorkspaceCache,
 } from "./diffdoc.ts";
-import {
-  decodedDiffBodyLine,
-  type DiffHunk,
-  type DiffModel,
-  parseDiff,
-} from "./diff.ts";
+import { type DiffHunk, type DiffModel, parseDiff } from "./diff.ts";
 import {
   type CommitHeader,
   type CommitMessage,
@@ -1473,7 +1468,19 @@ function editableStart(
   if (editableHunkRegion(model, saveHunks, lineText, row) !== "hunk") {
     return null;
   }
-  return model?.lines[row]?.newLine === 0 && lineText[1] === "\uFEFF" ? 2 : 1;
+  let hunkIndex = 0;
+  for (const file of model?.files ?? []) {
+    for (const hunk of file.hunks) {
+      if (row > hunk.headerLine && row <= hunk.endLine) {
+        return saveHunks[hunkIndex]?.newFileHasUtf8Bom === true &&
+            model?.lines[row]?.newLine === 0 && lineText[1] === "\uFEFF"
+          ? 2
+          : 1;
+      }
+      hunkIndex++;
+    }
+  }
+  return 1;
 }
 
 /**
@@ -1706,6 +1713,7 @@ interface MutableHunk {
   newStart: number;
   newCount: number;
   verified: boolean;
+  newFileHasUtf8Bom?: boolean;
   oldNoTrailingNewline?: boolean;
   newNoTrailingNewline?: boolean;
   /** The nearest preceding commit header in the source text. */
@@ -1872,7 +1880,12 @@ function collectFileOutputs(
         // final new-side line.
         if (kind === "ctx" || kind === "add") {
           const body = rawLines[i].slice(1);
-          newSide.push(decodedDiffBodyLine(body, model!.lines[i]?.newLine));
+          const sourceLine = model!.lines[i]?.newLine;
+          newSide.push(
+            sourceLine === 0 && info.newFileHasUtf8Bom === true
+              ? body.replace(/^\uFEFF/, "")
+              : body,
+          );
         }
         if (
           kind === "meta" && i - 1 === finalNewSideLine &&
