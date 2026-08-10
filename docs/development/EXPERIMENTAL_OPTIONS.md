@@ -378,15 +378,24 @@ value is ignored with a warning rather than coerced. See
 - **Design, measurements and staging.**
   [`../plans/lazy-cell-materialization.md`](../plans/lazy-cell-materialization.md).
 
-**Before it can graduate**, one runner unit test fails with the flag forced on:
-a lift that forwards its argument without reading it takes no dependency on the
-values inside and re-runs once rather than twice (`Pattern Runner - Lift`). Its
-computed result is unchanged, so whether the reduced re-run is wanted is a
-scheduling decision rather than a defect.
+**Status against the test suites.** The runner unit suite passes with the flag
+on, the group-chat pattern tests pass with it on, and the whole integration
+suite passes with it off.
 
-Everything else in the runner suite passes with the flag on, the group-chat
-pattern tests pass with it on, and the whole integration suite passes with it
-off.
+One behavior difference is deliberate rather than a defect, and it is the point
+of the mode: a lift that FORWARDS its argument onward without reading through it
+takes no dependency on the values inside, so it does not re-run when they
+change. That is safe because forwarding passes a LINK — whatever the value is
+written into re-reads through it and re-runs — and because a change to the
+REFERENCE still re-triggers the reader, since link resolution registers its own
+probe reads. `Pattern Runner - Lift` pins both halves: the forwarding lift runs
+once instead of twice, while the inner lift still runs and still produces the
+new result.
+
+Still unbuilt, and recorded in the plan: handlers materialize eagerly, and the
+write-epoch snapshot is not implemented (a view reads `doc.current`, which does
+not bite the lift case since no writes precede the argument read, but would for
+a materializer that writes and then re-reads through an earlier view).
 
 ## Category 2: Contextual Flow Control enforcement rollout dials
 

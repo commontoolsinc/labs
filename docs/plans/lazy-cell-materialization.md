@@ -428,9 +428,22 @@ diffing and the scheduler's own reads keep eager semantics.
 
       `$ref` resolution was NOT dropping the marker — an earlier note said so
       and was wrong; resolution preserves it, and a direct test says so.
-- [ ] Decide the forwarding case (`Pattern Runner - Lift`): a lift that forwards
-      its argument without reading it takes no dependency on the values inside
-      and re-runs once rather than twice. Its computed result is unchanged.
+- [x] The forwarding case is settled: a lift that forwards its argument without
+      reading through it SHOULD take no dependency on the values inside. Fewer
+      unnecessary reactive runs is the point of the mode.
+
+      It is safe because forwarding passes a link rather than a snapshot —
+      `normalizeAndDiff` converts any view written back into a sigil link — so
+      whatever the value is written into re-reads through it and re-runs. And a
+      change to the REFERENCE still re-triggers the forwarding lift, because
+      link resolution registers its own probe reads even when no value is read
+      through the view. Value changes stop at the forwarder; reference changes
+      do not.
+
+      `Pattern Runner - Lift` pins both halves, with a mode-aware count: the
+      forwarding lift runs once rather than twice under the flag, and the inner
+      lift still runs and still produces the new result (9, from the changed
+      input).
 - [ ] Measure against the Stage 0 baseline on real patterns.
 - [ ] Turn on in development, soak, then default on.
 - [ ] Graduate: remove the flag, remove the eager path for lift arguments,
