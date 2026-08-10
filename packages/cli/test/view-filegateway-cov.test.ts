@@ -154,6 +154,19 @@ Deno.test("realFileGateway.open: keeps shebang selection in the editable source"
   });
 });
 
+Deno.test("realFileGateway.open: reads an empty regular file", async () => {
+  await withTempDir((dir) => {
+    const path = join(dir, "empty.txt");
+    Deno.writeFileSync(path, new Uint8Array());
+
+    const opened = realFileGateway().open(path);
+
+    assert(opened !== null);
+    assertEquals(opened.text, "");
+    assertEquals(opened.source.editable, true);
+  });
+});
+
 Deno.test("realFileGateway.open: preserves binary bytes in a read-only source", async () => {
   await withTempDir((dir) => {
     const path = join(dir, "payload.data");
@@ -325,6 +338,56 @@ Deno.test("file gateway spool writes reject a writer that makes no progress", as
         return {
           writeSync: () => 0,
           readSync: (data: Uint8Array) => file.readSync(data),
+          seekSync: (offset: number, whence: Deno.SeekMode) =>
+            file.seekSync(offset, whence),
+          close: () => {
+            closeCalls++;
+            file.close();
+          },
+        } as unknown as Deno.FsFile;
+      };
+
+      assertEquals(realFileGateway().open(path), null);
+      assertEquals(closeCalls, 1);
+      assert(spoolPath !== undefined);
+      assertThrows(() => Deno.statSync(spoolPath!), Deno.errors.NotFound);
+    } finally {
+      (Deno as { makeTempFileSync: typeof Deno.makeTempFileSync })
+        .makeTempFileSync = makeTempFileSync;
+      (Deno as { openSync: typeof Deno.openSync }).openSync = openSync;
+      if (spoolPath !== undefined) {
+        removeIfPresent(spoolPath);
+      }
+    }
+  });
+});
+
+Deno.test("realFileGateway.open: rejects a premature spool EOF", async () => {
+  await withTempDir((dir) => {
+    const path = join(dir, "large.data");
+    Deno.writeFileSync(
+      path,
+      new Uint8Array(MAX_BINARY_VIEW_BYTES + 1).fill(0x41),
+    );
+    const makeTempFileSync = Deno.makeTempFileSync;
+    const openSync = Deno.openSync;
+    let closeCalls = 0;
+    let spoolPath: string | undefined;
+    try {
+      (Deno as { makeTempFileSync: typeof Deno.makeTempFileSync })
+        .makeTempFileSync = (options) => {
+          spoolPath = makeTempFileSync(options);
+          return spoolPath;
+        };
+      (Deno as { openSync: typeof Deno.openSync }).openSync = (
+        candidate,
+        options,
+      ) => {
+        const file = openSync(candidate, options);
+        if (candidate !== spoolPath) return file;
+        return {
+          writeSync: (data: Uint8Array) => file.writeSync(data),
+          readSync: () => null,
           seekSync: (offset: number, whence: Deno.SeekMode) =>
             file.seekSync(offset, whence),
           close: () => {

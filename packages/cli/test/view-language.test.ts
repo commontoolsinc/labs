@@ -173,6 +173,15 @@ Deno.test("decodeLanguageInput: decoder failures use the byte-language fallback"
   };
   const byteFallback = { ...binaryLanguage, id: "byte-fallback" };
 
+  const decoded = languageInternals.decodeTextInput(
+    typeScriptLanguage,
+    bytes,
+    byteFallback,
+  );
+  assertEquals(decoded.language, typeScriptLanguage);
+  assertEquals(decoded.source.text, "valid UTF-8");
+  assertEquals(decoded.source.encode(decoded.source.text), bytes);
+
   const fallback = languageInternals.decodeTextInput(
     selectedLanguage,
     bytes,

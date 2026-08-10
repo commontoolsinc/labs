@@ -165,6 +165,32 @@ Deno.test("interactive streams detect truncated UTF-8 when input ends", async ()
   assertEquals(input.extent, { byteLength: 1, complete: true });
 });
 
+Deno.test("empty stream chunks are skipped", async () => {
+  const bytes = new TextEncoder().encode("after empty");
+  const input = await loadFromSource(
+    streamSource([new Uint8Array(), bytes]),
+    { interactive: false, streamRendered: false },
+  );
+
+  assert(input.kind === "bytes");
+  assertEquals(input.bytes, bytes);
+  assertEquals(input.language, undefined);
+  assertEquals(input.extent, { byteLength: bytes.length, complete: true });
+});
+
+Deno.test("noninteractive binary input can stay buffered", async () => {
+  const bytes = new Uint8Array([0x41, 0, 0x42]);
+  const input = await loadFromSource(
+    streamSource([bytes]),
+    { interactive: false, streamRendered: false },
+  );
+
+  assert(input.kind === "bytes");
+  assertEquals(input.bytes, bytes);
+  assertEquals(input.language?.id, "binary");
+  assertEquals(input.extent, { byteLength: bytes.length, complete: true });
+});
+
 Deno.test("interactive regular files distinguish stale and complete sizes", async () => {
   const bytes = new Uint8Array(MAX_BINARY_VIEW_BYTES + 16);
   for (const currentBytes of [MAX_BINARY_VIEW_BYTES - 1, bytes.length]) {
@@ -396,6 +422,55 @@ Deno.test("asynchronous spool writes reject a writer that makes no progress", as
         ),
       Error,
       "temporary file accepted no bytes",
+    );
+    assertEquals(closeCalls, 1);
+    assert(spoolPath !== undefined);
+    assertThrows(() => Deno.statSync(spoolPath!), Deno.errors.NotFound);
+  } finally {
+    (Deno as { makeTempFile: typeof Deno.makeTempFile }).makeTempFile =
+      makeTempFile;
+    (Deno as { open: typeof Deno.open }).open = open;
+    if (spoolPath !== undefined) {
+      await removeIfPresent(spoolPath);
+    }
+  }
+});
+
+Deno.test("an asynchronous spool rejects a premature EOF", async () => {
+  const makeTempFile = Deno.makeTempFile;
+  const open = Deno.open;
+  let closeCalls = 0;
+  let spoolPath: string | undefined;
+  try {
+    (Deno as { makeTempFile: typeof Deno.makeTempFile }).makeTempFile = async (
+      options,
+    ) => {
+      spoolPath = await makeTempFile(options);
+      return spoolPath;
+    };
+    (Deno as { open: typeof Deno.open }).open = async (path, options) => {
+      const file = await open(path, options);
+      if (path !== spoolPath) return file;
+      return {
+        write: (data: Uint8Array) => file.write(data),
+        read: () => Promise.resolve(null),
+        seek: (offset: number, whence: Deno.SeekMode) =>
+          file.seek(offset, whence),
+        close: () => {
+          closeCalls++;
+          file.close();
+        },
+      } as unknown as Deno.FsFile;
+    };
+
+    await assertRejects(
+      () =>
+        loadFromSource(
+          streamSource([ascii(MAX_BINARY_VIEW_BYTES + 1)]),
+          { interactive: false, streamRendered: false },
+        ),
+      Error,
+      "temporary file ended before all input bytes were read",
     );
     assertEquals(closeCalls, 1);
     assert(spoolPath !== undefined);

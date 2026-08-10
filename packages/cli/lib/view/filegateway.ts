@@ -138,9 +138,9 @@ function openFileSync(
       return spoolFile;
     };
     const retain = (bytes: Uint8Array) => {
-      if (spool !== undefined) {
-        writeAllSync(spool.file, bytes);
-      } else if (retainedBytes + bytes.length <= previewByteLimit) {
+      if (
+        spool === undefined && retainedBytes + bytes.length <= previewByteLimit
+      ) {
         chunks.push(bytes.slice());
         retainedBytes += bytes.length;
       } else {
@@ -246,10 +246,14 @@ function readAllSync(file: Deno.FsFile, totalBytes: number): Uint8Array {
   let offset = 0;
   while (offset < bytes.length) {
     const read = file.readSync(bytes.subarray(offset));
-    if (read === null || read === 0) break;
+    if (read === null || read === 0) {
+      throw new Error(
+        "cf view: temporary file ended before all input bytes were read.",
+      );
+    }
     offset += read;
   }
-  return bytes.subarray(0, offset);
+  return bytes;
 }
 
 function mergeChunks(

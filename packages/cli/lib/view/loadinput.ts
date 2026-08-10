@@ -246,9 +246,8 @@ async function loadViewInputFromSource(
     return file;
   };
   const retain = async (value: Uint8Array) => {
-    if (spool !== undefined) {
-      await writeAll(spool.file, value);
-    } else if (
+    if (
+      spool === undefined &&
       retainedBytes + value.length <=
         Math.max(previewByteLimit, MAX_RETAINED_INPUT_BYTES)
     ) {
@@ -497,10 +496,14 @@ async function readAllFromOpenFile(
   let offset = 0;
   while (offset < bytes.length) {
     const read = await file.read(bytes.subarray(offset));
-    if (read === null || read === 0) break;
+    if (read === null || read === 0) {
+      throw new Error(
+        "cf view: temporary file ended before all input bytes were read.",
+      );
+    }
     offset += read;
   }
-  return bytes.subarray(0, offset);
+  return bytes;
 }
 
 function mergeChunks(

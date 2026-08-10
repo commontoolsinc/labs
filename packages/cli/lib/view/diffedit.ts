@@ -1640,9 +1640,6 @@ function reparse(
     ...(ws.hasUtf8Bom
       ? { hasUtf8Bom: (path: string) => ws.hasUtf8Bom!(path) }
       : {}),
-    ...(ws.write
-      ? { write: (path: string, text: string) => ws.write!(path, text) }
-      : {}),
     ...(ws.readBlob
       ? { readBlob: (object: string) => ws.readBlob!(object) }
       : {}),
