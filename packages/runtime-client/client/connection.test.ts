@@ -474,29 +474,39 @@ describe("RuntimeConnection loop-lag probe", () => {
       globalThis.clearInterval = originalClearInterval;
     }
   });
+});
 
-  describe("the transport contract", () => {
-    it("delivers a message unshared with the sender", () => {
-      // `RuntimeTransport.send()` requires the far end to receive a value it
-      // owns, which is what lets a handler cede a byte payload rather than
-      // copy it. A double that passed the sender's object through would model
-      // something no real transport does.
-      const transport = new FakeTransport();
-      const payload = new Uint8Array([1, 2, 3]);
-      const message = {
-        msgId: 1,
-        data: { type: RequestType.Idle, payload },
-      } as unknown as IPCClientMessage;
+describe("FakeTransport", () => {
+  it("delivers a message unshared with the sender", () => {
+    // `RuntimeTransport.send()` requires the far end to receive a value it
+    // owns, which is what lets a handler cede a byte payload rather than copy
+    // it. A double that passed the sender's object through would model
+    // something no real transport does.
+    const transport = new FakeTransport();
+    const body = new Uint8Array([1, 2, 3]);
+    const message: IPCClientMessage = {
+      msgId: 1,
+      data: {
+        type: RequestType.UploadBlob,
+        space: "did:key:test-space",
+        contentType: "image/png",
+        body,
+      },
+    };
 
-      transport.send(message);
+    transport.send(message);
 
-      const captured = transport.sent[0] as unknown as {
-        data: { payload: Uint8Array };
-      };
-      expect(captured).not.toBe(message);
-      expect(captured.data.payload).not.toBe(payload);
-      payload[0] = 0xff;
-      expect(captured.data.payload[0]).toBe(1);
-    });
+    const captured = transport.sent[0];
+    expect(captured).not.toBe(message);
+    if (
+      !("msgId" in captured) || captured.data.type !== RequestType.UploadBlob
+    ) {
+      throw new Error("Expected the upload request to have been captured.");
+    }
+    expect(captured.data.body).not.toBe(body);
+    // Mutate and re-read, rather than compare identity alone: a shallow copy
+    // differs by identity while still sharing the array.
+    body[0] = 0xff;
+    expect(captured.data.body[0]).toBe(1);
   });
 });
