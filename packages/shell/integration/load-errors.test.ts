@@ -1,18 +1,28 @@
 import { env, waitForCondition } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { Identity } from "@commonfabric/identity";
-import { NotificationType } from "@commonfabric/runtime-client";
 import { describe, it } from "@std/testing/bdd";
 import "../src/globals.ts";
 
 const { FRONTEND_URL, SPACE_NAME } = env;
+const ASYNC_FAILURE_MESSAGE = "The selected piece failed while it was starting";
+const ASYNC_FAILURE_SOURCE = `
+  import { computed, pattern, UI } from "commonfabric";
+
+  export default pattern(() => {
+    const failed = computed(() => {
+      throw new Error("${ASYNC_FAILURE_MESSAGE}");
+    });
+    return { [UI]: <div>{failed}</div> };
+  });
+`;
 
 describe("shell load errors", () => {
   const shell = new ShellIntegration({
     allowedConsoleErrors: [
       "[AppView] Failed to load space root pattern:",
       "[AppView] Failed to load selected piece:",
-      "[RuntimeClient Error]",
+      ASYNC_FAILURE_MESSAGE,
     ],
   });
   shell.bindLifecycle();
@@ -109,45 +119,57 @@ describe("shell load errors", () => {
   it("shows an asynchronous runtime failure for the selected piece", async () => {
     const page = shell.page();
     const identity = await Identity.generate({ implementation: "noble" });
-    const pieceId = "fid1:UagUTyzWNqugXzSpu3JH4Sso9lF_tmGQgwtdIL87mZs";
 
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      view: { spaceDid: identity.did(), pieceId },
+      view: { spaceDid: identity.did() },
       identity,
     });
-    await page.evaluate((type, pieceId, space) => {
-      const root = document.querySelector("x-root-view") as
+    await waitForCondition(page, () => {
+      const root = document.querySelector("x-root-view");
+      const appView = root?.shadowRoot?.querySelector("x-app-view") as
         | {
-          _handleRuntimeError?: (event: {
-            type: string;
-            message: string;
-            pieceId: string;
-            space: string;
-          }) => void;
+          rt?: {
+            createPiece(
+              space: string,
+              source: string,
+              options: { run: boolean },
+            ): Promise<{ id(): string }>;
+          };
         }
         | null;
-      if (!root?._handleRuntimeError) {
-        throw new Error("Root view was not ready");
-      }
-      root._handleRuntimeError({
-        type,
-        message: "The selected piece failed while it was starting",
-        pieceId: `of:${pieceId}`,
-        space,
-      });
-    }, {
-      args: [NotificationType.ErrorReport, pieceId, identity.did()],
+      return !!appView?.rt;
     });
+    const pieceId = await page.evaluate(async (space, source) => {
+      const root = document.querySelector("x-root-view");
+      const appView = root?.shadowRoot?.querySelector("x-app-view") as
+        | {
+          rt?: {
+            createPiece(
+              space: string,
+              source: string,
+              options: { run: boolean },
+            ): Promise<{ id(): string }>;
+          };
+        }
+        | null;
+      if (!appView?.rt) throw new Error("Runtime was not ready");
+      const piece = await appView.rt.createPiece(space, source, { run: false });
+      return piece.id();
+    }, { args: [identity.did(), ASYNC_FAILURE_SOURCE] });
+    await page.evaluate(async (space, pieceId) => {
+      await globalThis.app.setView({ spaceDid: space, pieceId });
+    }, { args: [identity.did(), pieceId] });
 
     await waitForCondition(
       page,
-      (probe) =>
+      (probe, expectedMessage) =>
         probe.collect(".runtime-error").some((element) => {
           const text = probe.deepText(element).replace(/\s+/g, " ").trim();
           return text.includes("This piece encountered an error") &&
-            text.includes("The selected piece failed while it was starting");
+            text.includes(expectedMessage);
         }),
+      { args: [ASYNC_FAILURE_MESSAGE] },
     );
   });
 });
