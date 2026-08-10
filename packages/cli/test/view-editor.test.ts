@@ -178,6 +178,42 @@ Deno.test("editor: edits text before CRLF transport but can edit a final carriag
   }
 });
 
+Deno.test("editor: structural edits treat CRLF as one line boundary", () => {
+  const encoder = new TextEncoder();
+  const cases = [
+    {
+      keys: ["end", "enter"],
+      expected: "ab\r\n\r\ncd\r\n",
+    },
+    {
+      keys: ["end", "delete"],
+      expected: "abcd\r\n",
+    },
+    {
+      keys: ["down", "home", "backspace"],
+      expected: "abcd\r\n",
+    },
+    {
+      keys: ["end", "ctrl-k"],
+      expected: "abcd\r\n",
+    },
+  ];
+  for (const testCase of cases) {
+    const path = Deno.makeTempFileSync({ suffix: ".ts" });
+    try {
+      const input = "ab\r\ncd\r\n";
+      Deno.writeFileSync(path, encoder.encode(input));
+      const source = fileSource(path);
+      const session = editSession(input, source);
+      press(session, "e", ...testCase.keys, "f3");
+
+      assertEquals(Deno.readFileSync(path), encoder.encode(testCase.expected));
+    } finally {
+      Deno.removeSync(path);
+    }
+  }
+});
+
 Deno.test("editor: Ctrl-K kills to end of line, Ctrl-Y yanks it back", () => {
   const { src } = memSource();
   const s = editSession("hello world\n", src);

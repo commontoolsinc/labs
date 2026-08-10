@@ -70,6 +70,32 @@ Deno.test("editbuffer: backspace joins lines, delete-forward too", () => {
   assertEquals(b.text(), "acd");
 });
 
+Deno.test("editbuffer: structural edits preserve source-owned CRLF transport", () => {
+  const split = new EditBuffer("ab\r\ncd\r\n");
+  split.col = 2;
+  split.insertNewline(2);
+  assertEquals(split.text(), "ab\r\n\r\ncd\r\n");
+
+  const backward = new EditBuffer("ab\r\ncd\r\n");
+  backward.row = 1;
+  backward.deleteBackward(2);
+  assertEquals(backward.text(), "abcd\r\n");
+  assertEquals(at(backward), [0, 2]);
+
+  const forward = new EditBuffer("ab\r\ncd\r\n");
+  forward.col = 2;
+  forward.deleteForward(2);
+  assertEquals(forward.text(), "abcd\r\n");
+
+  const killed = new EditBuffer("ab\r\ncd\r\n");
+  killed.col = 2;
+  killed.killLine(2);
+  assertEquals(killed.text(), "abcd\r\n");
+  assertEquals(killed.killRing[0], "\r\n");
+  killed.yank();
+  assertEquals(killed.text(), "ab\r\ncd\r\n");
+});
+
 Deno.test("editbuffer: dirty tracks against the original", () => {
   const b = new EditBuffer("x");
   assert(!b.dirty());

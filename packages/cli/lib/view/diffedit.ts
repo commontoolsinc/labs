@@ -927,15 +927,19 @@ function expansionBodyLines(
 
 /** Add Git's marker after context that reaches an unterminated file end. */
 function appendNoNewlineMarker(lines: string[], crlfDiff: boolean): void {
-  if (crlfDiff && lines.length > 0) {
-    lines[lines.length - 1] += "\r";
-    if (
-      lines.at(-1)?.startsWith("+") && lines.at(-2)?.startsWith("-")
-    ) {
-      lines[lines.length - 2] += "\r";
-    }
+  if (lines.length === 0) return;
+  const transport = crlfDiff ? "\r" : "";
+  const marker = `\\ No newline at end of file${transport}`;
+  const paired = lines.at(-1)?.startsWith("+") &&
+    lines.at(-2)?.startsWith("-");
+  if (paired) {
+    const removed = `${lines[lines.length - 2]}${transport}`;
+    const added = `${lines[lines.length - 1]}${transport}`;
+    lines.splice(lines.length - 2, 2, removed, marker, added, marker);
+    return;
   }
-  lines.push(`\\ No newline at end of file${crlfDiff ? "\r" : ""}`);
+  lines[lines.length - 1] += transport;
+  lines.push(marker);
 }
 
 /** Take the `@@` header off the second of two hunks and give its counts to the
@@ -1789,8 +1793,80 @@ interface FileSplice {
   startIndex: number;
   newCount: number;
   newSide: string[];
-  noTrailingNewline: boolean;
-  crlfTransport: boolean;
+  noTrailingNewline?: boolean;
+  newFileHasUtf8Bom?: boolean;
+  fallbackEnding: "\n" | "\r\n";
+}
+
+type FileLineEnding = "" | "\n" | "\r\n";
+
+interface FileContentLine {
+  text: string;
+  ending: FileLineEnding;
+}
+
+/** Split file contents while keeping each line's exact newline separate. */
+function fileContentLines(
+  text: string,
+  encodedEmptyLine: boolean,
+): FileContentLine[] {
+  if (text.length === 0) {
+    return encodedEmptyLine ? [{ text: "", ending: "" }] : [];
+  }
+  const raw = text.split("\n");
+  const trailingNewline = text.endsWith("\n");
+  if (trailingNewline) raw.pop();
+  return raw.map((line, index) => {
+    const hasNewline = index < raw.length - 1 || trailingNewline;
+    if (hasNewline && line.endsWith("\r")) {
+      return { text: line.slice(0, -1), ending: "\r\n" };
+    }
+    return { text: line, ending: hasNewline ? "\n" : "" };
+  });
+}
+
+/** Choose the closest newline style to a replaced file range. */
+function nearbyLineEnding(
+  lines: readonly FileContentLine[],
+  start: number,
+  count: number,
+  fallback: Exclude<FileLineEnding, "">,
+): Exclude<FileLineEnding, ""> {
+  for (const line of lines.slice(start, start + count)) {
+    if (line.ending !== "") return line.ending;
+  }
+  for (let index = start - 1; index >= 0; index--) {
+    const ending = lines[index]?.ending;
+    if (ending) return ending;
+  }
+  for (let index = start + count; index < lines.length; index++) {
+    const ending = lines[index]?.ending;
+    if (ending) return ending;
+  }
+  return fallback;
+}
+
+/** Give an edited diff row the file newline it represents. */
+function fileContentLine(
+  body: string,
+  original: FileContentLine | undefined,
+  needsEnding: boolean,
+  nearbyEnding: Exclude<FileLineEnding, "">,
+): FileContentLine {
+  let text = body;
+  let ending: FileLineEnding = "";
+  if (original?.ending === "\r\n") {
+    if (text.endsWith("\r")) text = text.slice(0, -1);
+    ending = "\r\n";
+  } else if (original?.ending === "\n") {
+    ending = "\n";
+  } else if (original === undefined && needsEnding && text.endsWith("\r")) {
+    text = text.slice(0, -1);
+    ending = "\r\n";
+  }
+  if (!needsEnding) ending = "";
+  else if (ending === "") ending = nearbyEnding;
+  return { text, ending };
 }
 
 /** A copy of {@link DiffHunkInfo} the diff source keeps mutable: expanding a
@@ -1954,18 +2030,19 @@ function collectFileOutputs(
   const byFile = new Map<string, FileSplice[]>();
   let hunkIndex = 0;
   for (const file of model?.files ?? []) {
-    let finalNewSideLine = -1;
-    for (let i = file.headerLine; i <= file.endLine; i++) {
-      const kind = model!.lines[i]?.kind;
-      if (kind === "ctx" || kind === "add") finalNewSideLine = i;
-    }
     for (const hunk of file.hunks) {
       const index = hunkIndex++;
       const info = hunks[index];
       const include = changedHunks === undefined || changedHunks.has(index);
       if (!include || !info || !isWritable(info) || !info.absPath) continue;
       const newSide: string[] = [];
-      let noTrailingNewline = false;
+      let noTrailingNewline: boolean | undefined;
+      const crlfTransport = rawLines[hunk.headerLine].endsWith("\r");
+      let finalNewSideLine = -1;
+      for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
+        const kind = model!.lines[i]?.kind;
+        if (kind === "ctx" || kind === "add") finalNewSideLine = i;
+      }
       for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
         const kind = model!.lines[i]?.kind;
         // Context and added lines are the new side; the leading marker is
@@ -1973,7 +2050,10 @@ function collectFileOutputs(
         // empty). The no-newline marker applies to the new file only after its
         // final new-side line.
         if (kind === "ctx" || kind === "add") {
-          const body = rawLines[i].slice(1);
+          let body = rawLines[i].slice(1);
+          if (crlfTransport && body.endsWith("\r")) {
+            body = body.slice(0, -1);
+          }
           const sourceLine = model!.lines[i]?.newLine;
           newSide.push(
             sourceLine === 0 && info.newFileHasUtf8Bom === true
@@ -1996,7 +2076,8 @@ function collectFileOutputs(
         newCount: info.newCount,
         newSide,
         noTrailingNewline,
-        crlfTransport: rawLines[hunk.headerLine].endsWith("\r"),
+        newFileHasUtf8Bom: info.newFileHasUtf8Bom,
+        fallbackEnding: crlfTransport ? "\r\n" : "\n",
       });
       byFile.set(info.absPath, list);
     }
@@ -2006,30 +2087,41 @@ function collectFileOutputs(
   for (const [path, splices] of byFile) {
     const base = fileText.get(path);
     if (base === undefined) continue;
-    let hasTrailingNewline = base.endsWith("\n");
-    const fileLines = base === "" ? [] : base.split("\n");
-    if (hasTrailingNewline) fileLines.pop();
+    const encodedEmptyLine = base === "" &&
+      splices.some((splice) =>
+        splice.newFileHasUtf8Bom === true && splice.newCount > 0
+      );
+    const fileLines = fileContentLines(base, encodedEmptyLine);
     const baseLineCount = fileLines.length;
     for (const h of [...splices].sort((a, b) => b.startIndex - a.startIndex)) {
-      fileLines.splice(h.startIndex, h.newCount, ...h.newSide);
-    }
-    const eofSplice = splices.find((h) =>
-      h.startIndex + h.newCount === baseLineCount
-    );
-    if (eofSplice) {
-      hasTrailingNewline = !eofSplice.noTrailingNewline;
-      const last = fileLines.length - 1;
-      if (
-        eofSplice.noTrailingNewline && eofSplice.crlfTransport &&
-        fileLines[last]?.endsWith("\r")
-      ) {
-        fileLines[last] = fileLines[last].slice(0, -1);
-      }
+      const original = fileLines.slice(
+        h.startIndex,
+        h.startIndex + h.newCount,
+      );
+      const ending = nearbyLineEnding(
+        fileLines,
+        h.startIndex,
+        h.newCount,
+        h.fallbackEnding,
+      );
+      const reachesEof = h.startIndex + h.newCount === baseLineCount;
+      const hasTrailingNewline = reachesEof
+        ? h.noTrailingNewline === true
+          ? false
+          : h.newCount > 0
+          ? base.endsWith("\n")
+          : true
+        : true;
+      const replacement = h.newSide.map((body, index) => {
+        const needsEnding = !reachesEof || index < h.newSide.length - 1 ||
+          hasTrailingNewline;
+        return fileContentLine(body, original[index], needsEnding, ending);
+      });
+      fileLines.splice(h.startIndex, h.newCount, ...replacement);
     }
     out.set(
       path,
-      fileLines.join("\n") +
-        (hasTrailingNewline && fileLines.length > 0 ? "\n" : ""),
+      fileLines.map((line) => `${line.text}${line.ending}`).join(""),
     );
   }
   return out;

@@ -1636,6 +1636,127 @@ ${body}
     }
   });
 
+  it("uses workspace newlines instead of CRLF diff transport", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(path, encoder.encode("new\n"));
+      const diff = [
+        "diff --git a/value.ts b/value.ts",
+        "--- a/value.ts",
+        "+++ b/value.ts",
+        "@@ -1 +1 @@",
+        "-old",
+        "+new",
+        "",
+      ].join("\r\n");
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 5;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "end" });
+      session.handleKey({ name: "left" });
+      session.handleKey({ name: "delete" });
+      session.handleKey({ name: "f3" });
+
+      expect(Deno.readFileSync(path)).toEqual(encoder.encode("ne\n"));
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("inherits CRLF when Enter terminates a standard Git EOF row", () => {
+    const encoder = new TextEncoder();
+    const cases = [
+      { fileText: "first\r\nnew", row: "+new", expected: "first\r\nnew\r\n" },
+      {
+        fileText: "first\r\nlast\r",
+        row: "+last\r",
+        expected: "first\r\nlast\r\r\n",
+      },
+    ];
+    for (const testCase of cases) {
+      const root = Deno.makeTempDirSync();
+      try {
+        Deno.mkdirSync(join(root, ".git"));
+        const path = join(root, "value.ts");
+        Deno.writeFileSync(path, encoder.encode(testCase.fileText));
+        const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -2 +2 @@
+-old
+\\ No newline at end of file
+${testCase.row}
+\\ No newline at end of file
+`;
+        const ws = realWorkspace(root);
+        const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+        const session = new Session(
+          built.doc,
+          { color: false, showLineNumbers: false },
+          { width: 80, height: 10 },
+          undefined,
+          diffSource(ws, built.edit),
+        );
+        session.top = 6;
+        session.handleKey({ name: "e" });
+        session.handleKey({ name: "end" });
+        session.handleKey({ name: "enter" });
+        session.handleKey({ name: "f3" });
+
+        expect(Deno.readFileSync(path)).toEqual(
+          encoder.encode(testCase.expected),
+        );
+      } finally {
+        Deno.removeSync(root, { recursive: true });
+      }
+    }
+  });
+
+  it("preserves an unterminated EOF when its diff omits metadata", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      Deno.writeTextFileSync(path, "new");
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1 +1 @@
+-old
++new
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 5;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "end" });
+      session.handleKey({ name: "backspace" });
+      session.handleKey({ name: "f3" });
+
+      expect(Deno.readTextFileSync(path)).toBe("ne");
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
   it("keeps a literal final carriage return editable", () => {
     const root = Deno.makeTempDirSync();
     try {
@@ -2026,6 +2147,58 @@ ${body}
     }
   });
 
+  it("marks both sides of an unterminated BOM replacement", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const bom = "\uFEFF";
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(
+        path,
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...encoder.encode("inserted\r\nexisting"),
+        ]),
+      );
+      const diff = [
+        "diff --git a/value.ts b/value.ts",
+        "--- a/value.ts",
+        "+++ b/value.ts",
+        "@@ -0,0 +1 @@",
+        `+${bom}inserted`,
+        "",
+      ].join("\r\n");
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const source = diffSource(ws, built.edit);
+      const expanded = source.expandContext!(diff, diff, 4, false)!;
+      const lines = expanded.text.split("\n");
+      const markers = lines.flatMap((line, index) =>
+        line.replace(/\r$/, "") === "\\ No newline at end of file"
+          ? [index]
+          : []
+      );
+
+      expect(markers).toHaveLength(2);
+      expect(lines[markers[0] - 1]).toBe(`-${bom}existing\r`);
+      expect(lines[markers[1] - 1]).toBe("+existing\r");
+      expect(lines[markers[0]].endsWith("\r")).toBe(true);
+      expect(lines[markers[1]].endsWith("\r")).toBe(true);
+      const rebuilt = buildDiffDocument(
+        expanded.text,
+        parseDiff(expanded.text)!,
+        ws,
+      );
+      expect(rebuilt.edit.hunks[0]?.oldNoTrailingNewline).toBe(true);
+      expect(rebuilt.edit.hunks[0]?.newNoTrailingNewline).toBe(true);
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
   it("infers an old blob's BOM when its reader omits byte metadata", () => {
     const root = Deno.makeTempDirSync();
     try {
@@ -2259,6 +2432,37 @@ index 1111111..2222222 100644
       expect(matching.edit.hunks[0]?.newNoTrailingNewline).toBe(true);
       expect(matching.edit.lines.size).toBe(1);
       expect(diffSource(matchingWs, matching.edit).editable).toBe(true);
+
+      const matchingBomOnlyCrlfDiff = [
+        "diff --git a/value.ts b/value.ts",
+        "--- a/value.ts",
+        "+++ b/value.ts",
+        "@@ -0,0 +1 @@",
+        `+${bom}`,
+        "\\ No newline at end of file",
+        "",
+      ].join("\r\n");
+      const matchingCrlfWs = realWorkspace(root);
+      const matchingCrlf = buildDiffDocument(
+        matchingBomOnlyCrlfDiff,
+        parseDiff(matchingBomOnlyCrlfDiff)!,
+        matchingCrlfWs,
+      );
+      const matchingCrlfSession = new Session(
+        matchingCrlf.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(matchingCrlfWs, matchingCrlf.edit),
+      );
+      matchingCrlfSession.top = 4;
+      matchingCrlfSession.handleKey({ name: "e" });
+      matchingCrlfSession.handleKey({ name: "end" });
+      matchingCrlfSession.handleKey({ name: "x", char: "x" });
+      matchingCrlfSession.handleKey({ name: "f3" });
+      expect(Deno.readFileSync(path)).toEqual(
+        new Uint8Array([0xef, 0xbb, 0xbf, 0x78]),
+      );
     } finally {
       Deno.removeSync(root, { recursive: true });
     }

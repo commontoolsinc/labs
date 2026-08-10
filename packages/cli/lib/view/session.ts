@@ -2328,7 +2328,7 @@ export class Session {
       case "delete":
       case "ctrl-d":
         if (this.guardForwardEdit()) {
-          b.deleteForward();
+          b.deleteForward(this.logicalLineEnd());
           this.afterEdit();
         }
         return;
@@ -2408,7 +2408,7 @@ export class Session {
             this.afterEdit();
           }
         } else {
-          b.insertNewline();
+          b.insertNewline(this.logicalLineEnd());
           this.afterEdit();
         }
         return;
@@ -2699,14 +2699,14 @@ export class Session {
   }
 
   /** The current line's last editable column, before source-owned transport. */
-  private logicalLineEnd(): number {
+  private logicalLineEnd(row = this.buffer!.row): number {
     const b = this.buffer!;
-    const physicalEnd = b.currentLineLength();
-    const line = b.lines[b.row] ?? "";
-    const ordinaryEnd = line.endsWith("\r") && b.row < b.lines.length - 1
+    const line = b.lines[row] ?? "";
+    const physicalEnd = [...line].length;
+    const ordinaryEnd = line.endsWith("\r") && row < b.lines.length - 1
       ? physicalEnd - 1
       : physicalEnd;
-    const end = this.source?.logicalEnd?.(b.lines, b.row) ?? ordinaryEnd;
+    const end = this.source?.logicalEnd?.(b.lines, row) ?? ordinaryEnd;
     return clamp(end, 0, physicalEnd);
   }
 
@@ -2809,7 +2809,9 @@ export class Session {
   private handleBackspace(): void {
     const b = this.buffer!;
     if (!this.source?.policy) {
-      b.deleteBackward();
+      b.deleteBackward(
+        b.row > 0 ? this.logicalLineEnd(b.row - 1) : undefined,
+      );
       return this.afterEdit();
     }
     const start = this.editStart();
