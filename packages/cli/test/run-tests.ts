@@ -60,6 +60,12 @@ const SERIAL_TESTS = [
   "test/wish-command.test.ts",
 ];
 
+// These tests exercise Linux procfs paths, which Deno exposes only to an
+// all-access process.
+const ALL_ACCESS_TESTS = [
+  "test/view-procfs.test.ts",
+];
+
 // Tests that need a live toolshed named by API_URL. This runner excludes
 // them: its --allow-net=127.0.0.1 grant cannot reach an arbitrary API_URL.
 // The CI cli-integration-test job runs them against its toolshed; each
@@ -89,6 +95,7 @@ async function run(
   label: string,
   options: string[],
   files: string[],
+  permissions = PERMISSIONS,
 ): Promise<void> {
   if (files.length === 0) {
     console.log(`Skipping ${label} (0 files)`);
@@ -97,7 +104,7 @@ async function run(
 
   console.log(`Running ${label} (${files.length} files)`);
   const result = await new Deno.Command(Deno.execPath(), {
-    args: ["test", ...PERMISSIONS, ...BASE_FLAGS, ...options, ...files],
+    args: ["test", ...permissions, ...BASE_FLAGS, ...options, ...files],
     stdout: "inherit",
     stderr: "inherit",
   }).spawn().status;
@@ -120,6 +127,19 @@ if (missingSerialTests.length > 0) {
   Deno.exit(1);
 }
 
+const allAccess = new Set(ALL_ACCESS_TESTS);
+const missingAllAccessTests = ALL_ACCESS_TESTS.filter((test) =>
+  !allTests.includes(test)
+);
+if (missingAllAccessTests.length > 0) {
+  console.error(
+    `All-access CLI test file(s) not found: ${
+      missingAllAccessTests.join(", ")
+    }`,
+  );
+  Deno.exit(1);
+}
+
 const integration = new Set(INTEGRATION_TESTS);
 const missingIntegrationTests = INTEGRATION_TESTS.filter((test) =>
   !allTests.includes(test)
@@ -137,9 +157,18 @@ const unitTests = allTests.filter((test) => !integration.has(test));
 const shard = parseCliTestShard();
 const tests = unitTests.filter((_, i) => i % shard.count === shard.index);
 
-const parallelTests = tests.filter((test) => !serial.has(test));
+const parallelTests = tests.filter((test) =>
+  !serial.has(test) && !allAccess.has(test)
+);
+const allAccessTests = tests.filter((test) => allAccess.has(test));
 const serialTests = tests.filter((test) => serial.has(test));
 const denoTestArgs = Deno.args[0] === "--" ? Deno.args.slice(1) : Deno.args;
 
 await run("parallel CLI tests", ["--parallel", ...denoTestArgs], parallelTests);
+await run(
+  "all-access CLI tests",
+  ["--parallel", ...denoTestArgs],
+  allAccessTests,
+  ["--allow-all"],
+);
 await run("serial CLI tests", denoTestArgs, serialTests);

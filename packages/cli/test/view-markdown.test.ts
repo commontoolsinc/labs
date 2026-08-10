@@ -4,7 +4,9 @@
  * not parsed as TypeScript, and its headings form the navigation tree.
  */
 import { assert, assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
 import { join } from "@std/path";
+import { describe, it } from "@std/testing/bdd";
 import {
   highlightMarkdownLines,
   markdownDocument,
@@ -187,6 +189,80 @@ Deno.test("markdown: a diff's nav tree steps through the headings it shows", () 
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
+});
+
+describe("decoded Markdown diff input", () => {
+  it("keeps a BOM outside a heading anchor", () => {
+    const bom = "\uFEFF";
+    const diff = `diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1,2 +1,2 @@
+ ${bom}# Title
+-old
++body
+`;
+    const ws: DiffWorkspace = {
+      resolve: () => "/README.md",
+      read: () => "# Title\nbody\n",
+      hasUtf8Bom: () => true,
+    };
+    const { doc } = buildDiffDocument(diff, parseDiff(diff)!, ws);
+    const heading = doc.flatStructure.find((node) => node.label === "# Title");
+
+    expect(heading).toBeDefined();
+    expect(heading!.startCol).toBe(2);
+    expect(heading!.startOffset).toBe(diff.indexOf("# Title"));
+  });
+
+  it("keeps rendered BOM text and spans aligned", () => {
+    const bom = "\uFEFF";
+    const diff = `diff --git a/notes.md b/notes.md
+--- a/notes.md
++++ b/notes.md
+@@ -0,0 +1 @@
++${bom}plain text
+`;
+    const ws: DiffWorkspace = { resolve: () => null, read: () => null };
+    const { doc } = buildDiffDocument(
+      diff,
+      parseDiff(diff)!,
+      ws,
+      new Map(),
+      "rendered",
+    );
+    const line = doc.lines[4];
+
+    expect(line.text).toBe(`+${bom}plain text`);
+    expect(line.spans.map((span) => span.text).join("")).toBe(line.text);
+  });
+
+  it("retains heading syntax when restoring a rendered BOM line", () => {
+    const bom = "\uFEFF";
+    const diff = `diff --git a/notes.md b/notes.md
+--- a/notes.md
++++ b/notes.md
+@@ -0,0 +1 @@
++${bom}# Heading
+`;
+    const ws: DiffWorkspace = { resolve: () => null, read: () => null };
+    const { doc } = buildDiffDocument(
+      diff,
+      parseDiff(diff)!,
+      ws,
+      new Map(),
+      "rendered",
+    );
+    const line = doc.lines[4];
+
+    expect(line.text).toBe(`+${bom}# Heading`);
+    expect(line.spans.map((span) => span.text).join("")).toBe(line.text);
+    expect(
+      line.spans.some((span) =>
+        span.cls === "sectionHeader" && span.text === "# Heading"
+      ),
+    ).toBe(true);
+  });
 });
 
 Deno.test("markdown: a deeper-then-shallower diff window keeps a navigable depth tree", () => {
