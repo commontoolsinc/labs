@@ -8,6 +8,7 @@
 import type { FabricInstance } from "@/interface.ts";
 import type { ReconstructionContext } from "./interface.ts";
 import { BaseReconstructionContext } from "./BaseReconstructionContext.ts";
+import { backtickQuote } from "@/value-debug.ts";
 
 /**
  * `ReconstructionContext` whose `getCell()` always throws. `shouldDeepFreeze`
@@ -32,7 +33,9 @@ export class EmptyReconstructionContext extends BaseReconstructionContext {
     ref: { id: string; path: string[]; space: string },
   ): FabricInstance {
     throw new Error(
-      `Cannot reconstruct cell reference \`${ref.id}\`: ${this.#getCellMessage}`,
+      `Cannot reconstruct cell reference ${
+        backtickQuote(ref.id)
+      }: ${this.#getCellMessage}`,
     );
   }
 }

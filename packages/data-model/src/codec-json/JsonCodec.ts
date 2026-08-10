@@ -70,7 +70,7 @@ export class JsonCodec implements SerializationContext<string> {
     if (!JsonCodec.seemsLikeEncoded(data)) {
       const excerpt = (data.length <= 50) ? data : `${data.slice(0, 50)}...`;
       throw new Error(
-        `Not a JSON-encoded \`FabricValue\` string: \`${excerpt}\``,
+        `Not a JSON-encoded \`FabricValue\` string: ${backtickQuote(excerpt)}`,
       );
     }
 
@@ -183,7 +183,9 @@ export class JsonCodec implements SerializationContext<string> {
       // recognized by a registered codec. Complain here since we didn't find a
       // `codec` above.
       throw new Error(
-        `No codec registered for fabric object class: \`${value.constructor.name}\``,
+        `No codec registered for fabric object class: ${
+          backtickQuote(value.constructor.name)
+        }`,
       );
     }
 
@@ -578,7 +580,9 @@ export class JsonCodec implements SerializationContext<string> {
     if (isMalformed) {
       if (!JsonCodec.seemsLikeEncoded(encoded)) {
         throw new Error(
-          `Not a JSON-encoded \`FabricValue\` string: \`${encoded}\``,
+          `Not a JSON-encoded \`FabricValue\` string: ${
+            backtickQuote(encoded)
+          }`,
         );
       }
     } else {
