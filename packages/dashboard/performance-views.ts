@@ -1,11 +1,9 @@
 import { escapeHtml } from "./lib.ts";
 import {
-  rgba,
-  STATUS_COLOR,
   STATUS_EDGE,
   STATUS_WASH,
 } from "./palette.ts";
-import { DASHBOARD_THEME_STYLES } from "./theme.ts";
+import { DASHBOARD_THEME_STYLES, statusLayer } from "./theme.ts";
 
 export type PerformanceView = "runtime" | "ci" | "gantt";
 
@@ -16,8 +14,8 @@ const ROW_WASH = 0.75;
 
 const ROW_RULES = (["good", "warn", "bad"] as const).map((s) =>
   `  .brow.${s},.crow.${s}{border-color:${
-    rgba(STATUS_COLOR[s], STATUS_EDGE[s])
-  };background:${rgba(STATUS_COLOR[s], STATUS_WASH[s] * ROW_WASH)}}`
+    statusLayer(s, STATUS_EDGE[s])
+  };background:${statusLayer(s, STATUS_WASH[s] * ROW_WASH)}}`
 ).join("\n");
 
 export interface PerformanceViewState {
@@ -33,7 +31,7 @@ export const PERFORMANCE_HISTORY_SCALE_TRIM = 2;
 
 export const PERFORMANCE_PROGRESS_STYLES = `
   .fetch-progress{background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;padding:10px 12px;margin:0 0 12px}
-  .fetch-progress.error,.fetch-progress.warning{border-color:${rgba(STATUS_COLOR.warn, STATUS_EDGE.warn)}}
+  .fetch-progress.error,.fetch-progress.warning{border-color:${statusLayer("warn", STATUS_EDGE.warn)}}
   .fetch-head{display:flex;justify-content:space-between;gap:12px;align-items:baseline;font-size:12px;color:var(--text-secondary)}
   .fetch-head strong{font-weight:600}.fetch-head span,#fetch-detail{font-variant-numeric:tabular-nums;color:var(--text-subtle)}
   .fetch-progress progress{display:block;width:100%;height:7px;margin:7px 0 6px;accent-color:var(--accent)}

@@ -60,6 +60,14 @@ export const LIGHT_THEME_COLORS: ThemeColors = {
   "chart-highlight": "#374151",
 };
 
+/** A transparent status color layer painted from the active theme. */
+export function statusLayer(status: Status, alpha: number): string {
+  const percent = Number((alpha * 100).toFixed(4));
+  return `color-mix(in srgb,var(--status-${status}) ${
+    percent
+  }%,transparent)`;
+}
+
 const STATUSES: readonly Status[] = ["good", "warn", "bad", "unknown"];
 
 function variables(

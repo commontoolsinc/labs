@@ -3,8 +3,6 @@
 import type { Status, TileView } from "./types.ts";
 import { durationTag, escapeHtml, STATUS_DOT } from "./lib.ts";
 import {
-  rgba,
-  STATUS_COLOR,
   STATUS_EDGE,
   STATUS_WASH,
   TEXTURE_ALPHA,
@@ -18,6 +16,7 @@ import {
   DASHBOARD_THEME_HEAD,
   DASHBOARD_THEME_STYLES,
   dashboardThemeToggle,
+  statusLayer,
 } from "./theme.ts";
 
 const FAVICON_PNG_HREFS = JSON.stringify({
@@ -42,26 +41,26 @@ export const FAVICON_CRY_AFTER_MS = 60 * 60 * 1000;
 const TEXTURE_HEIGHT = 24;
 
 /**
- * A tiling background of one stroked path, for the texture that sits behind a
- * tile's flat colour wash. Returns the whole background declaration, because
- * the size the tile repeats at is part of the pattern rather than a separate
- * choice. The path is drawn in a `period` by `TEXTURE_HEIGHT` space, and its
- * corners come to a point.
+ * A tiling mask of one stroked path, for the texture that sits behind a tile's
+ * flat colour wash. The mask lets CSS paint the path with the active theme's
+ * status color. The path is drawn in a `period` by `TEXTURE_HEIGHT` space, and
+ * its corners come to a point.
  *
  * A path has to begin and end on the left and right edges of that space,
  * heading the same way at both, so the two ends butt together where the
  * pattern repeats. The round cap is what makes that joint clean: it fills the
  * stroke out to the edge, and the part that reaches past is clipped away.
  */
-function strokeTexture(path: string, stroke: string, period: number): string {
+function strokeTexture(path: string, period: number): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" ` +
     `width="${period}" height="${TEXTURE_HEIGHT}" ` +
     `viewBox="0 0 ${period} ${TEXTURE_HEIGHT}">` +
-    `<path d="${path}" fill="none" stroke="${stroke}" ` +
+    `<path d="${path}" fill="none" stroke="black" ` +
     `stroke-width="${TEXTURE_WIDTH}" stroke-linecap="round"/></svg>`;
-  return `background-image:url("data:image/svg+xml,${
-    encodeURIComponent(svg)
-  }");background-size:${period}px ${TEXTURE_HEIGHT}px`;
+  const mask = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+  return `--texture-mask:${mask};mask-size:${period}px ${TEXTURE_HEIGHT}px;` +
+    `-webkit-mask-size:${period}px ${TEXTURE_HEIGHT}px;` +
+    `mask-image:var(--texture-mask);-webkit-mask-image:var(--texture-mask)`;
 }
 
 // The wave rises and falls once across its period, which is long enough for a
@@ -70,17 +69,15 @@ function strokeTexture(path: string, stroke: string, period: number): string {
 const WAVE_PERIOD = 60;
 const WAVE_TEXTURE = strokeTexture(
   `M0 12q${WAVE_PERIOD / 4} -8 ${WAVE_PERIOD / 2} 0t${WAVE_PERIOD / 2} 0`,
-  rgba(STATUS_COLOR.warn, TEXTURE_ALPHA),
   WAVE_PERIOD,
-);
+) + `;background-color:${statusLayer("warn", TEXTURE_ALPHA)}`;
 // Two turns of the zig-zag, which puts its period at half the tile. It starts
 // and ends halfway along a run rather than on a corner, which keeps every
 // corner inside a tile, where the join between its two runs draws the point.
 const ZIGZAG_TEXTURE = strokeTexture(
   "M0 12l6-6 12 12 12-12 12 12 6-6",
-  rgba(STATUS_COLOR.bad, TEXTURE_ALPHA),
   48,
-);
+) + `;background-color:${statusLayer("bad", TEXTURE_ALPHA)}`;
 // Two copies of the same dot grid make a triangular lattice, where each dot has
 // six neighbours at one distance rather than a square lattice's four near ones
 // and four far ones. The copies are one dot spacing apart across, one spacing
@@ -91,7 +88,7 @@ const ZIGZAG_TEXTURE = strokeTexture(
 const DOT_SPACING_PX = 16;
 const DOT_ROW_PX = DOT_SPACING_PX * Math.sqrt(3);
 const DOT_STIPPLE = `radial-gradient(${
-  rgba(STATUS_COLOR.unknown, 0.15)
+  statusLayer("unknown", 0.15)
 } 1px,transparent 1px)`;
 const DOT_TEXTURE = [
   `background-image:${DOT_STIPPLE},${DOT_STIPPLE};`,
@@ -121,8 +118,8 @@ const STATUSES: readonly Status[] = ["good", "warn", "bad", "unknown"];
 // keeps the neutral border below.
 const TILE_RULES = STATUSES.filter((s) => s !== "unknown").map((s) =>
   `  .tile.${s},.tile.wide.${s}{border-color:${
-    rgba(STATUS_COLOR[s], STATUS_EDGE[s])
-  };background:${rgba(STATUS_COLOR[s], STATUS_WASH[s])}}`
+    statusLayer(s, STATUS_EDGE[s])
+  };background:${statusLayer(s, STATUS_WASH[s])}}`
 ).join("\n");
 
 const BIG_RULES = STATUSES.map((s) =>
@@ -230,7 +227,7 @@ ${DASHBOARD_THEME_STYLES}
   .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
   .brand b{font-size:16px;font-weight:600}.brand span{font-size:12px;color:var(--text-faint);margin-left:8px}
   .badge{font-size:11px;color:var(--status-good-text);border:1px solid ${
-    rgba(STATUS_COLOR.good, 0.4)
+    statusLayer("good", 0.4)
   };border-radius:6px;padding:2px 8px;margin-left:8px}
   .top-actions{display:flex;align-items:center;gap:12px}.live{font-size:12px;color:var(--text-muted)}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:12px}

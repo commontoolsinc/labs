@@ -14,6 +14,7 @@ import {
   ciCommitGanttPage,
   type CiGanttDataProvider,
   ciGanttPage,
+  commitGanttUrl,
   labsCiDuration,
   loomCiDuration,
   median,
@@ -21,6 +22,7 @@ import {
   renderGanttRoute,
 } from "./ci-duration.ts";
 import { PERFORMANCE_VIEW_STYLES } from "../performance-views.ts";
+import { STATUS_EDGE, STATUS_WASH } from "../palette.ts";
 
 const SVG = new TextEncoder().encode(
   '<svg xmlns="http://www.w3.org/2000/svg"><text>chart</text></svg>',
@@ -215,6 +217,22 @@ Deno.test("the Gantt page shares the performance view selector", async () => {
   );
   assertStringIncludes(html, "<title>CI run Gantt</title>");
   assertStringIncludes(html, PERFORMANCE_VIEW_STYLES);
+  for (const status of ["good", "warn", "bad"] as const) {
+    assertStringIncludes(
+      html,
+      `.brow.${status},.crow.${status}{border-color:color-mix(in srgb,var(--status-${status}) ${
+        Number((STATUS_EDGE[status] * 100).toFixed(4))
+      }%,transparent);background:color-mix(in srgb,var(--status-${status}) ${
+        Number((STATUS_WASH[status] * 0.75 * 100).toFixed(4))
+      }%,transparent)}`,
+    );
+  }
+  assertStringIncludes(
+    html,
+    `.fetch-progress.error,.fetch-progress.warning{border-color:color-mix(in srgb,var(--status-warn) ${
+      Number((STATUS_EDGE.warn * 100).toFixed(4))
+    }%,transparent)}`,
+  );
   assertStringIncludes(html, `${REPO} · ${CI_WORKFLOW}`);
   assertStringIncludes(html, `href="/"`); // a way back to the dashboard
   assertStringIncludes(
@@ -375,6 +393,23 @@ Deno.test("the commit Gantt page contains only one commit selection", () => {
     "No successful main CI runs were supplied for this commit.",
   );
   assert(!empty.includes("/ci-gantt.svg?"));
+});
+
+Deno.test("commit Gantt URL normalization preserves only renderer themes", () => {
+  const selection = `repo=labs&sha=${"e".repeat(40)}&run=42:1`;
+  for (const theme of ["dark", "light"]) {
+    const normalized = commitGanttUrl(
+      new URL(`http://d/ci-gantt.svg?${selection}&theme=${theme}`),
+    );
+    assert(normalized);
+    assertEquals(normalized.searchParams.get("theme"), theme);
+  }
+
+  const unknown = commitGanttUrl(
+    new URL(`http://d/ci-gantt.svg?${selection}&theme=sepia`),
+  );
+  assert(unknown);
+  assertEquals(unknown.searchParams.has("theme"), false);
 });
 
 Deno.test("commit Gantt data routes start the exact selected collection", async () => {

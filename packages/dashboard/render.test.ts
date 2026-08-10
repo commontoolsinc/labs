@@ -9,7 +9,12 @@ import {
   shell,
 } from "./render.ts";
 import { humanSpan, STATUS_DOT } from "./lib.ts";
-import { TEXTURE_WIDTH } from "./palette.ts";
+import {
+  STATUS_EDGE,
+  STATUS_WASH,
+  TEXTURE_ALPHA,
+  TEXTURE_WIDTH,
+} from "./palette.ts";
 import { FAVICON_VERSION } from "./favicon.ts";
 import { liveUpdateStream } from "./stream-client.ts";
 
@@ -379,12 +384,39 @@ Deno.test("shell: the texture fades out towards the bottom of its own tile", () 
   const strokes = [...html.matchAll(/stroke-width%3D%22([\d.]+)%22/g)];
   assertEquals(strokes.length, 2, "one stroked texture each for warn and bad");
   for (const stroke of strokes) assertEquals(Number(stroke[1]), TEXTURE_WIDTH);
+  assertEquals(
+    [...html.matchAll(/stroke%3D%22black%22/g)].length,
+    2,
+    "texture masks use opaque strokes and take their color from the page theme",
+  );
+  assertEquals(
+    [...html.matchAll(/;mask-image:var\(--texture-mask\)/g)].length,
+    2,
+    "both textures apply their generated mask",
+  );
+  assertEquals(
+    [...html.matchAll(/-webkit-mask-image:var\(--texture-mask\)/g)].length,
+    2,
+    "both textures apply their generated mask in WebKit",
+  );
+  for (const status of ["warn", "bad"]) {
+    assertStringIncludes(
+      html,
+      `background-color:color-mix(in srgb,var(--status-${status}) ${
+        TEXTURE_ALPHA * 100
+      }%,transparent)`,
+    );
+  }
+  assertStringIncludes(
+    html,
+    "radial-gradient(color-mix(in srgb,var(--status-unknown) 15%,transparent) 1px,transparent 1px)",
+  );
   // A pattern repeats at the size of the artwork that draws it. The two are
   // written separately into the CSS, and a pattern drawn at one size and tiled
   // at another is stretched.
   const tiles = [
     ...html.matchAll(
-      /width%3D%22(\d+)%22%20height%3D%22(\d+)%22[^;]*;background-size:(\d+)px (\d+)px/g,
+      /width%3D%22(\d+)%22%20height%3D%22(\d+)%22[^;]*;mask-size:(\d+)px (\d+)px/g,
     ),
   ];
   assertEquals(tiles.length, 2, "both stroked textures set their own size");
@@ -440,10 +472,14 @@ Deno.test("shell: a tile's wash and border grow with the seriousness of its stat
   const html = shell("", "", 0, 30_000, TEST_VERSION, "good");
   const alphas = (["good", "warn", "bad"] as Status[]).map((status) => {
     const rule = new RegExp(
-      `\\.tile\\.${status},\\.tile\\.wide\\.${status}\\{border-color:rgba\\([\\d,]+,([\\d.]+)\\);background:rgba\\([\\d,]+,([\\d.]+)\\)\\}`,
+      `\\.tile\\.${status},\\.tile\\.wide\\.${status}\\{border-color:color-mix\\(in srgb,var\\(--status-${status}\\) ([\\d.]+)%,transparent\\);background:color-mix\\(in srgb,var\\(--status-${status}\\) ([\\d.]+)%,transparent\\)\\}`,
     ).exec(html);
     assert(rule, `${status} has a tile rule`);
-    return { edge: Number(rule[1]), wash: Number(rule[2]) };
+    const edge = Number(rule[1]);
+    const wash = Number(rule[2]);
+    assertEquals(edge, Math.round(STATUS_EDGE[status] * 100));
+    assertEquals(wash, Math.round(STATUS_WASH[status] * 100));
+    return { edge, wash };
   });
   for (let i = 1; i < alphas.length; i++) {
     assert(alphas[i].edge > alphas[i - 1].edge, "each border is stronger than the last");
@@ -519,8 +555,10 @@ Deno.test("shell: server-measured red age changes the favicon after one hour", (
 });
 
 Deno.test("shell: the header names the Fabric Wall shortcut", () => {
+  const html = shell("", "", 0, 1000, TEST_VERSION, "good");
+  assertStringIncludes(html, "<span>go/fabricwall</span>");
   assertStringIncludes(
-    shell("", "", 0, 1000, TEST_VERSION, "good"),
-    "<span>go/fabricwall</span>",
+    html,
+    ".badge{font-size:11px;color:var(--status-good-text);border:1px solid color-mix(in srgb,var(--status-good) 40%,transparent)",
   );
 });

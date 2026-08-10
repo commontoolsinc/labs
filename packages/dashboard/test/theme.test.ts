@@ -10,6 +10,7 @@ import {
   LIGHT_THEME_COLORS,
   themedChartSeries,
 } from "../theme.ts";
+import { LIGHT_STATUS_TEXT, STATUS_COLOR } from "../palette.ts";
 
 function contrastRatio(first: string, second: string): number {
   const luminance = (color: string) => {
@@ -42,8 +43,21 @@ describe("theme", () => {
       );
     });
 
-    it("defines every status text and sparkline color in both themes", () => {
-      for (const status of ["good", "warn", "bad", "unknown"]) {
+    it("defines every status color, text color, and sparkline color in both themes", () => {
+      for (const status of ["good", "warn", "bad", "unknown"] as const) {
+        expect(
+          DASHBOARD_THEME_STYLES.match(
+            new RegExp(`--status-${status}:${STATUS_COLOR[status]}`, "g"),
+          )?.length,
+        ).toBe(2);
+        expect(
+          DASHBOARD_THEME_STYLES.match(
+            new RegExp(
+              `--status-${status}:${LIGHT_STATUS_TEXT[status]}`,
+              "g",
+            ),
+          )?.length,
+        ).toBe(1);
         expect(
           DASHBOARD_THEME_STYLES.match(
             new RegExp(`--status-${status}-text:`, "g"),

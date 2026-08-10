@@ -584,9 +584,11 @@ ${DASHBOARD_THEME_HEAD}
 </body></html>`;
 }
 
-function commitGanttUrl(url: URL): URL | null {
+export function commitGanttUrl(url: URL): URL | null {
   const parameters = commitGanttParameters(url);
   if (!parameters) return null;
+  const theme = url.searchParams.get("theme");
+  if (theme === "dark" || theme === "light") parameters.set("theme", theme);
   const normalized = new URL(url);
   normalized.search = parameters.toString();
   return normalized;

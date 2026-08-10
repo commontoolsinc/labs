@@ -1,7 +1,6 @@
 // Shared helpers used across tiles and the core.
 import type { Status } from "./types.ts";
 import { PROD_SERVICE } from "./config.ts";
-import { RUNNING_COLOR, STATUS_COLOR } from "./palette.ts";
 import { CHART_HIGHLIGHT } from "./theme.ts";
 import {
   type GitHubPrimaryRateLimit,
@@ -552,12 +551,12 @@ export function strip(cells: { outcome: string; href: string }[], cols: number):
   if (!cells.length) return "";
   const col = (d: string) =>
     d === "green"
-      ? STATUS_COLOR.good
+      ? "var(--status-good)"
       : d === "red"
-      ? STATUS_COLOR.bad
+      ? "var(--status-bad)"
       : d === "run"
-      ? RUNNING_COLOR
-      : STATUS_COLOR.unknown;
+      ? "var(--running)"
+      : "var(--status-unknown)";
   const html = cells.map((c) =>
     `<a class="cell" href="${escapeHtml(c.href)}" target="_blank" rel="noopener" style="background:${col(c.outcome)}"></a>`
   ).join("");
