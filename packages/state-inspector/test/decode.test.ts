@@ -10,7 +10,7 @@ import {
   FabricLink,
 } from "@commonfabric/data-model/fabric-instances";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { jsonFromValue } from "@commonfabric/data-model/codec-json";
+import { jsonFromValue } from "@commonfabric/data-model/codecs";
 import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
