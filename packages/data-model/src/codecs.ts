@@ -6,16 +6,68 @@
 // the mechanism and know nothing about which classes participate. Nothing in
 // either of those directories may import from here; the dependency runs one
 // way, and a convenience import in the other direction would make it a cycle.
+//
+// Both class rosters are imported at module scope and the registry is built at
+// first import, so this module pulls in every class that participates in the
+// wire format. That is the shape a cycle would be most costly in, which is the
+// other half of why the rule above is absolute rather than stylistic.
 
 import { isInstance } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "./fabric-value.ts";
-import type { ReconstructionContext } from "./codec-common/interface.ts";
+import { CODEC, type ReconstructionContext } from "./codec-common/interface.ts";
 import { EmptyReconstructionContext } from "./codec-common/EmptyReconstructionContext.ts";
+import type { CodecRegistry } from "./codec-common/CodecRegistry.ts";
 import { JsonCodec } from "./codec-json/JsonCodec.ts";
+import { createBaseJsonRegistry } from "./codec-json/createBaseJsonRegistry.ts";
+import { codecClasses as primitiveCodecClasses } from "./fabric-primitives/index.ts";
+import { codecClasses as instanceCodecClasses } from "./fabric-instances/index.ts";
+
+/**
+ * Creates a registry pairing the JSON format with the fabric classes this
+ * package defines. This is the registry to build on: a caller adding classes
+ * of its own extends what this returns, so that it cannot omit these by
+ * accident.
+ *
+ * The two curated `codecClasses()` lists are the source of truth for which
+ * classes participate, so the wire-format surface is decided where those are
+ * written rather than here. Each class supplies its codec via a static
+ * `[CODEC]`.
+ *
+ * `UnknownValue` and `ProblematicValue` are among them, but their codecs
+ * recognize no single wire tag: the encode path resolves an instance's tag
+ * with `tagForValue()`, and an unrecognized tag on decode is wrapped in an
+ * `UnknownValue` by the encoding context rather than tag-routed.
+ */
+export function createDefaultJsonRegistry(): CodecRegistry {
+  const registry = createBaseJsonRegistry();
+
+  for (const cls of primitiveCodecClasses()) {
+    registry.register(cls[CODEC]);
+  }
+  for (const cls of instanceCodecClasses()) {
+    registry.register(cls[CODEC]);
+  }
+
+  return registry;
+}
+
+/**
+ * Constructs a `JsonCodec` over {@link createDefaultJsonRegistry}, for a
+ * caller that wants this package's classes rather than a set of its own.
+ * `options.lenient` is passed through.
+ */
+export function newDefaultJsonCodec(
+  options?: { lenient?: boolean },
+): JsonCodec {
+  return new JsonCodec({
+    registry: createDefaultJsonRegistry(),
+    lenient: options?.lenient ?? false,
+  });
+}
 
 /** Shared JSON codec. */
-const jsonCodec = new JsonCodec();
+const jsonCodec = newDefaultJsonCodec();
 
 /**
  * Shared empty `ReconstructionContext` used when a JSON decode is requested

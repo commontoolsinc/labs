@@ -5,5 +5,8 @@
 // Public entry-point functions.
 export { seemsLikeJsonEncodedFabricValue } from "./impl.ts";
 
+// Registry factory for this format's primitive determination.
+export { createBaseJsonRegistry } from "./createBaseJsonRegistry.ts";
+
 // Whole-value codec for the wire format.
 export { JsonCodec } from "./JsonCodec.ts";
