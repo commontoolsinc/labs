@@ -434,6 +434,82 @@ describe("schema-view", () => {
     });
   });
 
+  describe("once the transaction has written", () => {
+    // A view resolves each path when it is touched, so a read taken after a
+    // write would report the new value where an eager read hands back one
+    // detached at the moment it was taken. A read is materialized eagerly once
+    // the transaction has written, so it describes the same instant either way.
+    //
+    // This covers a read taken AFTER a write. A view handed out BEFORE one
+    // still tracks it, which the write epoch in the plan is what fixes.
+    it("materializes eagerly for a read taken after a write", async () => {
+      const readAfterWrite = async (lazy: boolean) => {
+        const cause = `read-after-write-${lazy}`;
+        const write = runtime.edit();
+        runtime.getCell(space, cause, undefined, write).set({ n: 1 });
+        await write.commit();
+
+        const tx = runtime.edit();
+        if (lazy) tx.markLazyMaterialize(true);
+        const schema = {
+          type: "object",
+          properties: { n: { type: "number" } },
+        } as const;
+        const cell = runtime.getCell(space, cause, schema, tx);
+        cell.key("n").set(99);
+        // Taken after the write, so it is detached at this instant and does
+        // not move when the value is written again.
+        const value = cell.get() as { n: number };
+        const seen = value.n;
+        cell.key("n").set(7);
+        const afterSecondWrite = value.n;
+        await tx.commit();
+        return { seen, afterSecondWrite };
+      };
+
+      expect(await readAfterWrite(true)).toEqual(await readAfterWrite(false));
+    });
+
+    it("still reads back what a lift wrote through a handle it was passed", async () => {
+      const readBack = async (lazy: boolean) => {
+        const cause = `write-then-read-${lazy}`;
+        const write = runtime.edit();
+        runtime.getCell(space, cause, undefined, write).set({
+          scratch: { n: 1 },
+        });
+        await write.commit();
+
+        const tx = runtime.edit();
+        if (lazy) tx.markLazyMaterialize(true);
+        const argument = runtime.getCell(
+          space,
+          cause,
+          {
+            type: "object",
+            properties: {
+              scratch: {
+                type: "object",
+                properties: { n: { type: "number" } },
+                asCell: ["cell"],
+              },
+            },
+          } as const,
+          tx,
+        ).get() as {
+          scratch: { set: (v: unknown) => void; get: () => { n: number } };
+        };
+
+        argument.scratch.set({ n: 42 });
+        const seen = argument.scratch.get()?.n;
+        await tx.commit();
+        return seen;
+      };
+
+      expect(await readBack(true)).toBe(42);
+      expect(await readBack(false)).toBe(42);
+    });
+  });
+
   describe("a view is a read", () => {
     it("refuses assignment", async () => {
       const read = await seeded(

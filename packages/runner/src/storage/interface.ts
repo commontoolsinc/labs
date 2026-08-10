@@ -1223,6 +1223,16 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   isLazyMaterialize(): boolean;
 
   /**
+   * Whether this transaction has written anything yet.
+   *
+   * Lazy materialization reads it to decide whether a view can still describe
+   * one instant: a view resolves each path when it is touched, so once the
+   * transaction has written, a view taken earlier would report the new value
+   * where an eager read hands back a detached one taken before the write.
+   */
+  hasWrites(): boolean;
+
+  /**
    * Record that a reader touched data its schema does not describe.
    *
    * Recorded on the transaction rather than left to the throw alone, because a

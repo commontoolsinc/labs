@@ -954,7 +954,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     };
   }
 
+  hasWrites(): boolean {
+    return this.#hasWrites;
+  }
+
+  #hasWrites = false;
+
   private invalidateReadResultCache(): void {
+    // Every write funnels through here, which makes it the one place that can
+    // answer "has this transaction written anything yet".
+    this.#hasWrites = true;
     // A write may have changed any value a cached read depends on. Drop the
     // whole cache by replacing the map; this enforces
     // the "no writes between the last read and this one" invariant the cache
@@ -2242,6 +2251,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   isLazyMaterialize(): boolean {
     return isLazyMaterializationTx(this) || this.wrapped.isLazyMaterialize();
+  }
+
+  hasWrites(): boolean {
+    return this.wrapped.hasWrites();
   }
 
   noteSchemaRefusal(refusal: unknown): void {

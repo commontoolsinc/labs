@@ -343,22 +343,33 @@ records, arrays of scalars and of records, unselected properties, declared
 defaults and a matching `anyOf` branch; and reading one field of a record
 registers no read for its siblings, nor for array elements never reached.
 
-### Stage 3 — Snapshot pinning
+### Stage 3 — Snapshot semantics
 
-**Partly done, and the rest is not needed yet.** A view keeps the transaction it
-was created with (Stage 1), so two views taken in one transaction agree. What is
-not built is the write epoch: a view still reads `doc.current`, so a reader that
-writes and then reads through a view taken earlier sees its own write, where an
-eager read would have handed back a detached value.
+**Closed for every read, by falling back rather than by pinning.** A view keeps
+the transaction it was created with (Stage 1), so two views taken together
+agree, and a view sees writes made through the handles it was passed — a lift
+that writes into a `Writable` input and reads back through it gets what it
+wrote, in either mode.
 
-This does not bite the case the plan exists for. The scheduler hands a fresh
-transaction straight to the action, whose first act is to read its argument, so
-there are no writes to be seen. It becomes real for a materializer lift that
-writes and then re-reads through the same view.
+What a view cannot do is describe an instant that has already moved. It resolves
+each path when the reader touches it, so a read taken after a write would report
+the new value where an eager read hands back one detached when it was taken. So
+a read is materialized eagerly once the transaction has written
+(`tx.hasWrites()`). Nothing is lost where the win is: a lift reads its argument
+before it writes anything, so that read is still lazy.
 
-- [ ] Write epoch on the transaction, first-write epoch per document, pins taken
-      at materialization for documents already written. The design is above,
-      under "Snapshot semantics", and the cost analysis there still holds.
+- [x] `hasWrites()` on the transaction, set at the one point every write funnels
+      through.
+- [x] `validateAndTransform` takes the lazy route only on a transaction that has
+      not written.
+- [x] Tested against an eager read, both for a read taken after a write and for
+      a lift writing through a handle and reading back.
+
+- [ ] One case is still open, and it needs the write epoch rather than the
+      fallback: a view handed out BEFORE a write still tracks that write, where
+      an eager read would have detached. The fallback cannot fix it after the
+      fact — recovering the pre-write value is exactly what an epoch buys. The
+      design and its cost analysis are under "Snapshot semantics" above.
 
 ### Stage 4 — The transaction mode
 

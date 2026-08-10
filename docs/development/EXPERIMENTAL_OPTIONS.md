@@ -392,10 +392,16 @@ probe reads. `Pattern Runner - Lift` pins both halves: the forwarding lift runs
 once instead of twice, while the inner lift still runs and still produces the
 new result.
 
-Still unbuilt, and recorded in the plan: handlers materialize eagerly, and the
-write-epoch snapshot is not implemented (a view reads `doc.current`, which does
-not bite the lift case since no writes precede the argument read, but would for
-a materializer that writes and then re-reads through an earlier view).
+Reads fall back to eager materialization once the transaction has written, so
+every read describes one instant: a lift that writes into a `Writable` input and
+reads back through it gets what it wrote, and a read taken after a write is
+detached exactly as an eager one is. A lift reads its argument before it writes,
+so the win is untouched.
+
+Still unbuilt, and recorded in the plan: handlers materialize eagerly, and a
+view handed out BEFORE a write still tracks that write where an eager read would
+have detached — the fallback cannot recover the pre-write value after the fact,
+which is what the write epoch is for.
 
 ## Category 2: Contextual Flow Control enforcement rollout dials
 
