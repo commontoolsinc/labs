@@ -970,7 +970,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json
-          key: cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx') }}
+          key: cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'tasks/integration.ts') }}
           restore-keys: |
             cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-
 

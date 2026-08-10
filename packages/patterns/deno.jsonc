@@ -21,9 +21,9 @@
   // instantiates it in the runtime; it is not a `deno test`. Colocate it next
   // to the pattern it exercises. The `.tsx` extension alone routes it here: the
   // `test` task's `**/*.test.ts` glob never matches `.test.tsx`. CI runs these
-  // in the "Pattern Unit Tests" job, split into chunks by filename (the
-  // `pattern-tests` target in tasks/integration.ts), and they are the only
-  // source of authored-pattern coverage (see docs/development/COVERAGE.md).
+  // in the "Pattern Unit Tests" job, assigned to chunks by a stable filename
+  // hash (the `pattern-tests` target in tasks/integration.ts), and they are the
+  // only source of authored-pattern coverage (see docs/development/COVERAGE.md).
   //
   // Lane 3 — integration test. A `*.test.ts` file under `integration/` that
   // needs a running shell/toolshed/browser (PiecesController, ShellIntegration,

@@ -146,8 +146,8 @@ function getCfCommand(rootDir: string): string[] {
 
 /**
  * Finds all `.test.tsx` pattern tests that match the given filter (if any). A
- * filter of the form `<chunk>/<total-chunks>` produces the indicated "chunk" of
- * the tests, to allow for separate parallel tasks to handle all the chunks.
+ * filter of the form `<chunk>/<total-chunks>` selects the files whose stable
+ * filename hash belongs to that chunk.
  */
 async function findPatternTests(
   rootDir: string,
@@ -178,21 +178,46 @@ async function findPatternTests(
     }
   }
 
-  testFiles.sort();
-
   if (chunk && totalChunks) {
     if (chunk > totalChunks) {
       throw new Error(`Nonsensical chunk demand: ${chunk}/${totalChunks}`);
     }
-    const perChunk = testFiles.length / totalChunks;
-    const first = Math.floor((chunk - 1) * perChunk);
-    const afterLast = Math.floor(chunk * perChunk);
     console.log(`Testing pattern chunk ${chunk} of ${totalChunks}.`);
     console.log(`${testFiles.length} tests in total across all chunks.`);
-    return testFiles.slice(first, afterLast);
+    return selectPatternTestFiles(testFiles, {
+      index: chunk,
+      total: totalChunks,
+    });
   } else {
-    return testFiles;
+    return selectPatternTestFiles(testFiles);
   }
+}
+
+const FNV1A_OFFSET_BASIS = 0x811c9dc5;
+const FNV1A_PRIME = 0x01000193;
+const UTF8_ENCODER = new TextEncoder();
+
+function fnv1a32(value: string): number {
+  let hash = FNV1A_OFFSET_BASIS;
+  for (const byte of UTF8_ENCODER.encode(value)) {
+    hash ^= byte;
+    hash = Math.imul(hash, FNV1A_PRIME) >>> 0;
+  }
+  return hash;
+}
+
+export function selectPatternTestFiles(
+  files: string[],
+  shard?: { index: number; total: number },
+): string[] {
+  const sorted = files.map((file) => file.replaceAll("\\", "/")).toSorted();
+  if (!shard) return sorted;
+  if (shard.index < 1 || shard.index > shard.total) {
+    throw new Error(`Nonsensical chunk demand: ${shard.index}/${shard.total}`);
+  }
+  return sorted.filter((file) =>
+    fnv1a32(file) % shard.total === shard.index - 1
+  );
 }
 
 /**
