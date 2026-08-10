@@ -18,6 +18,7 @@ import {
   listPieces,
   MapFormat,
   newPiece,
+  partitionVerbListing,
   PieceConfig,
   PieceResultProjectionError,
   PieceVerbReadError,
@@ -1714,16 +1715,46 @@ after --. Handlers interpret piped input when no input argument is present.`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option("--json", "Output machine-readable JSON.")
+  .option(
+    "--all",
+    "Include wrapper-tier and deprecated verbs the default listing hides. " +
+      "Hidden verbs stay callable either way.",
+  )
   .action(async (options) => {
     setQuietMode(!!options.quiet);
     const pieceConfig = parsePieceOptions(options);
     const listing = await listPieceCallables(pieceConfig);
+    // Default view: wrapper-tier (session-UI affordances) and deprecated
+    // verbs are omitted, LOUDLY — the hidden counts always print, so nothing
+    // is silently invisible. Rows carry their marks in both views, and
+    // `cf piece call` never consults them.
+    const partition = partitionVerbListing(listing.verbs);
+    const hiddenCount = partition.wrapper + partition.deprecated;
+    const shown = options.all ? listing.verbs : partition.shown;
+    const omission = hiddenCount > 0 && !options.all
+      ? `${partition.wrapper} wrapper, ${partition.deprecated} deprecated hidden; --all lists them`
+      : undefined;
     if (options.json) {
-      render(listing, { json: true });
+      render({
+        ...listing,
+        verbs: shown,
+        ...(omission !== undefined
+          ? {
+            hidden: {
+              wrapper: partition.wrapper,
+              deprecated: partition.deprecated,
+            },
+          }
+          : {}),
+      }, { json: true });
       return;
     }
-    if (listing.verbs.length === 0) {
-      render("<no callable verbs>");
+    if (shown.length === 0) {
+      render(
+        omission !== undefined
+          ? `<no callable verbs shown> (${omission})`
+          : "<no callable verbs>",
+      );
       return;
     }
     if (listing.pattern) {
@@ -1731,10 +1762,19 @@ after --. Handlers interpret piped input when no input argument is present.`,
     }
     render(
       Table.from([
-        ["NAME", "KIND", "ON"],
-        ...listing.verbs.map((v) => [v.name, v.kind, v.on]),
+        ["NAME", "KIND", "ON", "MARKS"],
+        ...shown.map((v) => [
+          v.name,
+          v.kind,
+          v.on,
+          [
+            ...(v.tier === "wrapper" ? ["wrapper"] : []),
+            ...(v.deprecated ? ["deprecated"] : []),
+          ].join(","),
+        ]),
       ]).toString(),
     );
+    if (omission !== undefined) render(`(${omission})`);
     hint(
       cliText(
         `TIP: --json includes each verb's input schema; 'cf piece call --piece ${pieceConfig.piece} <verb> --help --json' has the full command spec.`,

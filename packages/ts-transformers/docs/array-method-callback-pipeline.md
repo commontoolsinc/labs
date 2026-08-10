@@ -39,11 +39,12 @@ The stages relevant to array-method callbacks are:
                                                 the former BuilderCallbackHoisting +
                                                 LiftHoisting pair, #3864)
 19. SchemaGeneratorTransformer
-20. ReactiveVariableForTransformer
-21. ModuleScopeShadowingTransformer
-22. ModuleScopeCfDataTransformer
-23. PatternCoverageTransformer               ← no-op unless coverage is enabled
-24. ModuleScopeFunctionHardeningTransformer
+20. VerbTierMarkTransformer                  ← verb listing marks (WS-F)
+21. ReactiveVariableForTransformer
+22. ModuleScopeShadowingTransformer
+23. ModuleScopeCfDataTransformer
+24. PatternCoverageTransformer               ← no-op unless coverage is enabled
+25. ModuleScopeFunctionHardeningTransformer
 ```
 
 A common misconception worth flagging up front:

@@ -39,7 +39,7 @@ driver needs to know what is already moving before scheduling anything new.
 | PR | What | State |
 | --- | --- | --- |
 | #5307 | closed-world verb event schemas | code is gate-clear, 336/336 patterns; held for confirmation of the recorded skew policy, the one question named open |
-| #5309 | wrapper-tier and deprecated listing marks | rebased current; compat classification landed ahead of emission |
+| #5309 | wrapper-tier and deprecated listing marks | current; compat classification landed ahead of emission. Shipped as specced with one measured narrowing — the inference needs a **void event** as well as a session-scoped binding, or the rule marks `topics.addTopic`, a headless verb that merely clears the composer draft after a create. That conjunct is the PR's named veto point |
 | #5458 | the shared read step, factored out | open |
 | #5459 | `--piece` accepts the `of:` entity URI | open |
 | #5468 | receipts carry a descriptive schema | open |

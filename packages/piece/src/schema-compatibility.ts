@@ -77,9 +77,21 @@ const ANNOTATION_KEYS = new Set([
   "$schema",
   "default",
   "definitions",
+  // Standard JSON Schema annotation. The generator emits it from
+  // `@deprecated` JSDoc so `cf piece verbs` can hide legacy streams by
+  // default; it is validation-neutral by spec, so it must add and remove
+  // freely across pattern updates (verb contract WS-F listing marks — the
+  // C3 append-only lesson is why this is classified BEFORE the generator
+  // emits it).
+  "deprecated",
   "description",
   "examples",
   "tags",
+  // Listing-tier extension (`tier: "wrapper"`): a UI affordance outside the
+  // headless contract, inferred from session-scoped handler bindings.
+  // Validation-neutral by construction — it shapes only what `cf piece
+  // verbs` shows by default; `cf piece call` never consults it.
+  "tier",
   "title",
 ]);
 
