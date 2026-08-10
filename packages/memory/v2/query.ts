@@ -16,8 +16,7 @@ import {
 } from "@commonfabric/runner/traverse";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { ExtendedStorageTransaction } from "../../runner/src/storage/extended-storage-transaction.ts";
-import { ContextualFlowControl } from "../../runner/src/cfc.ts";
-import { type Immutable, isObject } from "@commonfabric/utils/types";
+import { isObject } from "@commonfabric/utils/types";
 import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, MIME, URI } from "../interface.ts";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
@@ -140,7 +139,7 @@ export class EngineObjectManager implements ObjectStorageManager {
         type: type as MIME,
         path: [],
       },
-      value: state.document as unknown as Immutable<FabricValue>,
+      value: state.document,
     };
     this.#attestations.set(key, attestation);
     this.#details.set(key, {
@@ -310,14 +309,12 @@ export const trackGraph = (
     reuse?.managers?.set(managerKey, manager);
   }
   const tracker = new CompoundCycleTracker<
-    Immutable<FabricValue>,
+    FabricValue,
     JSONSchema | undefined
   >();
   const schemaTracker = new MapSetStringToPathSelectors(true);
-  const cfc = new ContextualFlowControl();
   const traversalContext = createTraversalContext(
     tracker,
-    cfc,
     schemaTracker,
     true,
   );
@@ -678,13 +675,11 @@ const evaluateTrackedDocument = (
     return;
   }
   const tracker = new CompoundCycleTracker<
-    Immutable<FabricValue>,
+    FabricValue,
     JSONSchema | undefined
   >();
-  const cfc = new ContextualFlowControl();
   const traversalContext = createTraversalContext(
     tracker,
-    cfc,
     schemaTracker,
     true,
   );

@@ -20,6 +20,56 @@ import {
 
 const tags = ["AI Language Models"];
 
+const ErrorSchema = z.object({ error: z.string() });
+
+// The shape stoker's validation hook answers with, which differs from the one
+// the handlers write.
+const ValidationErrorSchema = z.object({
+  success: z.boolean(),
+  error: z.object({
+    name: z.string(),
+    issues: z.array(z.record(z.string(), z.any())),
+  }),
+});
+
+/**
+ * The ways a request to these routes fails, told apart by status so a caller
+ * knows whether to change the request, repeat it later, or report the service
+ * as broken. A streaming request that fails once its response body has begun
+ * cannot use any of these: its status is already 200 and the failure arrives
+ * as an `error` event in the stream.
+ */
+const failureResponses = {
+  [HttpStatusCodes.BAD_REQUEST]: jsonContent(
+    ErrorSchema,
+    "The request names something this service does not offer, asks for more than the model can produce, or carries something the model refused.",
+  ),
+  [HttpStatusCodes.UNPROCESSABLE_ENTITY]: jsonContent(
+    ValidationErrorSchema,
+    "The request body does not match the schema for this route.",
+  ),
+  [HttpStatusCodes.TOO_MANY_REQUESTS]: jsonContent(
+    ErrorSchema,
+    "The model provider is rate limiting these requests. Make the request again later.",
+  ),
+  [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
+    ErrorSchema,
+    "This service is misconfigured, or failed for a reason it does not recognise.",
+  ),
+  [HttpStatusCodes.BAD_GATEWAY]: jsonContent(
+    ErrorSchema,
+    "The model provider failed, or answered with something this service could not use.",
+  ),
+  [HttpStatusCodes.SERVICE_UNAVAILABLE]: jsonContent(
+    ErrorSchema,
+    "The model provider is overloaded. Make the request again later.",
+  ),
+  [HttpStatusCodes.GATEWAY_TIMEOUT]: jsonContent(
+    ErrorSchema,
+    "The exchange with the model provider ran out of time.",
+  ),
+} as const;
+
 const NativeModelToolIdSchema = z.enum(LLM_NATIVE_MODEL_TOOL_IDS);
 
 const TextPartSchema = z.object({
@@ -158,18 +208,6 @@ export type GetModelsRouteQueryParams = z.infer<
   typeof GetModelsRouteQueryParams
 >;
 
-export const FeedbackSchema = z.object({
-  span_id: z.string(),
-  name: z.string().default("user feedback"),
-  annotator_kind: z.enum(["HUMAN", "LLM"]).default("HUMAN"),
-  result: z.object({
-    label: z.string().optional(),
-    score: z.number().optional(),
-    explanation: z.string().optional(),
-  }),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-});
-
 // Route definitions
 export const getModels = createRoute({
   path: "/api/ai/llm/models",
@@ -245,64 +283,7 @@ export const generateText = createRoute({
       description:
         "Generated text response. NOTE: If you make a request with `stream: true`, the server answers with a `text/event-stream` of newline-delimited JSON events instead of a single message object; the message is assembled from the `text-delta` events as they arrive.",
     },
-    [HttpStatusCodes.BAD_REQUEST]: {
-      content: {
-        "application/json": {
-          schema: z.object({
-            error: z.string(),
-          }),
-        },
-      },
-      description: "Invalid request parameters",
-    },
-  },
-});
-
-export const feedback = createRoute({
-  path: "/api/ai/llm/feedback",
-  method: "post",
-  tags,
-  request: {
-    body: {
-      content: {
-        "application/json": {
-          schema: FeedbackSchema.openapi({
-            example: {
-              span_id: "67f6740bbe1ddc3f",
-              name: "correctness",
-              annotator_kind: "HUMAN",
-              result: {
-                label: "correct",
-                score: 1,
-                explanation: "The response answered the question I asked",
-              },
-            },
-          }),
-        },
-      },
-    },
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      z.object({
-        success: z.boolean(),
-      }).openapi({
-        example: {
-          success: true,
-        },
-      }),
-      "Feedback submitted successfully",
-    ),
-    [HttpStatusCodes.BAD_REQUEST]: {
-      content: {
-        "application/json": {
-          schema: z.object({
-            error: z.string(),
-          }),
-        },
-      },
-      description: "Invalid request parameters",
-    },
+    ...failureResponses,
   },
 });
 
@@ -353,20 +334,10 @@ export const generateObject = createRoute({
       }),
       "Generated object",
     ),
-    [HttpStatusCodes.BAD_REQUEST]: jsonContent(
-      z.object({
-        error: z.string(),
-      }).openapi({
-        example: {
-          error: "idea is missing",
-        },
-      }),
-      "Invalid request parameters",
-    ),
+    ...failureResponses,
   },
 });
 
 export type GetModelsRoute = typeof getModels;
 export type GenerateTextRoute = typeof generateText;
-export type FeedbackRoute = typeof feedback;
 export type GenerateObjectRoute = typeof generateObject;

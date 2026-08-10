@@ -22,7 +22,13 @@ import type {
 } from "../src/sandbox/types.ts";
 
 class FakeSandboxRuntime implements SandboxRuntime {
-  readonly kind = "docker-runsc-cfc" as const;
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: this.defaultWorkingDirectory(),
+      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+    };
+  }
 
   resolvePath(path: string, cwd = this.defaultWorkingDirectory()): string {
     return path.startsWith("/") ? path : `${cwd}/${path}`;
@@ -30,6 +36,10 @@ class FakeSandboxRuntime implements SandboxRuntime {
 
   isPathWithinWorkspace(path: string): boolean {
     return path === "/workspace" || path.startsWith("/workspace/");
+  }
+
+  isPathWithinAllowedRoots(path: string): boolean {
+    return this.isPathWithinWorkspace(path);
   }
 
   defaultWorkingDirectory(): string {
@@ -82,7 +92,7 @@ class FakeFabricSandboxRuntime extends FakeSandboxRuntime {
     return super.runShell(request);
   }
 
-  describe(): SandboxRuntimeDescription {
+  override describe(): SandboxRuntimeDescription {
     return {
       kind: "docker-runsc-cfc",
       defaultWorkingDirectory: "/workspace",
@@ -208,7 +218,7 @@ Deno.test("collectHarnessCapabilitySnapshot reports configured Fabric mounts", a
 });
 
 class FakeHostBindSandboxRuntime extends FakeSandboxRuntime {
-  describe(): SandboxRuntimeDescription {
+  override describe(): SandboxRuntimeDescription {
     return {
       kind: "docker-runsc-cfc",
       defaultWorkingDirectory: "/workspace",
@@ -588,6 +598,30 @@ Deno.test("classifyHarnessRunError maps timeouts and path escapes deterministica
       ),
       {
         at: "2026-04-22T23:30:02.000Z",
+      },
+    ).kind,
+    "timeout",
+  );
+  // The gateway client now names the operation, and Responses turns must still
+  // classify as timeouts rather than falling through to a generic run error.
+  assertEquals(
+    classifyHarnessRunError(
+      new Error(
+        "responses transport request failed after 2 attempts for https://llm.stage.commontools.dev/v1/responses: client error (SendRequest): connection error: timed out",
+      ),
+      {
+        at: "2026-04-22T23:30:03.000Z",
+      },
+    ).kind,
+    "timeout",
+  );
+  assertEquals(
+    classifyHarnessRunError(
+      new Error(
+        "chat.completions transport request failed after 2 attempts for https://llm.stage.commontools.dev/v1/chat/completions: connection error: timed out",
+      ),
+      {
+        at: "2026-04-22T23:30:04.000Z",
       },
     ).kind,
     "timeout",

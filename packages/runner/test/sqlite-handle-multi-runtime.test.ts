@@ -1,7 +1,7 @@
 // Multi-runtime stability of the SqliteDb handle (CFC Phase 3 rule-bearing
 // dbs). A rowLabel rule's term LIST (`all(a, b, …)` — an array of objects)
 // used to split into per-element entity docs when the handle value was stored
-// (Cell.set assigns [ID] to every object-in-array). Those term docs are not
+// (Cell.set anchors every object-in-array). Those term docs are not
 // reachable through any schema-driven sync, so a SECOND runtime deep-resolved
 // the links to `null` and `sqliteQuery` hashed `allOf: [null]` while the
 // creator runtime hashed the resolved AST — two request hashes fighting over
@@ -21,14 +21,9 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { SqliteTableSchemas } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
-import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
-import * as MemoryV2Client from "@commonfabric/memory/v2/client";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import {
-  type Options,
-  type SessionFactory,
-  StorageManager,
-} from "../src/storage/v2.ts";
+import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
@@ -43,59 +38,9 @@ const signer = await Identity.fromPassphrase(
 );
 const space = signer.did();
 
-// ---------------------------------------------------------------------------
-// Two storage managers, ONE server — the emulated loopback session factory
-// (mirrors v2-emulate.ts) against a caller-owned server, so each manager has
-// its own heap/replica while sharing the durable state.
-// ---------------------------------------------------------------------------
-
-class LoopbackSessionFactory implements SessionFactory {
-  constructor(private readonly server: MemoryV2Server.Server) {}
-
-  async create(space: MemorySpace, signer?: Signer) {
-    const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
-    });
-    const session = await client.mount(
-      space,
-      {},
-      (_space, _session, context) => ({
-        invocation: {
-          aud: context.audience,
-          challenge: context.challenge.value,
-        },
-        authorization: { principal: signer?.did() },
-      }),
-    );
-    return { client, session };
-  }
-}
-
-class SharedServerStorageManager extends StorageManager {
-  static overServer(
-    options: Omit<Options, "memoryHost">,
-    server: MemoryV2Server.Server,
-  ): SharedServerStorageManager {
-    return new SharedServerStorageManager(
-      // Placeholder: the loopback session factory never resolves an address.
-      { ...options, memoryHost: new URL("memory://") },
-      new LoopbackSessionFactory(server),
-    );
-  }
-}
-
-function newServer(): MemoryV2Server.Server {
-  return new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: {
-      audience: "did:key:z6Mk-runner-shared-server-test",
-    },
-  });
-}
+// Two storage managers, ONE server (`EmulatedStorageManager.connectTo`
+// against a caller-owned `newSharedServer()`), so each manager has its own
+// heap/replica while sharing the durable state.
 
 // ---------------------------------------------------------------------------
 // The pattern under test: a rule-bearing db whose rule is a term LIST
@@ -211,13 +156,10 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
   let runtimeB: Runtime | undefined;
 
   beforeEach(() => {
-    server = newServer();
+    server = newSharedServer();
     runtimeA = new Runtime({
       apiUrl: new URL(import.meta.url),
-      storageManager: SharedServerStorageManager.overServer(
-        { as: signer },
-        server,
-      ),
+      storageManager: EmulatedStorageManager.connectTo(server, { as: signer }),
     });
     runtimeB = undefined;
   });
@@ -232,6 +174,10 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
       Promise.allSettled([runtimeA.settled(), runtimeB?.settled()]),
       grace,
     ]);
+    // Scheduler only, not `dispose({ closeStorage: false })`: BOTH runtimes
+    // must stop before EITHER is torn down, because each can still be answering
+    // the other's shared query. A dispose call quiesces one runtime completely
+    // before the next one starts, which is the ordering this pair rules out.
     runtimeB?.scheduler.dispose();
     runtimeA.scheduler.dispose();
     await Promise.allSettled([
@@ -262,7 +208,7 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
     expect(collectSigilLinks(raw)).toEqual([]);
 
     // db.exec's rev bump must keep it self-contained too: it writes from a
-    // handler frame, where a whole-value set would [ID]-split the term list
+    // handler frame, where a whole-value set would entity-split the term list
     // right back into linked docs. Only the `rev` leaf may change.
     await seedDbFile(runtimeA, resultCell);
     await runtimeA.idle();
@@ -291,10 +237,7 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
     // (no inputs re-provided — a pure loader, like a second tab).
     runtimeB = new Runtime({
       apiUrl: new URL(import.meta.url),
-      storageManager: SharedServerStorageManager.overServer(
-        { as: signer },
-        server,
-      ),
+      storageManager: EmulatedStorageManager.connectTo(server, { as: signer }),
     });
     // Count B's server reads: with a stable request hash B must DEDUP against
     // the settled shared result, never issue its own request. (The red failure

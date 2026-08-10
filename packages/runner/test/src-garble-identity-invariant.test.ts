@@ -132,7 +132,6 @@ async function runAndCollect(
     });
     return await collectIdentities(runtime);
   } finally {
-    runtime.scheduler.dispose();
     await runtime.dispose();
   }
 }
@@ -268,7 +267,6 @@ async function runMultiAndCollect(
     expect(resultCell.getAsQueryResult()).toEqual({ da: 10, db: 18 });
     return await collectIdentities(runtime);
   } finally {
-    runtime.scheduler.dispose();
     await runtime.dispose();
   }
 }

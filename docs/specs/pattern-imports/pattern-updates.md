@@ -90,10 +90,10 @@ into the same active-origin and revision model.
 | Pattern pointer `patternIdentity = {identity, symbol}` on the piece result cell | `runner.ts` (`applySetupState` / `getPatternIdentityRef`) | The thing an update rewrites |
 | **In-place re-run watcher** — `setupPatternWatcher` sinks the `patternIdentity` meta; on change it cancels the old pattern's nodes and re-instantiates the new pattern **onto the same result cell** | `runner.ts` (enabled unless `doNotUpdateOnPatternChange`) | Applies a metadata swap when the piece is already running; at space open, bootstrap reads the reconciled metadata directly |
 | `PatternUpdater` | `packages/runner/src/pattern-updater.ts` | Shared identity lookup, verified closure compile, provenance repair, and compare-and-swap for awaited roots and background ordinary-piece checks |
-| Space root: `spaceCell.defaultPattern` link → root piece → `patternIdentity` | `packages/piece/src/manager.ts` (`linkDefaultPattern`/`getDefaultPattern`) | What a system update rewrites |
+| Space root: `spaceCell.defaultPattern` link → root piece → `patternIdentity` | `packages/piece/src/ops/pieces-controller.ts` (`linkDefaultPattern`/`getDefaultPattern`) | What a system update rewrites |
 | `ensureDefaultPattern` (resolve → reconcile → start) / `recreateDefaultPattern` (manual, **not** state-preserving) | `packages/piece/src/ops/pieces-controller.ts` | The automatic self-heal hook (ensure) and the state-losing escape hatch (recreate); both URL-based creation paths stamp `patternSource` |
 | System patterns = **raw TSX served by path**, bundled via `deno compile --include`; **no name→identity manifest** | `packages/toolshed/routes/patterns/patterns-server.ts`, `patterns.routes.ts` | Where the current system source + its identity come from |
-| Per-space host resolution: `mappedHostFor(space)` / `registerSpaceHost` (3-tier: seed `spaceHostMap` → learned site-table → default) | `runtime.ts:1423` / `:1444`, `storage/v2-remote-session.ts` | Which toolshed a space's source is fetched from |
+| Per-space host resolution: `mappedHostFor(space)` / `registerSpaceHost` (3-tier: seed `spaceHostMap` → learned site-table → default) | `Runtime.mappedHostFor` / `registerSpaceHost` in `packages/runner/src/runtime.ts`, `storage/v2-remote-session.ts` | Which toolshed a space's source is fetched from |
 | Identity computation: `transformInjectHelperModule` + `computeModuleIdentities` | `harness/pretransform.ts`, `sandbox/module-record-compiler.ts` | What toolshed runs to answer `?identity` |
 | Entry-doc `annotations` + `annotatePattern` | `pattern-manager.ts`, `cell-cache.ts` | **Rejected as the carrier** — see below |
 
@@ -101,12 +101,15 @@ into the same active-origin and revision model.
 non-hashed, excluded from `verifySourceDocs`) and looks like a natural home for
 "where updates live" — but it is **space-local**: `writeSourceDocs` preserves
 the *destination* cell's annotations, and replication does not copy the
-*source's* (`cell-cache.ts:475`). An `updatesAt` written in a publisher's space
+*source's* (`packages/runner/src/compilation-cache/cell-cache.ts`). An
+`updatesAt` written in a publisher's space
 would not appear on a consumer's replicated copy. The **piece** is the reliable
 carrier: explicit source provenance travels with it. For an unstamped non-root
-piece, its verified source-doc closure supplies the authored entry path; the
-runtime persists that path on the piece only after the matching same-toolshed
-`?identity` route succeeds.
+piece, its verified source-doc closure supplies the authored entry path — but
+only a path under the patterns route is admitted, since a module's name equals
+its route only for a program compiled over HTTP. The runtime persists the
+`system:` ref that path spells, and only after the matching `?identity` route
+succeeds.
 
 ## The implemented specialized model
 
@@ -115,9 +118,11 @@ Two decisions carry the whole design:
 1. **Every updatable piece carries a `patternSource` provenance string** — the
    source it tracks for updates. (`patternSource`, *not* `source`: the latter
    is the doc-level producer annotation the server-primary work uses.) Roots
-   stamp it at URL-based creation. An unstamped non-root may recover its verified
-   authored entry filename and stamp it after that same-origin route proves it
-   implements `?identity`.
+   stamp it at creation. An unstamped non-root may recover its verified
+   authored entry filename, but only one that is itself a patterns-route path,
+   and stamps the `system:` ref for it after that route proves it implements
+   `?identity`. A filename that names no route is not a claim about a source,
+   and the piece stays unstamped.
 2. **Update = resolve `patternSource` → current identity; if it differs from
    the persisted `patternIdentity.identity`, write the new `{identity, symbol}`
    to the piece's `patternIdentity` meta.** At space open this happens before
@@ -125,6 +130,16 @@ Two decisions carry the whole design:
    pattern starts first; its successful instantiation commit launches a
    fire-and-forget check, and the existing watcher re-instantiates a verified
    replacement in place. No new apply machinery.
+
+   The awaited default-root reconcile has a second entry point beyond space
+   open: `PiecesController.getDefaultPattern` — the resolution every registry
+   listing, CLI `piece ls`, FUSE mount, and shell list cell goes through —
+   runs the same awaited check when starting the persisted root FAILS, then
+   re-resolves the slot and retries the start once (a failed retry surfaces
+   the original start error). Without this, an unloadable obsolete root
+   healed only for consumers that happened to enter through space open;
+   every headless/listing consumer died with the root (the 2026-07-29
+   cf-cell-context retirement, caught by the loom vendor gate).
 
 A root created before provenance stamping may be admitted to this loop only
 when its stored `{ identity, symbol }` exactly equals the advertised current
@@ -179,10 +194,17 @@ prefix:
   (`fabric-ref-resolution.ts`: slug → piece → `patternIdentity`). A
   `cf:pattern:<hash>` ref is **frozen** (resolves to a constant → never
   updates); a bare slug **tracks**. Immutability is just a pinned ref.
-- **non-`cf:` toolshed source path** (system, e.g.
-  `/api/patterns/system/default-app.tsx`) → use `?identity` against the space's
-  host, then fetch and compile whenever the persisted artifact needs an update
-  or repair.
+- **`system:` ref** (a pattern this deployment's toolshed serves from its
+  patterns directory, addressed relative to that route, e.g.
+  `system:system/default-app.tsx` → `/api/patterns/system/default-app.tsx`) →
+  use `?identity` against the space's host, then fetch and compile whenever the
+  persisted artifact needs an update or repair. The ref is host-relative, so it
+  survives a space moving hosts; a ref that would climb out of the patterns
+  route is refused.
+- **Anything else** → no fetch. The scheme is a whitelist rather than a
+  filter, because a bare path cannot be distinguished from an authored module
+  name that merely looks like a route, and resolving such a name against the
+  host reaches whatever the site serves for an unrouted path.
 - **General source URL origins** use the discriminated active-origin and
   revision schemas defined by the piece source lifecycle spec. They must not
   overload the raw string with origin-kind-specific behavior. A fabric
@@ -199,11 +221,18 @@ be established under the ordinary consent rule. Otherwise it keeps the legacy
 locator only as inactive historical provenance and migrates the piece as
 detached. Rollout flags are not durable per-piece consent.
 
-Migration resolves a relative system path against the currently accepted
-toolshed route for the space and stores the resulting absolute web URL. If no
-accepted host can be established, migration does not invent an active origin.
-A later host remapping does not rewrite the stored URL; that requires an
-ordinary repoint.
+Migration rewrites a pre-scheme system locator — the rooted patterns-route
+path, and the absolute web URL that path resolves to under the space's own
+accepted host — into the `system:` ref naming the same file. A locator on any
+other host is left alone: re-pointing it at the local toolshed would be a
+change of source, not a change of spelling. A query or fragment on a legacy
+locator is dropped, since the patterns route serves a file by path and
+revalidation is the `?identity` ETag's job; the rewrite is otherwise exact, and
+a locator that cannot be spelled as a ref is left as authored rather than
+rewritten into one that would not resolve. If no accepted host can be
+established, migration does not invent an active origin. Because the ref is
+host-relative, a later host remapping needs no rewrite; changing which *file* a
+piece tracks still requires an ordinary repoint.
 
 A source-less legacy root does not gain an origin merely because it is a root.
 The specialized updater can derive an official candidate path, but ordinary
@@ -215,8 +244,10 @@ creates the space. In the target model, it passes that source through the same
 creation transition used for any other piece. That transition writes the first
 revision. It writes a normalized active origin only when creation also makes
 the ordinary explicit choice to accept future updates from a mutable default.
-The current implementation instead seeds a non-home root's raw `patternSource`
-from the home root's `defaultAppUrl`. Editing that template later does **not**
+The current implementation instead seeds a non-home root's `patternSource` from
+the home root's `defaultAppUrl`, canonicalized to the ref naming the same file
+so a root is born with the provenance it keeps rather than waiting on a
+migration to become followable. Editing that template later does **not**
 change an existing root. Changing that root's source is an ordinary repoint,
 edit, revert, or other lifecycle operation. Under the tentative identifier-only
 URL policy, a template stores a canonical space DID with a stable entity FID,
@@ -282,7 +313,29 @@ The apply is: ensure the new closure is loadable in the space
 the normal pattern setup path to install the new result schema, result
 projection, `{ identity, symbol }`, and `patternSetupIdentity` completion marker
 on the existing result cell. The completion marker is not a pattern pointer;
-it records which identity had its complete setup staged. During space open,
+it records which identity had its complete setup staged. It is also what tells
+an apply from a same-version replay when the pointer moved first — the
+roll-forward materialize commits the new `{ identity, symbol }` and then runs
+setup, and an identity moved with no setup at all leaves the same shape. The
+pointer then reads as unchanged, while the marker still names the version that
+staged the state.
+
+Setup re-points the piece's stored argument at the incoming argument schema and
+validates it in the same transaction, so an apply whose durable argument the new
+schema cannot read is refused rather than committed. Two cases are deferred
+rather than refused: a slot whose stored value is a link that cannot be
+dereferenced in that transaction (a nested piece's argument lives in its host's
+document, and "not yet synced" is not "invalid"), and a root carrying no
+completion marker at all, which gets one unvalidated setup because absence
+cannot be distinguished from a pending apply.
+
+A refusal is a repair failure, not a silent one. The pointer has already moved
+by the time setup runs, so re-running the same identity refuses identically;
+the boot repair therefore classifies this failure and escalates it to the
+roll-forward backstop — the same route a refused CFC migration takes — rather
+than retrying a version that cannot read its own root.
+
+During space open,
 `ensureDefaultPattern` performs this transaction before calling `startPiece`,
 and the updated root still takes the persisted-result dependency-sync path
 before its first start. This lets an obsolete pattern that cannot load be
@@ -308,6 +361,32 @@ source replacement reports a known incompatibility as a warning and can proceed
 only after explicit acceptance. Neither structural check proves semantic state
 continuity. The root-interface contract remains mandatory in both cases. See
 the [`Compatibility policy`](../piece-source-lifecycle.md#compatibility-policy).
+
+### The CI gate (`deno task pattern-compat`)
+
+Because the updater applies without that comparison, an incompatible schema
+that merges reaches every running piece. CI carries the check instead:
+`tasks/pattern-compat.ts` compiles every authored pattern and proves its
+argument/result contract against every contract recorded for it under
+`packages/patterns/baselines/`, using the same
+`assertPatternSchemasBackwardCompatible` that `cf piece setsrc` enforces — so
+the two paths cannot drift apart on what "compatible" means.
+
+- A baseline is a small JSON file holding only the two schemas. That is the
+  whole input to the check, so no compiled artifact or old source is needed.
+- **Every** baseline is checked, never just the newest: a piece rolls forward
+  from whatever version it last opened at, and the evolution-policy allowances
+  are not guaranteed to compose across steps.
+- Baselines are **never pruned**, and `deno task pattern-compat --update` can
+  only add one. An author-run command that could remove a baseline could remove
+  the one that would have caught the break.
+- A pattern with baselines that no longer yields a contract — file deleted, or
+  no longer exporting a pattern — is reported: pieces tracking that path are
+  pinned to their current pattern forever, and nothing surfaces on the piece.
+
+The gate is structural only. State continuity — data under keys the new pattern
+drops or renames — needs the golden replay described above, against captured
+prior state rather than a schema.
 
 ## System-source patterns — the loop
 
@@ -345,11 +424,12 @@ conditionally revalidate them before every update attempt.
 root with `runIt=false`, run this loop, re-resolve the cell after any metadata
 transaction, and only then start it:
 
-1. `url` = the root piece's stored `patternSource`. If it is absent, derive the
-   official candidate URL for the space, but do not treat that path as
-   provenance. A root with explicit repository provenance remains pinned.
-   `host` = `mappedHostFor(space) ?? apiUrl`. Only same-origin toolshed sources
-   participate in this v1 loop.
+1. `url` = the patterns route the root piece's stored `patternSource` ref
+   expands to. If the source is absent, derive the official candidate ref for
+   the space, but do not treat it as provenance. A root with explicit
+   repository provenance remains pinned, and so is one whose source is not a
+   `system:` ref. `host` = `mappedHostFor(space) ?? apiUrl`; the ref is
+   host-relative, so the request is same-origin by construction.
 2. `currentId` = a revalidating `GET {host}{url}?identity` for this attempt
    (`fetch` cache mode `no-cache`). A matching `ETag` may reuse the cached body
    after a `304`; the browser may not replay it without validation. An HTTP

@@ -65,10 +65,8 @@ describe("CompilationError message flattening", () => {
   });
 
   it("applies a message transformer over the flattened text", () => {
-    const transformer: DiagnosticMessageTransformer = {
-      transform: (message) =>
-        message.includes("assignable") ? `friendly: ${message}` : null,
-    };
+    const transformer: DiagnosticMessageTransformer = (message) =>
+      message.includes("assignable") ? `friendly: ${message}` : null;
     const chain: DiagnosticMessageChain = {
       messageText: "Type 'A' is not assignable to type 'B'.",
       category: ts.DiagnosticCategory.Error,
@@ -227,10 +225,8 @@ describe("Checker", () => {
     const checker = new Checker(
       programFor({ "/ok.ts": "export const x: number = 1;" }),
       {
-        messageTransformer: {
-          transform: (message) =>
-            message.includes("manufactured") ? `clearer: ${message}` : null,
-        },
+        messageTransformer: (message) =>
+          message.includes("manufactured") ? `clearer: ${message}` : null,
       },
     );
     expect(() => checker.check([chainDiagnostic("manufactured emit failure")]))

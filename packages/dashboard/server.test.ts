@@ -6,6 +6,7 @@
 import {
   assert,
   assertEquals,
+  assertMatch,
   assertRejects,
   assertStringIncludes,
 } from "@std/assert";
@@ -13,8 +14,10 @@ import {
   broadcast,
   clients,
   handle,
+  heartbeat,
   nextFaviconRedSince,
   page,
+  serveTick,
   start,
   tick,
 } from "./server.ts";
@@ -45,6 +48,7 @@ function sourceRun(id: number, title: string): Run {
     event: "push",
     head_sha: `sha-${id}`,
     display_title: title,
+    created_at: new Date(Date.now() - id * 60_000).toISOString(),
     run_started_at: new Date(Date.now() - id * 60_000).toISOString(),
     updated_at: new Date().toISOString(),
     html_url: "",
@@ -92,7 +96,7 @@ interface TestUpdate {
   gridHtml: string;
   wideHtml: string;
   ageSeconds: number;
-  shellVersion: number;
+  shellVersion: string;
   faviconStatus: "good" | "warn" | "bad";
   faviconRedSince: number | null;
   faviconRedAgeMs: number | null;
@@ -1087,7 +1091,13 @@ Deno.test("sse: /events opens a stream, tick pushes new tile markup, disconnect 
   assertEquals(await chunk(reader), ": connected\n\n");
   assertEquals(clients.size, 1);
   const initial = updateFromEvent(await chunk(reader));
-  assert(initial.shellVersion > 0);
+  // The page reloads itself when these two disagree, so the version the stream
+  // reports has to be the one the page it is feeding was built with.
+  const page = await (await handle(req("/"))).text();
+  assertStringIncludes(
+    page,
+    `const SHELL_VERSION = ${JSON.stringify(initial.shellVersion)};`,
+  );
   assert(initial.ageSeconds >= 0);
   assert(["good", "warn", "bad"].includes(initial.faviconStatus));
   assert(Object.hasOwn(initial, "faviconRedSince"));
@@ -1107,6 +1117,44 @@ Deno.test("sse: /events opens a stream, tick pushes new tile markup, disconnect 
   assertEquals(clients.size, 0, "a disconnected browser is not kept as a client");
 });
 
+Deno.test("sse: every serving tick sends a heartbeat, so silence means a broken stream", async () => {
+  const res = await handle(req("/events"));
+  const reader = res.body!.getReader();
+  await chunk(reader); // ": connected"
+  await chunk(reader); // the snapshot every connection opens with
+
+  let collections = 0;
+  await serveTick(() => {
+    collections++;
+  });
+  assertEquals(collections, 1, "the tick still collects what is due");
+  const beat = await chunk(reader);
+  assertStringIncludes(beat, "event: ping\n");
+  // An event with no data is never delivered to the page, so the heartbeat
+  // carries its count.
+  assertMatch(beat, /^data: \d+$/m);
+
+  await serveTick(() => {});
+  const next = await chunk(reader);
+  assertStringIncludes(next, "event: ping\n");
+  assert(
+    Number(next.match(/^data: (\d+)$/m)![1]) >
+      Number(beat.match(/^data: (\d+)$/m)![1]),
+    "each heartbeat differs from the last",
+  );
+
+  await reader.cancel();
+});
+
+Deno.test("heartbeat: a client whose stream is gone is dropped rather than throwing", async () => {
+  const res = await handle(req("/events"));
+  const dead = [...clients].at(-1)!;
+  await res.body!.cancel();
+  clients.add(dead);
+  heartbeat();
+  assertEquals(clients.size, 0);
+});
+
 Deno.test("broadcast: a client whose stream is gone is dropped rather than throwing", async () => {
   const res = await handle(req("/events"));
   const dead = [...clients].at(-1)!;
@@ -1116,7 +1164,7 @@ Deno.test("broadcast: a client whose stream is gone is dropped rather than throw
     gridHtml: "",
     wideHtml: "",
     ageSeconds: 0,
-    shellVersion: 1,
+    shellVersion: "test-shell",
     faviconStatus: "good",
     faviconRedSince: null,
     faviconRedAgeMs: null,
@@ -1175,4 +1223,40 @@ Deno.test("start: serves the handler on the configured port and keeps collecting
   assertStringIncludes(logged[0], `http://localhost:${PORT}`);
   assertStringIncludes(logged[0], `${TILES.length} tiles registered`);
   assertEquals(collections, 1, "startup collects immediately");
+});
+
+Deno.test("start: the work it schedules on its clock both heartbeats and collects", async () => {
+  const res = await handle(req("/events"));
+  const reader = res.body!.getReader();
+  await chunk(reader); // ": connected"
+  await chunk(reader); // the snapshot every connection opens with
+
+  const log = console.log;
+  console.log = () => {};
+  let collections = 0;
+  let timer = 0;
+  let onTick = () => Promise.resolve();
+  try {
+    ({ timer, onTick } = start(
+      ((opts: Deno.ServeTcpOptions) => {
+        opts.onListen?.({ transport: "tcp", hostname: "localhost", port: PORT });
+        return undefined;
+      }) as unknown as typeof Deno.serve,
+      () => {
+        collections++;
+      },
+    ));
+  } finally {
+    clearInterval(timer);
+    console.log = log;
+  }
+  assertEquals(collections, 1, "the startup collection does not go through the clock");
+
+  // Without this, a browser hears nothing between tile changes and replaces a
+  // healthy stream once a minute forever.
+  await onTick();
+  assertStringIncludes(await chunk(reader), "event: ping\n");
+  assertEquals(collections, 2);
+
+  await reader.cancel();
 });

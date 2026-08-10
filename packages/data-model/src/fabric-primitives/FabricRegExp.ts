@@ -1,3 +1,8 @@
+import type {
+  FabricRegExp as ApiFabricRegExp,
+  FabricRegExpConstructor as ApiFabricRegExpConstructor,
+} from "@commonfabric/api";
+
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
@@ -33,7 +38,8 @@ const DEFAULT_FLAVOR = "es2025";
  * other regex syntaxes in the future.
  * See Section 1.4.1 of the formal spec.
  */
-export class FabricRegExp extends BaseFabricPrimitive {
+export class FabricRegExp extends BaseFabricPrimitive
+  implements ApiFabricRegExp {
   /** The pattern source text. */
   readonly #source: string;
 
@@ -52,7 +58,7 @@ export class FabricRegExp extends BaseFabricPrimitive {
   readonly #value: RegExp | undefined;
 
   /**
-   * Constructs a `FabricRegExp`, either from a native `RegExp` (implying the
+   * Constructs an instance, either from a native `RegExp` (implying the
    * `"es2025"` flavor) or from explicit `flavor` / `source` / `flags`.
    *
    * When the resulting flavor is `"es2025"`, the `source` and `flags` are
@@ -127,6 +133,7 @@ export class FabricRegExp extends BaseFabricPrimitive {
 
   static #codec = Object.freeze(
     new (class RegExpCodec extends BaseFabricCodec {
+      /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.RegExp, FabricRegExp);
       }
@@ -159,10 +166,9 @@ export class FabricRegExp extends BaseFabricPrimitive {
         // `RegExp`); other flavors are stored faithfully and may carry
         // arbitrary `source`/`flags`. So a malformed non-`es2025` wire object
         // is accepted as-is rather than becoming a `ProblematicValue`.
-        const s = state as Record<string, unknown>;
-        const flavor = (s.flavor as string) ?? DEFAULT_FLAVOR;
-        const source = (s.source as string) ?? "";
-        const flags = (s.flags as string) ?? "";
+        const flavor = (state.flavor as string) ?? DEFAULT_FLAVOR;
+        const source = (state.source as string) ?? "";
+        const flags = (state.flags as string) ?? "";
         try {
           return new FabricRegExp(flavor, source, flags);
         } catch (e) {
@@ -190,7 +196,16 @@ export class FabricRegExp extends BaseFabricPrimitive {
 function rejectExtraRegExpProperties(regex: RegExp): void {
   if (Object.keys(regex).length > 0) {
     throw new Error(
-      "Cannot store RegExp with extra enumerable properties",
+      "Not representable as a `FabricValue`: RegExp with extra enumerable " +
+        "properties",
     );
   }
 }
+
+// Compile-time check that the exported `FabricRegExp` constructor matches the
+// `FabricRegExpConstructor` declared in `@commonfabric/api`. This catches a
+// declared member that is missing here or has the wrong type. It does NOT
+// catch the other direction: `satisfies` is an assignability check, so a
+// public member on this class that the declaration omits passes silently.
+// Members added here need adding there by hand.
+FabricRegExp satisfies ApiFabricRegExpConstructor;

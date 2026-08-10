@@ -2,15 +2,16 @@ import ts from "typescript";
 import { isRecord } from "@commonfabric/utils/types";
 
 import type {
-  JSONSchemaMutable,
-  JSONSchemaObjMutable,
+  MutableJSONSchema,
+  MutableJSONSchemaObj,
 } from "@commonfabric/api";
 import type {
   GenerationContext,
   SchemaGenerationOptions,
-  SchemaGenerator as ISchemaGenerator,
+  SchemaHints,
   TypeFormatter,
 } from "./interface.ts";
+import { attachUiContract, getUiContractHint } from "./ui-contract.ts";
 import { PrimitiveFormatter } from "./formatters/primitive-formatter.ts";
 import { ObjectFormatter } from "./formatters/object-formatter.ts";
 import { ArrayFormatter } from "./formatters/array-formatter.ts";
@@ -32,7 +33,7 @@ import { attachDocTags, extractDocFromType } from "./doc-utils.ts";
 /**
  * Main schema generator that uses a chain of formatters
  */
-export class SchemaGenerator implements ISchemaGenerator {
+export class SchemaGenerator {
   private formatters: TypeFormatter[] = [
     new CommonFabricFormatter(this),
     new NativeTypeFormatter(),
@@ -57,23 +58,9 @@ export class SchemaGenerator implements ISchemaGenerator {
     checker: ts.TypeChecker,
     typeNode?: ts.TypeNode,
     options?: SchemaGenerationOptions,
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: SchemaHints,
     sourceFile?: ts.SourceFile,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     return this.generateSchemaInternal(
       type,
       checker,
@@ -96,24 +83,10 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode: ts.TypeNode,
     checker: ts.TypeChecker,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: SchemaHints,
     sourceFile?: ts.SourceFile,
     options?: SchemaGenerationOptions,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     // Pass 'any' type with the typeNode - auto-detection will choose node-based analysis
     const anyType = checker.getAnyType();
     return this.generateSchemaInternal(
@@ -137,23 +110,9 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode?: ts.TypeNode,
     typeRegistry?: WeakMap<ts.Node, ts.Type>,
     options?: SchemaGenerationOptions,
-    schemaHints?: WeakMap<
-      ts.Node,
-      {
-        items?: unknown;
-        cfcUiContract?: {
-          helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-          action?: string;
-          surface?: string;
-          role?: string;
-          kind?: string;
-          trustedPattern?: string;
-          requiredEventIntegrity?: string[];
-        };
-      }
-    >,
+    schemaHints?: SchemaHints,
     sourceFile?: ts.SourceFile,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     // Create unified context with all state
     const cycles = this.getCycles(type, checker);
     const context: GenerationContext = {
@@ -188,7 +147,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     };
 
     // Auto-detect: Should we use node-based or type-based analysis?
-    let schema: JSONSchemaMutable;
+    let schema: MutableJSONSchema;
     if (this.shouldUseNodeBasedAnalysis(type, typeNode, checker)) {
       // Use node-based analysis (for synthetic nodes or when type is unreliable)
       schema = this.analyzeTypeNodeStructure(
@@ -252,7 +211,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     type: ts.Type,
     context: GenerationContext,
     typeNode?: ts.TypeNode,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     // IMPORTANT: Always create a new context, replacing typeNode (even if undefined).
     // If we pass the parent context as-is when typeNode is undefined, the child will
     // inherit the parent's typeNode which leads to mismatched type/node pairs.
@@ -352,7 +311,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     type: ts.Type,
     context: GenerationContext,
     isRootType: boolean = false,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     if ((type.flags & ts.TypeFlags.TypeParameter) !== 0) {
       const checker = context.typeChecker;
       const baseConstraint = checker.getBaseConstraintOfType(type);
@@ -483,11 +442,11 @@ export class SchemaGenerator implements ISchemaGenerator {
    * Build the final schema with definitions if needed
    */
   private buildFinalSchema(
-    schema: JSONSchemaMutable,
+    schema: MutableJSONSchema,
     type: ts.Type,
     context: GenerationContext,
     _typeNode?: ts.TypeNode,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const { definitions, emittedRefs } = context;
 
     // If no definitions were created or used, return simple schema without $schema
@@ -499,7 +458,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     const namedKey = getNamedTypeKey(type) ?? this.anonymousNames.get(type);
     const shouldPromoteRoot = this.shouldPromoteToRef(namedKey, context);
 
-    let base: JSONSchemaMutable;
+    let base: MutableJSONSchema;
 
     if (shouldPromoteRoot && namedKey) {
       // Ensure root is present in definitions
@@ -523,7 +482,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       ...(base as Record<string, unknown>),
     };
     if (Object.keys(filtered).length > 0) out.$defs = filtered;
-    return out as JSONSchemaMutable;
+    return out as MutableJSONSchema;
   }
 
   /**
@@ -543,48 +502,11 @@ export class SchemaGenerator implements ISchemaGenerator {
   }
 
   private applyNodeSchemaHints(
-    schema: JSONSchemaMutable,
+    schema: MutableJSONSchema,
     context: GenerationContext,
-  ): JSONSchemaMutable {
-    if (!context.schemaHints || !context.typeNode) {
-      return schema;
-    }
-
-    const hint = context.schemaHints.get(context.typeNode) ??
-      context.schemaHints.get(ts.getOriginalNode(context.typeNode));
-    if (!hint?.cfcUiContract) {
-      return schema;
-    }
-
-    return this.attachUiContract(schema, hint.cfcUiContract);
-  }
-
-  private attachUiContract(
-    schema: JSONSchemaMutable,
-    uiContract: {
-      helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
-      action?: string;
-      surface?: string;
-      role?: string;
-      kind?: string;
-      trustedPattern?: string;
-      requiredEventIntegrity?: string[];
-    },
-  ): JSONSchemaMutable {
-    if (typeof schema === "boolean") {
-      return schema === false
-        ? { not: true, ifc: { uiContract } }
-        : { ifc: { uiContract } };
-    }
-
-    const existingIfc = isRecord(schema.ifc) ? schema.ifc : {};
-    return {
-      ...schema,
-      ifc: {
-        ...existingIfc,
-        uiContract,
-      },
-    };
+  ): MutableJSONSchema {
+    const hint = getUiContractHint(context);
+    return hint ? attachUiContract(schema, hint) : schema;
   }
 
   /**
@@ -667,10 +589,10 @@ export class SchemaGenerator implements ISchemaGenerator {
    * already supply one.
    */
   private attachRootDescription(
-    schema: JSONSchemaMutable,
+    schema: MutableJSONSchema,
     type: ts.Type,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     if (typeof schema !== "object") return schema;
 
     const docInfo = extractDocFromType(type, context.typeChecker);
@@ -689,9 +611,9 @@ export class SchemaGenerator implements ISchemaGenerator {
    * including transitive dependencies.
    */
   private collectReferencedDefinitions(
-    fragment: JSONSchemaMutable,
-    allDefs: Record<string, JSONSchemaMutable>,
-  ): Record<string, JSONSchemaMutable> {
+    fragment: MutableJSONSchema,
+    allDefs: Record<string, MutableJSONSchema>,
+  ): Record<string, MutableJSONSchema> {
     const needed = new Set<string>();
     const visited = new Set<string>();
 
@@ -741,7 +663,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     }
 
     // Build the subset map
-    const subset: Record<string, JSONSchemaMutable> = {};
+    const subset: Record<string, MutableJSONSchema> = {};
     for (const name of visited) {
       if (allDefs[name]) subset[name] = allDefs[name];
     }
@@ -757,14 +679,14 @@ export class SchemaGenerator implements ISchemaGenerator {
     typeNode: ts.TypeNode,
     checker: ts.TypeChecker,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const typeRegistry = context.typeRegistry;
 
     // Handle TypeLiteral nodes (object types)
     if (ts.isTypeLiteralNode(typeNode)) {
-      const properties: Record<string, JSONSchemaMutable> = {};
+      const properties: Record<string, MutableJSONSchema> = {};
       const required: string[] = [];
-      let additionalProperties: JSONSchemaMutable | undefined;
+      let additionalProperties: MutableJSONSchema | undefined;
 
       for (const member of typeNode.members) {
         if (ts.isPropertySignature(member) && member.name && member.type) {
@@ -830,7 +752,7 @@ export class SchemaGenerator implements ISchemaGenerator {
         }
       }
 
-      const schema: JSONSchemaObjMutable = {
+      const schema: MutableJSONSchemaObj = {
         type: "object",
         properties,
       };
@@ -878,7 +800,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       const filtered = memberSchemas.filter((s) => s !== false);
       if (filtered.length === 0) return false;
       if (filtered.length === 1) return filtered[0]!;
-      return { anyOf: filtered as JSONSchemaObjMutable[] };
+      return { anyOf: filtered as MutableJSONSchemaObj[] };
     }
 
     if (ts.isLiteralTypeNode(typeNode)) {
@@ -1011,9 +933,9 @@ export class SchemaGenerator implements ISchemaGenerator {
    * Build final schema for synthetic TypeNode with $schema and $defs
    */
   private buildFinalSchemaForSynthetic(
-    schema: JSONSchemaMutable,
+    schema: MutableJSONSchema,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const { definitions, emittedRefs } = context;
 
     // Handle boolean schemas (rare, but supported by JSON Schema)
@@ -1032,6 +954,6 @@ export class SchemaGenerator implements ISchemaGenerator {
       ...(schema as Record<string, unknown>),
     };
     if (Object.keys(filtered).length > 0) out.$defs = filtered;
-    return out as JSONSchemaMutable;
+    return out as MutableJSONSchema;
   }
 }

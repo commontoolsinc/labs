@@ -5,8 +5,10 @@ import {
   getPatternRepository,
   getPatternSetupIdentityRef,
   getPatternSource,
+  getPieceSourceRevisions,
   parseLink,
   resolveEntryIdentity,
+  resolveSystemPatternSource,
   Runtime,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -14,12 +16,19 @@ import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/c
 import { createSession, Identity } from "@commonfabric/identity";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
-import { PieceManager } from "../src/manager.ts";
 import {
-  DEFAULT_APP_PATTERN_URL,
-  HOME_PATTERN_URL,
+  DEFAULT_APP_PATTERN_SOURCE,
+  HOME_PATTERN_SOURCE,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
+
+// The routes those refs resolve to. A system pattern is still SERVED at, and
+// its modules still NAMED by, the route path; the `system:` ref is what a
+// piece stores as provenance.
+const DEFAULT_APP_PATTERN_PATH = resolveSystemPatternSource(
+  DEFAULT_APP_PATTERN_SOURCE,
+)!;
+const HOME_PATTERN_PATH = resolveSystemPatternSource(HOME_PATTERN_SOURCE)!;
 
 const signer = await Identity.fromPassphrase("check update default pattern");
 
@@ -47,14 +56,10 @@ const SOURCE_V3_HANDLER = [
   "",
 ].join("\n");
 
-// The estuary brick, distilled to two home-shaped patterns that differ by ONE
-// thing: whether the required `favorites` output field carries a default. Both
-// carry a handler (its `{ "$stream": true }` markers are missing on an aged
-// doc → the "Handler used as lift" cold start that gets us into the repair).
-//
-// OLD: `favorites` is required with NO default. Run over a favorites-less
-// vintage doc, its own setup repair is REJECTED by the CFC additive-required
-// migration ("favorites needs a default") — loadable, but not runnable.
+// Two home-shaped pattern identities for exercising roll-forward orchestration.
+// The rejected repair below is injected with the production migration token;
+// these output shapes do not themselves cause it. A generated required result
+// is compatible because setup materializes it.
 const SOURCE_HOME_OLD_REQUIRED = [
   "import { Writable, handler, pattern } from 'commonfabric';",
   "const bump = handler<void, { count: Writable<number> }>((_, { count }) => {",
@@ -70,8 +75,8 @@ const SOURCE_HOME_OLD_REQUIRED = [
   "",
 ].join("\n");
 
-// OFFICIAL: identical, except `favorites` rides `Default<[]>` (post-fix
-// home.tsx). Migrates the same aged doc cleanly, so the roll-forward heals.
+// The roll-forward target differs by a schema default, giving the tests a
+// distinct compiled identity that materializes the reused document cleanly.
 const SOURCE_HOME_OFFICIAL_DEFAULTED = [
   "import { Default, Writable, handler, pattern } from 'commonfabric';",
   "const bump = handler<void, { count: Writable<number> }>((_, { count }) => {",
@@ -122,12 +127,14 @@ const IMPORTED_MODULE_URL = "/api/patterns/system/update-marker.ts";
 // A same-host custom-app path, as home config would supply via
 // `defaultAppUrl` (a published custom app, NOT a system pattern).
 const CUSTOM_APP_URL = "/api/patterns/custom/my-app.tsx";
+// What a root configured with that URL stores: the ref naming the same file.
+const CUSTOM_APP_SOURCE = "system:custom/my-app.tsx";
 
 /** Content identity a toolshed would serve for `source`. */
 function identityForSource(
   source: string,
   imports: Record<string, string> = {},
-  entry = DEFAULT_APP_PATTERN_URL,
+  entry = DEFAULT_APP_PATTERN_PATH,
 ): Promise<string> {
   return resolveEntryIdentity(
     entry,
@@ -187,8 +194,8 @@ function installFetchStub(): StubControls {
     });
 
     if (
-      url.pathname === DEFAULT_APP_PATTERN_URL ||
-      url.pathname === HOME_PATTERN_URL
+      url.pathname === DEFAULT_APP_PATTERN_PATH ||
+      url.pathname === HOME_PATTERN_PATH
     ) {
       if (url.searchParams.has("identity")) {
         identityFetchCount++;
@@ -261,7 +268,6 @@ describe("checkAndUpdateDefaultPattern", () => {
   let stub: StubControls;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
   let controller: PiecesController;
 
   async function setup(experimental: Record<string, boolean>) {
@@ -275,9 +281,8 @@ describe("checkAndUpdateDefaultPattern", () => {
       identity: signer,
       spaceName: "update-space-" + crypto.randomUUID(),
     });
-    manager = new PieceManager(session, runtime);
-    await manager.synced();
-    controller = new PiecesController(manager);
+    controller = new PiecesController(session, runtime);
+    await controller.synced();
   }
 
   async function setupHome(
@@ -296,9 +301,8 @@ describe("checkAndUpdateDefaultPattern", () => {
       spaceDid: signer.did(),
     });
     expect(session.space).toBe(runtime.userIdentityDID);
-    manager = new PieceManager(session, runtime);
-    await manager.synced();
-    controller = new PiecesController(manager);
+    controller = new PiecesController(session, runtime);
+    await controller.synced();
   }
 
   beforeEach(() => {
@@ -340,17 +344,17 @@ describe("checkAndUpdateDefaultPattern", () => {
 
   it("contains failures while resolving the default pattern", async () => {
     await setup({ systemPatternAutoUpdate: true });
-    const originalGetDefaultPattern = manager.getDefaultPattern;
-    manager.getDefaultPattern = (() =>
+    const originalGetDefaultPattern = controller.getDefaultPattern;
+    controller.getDefaultPattern = (() =>
       Promise.reject(
         new Error("default-pattern lookup failed"),
-      )) as typeof manager.getDefaultPattern;
+      )) as typeof controller.getDefaultPattern;
 
     try {
       expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
       expect(stub.identityFetches()).toBe(0);
     } finally {
-      manager.getDefaultPattern = originalGetDefaultPattern;
+      controller.getDefaultPattern = originalGetDefaultPattern;
     }
   });
 
@@ -399,7 +403,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       piece.getCell().withTx(tx).setMetaRaw("patternIdentity", "missing");
     });
     expect(error).toBeUndefined();
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
 
     expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
     expect(getPatternIdentityRef(root)).toBeUndefined();
@@ -416,7 +420,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
     await runtime.idle();
 
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
     // Same piece entity — no new piece minted; the update wrote a new
     // patternIdentity onto the existing result cell (the watcher re-instantiates
     // the new pattern in place — its own machinery, exercised elsewhere).
@@ -424,6 +428,38 @@ describe("checkAndUpdateDefaultPattern", () => {
     const idV2 = getPatternIdentityRef(root)?.identity;
     expect(idV2).toBe(await identityForSource(SOURCE_V2));
     expect(idV2).not.toBe(idV1);
+    expect(
+      getPieceSourceRevisions(root).map((revision) => ({
+        operation: revision.operation,
+        origin: revision.origin,
+      })),
+    ).toEqual([
+      {
+        operation: "baseline",
+        origin: DEFAULT_APP_PATTERN_SOURCE,
+      },
+      {
+        operation: "origin-update",
+        origin: DEFAULT_APP_PATTERN_SOURCE,
+      },
+    ]);
+  });
+
+  it("does not reconstruct an origin after an explicit detach", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const detachedRef = getPatternIdentityRef(piece.getCell());
+
+    expect(await piece.changeSource({ kind: "detach" })).toEqual({
+      status: "applied",
+    });
+    stub.setSource(SOURCE_V2);
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    const root = (await controller.getDefaultPattern(false))!;
+    expect(getPatternSource(root)).toBeUndefined();
+    expect(getPatternIdentityRef(root)).toEqual(detachedRef);
+    expect(getPieceSourceRevisions(root).at(-1)?.operation).toBe("detach");
   });
 
   it("repairs a metadata-only update when the result schema is unchanged", async () => {
@@ -433,15 +469,15 @@ describe("checkAndUpdateDefaultPattern", () => {
     const originalRef = getPatternIdentityRef(root)!;
     expect(getPatternSetupIdentityRef(root)).toEqual(originalRef);
     expect(root.key("marker").get()).toBe("v1");
-    await manager.stopPiece(root);
+    await controller.stopPiece(root);
 
     stub.setSource(SOURCE_V2);
     const currentPattern = await runtime.patternManager.compilePattern(
       {
-        main: DEFAULT_APP_PATTERN_URL,
-        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: SOURCE_V2 }],
+        main: DEFAULT_APP_PATTERN_PATH,
+        files: [{ name: DEFAULT_APP_PATTERN_PATH, contents: SOURCE_V2 }],
       },
-      { space: manager.getSpace() },
+      { space: controller.getSpace() },
     );
     const currentRef = runtime.patternManager.getArtifactEntryRef(
       currentPattern,
@@ -453,18 +489,18 @@ describe("checkAndUpdateDefaultPattern", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
     });
     expect(metadataUpdate.error).toBeUndefined();
-    const metadataOnlyRoot = (await manager.getDefaultPattern(false))!;
+    const metadataOnlyRoot = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(metadataOnlyRoot)).toEqual(currentRef);
     expect(getPatternSetupIdentityRef(metadataOnlyRoot)).toEqual(originalRef);
 
-    await manager.startPiece(metadataOnlyRoot);
+    await controller.startPiece(metadataOnlyRoot);
     expect(metadataOnlyRoot.key("marker").get()).toBe("v1");
 
     expect(
       await controller.checkAndUpdateDefaultPattern(metadataOnlyRoot),
     ).toBe("updated");
     await runtime.idle();
-    const repairedRoot = (await manager.getDefaultPattern(false))!;
+    const repairedRoot = (await controller.getDefaultPattern(false))!;
     await repairedRoot.pull();
 
     expect(repairedRoot.key("marker").get()).toBe("v2");
@@ -489,19 +525,19 @@ describe("checkAndUpdateDefaultPattern", () => {
     const piece = await controller.ensureDefaultPattern();
     const root = piece.getCell();
     const originalRef = getPatternIdentityRef(root)!;
-    expect(manager.getArgument(root).get()).toEqual({});
-    await manager.stopPiece(root);
+    expect(controller.getArgument(root).get()).toEqual({});
+    await controller.stopPiece(root);
 
     stub.setSource(argumentSourceV2);
     const currentPattern = await runtime.patternManager.compilePattern(
       {
-        main: DEFAULT_APP_PATTERN_URL,
+        main: DEFAULT_APP_PATTERN_PATH,
         files: [{
-          name: DEFAULT_APP_PATTERN_URL,
+          name: DEFAULT_APP_PATTERN_PATH,
           contents: argumentSourceV2,
         }],
       },
-      { space: manager.getSpace() },
+      { space: controller.getSpace() },
     );
     const currentRef = runtime.patternManager.getArtifactEntryRef(
       currentPattern,
@@ -510,9 +546,9 @@ describe("checkAndUpdateDefaultPattern", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
     });
     expect(metadataUpdate.error).toBeUndefined();
-    const metadataOnlyRoot = (await manager.getDefaultPattern(false))!;
+    const metadataOnlyRoot = (await controller.getDefaultPattern(false))!;
     expect(getPatternSetupIdentityRef(metadataOnlyRoot)).toEqual(originalRef);
-    expect(manager.getArgument(metadataOnlyRoot).get()).toEqual({});
+    expect(controller.getArgument(metadataOnlyRoot).get()).toEqual({});
 
     const originalLoad = runtime.patternManager.loadPatternByIdentity;
     let blockedCurrentLoad = false;
@@ -541,8 +577,8 @@ describe("checkAndUpdateDefaultPattern", () => {
       runtime.patternManager.loadPatternByIdentity = originalLoad;
     }
     await runtime.idle();
-    const repairedRoot = (await manager.getDefaultPattern(false))!;
-    const repairedArgument = manager.getArgument(repairedRoot);
+    const repairedRoot = (await controller.getDefaultPattern(false))!;
+    const repairedArgument = controller.getArgument(repairedRoot);
     await repairedArgument.pull();
 
     expect(blockedCurrentLoad).toBe(true);
@@ -561,15 +597,15 @@ describe("checkAndUpdateDefaultPattern", () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.ensureDefaultPattern();
     const root = piece.getCell();
-    await manager.stopPiece(root);
+    await controller.stopPiece(root);
 
     const alternatePattern = await runtime.patternManager.compilePattern(
       {
-        main: DEFAULT_APP_PATTERN_URL,
+        main: DEFAULT_APP_PATTERN_PATH,
         mainExport: "alternate",
-        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: source }],
+        files: [{ name: DEFAULT_APP_PATTERN_PATH, contents: source }],
       },
-      { space: manager.getSpace() },
+      { space: controller.getSpace() },
     );
     const alternateRef = runtime.patternManager.getArtifactEntryRef(
       alternatePattern,
@@ -577,7 +613,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     await runtime.setup(undefined, alternatePattern, {}, root, {
       prepareForResume: true,
     });
-    const alternateRoot = (await manager.getDefaultPattern(false))!;
+    const alternateRoot = (await controller.getDefaultPattern(false))!;
 
     expect(getPatternIdentityRef(alternateRoot)).toEqual(alternateRef);
     expect(getPatternSetupIdentityRef(alternateRoot)).toEqual(alternateRef);
@@ -586,7 +622,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(await controller.checkAndUpdateDefaultPattern(alternateRoot)).toBe(
       "updated",
     );
-    const repairedRoot = (await manager.getDefaultPattern(false))!;
+    const repairedRoot = (await controller.getDefaultPattern(false))!;
     const repairedRef = getPatternIdentityRef(repairedRoot)!;
 
     expect(repairedRef.identity).toBe(alternateRef.identity);
@@ -622,7 +658,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       if (!changedArgument) {
         changedArgument = true;
         const changed = await runtime.editWithRetry((tx) => {
-          manager.getArgument(cell).withTx(tx).set({ label: "after" });
+          controller.getArgument(cell).withTx(tx).set({ label: "after" });
         });
         expect(changed.error).toBeUndefined();
       }
@@ -637,17 +673,17 @@ describe("checkAndUpdateDefaultPattern", () => {
       runtime.syncStoredSetupArgument = originalSync;
     }
 
-    const unchangedRoot = (await manager.getDefaultPattern(false))!;
+    const unchangedRoot = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(unchangedRoot)).toEqual(originalRef);
-    expect(manager.getArgument(unchangedRoot).get()).toEqual({
+    expect(controller.getArgument(unchangedRoot).get()).toEqual({
       label: "after",
     });
 
     expect(
       await controller.checkAndUpdateDefaultPattern(unchangedRoot),
     ).toBe("updated");
-    const updatedRoot = (await manager.getDefaultPattern(false))!;
-    const updatedArgument = manager.getArgument(updatedRoot);
+    const updatedRoot = (await controller.getDefaultPattern(false))!;
+    const updatedArgument = controller.getArgument(updatedRoot);
     await updatedArgument.pull();
     expect(updatedArgument.get()).toEqual({ label: "after", count: 2 });
   });
@@ -682,25 +718,25 @@ describe("checkAndUpdateDefaultPattern", () => {
           ].join("\n"),
         }],
       },
-      { space: manager.getSpace() },
+      { space: controller.getSpace() },
     );
-    const profileBefore = await manager.runPersistent<{ name: string }>(
+    const profileBefore = await controller.runPersistent<{ name: string }>(
       profilePattern,
       { name: "before" },
       "setup argument profile before",
     );
-    const profileAfter = await manager.runPersistent<{ name: string }>(
+    const profileAfter = await controller.runPersistent<{ name: string }>(
       profilePattern,
       { name: "after" },
       "setup argument profile after",
     );
     await piece.setInput({ profile: profileBefore });
-    const initialRawArgument = manager.getArgument(root).getRawUntyped() as {
+    const initialRawArgument = controller.getArgument(root).getRawUntyped() as {
       profile?: unknown;
     };
     expect(initialRawArgument.profile).toBeInstanceOf(FabricLink);
     expect(
-      parseLink(initialRawArgument.profile, manager.getArgument(root))?.id,
+      parseLink(initialRawArgument.profile, controller.getArgument(root))?.id,
     ).toBe(profileBefore.getAsNormalizedFullLink().id);
 
     stub.setSource(argumentSourceV2);
@@ -711,7 +747,9 @@ describe("checkAndUpdateDefaultPattern", () => {
       if (!changedArgument) {
         changedArgument = true;
         const changed = await runtime.editWithRetry((tx) => {
-          manager.getArgument(cell).withTx(tx).set({ profile: profileAfter });
+          controller.getArgument(cell).withTx(tx).set({
+            profile: profileAfter,
+          });
         });
         expect(changed.error).toBeUndefined();
       }
@@ -726,9 +764,9 @@ describe("checkAndUpdateDefaultPattern", () => {
       runtime.syncStoredSetupArgument = originalSync;
     }
 
-    const unchangedRoot = (await manager.getDefaultPattern(false))!;
+    const unchangedRoot = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(unchangedRoot)).toEqual(originalRef);
-    const unchangedArgument = manager.getArgument(unchangedRoot);
+    const unchangedArgument = controller.getArgument(unchangedRoot);
     const unchangedRawArgument = unchangedArgument.getRawUntyped() as {
       profile?: unknown;
     };
@@ -755,7 +793,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     const staleIdentity = await identityForSource(
       patternSource("unloadable-stale-root"),
     );
-    await manager.stopPiece(root);
+    await controller.stopPiece(root);
     const { error } = await runtime.editWithRetry((tx) => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: staleIdentity,
@@ -766,7 +804,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       });
     });
     expect(error).toBeUndefined();
-    const staleRoot = (await manager.getDefaultPattern(false))!;
+    const staleRoot = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(staleRoot)?.identity).toBe(staleIdentity);
 
     // The toolshed advertises a newer system-root identity. The ensure path
@@ -781,6 +819,107 @@ describe("checkAndUpdateDefaultPattern", () => {
       await identityForSource(SOURCE_V2),
     );
     expect(getPatternIdentityRef(updated.getCell())?.symbol).toBe("default");
+  });
+
+  // The boot path (ensureDefaultPattern) reconciles an unloadable root before
+  // start — but registry listings, `cf piece ls`, FUSE, and the shell's list
+  // cells all resolve the root through PiecesController.getDefaultPattern instead,
+  // which used to inherit NO heal: the load failure propagated and every
+  // listing died with the root (2026-07-29 vendor gate, the cf-cell-context
+  // type retirement). The controller choke point must run the same awaited
+  // updater check and retry once.
+  it("heals an unloadable stale root on the REGISTRY path (not just boot)", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+
+    // A root left behind by an older runtime: well-formed identity, but its
+    // source closure was never persisted, so any start of it fails.
+    const staleIdentity = await identityForSource(
+      patternSource("unloadable-registry-path-root"),
+    );
+    await controller.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: staleIdentity,
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+
+    stub.setSource(SOURCE_V2);
+
+    // Straight to the registry — never through ensureDefaultPattern.
+    const registry = await controller.getPieceRegistry();
+    await runtime.idle();
+
+    expect(registry).toBeDefined();
+    const healed = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(healed)?.identity).toBe(
+      await identityForSource(SOURCE_V2),
+    );
+    expect(getPatternIdentityRef(healed)?.symbol).toBe("default");
+  });
+
+  it("surfaces the ORIGINAL start failure when the post-heal retry fails", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    const staleIdentity = await identityForSource(
+      patternSource("unloadable-registry-path-root-retry-fails"),
+    );
+    await controller.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: staleIdentity,
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+    stub.setSource(SOURCE_V2);
+
+    // Inject a failure into the post-heal sequence: runtime.idle() is only
+    // awaited there on this path. The caller must still see the ORIGINAL
+    // "Could not load pattern" failure, not the injected secondary one.
+    const originalIdle = runtime.idle.bind(runtime);
+    let injected = false;
+    runtime.idle = () => {
+      if (!injected) {
+        injected = true;
+        return Promise.reject(new Error("secondary retry failure"));
+      }
+      return originalIdle();
+    };
+    try {
+      await expect(controller.getPieceRegistry()).rejects.toThrow(
+        "Could not load pattern",
+      );
+      expect(injected).toBe(true);
+    } finally {
+      runtime.idle = originalIdle;
+    }
+  });
+
+  it("registry path still fails loudly when the flag is OFF", async () => {
+    await setup({});
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    const staleIdentity = await identityForSource(
+      patternSource("unloadable-registry-path-root-no-flag"),
+    );
+    await controller.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: staleIdentity,
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+    stub.setSource(SOURCE_V2);
+
+    await expect(controller.getPieceRegistry()).rejects.toThrow(
+      "Could not load pattern",
+    );
   });
 
   it("repairs persisted artifacts when the served identity is unchanged", async () => {
@@ -813,7 +952,7 @@ describe("checkAndUpdateDefaultPattern", () => {
           runtime.patternManager,
           currentRef.identity,
           currentRef.symbol,
-          manager.getSpace(),
+          controller.getSpace(),
         ),
       ).resolves.toBeDefined();
     } finally {
@@ -825,29 +964,29 @@ describe("checkAndUpdateDefaultPattern", () => {
     await setup({ systemPatternAutoUpdate: true });
     const existing = await controller.ensureDefaultPattern();
     const rootLinkBefore = JSON.stringify(existing.getCell().getAsLink());
-    const originalGetDefaultPattern = manager.getDefaultPattern;
-    const originalGetSpaceCellContents = manager.getSpaceCellContents;
+    const originalGetDefaultPattern = controller.getDefaultPattern;
+    const originalGetSpaceCellContents = controller.getSpaceCellContents;
     const originalCheck = controller.checkAndUpdateDefaultPattern;
     let firstLookup = true;
     let updateChecks = 0;
 
     // Model the retry after another writer wins: the first pre-transaction
     // lookup saw no root, while the transaction's double-check now sees one.
-    manager.getDefaultPattern = ((runIt?: boolean) => {
+    controller.getDefaultPattern = ((runIt?: boolean) => {
       if (firstLookup) {
         firstLookup = false;
         return Promise.resolve(undefined);
       }
-      return originalGetDefaultPattern.call(manager, runIt);
-    }) as typeof manager.getDefaultPattern;
-    manager.getSpaceCellContents = (() => ({
+      return originalGetDefaultPattern.call(controller, runIt);
+    }) as typeof controller.getDefaultPattern;
+    controller.getSpaceCellContents = (() => ({
       withTx: () => ({
         key: (key: string) => {
           expect(key).toBe("defaultPattern");
           return { get: () => ({ get: () => ({}) }) };
         },
       }),
-    })) as unknown as typeof manager.getSpaceCellContents;
+    })) as unknown as typeof controller.getSpaceCellContents;
     controller.checkAndUpdateDefaultPattern = ((root) => {
       updateChecks++;
       return originalCheck.call(controller, root);
@@ -858,8 +997,8 @@ describe("checkAndUpdateDefaultPattern", () => {
       expect(JSON.stringify(raced.getCell().getAsLink())).toBe(rootLinkBefore);
       expect(updateChecks).toBe(1);
     } finally {
-      manager.getDefaultPattern = originalGetDefaultPattern;
-      manager.getSpaceCellContents = originalGetSpaceCellContents;
+      controller.getDefaultPattern = originalGetDefaultPattern;
+      controller.getSpaceCellContents = originalGetSpaceCellContents;
       controller.checkAndUpdateDefaultPattern = originalCheck;
     }
   });
@@ -873,7 +1012,7 @@ describe("checkAndUpdateDefaultPattern", () => {
 
     expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
     await runtime.idle();
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(root)?.identity).toBe(
       await identityForSource(SOURCE_V2),
     );
@@ -911,12 +1050,12 @@ describe("checkAndUpdateDefaultPattern", () => {
       }),
     ).toEqual([
       {
-        path: DEFAULT_APP_PATTERN_URL,
+        path: DEFAULT_APP_PATTERN_PATH,
         identity: true,
         cache: "no-cache",
       },
       {
-        path: DEFAULT_APP_PATTERN_URL,
+        path: DEFAULT_APP_PATTERN_PATH,
         identity: false,
         cache: "no-cache",
       },
@@ -1016,15 +1155,17 @@ describe("checkAndUpdateDefaultPattern", () => {
       piece.getCell().withTx(tx).setMetaRaw("patternSource", undefined);
     });
     expect(error).toBeUndefined();
-    const legacyRoot = (await manager.getDefaultPattern(false))!;
+    const legacyRoot = (await controller.getDefaultPattern(false))!;
     expect(getPatternSource(legacyRoot)).toBeUndefined();
 
     expect(await controller.checkAndUpdateDefaultPattern()).toBe(
       "repaired-provenance",
     );
 
-    const root = (await manager.getDefaultPattern(false))!;
-    expect(getPatternSource(root)).toBe(DEFAULT_APP_PATTERN_URL);
+    const root = (await controller.getDefaultPattern(false))!;
+    expect(getPatternSource(root)).toBe(
+      DEFAULT_APP_PATTERN_SOURCE,
+    );
     expect(getPatternIdentityRef(root)?.identity).toBe(
       await identityForSource(SOURCE_V1),
     );
@@ -1037,7 +1178,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       piece.getCell().withTx(tx).setMetaRaw("patternSource", undefined);
     });
     expect(error).toBeUndefined();
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
     const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
     runtime.editWithRetry = (() =>
       Promise.resolve({
@@ -1088,7 +1229,9 @@ describe("checkAndUpdateDefaultPattern", () => {
         "repaired-provenance",
       );
       expect(stub.sourceFetches()).toBe(sourceFetchesBefore + 1);
-      expect(getPatternSource(piece.getCell())).toBe(DEFAULT_APP_PATTERN_URL);
+      expect(getPatternSource(piece.getCell())).toBe(
+        DEFAULT_APP_PATTERN_SOURCE,
+      );
     } finally {
       runtime.patternManager.loadPatternByIdentity = originalLoad;
     }
@@ -1098,12 +1241,12 @@ describe("checkAndUpdateDefaultPattern", () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.ensureDefaultPattern();
     const root = piece.getCell();
-    await manager.stopPiece(root);
+    await controller.stopPiece(root);
     const { error } = await runtime.editWithRetry((tx) => {
       root.withTx(tx).setMetaRaw("patternSource", undefined);
     });
     expect(error).toBeUndefined();
-    const legacyRoot = (await manager.getDefaultPattern(false))!;
+    const legacyRoot = (await controller.getDefaultPattern(false))!;
 
     const loadStarted = Promise.withResolvers<void>();
     const releaseLoad = Promise.withResolvers<void>();
@@ -1133,7 +1276,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       releaseLoad.resolve();
       expect(await update).toBe("current");
 
-      const current = (await manager.getDefaultPattern(false))!;
+      const current = (await controller.getDefaultPattern(false))!;
       expect(getPatternIdentityRef(current)).toEqual(customRef);
       expect(getPatternRepository(current)).toBe(repository);
       expect(getPatternSource(current)).toBeUndefined();
@@ -1147,7 +1290,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.ensureDefaultPattern();
     const root = piece.getCell();
-    await manager.stopPiece(root);
+    await controller.stopPiece(root);
 
     const compileStarted = Promise.withResolvers<void>();
     const releaseCompile = Promise.withResolvers<void>();
@@ -1183,7 +1326,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       releaseCompile.resolve();
       expect(await update).toBe("current");
 
-      const current = (await manager.getDefaultPattern(false))!;
+      const current = (await controller.getDefaultPattern(false))!;
       expect(getPatternIdentityRef(current)).toEqual(customRef);
       expect(getPatternRepository(current)).toBe(repository);
       expect(getPatternSource(current)).toBeUndefined();
@@ -1222,7 +1365,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       piece.getCell().withTx(tx).setMetaRaw("patternSource", externalSource);
     });
     expect(error).toBeUndefined();
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
     expect(getPatternSource(root)).toBe(externalSource);
 
     stub.setSource(SOURCE_V2);
@@ -1239,8 +1382,8 @@ describe("checkAndUpdateDefaultPattern", () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.recreateDefaultPattern({
       customProgram: {
-        main: DEFAULT_APP_PATTERN_URL,
-        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: SOURCE_V1 }],
+        main: DEFAULT_APP_PATTERN_PATH,
+        files: [{ name: DEFAULT_APP_PATTERN_PATH, contents: SOURCE_V1 }],
       },
     });
     const oldRef = getPatternIdentityRef(piece.getCell())!;
@@ -1248,7 +1391,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     stub.setSource(SOURCE_V2);
 
     expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
-    const pinned = (await manager.getDefaultPattern(false))!;
+    const pinned = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(pinned)).toEqual(oldRef);
     expect(getPatternSource(pinned)).toBeUndefined();
     expect(stub.identityFetches()).toBe(1);
@@ -1270,9 +1413,9 @@ describe("checkAndUpdateDefaultPattern", () => {
     try {
       expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
 
-      const unchanged = (await manager.getDefaultPattern(false))!;
+      const unchanged = (await controller.getDefaultPattern(false))!;
       expect(getPatternIdentityRef(unchanged)).toEqual(oldRef);
-      expect(getPatternSource(unchanged)).toBe(DEFAULT_APP_PATTERN_URL);
+      expect(getPatternSource(unchanged)).toBe(DEFAULT_APP_PATTERN_SOURCE);
       expect(stub.identityFetches()).toBe(1);
     } finally {
       runtime.patternManager.compilePattern = originalCompile;
@@ -1297,7 +1440,7 @@ describe("checkAndUpdateDefaultPattern", () => {
   it("leaves the current root untouched when the identity swap cannot commit", async () => {
     await setup({ systemPatternAutoUpdate: true });
     await controller.ensureDefaultPattern();
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
     const before = getPatternIdentityRef(root);
     const originalWithTx = root.withTx;
     root.withTx = (() => {
@@ -1323,7 +1466,7 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-root.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
     expect(getPatternSource(root)).toBeUndefined();
     const before = getPatternIdentityRef(root)?.identity;
 
@@ -1344,7 +1487,7 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
     const before = getPatternIdentityRef(root);
     expect(getPatternSource(root)).toBeUndefined();
 
@@ -1368,11 +1511,13 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
     await runtime.idle();
 
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
     expect(JSON.stringify(root.getAsLink())).toBe(rootLinkBefore);
     const idV2 = getPatternIdentityRef(root)?.identity;
-    // The home root compiles at HOME_PATTERN_URL — identity includes the entry.
-    expect(idV2).toBe(await identityForSource(SOURCE_V2, {}, HOME_PATTERN_URL));
+    // The home root compiles at HOME_PATTERN_PATH — identity includes the entry.
+    expect(idV2).toBe(
+      await identityForSource(SOURCE_V2, {}, HOME_PATTERN_PATH),
+    );
     expect(idV2).not.toBe(idV1);
   });
 
@@ -1417,7 +1562,7 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
     const staleRef = getPatternIdentityRef(root)!;
     expect(getPatternSource(root)).toBeUndefined();
 
@@ -1430,12 +1575,12 @@ describe("checkAndUpdateDefaultPattern", () => {
     }
     await runtime.idle();
 
-    const after = (await manager.getDefaultPattern(false))!;
+    const after = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(after)?.identity).toBe(
-      await identityForSource(SOURCE_V2, {}, HOME_PATTERN_URL),
+      await identityForSource(SOURCE_V2, {}, HOME_PATTERN_PATH),
     );
     // Provenance back-filled: the root now tracks the official URL.
-    expect(getPatternSource(after)).toBe(HOME_PATTERN_URL);
+    expect(getPatternSource(after)).toBe(HOME_PATTERN_SOURCE);
     // The displaced ref is the only record of the replaced sourceless root.
     const displaced = (after as unknown as {
       getMetaRaw: (key: string) => unknown;
@@ -1463,7 +1608,7 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
     const staleRef = getPatternIdentityRef(root)!;
 
     stub.setSource(SOURCE_V3_HANDLER);
@@ -1481,10 +1626,10 @@ describe("checkAndUpdateDefaultPattern", () => {
     // the pattern body never executes, so the functional read below is the
     // pin: `count` only reads 0 if the swapped-in program actually ran its
     // setup (internal cells materialized) and instantiated.
-    const after = (await manager.getDefaultPattern(true))!;
+    const after = (await controller.getDefaultPattern(true))!;
     await runtime.idle();
     expect(getPatternIdentityRef(after)?.identity).toBe(
-      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_URL),
+      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_PATH),
     );
     expect(after.key("count").get()).toBe(0);
   });
@@ -1506,7 +1651,7 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
     const staleRef = getPatternIdentityRef(root)!;
 
     stub.setSource(SOURCE_INCOMPATIBLE);
@@ -1517,7 +1662,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       restore();
     }
     await runtime.idle();
-    const after = (await manager.getDefaultPattern(true))!;
+    const after = (await controller.getDefaultPattern(true))!;
     await runtime.idle();
     expect(getPatternIdentityRef(after)).toEqual(staleRef);
     expect(after.key("marker").get()).toBe("v1");
@@ -1539,12 +1684,12 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
     const staleRef = getPatternIdentityRef(root)!;
 
     // The piece is NOT running when the swap lands — the defining difference
     // from the watcher-path test above.
-    await manager.stopPiece(root);
+    await controller.stopPiece(root);
 
     stub.setSource(SOURCE_V3_HANDLER);
     const restore = shadowLoadProbe(staleRef.identity, "undefined");
@@ -1557,9 +1702,9 @@ describe("checkAndUpdateDefaultPattern", () => {
     await runtime.idle();
 
     // Re-resolve: the controller's cell is a pre-heal transaction view.
-    const after = (await manager.getDefaultPattern(false))!;
+    const after = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(after)?.identity).toBe(
-      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_URL),
+      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_PATH),
     );
     // Functional pin: the pattern body ran its setup (count materialized)…
     expect(after.key("count").get()).toBe(0);
@@ -1567,7 +1712,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     (after.key("bump") as unknown as { send: (e: unknown) => void }).send({});
     await runtime.idle();
     await (after as unknown as { pull: () => Promise<unknown> }).pull();
-    const afterEvent = (await manager.getDefaultPattern(false))!;
+    const afterEvent = (await controller.getDefaultPattern(false))!;
     expect(afterEvent.key("count").get()).toBe(1);
   });
 
@@ -1586,14 +1731,14 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
-    await manager.stopPiece(root);
+    const root = (await controller.getDefaultPattern(false))!;
+    await controller.stopPiece(root);
 
     stub.setSource(SOURCE_V3_HANDLER);
     const targetId = await identityForSource(
       SOURCE_V3_HANDLER,
       {},
-      HOME_PATTERN_URL,
+      HOME_PATTERN_PATH,
     );
     // Model the already-committed swap: identity points at the CURRENT
     // official pattern, doc still set up for SOURCE_V1 (marker-less for V3).
@@ -1609,26 +1754,87 @@ describe("checkAndUpdateDefaultPattern", () => {
     await runtime.idle();
 
     // Re-resolve: the controller's cell is a pre-heal transaction view.
-    const after = (await manager.getDefaultPattern(false))!;
+    const after = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(after)?.identity).toBe(targetId);
     expect(after.key("count").get()).toBe(0);
     (after.key("bump") as unknown as { send: (e: unknown) => void }).send({});
     await runtime.idle();
     await (after as unknown as { pull: () => Promise<unknown> }).pull();
-    const afterEvent = (await manager.getDefaultPattern(false))!;
+    const afterEvent = (await controller.getDefaultPattern(false))!;
+    expect(afterEvent.key("count").get()).toBe(1);
+  });
+
+  it("cold start heals an already-moved identity with the update flag off", async () => {
+    // The same durable state as the test above, at the posture every deployment
+    // that does not set the flag actually runs: systemPatternAutoUpdate OFF.
+    // That is the runtime default — `Runtime`'s experimental defaults omit the
+    // flag entirely, so it is `undefined` unless a host passes it (the shell
+    // does; an embedding host need not).
+    //
+    // The split this pins: RECONCILING to a newer official pattern is flag-gated
+    // (checkAndUpdateDefaultPattern → "skipped-disabled"), but REPAIRING a doc
+    // onto its own already-pinned identity must NOT be. They are different
+    // operations — the repair changes no identity, rolls nothing forward, and
+    // writes no user data. Gate it too and an aged root has no recovery path at
+    // all on the deployments most likely to be carrying aged roots.
+    await setupHome({ systemPatternAutoUpdate: false });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await controller.getDefaultPattern(false))!;
+    await controller.stopPiece(root);
+
+    stub.setSource(SOURCE_V3_HANDLER);
+    // Model the refresh CLI faithfully: it compiles the replacement INTO the
+    // space (so the identity cold-loads — its probeLoad verified exactly that)
+    // and then writes patternIdentity meta only, never running setup. With the
+    // flag off nothing else compiles it, so without this the doc would point at
+    // an unloadable identity — a different failure than the one under test.
+    const targetPattern = await runtime.patternManager.compilePattern(
+      {
+        main: HOME_PATTERN_PATH,
+        files: [{ name: HOME_PATTERN_PATH, contents: SOURCE_V3_HANDLER }],
+      },
+      { space: controller.getSpace() },
+    );
+    const targetRef = runtime.patternManager.getArtifactEntryRef(
+      targetPattern,
+    )!;
+    const targetId = await identityForSource(
+      SOURCE_V3_HANDLER,
+      {},
+      HOME_PATTERN_PATH,
+    );
+    expect(targetRef.identity).toBe(targetId);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", targetRef);
+    });
+    expect(error).toBeUndefined();
+    expect(runtime.cfcEnforcementMode).not.toBe("disabled");
+
+    await controller.ensureDefaultPattern();
+    await runtime.idle();
+
+    const after = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(targetId);
+    expect(after.key("count").get()).toBe(0);
+    (after.key("bump") as unknown as { send: (e: unknown) => void }).send({});
+    await runtime.idle();
+    await (after as unknown as { pull: () => Promise<unknown> }).pull();
+    const afterEvent = (await controller.getDefaultPattern(false))!;
     expect(afterEvent.key("count").get()).toBe(1);
   });
 
   it("heals a root whose pinned pattern fails CFC migration by rolling forward to official", async () => {
-    // The estuary brick, faithfully: a home root pinned to an OLD home.tsx
-    // whose required `favorites` predates its `Default<>`. The doc was
-    // materialized by a favorites-less vintage, so the pinned pattern's OWN
-    // setup repair is REJECTED by the CFC additive-required migration ("needs a
-    // default") — it loads but cannot run. Enforce-on (the default here; the
-    // rejecting layer is the whole point of this test, so it must not be off).
-    // The runnability backstop must roll the root forward to the CURRENT
-    // official home.tsx and materialize THAT: the once-fatal field present, the
-    // handler stream live end to end.
+    // A pinned pattern is loadable, but its setup repair reports the
+    // machine-tagged CFC schema-migration rejection injected below. Enforce-on
+    // is the default here because the rejecting layer is the point of the
+    // orchestration test. The runnability backstop must roll the root forward
+    // to the current official identity and materialize it, including a live
+    // handler stream.
     await setupHome({ systemPatternAutoUpdate: true });
     expect(runtime.cfcEnforcementMode).not.toBe("disabled");
 
@@ -1639,18 +1845,18 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
-    await manager.stopPiece(root);
+    const root = (await controller.getDefaultPattern(false))!;
+    await controller.stopPiece(root);
 
-    // 2. Compile OLD so its identity is loadable in-session, then pin the root
-    //    to it (sourceless) — the pre-fix required-favorites home.tsx.
+    // 2. Compile the migration-rejected fixture so its identity is loadable
+    //    in-session, then pin the root to it without source state.
     stub.setSource(SOURCE_HOME_OLD_REQUIRED);
     const oldResolved = await runtime.harness.resolve(
-      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+      new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
     );
     const oldPattern = await runtime.patternManager.compilePattern(
       { ...oldResolved, mainExport: "default" },
-      { space: manager.getSpace() },
+      { space: controller.getSpace() },
     );
     const oldRef = runtime.patternManager.getArtifactEntryRef(oldPattern)!;
     const { error: pinError } = await runtime.editWithRetry((tx) => {
@@ -1666,21 +1872,21 @@ describe("checkAndUpdateDefaultPattern", () => {
       runtime.patternManager.loadPatternByIdentity(
         oldRef.identity,
         "default",
-        manager.getSpace(),
+        controller.getSpace(),
       ),
     ).resolves.toBeDefined();
 
-    // 3. Toolshed now serves OFFICIAL (favorites rides Default<[]>). Take its
-    //    expected identity the SAME way the heal does — the compiled artifact
-    //    ref, not a source hash — so the assertion also proves the roll-forward
-    //    compiled THIS source, not a stale-cached one.
+    // 3. Toolshed now serves the roll-forward target. Take its expected
+    //    identity the SAME way the heal does — the compiled artifact ref, not a
+    //    source hash — so the assertion also proves the roll-forward compiled
+    //    THIS source, not a stale-cached one.
     stub.setSource(SOURCE_HOME_OFFICIAL_DEFAULTED);
     const officialResolved = await runtime.harness.resolve(
-      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+      new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
     );
     const officialPattern = await runtime.patternManager.compilePattern(
       { ...officialResolved, mainExport: "default" },
-      { space: manager.getSpace() },
+      { space: controller.getSpace() },
     );
     const officialId =
       runtime.patternManager.getArtifactEntryRef(officialPattern)!.identity;
@@ -1694,8 +1900,8 @@ describe("checkAndUpdateDefaultPattern", () => {
     //    must heal the reused doc. The rejection message mirrors the live
     //    "CFC enforcement rejected commit" wrapper (see the runner + #4936's
     //    schema-merge tests) so the gate's predicate is exercised as shipped.
-    //    A genuine additive-required rejection over a CFC-relevant home root is
-    //    covered directly by cfc-additive-default-preserves-old-doc.test.ts;
+    //    A genuine required-field rejection for unclassified CFC document data
+    //    is covered directly by cfc-additive-default-preserves-old-doc.test.ts;
     //    here we pin the ORCHESTRATION the piece controller adds on top.
     const rt = runtime as unknown as {
       runSynced: (...args: unknown[]) => Promise<unknown>;
@@ -1730,10 +1936,10 @@ describe("checkAndUpdateDefaultPattern", () => {
     await runtime.idle();
 
     // Re-resolve: the controller's cell is a pre-heal transaction view.
-    const after = (await manager.getDefaultPattern(false))!;
+    const after = (await controller.getDefaultPattern(false))!;
     // Rolled forward to the official identity, official provenance stamped…
     expect(getPatternIdentityRef(after)?.identity).toBe(officialId);
-    expect(getPatternSource(after)).toBe(HOME_PATTERN_URL);
+    expect(getPatternSource(after)).toBe(HOME_PATTERN_SOURCE);
     // …recording the displaced pinned pattern for recovery.
     const displaced = (after as unknown as {
       getMetaRaw: (k: string) => unknown;
@@ -1748,7 +1954,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     (after.key("bump") as unknown as { send: (e: unknown) => void }).send({});
     await runtime.idle();
     await (after as unknown as { pull: () => Promise<unknown> }).pull();
-    const afterEvent = (await manager.getDefaultPattern(false))!;
+    const afterEvent = (await controller.getDefaultPattern(false))!;
     expect(afterEvent.key("count").get()).toBe(1);
 
     // The roll-forward compiled the FRESHEST official source (ETag-revalidated,
@@ -1756,16 +1962,16 @@ describe("checkAndUpdateDefaultPattern", () => {
     // pin is the whole point, so a cache-stale compile would defeat it.
     const homeSourceFetches = stub.requestedFetches().filter((f) => {
       const u = new URL(f.href);
-      return u.pathname === HOME_PATTERN_URL && !u.searchParams.has("identity");
+      return u.pathname === HOME_PATTERN_PATH &&
+        !u.searchParams.has("identity");
     });
     expect(homeSourceFetches.some((f) => f.cache === "no-cache")).toBe(true);
   });
 
-  // Shared estuary scaffolding for the roll-forward edge cases below: age a
-  // home doc with a favorites-less vintage, then pin the (stopped) root
-  // sourceless to an OLD required-favorites home.tsx that loads but cannot
-  // migrate the aged doc. Returns the pinned OLD ref and the OFFICIAL identity
-  // a successful roll-forward should reach. Mirrors the happy-path test above.
+  // Shared scaffolding for the roll-forward edge cases below: age a home doc,
+  // then pin the stopped root sourceless to the identity whose repair each case
+  // will reject explicitly. Returns that ref and the distinct official identity
+  // a successful roll-forward should reach.
   const pinOldRequiredHome = async () => {
     await setupHome({ systemPatternAutoUpdate: true });
     expect(runtime.cfcEnforcementMode).not.toBe("disabled");
@@ -1775,16 +1981,16 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
-    await manager.stopPiece(root);
+    const root = (await controller.getDefaultPattern(false))!;
+    await controller.stopPiece(root);
 
     stub.setSource(SOURCE_HOME_OLD_REQUIRED);
     const oldResolved = await runtime.harness.resolve(
-      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+      new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
     );
     const oldPattern = await runtime.patternManager.compilePattern(
       { ...oldResolved, mainExport: "default" },
-      { space: manager.getSpace() },
+      { space: controller.getSpace() },
     );
     const oldRef = runtime.patternManager.getArtifactEntryRef(oldPattern)!;
     const { error: pinError } = await runtime.editWithRetry((tx) => {
@@ -1799,11 +2005,11 @@ describe("checkAndUpdateDefaultPattern", () => {
     // the heal does, so `officialId` is exactly the roll-forward's target.
     stub.setSource(SOURCE_HOME_OFFICIAL_DEFAULTED);
     const officialResolved = await runtime.harness.resolve(
-      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+      new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
     );
     const officialPattern = await runtime.patternManager.compilePattern(
       { ...officialResolved, mainExport: "default" },
-      { space: manager.getSpace() },
+      { space: controller.getSpace() },
     );
     const officialId =
       runtime.patternManager.getArtifactEntryRef(officialPattern)!.identity;
@@ -1839,10 +2045,53 @@ describe("checkAndUpdateDefaultPattern", () => {
     };
   };
 
+  it("fails clearly when a root loses its source state during repair", async () => {
+    const { oldRef } = await pinOldRequiredHome();
+    const root = (await controller.getDefaultPattern(false))!;
+    const restoreRun = patchRunSynced((opts) =>
+      opts?.expectedPatternIdentity?.identity === oldRef.identity
+        ? Promise.reject(new Error(MIGRATION_REJECTION))
+        : "real"
+    );
+    const originalCompile = runtime.patternManager.compilePattern;
+    const originalGetMetaRaw = root.getMetaRaw;
+    const originalGetDefaultPattern = controller.getDefaultPattern;
+    let clearedSourceState = false;
+    controller.getDefaultPattern =
+      (() => Promise.resolve(root)) as typeof controller.getDefaultPattern;
+    root.getMetaRaw = ((field, options) => {
+      if (clearedSourceState && field === "patternIdentity") return undefined;
+      return originalGetMetaRaw.call(root, field, options);
+    }) as typeof root.getMetaRaw;
+    runtime.patternManager.compilePattern = (async (input, cacheCtx) => {
+      const pattern = await originalCompile.call(
+        runtime.patternManager,
+        input,
+        cacheCtx,
+      );
+      if (!clearedSourceState) {
+        clearedSourceState = true;
+      }
+      return pattern;
+    }) as typeof runtime.patternManager.compilePattern;
+
+    try {
+      await expect(controller.ensureDefaultPattern()).rejects.toThrow(
+        "has no source state to update",
+      );
+      expect(clearedSourceState).toBe(true);
+    } finally {
+      restoreRun();
+      root.getMetaRaw = originalGetMetaRaw;
+      controller.getDefaultPattern = originalGetDefaultPattern;
+      runtime.patternManager.compilePattern = originalCompile;
+    }
+  });
+
   it("stays fail-closed when the repair fails with a CFC rejection that is NOT a schema migration", async () => {
     // The negative twin of the roll-forward test: a repair rejection that
     // carries the `CFC enforcement rejected commit` PREFIX but is NOT the
-    // additive-required migration class (here: a prepared-digest race). Those
+    // schema-migration class (here: a prepared-digest race). Those
     // reflect ordering/policy/provenance faults, not "the pinned pattern is
     // wrong", so the backstop must NOT repoint the root. The bare-prefix
     // predicate this replaces would have wrongly rolled forward here.
@@ -1866,7 +2115,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(String(thrown)).toContain("Handler used as lift");
     expect(String(thrown)).not.toContain("default-root heal failed");
     // …and the root's identity is untouched — no roll-forward, no displacement.
-    const after = (await manager.getDefaultPattern(false))!;
+    const after = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(after)?.identity).toBe(oldRef.identity);
     expect(getPatternIdentityRef(after)?.identity).not.toBe(officialId);
     expect(
@@ -1905,7 +2154,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     // The ORIGINAL cold-start failure surfaces (fail-closed), not a heal error.
     expect(String(thrown)).toContain("Handler used as lift");
     expect(String(thrown)).not.toContain("default-root heal failed");
-    const after = (await manager.getDefaultPattern(false))!;
+    const after = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(after)?.identity).toBe(oldRef.identity);
     expect(getPatternIdentityRef(after)?.identity).not.toBe(officialId);
     expect(
@@ -1928,11 +2177,11 @@ describe("checkAndUpdateDefaultPattern", () => {
     // A distinct, loadable identity for the "concurrent heal" to install.
     stub.setSource(SOURCE_V3_HANDLER);
     const otherResolved = await runtime.harness.resolve(
-      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+      new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
     );
     const otherPattern = await runtime.patternManager.compilePattern(
       { ...otherResolved, mainExport: "default" },
-      { space: manager.getSpace() },
+      { space: controller.getSpace() },
     );
     const concurrentId =
       runtime.patternManager.getArtifactEntryRef(otherPattern)!.identity;
@@ -1971,7 +2220,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(String(thrown)).toContain("superseded by a concurrent heal");
     // Our stale roll-forward did NOT clobber the concurrent identity (no
     // displacement recorded, official identity never installed).
-    const after = (await manager.getDefaultPattern(false))!;
+    const after = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(after)?.identity).toBe(concurrentId);
     expect(getPatternIdentityRef(after)?.identity).not.toBe(officialId);
     expect(
@@ -1984,13 +2233,13 @@ describe("checkAndUpdateDefaultPattern", () => {
     // the once-missing handler markers materialize and the handler fires.
     await controller.ensureDefaultPattern();
     await runtime.idle();
-    const healed = (await manager.getDefaultPattern(false))!;
+    const healed = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(healed)?.identity).toBe(concurrentId);
     expect(healed.key("count").get()).toBe(0);
     (healed.key("bump") as unknown as { send: (e: unknown) => void }).send({});
     await runtime.idle();
     await (healed as unknown as { pull: () => Promise<unknown> }).pull();
-    const afterEvent = (await manager.getDefaultPattern(false))!;
+    const afterEvent = (await controller.getDefaultPattern(false))!;
     expect(afterEvent.key("count").get()).toBe(1);
   });
 
@@ -2024,7 +2273,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     // current best pattern), with the displaced OLD ref recorded for recovery —
     // the next boot re-attempts official and, if it still cannot migrate,
     // short-circuits to the same clear error rather than looping.
-    const after = (await manager.getDefaultPattern(false))!;
+    const after = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(after)?.identity).toBe(officialId);
   });
 
@@ -2043,15 +2292,15 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
-    await manager.stopPiece(root);
+    const root = (await controller.getDefaultPattern(false))!;
+    await controller.stopPiece(root);
     stub.setSource(SOURCE_HOME_OFFICIAL_DEFAULTED);
     const officialResolved = await runtime.harness.resolve(
-      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+      new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
     );
     const officialPattern = await runtime.patternManager.compilePattern(
       { ...officialResolved, mainExport: "default" },
-      { space: manager.getSpace() },
+      { space: controller.getSpace() },
     );
     const officialRef = runtime.patternManager.getArtifactEntryRef(
       officialPattern,
@@ -2095,25 +2344,25 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
-    await manager.stopPiece(root);
+    const root = (await controller.getDefaultPattern(false))!;
+    await controller.stopPiece(root);
 
     // The toolshed serves the two-export module. Compile BOTH exports from it:
     // they share one identity and differ only by symbol.
     stub.setSource(SOURCE_HOME_TWO_EXPORT);
     const resolved = await runtime.harness.resolve(
-      new HttpProgramResolver(new URL(HOME_PATTERN_URL, runtime.apiUrl).href),
+      new HttpProgramResolver(new URL(HOME_PATTERN_PATH, runtime.apiUrl).href),
     );
     const legacyPattern = await runtime.patternManager.compilePattern(
       { ...resolved, mainExport: "legacyHome" },
-      { space: manager.getSpace() },
+      { space: controller.getSpace() },
     );
     const legacyRef = runtime.patternManager.getArtifactEntryRef(
       legacyPattern,
     )!;
     const officialPattern = await runtime.patternManager.compilePattern(
       { ...resolved, mainExport: "default" },
-      { space: manager.getSpace() },
+      { space: controller.getSpace() },
     );
     const officialRef = runtime.patternManager.getArtifactEntryRef(
       officialPattern,
@@ -2150,7 +2399,7 @@ describe("checkAndUpdateDefaultPattern", () => {
 
     // Healed by roll-forward to the `default` entry (not short-circuited),
     // displacing the obsolete-symbol pin for recovery.
-    const after = (await manager.getDefaultPattern(false))!;
+    const after = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(after)?.identity).toBe(officialRef.identity);
     expect(getPatternIdentityRef(after)?.symbol).toBe("default");
     const displaced = (after as unknown as {
@@ -2245,7 +2494,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(message).toContain("default-root heal failed");
     expect(message).toContain("identity swap could not commit");
     expect(message).toContain("swap backend down");
-    const after = (await manager.getDefaultPattern(false))!;
+    const after = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(after)?.identity).toBe(oldRef.identity);
   });
 
@@ -2253,10 +2502,12 @@ describe("checkAndUpdateDefaultPattern", () => {
     // The repair's own failure contract: when the one-shot setup repair
     // cannot commit, the ORIGINAL start error must surface (not the repair's),
     // and the doc must be left exactly as it was — the next boot's repair
-    // attempt still heals it. Driven at the runSynced boundary because the
-    // in-process failure classes (arg validation) are skipped for an
-    // unchanged identity (samePattern), so a commit-layer failure is the
-    // realistic remaining one.
+    // attempt still heals it. Driven at the runSynced boundary with a
+    // commit-layer stub: this root's pointer names V3 while its setup marker
+    // still names V1, so the in-process argument re-stage DOES run here — it
+    // just passes, since the stored argument satisfies both schemas. A
+    // commit-layer failure is what reliably exercises the fail-closed path
+    // without also asserting the argument contract.
     await setupHome({ systemPatternAutoUpdate: true });
     await controller.recreateDefaultPattern({
       customProgram: {
@@ -2264,16 +2515,16 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
-    await manager.stopPiece(root);
+    const root = (await controller.getDefaultPattern(false))!;
+    await controller.stopPiece(root);
 
     stub.setSource(SOURCE_V3_HANDLER);
     const currentPattern = await runtime.patternManager.compilePattern(
       {
-        main: HOME_PATTERN_URL,
-        files: [{ name: HOME_PATTERN_URL, contents: SOURCE_V3_HANDLER }],
+        main: HOME_PATTERN_PATH,
+        files: [{ name: HOME_PATTERN_PATH, contents: SOURCE_V3_HANDLER }],
       },
-      { space: manager.getSpace() },
+      { space: controller.getSpace() },
     );
     const currentRef = runtime.patternManager.getArtifactEntryRef(
       currentPattern,
@@ -2306,15 +2557,15 @@ describe("checkAndUpdateDefaultPattern", () => {
     // very next boot heals the same doc end-to-end.
     await controller.ensureDefaultPattern();
     await runtime.idle();
-    const after = (await manager.getDefaultPattern(false))!;
+    const after = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(after)?.identity).toBe(
-      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_URL),
+      await identityForSource(SOURCE_V3_HANDLER, {}, HOME_PATTERN_PATH),
     );
     expect(after.key("count").get()).toBe(0);
     (after.key("bump") as unknown as { send: (e: unknown) => void }).send({});
     await runtime.idle();
     await (after as unknown as { pull: () => Promise<unknown> }).pull();
-    const afterEvent = (await manager.getDefaultPattern(false))!;
+    const afterEvent = (await controller.getDefaultPattern(false))!;
     expect(afterEvent.key("count").get()).toBe(1);
   });
 
@@ -2330,13 +2581,13 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
-    await manager.stopPiece(root);
+    const root = (await controller.getDefaultPattern(false))!;
+    await controller.stopPiece(root);
     stub.setSource(SOURCE_V3_HANDLER);
     const targetId = await identityForSource(
       SOURCE_V3_HANDLER,
       {},
-      HOME_PATTERN_URL,
+      HOME_PATTERN_PATH,
     );
     const { error } = await runtime.editWithRetry((tx) => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
@@ -2376,7 +2627,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     runtime.experimental.systemPatternAutoUpdate = true;
     await controller.ensureDefaultPattern();
     await runtime.idle();
-    const after = (await manager.getDefaultPattern(false))!;
+    const after = (await controller.getDefaultPattern(false))!;
     expect(after.key("count").get()).toBe(0);
   });
 
@@ -2391,8 +2642,8 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
-    await manager.stopPiece(root);
+    const root = (await controller.getDefaultPattern(false))!;
+    await controller.stopPiece(root);
     const { error } = await runtime.editWithRetry((tx) => {
       root.withTx(tx).setMetaRaw("patternIdentity", { malformed: true });
     });
@@ -2420,7 +2671,7 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-app.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
     const staleRef = getPatternIdentityRef(root)!;
     expect(getPatternSource(root)).toBeUndefined();
 
@@ -2433,11 +2684,13 @@ describe("checkAndUpdateDefaultPattern", () => {
     }
     await runtime.idle();
 
-    const after = (await manager.getDefaultPattern(false))!;
+    const after = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(after)?.identity).toBe(
       await identityForSource(SOURCE_V2),
     );
-    expect(getPatternSource(after)).toBe(DEFAULT_APP_PATTERN_URL);
+    expect(getPatternSource(after)).toBe(
+      DEFAULT_APP_PATTERN_SOURCE,
+    );
     const displaced = (after as unknown as {
       getMetaRaw: (key: string) => unknown;
     }).getMetaRaw("displacedPattern") as {
@@ -2461,7 +2714,7 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
     const staleRef = getPatternIdentityRef(root)!;
 
     stub.setSource(SOURCE_V2);
@@ -2492,7 +2745,7 @@ describe("checkAndUpdateDefaultPattern", () => {
         files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
       },
     });
-    const root = (await manager.getDefaultPattern(false))!;
+    const root = (await controller.getDefaultPattern(false))!;
     const staleRef = getPatternIdentityRef(root)!;
 
     stub.setSource(SOURCE_V2);
@@ -2505,8 +2758,8 @@ describe("checkAndUpdateDefaultPattern", () => {
     it("stamps a recreated non-home root so it can auto-update", async () => {
       await setup({ systemPatternAutoUpdate: true });
       await controller.recreateDefaultPattern();
-      const root = (await manager.getDefaultPattern(false))!;
-      expect(getPatternSource(root)).toBe(DEFAULT_APP_PATTERN_URL);
+      const root = (await controller.getDefaultPattern(false))!;
+      expect(getPatternSource(root)).toBe(DEFAULT_APP_PATTERN_SOURCE);
 
       // The stamp is the point: it makes the recreated root eligible for
       // auto-update. A newer toolshed identity must roll it forward instead
@@ -2514,7 +2767,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       stub.setSource(SOURCE_V2);
       expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
       await runtime.idle();
-      const updated = (await manager.getDefaultPattern(false))!;
+      const updated = (await controller.getDefaultPattern(false))!;
       expect(getPatternIdentityRef(updated)?.identity).toBe(
         await identityForSource(SOURCE_V2),
       );
@@ -2542,10 +2795,12 @@ describe("checkAndUpdateDefaultPattern", () => {
       const customV1 = patternSource("custom-v1");
       stub.setCustomSource(customV1);
       await controller.recreateDefaultPattern();
-      const root = (await manager.getDefaultPattern(false))!;
-      // patternSource freezes the exact source selected at birth — the
-      // configured custom path, not the default-app fallback.
-      expect(getPatternSource(root)).toBe(CUSTOM_APP_URL);
+      const root = (await controller.getDefaultPattern(false))!;
+      // patternSource freezes the source selected at birth — the configured
+      // custom app, not the default-app fallback. The authored URL is
+      // canonicalized to the ref naming the same file, so the root is born
+      // with the provenance it keeps rather than waiting on a migration.
+      expect(getPatternSource(root)).toBe(CUSTOM_APP_SOURCE);
       expect(getPatternIdentityRef(root)?.identity).toBe(
         await identityForSource(customV1, {}, CUSTOM_APP_URL),
       );
@@ -2558,8 +2813,8 @@ describe("checkAndUpdateDefaultPattern", () => {
       stub.setSource(SOURCE_V2);
       expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
       await runtime.idle();
-      const updated = (await manager.getDefaultPattern(false))!;
-      expect(getPatternSource(updated)).toBe(CUSTOM_APP_URL);
+      const updated = (await controller.getDefaultPattern(false))!;
+      expect(getPatternSource(updated)).toBe(CUSTOM_APP_SOURCE);
       expect(getPatternIdentityRef(updated)?.identity).toBe(
         await identityForSource(customV2, {}, CUSTOM_APP_URL),
       );
@@ -2569,8 +2824,8 @@ describe("checkAndUpdateDefaultPattern", () => {
       await setupHome({});
 
       await controller.recreateDefaultPattern();
-      const root = (await manager.getDefaultPattern(false))!;
-      expect(getPatternSource(root)).toBe(HOME_PATTERN_URL);
+      const root = (await controller.getDefaultPattern(false))!;
+      expect(getPatternSource(root)).toBe(HOME_PATTERN_SOURCE);
     });
   });
 });

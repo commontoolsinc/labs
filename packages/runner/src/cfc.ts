@@ -1,4 +1,4 @@
-import { type ImmutableJSONValue, JSONSchemaObj } from "@commonfabric/api";
+import { JSONSchemaObj, type JSONValue } from "@commonfabric/api";
 import type { CfcConfClause } from "./cfc/clause.ts";
 import { isRecord } from "@commonfabric/utils/types";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -9,7 +9,7 @@ import type {
   JSONSchema,
   SchemaScope,
 } from "./builder/types.ts";
-import { isSchemaScope } from "./scope.ts";
+import { isSchemaScope, narrowerScopeCap } from "./scope.ts";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { uniqueCfcAtoms } from "./cfc/observation.ts";
 import {
@@ -34,7 +34,7 @@ export {
   cfcAtom,
 } from "@commonfabric/api/cfc";
 
-type IFCAtom = ImmutableJSONValue;
+type IFCAtom = JSONValue;
 
 // schemaAtPath derivations per deep-frozen schema identity. The derivation is
 // pure given (schema, path, boolean default flags) when no extra
@@ -232,7 +232,9 @@ const schemaAtPathKey = (
   return key;
 };
 
-// Class for handling cfc rules.
+// The cfc rules. Every member is static: the derivations are pure functions of
+// their arguments, and what caching there is lives in module-level maps keyed
+// by schema identity.
 // The spec's confidentiality model is based on structured atoms.
 export class ContextualFlowControl {
   static uniqueAtoms(atoms: Iterable<unknown>): IFCAtom[] {
@@ -330,7 +332,7 @@ export class ContextualFlowControl {
   }
 
   // Get the joined confidentiality atoms from the schema.
-  public lubSchema(
+  static lubSchema(
     schema: JSONSchema,
     extraConfidentiality?: Set<unknown>,
   ): IFCAtom[] | undefined {
@@ -339,15 +341,17 @@ export class ContextualFlowControl {
       : new Set<unknown>();
     ContextualFlowControl.joinSchema(confidentiality, schema);
 
-    return (confidentiality.size === 0) ? undefined : this.lub(confidentiality);
+    return (confidentiality.size === 0)
+      ? undefined
+      : ContextualFlowControl.lub(confidentiality);
   }
 
-  public lub(joined: Set<unknown>): IFCAtom[] {
+  static lub(joined: Set<unknown>): IFCAtom[] {
     return ContextualFlowControl.uniqueAtoms(joined);
   }
 
   // Return a copy of the schema with joined confidentiality atoms.
-  public schemaWithLub(
+  static schemaWithLub(
     schema: JSONSchema,
     confidentiality: readonly CfcConfClause[],
   ): JSONSchema {
@@ -364,7 +368,10 @@ export class ContextualFlowControl {
     const schemaObj = ContextualFlowControl.toSchemaObj(schema);
     const restrictedSchema = {
       ...schemaObj,
-      ifc: { ...schemaObj.ifc, confidentiality: this.lub(joined) },
+      ifc: {
+        ...schemaObj.ifc,
+        confidentiality: ContextualFlowControl.lub(joined),
+      },
     };
     return restrictedSchema;
   }
@@ -452,7 +459,7 @@ export class ContextualFlowControl {
 
   // This is a variant of schemaAtPath that allows for an undefined schema.
   // It will return the empty object instead of true and undefined instead of false.
-  getSchemaAtPath(
+  static getSchemaAtPath(
     schema: JSONSchema | undefined,
     path: string[],
     extraConfidentiality?: Set<unknown>,
@@ -460,7 +467,11 @@ export class ContextualFlowControl {
     if (schema === undefined) {
       return undefined;
     }
-    const result = this.schemaAtPath(schema, path, extraConfidentiality);
+    const result = ContextualFlowControl.schemaAtPath(
+      schema,
+      path,
+      extraConfidentiality,
+    );
     return result === false ? undefined : result === true ? {} : result;
   }
 
@@ -491,7 +502,7 @@ export class ContextualFlowControl {
    * While we will handle $ref links as needed while getting to the schema,
    * the returned object will retain those $ref links.
    */
-  schemaAtPath(
+  static schemaAtPath(
     schema: JSONSchema,
     path: readonly string[],
     extraConfidentiality?: Set<unknown>,
@@ -507,7 +518,7 @@ export class ContextualFlowControl {
       typeof defaultMissingProperty === "boolean" &&
       isRecord(schema) && isDeepFrozen(schema);
     if (!cacheable) {
-      return this.schemaAtPathInternal(
+      return ContextualFlowControl.schemaAtPathInternal(
         schema,
         path,
         defs,
@@ -532,7 +543,7 @@ export class ContextualFlowControl {
       // Intern the derivation so the cached result is the canonical frozen
       // instance: downstream identity-keyed caches (standardization, value
       // hashing) hit instead of re-walking a fresh anyOf rebuild every time.
-      result = internSchema(this.schemaAtPathInternal(
+      result = internSchema(ContextualFlowControl.schemaAtPathInternal(
         schema,
         path,
         defs,
@@ -546,7 +557,7 @@ export class ContextualFlowControl {
     return result;
   }
 
-  private schemaAtPathInternal(
+  private static schemaAtPathInternal(
     schema: JSONSchema,
     path: readonly string[],
     defs: Record<string, JSONSchema> | undefined,
@@ -591,7 +602,7 @@ export class ContextualFlowControl {
           const entryDefs = isRecord(entry) && entry.$defs !== undefined
             ? entry.$defs as Record<string, JSONSchema>
             : defs;
-          const optSchema = this.schemaAtPathInternal(
+          const optSchema = ContextualFlowControl.schemaAtPathInternal(
             entry,
             path.slice(index),
             entryDefs,
@@ -709,7 +720,7 @@ export class ContextualFlowControl {
     // If we've encountered any confidentiality atoms while walking down the
     // schema, we need to add them to the returned object.
     const ifc = (joined.size !== 0)
-      ? { ...cursor.ifc, confidentiality: this.lub(joined) }
+      ? { ...cursor.ifc, confidentiality: ContextualFlowControl.lub(joined) }
       : cursor.ifc;
     const selectedDefs = selectReferencedCfcSchemaDefs(cursor, defs);
     const result = { ...cursor, ...(ifc && { ifc }) } as Record<
@@ -727,8 +738,8 @@ export class ContextualFlowControl {
     return cfcSchemaIsTrue(schema);
   }
 
-  // We don't need to check ID and ID_FIELD, since they won't be included
-  // in Object.keys return values.
+  // Symbol keys are not included in Object.keys return values, so no
+  // symbol-keyed entry needs checking here.
   static isInternalSchemaKey(key: string): boolean {
     return cfcSchemaIsInternalKey(key);
   }
@@ -780,5 +791,42 @@ export class ContextualFlowControl {
     if (isSchemaScope(entryScope)) return entryScope;
     if (isSchemaScope(schema.scope)) return schema.scope;
     return undefined;
+  }
+
+  /**
+   * The follow cap declared by an `asCell` ENTRY, looking through `anyOf` /
+   * `oneOf` wrappers.
+   *
+   * Two differences from {@link getSchemaScopeCap}, both deliberate:
+   *
+   * - No `schema.scope` fallback. Authors write `scope` on a node to say "this
+   *   value lives at that scope"; reading it as a follow cap at a handle
+   *   boundary invents a restriction nobody asked for.
+   * - It descends into `anyOf`/`oneOf`. A cap wrapped in a compound schema —
+   *   `{anyOf: [{...asCell: [{kind:"cell", scope:"space"}]}, {type:"null"}]}`
+   *   — is a real shape here, and reading only the top level made it a
+   *   one-line cap bypass. Branches that declare no `asCell` at all (a `null`
+   *   alternative) are not handles and are skipped; among those that do, the
+   *   NARROWEST wins, since the runtime value may be any of them.
+   */
+  static getAsCellFollowScopeCap(
+    schema: JSONSchema | undefined,
+  ): SchemaScope | undefined {
+    if (!isRecord(schema)) return undefined;
+    const entryScope = ContextualFlowControl.getAsCellScope(
+      ContextualFlowControl.getAsCellValues(schema).at(0),
+    );
+    if (isSchemaScope(entryScope)) return entryScope;
+    let cap: SchemaScope | undefined;
+    for (const branches of [schema.anyOf, schema.oneOf]) {
+      if (!Array.isArray(branches)) continue;
+      for (const branch of branches) {
+        const branchCap = ContextualFlowControl.getAsCellFollowScopeCap(
+          branch as JSONSchema,
+        );
+        cap = narrowerScopeCap(cap, branchCap);
+      }
+    }
+    return cap;
   }
 }

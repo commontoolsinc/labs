@@ -1,5 +1,9 @@
 import { isRecord } from "@commonfabric/utils/types";
-import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
+import {
+  FabricInstance,
+  FabricPrimitive,
+} from "@commonfabric/data-model/fabric-value";
+import { refuseFabricInstance } from "../fabric-special-object.ts";
 import { type FactoryInput, isPattern, isReactive } from "./types.ts";
 import { noteDerivedCopy } from "./pattern-metadata.ts";
 import { isCell } from "../cell.ts";
@@ -11,15 +15,6 @@ import { isCellResultForDereferencing } from "../query-result-proxy.ts";
  * @param value - The value to traverse
  * @param fn - The function to apply to each value, which can return a new value
  * @returns Transformed value
- *
- * TODO(danfuzz): The `isRecord`-gated `Object.entries`/`Array.map` descent
- * below now leaves `FabricPrimitive` values atomic (an `instanceof` check
- * short-circuits the descent condition), but the other special-object type,
- * `FabricInstance` (a container), is still walked by its internal slots instead
- * of its codec contents. Unlike a primitive it *does* need descending into —
- * but by its actual contents, which the generic enumerable-prop traversal won't
- * do correctly. This site will need attention once FabricInstances see real
- * use.
  */
 export function traverseValue(
   unprocessedValue: FactoryInput<any>,
@@ -34,6 +29,28 @@ export function traverseValue(
   if (seen.has(value) || seen.has(result)) return value;
   if (isRecord(result)) seen.add(result);
   else if (isRecord(unprocessedValue)) seen.add(unprocessedValue);
+
+  // A `FabricInstance` is NOT a leaf. It is a container reached by its codec
+  // contents rather than by property name, which this walk cannot do, so the
+  // rebuild below would hand back a bare `{}` -- and whatever `fn` was looking
+  // for inside it would go unseen. It refuses instead of doing that quietly.
+  //
+  // This sits after `fn`, not before it, for the same reason the primitive
+  // guard does: an instance is a value `fn` gets to see and may replace, and
+  // only descending into one is refused.
+  //
+  // Nothing reaches this in production today, de facto rather than by
+  // construction: a `FabricError` is exposed to pattern authors and ungated, so
+  // what keeps this safe is that no caller yet puts one in a builder value.
+  //
+  // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at which
+  // point this becomes a walk rather than a refusal.
+  if ((value as object) instanceof FabricInstance) {
+    refuseFabricInstance(
+      value as FabricInstance,
+      "when traversing a builder value",
+    );
+  }
 
   // Traverse value. A `FabricPrimitive` is an atomic value whose state lives in
   // private fields (zero enumerable own-props); descending into one would
@@ -60,7 +77,7 @@ export function traverseValue(
       // `resolveOriginal`/`getArtifactEntryRef` would be severed, which is how
       // a pattern passed as an `op` is later identified by
       // `{ identity, symbol }`. Mirrors the registration in
-      // `toJSONWithAliasBindings`.
+      // `withAliasBindings`.
       if (isPattern(value)) noteDerivedCopy(copy, value);
       return copy;
     }

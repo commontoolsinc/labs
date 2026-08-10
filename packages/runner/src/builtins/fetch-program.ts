@@ -12,7 +12,30 @@ import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
 
-const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution
+/**
+ * How long a `fetching` cache entry left by another replica is believed before
+ * this one takes the resolution over.
+ *
+ * This is not a bound on resolving a program. A resolution running here ends
+ * when its promise settles, and the entry it owns is never judged by elapsed
+ * time — `inFlight` below answers "am I already resolving this?" from local
+ * state. The bound applies only to an entry this replica did not claim, where
+ * the question is whether the replica that claimed it is still there. Nothing
+ * in the runner reports another replica's presence, so that question has no
+ * event to wait on.
+ *
+ * The value is left where it was. Once an early takeover no longer costs a
+ * result, the size is a trade with a cost on both sides: too low duplicates a
+ * resolution whenever another replica looks in while one is running, too high
+ * leaves a replica that arrives before the bound elapses looking at a claim it
+ * will not take over and has no reason to re-examine, so the piece keeps
+ * showing a spinner. A duplicated resolution is wasted work; a spinner that
+ * never resolves is a dead end, so the trade goes to the lower value.
+ *
+ * `docs/features/fetch-request-deadlines.md` records why this bound stays
+ * and what an early takeover costs.
+ */
+const PROGRAM_CLAIM_STALE_AFTER = 1000 * 10;
 
 export interface ProgramResult {
   files: Array<{ name: string; contents: string }>;
@@ -132,8 +155,13 @@ export function fetchProgram(
   let error: Cell<any | undefined>;
   let cache: Cell<Record<string, FetchCacheEntry>>;
   let cellScope: CellScope | undefined;
-  let myRequestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
+  // Input hash to the claim id this replica wrote for it, for every resolution
+  // running here right now. The claim id carries `runtime.id`, which is unique
+  // per storage manager and so per replica; the entry's `requestId` used to be
+  // the input hash, which every replica resolving the same URL writes
+  // identically, so no replica could tell its own claim from anyone else's.
+  const inFlight = new Map<string, string>();
 
   // This is called when the pattern containing this node is being stopped.
   addCancel(() => {
@@ -141,7 +169,7 @@ export function fetchProgram(
     abortController?.abort("Pattern stopped");
 
     // Only try to update state if cells were initialized
-    if (!cellsInitialized || !myRequestId) return;
+    if (!cellsInitialized || inFlight.size === 0) return;
 
     const tx = runtime.edit();
 
@@ -150,10 +178,13 @@ export function fetchProgram(
       const currentCache = cache.withTx(tx).get();
       const updates: Record<string, FetchCacheEntry> = {};
 
+      // Release only the entries this replica still holds. An entry another
+      // replica took over carries its claim id, not ours, and resetting it
+      // would strand the resolution that replica is running.
       for (const [hash, entry] of Object.entries(currentCache)) {
         if (
           entry.state.type === "fetching" &&
-          entry.state.requestId === myRequestId
+          entry.state.requestId === inFlight.get(hash)
         ) {
           updates[hash] = {
             inputHash: hash,
@@ -239,6 +270,12 @@ export function fetchProgram(
       error.sync();
       cache.sync();
 
+      // The cells above are re-minted when the scope changes, so a resolution
+      // started under the old scope writes into the old scope's cache and says
+      // nothing about the new one. Forget those claims; their `finally` sees a
+      // claim id that is no longer recorded and leaves the map alone.
+      inFlight.clear();
+
       cellsInitialized = true;
       cellScope = outputScope;
     }
@@ -260,10 +297,22 @@ export function fetchProgram(
     const cacheEntry = allEntries[inputHash];
     const state: FetchState = cacheEntry?.state ?? { type: "idle" };
 
-    // State machine transitions
-    if (state.type === "idle") {
-      // Try to transition to fetching
-      const requestId = inputHash;
+    // State machine transitions. A resolution running in this replica ends
+    // when its promise settles, so an entry in `inFlight` is left alone
+    // whatever the entry says and however long it has been running. An entry
+    // claimed elsewhere and left untouched for longer than the staleness bound
+    // is taken over directly, without passing through `idle`: a round trip
+    // through `idle` would publish `pending: false` with no result for a tick,
+    // which reads to a consumer as "finished, nothing here".
+    const resolvingHere = inFlight.has(inputHash);
+    const claimAbandoned = state.type === "fetching" && !resolvingHere &&
+      Date.now() - state.startTime > PROGRAM_CLAIM_STALE_AFTER;
+
+    if (!resolvingHere && (state.type === "idle" || claimAbandoned)) {
+      // Try to transition to fetching. The claim id names this replica; the
+      // outbox id stays the input hash, which is what makes it an idempotency
+      // key for the same request from anywhere.
+      const requestId = `${runtime.id}:${inputHash}`;
       cache.withTx(tx).update({
         [inputHash]: {
           inputHash,
@@ -274,37 +323,34 @@ export function fetchProgram(
       enqueueSinkRequestPostCommitEffect(
         tx,
         "fetchProgram",
-        `fetchProgram:${requestId}`,
+        `fetchProgram:${inputHash}`,
         requestSnapshot,
         "fetchProgram-start",
         () => {
           // Start fetch asynchronously only after the transaction commits.
-          // Tracked as async builtin work so `runtime.settled()`
-          // wait for the program resolve + writeback; `idle()` does not.
-          myRequestId = requestId;
+          // Tracked as async builtin work owned by this run, so
+          // `runtime.settled()` and `runtime.settledFor(parentCell)` both wait
+          // for the program resolve + writeback; `idle()` does not.
+          // Recorded in `inFlight` here rather than above, because a
+          // transaction that never commits never reaches this callback.
+          inFlight.set(inputHash, requestId);
           abortController = new AbortController();
-          runtime.trackAsyncWork(startFetch(
-            runtime,
-            cache,
-            inputHash,
-            url,
-            requestId,
-            abortController.signal,
-          ));
+          runtime.trackAsyncWork(
+            startFetch(
+              runtime,
+              cache,
+              inputHash,
+              url,
+              abortController.signal,
+            ).finally(() => {
+              if (inFlight.get(inputHash) === requestId) {
+                inFlight.delete(inputHash);
+              }
+            }),
+            parentCell,
+          );
         },
       );
-    } else if (state.type === "fetching") {
-      // Check for timeout
-      const isTimedOut = Date.now() - state.startTime > PROGRAM_REQUEST_TIMEOUT;
-      if (isTimedOut) {
-        // Transition back to idle if timed out
-        cache.withTx(tx).update({
-          [inputHash]: {
-            inputHash,
-            state: { type: "idle" },
-          },
-        });
-      }
     }
 
     // Convert state machine state to output cells
@@ -325,15 +371,23 @@ export function fetchProgram(
 }
 
 /**
- * Start fetching a program. Uses CAS to ensure only the tab that initiated
- * the fetch can write the result.
+ * Start fetching a program. The writeback lands only on an entry still marked
+ * `fetching`, so a resolution whose entry has since reached `success` or
+ * `error`, or been released, writes nothing. It deliberately does not require
+ * the entry to carry *this* replica's claim id: after a takeover two
+ * resolutions for the same input hash are running, they resolve the same URL,
+ * and whichever finishes first should be the one that counts.
+ *
+ * The abort signal does not reach the network. `HttpProgramResolver` issues its
+ * requests without one, so this checks the signal between steps: it suppresses
+ * a writeback from a resolution nobody is waiting for, and does not end the
+ * resolution.
  */
 async function startFetch(
   runtime: Runtime,
   cache: Cell<Record<string, FetchCacheEntry>>,
   inputHash: string,
   url: string,
-  requestId: string,
   abortSignal: AbortSignal,
 ) {
   try {
@@ -355,14 +409,11 @@ async function startFetch(
 
     await runtime.idle();
 
-    // CAS: Only write if we're still the active request
+    // Only write into an entry that is still marked `fetching`.
     await runtime.editWithRetry((tx) => {
       const allEntries = cache.withTx(tx).get();
       const entry = allEntries[inputHash];
-      if (
-        entry?.state.type === "fetching" &&
-        entry.state.requestId === requestId
-      ) {
+      if (entry?.state.type === "fetching") {
         cache.withTx(tx).update({
           [inputHash]: {
             inputHash,
@@ -380,14 +431,11 @@ async function startFetch(
 
     await runtime.idle();
 
-    // CAS: Only write error if we're still the active request
+    // Only write into an entry that is still marked `fetching`.
     await runtime.editWithRetry((tx) => {
       const allEntries = cache.withTx(tx).get();
       const entry = allEntries[inputHash];
-      if (
-        entry?.state.type === "fetching" &&
-        entry.state.requestId === requestId
-      ) {
+      if (entry?.state.type === "fetching") {
         cache.withTx(tx).update({
           [inputHash]: {
             inputHash,

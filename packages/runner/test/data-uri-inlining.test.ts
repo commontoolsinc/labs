@@ -8,6 +8,9 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
 import { findAndInlineDataUriLinks } from "../src/data-uri.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -197,6 +200,30 @@ describe("data URI inlining", () => {
       expect(result).toBe(link);
     });
 
+    it("should preserve links whose data: URI carries a foreign media type", () => {
+      // Only this codec's media type names content that can be inlined. A
+      // `data:` URI of any other media type is left alone, exactly as a link
+      // naming a document in a space is.
+      for (
+        const id of [
+          "data:image/png;base64,iVBORw0KGgo",
+          "data:text/plain,hello",
+          "data:,",
+        ]
+      ) {
+        const link = {
+          "/": {
+            [LINK_V1_TAG]: {
+              id,
+              path: [],
+            },
+          },
+        };
+
+        expect(findAndInlineDataUriLinks(link)).toBe(link);
+      }
+    });
+
     it("should preserve object identity when no data URI links are present", () => {
       const value = {
         name: "Ada",
@@ -306,6 +333,102 @@ describe("data URI inlining", () => {
             path: ["nested"],
           },
         },
+      });
+    });
+
+    describe("special objects", () => {
+      // A `FabricSpecialObject` is `isRecord`, so it reaches the record branch
+      // rather than the leaf return. What keeps it whole is that the branch
+      // only clones when an entry inlines to something new, and a special
+      // object has zero enumerable own properties: the loop body never runs,
+      // so `next` stays undefined and the original comes back by identity.
+      //
+      // For a `FabricPrimitive` that is the answer: a leaf holds no link to
+      // inline, and the guarantee -- indirect, resting on the zero-property
+      // fact -- is pinned so that giving one an enumerable property turns this
+      // red.
+      //
+      // For a `FabricInstance` it is _not_ the answer -- not being flattened is
+      // not the same as being handled -- so the walk refuses one.
+
+      it("returns a `FabricBytes` as the same instance", () => {
+        const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+        expect(findAndInlineDataUriLinks(bytes)).toBe(bytes);
+      });
+
+      it("throws for a `FabricError` rather than passing it through", () => {
+        // Passing an instance through hands it back _untransformed_: its state
+        // can carry a link this walk exists to inline, so coming back whole
+        // means coming back with that link intact.
+        //
+        // Latent, and refused anyway. A link ends up inside an error only if an
+        // author attaches a cell to one, and nothing in the tree does -- so
+        // this test builds the producer it does not have. The refusal is the
+        // point: it announces itself the moment these classes see real use,
+        // where a comment would wait to be read.
+        //
+        // The control shows the same link inlining on a plain object, so what
+        // changes the outcome is visibly the wrapper.
+        const dataURI = dataUriFromValueWithResolvedLinks("inlined value");
+        const link = { "/": { [LINK_V1_TAG]: { id: dataURI, path: [] } } };
+        const failure = new FabricError({
+          type: "Error",
+          message: "boom",
+          stack: undefined,
+          cause: undefined,
+          extras: { attachment: link as unknown as FabricValue },
+        });
+
+        expect(findAndInlineDataUriLinks({ e: link })).toEqual({
+          e: "inlined value",
+        });
+
+        expect(() => findAndInlineDataUriLinks(failure)).toThrow(
+          "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
+            "inlining `data:` URI links.",
+        );
+      });
+
+      it("throws for a `FabricError` decoded from a root `data:` URI", () => {
+        // The bypass this closes: an instance handed over directly is refused,
+        // and before this the same one decoded out of a `data:` URI left
+        // silently, because a decoded payload is returned rather than walked.
+        // A guard with a way around it is worse than none, since it reads as
+        // covering the case.
+        const failure = new FabricError({
+          type: "Error",
+          message: "boom",
+          stack: undefined,
+          cause: undefined,
+          extras: { attachment: "held" as unknown as FabricValue },
+        });
+        const uri = dataUriFromValueWithResolvedLinks(
+          failure as unknown as FabricValue,
+        );
+        const link = { "/": { [LINK_V1_TAG]: { id: uri, path: [] } } };
+
+        expect(() => findAndInlineDataUriLinks(link)).toThrow(
+          "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
+            "inlining a `data:` URI whose content is a `FabricInstance`.",
+        );
+      });
+
+      it("keeps a special object whole while inlining a sibling", () => {
+        // The discriminating case. A sibling that does inline forces the
+        // record branch to clone, and the clone is a `{ ...value }` spread --
+        // so this is where a special object would be flattened if the walk
+        // ever descended into one rather than copying the reference across.
+        const bytes = new FabricBytes(new Uint8Array([4, 5]));
+        const dataURI = dataUriFromValueWithResolvedLinks("inlined value");
+
+        const result = findAndInlineDataUriLinks({
+          bytes,
+          link: { "/": { [LINK_V1_TAG]: { id: dataURI, path: [] } } },
+        });
+
+        expect(result.bytes).toBe(bytes);
+        expect(result.link).toBe("inlined value");
       });
     });
   });
@@ -444,6 +567,32 @@ describe("data URI inlining", () => {
 
       // The raw value should be the inlined value, not the data URI link
       expect(rawValue).toBe("test");
+    });
+
+    it("should surface the storage error for a foreign-media-type data URI", () => {
+      // Such a link is not inlined, so the write treats it as an ordinary
+      // link and reads through it to diff against what it names. That read
+      // reports the media type, as the storage layer's typed error. Landing
+      // on that error is also what pins the inlining re-entry as unreached;
+      // the re-entry recurs on a value the inlining call leaves alone.
+      const targetCell = runtime.getCell(space, "target", undefined, tx);
+
+      const link = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "data:image/png;base64,iVBORw0KGgo",
+            path: [],
+          },
+        },
+      };
+
+      let error: { name?: string } | undefined;
+      try {
+        targetCell.set(link);
+      } catch (caught) {
+        error = caught as { name?: string };
+      }
+      expect(error?.name).toBe("UnsupportedMediaTypeError");
     });
   });
 

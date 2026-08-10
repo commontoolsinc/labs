@@ -1,10 +1,13 @@
 export { Runtime } from "./runtime.ts";
+export { normalizeSpaceHost } from "./space-host.ts";
 export type {
   ConsoleHandler,
   ConsoleHandlerOutput,
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
   ExperimentalOptions, // Space-model feature flags; see ExperimentalOptions in runtime.ts
+  PatternInstantiation,
+  PatternInstantiationObserver,
   RuntimeFetch,
   RuntimeOptions,
   SpaceCellContents,
@@ -29,7 +32,8 @@ export type {
 export * from "./interface.ts";
 export { raw } from "./module.ts";
 export type { Cell, Stream } from "./cell.ts";
-export type { NormalizedLink } from "./link-types.ts";
+export type { NormalizedFullLink, NormalizedLink } from "./link-types.ts";
+export { encodeJsonPointer } from "./link-types.ts";
 export type { SigilLink, URI } from "./sigil-types.ts";
 export {
   createRef,
@@ -44,13 +48,16 @@ export type {
   ReactivityLog,
   SettleStats,
 } from "./scheduler.ts";
-export * as StorageInspector from "./storage/inspector.ts";
-export { StorageTelemetry } from "./storage/telemetry.ts";
 export type {
   ChangeGroup,
   IExtendedStorageTransaction,
   MemorySpace,
+  TransactionCommitOptions,
 } from "./storage/interface.ts";
+export type {
+  EntityIdListOptions,
+  EntityIdListResult,
+} from "@commonfabric/memory/v2";
 export {
   debugTransactionWrites,
   formatTransactionSummary,
@@ -58,6 +65,7 @@ export {
   type TransactionSummary,
 } from "./storage/transaction-summary.ts";
 export {
+  type CellLinkInput,
   convertCellsToLinks,
   isCell,
   isReadableCell,
@@ -94,7 +102,6 @@ export {
   type PatternCoverageSpan,
   writePatternCoverageLcov,
 } from "./pattern-coverage.ts";
-export { addCommonIDfromObjectID } from "./data-updating.ts";
 export {
   type BlindStructuralTarget,
   isRendererInputTx,
@@ -117,22 +124,41 @@ export {
 } from "./link-utils.ts";
 export * from "./pattern-manager.ts";
 export {
+  normalizePatternSource,
+  PATTERNS_ROUTE_PREFIX,
+  resolveSystemPatternSource,
+  SYSTEM_PATTERN_SOURCE_SCHEME,
+  systemPatternSource,
+  systemPatternSourceForModuleName,
+} from "./pattern-source-scheme.ts";
+export {
   type PatternUpdateOutcome,
   PatternUpdater,
 } from "./pattern-updater.ts";
 export {
+  applyPieceSourceTransition,
   asPatternIdentityRef,
   extractDefaultValues,
   getPatternIdentityRef,
   getPatternRepository,
   getPatternSetupIdentityRef,
   getPatternSource,
+  getPieceSourceRevisions,
+  getPieceSourceSnapshot,
+  isStoredArgumentSchemaRefusal,
   mergeSchemaDefaults,
   patternIdentityKey,
+  type PieceSourceRevision,
+  type PieceSourceRevisionOperation,
+  type PieceSourceSnapshot,
+  type PieceSourceTransition,
+  type PieceSourceTransitionBaseline,
+  preparePieceSourceTransitionBaseline,
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
   setPatternRepository,
   setPatternSource,
+  STORED_ARGUMENT_SCHEMA_REFUSAL,
 } from "./runner.ts";
 
 // Builder functionality (migrated from @commonfabric/builder package)
@@ -166,18 +192,16 @@ export {
   FS,
   type FsProjection,
   type HandlerFactory,
-  ID,
-  ID_FIELD,
   isModule,
   isPattern,
   isReactive,
   isStreamValue,
   type JSONObject,
   type JSONSchema,
-  type JSONSchemaObjMutable,
   type JSONValue,
   type Module,
   type ModuleFactory,
+  type MutableJSONSchemaObj,
   NAME,
   type NodeFactory,
   OAuth2TokenSchema,
@@ -231,7 +255,7 @@ export type {
 } from "./telemetry-otel-bridge.ts";
 
 // Utility functions (split from utils.ts)
-export { createJsonSchema } from "./builder/json-utils.ts";
+export { createJsonSchema } from "./builder/create-json-schema.ts";
 export { deepEqual } from "@commonfabric/utils/deep-equal";
 export { getValueAtPath, setValueAtPath } from "./path-utils.ts";
 export { schemaToTypeString } from "./schema-format.ts";

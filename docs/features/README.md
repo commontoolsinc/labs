@@ -1,0 +1,90 @@
+# Features and subsystems
+
+One document per feature, or per aspect of the runtime. Each one is deep and
+narrow: it explains how that piece behaves, what invariants it holds, and what
+you need to know before you change it. Read one when you are working on the
+thing it describes. None of them is general orientation.
+
+The neighbouring trees answer different questions.
+[`../development/`](../development/README.md) is how to work in this
+repository — style, dependencies, testing, debugging, continuous integration.
+[`../specs/`](../specs/README.md) is what the system is required to do.
+[`../common/`](../common/README.md) is how to author patterns.
+[`../tutorial/`](../tutorial/README.md) is the guided introduction.
+
+Name new documents in lowercase with hyphens, after the thing they describe.
+Add a line for each new document to the index below.
+
+## Writes, storage, and sync
+
+- [`patch-operations.md`](patch-operations.md) — the family of single logical
+  changes a commit carries, the registries that define each one exactly once,
+  and how to add a new one across the memory, runner, api, and transformer
+  layers
+- [`mergeable-collection-writes.md`](mergeable-collection-writes.md) — why
+  append, add-unique, increment, and remove-by-value exist as operations
+  rather than as whole-value writes, and what they do to conflict detection
+- [`keyed-collection-writes.md`](keyed-collection-writes.md) — addressing a
+  record inside a collection by its key, which covers the read-then-write
+  shapes the whole-value operations cannot
+- [`migrating-collection-writes.md`](migrating-collection-writes.md) — how to
+  change an existing handler over to a mergeable or keyed write, and the
+  mistakes that make such a migration look finished when it is not
+- [`committed-write-backpressure.md`](committed-write-backpressure.md) — how
+  the scheduler keeps a committed write from being silently dropped when the
+  server rejects it under contention
+- [`authorization-failure-surfacing.md`](authorization-failure-surfacing.md) —
+  how an authorization failure during storage sync reaches the caller as a
+  typed error instead of a silent absent read or an endless wait
+- [`data-uri-identifiers.md`](data-uri-identifiers.md) — the cell identifiers
+  that carry their own frozen value rather than naming a document in a space,
+  why the runtime keeps both a broad and a narrow test for one, and what
+  follows from there being nothing stored behind such an address
+
+## Identity and people
+
+- [`shared-identity.md`](shared-identity.md) — using one identity across the
+  browser, the `cf` command-line tool, the FUSE mount, and browser-driving
+  agents when testing behavior that depends on who is acting
+- [`active-user-counting.md`](active-user-counting.md) — what signal the
+  server offers for counting active people, and the assumption any such count
+  rests on
+- [`home-space-internals.md`](home-space-internals.md) — the runtime
+  implementation behind home-space behavior, including how the runtime derives
+  the user's identity DID
+
+## Talking to the outside world
+
+- [`fetch-request-deadlines.md`](fetch-request-deadlines.md) — why the fetch
+  builtins keep a wall-clock bound, what that bound actually measures, and
+  what to check before changing when a request starts
+- [`bidirectional-sync.md`](bidirectional-sync.md) — building an importer that
+  syncs both ways with an external system that is the source of truth:
+  identity, reconciliation, and write-back
+- [`vouched-ingest-channel-mint.md`](vouched-ingest-channel-mint.md) — the
+  split-mint seam that lets an outside source deposit data carrying a trusted
+  provenance mark, without ever authoring that mark itself
+- [`gateway-request-provenance.md`](gateway-request-provenance.md) — how a
+  request to the LLM gateway says which workload produced it, what a value is
+  allowed to contain given that it reaches the provider, and why the machine
+  label is drawn at random and the codebase declared
+
+## Patterns, components, and hosts
+
+- [`canonical-base-patterns.md`](canonical-base-patterns.md) — the design for
+  a set of base patterns built from a container, minimal interface types, and
+  record-level upgrade
+- [`invoking-handlers-outside-a-pattern.md`](invoking-handlers-outside-a-pattern.md)
+  — calling a handler stream from `RuntimeProcessor`, or from anywhere else
+  outside a pattern body
+- [`host-embedding.md`](host-embedding.md) — the seams a host that is not the
+  labs shell may bind to when it mounts our components and patterns, each one
+  pinned by a test that goes red if the contract changes
+
+## Observability and testing
+
+- [`logger-internals.md`](logger-internals.md) — the TypeScript side of the
+  structured logging system: creating a logger, severity, timing, and flags
+- [`llm-testing.md`](llm-testing.md) — testing patterns and server routes that
+  call a language model, covering the test-environment guard, the mocks, and
+  the conversation fixtures

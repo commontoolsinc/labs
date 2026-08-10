@@ -1,4 +1,4 @@
-// ci-duration's drill-down: the Gantt page and the /bench/gantt.png image behind it.
+// ci-duration's drill-down: the Gantt page and the /bench/gantt.svg image behind it.
 // The image handler shells out to scripts/ci-gantt.ts and writes a temp file.
 // The subprocess and the filesystem calls around it are replaced with
 // stubs that record what the handler asked for and hand back a canned result.
@@ -12,6 +12,7 @@ import type {
 } from "../ci-job-history.ts";
 import {
   ciCommitGanttPage,
+  type CiGanttDataProvider,
   ciGanttPage,
   labsCiDuration,
   loomCiDuration,
@@ -19,8 +20,26 @@ import {
   renderGantt,
   renderGanttRoute,
 } from "./ci-duration.ts";
+import { PERFORMANCE_VIEW_STYLES } from "../performance-views.ts";
 
-const PNG = Uint8Array.from([137, 80, 78, 71]);
+const SVG = new TextEncoder().encode(
+  '<svg xmlns="http://www.w3.org/2000/svg"><text>chart</text></svg>',
+);
+
+// Stands in for the collector, which writes the renderer's input file itself
+// rather than handing back a chart to be serialized.
+function provideGantt(
+  chart: (
+    source: CiHistorySource,
+    options: CiGanttOptions,
+  ) => CiGanttInput["runs"],
+): CiGanttDataProvider {
+  return async (source, options, destination) => {
+    const runs = chart(source, options);
+    await Deno.writeTextFile(destination, JSON.stringify({ runs }));
+    return runs.length;
+  };
+}
 
 function ctx(runs: Run[]): Ctx {
   return {
@@ -31,6 +50,7 @@ function ctx(runs: Run[]): Ctx {
 }
 
 function run(over: Partial<Run>): Run {
+  const startedAt = new Date(Date.now() - 3_600_000).toISOString();
   return {
     id: 1,
     status: "completed",
@@ -39,7 +59,8 @@ function run(over: Partial<Run>): Run {
     event: "push",
     head_sha: "sha",
     display_title: "t",
-    run_started_at: new Date(Date.now() - 3_600_000).toISOString(),
+    created_at: startedAt,
+    run_started_at: startedAt,
     updated_at: new Date().toISOString(),
     html_url: "",
     head_commit: { message: "t (#1)" },
@@ -92,7 +113,7 @@ async function gantt(
     };
     Deno.readFile = (path: string | URL) =>
       live.has(String(path))
-        ? Promise.resolve(PNG)
+        ? Promise.resolve(SVG)
         : Promise.reject(new Deno.errors.NotFound(String(path)));
     Deno.writeTextFile = (
       _path: string | URL,
@@ -137,30 +158,28 @@ async function gantt(
     });
     console.error = (...parts: unknown[]) =>
       void logged.push(parts.map(String).join(" "));
-    const url = new URL(`http://d/bench/gantt.png${query}`);
+    const url = new URL(`http://d/bench/gantt.svg${query}`);
     const res = await renderGantt(
       url.searchParams,
-      (source, options) => {
+      provideGantt((source, options) => {
         requested = { source, options };
-        return Promise.resolve({
-          runs: Array.from(
-            { length: Math.min(options.limit, 60) },
-            (_, index) => ({
-              run: {
-                attempt: 1,
-                databaseId: index + 1,
-                status: "completed",
-                conclusion: "success",
-                event: "push",
-                headBranch: "main",
-                startedAt: "2026-06-20T18:00:00Z",
-                workflowName: source.workflow,
-              },
-              jobs: [],
-            }),
-          ),
-        });
-      },
+        return Array.from(
+          { length: Math.min(options.limit, 60) },
+          (_, index) => ({
+            run: {
+              attempt: 1,
+              databaseId: index + 1,
+              status: "completed",
+              conclusion: "success",
+              event: "push",
+              headBranch: "main",
+              startedAt: "2026-06-20T18:00:00Z",
+              workflowName: source.workflow,
+            },
+            jobs: [],
+          }),
+        );
+      }),
       signal,
     );
     return {
@@ -195,6 +214,7 @@ Deno.test("the Gantt page shares the performance view selector", async () => {
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
   );
   assertStringIncludes(html, "<title>CI run Gantt</title>");
+  assertStringIncludes(html, PERFORMANCE_VIEW_STYLES);
   assertStringIncludes(html, `${REPO} · ${CI_WORKFLOW}`);
   assertStringIncludes(html, `href="/"`); // a way back to the dashboard
   assertStringIncludes(
@@ -210,7 +230,7 @@ Deno.test("the Gantt page shares the performance view selector", async () => {
     'href="/bench?view=gantt&amp;repo=labs&amp;days=45&amp;sort=job&amp;stat=p99" aria-current="page">CI run Gantt</a>',
   );
   assertStringIncludes(html, '<option value="labs" selected>labs</option>');
-  assertStringIncludes(html, "/bench/gantt.png?"); // the controls point at the image route
+  assertStringIncludes(html, "/bench/gantt.svg?"); // the controls point at the image route
   assertStringIncludes(html, 'id="fetch-progress"');
   assertStringIncludes(html, 'id="fetch-title">Idle</strong>');
   assertStringIncludes(html, 'aria-label="CI Gantt fetch progress"');
@@ -250,10 +270,17 @@ Deno.test("the Gantt page shares the performance view selector", async () => {
       route.path === "/bench/gantt-progress"
     ),
   );
-  for (const path of ["/ci-gantt", "/ci-gantt.png", "/ci-gantt-progress"]) {
+  for (
+    const path of [
+      "/ci-gantt",
+      "/ci-gantt.svg",
+      "/ci-gantt.png",
+      "/ci-gantt-progress",
+    ]
+  ) {
     assert(labsCiDuration.routes?.some((route) => route.path === path));
   }
-  for (const path of ["/ci-gantt.png", "/ci-gantt-progress"]) {
+  for (const path of ["/ci-gantt.svg", "/ci-gantt-progress"]) {
     const route = labsCiDuration.routes?.find((route) => route.path === path);
     assert(route);
     const invalid = new URL(`http://d${path}?sha=invalid`);
@@ -270,6 +297,22 @@ Deno.test("the Gantt page shares the performance view selector", async () => {
     assertEquals(
       (await route.handler(new Request(tooMany), tooMany)).status,
       400,
+    );
+  }
+  for (
+    const [path, target] of [
+      ["/ci-gantt.png", "/ci-gantt.svg"],
+      ["/bench/gantt.png", "/bench/gantt.svg"],
+    ]
+  ) {
+    const route = labsCiDuration.routes?.find((route) => route.path === path);
+    assert(route);
+    const legacy = new URL(`http://d${path}?repo=loom&limit=12`);
+    const response = await route.handler(new Request(legacy), legacy);
+    assertEquals(response.status, 308);
+    assertEquals(
+      response.headers.get("location"),
+      `${target}?repo=loom&limit=12`,
     );
   }
 
@@ -303,7 +346,7 @@ Deno.test("the commit Gantt page contains only one commit selection", () => {
     `href="https://github.com/${LOOM_REPO}/commit/${sha}"`,
   );
   assertStringIncludes(html, 'aria-label="Commit CI Gantt fetch progress"');
-  assertStringIncludes(html, "/ci-gantt.png?");
+  assertStringIncludes(html, "/ci-gantt.svg?");
   assertStringIncludes(html, "/ci-gantt-progress?");
   assertStringIncludes(
     html,
@@ -326,7 +369,7 @@ Deno.test("the commit Gantt page contains only one commit selection", () => {
     empty,
     "No successful main CI runs were supplied for this commit.",
   );
-  assert(!empty.includes("/ci-gantt.png?"));
+  assert(!empty.includes("/ci-gantt.svg?"));
 });
 
 Deno.test("commit Gantt data routes start the exact selected collection", async () => {
@@ -341,10 +384,10 @@ Deno.test("commit Gantt data routes start the exact selected collection", async 
   }&limit=1&mainOnly=1&run=9007199254740991:1`;
   try {
     const imageRoute = labsCiDuration.routes?.find((route) =>
-      route.path === "/ci-gantt.png"
+      route.path === "/ci-gantt.svg"
     );
     assert(imageRoute);
-    const imageUrl = new URL(`http://d/ci-gantt.png?${selection}`);
+    const imageUrl = new URL(`http://d/ci-gantt.svg?${selection}`);
     const image = await imageRoute.handler(new Request(imageUrl), imageUrl);
     assertEquals(image.status, 500);
     assertEquals(await image.text(), "set GH_TOKEN");
@@ -397,26 +440,26 @@ Deno.test("CI duration tiles link to their repository histories", async () => {
   );
 });
 
-Deno.test("/bench/gantt.png: a successful render returns the PNG bytes uncached", async () => {
+Deno.test("/bench/gantt.svg: a successful render returns SVG uncached", async () => {
   const { res, args, input, leftover, requested } = await gantt("?limit=30");
   assertEquals(res.status, 200);
-  assertEquals(res.headers.get("content-type"), "image/png");
+  assertEquals(res.headers.get("content-type"), "image/svg+xml");
   assertEquals(res.headers.get("cache-control"), "no-store");
-  assertEquals(new Uint8Array(await res.arrayBuffer()), PNG);
+  assertEquals(new Uint8Array(await res.arrayBuffer()), SVG);
   assertEquals(opt(args, "--repo"), REPO);
   assertEquals(opt(args, "--workflow"), CI_WORKFLOW);
   assertEquals(opt(args, "--limit"), "30");
-  assertEquals(opt(args, "--out"), "/fake-tmp/ci-gantt-1.png"); // the bytes come from where it was told to write
-  assertEquals(opt(args, "--input"), "/fake-tmp/ci-gantt-input-2.json");
+  assertEquals(opt(args, "--out"), "/fake-tmp/ci-gantt-2.svg"); // the bytes come from where it was told to write
+  assertEquals(opt(args, "--input"), "/fake-tmp/ci-gantt-input-1.json");
   assert(!args.includes("--allow-net"));
   assert(!args.includes("--allow-env"));
-  assert(args.includes("--allow-read"));
+  assert(args.includes("--allow-read=/fake-tmp/ci-gantt-input-1.json"));
+  assert(!args.includes("--allow-read"));
   assert(!args.includes("--allow-write"));
-  assert(args.includes("--allow-ffi"));
-  assert(args.includes("--allow-sys=cpus,networkInterfaces,hostname"));
-  assert(!args.includes("--allow-read=/fake-tmp/ci-gantt-input-2.json"));
-  assert(args.includes("--allow-write=/fake-tmp/ci-gantt-1.png"));
-  assertEquals(opt(args, "--scale"), "2");
+  assert(!args.includes("--allow-ffi"));
+  assert(!args.includes("--allow-sys=cpus,networkInterfaces,hostname"));
+  assert(args.includes("--allow-write=/fake-tmp/ci-gantt-2.svg"));
+  assertEquals(opt(args, "--scale"), undefined);
   assertEquals(input.runs.length, 30);
   assertEquals(requested.source.key, "labs");
   assertEquals(requested.options, {
@@ -427,32 +470,92 @@ Deno.test("/bench/gantt.png: a successful render returns the PNG bytes uncached"
   assertEquals(leftover, []); // the temp file is cleaned up on the way out
 });
 
-Deno.test("/bench/gantt.png finishes collection but skips an abandoned render", async () => {
+Deno.test("/bench/gantt.svg includes chart labels without server fonts", async () => {
+  const response = await renderGantt(
+    new URLSearchParams("limit=1&mainOnly=1"),
+    provideGantt(() => [
+      {
+        run: {
+          attempt: 1,
+          databaseId: 123,
+          status: "completed",
+          conclusion: "success",
+          event: "push",
+          headBranch: "main",
+          startedAt: "2026-07-28T18:00:00Z",
+          workflowName: CI_WORKFLOW,
+        },
+        jobs: [{
+          name: "Check dashboard labels",
+          status: "completed",
+          conclusion: "success",
+          started_at: "2026-07-28T18:00:05Z",
+          completed_at: "2026-07-28T18:01:05Z",
+          steps: [{
+            name: "🔎 Check",
+            number: 1,
+            conclusion: "success",
+            started_at: "2026-07-28T18:00:10Z",
+            completed_at: "2026-07-28T18:01:00Z",
+          }],
+        }],
+      },
+    ]),
+  );
+
+  assertEquals(response.status, 200);
+  assertEquals(response.headers.get("content-type"), "image/svg+xml");
+  const svg = await response.text();
+  assertStringIncludes(svg, "<svg");
+  assertStringIncludes(svg, ">Check dashboard labels</text>");
+  assertStringIncludes(svg, ">runs</text>");
+});
+
+Deno.test("/bench/gantt.svg finishes collection but skips an abandoned render", async () => {
   const controller = new AbortController();
   controller.abort();
-  const request = new Request("http://d/bench/gantt.png?limit=12", {
+  const request = new Request("http://d/bench/gantt.svg?limit=12", {
     signal: controller.signal,
   });
   const url = new URL(request.url);
   const originalTemp = Deno.makeTempFile;
+  const originalRemove = Deno.remove;
   let collected = false;
+  const created: string[] = [];
+  const removed: string[] = [];
   try {
-    Deno.makeTempFile = () => {
-      throw new Error("abandoned render created a temporary file");
+    Deno.makeTempFile = (opts?: Deno.MakeTempOptions) => {
+      const path = `/fake-tmp/${opts?.prefix ?? ""}${opts?.suffix ?? ""}`;
+      created.push(path);
+      return Promise.resolve(path);
     };
-    const response = await renderGanttRoute(request, url, () => {
+    Deno.remove = (path: string | URL) => {
+      removed.push(String(path));
+      return Promise.resolve();
+    };
+    const response = await renderGanttRoute(request, url, (
+      _source,
+      _options,
+      destination,
+    ) => {
       collected = true;
-      return Promise.resolve({ runs: [] });
+      assertEquals(destination, "/fake-tmp/ci-gantt-input-.json");
+      return Promise.resolve(0);
     });
     assert(collected);
+    // The collection writes into a temporary file, so that one exists; the
+    // chart image is never started, so no file is made for its output.
+    assertEquals(created, ["/fake-tmp/ci-gantt-input-.json"]);
+    assertEquals(removed, ["/fake-tmp/ci-gantt-input-.json"]);
     assertEquals(response.status, 204);
     assertEquals(response.headers.get("cache-control"), "no-store");
   } finally {
     Deno.makeTempFile = originalTemp;
+    Deno.remove = originalRemove;
   }
 });
 
-Deno.test("/bench/gantt.png stops rasterizing when its request is abandoned", async () => {
+Deno.test("/bench/gantt.svg stops rendering when its request is abandoned", async () => {
   const controller = new AbortController();
   const result = await gantt(
     "?limit=12",
@@ -465,7 +568,7 @@ Deno.test("/bench/gantt.png stops rasterizing when its request is abandoned", as
   assertEquals(result.leftover, []);
 });
 
-Deno.test("/bench/gantt.png drops an image completed after abandonment", async () => {
+Deno.test("/bench/gantt.svg drops an image completed after abandonment", async () => {
   const controller = new AbortController();
   const result = await gantt(
     "?limit=12",
@@ -477,7 +580,7 @@ Deno.test("/bench/gantt.png drops an image completed after abandonment", async (
   assertEquals(result.leftover, []);
 });
 
-Deno.test("/bench/gantt.png selects loom for both cached data and rendering", async () => {
+Deno.test("/bench/gantt.svg selects loom for both cached data and rendering", async () => {
   const { args, requested, input } = await gantt(
     "?repo=loom&limit=12&mainOnly=1",
   );
@@ -516,14 +619,14 @@ Deno.test("a commit Gantt image requests the selected run attempts", async () =>
   assertEquals(opt(selected.args, "--min-runs"), "1");
 });
 
-Deno.test("/bench/gantt.png: limit is clamped to the slider's range, junk falls back to 60", async () => {
+Deno.test("/bench/gantt.svg: limit is clamped to the slider's range, junk falls back to 60", async () => {
   assertEquals(opt((await gantt("?limit=500")).args, "--limit"), "150");
   assertEquals(opt((await gantt("?limit=0")).args, "--limit"), "1");
   assertEquals(opt((await gantt("?limit=abc")).args, "--limit"), "60");
   assertEquals(opt((await gantt("")).args, "--limit"), "60");
 });
 
-Deno.test("/bench/gantt.png: the checkboxes are off unless set to 1", async () => {
+Deno.test("/bench/gantt.svg: the checkboxes are off unless set to 1", async () => {
   const offResult = await gantt("?mainOnly=0&allConclusions=yes");
   const off = offResult.args;
   assert(!off.includes("--main-only"), "mainOnly=0 is not main-only");
@@ -537,7 +640,7 @@ Deno.test("/bench/gantt.png: the checkboxes are off unless set to 1", async () =
   assertEquals(onResult.requested.options.allConclusions, true);
 });
 
-Deno.test("/bench/gantt.png: automatic min-runs fits every window", async () => {
+Deno.test("/bench/gantt.svg: automatic min-runs fits every window", async () => {
   // A main-only window can be thin. The floor is capped at the run count so even a
   // one-run window still draws instead of having every job dropped.
   assertEquals(opt((await gantt("?mainOnly=1")).args, "--min-runs"), "2");
@@ -549,14 +652,14 @@ Deno.test("/bench/gantt.png: automatic min-runs fits every window", async () => 
   assertEquals(opt((await gantt("?limit=4")).args, "--min-runs"), "4");
 });
 
-Deno.test("/bench/gantt.png ignores the removed minRuns parameter", async () => {
+Deno.test("/bench/gantt.svg ignores the removed minRuns parameter", async () => {
   assertEquals(
     opt((await gantt("?mainOnly=1&minRuns=9")).args, "--min-runs"),
     "2",
   );
 });
 
-Deno.test("/bench/gantt.png: a failing ci-gantt is a 500, with its stderr in the server log only", async () => {
+Deno.test("/bench/gantt.svg: a failing ci-gantt is a 500, with its stderr in the server log only", async () => {
   const { res, logged, leftover } = await gantt("?limit=5", {
     success: false,
     stderr: "no runs matched --min-runs",
@@ -567,7 +670,7 @@ Deno.test("/bench/gantt.png: a failing ci-gantt is a 500, with its stderr in the
   assertEquals(leftover, []);
 });
 
-Deno.test("/bench/gantt.png: a spawn that throws is a 500, not an unhandled rejection", async () => {
+Deno.test("/bench/gantt.svg: a spawn that throws is a 500, not an unhandled rejection", async () => {
   const { res, logged, leftover } = await gantt("", {
     throws: new Error("deno: command not found"),
   });
@@ -578,7 +681,7 @@ Deno.test("/bench/gantt.png: a spawn that throws is a 500, not an unhandled reje
   assertEquals(leftover, []); // the temp file is removed even on the error path
 });
 
-Deno.test("/bench/gantt.png reports the performance-history boundary as a rate limit hit", async () => {
+Deno.test("/bench/gantt.svg reports the performance-history boundary as a rate limit hit", async () => {
   const originalError = console.error;
   console.error = () => {};
   try {
@@ -599,7 +702,7 @@ Deno.test("/bench/gantt.png reports the performance-history boundary as a rate l
   }
 });
 
-Deno.test("/bench/gantt.png returns a safe collection error to the page", async () => {
+Deno.test("/bench/gantt.svg returns a safe collection error to the page", async () => {
   const originalError = console.error;
   console.error = () => {};
   try {
@@ -635,6 +738,7 @@ Deno.test("ci-duration: no passing runs is gray, never a false green", async () 
 Deno.test("ci-duration: the median minutes set the status against the thresholds", async () => {
   const mins = (m: number) =>
     run({
+      created_at: new Date(Date.now() - m * 60_000).toISOString(),
       run_started_at: new Date(Date.now() - m * 60_000).toISOString(),
       updated_at: new Date().toISOString(),
     });
@@ -660,6 +764,21 @@ Deno.test("ci-duration: the median minutes set the status against the thresholds
   const v = await labsCiDuration.collect(ctx([mins(10), mins(10), mins(180)]));
   assertEquals([v.status, v.value], ["good", "10m"]);
   assertStringIncludes(v.sub ?? "", "last 3 passing runs"); // under the 20-run bar -> count window
+});
+
+Deno.test("ci-duration measures from landing through completion", async () => {
+  const now = Date.now();
+  const view = await labsCiDuration.collect(
+    ctx([
+      run({
+        created_at: new Date(now - 15 * 60_000).toISOString(),
+        run_started_at: new Date(now - 5 * 60_000).toISOString(),
+        updated_at: new Date(now).toISOString(),
+      }),
+    ]),
+  );
+
+  assertEquals(view.value, "15m");
 });
 
 Deno.test("ci-duration: an even window takes the mean of the two middle runs", () => {

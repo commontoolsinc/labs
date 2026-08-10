@@ -1,0 +1,27 @@
+{
+  "argumentSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+  },
+  "pattern": "cfc-trusted-component-examples/main.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "type": "unknown"
+      },
+      "totalExamples": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "totalExamples",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

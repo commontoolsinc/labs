@@ -5,10 +5,9 @@ import { verifyCompiledModuleBody } from "../src/sandbox/module-record-verifier.
 
 // These tests guard the format-agnostic SES module-item classification rules
 // (the `classifyModuleItems` core) through the live enforcement entry point,
-// `verifyCompiledModuleBody` — the ESM module-body verifier. They were
-// originally written against the retired AMD whole-bundle verifier; each case
-// is the same compiled module body, now in compiled-CommonJS form with a
-// `require()` import preamble instead of an AMD `define` factory.
+// `verifyCompiledModuleBody` — the module-body verifier. Each case is one
+// compiled module body in compiled-CommonJS form, with a `require()` import
+// preamble ahead of the top-level items under test.
 //
 // Broad accept/reject parity cases (mutable bindings, classes, generators,
 // IIFEs, raw mutable exports, import policy) live in
@@ -601,4 +600,25 @@ exports.default = (0, commonfabric_1.patternTool)(() => ({ ok: true }));
       "Only trusted builder calls, schema(), canonical function hardening, and canonical binding annotation are allowed at module scope in SES mode",
     );
   });
+});
+
+it("accepts multiUserTest's descriptor of trusted-builder results", () => {
+  // The one builder WITHOUT a callback: it tags a descriptor object whose
+  // leaves are other trusted-builder results, so each argument verifies as
+  // a trusted value expression rather than through the callback path. The
+  // real shape `cf test` compiles: patterns hoisted to module consts, then
+  // `multiUserTest({ setup, participants: { ... } })` as the default
+  // export. Pinned here deterministically — this branch was otherwise
+  // covered only when integration sharding happened to compile a
+  // multi-user fixture, which made the coverage gate's runner count
+  // flutter by scheduling rather than by anyone's diff.
+  const body = `
+${IMPORT}
+const __cfPattern_1 = (0, commonfabric_1.pattern)(() => ({}));
+const __cfPattern_2 = (0, commonfabric_1.pattern)(() => ({}));
+const __cfPattern_3 = (0, commonfabric_1.pattern)(() => ({}));
+exports.default = (0, commonfabric_1.multiUserTest)({ setup: __cfPattern_1, participants: { gideon: __cfPattern_2, fable: __cfPattern_3 } });
+`;
+
+  expect(() => verify(body)).not.toThrow();
 });

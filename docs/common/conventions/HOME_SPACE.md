@@ -27,7 +27,7 @@ provides.
 Work that counts people — daily active users, for example — rests on that
 assumption. What the assumption costs, and what the server records about the
 identity behind a session, are covered in
-[`docs/development/active-user-counting.md`](../../development/active-user-counting.md).
+[`docs/features/active-user-counting.md`](../../features/active-user-counting.md).
 
 ## Purpose
 
@@ -53,33 +53,25 @@ Favorites are stored on the home default pattern at
 
 ### Accessing Favorites
 
-Via `PieceManager`:
-
-```typescript
-// Shown inside a pattern body.
-const manager = new PieceManager(session, runtime);
-await manager.addFavorite(piece);
-await manager.removeFavorite(piece);
-const isFav = manager.isFavorite(piece);
-const favoritesCell = manager.getFavorites();
-```
-
-Via the favorites functions directly:
+Favorites are reached through the runtime's favorites manager
+(`FavoritesManager`, exported by `@commonfabric/runtime-client`), which reads
+and writes the home space's default pattern directly. A piece is addressed by
+the space it lives in plus its entity id:
 
 ```typescript
 // Shown for illustration only.
-import {
-  addFavorite,
-  removeFavorite,
-  isFavorite,
-  getHomeFavorites,
-} from "@commonfabric/piece";
+const favorites = rt.favorites();
 
-await addFavorite(runtime, piece);
-await removeFavorite(runtime, piece);
-const isFav = isFavorite(runtime, piece);
-const favoritesCell = getHomeFavorites(runtime);
+await favorites.addFavorite(space, pieceId);
+await favorites.removeFavorite(space, pieceId);
+
+const entries = await favorites.getFavorites();
+const unsubscribe = favorites.subscribeFavorites((list) => render(list));
 ```
+
+An entry is keyed by the piece's identity, so favoriting the same piece twice
+replaces its entry rather than adding a second one, and removing it reaches
+that entry whatever else the list holds.
 
 ## Profile
 
@@ -164,7 +156,7 @@ public under the temporary compatibility rule.
 For local development, prefer one shared PKCS8/PEM key imported into the browser
 and exported through `CF_IDENTITY` for CLI commands. The browser login screen has
 an `Import CLI Key` option for this workflow. See
-[`docs/development/SHARED_IDENTITY.md`](../../development/SHARED_IDENTITY.md).
+[`docs/features/shared-identity.md`](../../features/shared-identity.md).
 
 The browser shell derives identity from a mnemonic via
 `Identity.fromMnemonic()`, while `cf id derive` uses
@@ -229,5 +221,6 @@ Both the home pattern and the default app pattern follow the same mechanism:
    sourceless roots always remain pinned.
 
 
-Runtime internals (ACL initialization, PieceManager home-space detection) are
-documented in [docs/development/home-space-internals.md](../../development/home-space-internals.md).
+Runtime internals (ACL initialization, PiecesController home-space detection)
+are
+documented in [docs/features/home-space-internals.md](../../features/home-space-internals.md).

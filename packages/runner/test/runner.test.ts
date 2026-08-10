@@ -1339,6 +1339,51 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 1 });
   });
 
+  it("reports the start failure, not a failure of the cleanup it triggers", () => {
+    // A start that fails cancels what it already registered, and a cancel can
+    // itself throw -- a builtin winding down state it had not finished
+    // building, say. Were that allowed to escape it would REPLACE the error
+    // being handled, and what surfaced would describe the cleanup rather than
+    // the failure that caused it.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          // Registers a cancel that fails, then the node below fails the
+          // start, so the cancel runs against a half-built piece.
+          module: {
+            type: "raw",
+            implementation: (
+              _inputs: unknown,
+              _sendResult: unknown,
+              addCancel: (cancel: () => void) => void,
+            ) => {
+              addCancel(() => {
+                throw new Error("cleanup blew up");
+              });
+            },
+          } as unknown as Module,
+          inputs: {},
+          outputs: {},
+        },
+        {
+          // `instantiateRawNode` rejects a raw module with no implementation.
+          module: { type: "raw" } as unknown as Module,
+          inputs: {},
+          outputs: {},
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(space, "start failure beats cleanup");
+
+    expect(() => runtime.run(undefined, pattern, {}, resultCell)).toThrow(
+      /Raw module is not a function/,
+    );
+  });
+
   it("reports a missing stream marker when a handler's $event reads undefined", async () => {
     const pattern: Pattern = {
       argumentSchema: { type: "object", properties: {} },
@@ -1800,6 +1845,50 @@ describe("setup/start", () => {
     setupTrusted(runtime, undefined, pattern, { input: 9 }, resultCell);
     cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 9 });
+  });
+
+  it("does not retain direct ownership after stop wins a start race", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (v: { input: number }) => v.input,
+          },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(space, "stopped direct start");
+    setupTrusted(runtime, undefined, pattern, { input: 1 }, resultCell);
+    await runtime.start(resultCell);
+
+    // The redundant start resolves on the already-running fast path, so its
+    // claim to a direct lifetime is decided by the bookkeeping that runs when
+    // its promise settles — after the stop and the replacement run below.
+    const redundantStart = runtime.start(resultCell);
+    runtime.runner.stop(resultCell);
+    runTrusted(runtime, undefined, pattern, { input: 2 }, resultCell);
+
+    // The stop superseded the redundant start: it reports that it left
+    // nothing running and claims no lifetime for the replacement's
+    // registration.
+    await expect(redundantStart).resolves.toBe(false);
+
+    await resultCell.pull();
+    const link = resultCell.getAsNormalizedFullLink();
+    const resultKey = `${link.space}/${link.scope}/${link.id}` as const;
+    expect(runtime.runner.cancels.has(resultKey)).toBe(true);
+    runtime.runner.releaseChild(resultCell, undefined);
+    expect(runtime.runner.cancels.has(resultKey)).toBe(false);
   });
 
   it("stop and restart works with setup/start", async () => {

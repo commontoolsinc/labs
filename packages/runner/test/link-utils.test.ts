@@ -228,9 +228,9 @@ describe("link-utils", () => {
       });
     });
 
-    it("should parse toJSON to normalized links", () => {
+    it("should parse a cell's sigil link to normalized links", () => {
       const cell = runtime.getCell(space, "test");
-      const result = parseLink(cell.toJSON(), cell);
+      const result = parseLink(cell.toSigilLinkOrNull(), cell);
 
       expect(result).toEqual({
         id: expect.stringContaining("of:"),

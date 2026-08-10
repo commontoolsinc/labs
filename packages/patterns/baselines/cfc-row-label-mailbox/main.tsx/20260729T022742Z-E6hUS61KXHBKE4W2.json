@@ -1,0 +1,65 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "draftBody": {
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "session"
+          }
+        ],
+        "default": "",
+        "type": "string"
+      },
+      "draftFrom": {
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "session"
+          }
+        ],
+        "default": "",
+        "type": "string"
+      },
+      "draftTo": {
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "session"
+          }
+        ],
+        "default": "",
+        "type": "string"
+      }
+    },
+    "required": [
+      "draftFrom",
+      "draftTo",
+      "draftBody"
+    ],
+    "type": "object"
+  },
+  "pattern": "cfc-row-label-mailbox/main.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "seed": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      }
+    },
+    "required": [
+      "seed",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

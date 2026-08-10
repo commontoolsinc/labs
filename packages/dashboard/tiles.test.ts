@@ -16,9 +16,9 @@ import { prodErrors } from "./tiles/prod-errors.ts";
 import {
   GITHUB_LAG_DAYS,
   githubCiSpend,
-  projectMonthly,
-  settled,
 } from "./tiles/github-ci-spend.ts";
+import { projectMonthly, settled } from "./spend.ts";
+import { RUNNING_COLOR, STATUS_COLOR } from "./palette.ts";
 import { modelSpend } from "./tiles/model-spend.ts";
 import {
   benchmark,
@@ -44,6 +44,7 @@ function ctx(
 let nextRunId = 1;
 
 function run(over: Partial<Run>): Run {
+  const startedAt = new Date(Date.now() - 3_600_000).toISOString();
   return {
     id: nextRunId++,
     status: "completed",
@@ -52,7 +53,8 @@ function run(over: Partial<Run>): Run {
     event: "push",
     head_sha: "sha",
     display_title: "t",
-    run_started_at: new Date(Date.now() - 3_600_000).toISOString(),
+    created_at: startedAt,
+    run_started_at: startedAt,
     updated_at: new Date().toISOString(),
     html_url: "",
     head_commit: { message: "t (#1)" },
@@ -108,10 +110,10 @@ Deno.test(
     assertEquals(cells, 200);
     assertEquals(
       view.sub,
-      "first-try green · 199 counted of last 200 runs",
+      "first-try green · 199 of last 200 runs",
     );
     assert(
-      !(view.extra ?? "").includes("#e2504a"),
+      !(view.extra ?? "").includes(STATUS_COLOR.bad),
       "the 201st run must be outside the grid and percentage window",
     );
   },
@@ -132,16 +134,20 @@ Deno.test("labs ci trust grid: cell colors match trust scoring", async () => {
     ...(view.extra ?? "").matchAll(/background:(#[0-9a-f]+)/g),
   ].map((match) => match[1]);
   assertEquals(view.value, "25.0%");
-  assertEquals(colors.filter((color) => color === "#43c574").length, 1);
-  assertEquals(colors.filter((color) => color === "#e2504a").length, 3);
-  assertEquals(colors.filter((color) => color === "#6ea8fe").length, 1);
-  assertEquals(colors.filter((color) => color === "#7c828c").length, 2);
+  assertEquals(colors.filter((color) => color === STATUS_COLOR.good).length, 1);
+  assertEquals(colors.filter((color) => color === STATUS_COLOR.bad).length, 3);
+  assertEquals(colors.filter((color) => color === RUNNING_COLOR).length, 1);
+  assertEquals(
+    colors.filter((color) => color === STATUS_COLOR.unknown).length,
+    2,
+  );
 });
 
 Deno.test("ci-duration window: the 6h window when it has >= 20 runs, else the most recent 20", async () => {
   const now = Date.now();
   const at = (minsAgo: number) =>
     run({
+      created_at: new Date(now - minsAgo * 60_000).toISOString(),
       run_started_at: new Date(now - minsAgo * 60_000).toISOString(),
       updated_at: new Date(now - minsAgo * 60_000 + 5 * 60_000).toISOString(),
     });
@@ -166,6 +172,7 @@ Deno.test("ci-duration: only runs that passed end to end count", async () => {
   const now = Date.now();
   const at = (i: number, over: Partial<Run>) =>
     run({
+      created_at: new Date(now - i * 60_000).toISOString(),
       run_started_at: new Date(now - i * 60_000).toISOString(),
       updated_at: new Date(now - i * 60_000 + 5 * 60_000).toISOString(),
       ...over,
@@ -176,12 +183,47 @@ Deno.test("ci-duration: only runs that passed end to end count", async () => {
     at(1, { conclusion: "cancelled" }),
     at(2, { conclusion: "timed_out" }),
     at(3, { status: "in_progress", conclusion: null }),
+    at(4, { event: "workflow_dispatch", conclusion: "success" }),
   ];
-  // Only the 20 successful runs are counted; the rest are ignored.
+  // Only the 20 successful push runs are counted; the rest are ignored.
   assertStringIncludes(
     (await labsCiDuration.collect(ctx(runs))).sub ?? "",
     "20 passing runs in the last 6h",
   );
+});
+
+Deno.test("ci-duration: a run without a usable landing span is dropped", async () => {
+  const now = Date.now();
+  const usable = run({
+    created_at: new Date(now - 10 * 60_000).toISOString(),
+    run_started_at: new Date(now - 10 * 60_000).toISOString(),
+    updated_at: new Date(now).toISOString(),
+  });
+  // A final update at or before the landing trigger, and a landing trigger that
+  // does not parse. Both would otherwise reach the median as a duration of zero
+  // or NaN minutes.
+  const endsBeforeItLands = run({
+    created_at: new Date(now).toISOString(),
+    run_started_at: new Date(now).toISOString(),
+    updated_at: new Date(now - 60_000).toISOString(),
+  });
+  const unparseableLanding = run({
+    created_at: "the fourteenth of never",
+    run_started_at: new Date(now - 20 * 60_000).toISOString(),
+    updated_at: new Date(now).toISOString(),
+  });
+
+  const mixed = await labsCiDuration.collect(
+    ctx([usable, endsBeforeItLands, unparseableLanding]),
+  );
+  assertEquals(mixed.value, "10m");
+  assertStringIncludes(mixed.sub ?? "", "last 1 passing runs");
+
+  const none = await labsCiDuration.collect(
+    ctx([endsBeforeItLands, unparseableLanding]),
+  );
+  assertEquals(none.status, "unknown");
+  assertEquals(none.value, "—");
 });
 
 Deno.test("recent-runs: wide, failure tip -> bad, rows link to the landing PR", async () => {
@@ -564,10 +606,10 @@ Deno.test("benchmark: fewer than a week of days claims no trend", () => {
   assertEquals(trendPct(t([100, 500, 2000]), [100, 500, 2000]), 0);
 });
 
-Deno.test("benchmark: Theil–Sen trend ignores a lone spike", () => {
+Deno.test("benchmark: the trend ignores a lone spike", () => {
   const flat = [100, 100, 100, 100, 100, 100, 100, 100];
   const spiked = [...flat];
-  spiked[3] = 400; // a 4x outlier — least squares would flag it, the median slope doesn't
+  spiked[3] = 400; // a 4x outlier — a median level does not move to meet it
   const times = flat.map((_, i) => i * 86_400_000);
   assertEquals(trendStatus(trendPct(times, spiked)), "good");
 });

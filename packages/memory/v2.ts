@@ -7,7 +7,11 @@ import {
   valueFromJson,
 } from "@commonfabric/data-model/codec-json";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
-import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
+import type {
+  FabricPlainObject,
+  FabricValue,
+  SchemaPathSelector,
+} from "@commonfabric/api";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
@@ -20,7 +24,6 @@ export type BranchName = string;
 export type SessionId = string;
 export type SessionToken = string;
 export type CellScope = "space" | "user" | "session";
-export type JobId = `job:${string}`;
 export type Reference = string & {
   readonly __memoryV2Reference: unique symbol;
 };
@@ -170,13 +173,35 @@ export type PendingRead = {
    * The reader's pending-stack dependency set for this document. An array
    * lists EVERY pending layer the read's materialized view sat on; each
    * element must have resolved to an accepted commit for this commit to be
-   * applicable, and the staleness (conflict) check runs exactly once, based
-   * at the resolution of the HIGHEST element — the document's top-of-stack
-   * layer below the reader, which the array MUST include. A scalar is the
-   * degenerate single-layer form (also what pre-`pendingReadStacks` peers
-   * emit: top-of-stack only, carrying no lower-layer dependencies).
+   * applicable, and the staleness (conflict) check runs exactly once, from
+   * the basis the server selects (03-commit-model.md §3.6.3): the declared
+   * `basisSeq` when present, else the resolution of the HIGHEST element —
+   * the document's top-of-stack layer below the reader, which the array
+   * MUST include. A scalar is the degenerate single-layer form (also what
+   * pre-`pendingReadStacks` peers emit: top-of-stack only, carrying no
+   * lower-layer dependencies).
    */
   localSeq: number | number[];
+  /**
+   * The reader's confirmed basis for THIS document, in the SERVER's
+   * space-log seq space (an accepted-commit `seq`, NOT the session's
+   * localSeq space): the seq of the last accepted write to this document
+   * that the client's confirmed view reflected at build time, or 0 for a
+   * document its subscriptions never covered.
+   *
+   * When present, the staleness scan covers the FULL interval
+   * `(basisSeq, head]`, excluding only the session's own TRUE PREDECESSOR
+   * commits — those with a localSeq below the reader's, the accepted layers
+   * its materialized view included. An own write with a higher localSeq
+   * accepted first (out-of-order submission) conflicts like a foreign
+   * write, so soundness does not depend on wire-order discipline. This is
+   * the CT-1910 repair
+   * (`PendingStacks_Repaired.cfg` certifies it); when absent (a legacy
+   * client), staleness is based at the HIGHEST dependency's resolution seq,
+   * whose known unsoundness is recorded against INV-1 in
+   * docs/specs/memory-v2/09-invariants.md.
+   */
+  basisSeq?: number;
   /** See {@link ConfirmedRead.nonRecursive}. */
   nonRecursive?: boolean;
 };
@@ -187,7 +212,10 @@ export type SchedulerObservationCommit = {
     confirmed: ConfirmedRead[];
     pending: PendingRead[];
   };
-  schedulerObservation: unknown;
+  /** The observation, opaque here: this layer stores and forwards it, and
+   *  the runner owns its shape and validation. `FabricValue` says only what
+   *  the wire requires of it. */
+  schedulerObservation: FabricValue;
 };
 
 export type CommitPrecondition =
@@ -217,7 +245,10 @@ export type ClientCommit = {
   };
   operations: Operation[];
   preconditions?: CommitPrecondition[];
-  schedulerObservation?: unknown;
+  /** The observation, opaque here: this layer stores and forwards it, and
+   *  the runner owns its shape and validation. `FabricValue` says only what
+   *  the wire requires of it. */
+  schedulerObservation?: FabricValue;
   schedulerObservationBatch?: SchedulerObservationCommit[];
   codeCID?: Reference;
   branch?: BranchName;
@@ -227,19 +258,6 @@ export type ClientCommit = {
     baseBranch: BranchName;
     baseSeq: number;
   };
-};
-
-export type SessionOpenArgs = {
-  sessionId?: SessionId;
-  seenSeq?: number;
-  sessionToken?: SessionToken;
-};
-
-export type SessionOpenCommand = {
-  cmd: "session.open";
-  id: JobId;
-  protocol: typeof MEMORY_PROTOCOL;
-  args: SessionOpenArgs;
 };
 
 export type SessionOpenResult = {
@@ -256,8 +274,6 @@ export type MemoryProtocolFlags = {
   modernCellRep: boolean;
   persistentSchedulerState: boolean;
   commitPreconditions: boolean;
-  /** Legacy CT-1775 draft capability: index-keyed per-frame schema table. */
-  syncSchemaTable: boolean;
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
   /**
@@ -283,6 +299,27 @@ export type MemoryProtocolFlags = {
    * version always advertises it.
    */
   pendingReadStacks: boolean;
+  /**
+   * Server capability (CT-1927): the server stages a `caughtUpLocalSeq`
+   * catch-up obligation for every accept and every conflict rejection —
+   * other rejection kinds carry none — so the batched fan-out's next frame to the
+   * committing session carries a marker covering the verdict (an
+   * otherwise-empty frame if nothing it watches is dirty). The CLIENT keys
+   * verdict parking on this: it holds an accepted commit's promotion
+   * (pending overlay to confirmed mirror) until the marker covers it, so
+   * promotion extrapolates over a base reflecting the foreign novelty the
+   * accept was applied on top of. A client that sees this absent (an older
+   * server that stamps markers only for conflicts) applies verdicts
+   * immediately, as before. Inherent to the build, so a server of this
+   * version always advertises it.
+   */
+  verdictCatchUpMarkers: boolean;
+  /** The server can list live space-scoped entity identifiers without values. */
+  entityIdListing: boolean;
+  /** The server can page one stable entity-identifier snapshot. */
+  entityIdPagination: boolean;
+  /** The server can test one entity identifier without loading its value. */
+  entityIdLookup: boolean;
 };
 
 /**
@@ -292,10 +329,13 @@ export type WireMemoryProtocolFlags = {
   modernCellRep?: boolean;
   persistentSchedulerState?: boolean;
   commitPreconditions?: boolean;
-  syncSchemaTable?: boolean;
   syncSchemaTableV2?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   pendingReadStacks?: boolean;
+  verdictCatchUpMarkers?: boolean;
+  entityIdListing?: boolean;
+  entityIdPagination?: boolean;
+  entityIdLookup?: boolean;
 };
 
 export type HelloMessage = {
@@ -360,6 +400,26 @@ export type EntitySnapshot = {
 export type GraphQueryResult = {
   serverSeq: number;
   entities: EntitySnapshot[];
+};
+
+export type EntityIdListResult = {
+  serverSeq: number;
+  ids: EntityId[];
+  nextAfter?: EntityId;
+};
+
+/** Maximum number of entity identifiers carried by one protocol response. */
+export const MAX_ENTITY_ID_PAGE_SIZE = 1_000;
+
+export type EntityIdListOptions = {
+  after?: EntityId;
+  limit?: number;
+  expectedServerSeq?: number;
+};
+
+export type EntityIdLookupResult = {
+  serverSeq: number;
+  exists: boolean;
 };
 
 export type QueryWatchSpec = {
@@ -439,10 +499,30 @@ export type GraphQueryRequest = {
   query: GraphQuery;
 };
 
+export type EntityIdListRequest = {
+  type: "entity-id.list";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  after?: EntityId;
+  limit?: number;
+  expectedServerSeq?: number;
+};
+
+export type EntityIdLookupRequest = {
+  type: "entity-id.exists";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  id: EntityId;
+};
+
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
 
 /** Wire form of SQLite bind parameters. */
-export type SqliteParamsWire = ReadonlyArray<unknown> | Record<string, unknown>;
+export type SqliteParamsWire =
+  | ReadonlyArray<FabricValue>
+  | Record<string, FabricValue>;
 
 /** Reference to a cell-derived SQLite database: an opaque id (the handle cell's
  *  entity id) plus the declared table schemas (for additive create/migrate).
@@ -453,7 +533,7 @@ export type SqliteParamsWire = ReadonlyArray<unknown> | Record<string, unknown>;
  *  `space` (or absent) keeps the original unqualified name. */
 export type SqliteDbRef = {
   id: string;
-  tables?: Record<string, unknown>;
+  tables?: Record<string, FabricValue>;
   scope?: CellScope;
   /** The db's owner — the principal that created the SqliteDb cell. Resolves
    *  the per-row label rule's `dbOwner()` term (CFC Phase 3); a FIXED db
@@ -517,7 +597,7 @@ export function dbNeedsColumnProvenance(
 }
 
 export type SqliteQueryResult = {
-  rows: unknown[];
+  rows: FabricPlainObject[];
   /** Per-result-column origin, present ONLY when the db needs provenance for
    *  CFC labeling — any column declares `ifc` (Phase 2) or any table declares
    *  a per-row label rule (Phase 3); see `dbNeedsColumnProvenance`. An aliased
@@ -692,7 +772,10 @@ export type SchedulerActionSnapshotResult = {
   commitSeq: number | null;
   observedAtSeq: number;
   executionContextKey: SchedulerExecutionContextKey;
-  observation: unknown;
+  /** The observation, opaque here: this layer stores and forwards it, and the
+   *  runner owns its shape and validation. `FabricValue` says only what the
+   *  wire requires of it. */
+  observation: FabricValue;
   directDirtySeq?: number;
   staleSeq?: number;
   unknownReason?: string;
@@ -752,20 +835,13 @@ export type V2Error = {
 
 export type V2Result<Value> = { ok: Value } | { error: V2Error };
 
-export type TaskReturn<Result> = {
-  the: "task/return";
-  of: JobId;
-  is: Result;
-};
-
-export type Receipt<Result> = TaskReturn<Result>;
-export type LegacyClientMessage = SessionOpenCommand;
-export type LegacyServerMessage = TaskReturn<V2Result<unknown>>;
 export type ClientMessage =
   | HelloMessage
   | SessionOpenRequest
   | TransactRequest
   | GraphQueryRequest
+  | EntityIdListRequest
+  | EntityIdLookupRequest
   | SqliteQueryRequest
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
@@ -774,7 +850,7 @@ export type ClientMessage =
   | SessionAckRequest;
 export type ServerMessage =
   | HelloOkMessage
-  | ResponseMessage<unknown>
+  | ResponseMessage<FabricValue>
   | SessionEffectMessage
   | SessionRevokedMessage;
 
@@ -789,6 +865,7 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 let persistentSchedulerStateEnabled = false;
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
+let ownWriteEchoEnabled = true;
 
 /**
  * Ambient runtime flag for persistent scheduler observations and rehydration.
@@ -841,11 +918,31 @@ export function resetSyncSchemaTableConfig(): void {
   syncSchemaTableEnabled = true;
 }
 
+/**
+ * Ambient server behavior for own-write echo on sync frames (CT-1965): a
+ * session's own accepted patch-produced heads ride the covering frame as full
+ * post-apply documents, so promotion retires the pending overlay against
+ * delivered truth instead of extrapolating merged state it never saw. Set- and
+ * delete-produced heads stay elided — the client provably holds their outcome.
+ * Off restores full echo suppression (the pre-CT-1965 behavior). Not a
+ * protocol capability: every client generation handles the echoed frames.
+ */
+export function setOwnWriteEchoConfig(enabled?: boolean): void {
+  ownWriteEchoEnabled = enabled ?? true;
+}
+
+export function getOwnWriteEchoConfig(): boolean {
+  return ownWriteEchoEnabled;
+}
+
+export function resetOwnWriteEchoConfig(): void {
+  ownWriteEchoEnabled = true;
+}
+
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
   commitPreconditions: getCommitPreconditionsConfig(),
-  syncSchemaTable: false,
   // A build-inherent capability, not configuration: this build's engine always
   // evaluates row-label rules at commit (sqlite/commit-eval.ts), so it always
   // advertises the fact. Peers that see it absent (an older server) keep their
@@ -855,6 +952,15 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // pending reads (resolvePendingReads), so it always advertises it. Clients
   // that see it absent scalarize to top-of-stack before sending.
   pendingReadStacks: true,
+  // Likewise build-inherent: this build's server stages the catch-up
+  // obligation for every verdict (accepts included), so it always
+  // advertises it. Clients that see it absent apply verdicts immediately.
+  verdictCatchUpMarkers: true,
+  // The engine answers this request from its identifier index without
+  // selecting stored entity values.
+  entityIdListing: true,
+  entityIdPagination: true,
+  entityIdLookup: true,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
 });
 
@@ -904,14 +1010,6 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
-  const syncSchemaTable = value.syncSchemaTable;
-  if (
-    syncSchemaTable !== undefined &&
-    typeof syncSchemaTable !== "boolean"
-  ) {
-    return null;
-  }
-
   const syncSchemaTableV2 = value.syncSchemaTableV2;
   if (
     syncSchemaTableV2 !== undefined &&
@@ -936,11 +1034,42 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const verdictCatchUpMarkers = value.verdictCatchUpMarkers;
+  if (
+    verdictCatchUpMarkers !== undefined &&
+    typeof verdictCatchUpMarkers !== "boolean"
+  ) {
+    return null;
+  }
+
+  const entityIdListing = value.entityIdListing;
+  if (
+    entityIdListing !== undefined &&
+    typeof entityIdListing !== "boolean"
+  ) {
+    return null;
+  }
+
+  const entityIdPagination = value.entityIdPagination;
+  if (
+    entityIdPagination !== undefined &&
+    typeof entityIdPagination !== "boolean"
+  ) {
+    return null;
+  }
+
+  const entityIdLookup = value.entityIdLookup;
+  if (
+    entityIdLookup !== undefined &&
+    typeof entityIdLookup !== "boolean"
+  ) {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
     commitPreconditions: commitPreconditions === true,
-    syncSchemaTable: syncSchemaTable === true,
     syncSchemaTableV2: syncSchemaTableV2 === true,
     // Absent (an older peer) parses to false: the capability must be
     // POSITIVELY advertised for the runner to relax its write gate.
@@ -948,6 +1077,13 @@ export const parseMemoryProtocolFlags = (
     // Absent (an older server) parses to false: clients scalarize pending
     // reads to top-of-stack unless the array capability is advertised.
     pendingReadStacks: pendingReadStacks === true,
+    // Absent (an older server that stamps markers only for conflicts)
+    // parses to false: clients apply verdicts immediately instead of
+    // parking them on marker coverage.
+    verdictCatchUpMarkers: verdictCatchUpMarkers === true,
+    entityIdListing: entityIdListing === true,
+    entityIdPagination: entityIdPagination === true,
+    entityIdLookup: entityIdLookup === true,
   };
 };
 
@@ -960,10 +1096,13 @@ export const wireMemoryProtocolFlags = (
   modernCellRep: flags.modernCellRep,
   persistentSchedulerState: flags.persistentSchedulerState,
   commitPreconditions: flags.commitPreconditions,
-  syncSchemaTable: flags.syncSchemaTable,
   syncSchemaTableV2: flags.syncSchemaTableV2,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   pendingReadStacks: flags.pendingReadStacks,
+  verdictCatchUpMarkers: flags.verdictCatchUpMarkers,
+  entityIdListing: flags.entityIdListing,
+  entityIdPagination: flags.entityIdPagination,
+  entityIdLookup: flags.entityIdLookup,
 });
 
 /**
@@ -975,43 +1114,11 @@ export const wireMemoryProtocolFlags = (
  * tag-like strings): the client receive-path expansion gate (v2/client.ts),
  * `containsReservedSchemaRefSubstring` (v2/sync-schema-ref.ts), and the
  * engine's commit/stored-row probes (v2/engine.ts). A pinning test in
- * test/v2-sync-schema-table-test.ts fails loudly if verbatim embedding ever
+ * test/v2-sync-schema-table.test.ts fails loudly if verbatim embedding ever
  * stops holding.
  */
 export const encodeMemoryBoundary = (value: FabricValue): string =>
   jsonFromValue(value);
-
-/**
- * Encodes a wire payload that the type system cannot yet prove is a
- * `FabricValue`. Identical to `encodeMemoryBoundary()` in every respect but the
- * declared parameter type; prefer that one wherever it type-checks.
- *
- * The memory protocol's own message types are the callers here. They are
- * fabric values in fact — they cross this boundary on every request and
- * response, and would fail loudly if they were not — but they cannot be
- * *stated* as such, because several of their fields are declared `unknown`
- * (notably `SchedulerActionSnapshotResult.observation`, and `SqliteDbRef`'s
- * `tables`, whose `TableSchema` carries a `[key: string]: unknown` catch-all).
- * A type containing an `unknown` field is not assignable to `FabricValue`, so
- * the whole enclosing message is rejected however sound its actual contents.
- *
- * What is given up is narrower than it looks: the encoding *verifies*. A value
- * that no codec can represent throws — at any depth, naming the offending
- * subvalue ("Cannot encode new ArrayBuffer(...): no applicable codec"). So this
- * trades a compile-time guarantee for a runtime one that already ran, rather
- * than for no guarantee at all. What it does lose is the early, local report:
- * a bad value is caught at the encode, not at the assignment that introduced
- * it.
- *
- * Every use marks a declaration that has not been tightened yet, which is why
- * the name is what it is — the count of callers is the size of the remaining
- * job, and `grep` measures it. As those `unknown` fields acquire real types,
- * move the corresponding calls back to `encodeMemoryBoundary()`; when the last
- * one moves, delete this.
- */
-export const encodeMemoryBoundaryUnprovenFabricValue = (
-  value: unknown,
-): string => jsonFromValue(value as FabricValue);
 
 export const commitPreconditionValueHash = (value: FabricValue): string =>
   hashStringOf(encodeMemoryBoundary(value));

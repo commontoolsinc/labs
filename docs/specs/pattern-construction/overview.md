@@ -63,7 +63,7 @@ metadata, and lifts and handlers gain cause-based identifier stability.
   result cell through `result` metadata.
 - Setup merges defaults into the argument cell, materializes
   `derivedInternalCells` into result-relative internal cells, and binds the
-  serialized pattern graph via `unwrapOneLevelAndBindtoDoc`.
+  serialized pattern graph via `unwrapOneLevelAndBindToDoc`.
 - `startWithTx` iterates serialized nodes, resolves modules, and calls
   `instantiateNode`, turning aliases into real `Cell` instances through
   `sendValueToBinding`. The scheduler maintains reactivity.
@@ -81,7 +81,7 @@ metadata, and lifts and handlers gain cause-based identifier stability.
   `unsafe_binding`, so the new wrappers must keep the frame lifecycle intact.
 - `packages/runner/src/runner.ts` writes pattern and argument metadata links,
   schema metadata, and the raw internal manifest onto the result cell. It later
-  instantiates nodes by unwrapping aliases in `unwrapOneLevelAndBindtoDoc`.
+  instantiates nodes by unwrapping aliases in `unwrapOneLevelAndBindToDoc`.
   Snapshot generation should hook into this instantiation path to capture
   concrete cell ids.
 - `packages/runner/src/create-ref.ts` hashes the supplied `cause` and recorded
@@ -158,7 +158,7 @@ metadata, and lifts and handlers gain cause-based identifier stability.
 
 - Builder APIs (`pattern`, `lift`, `handler`, helper exports).
 - Runtime cell creation, alias resolution, and pattern instantiation.
-- Serialization (`json-utils.ts`, pattern manager persistence, result metadata).
+- Serialization (`to-encodable-form.ts`, pattern manager persistence, result metadata).
 - Tests and tooling that assume path-based aliases or reactive-only helpers.
 
 ## Implementation Plan

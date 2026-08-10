@@ -1,17 +1,24 @@
 {
+  // Dependency guide: ../../docs/development/DEPENDENCIES.md
   "name": "@commonfabric/test-support",
   "version": "0.1.0",
   "exports": {
     ".": "./src/mod.ts",
+    "./clock-preload": "./test/clock-preload.ts",
     "./compile-byte-cache": "./src/compile-byte-cache.ts",
     "./fixture-runner": "./src/fixture-runner.ts",
     "./isolated-deno": "./src/isolated-deno.ts"
   },
   "tasks": {
-    "test": "deno test --frozen=true --allow-env=CF_COMPILE_CACHE_FILE --allow-read --allow-write --allow-run=deno src/*.test.ts",
-    "check": "deno check src/**/*.ts",
-    "fmt": "deno fmt src/",
-    "lint": "deno lint src/"
+    // The tests spawn the Deno running them, and a bare `--allow-run=deno`
+    // would not permit that: Deno resolves the allowlist entry through `PATH`,
+    // which is a different binary whenever the shell's Deno is not the pinned
+    // one. A task line runs the Deno running the task, so asking that Deno for
+    // its own path allows exactly the one binary the tests start.
+    "test": "deno test --frozen=true --allow-env=CF_COMPILE_CACHE_FILE --allow-read --allow-write --allow-run=$(deno eval \"console.log(Deno.execPath())\") src/*.test.ts",
+    "check": "deno check src/**/*.ts test/clock-preload.ts",
+    "fmt": "deno fmt src/ test/",
+    "lint": "deno lint src/ test/"
   },
   "compilerOptions": {
     "strict": true,

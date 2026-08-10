@@ -4,23 +4,28 @@
 // month-to-date spend and the header shows the combined month-to-date total.
 //
 // GitHub's enhanced billing report supplies daily net Actions spend. Blacksmith
-// supplies an invoice total, daily runner cost, and a range total for sticky-disk
-// storage. The invoice is the month-to-date source of truth. The daily endpoints
-// supply the projection and chart, with storage assigned to days in proportion
-// to the daily cache footprint. A configured source that cannot be read shows
-// "$???" and makes the combined projection a lower bound.
+// supplies an all-in invoice total and daily runner cost. The invoice is the
+// month-to-date source of truth and the runner history supplies the chart. A
+// configured source that cannot be read shows "$???" and makes the combined
+// projection a lower bound.
 import type { Status, Tile, TileView } from "../types.ts";
 import {
   budgetStatus,
   friendlyError,
   github,
-  multiSparkline,
   readBudget,
-  SPARK_FADE,
   usd,
 } from "../lib.ts";
 import { REPO } from "../config.ts";
 import { BlacksmithClient, blacksmithRoutes } from "../blacksmith.ts";
+import {
+  calendarMonth,
+  DAY_MS,
+  settled,
+  SPEND_HISTORY_DAYS,
+  spendChart,
+  summarizeDailySpend,
+} from "../spend.ts";
 
 interface UsageItem {
   date: string;
@@ -43,6 +48,7 @@ interface DailySpend {
   byDay: Map<string, number>;
   mtd: number;
   projected: number;
+  estimateDays: number;
 }
 
 interface GitHubDollarSpend extends DailySpend {
@@ -70,15 +76,6 @@ interface BlacksmithDailyResponse {
   }>;
 }
 
-interface BlacksmithStickyDailyResponse {
-  dockerfile?: Array<{ date?: unknown; value?: unknown }>;
-  stickydisk?: Array<{ date?: unknown; value?: unknown }>;
-}
-
-interface BlacksmithStickyTotalResponse {
-  total_cost?: unknown;
-}
-
 const actionsOf = (report: { usageItems?: UsageItem[] }): UsageItem[] =>
   (report.usageItems ?? []).filter((item) =>
     String(item.product).toLowerCase() === "actions"
@@ -88,50 +85,9 @@ const usagePath = (org: string, year: number, month: number) =>
   `organizations/${org}/settings/billing/usage?year=${year}&month=${month}`;
 
 export const GITHUB_LAG_DAYS = 2;
-export const PROVIDER_LAG_DAYS = 1;
-export const MIN_WINDOW_DAYS = 14;
-const SPARK_DAYS = 45;
-const DAY_MS = 86_400_000;
+const BLACKSMITH_LAG_DAYS = 1;
 const GITHUB_COLOR = "#58a6ff";
 const BLACKSMITH_COLOR = "#f59e0b";
-
-export function settled(
-  daily: number[],
-  elapsedDays: number,
-  lagDays: number,
-): number[] {
-  let withData = daily.length;
-  while (withData > 0 && daily[withData - 1] === 0) withData--;
-  const known = Math.max(withData, elapsedDays - lagDays);
-  return daily.slice(0, Math.max(0, Math.min(daily.length, known)));
-}
-
-export function calendarMonth(
-  byDay: Map<string, number>,
-  year: number,
-  month0: number,
-): number[] {
-  const days = new Date(Date.UTC(year, month0 + 1, 0)).getUTCDate();
-  const prefix = `${year}-${String(month0 + 1).padStart(2, "0")}-`;
-  return Array.from(
-    { length: days },
-    (_, index) => byDay.get(prefix + String(index + 1).padStart(2, "0")) ?? 0,
-  );
-}
-
-export function projectMonthly(
-  mtd: number,
-  coveredThis: number,
-  daysInMonth: number,
-  lastMonthDaily: number[],
-): number {
-  const needFromLast = Math.max(0, MIN_WINDOW_DAYS - coveredThis);
-  const tail = needFromLast > 0 ? lastMonthDaily.slice(-needFromLast) : [];
-  const windowDays = coveredThis + tail.length;
-  if (windowDays <= 0) return mtd;
-  const windowSpend = mtd + tail.reduce((sum, daily) => sum + daily, 0);
-  return (windowSpend / windowDays) * daysInMonth;
-}
 
 function dayKey(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -169,41 +125,6 @@ function addGitHubDays(
   }
 }
 
-function summarizeDaily(
-  byDay: Map<string, number>,
-  now: Date,
-  lagDays: number,
-  measuredMtd?: number,
-  priorMonthDaily?: number[],
-): Omit<DailySpend, "byDay"> {
-  const year = now.getUTCFullYear();
-  const month0 = now.getUTCMonth();
-  const dayOfMonth = now.getUTCDate();
-  const thisMonth = calendarMonth(byDay, year, month0);
-  const dailyMtd = thisMonth.reduce((sum, amount) => sum + amount, 0);
-  const mtd = measuredMtd ?? dailyMtd;
-  const coveredThis = settled(thisMonth, dayOfMonth, lagDays).length;
-  const previousMonth = month0 === 0 ? 11 : month0 - 1;
-  const previousYear = month0 === 0 ? year - 1 : year;
-  const previous = calendarMonth(byDay, previousYear, previousMonth);
-  const lastMonthDaily = priorMonthDaily ??
-    settled(
-      previous,
-      previous.length + dayOfMonth,
-      lagDays,
-    );
-  const daysInMonth = new Date(Date.UTC(year, month0 + 1, 0)).getUTCDate();
-  return {
-    mtd,
-    projected: projectMonthly(
-      mtd,
-      coveredThis,
-      daysInMonth,
-      lastMonthDaily,
-    ),
-  };
-}
-
 class GitHubUsageShapeError extends Error {}
 
 async function githubDollarSpend(
@@ -231,7 +152,7 @@ async function githubDollarSpend(
   addGitHubDays(byDay, current);
   let priorMonthDaily: number[] = [];
   let immediatePrior = true;
-  let remaining = SPARK_DAYS - dayOfMonth;
+  let remaining = SPEND_HISTORY_DAYS - dayOfMonth;
   let previousYear = year;
   let previousMonth = month0;
   while (remaining > 0) {
@@ -289,12 +210,14 @@ async function githubDollarSpend(
   return {
     kind: "dollars",
     byDay,
-    ...summarizeDaily(
+    ...summarizeDailySpend(
       byDay,
       now,
-      GITHUB_LAG_DAYS,
-      mtd,
-      priorMonthDaily,
+      {
+        lagDays: GITHUB_LAG_DAYS,
+        measuredMtd: mtd,
+        priorMonthDaily,
+      },
     ),
     budget,
   };
@@ -340,28 +263,6 @@ function parseBlacksmithDaily(
   return byDay;
 }
 
-function parseBlacksmithFootprint(
-  response: BlacksmithStickyDailyResponse,
-): Map<string, number> {
-  if (
-    !Array.isArray(response.dockerfile) || !Array.isArray(response.stickydisk)
-  ) {
-    throw new Error("Blacksmith storage usage has an unexpected shape");
-  }
-  const byDay = new Map<string, number>();
-  for (const entries of [response.dockerfile, response.stickydisk]) {
-    for (const entry of entries) {
-      const day = dayKey(entry.date);
-      const bytes = finiteNumber(entry.value);
-      if (!day || bytes === null || bytes < 0) {
-        throw new Error("Blacksmith storage usage has an unexpected shape");
-      }
-      addDaily(byDay, day, bytes);
-    }
-  }
-  return byDay;
-}
-
 function parseBlacksmithInvoice(response: unknown): number {
   let amount: unknown = response;
   if (response && typeof response === "object") {
@@ -400,64 +301,6 @@ function parseBlacksmithBudget(response: unknown): number {
   return parsed;
 }
 
-function calendarDays(start: Date, end: Date): string[] {
-  const days: string[] = [];
-  const first = Date.UTC(
-    start.getUTCFullYear(),
-    start.getUTCMonth(),
-    start.getUTCDate(),
-  );
-  const last = Date.UTC(
-    end.getUTCFullYear(),
-    end.getUTCMonth(),
-    end.getUTCDate(),
-  );
-  for (let time = first; time <= last; time += DAY_MS) {
-    days.push(new Date(time).toISOString().slice(0, 10));
-  }
-  return days;
-}
-
-function monthSegments(start: Date, end: Date): Array<{
-  start: Date;
-  end: Date;
-}> {
-  const segments: Array<{ start: Date; end: Date }> = [];
-  let cursor = new Date(start);
-  while (cursor <= end) {
-    const nextMonth = Date.UTC(
-      cursor.getUTCFullYear(),
-      cursor.getUTCMonth() + 1,
-      1,
-    );
-    const segmentEnd = new Date(Math.min(end.getTime(), nextMonth - 1));
-    segments.push({ start: new Date(cursor), end: segmentEnd });
-    cursor = new Date(nextMonth);
-  }
-  return segments;
-}
-
-function addAllocatedStorage(
-  target: Map<string, number>,
-  footprint: Map<string, number>,
-  start: Date,
-  end: Date,
-  totalCost: number,
-): void {
-  const days = calendarDays(start, end);
-  if (days.length === 0 || totalCost === 0) return;
-  const totalWeight = days.reduce(
-    (sum, day) => sum + (footprint.get(day) ?? 0),
-    0,
-  );
-  for (const day of days) {
-    const share = totalWeight > 0
-      ? (footprint.get(day) ?? 0) / totalWeight
-      : 1 / days.length;
-    addDaily(target, day, totalCost * share);
-  }
-}
-
 async function blacksmithSpend(
   client: BlacksmithClient,
   org: string,
@@ -470,103 +313,29 @@ async function blacksmithSpend(
     now.getUTCDate(),
   );
   const end = new Date(today - 1);
-  const start = new Date(today - SPARK_DAYS * DAY_MS);
-  const segments = monthSegments(start, end);
-  const [daily, stickyDaily, stickyTotals, invoice, threshold] = await Promise
-    .all([
-      client.get<BlacksmithDailyResponse>(
-        blacksmithRoutes.daily(org, start, end),
-      ),
-      client.get<BlacksmithStickyDailyResponse>(
-        blacksmithRoutes.stickyDaily(org, start, end),
-      ),
-      Promise.all(
-        segments.map((segment) =>
-          client.get<BlacksmithStickyTotalResponse>(
-            blacksmithRoutes.stickyTotal(org, segment.start, segment.end),
-          )
-        ),
-      ),
-      client.get<unknown>(blacksmithRoutes.invoiceAmount(org)),
-      readProviderBudget
-        ? client.get<unknown>(blacksmithRoutes.spendingThreshold(org))
-        : Promise.resolve(undefined),
-    ]);
-  const compute = parseBlacksmithDaily(daily);
-  const footprint = parseBlacksmithFootprint(stickyDaily);
-  for (const [index, response] of stickyTotals.entries()) {
-    const totalCost = finiteNumber(response.total_cost);
-    if (totalCost === null || totalCost < 0) {
-      throw new Error("Blacksmith storage cost has an unexpected shape");
-    }
-    const segment = segments[index];
-    addAllocatedStorage(
-      compute,
-      footprint,
-      segment.start,
-      segment.end,
-      totalCost,
-    );
-  }
+  const start = new Date(today - SPEND_HISTORY_DAYS * DAY_MS);
+  const [daily, invoice, threshold] = await Promise.all([
+    client.get<BlacksmithDailyResponse>(
+      blacksmithRoutes.daily(org, start, end),
+    ),
+    client.get<unknown>(blacksmithRoutes.invoiceAmount(org)),
+    readProviderBudget
+      ? client.get<unknown>(blacksmithRoutes.spendingThreshold(org))
+      : Promise.resolve(undefined),
+  ]);
+  const byDay = parseBlacksmithDaily(daily);
   const measuredMtd = parseBlacksmithInvoice(invoice);
   return {
-    byDay: compute,
-    ...summarizeDaily(
-      compute,
+    byDay,
+    ...summarizeDailySpend(
+      byDay,
       now,
-      PROVIDER_LAG_DAYS,
-      measuredMtd,
+      {
+        lagDays: BLACKSMITH_LAG_DAYS,
+        measuredMtd,
+      },
     ),
     budget: parseBlacksmithBudget(threshold),
-  };
-}
-
-function spendChart(
-  sources: Array<{
-    spend: DailySpend | null;
-    color: string;
-  }>,
-  now: Date,
-  status: Status,
-): { chart: string; duration: number } {
-  const allDays = new Set<string>();
-  for (const source of sources) {
-    if (source.spend) {
-      for (const day of source.spend.byDay.keys()) allDays.add(day);
-    }
-  }
-  if (allDays.size < 2) return { chart: "", duration: 0 };
-  const sorted = [...allDays].sort();
-  const timeOf = (day: string) => Date.parse(`${day}T00:00:00Z`);
-  const end = timeOf(sorted[sorted.length - 1]);
-  const start = Math.max(timeOf(sorted[0]), end - (SPARK_DAYS - 1) * DAY_MS);
-  const grid: string[] = [];
-  for (let time = start; time <= end; time += DAY_MS) {
-    grid.push(new Date(time).toISOString().slice(0, 10));
-  }
-  const lines = sources.flatMap((source) =>
-    source.spend
-      ? [{
-        vals: grid.map((day) => source.spend!.byDay.get(day) ?? 0),
-        color: source.color,
-        label: usd(source.spend.mtd),
-      }]
-      : []
-  );
-  const monthStart = `${now.getUTCFullYear()}-${
-    String(now.getUTCMonth() + 1).padStart(2, "0")
-  }-01`;
-  const currentDays = grid.filter((day) => day >= monthStart).length;
-  const windowDays = Math.min(
-    grid.length,
-    Math.max(currentDays, MIN_WINDOW_DAYS),
-  );
-  return {
-    chart: multiSparkline(lines, {
-      fadeFrom: SPARK_FADE[status],
-      highlight: { count: windowDays },
-    }),
-    duration: end - start + DAY_MS,
   };
 }
 
@@ -739,8 +508,18 @@ export const githubCiSpend: Tile = {
       : "unknown";
     const chart = spendChart(
       [
-        { spend: githubDollars, color: GITHUB_COLOR },
-        { spend: blacksmithValue, color: BLACKSMITH_COLOR },
+        {
+          spend: githubDollars,
+          color: GITHUB_COLOR,
+          label: githubDollars ? usd(githubDollars.mtd) : undefined,
+          lagDays: GITHUB_LAG_DAYS,
+        },
+        {
+          spend: blacksmithValue,
+          color: BLACKSMITH_COLOR,
+          label: blacksmithValue ? usd(blacksmithValue.mtd) : undefined,
+          lagDays: BLACKSMITH_LAG_DAYS,
+        },
       ],
       now,
       status,

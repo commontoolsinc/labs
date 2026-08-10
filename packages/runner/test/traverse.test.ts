@@ -27,14 +27,14 @@ import {
   PointerCycleTracker,
   SchemaObjectTraverser,
   schemaTrackerCoversSelector,
+  setTraverseDiagnostics,
   type TraversalContext,
 } from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { Immutable } from "@commonfabric/utils/types";
-import { ContextualFlowControl } from "@commonfabric/runner";
+
 import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 
 // Helper function to get the SchemaObjectTraverser backed by a store map
@@ -682,12 +682,11 @@ describe("SchemaObjectTraverser array traversal", () => {
       const managedTx = new ManagedStorageTransaction(manager);
       const tx = new ExtendedStorageTransaction(managedTx);
       const tracker = new CompoundCycleTracker<
-        Immutable<FabricValue>,
+        FabricValue,
         JSONSchema | undefined
       >();
-      const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, cfc, schemaTracker);
+      const context = createTraversalContext(tracker, schemaTracker);
       const docAFoo: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -695,7 +694,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "foo"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.foo as FabricValue,
+        value: (revA.is as any).value.foo,
       };
       const docASelector = {
         path: ["value", "foo"],
@@ -745,12 +744,11 @@ describe("SchemaObjectTraverser array traversal", () => {
       const managedTx = new ManagedStorageTransaction(manager);
       const tx = new ExtendedStorageTransaction(managedTx);
       const tracker = new CompoundCycleTracker<
-        Immutable<FabricValue>,
+        FabricValue,
         JSONSchema | undefined
       >();
-      const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, cfc, schemaTracker);
+      const context = createTraversalContext(tracker, schemaTracker);
       const docACurrent: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -758,7 +756,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.current as FabricValue,
+        value: (revA.is as any).value.current,
       };
       const docASelector = { path: ["value", "current"], schema: true };
       const [curDoc, _selector1] = getAtPath(
@@ -809,12 +807,11 @@ describe("SchemaObjectTraverser array traversal", () => {
       const managedTx = new ManagedStorageTransaction(manager);
       const tx = new ExtendedStorageTransaction(managedTx);
       const tracker = new CompoundCycleTracker<
-        Immutable<FabricValue>,
+        FabricValue,
         JSONSchema | undefined
       >();
-      const cfc = new ContextualFlowControl();
       const schemaTracker = new MapSet<string, SchemaPathSelector>();
-      const context = createTraversalContext(tracker, cfc, schemaTracker);
+      const context = createTraversalContext(tracker, schemaTracker);
       const docACurrent: IMemorySpaceValueAttestation = {
         address: {
           id: revA.of,
@@ -822,7 +819,7 @@ describe("SchemaObjectTraverser array traversal", () => {
           path: ["value", "current"],
           space: "did:null:null",
         },
-        value: (revA.is as any).value.current as FabricValue,
+        value: (revA.is as any).value.current,
       };
       const docASelector = {
         path: ["value", "current"],
@@ -884,12 +881,11 @@ describe("getAtPath array index validation", () => {
     const managedTx = new ManagedStorageTransaction(manager);
     const tx = new ExtendedStorageTransaction(managedTx);
     const tracker: PointerCycleTracker = new CompoundCycleTracker<
-      Immutable<FabricValue>,
+      FabricValue,
       JSONSchema | undefined
     >();
-    const cfc = new ContextualFlowControl();
     const schemaTracker = new MapSetStringToPathSelectors(true);
-    const context = createTraversalContext(tracker, cfc, schemaTracker);
+    const context = createTraversalContext(tracker, schemaTracker);
 
     const doc: IMemorySpaceValueAttestation = {
       address: {
@@ -1368,7 +1364,7 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
     // receives that self-contained schema and must resolve the $ref before
     // deciding whether undefined is a valid substitute.
     const docValue = ["hello", true];
-    const { store, docUri, type } = makeArrayDoc(docValue as FabricValue[]);
+    const { store, docUri, type } = makeArrayDoc(docValue);
 
     const schema = {
       type: "array",
@@ -1386,7 +1382,7 @@ describe("SchemaObjectTraverser array element validation fallback priority", () 
           type,
           path: ["value"],
         },
-        value: docValue as FabricValue[],
+        value: docValue,
       });
 
     // After fix: $ref is resolved to { type: "string" }, which does not allow
@@ -1918,6 +1914,27 @@ describe("canBranchMatch", () => {
         { name: "Alice", extra: true },
       ),
     ).toBe(true);
+  });
+
+  it("treats the nominal brand key as present on a fabric value", () => {
+    // The generator's emitted shape for a FabricBytes-typed field: the
+    // brand has no runtime existence, so a fabric value satisfies it by
+    // construction; `length` is satisfied by the class accessor.
+    const branch = {
+      type: "object",
+      required: ["length", "@commonfabric/FabricSpecialObject"],
+    } as const;
+    expect(canBranchMatch(branch, new FabricBytes(new Uint8Array([1]))))
+      .toBe(true);
+    // No exemption for a plain record, which genuinely lacks the brand.
+    expect(canBranchMatch(branch, { length: 1 })).toBe(false);
+    // A key the primitive lacks still rejects it.
+    expect(
+      canBranchMatch(
+        { type: "object", required: ["x"] },
+        new FabricBytes(new Uint8Array([1])),
+      ),
+    ).toBe(false);
   });
 
   it("conservatively accepts property-level const (values may be unresolved links)", () => {
@@ -4197,5 +4214,268 @@ describe("canBranchMatch NaN and Infinity type handling", () => {
 
   it("rejects a finite number against a {type: 'string'} branch", () => {
     expect(canBranchMatch({ type: "string" }, 42)).toBe(false);
+  });
+});
+
+describe("MapSet size and totalValues", () => {
+  // Both getters exist only to fill in the slow-traverse report, so nothing
+  // else in the runtime reads them. Covering them here keeps them off the
+  // machine-speed-dependent path that report used to sit on.
+  it("counts keys and values in the reference-equality mode", () => {
+    const mapSet = new MapSet<string, string>();
+    expect(mapSet.size).toBe(0);
+    expect(mapSet.totalValues).toBe(0);
+
+    mapSet.add("a", "one");
+    mapSet.add("a", "two");
+    mapSet.add("b", "three");
+    // "two" is already present under "a" by reference, so it does not add.
+    mapSet.add("a", "two");
+
+    expect(mapSet.size).toBe(2);
+    expect(mapSet.totalValues).toBe(3);
+    expect(mapSet.get("a")).toEqual(new Set(["one", "two"]));
+    expect(mapSet.get("absent")).toBeUndefined();
+
+    // Emptying a key drops the key, so both counts fall.
+    mapSet.deleteValue("b", "three");
+    expect(mapSet.size).toBe(1);
+    expect(mapSet.totalValues).toBe(2);
+  });
+
+  it("counts keys and values in the hash-dedup mode", () => {
+    const mapSet = new MapSet<string, { n: number }>((value) => `${value.n}`);
+    expect(mapSet.size).toBe(0);
+    expect(mapSet.totalValues).toBe(0);
+
+    mapSet.add("a", { n: 1 });
+    mapSet.add("a", { n: 2 });
+    mapSet.add("b", { n: 3 });
+    // A distinct object that hashes the same is a duplicate here, unlike in
+    // the reference-equality mode above.
+    mapSet.add("a", { n: 2 });
+
+    expect(mapSet.size).toBe(2);
+    expect(mapSet.totalValues).toBe(3);
+
+    // Dropping a key takes the values it held with it.
+    mapSet.delete("a");
+    expect(mapSet.size).toBe(1);
+    expect(mapSet.totalValues).toBe(1);
+  });
+});
+
+describe("SchemaObjectTraverser slow-traverse reporting", () => {
+  const type = "application/json" as const;
+
+  // A store that advances the traversal's clock the first time it is read.
+  // `traverse()` is synchronous, so a test cannot step the clock from outside
+  // while a traversal is in flight; loading a linked doc is the hook that runs
+  // during one. If the traversal never reads the store, `advanceMs` never
+  // lands and the assertions fail rather than passing vacuously — which is
+  // what `readStore` is asserted on.
+  class ClockAdvancingStore extends Map<string, Revision<State>> {
+    advanced = false;
+    constructor(private readonly onFirstRead: () => void) {
+      super();
+    }
+    override get(key: string): Revision<State> | undefined {
+      if (!this.advanced) {
+        this.advanced = true;
+        this.onFirstRead();
+      }
+      return super.get(key);
+    }
+  }
+
+  // Runs one real traversal with `elapsed` pinned to `advanceMs`, and returns
+  // whatever the logger wrote. `performance.now` is what `logger.timeStart` /
+  // `timeEnd` read, so overriding it is what decides the elapsed time the gate
+  // sees — no sleeping, and no dependence on how fast this machine is. The
+  // package's fake clock has already replaced `performance.now` with its own
+  // stub, so the property is saved and put back rather than assumed native.
+  function traverseWithElapsed(
+    advanceMs: number,
+  ): { warnings: string[]; readStore: boolean } {
+    const targetUri = "of:slow-traverse-target" as URI;
+    const docUri = "of:slow-traverse-doc" as URI;
+    // The container links into the target, so resolving it makes the traversal
+    // load the target out of the store — the moment the clock advances.
+    const docValue = {
+      employeeName: {
+        "/": {
+          [LINK_V1_TAG]: { id: targetUri, path: ["employees", "0", "name"] },
+        },
+      },
+    };
+
+    let now = 1000;
+    const store = new ClockAdvancingStore(() => {
+      now += advanceMs;
+    });
+    store.set(`${targetUri}/${type}`, {
+      the: type,
+      of: targetUri as Entity,
+      is: { value: { employees: [{ name: "Bob" }] } },
+      cause: hashOf({ the: type, of: targetUri as Entity }),
+      since: 1,
+    });
+    store.set(`${docUri}/${type}`, {
+      the: type,
+      of: docUri as Entity,
+      is: { value: docValue },
+      cause: hashOf({ the: type, of: docUri as Entity }),
+      since: 2,
+    });
+
+    const traverser = getTraverser(store, { path: ["value"], schema: true });
+    const doc: IMemorySpaceValueAttestation = {
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    };
+
+    const warnings: string[] = [];
+    const savedWarn = console.warn;
+    const savedNow = performance.now;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map((arg) => String(arg)).join(" "));
+    };
+    Reflect.set(performance, "now", () => now);
+    try {
+      traverser.traverse(doc);
+    } finally {
+      Reflect.set(performance, "now", savedNow);
+      console.warn = savedWarn;
+    }
+    return { warnings, readStore: store.advanced };
+  }
+
+  it("reports a traversal that crosses the threshold", () => {
+    const { warnings, readStore } = traverseWithElapsed(150);
+
+    expect(readStore).toBe(true);
+    expect(warnings.length).toBe(1);
+    const report = warnings[0];
+    expect(report).toContain("slow-traverse");
+    expect(report).toContain("150ms");
+    expect(report).toContain("doc=of:slow-traverse-doc/application/json");
+    // The container and the doc it links into were both tracked, so the report
+    // is reading live traversal state rather than a zeroed-out traverser.
+    expect(report).toContain("trackerKeys=2");
+    expect(report).toContain("trackerVals=2");
+    expect(report).toContain("traverseSchema=1");
+    expect(report).toContain("maxDepth=1");
+    // docVisits is populated only under CF_TRAVERSE_DIAGNOSTICS=1.
+    expect(report).toContain("topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)");
+  });
+
+  it("stays quiet for a traversal well under the threshold", () => {
+    const { warnings, readStore } = traverseWithElapsed(5);
+
+    expect(readStore).toBe(true);
+    expect(warnings).toEqual([]);
+  });
+
+  it("stays quiet at the threshold exactly, and reports one ms past it", () => {
+    // The gate is `elapsed > SLOW_TRAVERSE_MS`, so 100 is silent and 101 is
+    // not. Pinning both sides keeps a later edit from turning it into `>=`
+    // without a test noticing.
+    expect(traverseWithElapsed(100).warnings).toEqual([]);
+    expect(traverseWithElapsed(101).warnings.length).toBe(1);
+  });
+
+  // Runs a slow traversal over a container that links into `targetCount`
+  // separate docs, linking target `i` exactly `i + 1` times, so every target
+  // ends with a different visit count. Ids are long enough to be truncated in
+  // the report.
+  function traverseLinkingIntoManyDocs(targetCount: number): string[] {
+    const docUri = "of:slow-traverse-many-container" as URI;
+    const targetUri = (i: number) =>
+      `of:slow-traverse-linked-document-${i}` as URI;
+    const properties: Record<string, JSONSchema> = {};
+    const docValue: Record<string, FabricValue> = {};
+    for (let i = 0; i < targetCount; i++) {
+      for (let link = 0; link <= i; link++) {
+        docValue[`p${i}_${link}`] = {
+          "/": { [LINK_V1_TAG]: { id: targetUri(i), path: ["name"] } },
+        };
+        properties[`p${i}_${link}`] = { type: "string" };
+      }
+    }
+
+    let now = 1000;
+    const store = new ClockAdvancingStore(() => {
+      now += 150;
+    });
+    for (let i = 0; i < targetCount; i++) {
+      const of = targetUri(i) as Entity;
+      store.set(`${of}/${type}`, {
+        the: type,
+        of,
+        is: { value: { name: `name-${i}` } },
+        cause: hashOf({ the: type, of }),
+        since: 1,
+      });
+    }
+    store.set(`${docUri}/${type}`, {
+      the: type,
+      of: docUri as Entity,
+      is: { value: docValue },
+      cause: hashOf({ the: type, of: docUri as Entity }),
+      since: 2,
+    });
+
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schema: { type: "object", properties },
+    });
+    const doc: IMemorySpaceValueAttestation = {
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
+      value: docValue,
+    };
+
+    const warnings: string[] = [];
+    const savedWarn = console.warn;
+    const savedNow = performance.now;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map((arg) => String(arg)).join(" "));
+    };
+    Reflect.set(performance, "now", () => now);
+    setTraverseDiagnostics(true);
+    try {
+      traverser.traverse(doc);
+    } finally {
+      setTraverseDiagnostics(undefined);
+      Reflect.set(performance, "now", savedNow);
+      console.warn = savedWarn;
+    }
+    return warnings;
+  }
+
+  it("names the five most-visited docs when diagnostics are on", () => {
+    const warnings = traverseLinkingIntoManyDocs(6);
+
+    expect(warnings.length).toBe(1);
+    // Six targets plus the container were visited, and all seven are counted.
+    expect(warnings[0]).toContain("uniqueDocs=7");
+
+    const listed = /topDocs=(.*)$/.exec(warnings[0])![1].trim().split(" ");
+    // Seven docs were visited and five are named: the field is capped.
+    expect(listed.length).toBe(5);
+    // Each entry is an id cut to its first 20 characters, then its count.
+    for (const entry of listed) {
+      expect(entry).toMatch(/^.{20}\.\.=\d+$/);
+    }
+    // Most-visited first. Target `i` was linked `i + 1` times, so the two
+    // least-visited targets are the ones the cap dropped.
+    const counts = listed.map((entry) => Number(entry.split("=")[1]));
+    expect(counts).toEqual([...counts].sort((a, b) => b - a));
+    expect(counts).not.toContain(1);
+    expect(counts).not.toContain(2);
+  });
+
+  it("collects nothing when diagnostics are off", () => {
+    // The default, and what every job that measures coverage runs under.
+    expect(traverseWithElapsed(150).warnings[0]).toContain("uniqueDocs=0");
   });
 });

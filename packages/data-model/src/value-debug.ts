@@ -1,6 +1,4 @@
-/**
- * Debugging-ish helpers for `FabricValue`s.
- */
+/** Debugging-ish helpers for `FabricValue`s. */
 
 import { isPlainObject } from "@commonfabric/utils/types";
 
@@ -9,7 +7,14 @@ import {
   FabricPrimitive,
   FabricSpecialObject,
 } from "./interface.ts";
-import { codecOf } from "@/codec-common/index.ts";
+// Imported from its own module rather than the package barrel, deliberately:
+// the barrel pulls in every codec, and three of those import
+// `ProblematicValue` -- a `BaseFabricInstance` subclass. Going through the
+// barrel would make this module part of a cycle with the fabric base classes,
+// whose custom inspectors import it, and an `extends` clause evaluated inside
+// that cycle fails with "Cannot access 'BaseFabricInstance' before
+// initialization". `codecOf.ts` itself is a leaf.
+import { codecOf } from "@/codec-common/codecOf.ts";
 
 /**
  * Sentinel marker used to wrap content that should appear unquoted in the
@@ -40,15 +45,17 @@ function unquoteMarked(json: string): string {
   });
 }
 
-/**
- * Helper class for rendering debug-string representations of values.
- */
+/** Helper class for rendering debug-string representations of values. */
 class DebugStringifier {
   #circles = new Set<object>();
   #unusedCircles = new Set<object>();
   #indent: number | undefined;
   #value: unknown;
 
+  /**
+   * Constructs an instance which renders `value`, using `indent` spaces per
+   * level when given and a single-line rendering when not.
+   */
   constructor(value: unknown, indent?: number) {
     this.#value = value;
     this.#indent = indent;

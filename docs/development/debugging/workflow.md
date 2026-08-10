@@ -19,16 +19,12 @@ Fix all type errors before deploying. Most issues are caught here.
 
 ### 3. Inspect Cell Values
 
-Use `<cf-cell-context>` for on-demand value inspection:
-
-```tsx
-// Shown as JSX element children.
-<cf-cell-context $cell={result} label="Result">
-  <div>{result.value}</div>
-</cf-cell-context>
-```
-
-Hold **Alt** and hover to access debugging toolbar (val, id, watch/unwatch).
+Right-click a rendered piece and choose **Data** to see its live argument and
+result values, or **Actions** to dispatch an event to one of its handler
+streams. The menu (`cf-piece-menu`) comes with `cf-render`, so any host that
+renders pieces has it; see
+[COMPONENTS.md](../../common/components/COMPONENTS.md) under "The piece
+context menu".
 
 ### 4. Inspect Deployed Piece
 
@@ -89,7 +85,6 @@ See [console-commands](./console-commands.md) for the full reference.
 
 ## See Also
 
-- [@CELL_CONTEXT](../../common/components/CELL_CONTEXT.md) - Cell debugging tool details
 - [Console Commands](./console-commands.md) - Browser console reference
-- [Logger Internals](../logger-internals.md) - Creating loggers in runtime code
+- [Logger Internals](../../features/logger-internals.md) - Creating loggers in runtime code
 - [cli-debugging](./cli-debugging.md) - CLI-based debugging and testing workflows

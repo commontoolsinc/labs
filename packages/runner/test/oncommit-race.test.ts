@@ -11,6 +11,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { getLogger } from "@commonfabric/utils/logger";
 
 const signer = await Identity.fromPassphrase("test oncommit race");
 const space = signer.did();
@@ -87,10 +88,10 @@ describe("onCommit callback final outcome", () => {
     expect(pieceRegistryCell.get()).toEqual([]);
   });
 
-  it("fires onCommit once after a conflict is retried and lands", async () => {
+  it("fires onCommit once when the storage commit promise rejects", async () => {
     const streamCell = runtime.getCell<number>(
       space,
-      "fix-demo-stream",
+      "rejected-storage-promise-stream",
       undefined,
       tx,
     );
@@ -99,44 +100,193 @@ describe("onCommit callback final outcome", () => {
     tx = runtime.edit();
     await runtime.storageManager.synced();
 
-    let attempts = 0;
+    const rejection = Object.assign(
+      new Error("forced event commit promise rejection"),
+      { name: "TransactionError" },
+    );
+    let handlerCallCount = 0;
     runtime.scheduler.addEventHandler(
       (handlerTx, event) => {
-        attempts++;
-        streamCell.withTx(handlerTx).set(event + 1);
+        handlerCallCount++;
+        streamCell.withTx(handlerTx).set(event);
+        handlerTx.tx.commit = () => Promise.reject(rejection);
       },
       streamCell.getAsNormalizedFullLink(),
     );
 
-    // Reject the first commit the handler attempts with a transient conflict —
-    // a genuinely retryable failure, unlike a local abort. The scheduler retries
-    // within the backpressure window and the second attempt lands. onCommit must
-    // still fire exactly once, for the winning attempt, not once per attempt.
-    const server = (storageManager as unknown as {
-      server(): {
-        transact: (m: { requestId: string }) => Promise<unknown>;
+    const statuses: string[] = [];
+    const errors: unknown[] = [];
+    runtime.scheduler.queueEvent(
+      streamCell.getAsNormalizedFullLink(),
+      1,
+      true,
+      (committedTx) => {
+        const status = committedTx.status();
+        statuses.push(status.status);
+        if (status.status === "error") {
+          errors.push(status.error);
+        }
+      },
+    );
+
+    await runtime.scheduler.idleWithPendingCommits();
+    await Promise.resolve();
+
+    expect(handlerCallCount).toBe(1);
+    expect(statuses).toEqual(["error"]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({
+      name: "StorageTransactionAborted",
+      reason: rejection,
+    });
+    expect(streamCell.get()).toBe(0);
+  });
+
+  for (
+    const {
+      testName,
+      streamId,
+      rejection,
+      expectedMarker,
+    } of [
+      {
+        testName: "normalizes a plain permanent rejection",
+        streamId: "plain-permanent-rejection-stream",
+        rejection: {
+          name: "PreconditionFailedError",
+          message: "receipt already exists",
+          precondition: "receipt-exists",
+        },
+        expectedMarker: {
+          error: "receipt already exists",
+          permanentRejection: "receipt-exists",
+          terminal: "permanent",
+        },
+      },
+      {
+        testName: "normalizes malformed plain rejection fields",
+        streamId: "plain-malformed-rejection-stream",
+        rejection: {
+          name: 42,
+          message: 42,
+          precondition: "invalid-precondition",
+        },
+        expectedMarker: {
+          error: "Storage commit promise rejected",
+        },
+      },
+    ] as const
+  ) {
+    it(testName, async () => {
+      const streamCell = runtime.getCell<number>(
+        space,
+        streamId,
+        undefined,
+        tx,
+      );
+      streamCell.set(0);
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.storageManager.synced();
+
+      let handlerCallCount = 0;
+      runtime.scheduler.addEventHandler(
+        (handlerTx, event) => {
+          handlerCallCount++;
+          streamCell.withTx(handlerTx).set(event);
+          handlerTx.tx.commit = () => Promise.reject(rejection);
+        },
+        streamCell.getAsNormalizedFullLink(),
+      );
+
+      const commitMarkers: unknown[] = [];
+      const listener = (event: Event) => {
+        const marker = (event as CustomEvent<{ marker: { type: string } }>)
+          .detail.marker;
+        if (marker.type === "scheduler.event.commit") {
+          commitMarkers.push(marker);
+        }
       };
-    }).server();
-    const originalTransact = server.transact.bind(server);
-    // Reject every commit until the handler has run a second time, so the
-    // handler's own first commit is the one that conflicts (rejecting only "the
-    // next transact" can hit an unrelated observation commit instead). Once the
-    // retry re-runs the handler, its commit lands.
-    server.transact = (message: { requestId: string }) => {
-      if (attempts < 2) {
-        return Promise.resolve({
-          type: "response",
-          requestId: message.requestId,
-          error: {
-            name: "ConflictError",
-            message: "forced retry-then-land conflict",
+      runtime.telemetry.addEventListener("telemetry", listener);
+      try {
+        const statuses: string[] = [];
+        runtime.scheduler.queueEvent(
+          streamCell.getAsNormalizedFullLink(),
+          1,
+          true,
+          (committedTx) => {
+            statuses.push(committedTx.status().status);
           },
-        });
+        );
+
+        await runtime.scheduler.idleWithPendingCommits();
+        await Promise.resolve();
+
+        expect(handlerCallCount).toBe(1);
+        expect(statuses).toEqual(["error"]);
+        expect(commitMarkers).toHaveLength(1);
+        expect(commitMarkers[0]).toMatchObject(expectedMarker);
+        if (!("terminal" in expectedMarker)) {
+          expect(commitMarkers[0]).not.toHaveProperty("permanentRejection");
+          expect(commitMarkers[0]).not.toHaveProperty("terminal");
+        }
+        expect(streamCell.get()).toBe(0);
+      } finally {
+        runtime.telemetry.removeEventListener("telemetry", listener);
       }
-      return originalTransact(message);
-    };
+    });
+  }
+
+  it("settles when event commit telemetry throws", async () => {
+    const streamCell = runtime.getCell<number>(
+      space,
+      "commit-result-handling-error-stream",
+      undefined,
+      tx,
+    );
+    streamCell.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+    await runtime.storageManager.synced();
+
+    let handlerCallCount = 0;
+    runtime.scheduler.addEventHandler(
+      (handlerTx, event) => {
+        handlerCallCount++;
+        streamCell.withTx(handlerTx).set(event);
+      },
+      streamCell.getAsNormalizedFullLink(),
+    );
 
     const statuses: string[] = [];
+    const telemetryError = new Error("commit result telemetry failed");
+    const errorReports: Array<{
+      readonly messages: unknown[];
+      readonly statuses: string[];
+    }> = [];
+    const originalSubmit = runtime.telemetry.submit.bind(runtime.telemetry);
+    const schedulerLogger = getLogger("scheduler");
+    const originalLoggerErrorDescriptor = Object.getOwnPropertyDescriptor(
+      schedulerLogger,
+      "error",
+    );
+    const originalLoggerError = schedulerLogger.error;
+    let commitMarkerAttempts = 0;
+    runtime.telemetry.submit = (marker) => {
+      if (marker.type === "scheduler.event.commit") {
+        commitMarkerAttempts++;
+        throw telemetryError;
+      }
+      originalSubmit(marker);
+    };
+    schedulerLogger.error = (key, ...messages) => {
+      if (
+        messages.includes("Event handler commit result handling failed:")
+      ) {
+        errorReports.push({ messages, statuses: [...statuses] });
+      }
+      originalLoggerError.call(schedulerLogger, key, ...messages);
+    };
     try {
       runtime.scheduler.queueEvent(
         streamCell.getAsNormalizedFullLink(),
@@ -147,20 +297,84 @@ describe("onCommit callback final outcome", () => {
         },
       );
 
-      // The first commit fails on the server asynchronously; the scheduler's
-      // backoff retry re-runs the handler. Advancing the clock fires the
-      // backoff timer so the retry lands before we assert.
+      await runtime.scheduler.idleWithPendingCommits();
+      await Promise.resolve();
+
+      expect(handlerCallCount).toBe(1);
+      expect(commitMarkerAttempts).toBe(1);
+      expect(statuses).toEqual(["done"]);
+      expect(errorReports).toHaveLength(1);
+      expect(errorReports[0]?.statuses).toEqual(["done"]);
+      expect(errorReports[0]?.messages.at(-1)).toBe(telemetryError);
+      expect(streamCell.get()).toBe(1);
+    } finally {
+      runtime.telemetry.submit = originalSubmit;
+      if (originalLoggerErrorDescriptor) {
+        Object.defineProperty(
+          schedulerLogger,
+          "error",
+          originalLoggerErrorDescriptor,
+        );
+      } else {
+        Reflect.deleteProperty(schedulerLogger, "error");
+      }
+    }
+  });
+
+  it(
+    "fires onCommit once after a rejected conflict is retried and lands",
+    async () => {
+      const streamCell = runtime.getCell<number>(
+        space,
+        "fix-demo-stream",
+        undefined,
+        tx,
+      );
+      streamCell.set(0);
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.storageManager.synced();
+
+      const rejection = Object.assign(
+        new Error("forced retry-then-land conflict"),
+        { name: "ConflictError" },
+      );
+      let attempts = 0;
+      runtime.scheduler.addEventHandler(
+        (handlerTx, event) => {
+          attempts++;
+          streamCell.withTx(handlerTx).set(event + 1);
+          if (attempts === 1) {
+            handlerTx.tx.commit = () => Promise.reject(rejection);
+          }
+        },
+        streamCell.getAsNormalizedFullLink(),
+      );
+
+      // Reject the first commit promise with a transient conflict. The
+      // scheduler classifies the rejection, retries within the backpressure
+      // window, and runs onCommit only for the second attempt that lands.
+      const statuses: string[] = [];
+      runtime.scheduler.queueEvent(
+        streamCell.getAsNormalizedFullLink(),
+        1,
+        true,
+        (committedTx) => {
+          statuses.push(committedTx.status().status);
+        },
+      );
+
+      // Advancing the clock fires the backoff timer so the retry lands before
+      // the assertions.
       await clock.tick(2_000);
       await runtime.idle();
       await runtime.storageManager.synced();
-    } finally {
-      server.transact = originalTransact;
-    }
 
-    expect(attempts).toBe(2);
-    expect(statuses).toEqual(["done"]);
-    expect(streamCell.get()).toBe(2);
-  });
+      expect(attempts).toBe(2);
+      expect(statuses).toEqual(["done"]);
+      expect(streamCell.get()).toBe(2);
+    },
+  );
 
   it("prepares scheduler-managed relevant writes before commit", async () => {
     const streamCell = runtime.getCell<number>(
@@ -210,6 +424,11 @@ describe("onCommit callback final outcome", () => {
     );
 
     await runtime.idle();
+    // idleWithPendingCommits spans the event commit AND its disposition
+    // handling (the tracked handled-chain), which is what delivers the
+    // onCommit callback; synced() alone stops at storage settlement, a few
+    // microtasks before the callback runs.
+    await runtime.scheduler.idleWithPendingCommits();
     await runtime.storageManager.synced();
 
     expect(statuses).toEqual(["done"]);

@@ -32,6 +32,7 @@ export class FabricEpochDays extends BaseFabricPrimitive
   /** Days from POSIX Epoch. Negative values represent pre-epoch dates. */
   readonly #value: bigint;
 
+  /** Constructs an instance representing `value` days from the Epoch. */
   constructor(value: bigint) {
     super();
     this.#value = value;
@@ -49,6 +50,7 @@ export class FabricEpochDays extends BaseFabricPrimitive
 
   static #codec = Object.freeze(
     new (class EpochDaysCodec extends BaseFabricCodec {
+      /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.EpochDays, FabricEpochDays);
       }

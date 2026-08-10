@@ -35,8 +35,6 @@ import type {
   IStorageTransaction,
   IStorageTransactionInconsistent,
   ITransactionJournal,
-  ITransactionReader,
-  ITransactionWriter,
   ITransactionWriteRequest,
   IWriteAttempt,
   IWriteOptions,
@@ -44,12 +42,12 @@ import type {
   MemorySpace,
   NativeStorageCommit,
   NativeStorageCommitOperation,
-  ReaderError,
   ReadError,
   Result,
   StorageTransactionFailed,
   StorageTransactionRejected,
   StorageTransactionStatus,
+  TransactionCommitOptions,
   TransactionReactivityLog,
   TransactionReadDetail,
   TransactionWriteDetail,
@@ -63,24 +61,27 @@ import {
   claim,
   load as loadInline,
   read as readAttestation,
+  StateInconsistency,
 } from "./transaction/attestation.ts";
 import {
   applyMutablePathWrite,
   getValueTypeName,
   isContainerValue,
 } from "./transaction/mutable-path-write.ts";
-import { ReadOnlyAddressError } from "./transaction/chronicle.ts";
 import {
+  ReadOnlyAddressError,
   TransactionAborted,
   TransactionCompleteError,
   WriteIsolationError,
-} from "./transaction.ts";
+} from "./transaction-errors.ts";
 import {
   ignoreReadForCommit,
   isMutableTransactionReadAllowed,
   isReadIgnoredForScheduling,
   isReadMarkedAsAttemptedWrite,
   isUiInputBlindWriteTx,
+  registerCommitRejectionListener,
+  takeCoverageWaits,
 } from "./reactivity-log.ts";
 import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
@@ -88,12 +89,15 @@ import {
   buildMergeableIntent,
   foldMergeableIntent,
   isNoopMergeableDelta,
+  type MergeableBuildContext,
   type MergeableOpDelta,
   type MergeableOpIntent,
+  mergeableOpPayloadContains,
   type OpSuppression,
 } from "./mergeable-ops.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
 import { normalizeCellScope } from "../scope.ts";
+import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
 import type { CellScope } from "../builder/types.ts";
 
 type RootAttestation = IAttestation;
@@ -123,9 +127,11 @@ type WritableDocumentEntry = {
   // set. See ./mergeable-ops.ts.
   mergeableOps?: Map<string, MergeableOpIntent>;
   // Paths where a mergeable intent cannot faithfully carry the transaction's
-  // local change — a second mergeable op of a different kind was recorded, or a
-  // foreign write (a reshape such as sort/splice) rewrote the array after an op
-  // was recorded. Such a path abandons the mergeable fast path and commits the
+  // local change — a second mergeable op of a different kind was recorded, a
+  // foreign write (a reshape such as sort/splice, or a whole-value set at or
+  // above the path) rewrote the array after an op was recorded, or the
+  // commit-time builder abandoned the intent because it no longer described the
+  // local value. Such a path abandons the mergeable fast path and commits the
   // whole-array diff, which reflects the correct combined local value. Once
   // poisoned a path stays poisoned for the rest of the transaction, so a later
   // op does not resurrect a partial intent. Keyed like mergeableOps.
@@ -137,8 +143,6 @@ type DocumentEntry = ReadDocumentEntry | WritableDocumentEntry;
 type SpaceBranch = {
   replica: ReturnType<IStorageManager["open"]>["replica"];
   docs: Map<string, DocumentEntry>;
-  reader?: ITransactionReader;
-  writer?: ITransactionWriter;
 };
 
 type ReadyState = {
@@ -262,7 +266,7 @@ const freezeReadValue = <T extends FabricValue | undefined>(value: T): T => {
   // deep-clones-and-freezes -- isolating the result from later source
   // mutation. On the hot read path, repeated reads of the same stored
   // (deep-frozen) value collapse to a single cache lookup.
-  return cloneIfNecessary(value as FabricValue) as T;
+  return cloneIfNecessary(value) as T;
 };
 
 const collapseEmptyJsonDocumentEnvelope = (
@@ -609,7 +613,7 @@ const buildArrayPatchCandidates = (
         path: encodePointer(path),
         index: before.length,
         remove: 0,
-        add: after.slice(before.length) as FabricValue[],
+        add: after.slice(before.length),
       },
       path,
       coversDescendants: false,
@@ -720,6 +724,12 @@ const isSubsumedByTailSplice = (
     Number(childSegment) >= spliceCandidate.tailSpliceStartIndex;
 };
 
+// TODO(danfuzz): `isRecord` admits a `FabricSpecialObject` on both sides, so
+// two special objects — or one against a plain `{}` — compare by their empty
+// key sets and report "unchanged" without ever reaching the fabric-aware
+// `valueEqual` fallback. An in-place fabric change at an ancestor prefix then
+// emits no reactivity path. `differential.ts` guards its sibling walk with an
+// explicit `FabricSpecialObject` test for exactly this reason.
 const shallowStructureChanged = (
   before: FabricValue | undefined,
   after: FabricValue | undefined,
@@ -836,34 +846,6 @@ class V2TransactionJournal implements ITransactionJournal {
   }
 }
 
-class V2Reader implements ITransactionReader {
-  constructor(
-    protected readonly tx: V2StorageTransaction,
-    private readonly space: MemorySpace,
-  ) {}
-
-  did(): MemorySpace {
-    return this.space;
-  }
-
-  read(
-    address: IMemoryAddress,
-    options?: IReadOptions,
-  ): Result<IAttestation, ReadError> {
-    return this.tx.read({ ...address, space: this.space }, options);
-  }
-}
-
-class V2Writer extends V2Reader implements ITransactionWriter {
-  write(
-    address: IMemoryAddress,
-    value?: FabricValue,
-    options?: IWriteOptions,
-  ): Result<IAttestation, WriteError> {
-    return this.tx.writeWithinSpace(this.did(), address, value, options);
-  }
-}
-
 export class V2StorageTransaction implements IStorageTransaction {
   changeGroup?: ChangeGroup;
   immediate?: boolean;
@@ -871,6 +853,12 @@ export class V2StorageTransaction implements IStorageTransaction {
   readonly journal = new V2TransactionJournal(this);
 
   #state: TxState = { status: "ready" };
+  // The commit's fate — server verdict or local rejection — which commit()
+  // itself may resolve later than: commit() additionally waits for the
+  // subscribed view to reflect the committed write (CT-1950 coverage).
+  // Post-commit effects gated on durability alone hook this via
+  // commitVerdict(). Resolved with the same result commit() returns.
+  readonly #verdict = Promise.withResolvers<Result<Unit, CommitError>>();
   #branches = new Map<MemorySpace, SpaceBranch>();
   #readActivities: IReadActivity[] = [];
   // Per-transaction monotonic activity clock, shared between read activities
@@ -882,7 +870,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   #activityClock = 0;
   #writeAttemptLog: IWriteAttempt[] = [];
   #reactivityLogCache?: TransactionReactivityLog;
-  #schedulerObservation?: unknown;
+  #schedulerObservation?: FabricValue;
   #commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
   #createOnlyMarks = new Map<
     MemorySpace,
@@ -906,6 +894,31 @@ export class V2StorageTransaction implements IStorageTransaction {
     scope: CellScope;
     doc: DocumentEntry;
   };
+
+  /**
+   * Complete the transaction, keeping its result and releasing the state that
+   * only an open transaction needs: the materialized branches, the read and
+   * write activity, and the cached reactivity log. Those are consumed while
+   * the transaction is open — the scheduler takes the reactivity log when the
+   * action that opened the transaction finishes, and the commit path takes the
+   * write details before the result is known. Whatever holds a completed
+   * transaction afterwards, such as a cell bound to it or a cleanup closure
+   * that captured it, would otherwise also hold every address that
+   * transaction read.
+   *
+   * Only a commit that ran ends here. A transaction that never reached storage
+   * — aborted, or rejected by validation — keeps its activity, because the
+   * scheduler retries the action that opened it and re-establishes that
+   * action's dependencies from those reads.
+   */
+  #finish(result: Result<Unit, StorageTransactionFailed>): void {
+    this.#state = { status: "done", result };
+    this.#branches.clear();
+    this.#readActivities.length = 0;
+    this.#writeAttemptLog.length = 0;
+    this.#reactivityLogCache = undefined;
+    this.#lastDocument = undefined;
+  }
 
   constructor(private readonly storage: IStorageManager) {}
 
@@ -963,7 +976,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     return this.#reactivityLogCache;
   }
 
-  setSchedulerObservation(observation: unknown): void {
+  setSchedulerObservation(observation: FabricValue): void {
     this.assertWritable("setSchedulerObservation()");
     const ready = this.editable();
     if (ready.error) {
@@ -972,7 +985,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.#schedulerObservation = observation;
   }
 
-  getSchedulerObservation(): unknown {
+  getSchedulerObservation(): FabricValue {
     return this.#schedulerObservation;
   }
 
@@ -1073,23 +1086,39 @@ export class V2StorageTransaction implements IStorageTransaction {
   // Abandon the mergeable fast path for `address`: a foreign write (a reshape
   // that is not itself a mergeable op) has rewritten the array after an op was
   // recorded, so the recorded tail no longer identifies the appended elements.
-  // Drop any intent and mark the path poisoned so the commit emits the
-  // whole-array diff (the correct local value) instead. A path with no recorded
-  // intent is left untouched — a reshape before any op is fine, and a later op on
-  // that path is still mergeable.
+  // Drop any covered intent and mark its path poisoned so the commit emits the
+  // whole-array diff (the correct local value) instead.
+  //
+  // The reshape reaches every intent AT or BENEATH the written path: a write to
+  // an enclosing object (`doc.set({rows})`) rewrites the array inside it just as
+  // surely as a write to the array itself, and the intent's recorded tail then
+  // spans elements the reshape supplied rather than ones an op appended. Intents
+  // ABOVE the write are untouched, which is what keeps an element edit
+  // (`cell.key(i).set(...)`, a write beneath the array) composing with a push,
+  // and leaves a write to a sibling field alone.
+  //
+  // A path carrying no intent yet is left alone — but that is not a statement
+  // that a reshape before an op is harmless. It is caught later instead, by each
+  // builder's own check at commit that its intent still describes the local
+  // value (see ./mergeable-ops.ts). The same goes for an element edit, which is
+  // beneath the array and so passes through here untouched: harmless to a tail
+  // op, fatal to a remove-by-value, and the builders are what tell them apart.
   poisonMergeableOp(address: IMemorySpaceAddress): void {
     // Only ever called right after a write on this transaction, so the tx is
     // editable — no editable() re-check. The write also made the address's
     // document writable, but a caller could resolve to a different (read-only)
     // slot, so a non-writable target is a real no-op.
     const doc = this.writableMergeableTarget(address);
-    if (!doc) return;
-    const pathKey = encodePointer(address.path);
-    if (!doc.mergeableOps?.has(pathKey)) {
+    if (!doc?.mergeableOps?.size) {
       return;
     }
-    doc.mergeableOps.delete(pathKey);
-    (doc.mergeableOpsPoisoned ??= new Set()).add(pathKey);
+    const covered = [...doc.mergeableOps.entries()]
+      .filter(([, intent]) => isPrefixPath(address.path, intent.path))
+      .map(([pathKey]) => pathKey);
+    for (const pathKey of covered) {
+      doc.mergeableOps.delete(pathKey);
+      (doc.mergeableOpsPoisoned ??= new Set()).add(pathKey);
+    }
   }
 
   // The caller wrote through this same transaction, so the entry is writable.
@@ -1259,31 +1288,6 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
   }
 
-  reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
-    const ready = this.editable();
-    if (ready.error) {
-      return { error: ready.error };
-    }
-    const branch = this.branch(space);
-    branch.reader ??= new V2Reader(this, space);
-    return { ok: branch.reader };
-  }
-
-  writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
-    this.assertWritable("writer()");
-    const ready = this.editable();
-    if (ready.error) {
-      return { error: ready.error };
-    }
-    const claim = this.claimWriteSpace(space);
-    if (claim.error) {
-      return { error: claim.error };
-    }
-    const branch = this.branch(space);
-    branch.writer ??= new V2Writer(this, space);
-    return { ok: branch.writer };
-  }
-
   /**
    * Records `space` as a write target. Without the multi-space opt-in, rejects a
    * second space with a write-isolation error (preserving the default
@@ -1336,7 +1340,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const skipCommitPrecondition = isUiInputBlindWriteTx(this);
     const { space: _, ...memoryAddress } = address;
 
-    if (!address.id.startsWith("data:")) {
+    if (!hasDataUriScheme(address.id)) {
       const readActivity = {
         space: address.space,
         scope: normalizeCellScope(address.scope),
@@ -1352,7 +1356,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       this.invalidateReactivityLog();
     }
     if (options?.trackReadWithoutLoad === true) {
-      if (!address.id.startsWith("data:") && !skipCommitPrecondition) {
+      if (!hasDataUriScheme(address.id) && !skipCommitPrecondition) {
         doc.validated = true;
       }
       return { ok: { address, value: undefined } };
@@ -1360,7 +1364,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     if (isMutableTransactionReadAllowed(readMeta)) {
       if (
-        !address.id.startsWith("data:") &&
+        !hasDataUriScheme(address.id) &&
         !doc.validated &&
         !skipCommitPrecondition
       ) {
@@ -1387,7 +1391,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const result = readAttestation(current, memoryAddress);
     if (
-      !address.id.startsWith("data:") &&
+      !hasDataUriScheme(address.id) &&
       !doc.validated &&
       !skipCommitPrecondition
     ) {
@@ -1418,7 +1422,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const branch = this.branch(address.space);
     const { doc } = this.document(branch, address);
-    if (address.id.startsWith("data:")) return { ok: {} };
+    if (hasDataUriScheme(address.id)) return { ok: {} };
 
     const readMeta = options?.meta ?? EMPTY_META;
     const skipCommitPrecondition = isUiInputBlindWriteTx(this);
@@ -1519,7 +1523,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     return flushRun();
   }
 
-  writeWithinSpace(
+  private writeWithinSpace(
     space: MemorySpace,
     address: IMemoryAddress,
     value?: FabricValue,
@@ -1561,7 +1565,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     value?: FabricValue,
     options?: IWriteOptions,
   ): Result<IAttestation, WriteError> {
-    if (address.id.startsWith("data:")) {
+    if (hasDataUriScheme(address.id)) {
       return { error: ReadOnlyAddressError(address).from(space) };
     }
     const isDelete = options?.delete === true;
@@ -1586,7 +1590,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const isolatedValue = value === undefined
       ? undefined
-      : cloneIfNecessary(value) as FabricValue;
+      : cloneIfNecessary(value);
 
     // Compute the activity path and previous-value snapshots BEFORE the
     // write -- `applyMutablePathWrite()` mutates `current.value` in place
@@ -1608,7 +1612,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const previousActivityValue = cloneIfNecessary(
       readValueAtPath(current.value, activityPath, {
         allowArrayLength: true,
-      }) as FabricValue,
+      }),
     ) as FabricValue | undefined;
     // Pre-write slot presence (distinct from value: a slot holding
     // `undefined` is present) for the write details — also read BEFORE the
@@ -1675,7 +1679,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   ): Result<Unit, WriteError> {
     if (
       writes.length <= 1 ||
-      writes.some(({ address }) => address.id.startsWith("data:"))
+      writes.some(({ address }) => hasDataUriScheme(address.id))
     ) {
       // Singleton-batch / data:URI fallback: route each write through the
       // unified single-write entry, which itself handles
@@ -1719,7 +1723,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     for (const { address, value, delete: isDelete } of writes) {
       const isolatedValue = value === undefined
         ? undefined
-        : cloneIfNecessary(value) as FabricValue;
+        : cloneIfNecessary(value);
       const previousValue = readValueAtPath(nextRoot, address.path, {
         allowArrayLength: true,
       });
@@ -1744,7 +1748,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       const previousActivityValue = cloneIfNecessary(
         readValueAtPath(nextRoot, activityPath, {
           allowArrayLength: true,
-        }) as FabricValue,
+        }),
       ) as FabricValue | undefined;
       // Pre-write slot presence for the write details (see
       // `writeWithinBranch`; empty path = root definedness, since
@@ -1928,6 +1932,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (ready.error) {
       return { error: ready.error };
     }
+    // Aborted before reaching storage, so the activity stays: the scheduler
+    // rebuilds this action's dependencies from it and retries.
     this.#state = {
       status: "done",
       result: { error: TransactionAborted(reason) },
@@ -1935,17 +1941,49 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { ok: {} };
   }
 
-  commit(): Promise<Result<Unit, CommitError>> {
-    const promise = this.#commitImpl();
+  commit(
+    options?: TransactionCommitOptions,
+  ): Promise<Result<Unit, CommitError>> {
+    // A rejection seals the commit's fate before the promise resolves — the
+    // promise additionally waits out the read-repair gate so a retry runs
+    // against the repaired base. The verdict must not: finalizeRejection
+    // notifies this listener at rejection receipt, ahead of the gate.
+    registerCommitRejectionListener(
+      this,
+      (rejection) => this.#verdict.resolve({ error: rejection }),
+    );
+    const promise = this.#commitImpl(options);
+    // Backstop for the verdict signal: paths that never reach a push (zero
+    // writes, pre-storage rejections) determine their fate exactly when the
+    // commit promise resolves. The push path resolves #verdict earlier —
+    // at the verdict — and this second resolve is then a no-op. An
+    // internally REJECTED commit promise resolves the verdict with the
+    // error: the verdict never rejects, and a waiter must not hang on a
+    // commit whose fate is known.
+    promise.then(
+      (result) => this.#verdict.resolve(result),
+      (reason) => this.#verdict.resolve({ error: toStoreError(reason) }),
+    );
     // Synchronous registration with the manager's durability barrier: by the
     // time commit() returns, the in-flight commit is visible to
     // hasPendingCommits(), so a quiescence check started in the same turn
-    // cannot miss it.
+    // cannot miss it. The entry spans the full commit promise — coverage
+    // included — so the barrier also covers follow-on commits issued from a
+    // continuation chained on the promise. (The scheduler's event path
+    // registers its own entry spanning its disposition handling, which
+    // chains on the WRAPPER's promise and trails this one by the
+    // verdict-time effect run.)
     this.storage.trackPendingCommit(promise);
     return promise;
   }
 
-  async #commitImpl(): Promise<Result<Unit, CommitError>> {
+  commitVerdict(): Promise<Result<Unit, CommitError>> {
+    return this.#verdict.promise;
+  }
+
+  async #commitImpl(
+    options?: TransactionCommitOptions,
+  ): Promise<Result<Unit, CommitError>> {
     this.assertWritable("commit()");
     const ready = this.editable();
     if (ready.error) {
@@ -1956,14 +1994,14 @@ export class V2StorageTransaction implements IStorageTransaction {
     // single-space transaction (the common case, even with the opt-in set) stays
     // on the proven path below.
     if (this.#multiSpaceWrites && this.#writtenSpaces.length > 1) {
-      return this.commitMultiSpace();
+      return this.commitMultiSpace(options);
     }
 
     const writeSpace = this.#writeSpace ??
       schedulerObservationCommitSpace(this.#schedulerObservation);
     if (!writeSpace) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     }
 
@@ -1980,7 +2018,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       !hasCommitPreconditions && !hasSqliteOps
     ) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     }
 
@@ -1989,6 +2027,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       () => this.validate(),
     );
     if (validation.error) {
+      // Rejected before reaching storage, so the activity stays: the scheduler
+      // rebuilds this action's dependencies from it and retries.
       this.#state = {
         status: "done",
         result: { error: validation.error },
@@ -1996,25 +2036,39 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { error: validation.error };
     }
 
-    const replica = this.storage.open(writeSpace).replica;
+    const replica = this.replicaForCommit(writeSpace);
     if (!replica.commitNative) {
       throw new Error("memory v2 replica does not support commitNative()");
     }
     const commitNative = replica.commitNative.bind(replica);
     const promise = withCommitTiming(
       ["commit", "commitNative"],
-      () => commitNative(native!, this),
+      () => commitNative(native!, this, options),
     );
     this.#state = { status: "pending", promise };
     try {
       const result = await promise;
-      this.#state = { status: "done", result };
+      this.#finish(result);
+      this.#verdict.resolve(result);
+      // CT-1950: the caller's commit promise resolves at coverage — the
+      // subscribed view reflects the committed write — while the verdict
+      // above already released durability-gated effects. Drained on EVERY
+      // settlement, not only success: waits are recorded per accepted
+      // space, so a multi-space commit rejected on a later space still
+      // holds its settlement (and commit callbacks) until the earlier
+      // accepted spaces' parked writes reach the view.
+      {
+        const waits = takeCoverageWaits(this);
+        if (waits.length > 0) {
+          await Promise.all(waits);
+        }
+      }
       return result;
     } catch (error) {
       const result: Result<Unit, StorageTransactionRejected> = {
         error: toStoreError(error),
       };
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     }
   }
@@ -2025,7 +2079,9 @@ export class V2StorageTransaction implements IStorageTransaction {
    * cross-space atomicity: a later failure does not roll back earlier spaces; it
    * is logged and surfaced as the overall result.
    */
-  private async commitMultiSpace(): Promise<Result<Unit, CommitError>> {
+  private async commitMultiSpace(
+    options?: TransactionCommitOptions,
+  ): Promise<Result<Unit, CommitError>> {
     const commits: { space: MemorySpace; native: NativeStorageCommit }[] = [];
     for (const space of this.orderedCommitSpaces()) {
       const native = this.getNativeCommit(space);
@@ -2046,21 +2102,37 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     if (commits.length === 0) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     }
 
     const validation = this.validate();
     if (validation.error) {
-      this.#state = { status: "done", result: { error: validation.error } };
+      // Rejected before reaching storage, so the activity stays: the scheduler
+      // rebuilds this action's dependencies from it and retries.
+      this.#state = {
+        status: "done",
+        result: { error: validation.error },
+      };
       return { error: validation.error };
     }
 
-    const promise = this.runSplitCommits(commits);
+    const promise = this.runSplitCommits(commits, options);
     this.#state = { status: "pending", promise };
     try {
       const result = await promise;
-      this.#state = { status: "done", result };
+      this.#finish(result);
+      this.#verdict.resolve(result);
+      // Same split as the single-space path: verdicts (all spaces) release
+      // effects; the commit promise waits for every space's coverage —
+      // including on a partial failure, where the waits recorded by the
+      // earlier ACCEPTED spaces still gate settlement.
+      {
+        const waits = takeCoverageWaits(this);
+        if (waits.length > 0) {
+          await Promise.all(waits);
+        }
+      }
       return result;
     } catch (error) {
       // Mirror the single-space path: a rejected commit must still transition
@@ -2069,7 +2141,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       const result: Result<Unit, StorageTransactionRejected> = {
         error: toStoreError(error),
       };
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     }
   }
@@ -2101,10 +2173,11 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   private async runSplitCommits(
     commits: { space: MemorySpace; native: NativeStorageCommit }[],
+    options?: TransactionCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     for (let i = 0; i < commits.length; i++) {
       const { space, native } = commits[i];
-      const replica = this.storage.open(space).replica;
+      const replica = this.replicaForCommit(space);
       if (!replica.commitNative) {
         throw new Error("memory v2 replica does not support commitNative()");
       }
@@ -2117,7 +2190,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       // committed before the failure are not rolled back (logged); the failing
       // space and everything after it are left uncommitted.
       try {
-        const result = await commitNative(native, this);
+        const result = await commitNative(native, this, options);
         if (result.error) {
           multiSpaceCommitLogger.error(
             "multi-space-commit-failed",
@@ -2142,7 +2215,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   private schedulerObservationForNativeCommit(
     space: MemorySpace,
-  ): unknown | undefined {
+  ): FabricValue {
     if (this.#schedulerObservation === undefined) {
       return undefined;
     }
@@ -2281,6 +2354,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     return branch;
   }
 
+  private replicaForCommit(
+    space: MemorySpace,
+  ): ReturnType<IStorageManager["open"]>["replica"] {
+    return this.#branches.get(space)?.replica ??
+      this.storage.open(space).replica;
+  }
+
   private document(
     branch: SpaceBranch,
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
@@ -2320,7 +2400,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
   ): RootAttestation {
     const type = address.type ?? DOCUMENT_MIME;
-    if (address.id.startsWith("data:")) {
+    if (hasDataUriScheme(address.id)) {
       const loaded = loadInline({ id: address.id, type });
       if (loaded.error) {
         throw loaded.error;
@@ -2343,7 +2423,35 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
   }
 
+  validateReplicaRoutes(): Result<Unit, IStorageTransactionInconsistent> {
+    for (const [space, branch] of this.#branches) {
+      const currentReplica = this.storage.open(space).replica;
+      if (currentReplica !== branch.replica) {
+        const firstDocument = branch.docs.values().next().value;
+        if (firstDocument !== undefined) {
+          const { address, value: expected } = firstDocument.initial;
+          const actual = toTransactionDocumentValue(
+            currentReplica.getDocument(address.id as URI, address.scope),
+          );
+          return {
+            error: StateInconsistency({
+              address,
+              expected,
+              actual,
+              space,
+            }),
+          };
+        }
+      }
+    }
+    return { ok: {} };
+  }
+
   private validate(): Result<Unit, IStorageTransactionInconsistent> {
+    const routes = this.validateReplicaRoutes();
+    if (routes.error) {
+      return routes;
+    }
     for (const branch of this.#branches.values()) {
       for (const doc of branch.docs.values()) {
         if (!doc.validated) {
@@ -2583,6 +2691,24 @@ export class V2StorageTransaction implements IStorageTransaction {
   // each covers so the diff candidates the op replaces can be suppressed. The
   // per-op payload/suppression rules live in ./mergeable-ops.ts; here we only
   // supply each intent the working/initial array state its builder needs.
+  //
+  // A builder can also abandon its intent — the recorded op no longer describes
+  // the transaction's local value (see `buildTailOp` / `buildRemoveByValue`).
+  // Abandoning must poison the path here rather than just skip the op, because a
+  // surviving intent still narrows the op's reads out of the commit's conflict
+  // set (v2.ts) and would hand the replacing whole-value diff a read set it has
+  // not earned. This runs inside getNativeCommit, which precedes that narrowing,
+  // so both sides see the same intents.
+  //
+  // One intent is also abandoned for what its SIBLINGS carry, which is why the
+  // contexts are computed for all of them before any is built: a tail op's
+  // payload is live values read out of the working document, so an intent whose
+  // target sits inside that payload has already had its change applied by the
+  // covering op, and sending it too would apply it twice (see
+  // `mergeableOpPayloadContains`). Coverage is judged on what each intent
+  // RECORDED, not on which ops survived — an intent contained by an op that is
+  // itself abandoned must fall back with it, so that the whole-value diff is the
+  // only thing carrying that region.
   private buildMergeableOps(
     doc: WritableDocumentEntry,
   ): { ops: PatchOp[]; suppress: OpSuppression[] } {
@@ -2591,32 +2717,59 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (!doc.mergeableOps || doc.current.value === undefined) {
       return { ops, suppress };
     }
-    for (const intent of doc.mergeableOps.values()) {
-      const working = readValueAtPath(doc.current.value, intent.path, {
-        allowArrayLength: true,
-      });
-      const initial = doc.initial.value === undefined ? undefined : (
-        readValueAtPath(doc.initial.value, intent.path, {
-          allowArrayLength: true,
-        })
-      );
-      // Presence, not definedness: an already-present slot (even holding
-      // `undefined`) does not add a key to its parent, so the op does not
-      // materialize a path and must not stamp `createsKey`.
-      const hadInitialValue = doc.initial.value !== undefined &&
-        hasValueAtPath(doc.initial.value, intent.path, {
-          allowArrayLength: true,
-        });
-      const built = buildMergeableIntent(intent, {
-        workingArray: Array.isArray(working)
-          ? working as FabricValue[]
-          : undefined,
-        hadInitialArray: Array.isArray(initial),
-        hadInitialValue,
-      });
+    const pending = [...doc.mergeableOps.values()].map((intent) => ({
+      intent,
+      ctx: this.mergeableBuildContext(doc, intent),
+    }));
+
+    const abandoned: string[] = [];
+    for (const { intent, ctx } of pending) {
+      const built = pending.some(({ intent: other, ctx: otherCtx }) =>
+          mergeableOpPayloadContains(other, otherCtx, intent.path)
+        )
+        ? { abandon: true, ops: [], suppress: [] }
+        : buildMergeableIntent(intent, ctx);
+      if (built.abandon) {
+        abandoned.push(encodePointer(intent.path));
+        continue;
+      }
       ops.push(...built.ops);
       suppress.push(...built.suppress);
     }
+    for (const pathKey of abandoned) {
+      doc.mergeableOps.delete(pathKey);
+      (doc.mergeableOpsPoisoned ??= new Set()).add(pathKey);
+    }
     return { ops, suppress };
+  }
+
+  // The working / initial state at one intent's path, which its builder turns
+  // into wire ops.
+  private mergeableBuildContext(
+    doc: WritableDocumentEntry,
+    intent: MergeableOpIntent,
+  ): MergeableBuildContext {
+    const working = readValueAtPath(doc.current.value, intent.path, {
+      allowArrayLength: true,
+    });
+    const initial = doc.initial.value === undefined ? undefined : (
+      readValueAtPath(doc.initial.value, intent.path, {
+        allowArrayLength: true,
+      })
+    );
+    return {
+      workingArray: Array.isArray(working) ? working : undefined,
+      hadInitialArray: Array.isArray(initial),
+      // Presence, not definedness: an already-present slot (even holding
+      // `undefined`) does not add a key to its parent, so the op does not
+      // materialize a path and must not stamp `createsKey`.
+      hadInitialValue: doc.initial.value !== undefined &&
+        hasValueAtPath(doc.initial.value, intent.path, {
+          allowArrayLength: true,
+        }),
+      initialArray: Array.isArray(initial)
+        ? initial as readonly FabricValue[]
+        : undefined,
+    };
   }
 }

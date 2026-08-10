@@ -19,7 +19,7 @@ import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import {
-  TEST_MEMORY_SERVER_AUTH,
+  newSharedServer,
   testPrincipalSessionOpenAuthFactory,
 } from "./memory-v2-test-utils.ts";
 
@@ -402,14 +402,7 @@ describe("resume owned-cell walk: scoped sub-pattern", () => {
   let sm2: LoopbackStorageManager;
 
   beforeEach(() => {
-    server = new MemoryV2Server.Server({
-      authorizeSessionOpen(message) {
-        const principal = (message.authorization as { principal?: unknown })
-          ?.principal;
-        return typeof principal === "string" ? principal : undefined;
-      },
-      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-    });
+    server = newSharedServer();
     sm1 = LoopbackStorageManager.make(signer, server);
     sm2 = LoopbackStorageManager.make(signer, server);
   });
@@ -443,7 +436,7 @@ describe("resume owned-cell walk: scoped sub-pattern", () => {
     await rt1.patternManager.flushCompileCacheWrites();
     await sm1.synced();
     expect(rc1.key("value").get()).toBe(40);
-    rt1.scheduler.dispose();
+    await rt1.dispose({ closeStorage: false });
 
     const rt2 = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -469,8 +462,7 @@ describe("resume owned-cell walk: scoped sub-pattern", () => {
       }
       expect(rc2.key("value").get()).toBe(40);
     } finally {
-      await rt2.dispose();
-      await rt1.dispose();
+      await rt2.dispose({ closeStorage: false });
     }
   });
 });
@@ -488,24 +480,6 @@ describe("resume owned-cell walk: scoped sub-pattern", () => {
 
 const spaceH = signer.did(); // "home" — holds the link
 const spaceP = (await Identity.fromPassphrase("edge paths target P")).did();
-
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-  private sharedServer!: MemoryV2Server.Server;
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
 
 const CROSS_SPACE_PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
@@ -542,22 +516,15 @@ const crossSpaceLinkListSchema = {
 
 describe("cross-space link load kick", () => {
   let server: MemoryV2Server.Server;
-  let writerStorage: SharedServerStorageManager;
-  let readerStorage: SharedServerStorageManager;
+  let writerStorage: EmulatedStorageManager;
+  let readerStorage: EmulatedStorageManager;
 
   beforeEach(() => {
-    server = new MemoryV2Server.Server({
-      authorizeSessionOpen(message) {
-        const principal = (message.authorization as { principal?: unknown })
-          ?.principal;
-        return typeof principal === "string" ? principal : undefined;
-      },
-      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-    });
-    writerStorage = SharedServerStorageManager.connectTo(server, {
+    server = newSharedServer();
+    writerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
-    readerStorage = SharedServerStorageManager.connectTo(server, {
+    readerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
   });
@@ -596,6 +563,10 @@ describe("cross-space link load kick", () => {
       r1.key("create").send({ name: "Ada" });
       await r1.pull();
       await rt1.idle();
+      // The cross-space child creation rides server->client delivery turns;
+      // drain them before reading the freshly pushed link.
+      await clock.settle();
+      await r1.pull();
       // deno-lint-ignore no-explicit-any
       const links = r1.key("items").asSchema(crossSpaceLinkListSchema)
         .get() as any[];

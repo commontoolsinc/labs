@@ -1,7 +1,9 @@
 import { Table } from "@cliffy/table";
 import { Command, ValidationError } from "@cliffy/command";
+import { VerbInputValidationError } from "../lib/callable.ts";
 import {
   applyPieceInput,
+  checkPiecePattern,
   type EntryConfig,
   executePieceCallable,
   formatViewTree,
@@ -12,11 +14,13 @@ import {
   linkPieces,
   linkSqliteDiskSource,
   LinkValidationError,
+  listPieceCallables,
   listPieces,
   MapFormat,
   newPiece,
   PieceConfig,
   PieceResultProjectionError,
+  PieceVerbReadError,
   recreateSpaceRootPattern,
   removePiece,
   resetHomePattern,
@@ -29,6 +33,9 @@ import {
   SpaceConfig,
   stepPiece,
 } from "../lib/piece.ts";
+import type { ExecutedPieceCallable } from "../lib/piece.ts";
+import type { PatternCompatibilityReport } from "@commonfabric/piece/ops";
+import type { InvocationOutcome, InvocationPhase } from "../lib/callable.ts";
 import { renderPiece } from "../lib/piece-render.ts";
 import { parseSqliteSource } from "../lib/sqlite-source.ts";
 import { render, safeStringify } from "../lib/render.ts";
@@ -41,6 +48,12 @@ import { UI } from "@commonfabric/runner";
 import ports from "@commonfabric/ports" with { type: "json" };
 import type { PiecePatternRef } from "@commonfabric/piece/ops";
 import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
+import {
+  parsePieceGetFilter,
+  parsePieceGetProjection,
+  type PieceGetTransform,
+  PieceGetTransformError,
+} from "../lib/piece-get-transform.ts";
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -65,6 +78,21 @@ export function normalizeApiUrl(apiUrl: string): string {
   normalized.hash = "";
   const href = normalized.toString();
   return basePath ? href : href.slice(0, -1);
+}
+
+export async function parsePieceGetTransformOptions(options: {
+  filter?: string;
+  schema?: string;
+}): Promise<PieceGetTransform | undefined> {
+  const filter = options.filter === undefined
+    ? undefined
+    : parsePieceGetFilter(options.filter);
+  const projection = options.schema === undefined
+    ? undefined
+    : await parsePieceGetProjection(options.schema);
+  return filter === undefined && projection === undefined
+    ? undefined
+    : { filter, projection };
 }
 
 function summarizeForDisplay(value: unknown): unknown {
@@ -154,13 +182,18 @@ export function localPatternEntry(
 
 /**
  * A `piece get` failure caused by a data condition rather than bad arguments:
- * a path that doesn't resolve, or a result schema that can't project the
- * stored data (PieceResultProjectionError). Reported as a plain error on
- * stderr with exit 1, never as a Cliffy ValidationError (which would dump the
- * usage screen and read as an arg-parse failure).
+ * a path that doesn't resolve, a result schema that can't project stored data
+ * (PieceResultProjectionError), a filter/projection that doesn't fit the
+ * selected value (PieceGetTransformError), or a path that lands on a verb
+ * (PieceVerbReadError — the read-path guard's redirect at `cf piece call`).
+ * Reported as a plain error on stderr with exit 1, never as a Cliffy
+ * ValidationError (which would dump the usage screen and read as an arg-parse
+ * failure).
  */
 export function isPieceGetDataError(error: unknown): error is Error {
   return error instanceof PieceResultProjectionError ||
+    error instanceof PieceGetTransformError ||
+    error instanceof PieceVerbReadError ||
     (error instanceof Error &&
       error.message.startsWith("Cannot access path"));
 }
@@ -169,16 +202,22 @@ export function isPieceGetDataError(error: unknown): error is Error {
  * Build the stderr report for a `piece get` failure. Returns null when the
  * error is not a data error (the caller should rethrow). `message` is the
  * one-line error; `hint` is an optional next-step tip. A projection error
- * already carries its own `--step` guidance, and an input-mode read has
- * nothing more to suggest — only a result-mode unresolved path gets the
- * `--input` tip.
+ * already carries its own `--step` guidance, transform errors stand alone,
+ * a verb refusal already carries its `cf piece call` redirect, and an
+ * input-mode read has nothing more to suggest — only a result-mode
+ * unresolved path gets the `--input` tip.
  */
 export function pieceGetDataErrorReport(
   error: unknown,
   opts: { input?: boolean; piece?: string },
 ): { message: string; hint?: string } | null {
   if (!isPieceGetDataError(error)) return null;
-  if (error instanceof PieceResultProjectionError || opts.input) {
+  if (
+    error instanceof PieceResultProjectionError ||
+    error instanceof PieceGetTransformError ||
+    error instanceof PieceVerbReadError ||
+    opts.input
+  ) {
     return { message: error.message };
   }
   return {
@@ -210,6 +249,26 @@ export function pieceLinkDataErrorReport(
 }
 
 /**
+ * Build the stderr report for a `piece call` payload rejection. Returns null
+ * when the error is not a VerbInputValidationError (the caller should
+ * rethrow). The flags parsed fine and the piece resolved — the values simply
+ * do not fit the verb — so it reports like the other data errors rather than
+ * as a usage failure, and points at the listing that shows the shape it wanted.
+ */
+export function verbInputErrorReport(
+  error: unknown,
+  opts: { piece: string },
+): { message: string; hint: string } | null {
+  if (!(error instanceof VerbInputValidationError)) return null;
+  return {
+    message: error.message,
+    hint: cliText(
+      `TIP: Run 'cf piece verbs --piece ${opts.piece} --json' to see each verb's expected input.`,
+    ),
+  };
+}
+
+/**
  * Print a data-error report — message plus optional hint — to stderr and exit
  * 1. The single exit path for the `piece get` / `piece link` data errors
  * above. The `deps` seam lets unit tests observe the wiring without a real
@@ -228,6 +287,69 @@ export function exitWithDataError(
   const exit = deps?.exit ?? Deno.exit;
   printError(report.message);
   if (report.hint) printHint(report.hint);
+  return exit(1);
+}
+
+/**
+ * Turn a failed `piece call` into its stderr report, or re-throw.
+ *
+ * A named function rather than an inline `.catch` in the command action: the
+ * action body only ever runs under Cliffy, so anything written there is
+ * unreachable from a unit test. The `deps` seam is `exitWithDataError`'s,
+ * threaded so a test can observe the report without a real process exit.
+ *
+ * `observer` is the call's phase observer: this exit bypasses the action's
+ * catch (it terminates the process from inside the promise chain), so the
+ * verbose in-flight span must be closed HERE — otherwise a pre-dispatch
+ * payload rejection under --verbose would leave the initial_sync span
+ * dangling with no failure timing. A rethrown error is closed by the
+ * action's own failure exit instead.
+ */
+export function reportVerbInputErrorOrRethrow(
+  error: unknown,
+  piece: string | undefined,
+  deps?: Parameters<typeof exitWithDataError>[1],
+  observer?: { finish: (end?: "settled" | "failed") => void },
+): never {
+  const report = verbInputErrorReport(error, { piece: piece ?? "<piece>" });
+  if (report) {
+    observer?.finish("failed");
+    exitWithDataError(report, deps);
+  }
+  throw error;
+}
+
+/**
+ * The failure exit for `cf piece call`: closes the verbose in-flight span as
+ * `failed` (idempotent — a span already closed elsewhere stays closed),
+ * rethrows Cliffy validation errors so usage failures still render the usage
+ * screen — with their span closed first — and reports everything else as the
+ * failure message plus the invocation id beside the furthest observed phase,
+ * the retry key, before exiting 1. A named export rather than catch-block
+ * prose because the action body only runs under Cliffy and is unreachable
+ * from a unit test; the seams let a test observe the exact exit contract.
+ */
+export function exitPieceCallFailure(
+  observer: { finish: (end?: "settled" | "failed") => void },
+  error: unknown,
+  invocationId: string,
+  phase: InvocationPhase,
+  deps?: {
+    printError?: (message: string) => void;
+    exit?: (code: number) => never;
+  },
+): never {
+  observer.finish("failed");
+  if (error instanceof ValidationError) {
+    throw error;
+  }
+  const printError = deps?.printError ?? console.error;
+  const exit = deps?.exit ?? Deno.exit;
+  printError(error instanceof Error ? error.message : String(error));
+  // Where the invocation stopped decides retry semantics: anything at or
+  // past "dispatched" retries SAFELY ONLY with this same id (same-id
+  // retries deduplicate; a fresh id would re-execute).
+  printError(`invocation: ${invocationId} phase: ${phase}`);
   return exit(1);
 }
 
@@ -311,6 +433,313 @@ export function pieceCallInvocation(
       rawArgs.length === argumentOffset + 2 &&
       rawArgs[argumentOffset + 1] === "--json");
   return { rawArgs, jsonOutput };
+}
+
+/**
+ * Resolve the invocation id for a handler call: the caller's own id, or a
+ * freshly minted one. A blank id is rejected rather than passed down — it
+ * would read as "the caller supplied one" while carrying nothing that can
+ * distinguish one delivery from another, so the retry it promises to make
+ * safe would not be (verb contract WS-D).
+ */
+export function resolveInvocationId(
+  raw: string | undefined,
+  mint: () => string = () => crypto.randomUUID(),
+): string {
+  if (raw === undefined) return mint();
+  if (!raw.trim()) {
+    throw new ValidationError("--invocation requires a non-blank id");
+  }
+  return raw;
+}
+
+/**
+ * Build the phase observer for a handler invocation. Its whole job is to put
+ * the invocation id on stderr at the moment the event is about to dispatch —
+ * BEFORE any network work — so a caller whose process dies past that line
+ * still holds the exact id to retry with, and the retry deduplicates instead
+ * of executing a second time. Announcing once matters: a caller scraping
+ * stderr for its id should not have to decide which of several to trust.
+ *
+ * `announcePhases` is a test-harness hook (reached via the
+ * `CF_TEST_ANNOUNCE_INVOCATION_PHASES` env var at the call site): every phase
+ * advance is additionally announced as `invocation: <id> phase: <phase>` —
+ * the shape failure exits already print. Integration scenarios that must act
+ * inside a specific window block on a phase line instead of racing a clock:
+ * the dropped-response fixture kills its call only after reading
+ * `phase: committed`, which the observer emits only once the handling's
+ * durable commit has been acknowledged. Off by default, so normal output is
+ * byte-identical with the hook absent.
+ */
+export function invocationPhaseReporter(
+  invocationId: string,
+  onAdvance: (phase: InvocationPhase) => void,
+  announce: (message: string) => void = console.error,
+  announcePhases = false,
+): (phase: InvocationPhase) => void {
+  let announced = false;
+  return (next) => {
+    if (next === "dispatched" && !announced) {
+      announced = true;
+      announce(`invocation: ${invocationId}`);
+    }
+    if (announcePhases) {
+      announce(`invocation: ${invocationId} phase: ${next}`);
+    }
+    onAdvance(next);
+  };
+}
+
+/**
+ * Phase observer for `cf piece call`: always advances the furthest-phase
+ * tracker the failure report prints; under --verbose it also streams one
+ * wall-clock span per observed phase transition (verb contract WS-D, phase
+ * timings). Spans are bounded by the phases the `onPhase` callback already
+ * observes — initial sync up to dispatch, the dispatched handler run up to
+ * its transaction-local commit acknowledgement, the receipt classification,
+ * and the receipt readback up to settlement — because those boundaries are
+ * what the invocation actually reports; nothing new is instrumented inside
+ * the runner. Every line goes to stderr so stdout stays exactly the settled
+ * Invocation JSON an agent parses, and lines stream as transitions happen so
+ * a failure exit keeps every span observed before the failure — `finish`
+ * closes the in-flight span with the outcome that ended it: `settled`,
+ * `failed`, or `detached` for a `--no-wait` exit that stopped at the commit
+ * acknowledgement and skipped the readback.
+ */
+export function pieceCallPhaseObserver(
+  verbose: boolean,
+  onAdvance: (phase: InvocationPhase) => void,
+  emit: (line: string) => void = console.error,
+  now: () => number = () => performance.now(),
+): {
+  onPhase: (phase: InvocationPhase) => void;
+  finish: (end?: "settled" | "failed" | "detached") => void;
+} {
+  if (!verbose) {
+    return { onPhase: onAdvance, finish: () => {} };
+  }
+  let current: InvocationPhase = "initial_sync";
+  let spanStart = now();
+  let finished = false;
+  const close = (next: string) => {
+    emit(`timing: ${current} → ${next} ${(now() - spanStart).toFixed(1)}ms`);
+  };
+  return {
+    onPhase: (next) => {
+      close(next);
+      current = next;
+      spanStart = now();
+      onAdvance(next);
+    },
+    finish: (end = "settled") => {
+      if (finished) return;
+      finished = true;
+      close(end);
+    },
+  };
+}
+
+/**
+ * The success tail of `cf piece call`, extracted from the command action so
+ * it is unit-coverable — command action bodies never execute under the unit
+ * suite, the same convention that keeps `cf test` out of its action body
+ * (docs/development/COVERAGE.md). Help output returns BEFORE the observer
+ * finishes: no invocation ran, so there is no span to close.
+ */
+export function renderPieceCallOutcome(
+  observer: { finish: (end?: "settled" | "failed" | "detached") => void },
+  result: ExecutedPieceCallable,
+  callableName: string,
+  piece: string,
+  deps: {
+    render?: (text: string) => void;
+    hint?: (text: string, prefix?: boolean) => void;
+    printError?: (text: string) => void;
+  } = {},
+  opts: { detached?: boolean; invocationId?: string } = {},
+): void {
+  const renderOut = deps.render ?? render;
+  const hintOut = deps.hint ?? hint;
+  const printError = deps.printError ?? console.error;
+  if (result.helpText) {
+    renderOut(result.helpText);
+    return;
+  }
+  observer.finish(opts.detached ? "detached" : undefined);
+  if (result.outputText) {
+    renderOut(result.outputText);
+    if (result.resultRef) {
+      // stderr, so stdout stays exactly the tool's JSON result. Routed
+      // through hint() DELIBERATELY: under --quiet the ref is suppressed —
+      // it is advisory until the invocation protocol carries it in the
+      // stdout Invocation JSON (verb contract WS-D), and --quiet callers
+      // asked for the bare result.
+      const ref = result.resultRef;
+      hintOut(
+        `Tool result cell: ${ref.id} (space ${ref.space}, scope ${ref.scope})`,
+        false,
+      );
+    }
+    return;
+  }
+  const nextSteps = cliText(`NEXT STEPS:
+  → Verify state:  cf piece get --piece ${piece} <path> ...
+  → Full inspect:  cf piece inspect --piece ${piece} ...`);
+  if (result.invocation) {
+    // The machine surface for a handler invocation: stdout carries the
+    // Invocation JSON — settled, or stopped at "committed" under --no-wait —
+    // prose stays on stderr via hint().
+    renderOut(JSON.stringify(invocationJson(result.invocation), null, 2));
+    hintOut(
+      opts.detached
+        ? cliText(`NEXT STEPS:
+  → Read the outcome: cf piece call --piece ${piece} --invocation ${
+          opts.invocationId ?? "<id>"
+        } ${callableName} ... (the commit is durable; a same-id call deduplicates and returns the settled outcome)
+  → Verify state:     cf piece get --piece ${piece} <path> ...`)
+        : nextSteps,
+    );
+    return;
+  }
+  const confirmation = `Called handler "${callableName}" on piece ${piece}`;
+  if (result.parsed.usedJsonInput) {
+    printError(confirmation);
+  } else {
+    renderOut(confirmation);
+  }
+  hintOut(nextSteps);
+}
+
+/**
+ * Shape a settled handler invocation for stdout. This is the wire contract an
+ * agent parses, so the optional keys are load-bearing: `deduplicated` appears
+ * only when the call collided on an existing receipt, and `result` only when
+ * the receipt carried one — a value-less verb omits it rather than reporting
+ * `null`, which would be indistinguishable from a verb that returned null.
+ * `links` appears only under --show-links: provenance beside the value,
+ * never inline in it.
+ */
+export function invocationJson(
+  outcome: InvocationOutcome,
+): Record<string, unknown> {
+  return {
+    invocation: outcome.id,
+    status: outcome.status,
+    ...(outcome.deduplicated ? { deduplicated: true } : {}),
+    ...("result" in outcome && outcome.result !== undefined
+      ? { result: outcome.result }
+      : {}),
+    ...(outcome.links !== undefined ? { links: outcome.links } : {}),
+  };
+}
+
+/** How long `cf piece call` waits for a handler invocation (verb contract
+ * WS-F, F3). `settle` is the default: await this handling's commit
+ * acknowledgement plus receipt readback, optionally bounded by the caller's
+ * patience (`--wait <seconds>`). `commit` (`--no-wait`) awaits the
+ * transaction-local commit acknowledgement — the durable point; the handler
+ * runs in THIS process, so the acknowledgement is not skippable — and skips
+ * only the receipt readback. */
+export interface PieceCallWaitControl {
+  mode: "settle" | "commit";
+  /** Caller-chosen patience bound in seconds (`--wait`). Never set for
+   * `commit` — the readback the bound would cover is already skipped. */
+  boundSeconds?: number;
+}
+
+/**
+ * Resolve the wait flags into one control. `--await` is the explicit spelling
+ * of the default (flag parity, so a script can state its intent), which makes
+ * `--await --no-wait` a contradiction rather than a precedence puzzle — it is
+ * refused. `--await --wait <s>` is fine: both mean "wait", the bound just
+ * names the patience. A non-positive bound is refused: it would spell
+ * "don't wait" while claiming to be a wait. `--show-links --no-wait` is
+ * refused too: the links ride the receipt readback a detached exit skips,
+ * so honoring both is impossible — refusing beats silently dropping the
+ * links.
+ */
+export function resolveWaitControl(
+  options: { await?: boolean; wait?: number | boolean; showLinks?: boolean },
+): PieceCallWaitControl {
+  if (options.wait === false) {
+    if (options.await) {
+      throw new ValidationError(
+        "--await and --no-wait contradict each other; pass one.",
+      );
+    }
+    if (options.showLinks) {
+      throw new ValidationError(
+        "--show-links needs the receipt readback that --no-wait skips; " +
+          "pass one.",
+      );
+    }
+    return { mode: "commit" };
+  }
+  if (typeof options.wait === "number") {
+    if (!Number.isFinite(options.wait) || options.wait <= 0) {
+      throw new ValidationError(
+        "--wait requires a positive number of seconds",
+      );
+    }
+    return { mode: "settle", boundSeconds: options.wait };
+  }
+  return { mode: "settle" };
+}
+
+/**
+ * The caller's patience bound expired before the invocation settled. The
+ * handler runs in THIS process's runtime, so an exit before the commit is
+ * acknowledged abandons un-executed work rather than leaving it settling
+ * elsewhere: before the `committed` phase, the invocation may not have
+ * executed or committed at all. The recovery is re-invoking with the SAME
+ * id — safe in every phase, because it deduplicates against the create-only
+ * receipt when the commit landed and re-executes when it never did. The
+ * exit reports the id and the furthest phase so the caller can.
+ */
+export class WaitBoundExpired extends Error {
+  constructor(readonly seconds: number) {
+    super(
+      `--wait bound of ${seconds}s expired: the invocation may not have ` +
+        "executed or committed — re-invoke with the same invocation id " +
+        "to finish it or read the outcome back",
+    );
+    this.name = "WaitBoundExpired";
+  }
+}
+
+/**
+ * Bound an in-flight settlement wait by the caller's chosen patience.
+ *
+ * This is a patience bound, not a correctness timeout (the distinction
+ * docs/development/waiting-in-tests.md draws): firing early is safe because
+ * a caller-supplied invocation id makes a same-id re-invoke safe in EVERY
+ * phase. Safe is not lossless — the handler runs locally, so a bound that
+ * fires before the commit is acknowledged abandons work that may never have
+ * executed or committed — but the re-invoke recovers either way: it
+ * deduplicates when the commit landed and re-executes when it never did.
+ * That is what permits a wall-clock bound here at all, and only because the
+ * caller asked for one; nothing waits by default.
+ *
+ * Mechanism: one deadline racing the outermost await — the settlement work
+ * underneath is event-driven and untouched, and there is no polling anywhere.
+ * The timer is cleared once the race resolves, so a call that settles inside
+ * the bound leaves no armed timer behind (`AbortSignal.timeout` would keep
+ * ticking; a clearable timer is the same one-shot deadline without the
+ * leftover).
+ */
+export function boundedSettlement<T>(
+  settlement: Promise<T>,
+  boundSeconds: number | undefined,
+): Promise<T> {
+  if (boundSeconds === undefined) return settlement;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expiry = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new WaitBoundExpired(boundSeconds)),
+      boundSeconds * 1000,
+    );
+  });
+  return Promise.race([settlement, expiry]).finally(() => clearTimeout(timer));
 }
 
 export function writePieceRenderStatus(
@@ -412,20 +841,20 @@ export const piece = new Command()
   .globalOption("-i,--identity <path:string>", "Path to an identity keyfile.")
   .globalOption("-s,--space <space:string>", "The space name or DID")
   /* piece ls */
-  .command("ls", "List pieces in space.")
+  .command("ls", "List pieces registered in the space.")
   .usage(spaceUsage)
   .example(
     cliText(`cf piece ls ${EX_ID} ${EX_COMP}`),
-    `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
+    `Display the registered pieces in "${RAW_EX_COMP.space}".`,
   )
   .example(
     cliText(`cf piece ls ${EX_ID} ${EX_URL}`),
-    `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
+    `Display the registered pieces in "${RAW_EX_COMP.space}".`,
   )
   .option("--json", "Output machine-readable JSON.")
   .action(listPiecesFromCommand)
   /* piece search */
-  .command("search", "Search readable input and result data in every piece.")
+  .command("search", "Search input and result data in registered pieces.")
   .usage(`${spaceUsage} <query>`)
   .example(
     cliText(`cf piece search ${EX_ID} ${EX_COMP} "meeting notes"`),
@@ -604,9 +1033,26 @@ export const piece = new Command()
     "--dangerously-allow-incompatible-schema",
     "Replace the source even when pattern or retained-link schema compatibility cannot be proven.",
   )
+  .option(
+    "--check",
+    "Report whether the source could replace the piece's current one, without updating the piece. Exits non-zero when it could not.",
+  )
   .arguments("<main:string>")
   .action(async (options, mainPath) => {
     setQuietMode(!!options.quiet);
+    if (options.check) {
+      // A refusal exits 1 from inside the check (plain stderr, no usage
+      // dump), so `--check` gates a deploy script as well as informing a
+      // person.
+      const { config, summary } = await checkPieceSourceFromCommand(
+        options,
+        mainPath,
+      );
+      render(summary);
+      hint(cliText(`NEXT STEPS:
+  → Apply it: cf piece setsrc --piece ${config.piece} ${mainPath} ...`));
+      return;
+    }
     const pieceConfig = await setPieceSourceFromCommand(options, mainPath);
     render(`Updated source for piece ${pieceConfig.piece}`);
     hint(cliText(`NEXT STEPS:
@@ -971,6 +1417,18 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE} --step`),
     `Start, recompute, and get the result in one CLI session.`,
   )
+  .example(
+    cliText(
+      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items --filter '.status == "open"'`,
+    ),
+    "Return only matching items from an array.",
+  )
+  .example(
+    cliText(
+      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items --schema id,title`,
+    ),
+    "Project each returned item to selected fields.",
+  )
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option("--input", "Read from the piece's input cell instead of result cell")
   .option(
@@ -981,6 +1439,14 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     "--json",
     "Select JSON output explicitly. This command always outputs JSON.",
   )
+  .option(
+    "--filter <predicate:string>",
+    "Filter an array with a jq-inspired predicate",
+  )
+  .option(
+    "--schema <schema:string>",
+    "Project output with comma-separated fields, inline JSON Schema, or @file",
+  )
   .arguments("[path:string]")
   .action(async (options, pathString) => {
     setQuietMode(!!options.quiet);
@@ -990,9 +1456,11 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     };
     const pathSegments = pathString ? parseCellPath(pathString) : [];
     try {
+      const transform = await parsePieceGetTransformOptions(options);
       const value = await getCellValue(pieceConfig, pathSegments, {
         input: options.input,
         step: options.step,
+        ...(transform === undefined ? {} : { transform }),
       });
       render(value, { json: true });
     } catch (error) {
@@ -1048,11 +1516,11 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     );
   })
   /* piece map */
-  .command("map", "Display a visual map of all pieces and their connections")
+  .command("map", "Show registered pieces and the connections between them")
   .usage(spaceUsage)
   .example(
     cliText(`cf piece map ${EX_ID} ${EX_COMP}`),
-    `Display a map of all pieces and connections in "${RAW_EX_COMP.space}".`,
+    `Display registered pieces and connections in "${RAW_EX_COMP.space}".`,
   )
   .example(
     cliText(`cf piece map ${EX_ID} ${EX_COMP} --format dot`),
@@ -1111,9 +1579,61 @@ after --. Handlers interpret piped input when no input argument is present.`,
     `Run the "search" tool using schema-derived flags after "--".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option(
+    "--invocation <id:string>",
+    "Idempotency key for a handler call (before the callable name). A " +
+      "same-id retry cannot commit twice — it settles on the original " +
+      "outcome — but the handler body does re-run, so effects outside the " +
+      "transaction repeat. Minted automatically when omitted.",
+  )
+  .option(
+    "--verbose",
+    "Print per-phase wall-clock timings to stderr (before the callable " +
+      "name). stdout still carries only the command output.",
+  )
+  .option(
+    "--await",
+    "Wait for settlement and receipt readback (before the callable name). " +
+      "This is the default; the flag exists so a script can say so " +
+      "explicitly. Contradicts --no-wait.",
+  )
+  .option(
+    "--wait <seconds:number>",
+    "Bound the settlement wait by a chosen patience, in seconds (before " +
+      "the callable name). On expiry the exit is nonzero with the " +
+      "invocation id and furthest phase on stderr; the invocation may not " +
+      "have executed or committed, and re-invoking with the same id is " +
+      "safe in every phase — it finishes the work or reads the outcome " +
+      "back.",
+  )
+  .option(
+    "--no-wait",
+    "Exit once this handling's commit is acknowledged (before the callable " +
+      "name), skipping only the receipt readback: stdout reports status " +
+      '"committed", and a later call with the same --invocation id reads ' +
+      "the outcome back. The handler still executes here and its commit " +
+      "is durable. Handler invocations only.",
+  )
+  .option(
+    "--show-links",
+    "Annotate the Invocation JSON with a links dictionary mapping result " +
+      "paths to their backing cell addresses (before the callable name). " +
+      'The root "/" entry is the result\'s own backing document — the ' +
+      "receipt, unless the result is itself a reference, in which case a " +
+      'separate "receipt" entry keeps the receipt address; other entries ' +
+      "appear only where a path is backed by a different document. Handler " +
+      "invocations only — a tool already reports its result cell on stderr.",
+  )
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
+    const invocationId = resolveInvocationId(options.invocation);
+    const waitControl = resolveWaitControl(options);
+    let phase: InvocationPhase = "initial_sync";
+    const observer = pieceCallPhaseObserver(
+      !!options.verbose,
+      (next) => phase = next,
+    );
     try {
       setQuietMode(!!options.quiet);
       const invocation = pieceCallInvocation(
@@ -1124,37 +1644,112 @@ after --. Handlers interpret piped input when no input argument is present.`,
         ...options,
         json: invocation.jsonOutput,
       });
-      const result = await executePieceCallable(
-        pieceConfig,
-        callableName,
-        invocation.rawArgs,
+      const result = await boundedSettlement(
+        executePieceCallable(
+          pieceConfig,
+          callableName,
+          invocation.rawArgs,
+          {
+            invocationId,
+            skipReadback: waitControl.mode === "commit",
+            showLinks: !!options.showLinks,
+            onPhase: invocationPhaseReporter(
+              invocationId,
+              observer.onPhase,
+              undefined,
+              Boolean(Deno.env.get("CF_TEST_ANNOUNCE_INVOCATION_PHASES")),
+            ),
+          },
+        ).catch((error) =>
+          reportVerbInputErrorOrRethrow(
+            error,
+            pieceConfig.piece,
+            undefined,
+            observer,
+          )
+        ),
+        waitControl.boundSeconds,
       );
-      if (result.helpText) {
-        render(result.helpText);
-        return;
-      }
-      if (result.outputText) {
-        render(result.outputText);
-        return;
-      }
-      const confirmation =
-        `Called handler "${callableName}" on piece ${pieceConfig.piece}`;
-      if (result.parsed.usedJsonInput) {
-        console.error(confirmation);
-      } else {
-        render(confirmation);
-      }
-      hint(cliText(`NEXT STEPS:
-  → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
-  → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
+      renderPieceCallOutcome(
+        observer,
+        result,
+        callableName,
+        pieceConfig.piece,
+        {},
+        { detached: waitControl.mode === "commit", invocationId },
+      );
     } catch (error) {
       if (error instanceof ValidationError) {
+        observer.finish("failed");
         throw error;
       }
       const message = error instanceof Error ? error.message : String(error);
       console.error(message);
+      observer.finish("failed");
+      // Where the invocation stopped decides retry semantics: anything at or
+      // past "dispatched" retries SAFELY ONLY with this same id (same-id
+      // retries deduplicate; a fresh id would re-execute).
+      console.error(`invocation: ${invocationId} phase: ${phase}`);
+      if (error instanceof WaitBoundExpired) {
+        // The caller's patience expired. The handler runs in this process,
+        // so the invocation may not have executed or committed — the
+        // recovery is a same-id re-invoke, which the stderr message names.
+        // stdout still carries the Invocation JSON with the furthest
+        // observed phase — the same machine surface as a settled call, so a
+        // script parses one shape either way.
+        render(
+          JSON.stringify(
+            invocationJson({ id: invocationId, status: phase }),
+            null,
+            2,
+          ),
+        );
+      }
       Deno.exit(1);
     }
+  })
+  /* piece verbs */
+  .command(
+    "verbs",
+    "List a piece's callable verbs (handlers and tools) with their schemas.",
+  )
+  .usage(pieceUsage)
+  .example(
+    cliText(`cf piece verbs ${EX_ID} ${EX_COMP_PIECE}`),
+    `List every verb piece "${RAW_EX_COMP.piece!}" exposes.`,
+  )
+  .example(
+    cliText(`cf piece verbs ${EX_ID} ${EX_URL} --json`),
+    "Machine-readable listing: name, kind, and input schema per verb.",
+  )
+  .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option("--json", "Output machine-readable JSON.")
+  .action(async (options) => {
+    setQuietMode(!!options.quiet);
+    const pieceConfig = parsePieceOptions(options);
+    const listing = await listPieceCallables(pieceConfig);
+    if (options.json) {
+      render(listing, { json: true });
+      return;
+    }
+    if (listing.verbs.length === 0) {
+      render("<no callable verbs>");
+      return;
+    }
+    if (listing.pattern) {
+      render(`PATTERN ${formatPatternIdentity(listing.pattern)}`);
+    }
+    render(
+      Table.from([
+        ["NAME", "KIND", "ON"],
+        ...listing.verbs.map((v) => [v.name, v.kind, v.on]),
+      ]).toString(),
+    );
+    hint(
+      cliText(
+        `TIP: --json includes each verb's input schema; 'cf piece call --piece ${pieceConfig.piece} <verb> --help --json' has the full command spec.`,
+      ),
+    );
   })
   /* piece rm */
   .command("rm", "Remove a piece")
@@ -1318,6 +1913,56 @@ export async function searchPiecesFromCommand(
 /** Injectable dependencies for testing the `piece setsrc` command boundary. */
 export interface SetPieceSourceCommandDependencies {
   setPiecePattern?: typeof setPiecePattern;
+}
+
+/** Injectable dependencies for testing `piece setsrc --check`. */
+export interface CheckPieceSourceCommandDependencies {
+  checkPiecePattern?: typeof checkPiecePattern;
+  /** `exitWithDataError`'s seam, so a test can observe the refusal. */
+  exit?: Parameters<typeof exitWithDataError>[1];
+}
+
+/**
+ * Run the `piece setsrc --check` preflight. Applies nothing.
+ *
+ * Deliberately parses the same options `setsrc` does, so the check is aimed at
+ * the piece and entry the apply would have used — a preflight against a
+ * different target is worse than none.
+ *
+ * The refusal is raised here rather than in the command's action so that the
+ * decision — including the non-zero exit that lets `--check` gate a deploy
+ * script — is reachable by a test. The action only renders what it returns.
+ */
+export async function checkPieceSourceFromCommand(
+  options: PieceCLIOptions,
+  mainPath: string,
+  deps: CheckPieceSourceCommandDependencies = {},
+): Promise<{
+  config: PieceConfig;
+  report: PatternCompatibilityReport;
+  summary: string;
+}> {
+  const config = parsePieceOptions(options);
+  const report = await (deps.checkPiecePattern ?? checkPiecePattern)(
+    config,
+    localPatternEntry(mainPath, options),
+  );
+  if (!report.compatible) {
+    // A refusal is a data condition — this source and this piece's stored
+    // state don't fit — not an arg-parse failure, so it reports like the
+    // `piece get` / `piece link` data errors above: plain stderr and exit 1,
+    // never a Cliffy ValidationError, which would dump the usage screen over
+    // the verdict.
+    exitWithDataError({
+      message:
+        `${mainPath} cannot replace the source for piece ${config.piece}:\n${report.message}`,
+    }, deps.exit);
+  }
+  return {
+    config,
+    report,
+    summary: `${mainPath} can replace the source for piece ${config.piece}`,
+  };
 }
 
 /** Apply the parsed `piece setsrc` command while preserving its safety flag. */

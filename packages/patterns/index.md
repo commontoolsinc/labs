@@ -109,9 +109,6 @@ follow: `address.tsx`, `age-category.tsx`, `birthday.tsx`, `custom-field.tsx`,
 `rating.tsx`, `relationship.tsx`, `social.tsx`, `status.tsx`, `tags.tsx`,
 `text-import.tsx`, `timeline.tsx`, `timing.tsx`, `type-picker.tsx`.
 
-**`deprecated/`** — already explicitly deprecated; ignored by tooling and agents
-(see AGENTS.md).
-
 **`factory-outputs/`** (+ its support files `vehicles.ts`, `vehicles.test.ts`) —
 machine-generated pattern-factory outputs kept with their eval scores; never
 intended as style references.
@@ -120,10 +117,10 @@ intended as style references.
 `google/core/`.
 
 Support files with no tier (not patterns): `deno.jsonc`, `mod.ts`, `index.md`,
-`README.md`, `DEPRECATED_IDIOMS.md`, `test-ui-helpers.ts`, `tools/` (codegen
-tooling). The December 2025 bug survey formerly kept here as
-`PREEXISTING_BUGS.md` is archived at
-`docs/history/packages/patterns/PREEXISTING_BUGS.md`.
+`README.md`, `DEPRECATED_IDIOMS.md`, `test/vnode-helpers.ts` (the shared
+rendered-tree helpers for pattern tests), `tools/` (codegen tooling). The
+December 2025 bug survey formerly kept here as `PREEXISTING_BUGS.md` is archived
+at `docs/history/packages/patterns/PREEXISTING_BUGS.md`.
 
 ---
 
@@ -209,8 +206,10 @@ interface TopicsInput {
   topics?: Writable<TopicPiece[] | Default<[]>>;
   myName?: PerUser<Writable<string | Default<"">>>;
 }
-// TopicInput additionally takes mentionable?: Writable<TopicPiece[]> — the
-// board's own list, wired at creation, for detail-page Connections.
+// TopicInput additionally takes mentionable?: Writable<TopicReference[]> —
+// the board's own list, wired at creation, for detail-page Connections.
+// TopicReference is TopicPiece minus its own crossrefs, so a Topic's schema
+// describes its siblings without recursing over the whole board.
 ```
 
 ### Output Schema
@@ -1188,13 +1187,13 @@ formatting.
 ## `examples/reactive-now.tsx`
 
 Example pattern demonstrating both pattern-facing surfaces of the timing
-side-channel mitigations. Reading time: a one-shot `#now` snapshot (load time),
-a ticking `#now/1` clock (current time), and a `#now`-derived "N seconds ago"
-elapsed label — a worked reference for migrating clock reads off the forbidden
-body-level `Date.now()` onto `#now`. Receiving input: a "Tap" button and a
-`$value` text box, so a live browser can watch the token-bucket delivery shaping
-— bursts are realtime, only sustained mashing/typing is throttled, and nothing
-is dropped.
+side-channel mitigations. Reading time: a one-shot `#now` snapshot (the piece's
+first-ever load, durable), a ticking `#now/1` clock (current time), and a
+`#now`-derived "N seconds ago" elapsed label — a worked reference for migrating
+clock reads off the forbidden body-level `Date.now()` onto `#now`. Receiving
+input: a "Tap" button and a `$value` text box, so a live browser can watch the
+token-bucket delivery shaping — bursts are realtime, only sustained
+mashing/typing is throttled, and nothing is dropped.
 
 **Keywords:** now, wish, time, elapsed, relative-time, reactive,
 capability-gate, timing, delivery-shaping, token-bucket, input

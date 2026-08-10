@@ -46,11 +46,12 @@ Allowed inside patterns:
 | `.get()` on computed or lift result | Access directly; only `Writable` uses `.get()` |
 | `items.filter(...)` inline in JSX | Wrap in `computed()` outside JSX |
 | `items.sort(...)` inline in JSX | Wrap in `computed()` outside JSX |
-| `Date.now()`/`new Date()` or `Math.random()` in a `computed()` or `lift()`, or at pattern-body level | These built-ins throw a `TimeCapabilityError` outside a handler; read them in `action()`/`handler()`, or use the `#now` wish for reactive time |
+| `Date.now()`/`new Date()` or `Math.random()` in a `computed()` or `lift()`, or at pattern-body level | These built-ins throw a `TimeCapabilityError` outside a handler; read them in `action()`/`handler()`, or use the interval `#now/N` wish for reactive time (bare `#now` is a frozen one-shot) |
 | `Date.now()`/`new Date()` or `Math.random()` inside a re-running computation (`computed()` or `lift()`) without clear intent | Move the snapshot into `action()`, `handler()`, or one-time initialization |
 | nested computed with outer-scope reactive vars | Pre-compute with lift or an outer computed |
 | `lift()` closing over reactive deps | Pass dependencies as explicit parameters |
 | cells from composed patterns in `ifElse` | Wrap in a local `computed()` bridge |
+| reactive computation inline in builder-call args, e.g. `join({ x: a ?? b.result })` | Hoist to a body-level const or `computed()` and bind that (the compiler rejects the inline form) |
 
 ### 3. Conditional Rendering
 
@@ -204,10 +205,9 @@ state carry over? If not, it is probably `PerSession<>`.
 
 Findings in this category are warnings, not failures: emit them as `[WARN]`
 lines in the checklist, count them under `Warnings` in the summary, and treat
-severity as `minor`. Skip files under `deprecated/`. The tells below are seed
-examples, not a boundary — the underlying principle is: if a shipped `cf-*`
-component or theme token already expresses the intent, hand-rolling it is a
-warning. Where a tell here overlaps category 6's "arbitrary one-off visual
+severity as `minor`. The tells below are seed examples, not a boundary — the
+underlying principle is: if a shipped `cf-*` component or theme token already
+expresses the intent, hand-rolling it is a warning. Where a tell here overlaps category 6's "arbitrary one-off visual
 overrides" row, report it once, here, as `[WARN]` — not there as `[FAIL]`.
 
 | Look for | Why it's wrong | Use instead |
@@ -265,6 +265,43 @@ See `docs/common/patterns/multi-user-patterns.md#presenting-identity` and `docs/
   `.get()` — is correct. Do not report a "missing `.get()`"; adding `.get()` on a
   resolved string/number is the actual defect, and `cf check` would reject the
   handler-state type mismatch if the binding were unresolved.
+
+### 17. Cross-Pattern Data Contracts
+
+Review types used to read externally owned data: linked pieces, wish results,
+registry entries, cells passed between independently evolving patterns, and
+similar boundaries. A schema is a runtime projection and binding contract, not
+just a TypeScript annotation. The consumer should name only the fields it reads
+and the live-cell/stream bindings it actually uses.
+
+| Violation | Fix |
+|-----------|-----|
+| another pattern's full `FooInput` or `FooOutput` is imported, aliased, or extended to type external data even though only a subset is used | declare a consumer-owned structural type containing exactly the fields and bindings used |
+| `Pick<FooOutput, ...>` / `Omit<FooOutput, ...>` is used merely to avoid spelling the consumer contract | write the minimal local shape so unrelated producer type changes do not become consumer migrations |
+| a consumer projection names fields it never reads, including `[UI]`, unrelated state, or mutation streams | remove them; undeclared fields are intentionally outside this relationship |
+| a consumer requests a branded live cell (`Writable<>` / `Cell<>`) or stream when it needs only a projected value or does not use the stream | use the plain field type or omit the stream; `Writable<>` and `Cell<>` are equivalent aliases, not different authority levels |
+| a producer's advertised reusable model contains its full pattern state or grows whenever one consumer needs another field | keep/export a shallow role model for the stable shared semantics; let specialized consumers own additional local projections |
+
+This duplication is intentional. Narrow schemas avoid traversing unrelated
+linked data, reduce validation failures across durable-data vintages, avoid
+unnecessary live-cell and stream bindings, and let patterns migrate
+independently. An extra required field whose value is unavailable or
+incompatible invalidates its object; when that object is an array element, one
+invalid element voids the entire array read. See
+`packages/runner/test/traverse-required-links.test.ts` and
+`docs/common/patterns/composition.md#keep-external-data-contracts-narrow`.
+
+Do not flag a genuinely shared protocol (for example, a stream event or enum),
+a cohesive domain model co-owned by one pattern family, a test intentionally
+checking the complete public result, or a wrapper whose stated purpose is to
+forward the complete contract. If the consumer demonstrably uses every field
+and binding, the full contract may be honest. Also do not flag `[UI]` on a
+sub-pattern's own output type: it is required for rendering that sub-pattern in
+another pattern.
+
+Severity is `minor` when the only current effect is unnecessary coupling.
+Raise it to `major` when the oversized contract causes extra traversal,
+validation, or migration failure.
 
 ## Output Format
 

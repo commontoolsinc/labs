@@ -118,11 +118,11 @@ Useful references:
 
 ### Feedback And Overlays
 
-| Element    | Element             | Element       | Element       |
-| ---------- | ------------------- | ------------- | ------------- |
-| `cf-alert` | `cf-empty-state`    | `cf-fab`      | `cf-loader`   |
-| `cf-modal` | `cf-modal-provider` | `cf-progress` | `cf-skeleton` |
-| `cf-toast` | `cf-toast-provider` |               |               |
+| Element             | Element          | Element       | Element     |
+| ------------------- | ---------------- | ------------- | ----------- |
+| `cf-alert`          | `cf-empty-state` | `cf-fab`      | `cf-loader` |
+| `cf-modal`          | `cf-progress`    | `cf-skeleton` | `cf-toast`  |
+| `cf-toast-provider` |                  |               |             |
 
 ### Charts And Maps
 
@@ -156,11 +156,28 @@ Useful references:
 
 ### Runtime And Interaction
 
-| Element        | Element           | Element        | Element          |
-| -------------- | ----------------- | -------------- | ---------------- |
-| `cf-autostart` | `cf-cell-context` | `cf-cell-link` | `cf-drag-source` |
-| `cf-draggable` | `cf-drop-zone`    | `cf-keybind`   | `cf-piece`       |
-| `cf-render`    | `cf-toolbar`      | `cf-updater`   |                  |
+| Element        | Element        | Element          | Element         |
+| -------------- | -------------- | ---------------- | --------------- |
+| `cf-autostart` | `cf-cell-link` | `cf-drag-source` | `cf-draggable`  |
+| `cf-drop-zone` | `cf-keybind`   | `cf-piece`       | `cf-piece-menu` |
+| `cf-render`    | `cf-toolbar`   | `cf-updater`     |                 |
+
+### Retired
+
+Kept as inert passthroughs: they render their children and nothing else, warn
+once per session when used, and are `@deprecated` so authoring flags them.
+Durable pattern source still names them, and a piece runs the source it was
+stored with — so deleting the definition strands that source rather than
+retiring the element. They leave once nothing durable emits them. See
+`src/v2/core/retired-element.ts`.
+
+Replacements are named unbacktick'd on purpose: the registration test reads
+every backticked `cf-*` in this section as a registered element, and a name
+repeated here is a duplicate.
+
+| Element           | Retired in | Use instead   |
+| ----------------- | ---------- | ------------- |
+| `cf-cell-context` | #5132      | cf-piece-menu |
 
 ## 🔒 Security Constraints
 

@@ -16,7 +16,8 @@ import type { Writable } from "commonfabric";
  * - Future: AI agents that dynamically configure containers
  *
  * Note: This interface uses serializable data only (no functions) to avoid
- * "Cannot store function per se" errors when the context is stored as pattern input.
+ * "Not representable as a `FabricValue`: function" errors when the
+ * context is stored as pattern input.
  *
  * @template TEntry - The type of entries in the container's list
  */

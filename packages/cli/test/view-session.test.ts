@@ -1,10 +1,14 @@
 import { assert, assertEquals } from "@std/assert";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";
+import { renderFrame } from "../lib/view/render.ts";
 import { Session } from "../lib/view/session.ts";
-import { frameTop } from "../lib/view/actions.ts";
+import { frameTop, maxTop } from "../lib/view/actions.ts";
 import { buildPeekCard } from "../lib/view/card.ts";
+import type { CardTarget } from "../lib/view/card.ts";
+import type { EditableSource } from "../lib/view/editsource.ts";
 import type { Key } from "../lib/view/keys.ts";
 import type { Semantics } from "../lib/view/languages/language.ts";
+import { wrappedRowAt } from "../lib/view/wrap.ts";
 
 function makeSession() {
   const doc = parseDocument(SAMPLE);
@@ -22,6 +26,28 @@ function press(session: Session, ...names: string[]): void {
       : { name };
     session.handleKey(key);
   }
+}
+
+function expandableSession(
+  text: string,
+  width: number,
+  editable = false,
+): Session {
+  const source: EditableSource = {
+    label: null,
+    isDiff: true,
+    editable,
+    parse: (next) => parseDocument(next),
+    save: () => "",
+    expandContext: () => null,
+  };
+  return new Session(
+    parseDocument(text),
+    { color: false, showLineNumbers: false },
+    { width, height: 4 },
+    undefined,
+    source,
+  );
 }
 
 Deno.test("session: vertical scrolling and clamping", () => {
@@ -42,6 +68,100 @@ Deno.test("session: vertical scrolling and clamping", () => {
   assertEquals(s.view().top, 0);
 });
 
+Deno.test("session: an ordinary file ends at the bottom of the viewport", () => {
+  const text = Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n");
+  const s = new Session(
+    parseDocument(text),
+    { color: false, showLineNumbers: false },
+    { width: 30, height: 9 },
+  );
+  press(s, "G");
+  assertEquals(s.view().top, maxTop(s.doc.lines.length, s.view().height));
+  const rows = renderFrame(s.displayDoc(), s.view());
+  assertEquals(rows[7].trim(), "line 11");
+  assert(
+    !rows.some((row) => /[☙❦❧]/u.test(row)),
+    "ordinary files omit the end mark",
+  );
+  press(s, "j");
+  assertEquals(s.view().top, 4, "down stops with the last line at the bottom");
+});
+
+Deno.test("session: a diff leaves three quarters below the final line", () => {
+  const text = Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n");
+  const source: EditableSource = {
+    label: null,
+    isDiff: true,
+    editable: false,
+    parse: (next) => parseDocument(next),
+    save: () => "",
+  };
+  const s = new Session(
+    parseDocument(text),
+    { color: false, showLineNumbers: false },
+    { width: 30, height: 9 },
+    undefined,
+    source,
+  );
+  press(s, "G");
+  assertEquals(s.view().top, 10);
+  const rows = renderFrame(s.displayDoc(), s.view());
+  assertEquals(rows[1].trim(), "line 11");
+  assertEquals(rows[2].trim(), "☙   ❦   ❧");
+  assertEquals(rows[3].trim(), "☙   ❧");
+  assertEquals(rows[4].trim(), "❦");
+  press(s, "j");
+  assertEquals(s.view().top, 10, "down stops at the padded diff end");
+});
+
+Deno.test("session: a trailing diff newline is not a padded content row", () => {
+  const source: EditableSource = {
+    label: null,
+    isDiff: true,
+    editable: false,
+    parse: (next) => parseDocument(next),
+    save: () => "",
+  };
+  const s = new Session(
+    parseDocument("done\n"),
+    { color: false, showLineNumbers: false },
+    { width: 30, height: 5 },
+    undefined,
+    source,
+  );
+  press(s, "G");
+  assertEquals(s.view().top, 0);
+  const rows = renderFrame(s.displayDoc(), s.view());
+  assertEquals(rows[0].trim(), "done");
+  assertEquals(rows[1].trim(), "☙   ❦   ❧");
+  assert(
+    rows.at(-1)!.includes("1-1/1  END"),
+    "the hidden terminator is absent from the status",
+  );
+});
+
+Deno.test("session: edit-mode scrolling keeps the ordinary document limit", () => {
+  const text = Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n");
+  const source: EditableSource = {
+    label: null,
+    editable: true,
+    parse: (next) => parseDocument(next),
+    save: () => "",
+  };
+  const s = new Session(
+    parseDocument(text),
+    { color: false, showLineNumbers: false },
+    { width: 30, height: 9 },
+    undefined,
+    source,
+  );
+  press(s, "e");
+  for (let i = 0; i < 20; i++) {
+    s.handleKey({ name: "down", alt: true });
+  }
+  assertEquals(s.view().top, maxTop(s.doc.lines.length, s.view().height));
+});
+
 Deno.test("session: horizontal scrolling", () => {
   const s = makeSession();
   press(s, "l");
@@ -52,7 +172,216 @@ Deno.test("session: horizontal scrolling", () => {
   assertEquals(s.view().left, 0, "left clamps at 0");
 });
 
-Deno.test("session: backslash toggles wrapping and continuation-row scrolling", () => {
+Deno.test("session: lines without diff annotations use the full width", () => {
+  const s = expandableSession("abcde", 7);
+  assertEquals(renderFrame(s.displayDoc(), s.view())[0], "abcde  ");
+  press(s, "l");
+  assertEquals(s.view().left, 0);
+  assertEquals(renderFrame(s.displayDoc(), s.view())[0], "abcde  ");
+});
+
+Deno.test("session: full-width lines count displayed cells", () => {
+  const cases = [
+    { text: "😀😀😀😀😀", displayModeKeys: 0, expected: "😀😀😀😀😀  " },
+    {
+      text: "\x1b[31mabcde\x1b[0m",
+      displayModeKeys: 1,
+      expected: "abcde  ",
+    },
+  ];
+  for (const { text, displayModeKeys, expected } of cases) {
+    const s = expandableSession(text, 7);
+    for (let i = 0; i < displayModeKeys; i++) press(s, "c");
+    press(s, "l", "l");
+    assertEquals(s.view().left, 0);
+    assertEquals(renderFrame(s.displayDoc(), s.view())[0], expected);
+  }
+});
+
+Deno.test("session: search keeps a fitting unannotated match in place", () => {
+  const s = expandableSession("abcdX", 7);
+  press(s, "/", "X", "enter");
+  assertEquals(s.view().left, 0);
+  assertEquals(renderFrame(s.displayDoc(), s.view())[0], "abcdX  ");
+});
+
+Deno.test("session: a card jump uses the full unannotated width", () => {
+  const s = expandableSession("abcdX", 7);
+  const target: CardTarget = {
+    cardLine: 0,
+    destLine: 0,
+    destCol: 4,
+  };
+  const jump = s as unknown as {
+    jumpToTarget(target: CardTarget): void;
+  };
+  jump.jumpToTarget(target);
+  assertEquals(s.view().left, 0);
+  assertEquals(renderFrame(s.displayDoc(), s.view())[0], "▶abcdX ");
+});
+
+Deno.test("session: clearing a selection clamps expansion-margin panning", () => {
+  const s = expandableSession("const x = 123456789;", 5);
+  press(s, "tab");
+  assert(s.view().selected, "a guide is present");
+  press(s, ...Array(25).fill("l"));
+  const withGuide = s.view().left;
+  press(s, "escape");
+  assertEquals(s.view().left, withGuide - 1);
+  const atRightEdge = s.view().left;
+  press(s, "l");
+  assertEquals(s.view().left, atRightEdge, "right does not move left");
+});
+
+const TOTALS_DIFF = [
+  "diff --git a/a.ts b/a.ts",
+  "index 1111111..2222222 100644",
+  "--- a/a.ts",
+  "+++ b/a.ts",
+  "@@ -1,3 +1,3 @@",
+  " keep",
+  "-old",
+  "+new",
+  "diff --git a/b.ts b/b.ts",
+  "index 3333333..4444444 100644",
+  "--- a/b.ts",
+  "+++ b/b.ts",
+  "@@ -1 +1,2 @@",
+  " x",
+  "+added",
+  "",
+].join("\n");
+
+function totalsSource(editable = false): EditableSource {
+  return {
+    label: null,
+    isDiff: true,
+    editable,
+    parse: (next) => parseDocument(next),
+    save: () => "",
+  };
+}
+
+Deno.test("session: a diff source carries whole-diff totals to the view", () => {
+  const s = new Session(
+    parseDocument(TOTALS_DIFF),
+    { color: false, showLineNumbers: false },
+    { width: 40, height: 6 },
+    undefined,
+    totalsSource(),
+  );
+  assertEquals(s.view().diffTotals, { adds: 2, dels: 1 });
+  const rows = renderFrame(s.displayDoc(), s.view());
+  assert(rows[0].endsWith("+2 −1"), "the first line's corner sums both files");
+
+  const plain = new Session(
+    parseDocument(TOTALS_DIFF),
+    { color: false, showLineNumbers: false },
+    { width: 40, height: 6 },
+  );
+  assertEquals(
+    plain.view().diffTotals,
+    null,
+    "no totals without a diff source",
+  );
+
+  const noFiles = new Session(
+    parseDocument(SAMPLE),
+    { color: false, showLineNumbers: false },
+    { width: 40, height: 6 },
+    undefined,
+    totalsSource(),
+  );
+  assertEquals(noFiles.view().diffTotals, null, "no totals without diff files");
+});
+
+Deno.test("session: edit mode hides the whole-diff totals", () => {
+  const s = new Session(
+    parseDocument(TOTALS_DIFF),
+    { color: false, showLineNumbers: false },
+    { width: 40, height: 8 },
+    undefined,
+    totalsSource(true),
+  );
+  press(s, "e");
+  assert(s.view().cursor, "the text cursor is active");
+  assertEquals(s.view().diffTotals, null);
+  assert(!renderFrame(s.displayDoc(), s.view())[0].includes("+2 −1"));
+  press(s, "escape");
+  assertEquals(s.view().diffTotals, { adds: 2, dels: 1 });
+});
+
+Deno.test("session: a wrapped first line flows around the totals label", () => {
+  const s = new Session(
+    parseDocument(TOTALS_DIFF),
+    { color: false, showLineNumbers: false },
+    { width: 20, height: 6 },
+    undefined,
+    totalsSource(),
+  );
+  press(s, "\\");
+  const rows = renderFrame(s.displayDoc(), s.view());
+  assertEquals(rows[0], "diff --git a/a\\+2 −1");
+  assertEquals(rows[1], ".ts b/a.ts          ");
+});
+
+Deno.test("session: panning reaches content hidden under the totals label", () => {
+  const PAN_DIFF = [
+    "diff --git a/src/app.ts b/src/app.ts",
+    "index 1111111..2222222 100644",
+    "--- a/src/app.ts",
+    "+++ b/src/app.ts",
+    "@@ -1,2 +1,2 @@",
+    " keep",
+    "-old",
+    "+new",
+    "",
+  ].join("\n");
+  const s = expandableSession(PAN_DIFF, 20);
+  press(s, ...Array(4).fill("l"));
+  // The first line is 36 columns; the clamp leaves room to pan its tail out
+  // from under the five-column label: 36 − (20 − 5).
+  assertEquals(s.view().left, 21);
+  assertEquals(
+    renderFrame(s.displayDoc(), s.view())[0],
+    "ts b/src/app.ts+1 −1",
+    "the end of the first line is visible beside the label",
+  );
+});
+
+Deno.test("session: removing the gutter clamps expansion-margin panning", () => {
+  const s = expandableSession("abcdefghijklmnopqrst", 10);
+  press(s, "#");
+  for (let i = 0; i < 10; i++) press(s, "l");
+  const withGutter = s.view().left;
+  press(s, "#", "#");
+  assertEquals(s.view().left, withGutter - 4);
+  const atRightEdge = s.view().left;
+  press(s, "l");
+  assertEquals(s.view().left, atRightEdge, "right does not move left");
+});
+
+Deno.test("session: leaving edit mode clamps expansion-margin panning", () => {
+  const s = expandableSession("abcdefghijklmnopqrst", 10, true);
+  press(s, "e", "end", "left");
+  for (let i = 0; i < 10; i++) {
+    s.handleKey({ name: "right", alt: true });
+  }
+  assertEquals(s.view().left, 20, "edit mode retains ordinary panning");
+  press(s, "escape");
+  assertEquals(s.view().left, 10);
+  press(s, "l");
+  assertEquals(s.view().left, 10, "right does not move left");
+});
+
+Deno.test("session: leaving edit mode keeps the former cursor column visible", () => {
+  const s = expandableSession("abcde", 7, true);
+  press(s, "e", "right", "right", "right", "right", "escape");
+  assertEquals(s.view().left, 0);
+  assertEquals(renderFrame(s.displayDoc(), s.view())[0], "abcde  ");
+});
+
+Deno.test("session: backslash cycles wrapping and keeps its content anchor", () => {
   const doc = parseDocument("abcdefghijkl\nsecond");
   const s = new Session(
     doc,
@@ -60,10 +389,10 @@ Deno.test("session: backslash toggles wrapping and continuation-row scrolling", 
     { width: 4, height: 3 },
   );
   press(s, "l", "\\");
-  assert(s.view().wrapLines, "wrapping is on");
+  assertEquals(s.view().wrapMode, "hard");
   assertEquals(s.view().left, 0, "wrapping resets horizontal panning");
   assertEquals(s.view().top, 2, "wrapping keeps the panned content in view");
-  assertEquals(s.view().message, "Line wrapping: on");
+  assertEquals(s.view().message, "Line wrapping: hard");
 
   press(s, "k");
   assertEquals(s.view().top, 1, "k moves to the previous wrapped row");
@@ -71,10 +400,49 @@ Deno.test("session: backslash toggles wrapping and continuation-row scrolling", 
   assertEquals(s.view().left, 0, "wrapped content does not pan");
 
   press(s, "\\");
-  assert(!s.view().wrapLines, "wrapping is off");
+  assertEquals(s.view().wrapMode, "word");
+  assertEquals(s.view().top, 1, "word wrapping keeps the same source content");
+  assertEquals(s.view().message, "Line wrapping: word");
+
+  press(s, "\\");
+  assertEquals(s.view().wrapMode, "off");
   assertEquals(s.view().top, 0, "the same logical line remains at the top");
   assertEquals(s.view().left, 3, "unwrapping keeps the continuation visible");
   assertEquals(s.view().message, "Line wrapping: off");
+});
+
+Deno.test("session: word wrapping repeats punctuation and whitespace prefixes", () => {
+  const s = new Session(
+    parseDocument("  #  foo bar"),
+    { color: false, showLineNumbers: false },
+    { width: 11, height: 4 },
+  );
+
+  press(s, "\\", "\\");
+
+  assertEquals(s.view().wrapMode, "word");
+  const rows = renderFrame(s.displayDoc(), s.view());
+  assertEquals(rows[0], "  #  foo  \\");
+  assertEquals(rows[1], "  #  bar   ");
+});
+
+Deno.test("session: word wrapping restores the visible source at a word", () => {
+  const s = new Session(
+    parseDocument("alpha beta gamma delta\nnext"),
+    { color: false, showLineNumbers: false },
+    { width: 10, height: 3 },
+  );
+
+  press(s, "\\", "j", "\\");
+
+  const view = s.view();
+  assertEquals(view.wrapMode, "word");
+  assertEquals(
+    wrappedRowAt(view.wrapPlan!, view.top)?.offset,
+    6,
+    "the hard-wrap anchor remains on the row that starts with beta",
+  );
+  assert(renderFrame(s.displayDoc(), view)[0].startsWith("beta "));
 });
 
 Deno.test("session: resizing a wrapped view keeps its top content in view", () => {
@@ -117,7 +485,7 @@ Deno.test("session: a gutter-width change reflows wrapped rows around the anchor
   assert(s.view().showLineNumbers, "line numbers are on");
 });
 
-Deno.test("session: removing a gutter clamps a wrapped view that now fits", () => {
+Deno.test("session: removing a gutter reclamps a wrapped ordinary end", () => {
   const doc = parseDocument("abcdefghijklmnopqrst");
   const s = new Session(
     doc,
@@ -125,9 +493,15 @@ Deno.test("session: removing a gutter clamps a wrapped view that now fits", () =
     { width: 8, height: 4 },
   );
   press(s, "\\", "#", "G");
-  assertEquals(s.view().top, 4);
+  assertEquals(
+    s.view().top,
+    maxTop(s.view().wrapPlan!.rowCount, s.view().height),
+  );
   press(s, "#", "#");
-  assertEquals(s.view().top, 0, "the wider view is clamped to its only page");
+  assertEquals(
+    s.view().top,
+    maxTop(s.view().wrapPlan!.rowCount, s.view().height),
+  );
 });
 
 Deno.test("session: search reveals the wrapped row containing the match", () => {
@@ -496,12 +870,15 @@ Deno.test("session: a search reveal in a compacting mode scrolls to the display 
   assert(left > 0 && left <= 42, `reveal used a display column, left=${left}`);
 });
 
-Deno.test("session: resize reclamps scroll", () => {
+Deno.test("session: resize reclamps scroll to the ordinary end", () => {
   const s = makeSession();
   press(s, "G");
   const bottomTop = s.view().top;
   s.resize(80, 100); // taller than the doc
-  assertEquals(s.view().top, 0, "growing the viewport pulls top back to 0");
+  assertEquals(
+    s.view().top,
+    maxTop(s.displayDoc().lines.length, 100),
+  );
   assert(bottomTop >= 0);
 });
 
@@ -782,8 +1159,19 @@ Deno.test("session: the help overlay documents file folding and scrolling", () =
   assert(text.includes("Diff files"), "has a Diff files section");
   assert(/hide\s*\/\s*show/.test(text), "documents hide/show");
   assert(text.includes("hide all files"), "documents hide all");
-  assert(text.includes("hide test"), "documents hiding test files");
-  assert(text.includes("wrap / unwrap long lines"), "documents line wrapping");
+  assert(text.includes("show test"), "documents toggling test files");
+  assert(text.includes("Markdown files"), "documents toggling Markdown files");
+  assert(
+    text.includes("line wrapping: off / hard / word"),
+    "documents line wrapping",
+  );
+  assert(
+    ov.lines.some((line) =>
+      line.text.includes("^L") &&
+      line.text.includes("reveal more context at the marked edge")
+    ),
+    "documents the pager's Ctrl-L marker and its key",
+  );
   assert(
     ov.footer.includes("scroll"),
     `footer advertises scrolling: ${ov.footer}`,

@@ -1,3 +1,4 @@
+import type { FabricValue } from "@commonfabric/api";
 import { expect } from "@std/expect";
 import type {
   SchedulerActionSnapshotCursor,
@@ -67,6 +68,10 @@ async function seedReloadablePiece(name: string) {
   await runtime.idle();
   await runtime.storageManager.synced();
   await runtime.idle();
+  // Scheduler only, not `dispose({ closeStorage: false })`: the seeding runtime
+  // is handed back live, and both tests below write through it to race a
+  // reload. Freezing its reactions is the point; tearing it down would take the
+  // writer with it.
   runtime.scheduler.dispose();
   return { env, input, result };
 }
@@ -462,6 +467,151 @@ Deno.test("stopping a target before link resolution invalidates the held start",
     runtime.runner.stop(target);
   } finally {
     await disposeSchedulerTestRuntime(reloaded);
+  }
+});
+
+Deno.test("releasing a target before link resolution preserves the held start", async () => {
+  const env = createSchedulerTestRuntime(import.meta.url, {});
+  try {
+    const { runtime, tx } = env;
+    const compiled = await runtime.patternManager.compilePattern(PROGRAM, {
+      space,
+      tx,
+    });
+    const input = runtime.getCell<number>(
+      space,
+      "pre-resolution-release-input",
+      undefined,
+      tx,
+    );
+    input.withTx(tx).set(5);
+    const target = runtime.getCell<{ doubled: number }>(
+      space,
+      "pre-resolution-release-target",
+      undefined,
+      tx,
+    );
+    // run() gives the target a plain child registration: live in `cancels`,
+    // with no independent lifetime recorded for it, so the release below
+    // reaches the registration instead of declining.
+    runtime.run(tx, compiled, { value: input }, target);
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+    await runtime.idle();
+    expect(runtime.runner.cancels.size).toBe(1);
+
+    const link = runtime.getCell<unknown>(
+      space,
+      "pre-resolution-release-alias",
+    );
+    const syncStarted = Promise.withResolvers<void>();
+    const releaseSync = Promise.withResolvers<void>();
+    const targetLink = target.getAsLink();
+    let resolved = false;
+    link.getRaw = (() =>
+      resolved ? targetLink : undefined) as typeof link.getRaw;
+    link.sync = (() => {
+      syncStarted.resolve();
+      return releaseSync.promise.then(() => {
+        resolved = true;
+        return link;
+      });
+    }) as typeof link.sync;
+
+    const lifecycleState = runtime.runner as unknown as {
+      activeStartAttempts: Set<{ preResolutionStopKeys: Set<string> }>;
+    };
+    const start = runtime.start(link);
+    await syncStarted.promise;
+    // The release stops the child registration it owns, and leaves the start
+    // still resolving toward the same target without a tombstone.
+    runtime.runner.releaseChild(target, undefined);
+    expect(runtime.runner.cancels.size).toBe(0);
+    expect(
+      [...lifecycleState.activeStartAttempts][0]?.preResolutionStopKeys.size,
+    ).toBe(0);
+    releaseSync.resolve();
+
+    expect(await start).toBe(true);
+    expect(runtime.runner.cancels.size).toBe(1);
+    expect(await target.pull()).toEqual({ doubled: 10 });
+    runtime.runner.stop(target);
+  } finally {
+    await disposeSchedulerTestRuntime(env);
+  }
+});
+
+Deno.test("stopping the link doc after resolution leaves the started target owned", async () => {
+  const env = createSchedulerTestRuntime(import.meta.url, {});
+  try {
+    const { runtime, tx } = env;
+    const compiled = await runtime.patternManager.compilePattern(PROGRAM, {
+      space,
+      tx,
+    });
+    const input = runtime.getCell<number>(
+      space,
+      "link-doc-stop-input",
+      undefined,
+      tx,
+    );
+    input.withTx(tx).set(5);
+    const target = runtime.getCell<{ doubled: number }>(
+      space,
+      "link-doc-stop-target",
+      undefined,
+      tx,
+    );
+    await runtime.setup(tx, compiled, { value: input }, target);
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+    expect(runtime.runner.cancels.size).toBe(0);
+
+    const link = runtime.getCell<unknown>(space, "link-doc-stop-alias");
+    const syncStarted = Promise.withResolvers<void>();
+    const releaseSync = Promise.withResolvers<void>();
+    const targetLink = target.getAsLink();
+    let resolved = false;
+    link.getRaw = (() =>
+      resolved ? targetLink : undefined) as typeof link.getRaw;
+    link.sync = (() => {
+      syncStarted.resolve();
+      return releaseSync.promise.then(() => {
+        resolved = true;
+        return link;
+      });
+    }) as typeof link.sync;
+
+    const runnerHarness = runtime.runner as unknown as {
+      startCore(resultCell: Cell<unknown>, options?: unknown): void;
+    };
+    const originalStartCore = runnerHarness.startCore.bind(runtime.runner);
+    const installed = Promise.withResolvers<void>();
+    runnerHarness.startCore = (resultCell, options) => {
+      originalStartCore(resultCell, options);
+      installed.resolve();
+    };
+
+    const start = runtime.start(link);
+    await syncStarted.promise;
+    releaseSync.resolve();
+    // The continuation below is queued when startCore installs the target's
+    // registration, ahead of the start's own settle bookkeeping, so the stop
+    // of the link doc lands in between: after the install, before the claim.
+    await installed.promise;
+    runtime.runner.stop(link);
+
+    // The stop of the link doc touched neither the target nor its
+    // registration, so the start claims the target's lifetime and reports it
+    // running; a release then declines against that lifetime.
+    expect(await start).toBe(true);
+    expect(runtime.runner.cancels.size).toBe(1);
+    runtime.runner.releaseChild(target, undefined);
+    expect(runtime.runner.cancels.size).toBe(1);
+    expect(await target.pull()).toEqual({ doubled: 10 });
+    runtime.runner.stop(target);
+  } finally {
+    await disposeSchedulerTestRuntime(env);
   }
 });
 
@@ -898,7 +1048,7 @@ Deno.test("a locally stopped piece restarts fresh while retaining persistence id
     runtime.edit = ((...args: Parameters<typeof originalEdit>) => {
       const actionTx = originalEdit(...args);
       const originalSet = actionTx.setSchedulerObservation?.bind(actionTx);
-      actionTx.setSchedulerObservation = (value: unknown) => {
+      actionTx.setSchedulerObservation = (value: FabricValue) => {
         if (isSchedulerActionObservation(value)) observations.push(value);
         originalSet?.(value);
       };

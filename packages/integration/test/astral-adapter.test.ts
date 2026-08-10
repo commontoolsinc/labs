@@ -117,7 +117,7 @@ Deno.test("ElementHandle pierce waits observe their own shadow root", async () =
 
       const lightTarget = document.createElement("button");
       lightTarget.id = "scoped-light-target";
-      lightTarget.className = "scoped-target";
+      lightTarget.className = "scoped-light";
       host.append(lightTarget);
       document.body.append(host);
     });
@@ -143,6 +143,77 @@ Deno.test("ElementHandle pierce waits observe their own shadow root", async () =
       await (await target).getAttribute("id"),
       "scoped-shadow-target",
     );
+  } finally {
+    await closeTestBrowser(page, browser);
+  }
+});
+
+Deno.test("pierce selectors resolve light-DOM elements", async () => {
+  const browser = await launch({ headless: true });
+  const astralPage = await browser.newPage();
+  const page = new Page(astralPage, { timeout: 10_000 });
+
+  try {
+    await page.evaluate(() => {
+      const lightTarget = document.createElement("button");
+      lightTarget.className = "pierce-target";
+      lightTarget.textContent = "light";
+      document.body.append(lightTarget);
+
+      const host = document.createElement("section");
+      host.id = "pierce-shadow-host";
+      const root = host.attachShadow({ mode: "open" });
+      const shadowTarget = document.createElement("button");
+      shadowTarget.className = "pierce-target";
+      shadowTarget.textContent = "shadow";
+      root.append(shadowTarget);
+      document.body.append(host);
+
+      const scope = document.createElement("main");
+      scope.id = "pierce-scope";
+      document.body.append(scope);
+    });
+
+    const firstTarget = await page.$(".pierce-target", { strategy: "pierce" });
+    assertEquals(await firstTarget?.innerText(), "light");
+
+    const targets = await page.$$(".pierce-target", { strategy: "pierce" });
+    assertEquals(
+      await Promise.all(targets.map((target) => target.innerText())),
+      ["light", "shadow"],
+    );
+
+    const awaitedTarget = await page.waitForSelector(".pierce-target", {
+      strategy: "pierce",
+    });
+    assertEquals(await awaitedTarget.innerText(), "light");
+
+    const host = await page.waitForSelector("#pierce-shadow-host");
+    const hostTarget = await host.$(".pierce-target", { strategy: "pierce" });
+    assertEquals(await hostTarget?.innerText(), "shadow");
+
+    const lateTarget = page.waitForSelector("#late-light-target", {
+      strategy: "pierce",
+    });
+    await page.evaluate(() => {
+      const target = document.createElement("button");
+      target.id = "late-light-target";
+      target.textContent = "late light";
+      document.body.append(target);
+    });
+    assertEquals(await (await lateTarget).innerText(), "late light");
+
+    const scope = await page.waitForSelector("#pierce-scope");
+    const scopedTarget = scope.waitForSelector("#scoped-late-light-target", {
+      strategy: "pierce",
+    });
+    await page.evaluate(() => {
+      const target = document.createElement("button");
+      target.id = "scoped-late-light-target";
+      target.textContent = "scoped late light";
+      document.getElementById("pierce-scope")!.append(target);
+    });
+    assertEquals(await (await scopedTarget).innerText(), "scoped late light");
   } finally {
     await closeTestBrowser(page, browser);
   }
@@ -1005,15 +1076,15 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
     const nativeTarget = await page.$(".target");
     assertEquals(await nativeTarget?.innerText(), "light");
 
-    const firstShadowTarget = await page.$(".target", {
+    const firstPierceTarget = await page.$(".target", {
       strategy: "pierce",
     });
-    assertEquals(await firstShadowTarget?.innerText(), "outer");
+    assertEquals(await firstPierceTarget?.innerText(), "light");
 
-    const shadowTargets = await page.$$(".target", { strategy: "pierce" });
+    const pierceTargets = await page.$$(".target", { strategy: "pierce" });
     assertEquals(
-      await Promise.all(shadowTargets.map((target) => target.innerText())),
-      ["outer", "inner"],
+      await Promise.all(pierceTargets.map((target) => target.innerText())),
+      ["light", "outer", "inner"],
     );
 
     const queryRoot = await page.waitForSelector("#query-root");
@@ -1293,8 +1364,16 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
       const button = document.createElement("button");
       button.id = "click-target";
       button.textContent = "click";
-      button.style.width = "100px";
-      button.style.height = "30px";
+      // Pinned so the click point is arithmetic on a known rect rather than
+      // on wherever the default layout put the control.
+      Object.assign(button.style, {
+        position: "fixed",
+        left: "60px",
+        top: "60px",
+        width: "100px",
+        height: "30px",
+        margin: "0",
+      });
       button.addEventListener("click", () => {
         document.body.dataset.clicked = "yes";
       });
@@ -1312,30 +1391,9 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
       "yes",
     );
 
-    const content = [
-      { x: 160, y: 60 },
-      { x: 200, y: 100 },
-      { x: 130, y: 160 },
-      { x: 70, y: 100 },
-    ];
-    const boxModel = {
-      border: content,
-      content,
-      height: 40,
-      margin: content,
-      padding: content,
-      width: 80,
-    };
-    Object.defineProperties(clickTarget, {
-      boxModel: {
-        configurable: true,
-        value: () => Promise.resolve(boxModel),
-      },
-      scrollIntoView: {
-        configurable: true,
-        value: () => Promise.resolve(),
-      },
-    });
+    // The click aims at the centre of the control's own rect, and an offset
+    // aims from the rect's top-left corner. Both are measured in the page, so
+    // the numbers come from the pinned control above.
     let mousePoint: { x: number; y: number } | undefined;
     Object.defineProperty(astralPage.mouse, "click", {
       configurable: true,
@@ -1345,12 +1403,12 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
       },
     });
     await clickTarget.click();
-    assertEquals(mousePoint, { x: 140, y: 105 });
-    assertEquals(clickPoints[1], { x: 140, y: 105 });
+    assertEquals(mousePoint, { x: 110, y: 75 });
+    assertEquals(clickPoints[1], { x: 110, y: 75 });
 
-    await clickTarget.click({ offset: { x: 0, y: 0 } });
-    assertEquals(mousePoint, { x: 160, y: 60 });
-    assertEquals(clickPoints[2], { x: 160, y: 60 });
+    await clickTarget.click({ offset: { x: 4, y: 6 } });
+    assertEquals(mousePoint, { x: 64, y: 66 });
+    assertEquals(clickPoints[2], { x: 64, y: 66 });
 
     const typeTarget = await page.waitForSelector("#type-target");
     await typeTarget.type("text");

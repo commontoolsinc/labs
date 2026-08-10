@@ -26,6 +26,52 @@ file no test ever loaded and charges every one of its lines, so a well-tested
 file scores as entirely uncovered. This is why the `cf test` command lives in
 `commands/test-command.ts`.
 
+#### A file can also drop out of the report on its own
+
+`deno coverage` builds the report from each covered file's transpiled form in
+the Deno cache rather than from the source on disk. A file whose transpiled form
+is absent from the cache is left out of the report, with a warning on stderr and
+no change to the exit status. Because the debt metric charges every line of a
+file that has no report entry, such a drop reads downstream as a coverage
+regression that no change in the tree explains.
+
+`deno coverage` says which of two things happened, in two different messages,
+and `tasks/write-coverage-lcov.ts` acts on the difference:
+
+- `Missing transpiled source code for: "<url>"` — the source is on disk but the
+  cache holds no transpiled form of it. For a file the debt metric tracks that is
+  a file the report should have carried: the script names those files and exits
+  non-zero, after writing the report of what did convert so it can be read while
+  the cause is found. Two things cause it. The profiles were collected by one
+  Deno version and reported by another, which happens when a test starts the Deno
+  on `PATH` instead of the Deno running it. Or they were collected from a working
+  directory under a different Deno configuration, because the cache key covers
+  the configuration in scope where the file was compiled.
+- `Source not found for "<url>"` — the source is gone, so a test compiled the
+  file and then deleted it. No report could name it, so the script warns and
+  carries on.
+
+A file the metric does not track is only ever warned about, whichever message it
+came with, because its absence from the report costs nothing. The conversion asks
+the metric's own `isTrackedSourcePath`, so the two cannot drift apart. That
+covers a file outside the repository, which is what a test that copies a fixture
+project into a temporary directory and runs Deno there produces, as well as one
+inside it that the metric never charges for — anything under `docs/` or
+`scripts/`, a test or fixture directory, a `.test.ts` or `.d.ts`.
+
+An empty report is not a failure by itself. `deno coverage` calls it an error
+when nothing survives its filters, which happens honestly whenever a profile set
+covers only test files, since those are excluded by design. With no repository
+file dropped, the script takes that emptiness at face value: it warns and exits
+zero. It also warns and exits zero when there was nothing to convert in the first
+place, which is what a job whose test step never ran produces — the profile
+directory is absent, or holds only empty files. Any other `deno coverage` failure
+is an error.
+
+Every one of those paths writes an output file, so the artifact upload always has
+one to collect and the outcome is read from the conversion step rather than from
+a missing file.
+
 ### Authored pattern code is measured by transformer instrumentation
 
 Patterns (the user programs under `packages/patterns`) are not loaded the way an
@@ -102,26 +148,135 @@ covered a line.
 
 One detail of the gate's accounting is worth knowing when reasoning about
 pattern coverage. A file with no LCOV record has every tracked line counted as
-uncovered. A file with a record is scored against the lines that record names.
+uncovered, unless it compiles to no code at all — see the next subsection. A
+file with a record is scored against the lines that record names.
 For a file measured by Deno's V8 coverage that is every executable line; pattern
 instrumentation names only the statements it could instrument, so a pattern
 file's first record both covers real lines and drops the never-named lines out of
 the count.
 
 The gate absorbs that safely, because it is a ratchet: it fails a pull request
-only when a group's uncovered count *rises* above the latest `main` baseline.
+only when a group's uncovered count *rises* above its `main` baseline.
 Gaining a record can only *lower* a file's count, since the record names a subset
 of the file's lines and the rest stop being counted, so it settles at a lower —
 and therefore stricter — bar rather than failing anything. The instrumented
 statements are also the only lines this mechanism can speak to: a line the
 instrumentation cannot reach is not a line a pattern test could cover.
 
+### A file that compiles to nothing is charged nothing
+
+Charging every tracked line of a file with no coverage record is how the gate
+catches source that no test ever loaded. A second kind of file also has no
+record: one holding only declarations — interfaces, type aliases, ambient
+declarations — which compiles to an empty module. Such a file has no statement
+to run, so a test that loads it executes nothing and Deno's coverage has nothing
+to report. No test can cover a line of it, so the gate charges it nothing.
+
+The gate tells the two apart by compiling each file it finds no record for, and
+charges it only when something comes out. `tasks/executable-source.ts` runs the
+file through the TypeScript compiler and reads the emitted JavaScript: a file
+that emits no statement, an `export {}` module marker aside, is charged nothing,
+and every other file is charged its full tracked-line count. Which constructs
+reach the output is the compiler's rule. An enum, a namespace holding a value,
+and an import kept for its side effects all emit code. A type-only import, a
+namespace holding only types, and a comment do not. The compile happens at gate
+time, once per file the report leaves out. A file with a record never pays for
+it, because its record already says which of its lines ran.
+
+Such a file occasionally does get a record. A comment that survives into the
+emitted output leaves Deno one line to report, and that line is hit the moment
+the module loads, so the file contributes nothing either way.
+
+The charge is all or nothing. The first line of runnable code added to such a
+file charges the whole file, which is the bill a new module of that size runs
+up. A file that gains code usually gains a coverage record with it, and that
+brings the charge down to the lines no test reached. The full charge stands
+only while nothing loads the file.
+
+## Coverage must not depend on the execution environment
+
+Whether a line counts as covered must not depend on how fast the machine ran,
+how the test files were distributed across shards, or any other property of the
+environment or configuration. A line that is covered on one run and uncovered
+on the next is a defect in the tests. It is not noise for the gate to absorb,
+and it is not something to wave through with an override.
+
+So when you find a line whose coverage moves with the environment — a branch
+guarded on elapsed wall-clock time, a line whose count changes when test files
+are redistributed across shards, a path that only some runs happen to take —
+write a test that covers that line reliably on every run and under every
+configuration. Extract the code into something a plain unit test can call
+directly if that is what it takes: a unit test that constructs the input it
+wants does not care how loaded the machine is or which shard it landed in.
+
+The
+[2026-07-28 investigation record](../history/development/coverage-ratchet-noise-2026-07-28.md)
+works through two real instances, and describes how to localize a group-level
+change down to the specific file and line so you know what to write a test for.
+
+### Diagnostics that fire on wall-clock time
+
+The slow-traverse report in `packages/runner/src/traverse.ts` was one of those
+instances. It logged a traversal's counters only when that traversal had taken
+more than 100 milliseconds of real time, so it ran on a loaded machine and did
+not run on an idle one. Thirty-nine lines moved with the load: the body of the
+report, plus the two `MapSet` getters that nothing but the report called.
+Several unrelated pull requests spent an `ACCEPT_COVERAGE_DEBT` marker on the
+result.
+
+Write such a diagnostic so that the elapsed time reaches it as a parameter,
+rather than having the reporting code measure the time for itself. Put the
+threshold comparison and the report together in a function that takes the
+elapsed time, and call that function from the timed path every time, with no
+condition around the call. That is what `maybeReportSlowTraverse()` does now.
+Every line of the diagnostic then runs on every machine, and the clock decides
+nothing except which way the comparison inside goes.
+
+A test reaches the report by choosing the elapsed time. It can call the
+function directly with a time over the threshold, or it can pin the clock the
+timed path reads, which also proves that the path still reaches the
+diagnostic. The `SchemaObjectTraverser slow-traverse reporting` cases in
+`packages/runner/test/traverse.test.ts` are the worked example of the second.
+They replace `performance.now` — what `logger.timeStart` and `timeEnd` read —
+for the length of one traversal, and advance it from a store read, because
+`traverse()` is synchronous and a test cannot step a clock from outside a call
+that never yields. That the traversal really did read the store is asserted, so
+a traversal that stopped reading could not pass the test vacuously.
+
+The fake clock that a package's test task preloads does not cover a branch like
+this one, and cannot. It replaces `performance.now` with logical time, and
+logical time moves only when a positive-delay timer fires. A synchronous call
+arms no timers, so a span timed around synchronous work measures exactly zero:
+under the runner package's preload, `elapsed > 100` is deterministically false
+in every test in the package. The `clock.tick(ms)` control is asynchronous and
+advances nothing until it is awaited, so there is no way to move logical time
+from inside a synchronous call either. A test that wants a chosen elapsed time
+therefore replaces `performance.now` outright, saving and restoring it rather
+than assuming it is the native one, since the preload already owns that
+property. That is also why the movement was collected by the
+pattern-integration jobs rather than by the runner suite: their coverage comes
+from a browser worker, which a Deno `--preload` never reaches.
+
+Leaving the threshold comparison behind at the call site does not reduce the
+movement to nothing. The lines inside a guard are covered only on a run that
+took the branch, so a call site of the form
+`if (elapsed > SLOW_TRAVERSE_MS) report(...)` keeps its reporting line moving
+from one run to the next, and one line of movement fails the ratchet exactly as
+thirty-nine did. Do not reason from what the `if` line itself reports either.
+That count is a projection of V8's block ranges onto lines: it differs between
+the one-line and the braced form of the same guard, and it changed between deno
+2.8.3 and the pinned 2.9.4, which now credits a braced guard's line with the
+condition's own count. See
+[deno coverage: one-line guard reported uncovered when its branch is not taken](deno-coverage-guard-line-artifact.md).
+
 ## Ratchet baselines and accepting debt
 
 The ratchet applies per source group and only to the groups a PR changes: for
-each such group the uncovered-line count must not rise above the latest non-cold
-`main` run's count. Debt in unchanged groups is still reported, but does not
-block the PR.
+each such group the uncovered-line count must not rise above the count from the
+`main` run for the base-branch commit the PR is merged with, or the nearest
+ancestor of it that has one (see "Which `main` run the ratchet compares
+against"). Debt in unchanged groups is still reported, but does not block the
+PR.
 
 Accept one metric's increase with the narrow per-metric marker in the PR
 description:
@@ -148,9 +303,10 @@ Each run writes a per-run baseline artifact recording its coverage-debt metrics
 and its compile cache states. It is named `perf-metrics` for historical reasons
 — it once also carried CI timing metrics for the removed performance gate — and
 keeps that name so the ratchet needs no migration; a run from before the gate
-was removed reads as a valid baseline unchanged. A later PR run reads the most
-recent `main` run's `perf-metrics` artifact as its ratchet baseline; there is no
-separate history store. The workflow downloads the current run's
+was removed reads as a valid baseline unchanged. A later PR run reads its ratchet
+baseline from the `perf-metrics` artifact of the `main` run for the base-branch
+commit it merged, or of the nearest ancestor of that commit which has one; there
+is no separate history store. The workflow downloads the current run's
 `coverage-profile-*` artifacts before starting `tasks/coverage-check.ts`.
 `COVERAGE_ARTIFACTS_DIR` points the script at one subdirectory per artifact. The
 download step checks the artifact digests. The script separately checks the
@@ -181,8 +337,9 @@ any of its shards had a full cache miss, detected as the cache file being absent
 after the restore step (the combined `actions/cache` action does not expose the
 matched key). A partial hit through a restore key counts as warm: both key forms
 start with the fingerprint hash, so any restore means the compiled bytes are
-current. The ratchet then uses the latest non-cold `main` sample, so a cold
-`main` run cannot lower the baseline that warm PRs are held to.
+current. The ratchet skips a cold sample when choosing among the
+base-branch commit and its ancestors, so a cold `main` run cannot lower the
+baseline that warm PRs are held to.
 
 A run without a recorded cache state — an artifact carrying no stamp, or a run
 whose cache-state artifact failed to upload — is retro-classified from the
@@ -194,6 +351,39 @@ its cache-state artifact is missing. Fingerprint inference cannot see
 non-fingerprint cold causes (cache eviction, cache-service outages): a run cold
 for those reasons and lacking a recorded state stays unknown, so it is treated
 as not-cold and may still be used as a baseline.
+
+## Which `main` run the ratchet compares against
+
+A `pull_request` run checks out `refs/pull/<number>/merge`, whose first parent
+is the base-branch commit and whose second parent is the pull request head.
+GitHub rebuilds that merge ref whenever the base branch moves, so the run
+measures the pull request merged with `main` as it stood when the run started.
+
+The baseline is the `main` run for that commit, or for the nearest ancestor of
+it that has one. Comparing against the commit itself is exact: both numbers
+count the same base-branch code, so the only difference between them is the
+pull request. Runs that are not ancestors are never used, in either direction —
+one that landed after the run started measured code the run does not contain.
+
+The base commit's own run is usually available, but not always: it may still be
+going, or it may have failed. Rather than skip the gate, the ratchet steps back
+to the nearest ancestor that has a usable run. Whatever the base branch changed
+in between is then present in this run and absent from the baseline, so the
+groups it touched have totals that count different code on the two sides. Those
+groups are reported and not gated; every other group still is, which is the
+point of stepping back rather than giving up. A gap of one or two commits
+usually touches one or two groups.
+
+One case this does not reach: a base-branch commit that changes a test in one
+package can move the coverage of source in another, and no diff of that source
+names it. It ends when a `main` run measures the base commit.
+
+Two details of reading the base commit are load-bearing. It comes from the
+checked-out merge commit rather than the triggering event, because GitHub does
+not rewrite `pull_request.base.sha` when it rebuilds the merge ref. And it is
+read with `git cat-file commit HEAD` rather than `git log --format=%P`, because
+`actions/checkout` clones to depth one and git reports a shallow boundary commit
+as having no parents.
 
 ## A combined report for IDEs
 
@@ -357,6 +547,9 @@ like a pattern nobody tested. Writing one warns.
 - [TESTING.md](TESTING.md) — how to run the test suites whose execution this
   coverage is measured from.
 - [CI_PERFORMANCE.md](CI_PERFORMANCE.md) — CI wall-time optimization policy.
+- [One-line guard coverage artifact](deno-coverage-guard-line-artifact.md) —
+  why V8 can report a one-line conditional guard as uncovered when its branch
+  is not taken.
 - [../common/workflows/pattern-testing.md](../common/workflows/pattern-testing.md)
   — writing the pattern unit tests that the `pattern-unit-test` job runs through
   `cf test`, the source of the gated authored-pattern coverage.

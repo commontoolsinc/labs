@@ -3,14 +3,24 @@ import { getLogger } from "@commonfabric/utils/logger";
 import type { Cell } from "./cell.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
+  applyPieceSourceTransition,
   getPatternIdentityRef,
   getPatternRepository,
   getPatternSetupIdentityRef,
   getPatternSource,
-  setPatternSource,
+  getPieceSourceSnapshot,
+  type PieceSourceTransition,
+  type PieceSourceTransitionBaseline,
+  preparePieceSourceTransitionBaseline,
 } from "./runner.ts";
 import type { Pattern } from "./builder/types.ts";
+import {
+  normalizePatternSource,
+  resolveSystemPatternSource,
+  systemPatternSourceForModuleName,
+} from "./pattern-source-scheme.ts";
 import type { Runtime } from "./runtime.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 const logger = getLogger("runner.pattern-update", {
   enabled: true,
@@ -161,30 +171,64 @@ export class PatternUpdater {
       const storedSource = getPatternSource(resultCell);
       const storedRepository = getPatternRepository(resultCell);
       const storedSetupRef = getPatternSetupIdentityRef(resultCell);
+      const sourceSnapshot = getPieceSourceSnapshot(resultCell)!;
       if (storedRepository !== undefined) return "current";
 
-      let source = storedSource;
+      const host = runtime.mappedHostFor(space) ?? runtime.apiUrl.href;
+      let source = storedSource === undefined
+        ? undefined
+        : normalizePatternSource(storedSource, host);
       if (source === undefined) {
+        // A lifecycle revision with no active origin is an intentional detach.
+        // Only a history-free legacy piece may have provenance reconstructed.
+        if (sourceSnapshot.revisionId !== null) return "current";
         if (mode.kind === "default-root") {
-          source = mode.officialSource;
+          // `checkDefaultPattern` is exported, and a caller outside this
+          // package may still name the official root by its route path. The
+          // same rewrite applies, so the repair below stamps the ref either
+          // way rather than refusing a caller that spells it the old way.
+          source = normalizePatternSource(mode.officialSource, host);
         }
         if (mode.kind === "instantiated") {
           // A sourceless default root remains under the stricter, awaited root
           // policy. In particular, do not turn an author-controlled filename
           // into provenance and bypass its legacy/custom-root admission rules.
+          //
+          // Reconstruction is limited to an entry document whose name is itself
+          // a patterns-route pathname, which is the only case where the name
+          // says where the source came from. A program deployed from a file
+          // tree names its entry for the compile root instead
+          // (`/participant-identity-card.tsx`); resolving that against the host
+          // fetched the shell's SPA fallback — 200, with HTML, for any unrouted
+          // path — and then compiled the HTML as TSX.
           const program = await runtime.patternManager
             .getPatternSourceProgramByIdentity(runningRef.identity, space);
-          source = program?.main;
+          source = program === undefined
+            ? undefined
+            : systemPatternSourceForModuleName(program.main);
         }
         if (source === undefined) return "current";
       }
 
-      // Published `cf:` refs have a different resolver. This pass is exactly
-      // for same-toolshed HTTP sources whose route implements `?identity`.
-      if (source.startsWith("cf:")) return "current";
-      const host = runtime.mappedHostFor(space) ?? runtime.apiUrl.href;
-      const target = new URL(source, host);
-      if (target.origin !== new URL(host).origin) return "current";
+      // Only a `system:` ref names something this pass can fetch. A `cf:` ref
+      // has its own resolver, and everything else is provenance this pass has
+      // no route for.
+      const routePath = resolveSystemPatternSource(source);
+      if (routePath === undefined) return "current";
+      // A piece still carrying a pre-scheme spelling is re-stamped in its
+      // canonical form by the repair below, so it migrates on this check.
+      const legacyProvenance = storedSource !== undefined &&
+        storedSource !== source;
+      // Host-relative by construction, so there is no cross-origin case left
+      // to refuse: the ref addresses the patterns route of whichever host
+      // serves this space.
+      const target = new URL(routePath, host);
+      const baseline = await preparePieceSourceTransitionBaseline(
+        runtime,
+        resultCell,
+        sourceSnapshot,
+        { allowUnavailable: true },
+      );
 
       const stillMatches = (candidate: Cell<unknown>): boolean => {
         const candidateRef = getPatternIdentityRef(candidate);
@@ -208,10 +252,37 @@ export class PatternUpdater {
         return defaultPattern === undefined ||
           !defaultPattern.resolveAsCell().equals(candidate.resolveAsCell());
       };
-      const repairProvenance = async (): Promise<PatternUpdateOutcome> => {
+      const sourceTransition = (
+        operation: PieceSourceTransition["operation"],
+        origin: string,
+        transitionBaseline: PieceSourceTransitionBaseline = baseline,
+      ): PieceSourceTransition => ({
+        revisionId: crypto.randomUUID(),
+        baseline: transitionBaseline,
+        timestamp: Date.now(),
+        operation,
+        origin,
+        expected: sourceSnapshot,
+      });
+      const repairProvenance = async (
+        transitionBaseline: PieceSourceTransitionBaseline = baseline,
+      ): Promise<PatternUpdateOutcome> => {
+        // A legacy re-stamp keeps `origin-update`: the origin field does
+        // change, even though it names the same route in a new spelling.
+        const transition = sourceTransition(
+          storedSource === undefined ? "follow" : "origin-update",
+          source,
+          transitionBaseline,
+        );
         const result = await runtime.editWithRetry((tx) => {
           if (!canWrite(tx)) return false;
-          setPatternSource(resultCell, tx, source);
+          applyPieceSourceTransition(
+            runtime,
+            resultCell,
+            tx,
+            runningRef,
+            transition,
+          );
           return true;
         });
         if (result.error) {
@@ -292,8 +363,11 @@ export class PatternUpdater {
 
       let currentPatternNeedingSetup: Pattern | undefined;
       if (runningTargetIsAdvertised) {
-        if (mode.kind === "instantiated") {
-          return storedSource === undefined
+        if (
+          mode.kind === "instantiated" &&
+          baseline.kind === "retain"
+        ) {
+          return storedSource === undefined || legacyProvenance
             ? await repairProvenance()
             : "current";
         }
@@ -308,10 +382,13 @@ export class PatternUpdater {
           // Continue through the identity-authorized source path below.
         }
         if (currentPattern !== undefined) {
-          if (setupNeedsRepair) {
+          if (setupNeedsRepair && baseline.kind === "retain") {
             currentPatternNeedingSetup = currentPattern;
-          } else {
-            return storedSource === undefined
+          } else if (
+            !setupNeedsRepair &&
+            baseline.kind !== "unavailable"
+          ) {
+            return storedSource === undefined || legacyProvenance
               ? await repairProvenance()
               : "current";
           }
@@ -345,20 +422,57 @@ export class PatternUpdater {
         ]);
         return "current";
       }
+      const transitionBaseline: PieceSourceTransitionBaseline =
+        baseline.kind === "unavailable" &&
+          entryRef.identity === runningRef.identity &&
+          entryRef.symbol === runningRef.symbol
+          ? { kind: "retain", revisionId: crypto.randomUUID() }
+          : baseline;
       if (
         !setupNeedsRepair &&
         entryRef.identity === runningRef.identity &&
         entryRef.symbol === runningRef.symbol
       ) {
-        return storedSource === undefined
-          ? await repairProvenance()
+        return storedSource === undefined || legacyProvenance ||
+            baseline.kind === "unavailable"
+          ? await repairProvenance(transitionBaseline)
           : "current";
+      }
+
+      if (mode.kind === "instantiated") {
+        const previousPattern = await runtime.patternManager
+          .loadPatternByIdentity(
+            runningRef.identity,
+            runningRef.symbol,
+            space,
+          );
+        if (
+          previousPattern === undefined ||
+          !deepEqual(
+            previousPattern.argumentSchema,
+            pattern.argumentSchema,
+          ) ||
+          !deepEqual(previousPattern.resultSchema, pattern.resultSchema)
+        ) {
+          logger.warn("incompatible-source-update", () => [
+            "automatic source update changed the piece contract",
+            space,
+            runningRef,
+            entryRef,
+          ]);
+          return "current";
+        }
       }
 
       const argumentStillMatches = mode.kind === "default-root"
         ? await runtime.syncStoredSetupArgument(resultCell)
         : undefined;
 
+      const transition = sourceTransition(
+        "origin-update",
+        source,
+        transitionBaseline,
+      );
       const result = await runtime.editWithRetry((tx) => {
         if (!canWrite(tx)) return false;
         const candidate = resultCell.withTx(tx);
@@ -368,7 +482,17 @@ export class PatternUpdater {
         ) {
           return false;
         }
-        if (staleSourcelessRoot) {
+        applyPieceSourceTransition(
+          runtime,
+          resultCell,
+          tx,
+          entryRef,
+          transition,
+        );
+        if (
+          staleSourcelessRoot ||
+          transitionBaseline.kind === "unavailable"
+        ) {
           candidate.setMetaRaw("displacedPattern", {
             identity: runningRef.identity,
             symbol: runningRef.symbol,
@@ -383,7 +507,6 @@ export class PatternUpdater {
         } else {
           candidate.setMetaRaw("patternIdentity", entryRef);
         }
-        setPatternSource(resultCell, tx, source);
         return true;
       });
       if (result.error) {

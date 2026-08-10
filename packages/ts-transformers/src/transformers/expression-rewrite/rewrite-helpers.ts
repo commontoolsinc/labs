@@ -2,6 +2,7 @@ import ts from "typescript";
 
 import {
   detectCallKind,
+  isSyntheticNode,
   type NormalizedDataFlow,
   preserveSourceMapRange,
   setParentPointers,
@@ -28,7 +29,7 @@ function isNestedFunctionLocalCapture(
   wrappedExpression: ts.Expression,
   checker: ts.TypeChecker,
 ): boolean {
-  const wrappedSourceNode = wrappedExpression.pos >= 0
+  const wrappedSourceNode = !isSyntheticNode(wrappedExpression)
     ? wrappedExpression
     : ts.getOriginalNode(wrappedExpression);
   const root = getCaptureRootExpression(expression);
@@ -142,7 +143,7 @@ export function createReactiveWrapperForExpression(
     resultTypeNode = typeToTypeNodeWithRegistry(
       resultType,
       { checker, factory, sourceFile },
-      context.options.state?.typeRegistry,
+      context.state.typeRegistry,
     );
   } catch {
     resultTypeNode = undefined;
@@ -199,9 +200,9 @@ export function createReactiveWrapperForExpression(
   );
 
   // Register types for both the TypeNode and the lift-applied CallExpression
-  if (resultTypeNode && resultType && context.options.state?.typeRegistry) {
-    context.options.state?.typeRegistry.set(resultTypeNode, resultType);
-    context.options.state?.typeRegistry.set(liftAppliedCall, resultType);
+  if (resultTypeNode && resultType) {
+    context.state.typeRegistry.set(resultTypeNode, resultType);
+    context.state.typeRegistry.set(liftAppliedCall, resultType);
   }
 
   // CRITICAL: Set parent pointers and connect to parent chain

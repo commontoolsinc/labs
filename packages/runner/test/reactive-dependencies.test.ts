@@ -9,6 +9,7 @@ import {
 } from "../src/reactive-dependencies.ts";
 import type { Action, SpaceScopeAndURI } from "../src/scheduler.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { FabricMap } from "@commonfabric/data-model/fabric-instances";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
@@ -754,7 +755,7 @@ describe("determineTriggeredActions", () => {
       const result = determineTriggeredActions(
         dependencies,
         { a: 1 },
-        { a: undefined } as FabricValue,
+        { a: undefined },
       );
       expect(result).toEqual([action1]);
     });
@@ -1726,8 +1727,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
       );
 
       // Action B and C should trigger because __#0 appeared,
@@ -1892,8 +1893,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
       );
 
       // Should trigger
@@ -1921,8 +1922,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
         ["value", "a", "existing"],
         { nonRecursive: true },
       );
@@ -1939,8 +1940,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
         ["value", "a", "added"],
         { nonRecursive: true },
       );
@@ -1957,12 +1958,38 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
         ["value", "a", "added"],
         { nonRecursive: true },
       );
       expect(result).toEqual([action]);
+    });
+
+    // A non-recursive read compares an opaque leaf by value, and a class whose
+    // comparison is an unimplemented stub cannot answer. The failure is
+    // deliberately left to propagate rather than being caught and turned into
+    // "changed": a stub announcing itself loudly is worth more than a quiet
+    // answer derived from an unfinished class, and swallowing it would let
+    // that class shape behavior here. `FabricMap` stands in for any value
+    // whose comparison is unavailable.
+    it("propagates the failure from a value it cannot compare", () => {
+      const action = createAction("nonRecursiveUncomparableLeaf");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a"]]],
+      ]);
+      const before = { value: { a: new FabricMap(new Map([["k", 1]])) } };
+      const after = { value: { a: new FabricMap(new Map([["k", 2]])) } };
+
+      expect(() =>
+        determineTriggeredActions(
+          dependencies,
+          before,
+          after,
+          ["value", "a"],
+          { nonRecursive: true },
+        )
+      ).toThrow("not yet implemented");
     });
 
     it("triggers on same-path write for non-recursive reads", () => {
@@ -1975,8 +2002,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
         ["value", "a"],
         { nonRecursive: true },
       );
@@ -1996,16 +2023,16 @@ describe("determineTriggeredActions", () => {
 
       const recursiveResult = determineTriggeredActions(
         new Map([[recursiveAction, [["value", "a"]]]]),
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
         ["value", "a", "existing"],
       );
       expect(recursiveResult).toEqual([recursiveAction]);
 
       const nonRecursiveResult = determineTriggeredActions(
         new Map([[nonRecursiveAction, [["value", "a"]]]]),
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
         ["value", "a", "existing"],
         { nonRecursive: true },
       );
@@ -2022,8 +2049,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        before as FabricValue,
-        after as FabricValue,
+        before,
+        after,
         ["value"],
         { nonRecursive: true },
       );
@@ -2132,8 +2159,8 @@ Deno.bench("determineTriggeredActions - many dependencies", () => {
 
   determineTriggeredActions(
     dependencies,
-    before as FabricValue,
-    after as FabricValue,
+    before,
+    after,
   );
 });
 
@@ -2241,7 +2268,7 @@ Deno.bench("determineTriggeredActions - complex real-world", () => {
 
   determineTriggeredActions(
     dependencies,
-    before as FabricValue,
-    after as FabricValue,
+    before,
+    after,
   );
 });

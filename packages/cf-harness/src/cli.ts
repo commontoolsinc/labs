@@ -107,9 +107,18 @@ import {
   type OpenAICodexCredentialResolverLike,
   OpenAICodexResponsesClient,
 } from "./model/openai-codex-responses.ts";
-import type { HarnessModelClient } from "./model/client.ts";
+import type { HarnessModelClient, HarnessModelUsage } from "./model/client.ts";
+import {
+  currentProvenance,
+  type HarnessProvenance,
+  provenanceEntries,
+  provenanceUserAgent,
+  recordProvenanceRunManifest,
+  setCurrentProvenance,
+  setProvenanceCommand,
+} from "./provenance.ts";
 
-const DEFAULT_MODEL = "gpt-5.5";
+const DEFAULT_MODEL = "gpt-5.6-terra";
 const DEFAULT_MAX_MODEL_TURNS = 8;
 const DEFAULT_ARTIFACT_DIRNAME = ".cf-harness-artifacts";
 const CLI_OUTPUT_MODES = ["operator", "batch"] as const;
@@ -129,6 +138,9 @@ const CLI_STRING_FLAGS = [
   "resume-run",
   "model",
   "model-provider",
+  "reasoning-effort",
+  "compact-threshold",
+  "prompt-cache-mode",
   "skills-root",
   "skill",
   "skill-script-execution-target",
@@ -194,6 +206,9 @@ export interface CfHarnessCliConfig {
   skillCatalogEnabled: boolean;
   model?: string;
   modelProvider?: HarnessModelProviderId;
+  reasoningEffort?: string;
+  compactThreshold?: number;
+  promptCacheMode?: "implicit" | "explicit";
   gatewayConfigurationExplicit: boolean;
   harnessHome: string;
   gatewayBaseUrl: string;
@@ -253,6 +268,10 @@ export interface CfHarnessCliCapabilities {
     resumeRun: true;
     subscriptionAuth: true;
     modelDiscovery: true;
+    modelUsage: true;
+    promptCacheControls: true;
+    reasoningEffort: true;
+    compactThreshold: true;
   };
 }
 
@@ -270,6 +289,11 @@ export type CfHarnessCliSignalHandler = (
 export interface RunCfHarnessCliDependencies {
   cwd?: string;
   env?: Record<string, string | undefined>;
+  /**
+   * What caused this run, reported on every gateway request it makes.
+   * Resolved from the process when absent.
+   */
+  provenance?: HarnessProvenance;
   io?: CfHarnessCliIO;
   readTextFile?: (path: string) => Promise<string>;
   writeTextFile?: (path: string, text: string) => Promise<void>;
@@ -369,6 +393,8 @@ Options:
   auth status openai-codex      Show local connection status without secrets
   auth logout openai-codex      Remove only cf-harness local credentials
   models openai-codex           List models advertised for this subscription
+  whoami [--json]               Show the provenance this host reports to the gateway,
+                                including the principal that identifies its requests
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
@@ -390,6 +416,10 @@ Options:
   --no-skill-catalog            Disable automatic skill catalog disclosure
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --model-provider <provider>   openai-compatible-gateway | openai-codex
+  --reasoning-effort <effort>   Provider reasoning effort (for example low, medium, high)
+  --compact-threshold <n>       Token threshold for server-side compaction
+                                (default: 75% of the model input budget; 0 disables)
+  --prompt-cache-mode <mode>    implicit | explicit (GPT-5.6 API gateway only)
   --gateway-base-url <url>      OpenAI-compatible gateway URL
   --gateway-auth-mode <mode>    bearer | none (default: bearer)
   --artifact-root <path>        Host-side artifact directory
@@ -423,6 +453,9 @@ Environment:
   CF_HARNESS_GATEWAY_AUTH_MODE  Default value for --gateway-auth-mode
   CF_HARNESS_MODEL              Default value for --model (ignored on --resume-run)
   CF_HARNESS_MODEL_PROVIDER     Default value for --model-provider
+  CF_HARNESS_REASONING_EFFORT   Default value for --reasoning-effort
+  CF_HARNESS_COMPACT_THRESHOLD  Default value for --compact-threshold
+  CF_HARNESS_PROMPT_CACHE_MODE  Default value for --prompt-cache-mode
   CF_HARNESS_HOME               Local cf-harness credential/config directory
   CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
@@ -513,6 +546,10 @@ export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
     resumeRun: true,
     subscriptionAuth: true,
     modelDiscovery: true,
+    modelUsage: true,
+    promptCacheControls: true,
+    reasoningEffort: true,
+    compactThreshold: true,
   },
 });
 
@@ -1249,6 +1286,15 @@ export const parseCfHarnessCliArgs = async (
       ),
       CF_HARNESS_MODEL: Deno.env.get("CF_HARNESS_MODEL"),
       CF_HARNESS_MODEL_PROVIDER: Deno.env.get("CF_HARNESS_MODEL_PROVIDER"),
+      CF_HARNESS_REASONING_EFFORT: Deno.env.get(
+        "CF_HARNESS_REASONING_EFFORT",
+      ),
+      CF_HARNESS_PROMPT_CACHE_MODE: Deno.env.get(
+        "CF_HARNESS_PROMPT_CACHE_MODE",
+      ),
+      CF_HARNESS_COMPACT_THRESHOLD: Deno.env.get(
+        "CF_HARNESS_COMPACT_THRESHOLD",
+      ),
       CF_HARNESS_HOME: Deno.env.get("CF_HARNESS_HOME"),
       HOME: Deno.env.get("HOME"),
       CF_HARNESS_CFC_ENFORCEMENT_MODE: Deno.env.get(
@@ -1287,6 +1333,45 @@ export const parseCfHarnessCliArgs = async (
       "model provider must be one of openai-compatible-gateway, openai-codex",
     );
   }
+  const reasoningEffort = typeof args["reasoning-effort"] === "string"
+    ? nonEmptyEnvValue(args["reasoning-effort"])
+    : nonEmptyEnvValue(env.CF_HARNESS_REASONING_EFFORT);
+  if (
+    args["reasoning-effort"] !== undefined &&
+    reasoningEffort === undefined
+  ) {
+    throw new Error("--reasoning-effort requires a non-empty value");
+  }
+  // 0 is meaningful (disables compaction), so an explicit 0 must survive.
+  const rawCompactThreshold = typeof args["compact-threshold"] === "string"
+    ? args["compact-threshold"].trim()
+    : nonEmptyEnvValue(env.CF_HARNESS_COMPACT_THRESHOLD);
+  let compactThreshold: number | undefined;
+  if (rawCompactThreshold !== undefined && rawCompactThreshold !== "") {
+    const parsedThreshold = Number(rawCompactThreshold);
+    if (!Number.isSafeInteger(parsedThreshold) || parsedThreshold < 0) {
+      throw new Error(
+        "--compact-threshold requires a non-negative integer token count",
+      );
+    }
+    compactThreshold = parsedThreshold;
+  } else if (args["compact-threshold"] !== undefined) {
+    // A bare flag lands here, and so does a value the parser read as another
+    // flag: `--compact-threshold -5` leaves the option set with no string.
+    // Name the requirement, and point at the form that survives parsing.
+    throw new Error(
+      "--compact-threshold requires a non-negative integer token count; " +
+        "pass values the parser would read as a flag as " +
+        "--compact-threshold=<n>",
+    );
+  }
+  const promptCacheMode = optionalStringValue(
+    typeof args["prompt-cache-mode"] === "string"
+      ? args["prompt-cache-mode"].trim()
+      : nonEmptyEnvValue(env.CF_HARNESS_PROMPT_CACHE_MODE),
+    ["implicit", "explicit"] as const,
+    "prompt cache mode",
+  );
   const gatewayConfigurationExplicit = args["gateway-base-url"] !== undefined ||
     args["gateway-auth-mode"] !== undefined ||
     nonEmptyEnvValue(env.CF_HARNESS_GATEWAY_BASE_URL) !== undefined ||
@@ -1412,6 +1497,9 @@ export const parseCfHarnessCliArgs = async (
       ? { model: nonEmptyEnvValue(env.CF_HARNESS_MODEL) ?? DEFAULT_MODEL }
       : {}),
     ...(modelProvider !== undefined ? { modelProvider } : {}),
+    ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+    ...(compactThreshold !== undefined ? { compactThreshold } : {}),
+    ...(promptCacheMode !== undefined ? { promptCacheMode } : {}),
     gatewayConfigurationExplicit,
     harnessHome,
     gatewayBaseUrl,
@@ -1562,6 +1650,41 @@ const runCfHarnessModelsCommand = async (
     throw new Error("openai-codex model discovery is unavailable");
   }
   io.stdout(`${JSON.stringify(models, null, 2)}\n`);
+  return 0;
+};
+
+/**
+ * Prints the provenance this host attaches to gateway requests, principal
+ * first.
+ */
+const runCfHarnessWhoamiCommand = (
+  argv: readonly string[],
+  _deps: RunCfHarnessCliDependencies,
+  io: CfHarnessCliIO,
+): number | undefined => {
+  const normalized = argv[0] === "--" ? argv.slice(1) : argv;
+  if (normalized[0] !== "whoami") return undefined;
+  const json = normalized[1] === "--json";
+  if (normalized.length > 2 || (normalized.length === 2 && !json)) {
+    throw new Error("usage: whoami [--json]");
+  }
+  const provenance = currentProvenance();
+  const entries = provenanceEntries(provenance);
+  const fields = Object.fromEntries(entries);
+  if (json) {
+    io.stdout(`${JSON.stringify(fields, null, 2)}\n`);
+    return 0;
+  }
+  const lines = [
+    ...entries.map(([name, value]) => `${name.padEnd(10)} ${value}`),
+    "",
+    "The principal is a random label drawn once for this machine and kept in",
+    "the harness home. It is what the LLM gateway records for requests from",
+    `here, so when a run is traced to a principal, ${fields.principal} is yours.`,
+    "",
+    `user agent  ${provenanceUserAgent(provenance)}`,
+  ];
+  io.stdout(`${lines.join("\n")}\n`);
   return 0;
 };
 
@@ -1768,6 +1891,7 @@ export interface CfHarnessBatchResult {
   run_id: string;
   status: string;
   model: string;
+  usage?: HarnessModelUsage;
   artifact_root?: string;
   transcript_path?: string;
   run_report_path?: string;
@@ -1854,6 +1978,9 @@ export const createCfHarnessBatchResult = (
   run_id: result.runState.runId,
   status: result.runState.status,
   model: result.model,
+  ...((result.totalUsage ?? result.usage) !== undefined
+    ? { usage: result.totalUsage ?? result.usage }
+    : {}),
   ...(result.runState.artifactRoot !== undefined
     ? { artifact_root: result.runState.artifactRoot }
     : {}),
@@ -2021,6 +2148,48 @@ export const formatCfHarnessCliResult = (
     `status: ${result.runState.status}`,
     `modelTurns: ${result.modelTurns}`,
   ];
+  const reportedUsage = result.totalUsage ?? result.usage;
+  if (reportedUsage !== undefined) {
+    const usage = reportedUsage;
+    const fields = [
+      usage.inputTokens !== undefined
+        ? `input=${usage.inputTokens}`
+        : undefined,
+      usage.cachedInputTokens !== undefined
+        ? `cachedInput=${usage.cachedInputTokens}`
+        : undefined,
+      usage.cacheWriteTokens !== undefined
+        ? `cacheWrite=${usage.cacheWriteTokens}`
+        : undefined,
+      usage.outputTokens !== undefined
+        ? `output=${usage.outputTokens}`
+        : undefined,
+      usage.reasoningTokens !== undefined
+        ? `reasoning=${usage.reasoningTokens}`
+        : undefined,
+      usage.totalTokens !== undefined
+        ? `total=${usage.totalTokens}`
+        : undefined,
+      usage.inputTokens !== undefined && usage.inputTokens > 0 &&
+        usage.cachedInputTokens !== undefined
+        ? `cacheRead=${
+          (
+            usage.cachedInputTokens / usage.inputTokens * 100
+          ).toFixed(1)
+        }%`
+        : undefined,
+      usage.costUsd !== undefined
+        ? `providerCostUsd=${usage.costUsd.toFixed(6)}`
+        : undefined,
+      usage.estimatedCostUsd !== undefined
+        ? `estimatedCostUsd=${usage.estimatedCostUsd.toFixed(6)}`
+        : undefined,
+      usage.estimateWithheldReason !== undefined
+        ? `estimateWithheld=${usage.estimateWithheldReason}`
+        : undefined,
+    ].filter((value): value is string => value !== undefined);
+    lines.push(`usage: ${fields.join(" ")}`);
+  }
   if (result.runState.artifactRoot !== undefined) {
     lines.push(`artifactRoot: ${result.runState.artifactRoot}`);
   }
@@ -2141,10 +2310,23 @@ const runCfHarnessAuthCommand = async (
   return 0;
 };
 
+/**
+ * Which subcommand is running, drawn from a closed set. Anything unrecognized
+ * reports "prompt", keeping the command line out of the reported provenance.
+ */
+export const cfHarnessCliCommandName = (argv: readonly string[]): string => {
+  const first = argv[0] === "--" ? argv[1] : argv[0];
+  return first === "auth" || first === "models" || first === "whoami"
+    ? first
+    : "prompt";
+};
+
 export const runCfHarnessCli = async (
   argv: readonly string[],
   deps: RunCfHarnessCliDependencies = {},
 ): Promise<number> => {
+  setCurrentProvenance(deps.provenance);
+  setProvenanceCommand(cfHarnessCliCommandName(argv));
   const io = deps.io ?? defaultCliIo();
   let activeEngine: CfHarnessEngine | undefined;
   let signalCleanup: (() => void) | undefined;
@@ -2160,6 +2342,8 @@ export const runCfHarnessCli = async (
     if (authResult !== undefined) return authResult;
     const modelsResult = await runCfHarnessModelsCommand(argv, deps, io);
     if (modelsResult !== undefined) return modelsResult;
+    const whoamiResult = runCfHarnessWhoamiCommand(argv, deps, io);
+    if (whoamiResult !== undefined) return whoamiResult;
     const controlArgs = parseCfHarnessCliControlArgs(argv);
     if (controlArgs.help) {
       io.stdout(formatCfHarnessCliUsage());
@@ -2286,6 +2470,7 @@ export const runCfHarnessCli = async (
       }
       const credentialOwnerKey = credentialOwner.ownerKey;
       const effectiveRunManifest = recordedRunManifest ?? runManifest;
+      recordProvenanceRunManifest(effectiveRunManifest);
       const loom = effectiveRunManifest?.source === "loom";
       if (
         modelProvider === "openai-codex" && loom &&
@@ -2383,6 +2568,15 @@ export const runCfHarnessCli = async (
           ? { apiKey: parsed.apiKey, apiKeySource: parsed.apiKeySource }
           : {}),
         ...(modelClient !== undefined ? { modelClient } : {}),
+        ...(parsed.reasoningEffort !== undefined
+          ? { reasoningEffort: parsed.reasoningEffort }
+          : {}),
+        ...(parsed.compactThreshold !== undefined
+          ? { compactThreshold: parsed.compactThreshold }
+          : {}),
+        ...(parsed.promptCacheMode !== undefined
+          ? { promptCacheMode: parsed.promptCacheMode }
+          : {}),
         maxModelTurns: parsed.maxModelTurns,
         allowedSubagentProfiles: parsed.allowedSubagentProfiles,
         ...(parsed.allowedToolIds !== undefined
@@ -2424,6 +2618,7 @@ export const runCfHarnessCli = async (
       const credentialOwner = runManifest?.credentialOwner ??
         localCredentialOwner();
       const credentialOwnerKey = credentialOwner.ownerKey;
+      recordProvenanceRunManifest(runManifest);
       if (
         modelProvider === "openai-codex" && runManifest?.source === "loom" &&
         runManifest.credentialOwner === undefined
@@ -2507,6 +2702,15 @@ export const runCfHarnessCli = async (
           ? { apiKey: parsed.apiKey, apiKeySource: parsed.apiKeySource }
           : {}),
         ...(modelClient !== undefined ? { modelClient } : {}),
+        ...(parsed.reasoningEffort !== undefined
+          ? { reasoningEffort: parsed.reasoningEffort }
+          : {}),
+        ...(parsed.compactThreshold !== undefined
+          ? { compactThreshold: parsed.compactThreshold }
+          : {}),
+        ...(parsed.promptCacheMode !== undefined
+          ? { promptCacheMode: parsed.promptCacheMode }
+          : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined

@@ -1,10 +1,10 @@
 import { AnyCellWrapping } from "@commonfabric/api";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
-import { Immutable, isRecord } from "@commonfabric/utils/types";
+import { isReadonlyRecord, isRecord } from "@commonfabric/utils/types";
 import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { type JSONSchema } from "./builder/types.ts";
+import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
 import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
 import {
   cloneIfNecessary,
@@ -22,9 +22,14 @@ import {
   schemaWithProperties,
 } from "@commonfabric/data-model/schema-utils";
 import { createCell, isCell } from "./cell.ts";
+import { canFollowScopedLink } from "./scope.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
-import { readMaybeLink, resolveLink } from "./link-resolution.ts";
+import {
+  readMaybeLink,
+  resolveLink,
+  undefinedDataLink,
+} from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import { type Runtime } from "./runtime.ts";
@@ -135,6 +140,26 @@ const asCellCompoundCandidates = (
     compoundAsCellCandidatesCache.set(schema, candidates);
   }
   return candidates;
+};
+
+/**
+ * The link a handle gets when its target is narrower than the cap its schema
+ * declares: undefined-data in place, the same shape resolveLink hands back for
+ * a blocked follow. It is still a Cell -- so a `required` container is not
+ * voided -- it reads as undefined, and it is not writable, because a data URI
+ * is a read-only address.
+ */
+const blockedHandleLink = (
+  link: NormalizedFullLink,
+  cap: SchemaScope | undefined,
+): NormalizedFullLink => {
+  logger.warn(
+    `blocked narrower-scope asCell handle: a "${cap}"-scoped read cannot ` +
+      `hold a "${link.scope}"-scoped link, so the handle reads as undefined. ` +
+      `Declare the handle's asCell scope at least as narrow as the value it ` +
+      `points at.`,
+  );
+  return undefinedDataLink(link);
 };
 
 const asCellCompoundSchemaForValue = (
@@ -715,7 +740,10 @@ export function processDefaultValue(
     // Process properties defined in both the schema and default value
     if (resolvedSchema?.properties) {
       for (const key of Object.keys(resolvedSchema.properties)) {
-        const rawPropSchema = runtime.cfc.schemaAtPath(resolvedSchema, [key]);
+        const rawPropSchema = ContextualFlowControl.schemaAtPath(
+          resolvedSchema,
+          [key],
+        );
         const propSchema =
           (isRecord(rawPropSchema) && typeof rawPropSchema.$ref === "string")
             ? ContextualFlowControl.resolveSchemaRefs(
@@ -723,7 +751,11 @@ export function processDefaultValue(
               resolvedSchema,
             )
             : rawPropSchema;
-        if (key in defaultValue) {
+        // `Object.hasOwn`, not `in`: `key` is a schema-declared property NAME,
+        // and `defaultValue` is data. `in` walks the prototype chain, so a
+        // schema property called `toString` or `valueOf` matched every object
+        // and read back `Object.prototype`'s function instead of the default.
+        if (Object.hasOwn(defaultValue, key)) {
           result[key] = processDefaultValue(
             runtime,
             tx,
@@ -889,8 +921,17 @@ export function mergeDefaults(
   const base = isNontrivialSchema(schema) ? schema : {};
 
   // TODO(seefeld): What's the right thing to do for arrays?
-  const mergedDefault = base.type === "object" && isRecord(base.default) &&
-      isRecord(defaultValue)
+  //
+  // TODO(danfuzz): `isReadonlyRecord` admits a `FabricSpecialObject` on
+  // either side, and the spread copies zero properties from one, so a
+  // fabric-valued default here merges to `{}` (or silently drops the other
+  // side's contribution). Reachable: the schema generator emits
+  // `{ type: "object" }` for the fabric-backed natives (`Date`, `RegExp`,
+  // `Uint8Array`), so a `Cell` of one of those with an object default in its
+  // schema takes the spread arm. Wants a `FabricSpecialObject` test choosing
+  // the `defaultValue` arm.
+  const mergedDefault = base.type === "object" &&
+      isReadonlyRecord(base.default) && isReadonlyRecord(defaultValue)
     ? { ...base.default, ...defaultValue } as JSONValue
     : defaultValue as JSONValue;
 
@@ -1082,6 +1123,10 @@ export function validateAndTransform(
     // We've already followed all the writeRedirect links above.
     const next = readMaybeLink(tx, link);
     if (next !== undefined) {
+      // An asCell schema turns this link into a handle instead of following
+      // it, so resolveLink's cap check never sees this hop. Apply it here too,
+      // or reading THROUGH the handle escapes the cap the schema declared
+      // (#5230).
       cfcLabelView = mergeCfcLabelViews([
         cfcLabelView,
         cfcLabelViewForDereference(
@@ -1269,7 +1314,7 @@ class TransformObjectCreator
   // This controls the behavior when properties is specified, but
   // additonalProperties is not.
   addOptionalProperty(
-    _obj: Record<string, Immutable<FabricValue>>,
+    _obj: Record<string, FabricValue>,
     _key: string,
     _value: FabricValue,
   ) {
@@ -1343,15 +1388,25 @@ class TransformObjectCreator
         if (cellKind === undefined) {
           return undefined;
         }
-        // TODO(@ubik2): deal with anyOf/oneOf with asCell/asStream
         // This is a read/materialization path: keep the link's own
         // storage-resolved scope. The asCell entry scope is honored as a
         // follow cap during link resolution, never copied onto the link here
         // (doing so would re-address the value to a different scoped instance).
+        //
+        // Minting a handle is the one place a link is NOT followed, so
+        // resolveLink's cap check never sees this hop -- and the holder reads
+        // through the handle later, which is exactly the follow the cap bounds
+        // (#5230). Every route that produces a handle lands here, including
+        // the compound anyOf/oneOf shape `getSchemaScopeCap` cannot see, so
+        // this is the one place the check belongs.
+        const followCap = ContextualFlowControl.getAsCellFollowScopeCap(schema);
+        const handleLink = canFollowScopedLink(followCap, link.scope)
+          ? link
+          : blockedHandleLink(link, followCap);
         return createCell(
           this.runtime,
           {
-            ...link,
+            ...handleLink,
             schema: unwrapAsCellSchema(schema as JSONSchemaObj),
           },
           getTransactionForChildCells(this.tx),
@@ -1394,7 +1449,7 @@ class TransformObjectCreator
         // Ensure value is mutable before injecting default properties.
         // cloneIfNecessary with { deep: false, frozen: false, force: false }
         // is a no-op for unfrozen objects and shallow-clones frozen ones.
-        value = cloneIfNecessary(value as FabricValue, {
+        value = cloneIfNecessary(value, {
           deep: false,
           frozen: false,
           force: false,

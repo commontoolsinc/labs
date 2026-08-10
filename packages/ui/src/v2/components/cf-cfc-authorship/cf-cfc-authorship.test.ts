@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FakeTime } from "@std/testing/time";
 import {
   authorshipStateForLabel,
   CFCFCAuthorship,
@@ -135,6 +136,13 @@ describe("CFCFCAuthorship", () => {
       }],
     };
     let labelAvailable = false;
+    // Open the fake clock up front. The component schedules its retry poll as a
+    // real setTimeout in `scheduleLabelRetry()`, which the `refreshLabel()` call
+    // below reaches through `reconcileLabelRetry()` — so the timer is armed
+    // there, not here. FakeTime only intercepts timers scheduled after it is
+    // installed, so it has to be in place before the element runs any of its own
+    // code. The `using` declaration restores the real clock when the test ends.
+    using time = new FakeTime();
     const element = new CFCFCAuthorship();
     Object.defineProperty(element, "isConnected", {
       value: true,
@@ -156,7 +164,15 @@ describe("CFCFCAuthorship", () => {
       expect(element.authorshipState).not.toBe("verified");
 
       labelAvailable = true;
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Advance the clock. runAllAsync() is the actual advance: it jumps logical
+      // time to the one pending retry timer and fires it, so the test never
+      // hardcodes the poll interval. Firing the retry starts an async re-read of
+      // the now-loaded resolved label (getCfcLabel resolves through microtasks).
+      // runAllAsync drains microtasks before each timer it fires, not after the
+      // last one, so runMicrotasks() flushes that trailing re-read to completion.
+      // runMicrotasks() does not move the clock.
+      await time.runAllAsync();
+      await time.runMicrotasks();
 
       expect(element.authorshipState).toBe("verified");
     } finally {

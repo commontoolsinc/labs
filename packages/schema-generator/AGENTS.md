@@ -2,20 +2,20 @@
 
 Converts TypeScript types to Common Fabric JSON Schemas (2020-12 dialect + repo
 extensions). Consumed at compile time by `packages/ts-transformers`
-(SchemaGeneratorTransformer → `createSchemaTransformerV2`); also the repo's
+(SchemaGeneratorTransformer constructs a `SchemaGenerator`); also the repo's
 wrapper-type vocabulary oracle — ts-transformers imports `cell-brand`,
-`wrapper-names`, `type-traversal`, `property-name`, `property-optionality` via
-subpath exports. Entry point is `src/index.ts` (not `mod.ts`).
+`wrapper-names`, `property-name`, `property-optionality`, `numeric-expression`
+via subpath exports. Entry point is `src/index.ts` (not `mod.ts`).
 
 ## Where answers live
 
-| Question                                                                 | Read                                                                                                       |
-| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Full type→schema mapping rules                                           | `docs/specs/schema-generator/ts_to_json_schema_mapping.md` (sources-of-truth table first)                  |
-| The runtime schema dialect (asCell, ifc, additionalProperties tri-state) | `docs/specs/json_schema.md` + the `JSONSchema` type in `packages/api/index.ts` (the type is authoritative) |
-| Wrapper vocabulary (spelling vs resolved kind)                           | `src/typescript/wrapper-names.ts` (header comment) + `src/typescript/cell-brand.ts`                        |
-| Cross-package contract with ts-transformers                              | bare WeakMaps `typeRegistry` / `schemaHints` — see ts-transformers `src/core/cross-stage-state.ts` header  |
-| How the generator is structured                                          | `src/schema-generator.ts` (formatter chain) + `src/interface.ts` (GenerationContext)                       |
+| Question                                                                 | Read                                                                                                               |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| Full type→schema mapping rules                                           | `docs/specs/schema-generator/ts_to_json_schema_mapping.md` (sources-of-truth table first)                          |
+| The runtime schema dialect (asCell, ifc, additionalProperties tri-state) | `docs/specs/json_schema.md` + the `JSONSchema` type in `packages/api/index.ts` (the type is authoritative)         |
+| Wrapper vocabulary (spelling vs resolved kind)                           | `src/typescript/wrapper-names.ts` (header comment) + `src/typescript/cell-brand.ts`                                |
+| Cross-package contract with ts-transformers                              | bare WeakMaps `typeRegistry` / `schemaHints` — see `packages/ts-transformers/src/core/cross-stage-state.ts` header |
+| How the generator is structured                                          | `src/schema-generator.ts` (formatter chain) + `src/interface.ts` (GenerationContext)                               |
 
 ## Facts that will bite you
 
@@ -29,7 +29,10 @@ subpath exports. Entry point is `src/index.ts` (not `mod.ts`).
 - Semantic sentinels: `any` → `true`; `unknown` → `{ type: "unknown" }`; `never`
   → `false`; `void` → `{ asCell: ["opaque"] }`; `undefined` survives in unions
   (`{ type: "undefined" }`). The `unknown`/`undefined` type values are
-  deliberate non-standard extensions.
+  deliberate non-standard extensions, as are the fabric-primitive type names
+  (`{ type: "FabricBytes" }` and friends — see `FABRIC_PRIMITIVE_SCHEMA_TYPES`
+  in `packages/api/index.ts`), emitted for fields authored against those
+  classes.
 - Fail-loud inventory: `Map`/`Set`/`WeakMap`, `Cell<Stream<T>>`,
   `Default<undefined>`, unresolvable DeepDefault keys, and circular aliases
   THROW rather than degrade. An unformattable type also throws (complete

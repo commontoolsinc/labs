@@ -100,17 +100,31 @@ export interface ProbeApi {
   isVisible(element: Element): boolean;
   /** Visible text of `root` plus its shadow and slotted descendants. */
   deepText(root: ParentNode): string;
+  /**
+   * Add `token` to the whitespace-separated token list held in `element`'s
+   * `attribute`, keeping the tokens already there. This is how a predicate
+   * tags an element it has resolved without disturbing a tag another wait
+   * placed on the same element. Adding a token twice leaves one copy.
+   */
+  addToken(element: Element, attribute: string, token: string): void;
 }
 
 /**
  * A predicate evaluated in the page. It receives a {@link ProbeApi} plus the
  * `args` passed to {@link waitForCondition}, and returns whether the awaited
  * condition holds. It may be async (for example to await `rt.idle()`).
+ *
+ * A predicate may answer with a value instead of `true`. Any truthy result
+ * satisfies the condition, and a result other than `true` is carried back to
+ * the test process as {@link waitForCondition}'s resolution. That is how a
+ * wait hands over a measurement taken at the instant the condition held —
+ * the coordinates a trusted click is about to be aimed at, say — without a
+ * second round trip in which the page could move on.
  */
-export type PageCondition<A extends readonly unknown[]> = (
+export type PageCondition<A extends readonly unknown[], R = unknown> = (
   probe: ProbeApi,
   ...args: A
-) => boolean | Promise<boolean>;
+) => boolean | R | Promise<boolean | R>;
 
 /**
  * Installed in the page by {@link waitForCondition}. Re-evaluates `predicate`
@@ -200,6 +214,13 @@ function installWaiter(
       visit(root);
       return parts.join(" ");
     },
+    addToken(element, attribute, token) {
+      const tokens = new Set(
+        (element.getAttribute(attribute) ?? "").split(/\s+/).filter(Boolean),
+      );
+      tokens.add(token);
+      element.setAttribute(attribute, [...tokens].join(" "));
+    },
   };
 
   const predicate = new Function("return (" + predicateSource + ")")() as (
@@ -276,11 +297,29 @@ function installWaiter(
   let running = false;
   let rerun = false;
 
+  // The value the predicate answered with, carried to the test process in the
+  // binding payload so a measurement taken at the instant the condition held
+  // reaches the caller without a second round trip.
+  let answer: unknown = true;
+
   const fire = (): boolean => {
     const notify = (globalThis as Record<string, unknown>)[bindingName];
     if (typeof notify !== "function") return false;
     signalled = true;
-    (notify as (payload: string) => void)("ok");
+    let payload: string;
+    try {
+      payload = JSON.stringify({ value: answer === true ? undefined : answer });
+    } catch (error) {
+      // An answer that cannot cross the boundary is reported as one. Sending
+      // "no value" instead would read to the caller as a condition that held
+      // and simply had nothing to say, which is a different thing.
+      payload = JSON.stringify({
+        unserializable: String(
+          error instanceof Error ? error.message : error,
+        ),
+      });
+    }
+    (notify as (payload: string) => void)(payload);
     return true;
   };
 
@@ -330,8 +369,10 @@ function installWaiter(
       .then((ok) => {
         running = false;
         if (stopped) return;
-        if (ok) onConditionMet();
-        else if (rerun) {
+        if (ok) {
+          answer = ok;
+          onConditionMet();
+        } else if (rerun) {
           rerun = false;
           evaluate();
         }
@@ -373,19 +414,37 @@ function installWaiter(
  * safety net elapses; callers add the context and rich probe for the failure
  * message. There is no caller-supplied timeout: the wait resolves on the
  * condition, and the safety net is not the common-case latency.
+ *
+ * Resolves with whatever the predicate answered, when that answer is a value
+ * rather than `true`. The answer travels in the same notification that ends
+ * the wait, so a caller acting on it acts on the page as it was when the
+ * condition held, with no round trip in between for the page to change in.
  */
-export const waitForCondition = async <A extends readonly unknown[]>(
+export const waitForCondition = async <A extends readonly unknown[], R>(
   page: Page,
-  predicate: PageCondition<A>,
+  predicate: PageCondition<A, R>,
   { args }: { args?: A } = {},
-): Promise<void> => {
+): Promise<R | undefined> => {
   const bindingName = `__cfcWait_${crypto.randomUUID().replace(/-/g, "")}`;
+  let answer: R | undefined;
+  let answerError: string | undefined;
   let resolveSignal!: () => void;
   const signalled = new Promise<void>((resolve) => {
     resolveSignal = resolve;
   });
-  const unsubscribe = page.onBindingCalled((name) => {
-    if (name === bindingName) resolveSignal();
+  const unsubscribe = page.onBindingCalled((name, payload) => {
+    if (name !== bindingName) return;
+    try {
+      const parsed = JSON.parse(payload) as {
+        value?: R;
+        unserializable?: string;
+      };
+      answerError = parsed.unserializable;
+      answer = parsed.value;
+    } catch (error) {
+      answerError = `the wait's notification did not parse: ${String(error)}`;
+    }
+    resolveSignal();
   });
   await page.addBinding(bindingName);
 
@@ -406,6 +465,13 @@ export const waitForCondition = async <A extends readonly unknown[]>(
       );
     });
     await Promise.race([signalled, timedOut]);
+    if (answerError !== undefined) {
+      throw new Error(
+        `The condition held, but its answer did not reach the test: ` +
+          answerError,
+      );
+    }
+    return answer;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     unsubscribe();

@@ -15,15 +15,32 @@ deno task cf check pattern.tsx
 deno task cf check pattern.tsx --show-transformed
 ```
 
+## Identity for CLI Commands
+
+Every command below passes `-i "$CF_IDENTITY"`. Set it once per shell to the
+unique key you use for normal development — see
+[LOCAL_DEV_SERVERS.md](../LOCAL_DEV_SERVERS.md) for the full recipe:
+
+```bash
+mkdir -p .cf
+deno run -A packages/cli/mod.ts id new > .cf/shared-dev.key
+export CF_IDENTITY="$PWD/.cf/shared-dev.key"
+```
+
+Without it set, `-i "$CF_IDENTITY"` expands to an empty argument and the
+command fails immediately with `Missing value for option "--identity"`. Don't
+reach for `id derive "implicit trust"` here: that is the local server's own
+operator key, reserved for operator actions.
+
 ## Deploying a Test Piece
 
 ```bash
 # Deploy — returns a piece-id used by all commands below
-deno task cf piece new --identity key.json --api-url URL --space SPACE pattern.tsx
+deno task cf piece new -i "$CF_IDENTITY" --api-url URL --space SPACE pattern.tsx
 
 # Set test data
 echo '{"title": "Test", "done": false}' | \
-  deno task cf piece set --identity key.json --api-url URL --space SPACE --piece ID testItem
+  deno task cf piece set -i "$CF_IDENTITY" --api-url URL --space SPACE --piece ID testItem
 ```
 
 ## When to Use CLI vs Browser

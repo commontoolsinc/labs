@@ -1,5 +1,5 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
-import { encodeMemoryBoundaryUnprovenFabricValue } from "@commonfabric/memory/v2";
+import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import * as MemoryServer from "@commonfabric/memory/v2/server";
 import type * as Routes from "./memory.routes.ts";
 import { memoryServer } from "../memory.ts";
@@ -140,7 +140,7 @@ export const bufferTextMessagesUntilNegotiated = (
 // `memwrite-trace.ts`.
 let memwriteConnSeq = 0;
 
-const attachMemorySocketPipeline = (
+export const attachMemorySocketPipeline = (
   socket: WebSocket,
   negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
   firstMessage: string,
@@ -166,7 +166,7 @@ const attachMemorySocketPipeline = (
     if (socket.readyState !== WebSocket.OPEN) {
       return;
     }
-    socket.send(encodeMemoryBoundaryUnprovenFabricValue(message));
+    socket.send(encodeMemoryBoundary(message));
   });
   const closeConnection = () => {
     connection.close();

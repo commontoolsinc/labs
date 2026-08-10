@@ -1,16 +1,13 @@
-import type { JsScript, SourceMap } from "@commonfabric/js-compiler";
+import type { SourceMap } from "@commonfabric/js-compiler";
 import {
   type MappedPosition,
   SourceMapParser,
 } from "@commonfabric/js-compiler/source-map";
-import { getLogger } from "@commonfabric/utils/logger";
 import "ses";
 import { createCallbackCompartmentGlobals } from "./compartment-globals.ts";
 import { restoreErrorIsError } from "./error-taming.ts";
 import { hardenVerifiedFunction } from "./function-hardening.ts";
 import { sanitizeLocaleMethods } from "./locale-taming.ts";
-
-const logger = getLogger("ses-runtime");
 
 export interface SESRuntimeOptions {
   globals?: Record<string, unknown>;
@@ -21,13 +18,6 @@ export interface SESRuntimeOptions {
 interface SESCompartmentLike {
   evaluate(source: string): unknown;
   globalThis?: object;
-}
-
-export interface JsValue {
-  invoke(...args: unknown[]): JsValue;
-  inner(): unknown;
-  asObject(): object;
-  isObject(): boolean;
 }
 
 class SESInternals {
@@ -47,10 +37,6 @@ class SESInternals {
     } catch (e: unknown) {
       throw this.mapThrownError(e);
     }
-  }
-
-  loadSourceMap(filename: string, sourceMap: SourceMap) {
-    this.sourceMaps.load(filename, sourceMap);
   }
 
   loadSourceMapLazy(filename: string, provider: () => SourceMap | undefined) {
@@ -99,127 +85,25 @@ class SESInternals {
   }
 }
 
-class SESJsValue implements JsValue {
-  constructor(
-    private internals: SESInternals,
-    private value: unknown,
-  ) {}
-
-  invoke(...args: unknown[]): SESJsValue {
-    if (typeof this.value !== "function") {
-      throw new Error("Cannot invoke non function");
-    }
-    const result = this.internals.exec(() =>
-      Reflect.apply(
-        this.value as (...args: unknown[]) => unknown,
-        undefined,
-        args,
-      )
-    );
-    return new SESJsValue(this.internals, result);
-  }
-
-  inner(): unknown {
-    return this.value;
-  }
-
-  asObject(): object {
-    if (!this.isObject()) {
-      throw new Error("Value is not an object");
-    }
-    return this.value as object;
-  }
-
-  isObject(): boolean {
-    return !!(this.value && typeof this.value === "object");
-  }
-}
-
-export class SESIsolate {
-  private globals: Record<string, unknown>;
-  private internals: SESInternals;
-
-  constructor(
-    private options: SESRuntimeOptions = {},
-    internals?: SESInternals,
-  ) {
-    this.internals = internals ?? new SESInternals(options);
-    this.globals = { ...(options.globals ?? {}) };
-    ensureSESInitialized(!!options.lockdown);
-  }
-
-  execute(input: string | JsScript): SESJsValue {
-    logger.timeStart("execute");
-    try {
-      const { js, filename, sourceMap } = typeof input === "string"
-        ? { js: input, filename: "NO-NAME.js" }
-        : input;
-
-      if (filename && sourceMap) {
-        this.internals.loadSourceMap(filename, sourceMap);
-      }
-
-      logger.timeStart("execute", "createCompartment");
-      let compartment;
-      try {
-        compartment = createCompartment(this.globals);
-      } finally {
-        logger.timeEnd("execute", "createCompartment");
-      }
-
-      logger.timeStart("execute", "compartmentEvaluate");
-      try {
-        const result = this.internals.exec(() => compartment.evaluate(js));
-        return new SESJsValue(this.internals, result);
-      } finally {
-        logger.timeEnd("execute", "compartmentEvaluate");
-      }
-    } finally {
-      logger.timeEnd("execute");
-    }
-  }
-
-  value<T>(value: T): SESJsValue {
-    return new SESJsValue(this.internals, value);
-  }
-
-  mapPosition(
-    filename: string,
-    line: number,
-    column: number,
-  ): MappedPosition | null {
-    return this.internals.mapPosition(filename, line, column);
-  }
-
-  parseStack(stack: string): string {
-    return this.internals.parseStack(stack);
-  }
-
-  clear(): void {
-    this.internals.clear();
-  }
-}
-
 export class SESRuntime extends EventTarget {
   private internals: SESInternals;
-  private isolates = new Map<string, SESIsolate>();
   private callbackEvaluator: SESCallbackEvaluator;
 
-  constructor(private options: SESRuntimeOptions = {}) {
+  constructor(options: SESRuntimeOptions = {}) {
     super();
     this.internals = new SESInternals(options);
     this.callbackEvaluator = new SESCallbackEvaluator(options);
   }
 
-  getIsolate(key: string): SESIsolate {
-    const existing = this.isolates.get(key);
-    if (existing) {
-      return existing;
-    }
-
-    const isolate = new SESIsolate(this.options, this.internals);
-    this.isolates.set(key, isolate);
-    return isolate;
+  /**
+   * Call `callback` and source-map the stack of whatever it throws — or of the
+   * rejection, when it returns a promise. Mapping happens once per error (see
+   * `SESInternals.mapThrownError`). The scheduler runs each action through
+   * `Engine.invoke`, which lands here, so an error raised in pattern code
+   * reaches the scheduler carrying authored coordinates.
+   */
+  exec<T>(callback: () => T): T {
+    return this.internals.exec(callback);
   }
 
   mapPosition(
@@ -232,21 +116,12 @@ export class SESRuntime extends EventTarget {
 
   /**
    * Register a source map under `filename` so {@link mapPosition} (and stack
-   * parsing) can translate bundle coordinates back to original sources. The AMD
-   * isolate path does this implicitly via {@link SESIsolate.execute}; the ESM
-   * module-record loader composes a per-load bundle map and registers it here.
-   */
-  loadSourceMap(filename: string, sourceMap: SourceMap): void {
-    this.internals.loadSourceMap(filename, sourceMap);
-  }
-
-  /**
-   * Deferred variant of {@link loadSourceMap}: `provider` runs (once) on the
-   * first lookup that needs `filename`. The ESM boot path registers its
-   * composed bundle/per-module maps this way — composition is a per-segment
-   * VLQ transcode over every module, and its only consumers (error mapping,
-   * debug `fn.src` resolution) are on-demand, so boots that never look up a
-   * frame never pay it (CT-1819).
+   * parsing) can translate bundle coordinates back to original sources.
+   * `provider` runs (once) on the first lookup that needs `filename`. The ESM
+   * boot path registers its composed bundle/per-module maps this way —
+   * composition is a per-segment VLQ transcode over every module, and its only
+   * consumers (error mapping, debug `fn.src` resolution) are on-demand, so
+   * boots that never look up a frame never pay it (CT-1819).
    */
   loadSourceMapLazy(
     filename: string,
@@ -262,7 +137,7 @@ export class SESRuntime extends EventTarget {
   /**
    * Materialize + source-map a thrown error's stack (once — see
    * `SESInternals.mapThrownError`). Used by the engine for errors that escape
-   * module evaluation outside an isolate `exec` (e.g. `loadModuleGraph`).
+   * module evaluation outside an {@link exec} call (e.g. `loadModuleGraph`).
    */
   mapThrownError(error: unknown): unknown {
     return this.internals.mapThrownError(error);
@@ -275,7 +150,6 @@ export class SESRuntime extends EventTarget {
   clear(): void {
     this.internals.clear();
     this.callbackEvaluator.clear();
-    this.isolates.clear();
   }
 }
 

@@ -7,10 +7,10 @@ import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { Pattern } from "../src/builder/types.ts";
 import {
-  patternToJSON,
+  patternToEncodableForm,
   serializePatternGraph,
-  toJSONWithAliasBindings,
-} from "../src/builder/json-utils.ts";
+  withAliasBindings,
+} from "../src/builder/to-encodable-form.ts";
 import {
   resolveOpPattern,
   resolveStoredPattern,
@@ -20,13 +20,13 @@ import type { FactoryInput } from "../src/builder/types.ts";
 
 /**
  * Identity E4 (docs/specs/content-addressed-action-identity.md §7): the JSON
- * BOUNDARY (`Pattern.toJSON()`, fired by JSON.stringify and by cell writes via
- * native-conversion's HasToJSON) is REFS-ONLY — `{ $patternRef, argumentSchema,
+ * BOUNDARY (`Pattern.toEncodableForm()`, reached by the runtime's artifact
+ * walk on the way into a cell write) is REFS-ONLY — `{ $patternRef, argumentSchema,
  * resultSchema }`, no graph. Rehydration of a stored ref goes by identity: the
  * session-lifetime artifact index (sync) or the storage-backed
  * `loadPatternByIdentity` (async; compiled artifacts persist in-space as part
  * of compilation). INTERNAL serialization (`serializePatternGraph`, used by
- * builder-time node serialization through `toJSONWithAliasBindings`) stays the
+ * builder-time node serialization through `withAliasBindings`) stays the
  * full bare graph — `Pattern.nodes` is the in-memory instantiation
  * representation, not a wire format.
  */
@@ -42,6 +42,29 @@ const PROGRAM: RuntimeProgram = {
         "import { pattern } from 'commonfabric';",
         "export default pattern<{ items: { v: number }[] }>(({ items }) => {",
         "  return { vs: items.map((item) => item.v) };",
+        "});",
+      ].join("\n"),
+    },
+  ],
+};
+
+/**
+ * A pattern whose node module is backed by a LIVE FUNCTION. `PROGRAM`'s single
+ * node is a `ref` module whose implementation is already a string, so it
+ * cannot exhibit anything about function-valued members either way.
+ */
+const HANDLER_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [
+    {
+      name: "/main.tsx",
+      contents: [
+        "import { pattern, handler, Cell } from 'commonfabric';",
+        "const bump = handler((_e: unknown, s: { n: Cell<number> }) => {",
+        "  s.n.set(s.n.get() + 1);",
+        "});",
+        "export default pattern<{ n: number }>(({ n }) => {",
+        "  return { n, go: bump({ n }) };",
         "});",
       ].join("\n"),
     },
@@ -108,9 +131,59 @@ describe("refs-only pattern JSON at the boundary", () => {
       result: {},
       nodes: [],
     } as unknown as Pattern;
-    const serialized = patternToJSON(fake);
+    const serialized = patternToEncodableForm(fake);
     expect("$patternRef" in serialized).toBe(false);
     expect(Array.isArray((serialized as { nodes: unknown }).nodes)).toBe(true);
+  });
+
+  it("a graph crossing the boundary carries no live builder artifact", () => {
+    // The nodes a pattern holds carry LIVE modules: `withAliasBindings`
+    // builds a node by copying its module member by member, function members
+    // included. A graph emitted with those still in it is not a serialized
+    // value -- it depends on whatever reads it next to finish the job by
+    // calling methods on live objects.
+    //
+    // The fixture mirrors that shape rather than being a real pattern: a
+    // hand-built one cannot exhibit a bug it has no shape for, so this pins
+    // the property and `scripts/ab-harness.ts` measures it against a real
+    // pattern, where the same graph carried 7691 functions across 16 paths.
+    const fake = {
+      argumentSchema: true,
+      resultSchema: true,
+      result: {},
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: () => "live",
+            toEncodableForm: () => ({
+              type: "javascript",
+              implementation: "source",
+            }),
+          },
+          inputs: {},
+          outputs: {},
+        },
+      ],
+    } as unknown as Pattern;
+
+    const serialized = patternToEncodableForm(fake);
+    const live: string[] = [];
+    const walk = (value: unknown, path: string) => {
+      if (typeof value === "function") live.push(path);
+      else if (value && typeof value === "object") {
+        for (const [key, member] of Object.entries(value)) {
+          walk(member, `${path}.${key}`);
+        }
+      }
+    };
+    walk(serialized, "$");
+
+    expect(live).toEqual([]);
+    expect((serialized as any).nodes[0].module).toEqual({
+      type: "javascript",
+      implementation: "source",
+    });
   });
 
   it("internal graph serialization stays the full bare graph", async () => {
@@ -121,11 +194,39 @@ describe("refs-only pattern JSON at the boundary", () => {
     expect("$patternRef" in internal).toBe(false);
     expect(Array.isArray((internal as { nodes: unknown }).nodes)).toBe(true);
 
-    const viaLegacyAliases = toJSONWithAliasBindings(
+    const viaLegacyAliases = withAliasBindings(
       compiled as unknown as FactoryInput<unknown>,
     ) as Record<string, unknown>;
     expect("$patternRef" in viaLegacyAliases).toBe(false);
     expect(Array.isArray(viaLegacyAliases.nodes)).toBe(true);
+  });
+
+  it("a stringified internal graph keeps every module's body", async () => {
+    // The internal graph is the in-memory instantiation representation, so it
+    // holds LIVE modules and a live module's `implementation` is a function.
+    // `JSON.stringify` consults `toJSON` and no other name, and drops a
+    // function-valued property without a word -- so a module that did not
+    // answer that name would round-trip to a node with no executable body and
+    // no `$implRef` naming one. No throw, no `undefined`, just a smaller
+    // object; only an assertion on the round-tripped GRAPH can see it.
+    const compiled = await runtime.patternManager.compilePattern(
+      HANDLER_PROGRAM,
+    );
+    const internal = serializePatternGraph(compiled as unknown as Pattern);
+    const nodes = (internal as { nodes: { module: Record<string, unknown> }[] })
+      .nodes;
+    expect(nodes.some((n) => typeof n.module.implementation === "function"))
+      .toBe(true);
+
+    const roundTripped = JSON.parse(JSON.stringify(internal)) as {
+      nodes: { module: Record<string, unknown> }[];
+    };
+    expect(roundTripped.nodes.length).toBe(nodes.length);
+    for (const { module } of roundTripped.nodes) {
+      const hasRef = "$implRef" in module;
+      const hasBody = typeof module.implementation === "string";
+      expect(hasRef || hasBody).toBe(true);
+    }
   });
 
   it("nodes of a freshly compiled pattern embed bare op graphs (no $patternRef)", async () => {

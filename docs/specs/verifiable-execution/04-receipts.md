@@ -1,6 +1,6 @@
 # CF Protocol: Receipt Object (Section 7)
 
-See `docs/specs/verifiable-execution/README.md` for navigation.
+See the [verifiable-execution document map](README.md) for navigation.
 
 ## 7. Receipt Object (Future Enhancement)
 
@@ -11,8 +11,9 @@ commitments, provenance commitments, optional TEEs).
 
 **Conventions:**
 
-- Hash/commitment values are content-addressed digests (see `CauseString` in
-  `packages/memory/interface.ts`).
+- Hash/commitment values are content-addressed digests (see `FabricHash` in
+  `packages/data-model/src/fabric-primitives/FabricHash.ts`, whose tagged string
+  form reads `fid1:…`).
 - `refer(x)` refers to the `merkle-reference` hashing function used elsewhere
   in this spec.
 

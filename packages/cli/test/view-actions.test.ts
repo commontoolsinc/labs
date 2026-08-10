@@ -5,6 +5,7 @@ import {
   clamp,
   findMatches,
   frameTop,
+  maxPagerTop,
   maxTop,
   nextMatchIndex,
   nodeAtLine,
@@ -41,6 +42,14 @@ Deno.test("clamp / maxTop", () => {
   // 100 lines, height 24 -> content rows 23 -> maxTop 77
   assertEquals(maxTop(100, 24), 77);
   assertEquals(maxTop(5, 24), 0);
+});
+
+Deno.test("maxPagerTop leaves the bottom three quarters below the last line", () => {
+  // Height 21 has 20 content rows. The last line occupies the fifth row, with
+  // 15 rows below it.
+  assertEquals(maxPagerTop(100, 21), 95);
+  assertEquals(maxPagerTop(5, 21), 0, "a short document already fits");
+  assertEquals(maxPagerTop(100, 2), 99, "one content row still shows text");
 });
 
 Deno.test("findMatches: smartcase", () => {
@@ -228,10 +237,11 @@ Deno.test("frameTop: puts a too-tall node's top line ~1/10 down", () => {
   assert(top < 100, "node start is below the top of the screen");
 });
 
-Deno.test("frameTop: clamps at document bounds", () => {
+Deno.test("frameTop: respects document bounds", () => {
   assertEquals(frameTop(0, 2, 40, 1000), 0, "cannot scroll above the start");
   const t = frameTop(999, 999, 40, 1000);
-  assertEquals(t, maxTop(1000, 40), "clamped to the last page");
+  assertEquals(t, 980, "the padded end lets the final line be centered");
+  assert(t <= maxPagerTop(1000, 40));
 });
 
 Deno.test("scrollToAnchor: no scroll when the anchor is already visible", () => {
@@ -252,11 +262,12 @@ Deno.test("scrollToAnchor: minimal scroll when the anchor is off screen", () => 
   assert(60 >= down && 60 <= down + 10, "anchor now visible");
 });
 
-Deno.test("scrollToAnchor: clamps at document bounds", () => {
+Deno.test("scrollToAnchor: respects document bounds", () => {
   assertEquals(scrollToAnchor(0, 50, 12, 1000), 0); // can't scroll past the top
-  // near the end: top clamps to maxTop while keeping the anchor visible
+  // The padded end leaves room for the normal lower margin around the anchor.
   const t = scrollToAnchor(999, 0, 12, 1000);
-  assertEquals(t, maxTop(1000, 12));
+  assertEquals(t, 991);
+  assert(t <= maxPagerTop(1000, 12));
   assert(999 >= t && 999 <= t + 10, "last-line anchor visible");
 });
 

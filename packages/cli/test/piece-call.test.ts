@@ -1,22 +1,109 @@
 import { describe, it } from "@std/testing/bdd";
+import { assertEquals, assertStringIncludes } from "@std/assert";
 import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
-import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
+import type { Cell, NormalizedFullLink } from "@commonfabric/runner";
+import {
+  CF_RUNTIME_ERROR_LOG,
+  collectInvocationResultLinks,
+  normalizeAbsentVerbPayload,
+  runtimeErrorLog,
+  schemaIsObjectShaped,
+  verbInputSchemaError,
+  VerbInputValidationError,
+} from "../lib/callable.ts";
 import {
   executePieceCallable,
   PieceResultProjectionError,
+  PieceVerbReadError,
 } from "../lib/piece.ts";
+import type { ExecutedPieceCallable } from "../lib/piece.ts";
+import { ValidationError } from "@cliffy/command";
 import {
+  boundedSettlement,
+  exitPieceCallFailure,
   exitWithDataError,
+  invocationJson,
+  invocationPhaseReporter,
   isPieceGetDataError,
   pieceCallInvocation,
+  pieceCallPhaseObserver,
   pieceCallRawArgs,
   pieceGetDataErrorReport,
   pieceLinkDataErrorReport,
+  renderPieceCallOutcome,
+  reportVerbInputErrorOrRethrow,
+  resolveInvocationId,
+  resolveWaitControl,
+  verbInputErrorReport,
+  WaitBoundExpired,
 } from "../commands/piece.ts";
 import { LinkValidationError } from "../lib/piece.ts";
+import { PieceGetTransformError } from "../lib/piece-get-transform.ts";
 
 describe("executePieceCallable", () => {
+  it("reports not-found when the piece cell has no schema-cast surface", async () => {
+    // The forced-stream probe's type guard: a piece cell without asSchema
+    // cannot take the cast, so the third resolution path answers null and
+    // the resolver reports not-found instead of crashing on the probe.
+    const emptyChild: Record<string, unknown> = {
+      schema: undefined,
+      get: () => undefined,
+      getRaw: () => undefined,
+    };
+    emptyChild.key = () => emptyChild;
+    emptyChild.asSchemaFromLinks = () => emptyChild;
+    const emptyRoot = {
+      schema: undefined,
+      get: () => ({}),
+      getRaw: () => ({}),
+      key: () => emptyChild,
+      asSchemaFromLinks: () => emptyChild,
+    };
+    const piece = {
+      result: { getCell: () => Promise.resolve(emptyRoot) },
+      input: { getCell: () => Promise.resolve(emptyRoot) },
+      getCell: () => ({}),
+    };
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "missing",
+        [],
+        {
+          loadPieces: () =>
+            Promise.resolve({ getSpace: () => "home" } as never),
+          loadPiece: () => Promise.resolve(piece as never),
+        },
+      ),
+    ).rejects.toThrow('Callable "missing" not found');
+
+    // A piece exposing no cell at all skips the probe the same way.
+    const { getCell: _getCell, ...pieceWithoutCell } = piece;
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "missing",
+        [],
+        {
+          loadPieces: () =>
+            Promise.resolve({ getSpace: () => "home" } as never),
+          loadPiece: () => Promise.resolve(pieceWithoutCell as never),
+        },
+      ),
+    ).rejects.toThrow('Callable "missing" not found');
+  });
+
   it("preserves plain-text mode while resolving a callable", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -38,9 +125,9 @@ describe("executePieceCallable", () => {
       "refresh",
       [],
       {
-        loadManager: (config) => {
+        loadPieces: (config) => {
           managerConfig = config;
-          return Promise.resolve(harness.manager);
+          return Promise.resolve(harness.pieces);
         },
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => true,
@@ -77,9 +164,9 @@ describe("executePieceCallable", () => {
       "refresh",
       [],
       {
-        loadManager: (config) => {
+        loadPieces: (config) => {
           managerConfig = config;
-          return Promise.resolve(harness.manager);
+          return Promise.resolve(harness.pieces);
         },
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => true,
@@ -118,7 +205,7 @@ describe("executePieceCallable", () => {
       "recordMessage",
       ["--message", "milk"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
       },
     );
@@ -132,6 +219,153 @@ describe("executePieceCallable", () => {
         value: { message: "milk" },
       },
     ]);
+  });
+
+  it("rejects a piped payload that fails the verb's schema before dispatch", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+    });
+
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "recordMessage",
+        [],
+        {
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+          isStdinTerminal: () => false,
+          readTextInput: () => Promise.resolve('{"mesage":"milk"}'),
+          invocationId: "inv-typo-retry",
+        },
+      ),
+    ).rejects.toThrow(/Invalid input for "recordMessage"/);
+
+    // Nothing reached the stream, so the invocation id was never spent — the
+    // corrected retry can still use it. Without this gate the typo'd payload
+    // reads back as an absent `$event`, the verb runs with no event, and its
+    // receipt burns the id while the call reports settled.
+    expect(harness.tracker.handlerWrites).toEqual([]);
+    expect(harness.tracker.sendOptions).toEqual([]);
+  });
+
+  // Characterized first (pre-D5, observed passing on unmodified code): this
+  // exact call dispatched — the handler ran with `$event === undefined` and
+  // its receipt spent the invocation id. The schema below is the deployed
+  // shape absence reaches dispatch through: a top-level local $ref with the
+  // stream marker, which the arg parser cannot derive flags from, so a bare
+  // call parses to `input === undefined`.
+  it("refuses an absent payload against a verb that provably cannot run without one", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        $ref: "#/$defs/RecordMessageEvent",
+        asCell: ["stream"],
+        $defs: {
+          RecordMessageEvent: {
+            type: "object",
+            properties: {
+              message: { type: "string" },
+            },
+            required: ["message"],
+          },
+        },
+      } as JSONSchema,
+    });
+
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "recordMessage",
+        [],
+        {
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+          isStdinTerminal: () => true,
+          invocationId: "inv-absent-retry",
+        },
+      ),
+    ).rejects.toThrow(
+      /Invalid input for "recordMessage": no payload was supplied.*message.*send a payload/,
+    );
+
+    // Nothing reached the stream, so the invocation id was never spent — the
+    // retry that actually sends a payload can still use it.
+    expect(harness.tracker.handlerWrites).toEqual([]);
+    expect(harness.tracker.sendOptions).toEqual([]);
+  });
+
+  it("normalizes an absent payload to {} so an all-defaulted verb receives its defaults", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refreshFeed",
+      inputSchema: {
+        $ref: "#/$defs/RefreshEvent",
+        asCell: ["stream"],
+        $defs: {
+          RefreshEvent: {
+            type: "object",
+            properties: {
+              mode: { type: "string", default: "fast" },
+              limit: { type: "number", default: 10 },
+            },
+            required: ["mode", "limit"],
+          },
+        },
+      } as JSONSchema,
+      receiptValue: {},
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "refreshFeed",
+      [],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+        invocationId: "inv-defaulted",
+      },
+    );
+
+    // `{}` goes out instead of nothing: the runtime materializes defaults for
+    // a PRESENT object payload only, so this is the difference between the
+    // handler seeing `{ mode: "fast", limit: 10 }` and seeing `undefined`.
+    expect(harness.tracker.handlerWrites).toEqual([
+      {
+        cellProp: "result",
+        path: ["refreshFeed"],
+        value: {},
+      },
+    ]);
+    expect(result.invocation).toEqual({
+      id: "inv-defaulted",
+      status: "settled",
+    });
   });
 
   it("runs tools from schema-derived flags and returns JSON output", async () => {
@@ -189,7 +423,7 @@ describe("executePieceCallable", () => {
       "search",
       ["--query", "tea"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
       },
@@ -205,6 +439,13 @@ describe("executePieceCallable", () => {
     expect(JSON.parse(result.outputText!)).toEqual({
       summary: "bound-source:tea",
       source: "bound-source",
+    });
+    // The result cell's durable address rides along — the handle a caller can
+    // revisit instead of re-running the tool (verb contract Part 2).
+    expect(result.resultRef).toEqual({
+      id: "of:tool-result-cell",
+      space: "did:key:test-home",
+      scope: "space",
     });
   });
 
@@ -233,7 +474,7 @@ describe("executePieceCallable", () => {
       "recordMessage",
       ["--message", "milk"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: (_manager, _pieceId, scope) => {
           resolvedScope = scope;
           return Promise.resolve(harness.piece);
@@ -269,7 +510,7 @@ describe("executePieceCallable", () => {
       toolResult: { ok: true },
     });
 
-    await executePieceCallable(
+    const result = await executePieceCallable(
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
@@ -279,13 +520,16 @@ describe("executePieceCallable", () => {
       "search",
       ["--query", "tea"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
       },
     );
 
     expect(harness.tracker.toolResultScope).toBe("user");
+    // The returned handle preserves the scope — dropping it would silently
+    // retarget a user-scoped result to the space-scoped instance.
+    expect(result.resultRef?.scope).toBe("user");
   });
 
   it("reads primitive handler input from --value-file", async () => {
@@ -305,7 +549,7 @@ describe("executePieceCallable", () => {
       "editContent",
       ["--value-file", "/tmp/content.md"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         readTextFile: () => Promise.resolve("# Title\n\nUse `cat` here"),
       },
@@ -348,7 +592,7 @@ describe("executePieceCallable", () => {
       "editContent",
       ["--json-file", "/tmp/input.json"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         readTextFile: () =>
           Promise.resolve(
@@ -368,7 +612,7 @@ describe("executePieceCallable", () => {
     ]);
   });
 
-  it("passes --json-file payloads through for object handlers without CLI shape enforcement", async () => {
+  it("refuses a --json-file payload that cannot satisfy an object handler", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "editContent",
@@ -386,29 +630,28 @@ describe("executePieceCallable", () => {
       },
     });
 
-    await executePieceCallable(
-      {
-        apiUrl: "http://localhost:8000",
-        identity: "/tmp/test-identity.pem",
-        piece: "fid1:piece-123",
-        space: "home",
-      },
-      "editContent",
-      ["--json-file", "/tmp/input.json"],
-      {
-        loadManager: () => Promise.resolve(harness.manager),
-        loadPiece: () => Promise.resolve(harness.piece),
-        readTextFile: () => Promise.resolve('["not-an-object"]'),
-      },
-    );
+    // The arg parser still passes JSON through verbatim — it neither reshapes
+    // nor rejects. The refusal happens at dispatch, where the payload is
+    // measured against the verb's own schema.
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "editContent",
+        ["--json-file", "/tmp/input.json"],
+        {
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+          readTextFile: () => Promise.resolve('["not-an-object"]'),
+        },
+      ),
+    ).rejects.toThrow(/Invalid input for "editContent"/);
 
-    expect(harness.tracker.handlerWrites).toEqual([
-      {
-        cellProp: "result",
-        path: ["editContent"],
-        value: ["not-an-object"],
-      },
-    ]);
+    expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
   it("infers piped stdin for primitive handlers when no args are provided", async () => {
@@ -428,7 +671,7 @@ describe("executePieceCallable", () => {
       "editContent",
       [],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => false,
         readTextInput: () => Promise.resolve("# Title\n\nLine 2"),
@@ -472,7 +715,7 @@ describe("executePieceCallable", () => {
       "editContent",
       [],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => false,
         readTextInput: () =>
@@ -491,7 +734,7 @@ describe("executePieceCallable", () => {
     ]);
   });
 
-  it("passes implicit piped JSON through for object handlers without CLI shape enforcement", async () => {
+  it("refuses implicit piped JSON that cannot satisfy an object handler", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "editContent",
@@ -509,33 +752,29 @@ describe("executePieceCallable", () => {
       },
     });
 
-    await executePieceCallable(
-      {
-        apiUrl: "http://localhost:8000",
-        identity: "/tmp/test-identity.pem",
-        piece: "fid1:piece-123",
-        space: "home",
-      },
-      "editContent",
-      [],
-      {
-        loadManager: () => Promise.resolve(harness.manager),
-        loadPiece: () => Promise.resolve(harness.piece),
-        isStdinTerminal: () => false,
-        readTextInput: () => Promise.resolve('["not-an-object"]'),
-      },
-    );
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "editContent",
+        [],
+        {
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+          isStdinTerminal: () => false,
+          readTextInput: () => Promise.resolve('["not-an-object"]'),
+        },
+      ),
+    ).rejects.toThrow(/Invalid input for "editContent"/);
 
-    expect(harness.tracker.handlerWrites).toEqual([
-      {
-        cellProp: "result",
-        path: ["editContent"],
-        value: ["not-an-object"],
-      },
-    ]);
+    expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
-  it("passes inline --json through for object handlers without CLI shape enforcement", async () => {
+  it("refuses inline --json that cannot satisfy an object handler", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "editContent",
@@ -553,28 +792,24 @@ describe("executePieceCallable", () => {
       },
     });
 
-    await executePieceCallable(
-      {
-        apiUrl: "http://localhost:8000",
-        identity: "/tmp/test-identity.pem",
-        piece: "fid1:piece-123",
-        space: "home",
-      },
-      "editContent",
-      ["--json", '["not-an-object"]'],
-      {
-        loadManager: () => Promise.resolve(harness.manager),
-        loadPiece: () => Promise.resolve(harness.piece),
-      },
-    );
+    await expect(
+      executePieceCallable(
+        {
+          apiUrl: "http://localhost:8000",
+          identity: "/tmp/test-identity.pem",
+          piece: "fid1:piece-123",
+          space: "home",
+        },
+        "editContent",
+        ["--json", '["not-an-object"]'],
+        {
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+        },
+      ),
+    ).rejects.toThrow(/Invalid input for "editContent"/);
 
-    expect(harness.tracker.handlerWrites).toEqual([
-      {
-        cellProp: "result",
-        path: ["editContent"],
-        value: ["not-an-object"],
-      },
-    ]);
+    expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
   it("renders piece-call help with the piece-call command prefix", async () => {
@@ -609,7 +844,7 @@ describe("executePieceCallable", () => {
       "search",
       ["--help"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
       },
     );
@@ -663,11 +898,153 @@ describe("executePieceCallable", () => {
         "recordMessage",
         ["--message", "milk"],
         {
-          loadManager: () => Promise.resolve(harness.manager),
+          loadPieces: () => Promise.resolve(harness.pieces),
           loadPiece: () => Promise.resolve(harness.piece),
         },
       ),
     ).rejects.toThrow(/Handler "recordMessage" failed: Bad message payload/);
+  });
+
+  it("threads the invocation id to send and settles with receipt readback, without awaiting graph quiescence", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptValue: { commentId: "c-1" },
+    });
+    const phases: string[] = [];
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-123",
+        onPhase: (phase) => phases.push(phase),
+      },
+    );
+
+    expect(harness.tracker.sendOptions).toEqual([{ eventId: "inv-123" }]);
+    expect(result.invocation).toEqual({
+      id: "inv-123",
+      status: "settled",
+      result: { commentId: "c-1" },
+    });
+    expect(phases).toEqual(["dispatched", "committed", "readback"]);
+    expect(harness.tracker.receiptLinkRequested?.id).toBe("of:receipt-1");
+    // Transaction-local acknowledgment: the settled result must come straight
+    // off this handling's commit — never from draining the whole graph.
+    expect(harness.tracker.idleCalls).toBe(0);
+    expect(harness.tracker.syncedCalls).toBe(0);
+  });
+
+  it("reclassifies a receipt-exists collision as the original settled outcome", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptExists: true,
+      receiptValue: { commentId: "c-original" },
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-dup",
+      },
+    );
+
+    expect(result.invocation).toEqual({
+      id: "inv-dup",
+      status: "settled",
+      deduplicated: true,
+      result: { commentId: "c-original" },
+    });
+  });
+
+  it("settles a value-less verb with no result key (existence-only receipt)", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: { type: "object", properties: {} },
+      receiptValue: {},
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "refresh",
+      [],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+        invocationId: "inv-empty",
+      },
+    );
+
+    expect(result.invocation).toEqual({ id: "inv-empty", status: "settled" });
+  });
+
+  it("sends without options and returns no invocation when no id is supplied", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: { type: "object", properties: {} },
+      receiptValue: { ignored: true },
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "refresh",
+      [],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+      },
+    );
+
+    expect(harness.tracker.sendOptions).toEqual([undefined]);
+    expect(result.invocation).toBeUndefined();
+    expect(harness.tracker.receiptLinkRequested).toBeUndefined();
   });
 });
 
@@ -683,6 +1060,21 @@ function createPieceCallableHarness(options: {
   toolResult?: unknown;
   handlerFailureMessage?: string;
   callableScope?: "space" | "user" | "session";
+  /** Value the handling's receipt cell reads back ({} = value-less verb). */
+  receiptValue?: unknown;
+  /** Simulate the create-only receipt collision: commit fails with
+   * precondition "receipt-exists" while the link addresses the winner's
+   * original receipt. */
+  receiptExists?: boolean;
+  /** Hold settlement open: `send` records the dispatch but never invokes the
+   * commit callback, so anything awaiting acknowledgement waits forever.
+   * This is how a test proves a path does NOT await the commit — the path
+   * completes anyway — or exercises a wait bound against a call that can
+   * never beat it. */
+  neverCommit?: boolean;
+  /** Replace the readback receipt cell wholesale — for --show-links tests,
+   * whose receipt must support key()/resolveAsCell link traversal. */
+  receiptCell?: Cell<any>;
 }) {
   const tracker = {
     handlerWrites: [] as Array<{
@@ -690,6 +1082,10 @@ function createPieceCallableHarness(options: {
       path: (string | number)[] | undefined;
       value: unknown;
     }>,
+    sendOptions: [] as Array<{ eventId?: string } | undefined>,
+    receiptLinkRequested: undefined as { id?: string } | undefined,
+    idleCalls: 0,
+    syncedCalls: 0,
     toolRunPattern: undefined as unknown,
     toolRunInput: undefined as unknown,
     toolResultScope: undefined as string | undefined,
@@ -727,17 +1123,23 @@ function createPieceCallableHarness(options: {
           send: (
             value: unknown,
             onCommit?: (
-              tx: { status: () => { status: string; error?: Error } },
+              tx: {
+                status: () => { status: string; error?: Error };
+                handlingReceiptLink?: NormalizedFullLink;
+              },
             ) => void,
+            sendOptions?: { eventId?: string },
           ) => {
             tracker.handlerWrites.push({
               cellProp: "result",
               path: [options.cellKey],
               value,
             });
+            tracker.sendOptions.push(sendOptions);
             if (options.handlerFailureMessage) {
               runtimeErrors.push({ message: options.handlerFailureMessage });
             }
+            if (options.neverCommit) return;
             onCommit?.({
               status: () =>
                 options.handlerFailureMessage
@@ -745,7 +1147,19 @@ function createPieceCallableHarness(options: {
                     status: "error",
                     error: new Error(options.handlerFailureMessage),
                   }
+                  : options.receiptExists
+                  ? {
+                    status: "error",
+                    error: Object.assign(
+                      new Error("Result receipt already exists"),
+                      { precondition: "receipt-exists" },
+                    ),
+                  }
                   : { status: "done" },
+              handlingReceiptLink: mockLink({
+                id: "of:receipt-1",
+                space: "did:key:test-home",
+              }),
             });
           },
         }
@@ -772,6 +1186,11 @@ function createPieceCallableHarness(options: {
     pull: () => Promise.resolve(state.value),
     key: (_key: string) => resultCell,
     asSchemaFromLinks: () => resultCell,
+    getAsNormalizedFullLink: () => ({
+      id: "of:tool-result-cell",
+      space: "did:key:test-home",
+      scope: options.callableScope ?? "space",
+    }),
   };
 
   const piece = {
@@ -799,17 +1218,32 @@ function createPieceCallableHarness(options: {
     },
   };
 
-  const manager = {
+  const defaultReceiptCell = {
+    get: () => options.receiptValue,
+    pull: () => Promise.resolve(options.receiptValue),
+    key: (_key: string) => defaultReceiptCell,
+  };
+
+  const pieces = {
     getSpace: () => "home",
-    synced: async () => {},
+    synced: () => {
+      tracker.syncedCalls++;
+      return Promise.resolve();
+    },
     runtime: {
       [CF_RUNTIME_ERROR_LOG]: runtimeErrors,
+      getCellFromLink: (link: { id?: string }) => {
+        tracker.receiptLinkRequested = link;
+        return options.receiptCell ?? defaultReceiptCell;
+      },
       storageManager: {
         synced: async () => {},
       },
       edit: () => ({
         commit: async () => {},
       }),
+      prepareTxForCommit: () => {},
+      settled: () => Promise.resolve(),
       getCell: (
         _space: string,
         _id: string,
@@ -833,11 +1267,14 @@ function createPieceCallableHarness(options: {
           sink: () => () => {},
         };
       },
-      idle: async () => {},
+      idle: () => {
+        tracker.idleCalls++;
+        return Promise.resolve();
+      },
     },
   };
 
-  return { manager, piece, tracker };
+  return { pieces, piece, tracker };
 }
 
 function createMockCell(
@@ -899,6 +1336,164 @@ function getChildSchema(
   return properties[key] as JSONSchema | undefined;
 }
 
+describe("forced-stream fallback dispatch", () => {
+  /** A verb that defeats ordinary detection — plain object value, no `$stream`
+   * marker, no stream schema — but that the forced stream cast proves is a
+   * handler. This is the only case `tryResolvePieceHandler` exists for, and
+   * the one where the cell that passed detection and the cell built by reading
+   * the schema back from links are not interchangeable. */
+  function createFallbackHarness() {
+    const sends: unknown[] = [];
+    const dataWrites: unknown[] = [];
+
+    // The cell the forced cast proves. Only this one dispatches.
+    const streamCell = {
+      isStream: () => true,
+      send: (value: unknown, onCommit?: (tx: unknown) => void) => {
+        sends.push(value);
+        onCommit?.({ status: () => ({ status: "done" }) });
+      },
+    };
+
+    // What `rootCell.key(name).asSchemaFromLinks()` yields: carries the
+    // published payload schema, but nothing marking it a stream. A real cell
+    // here has a `send` that routes to `.set()`'s non-stream branch and
+    // throws "Transaction required for .set()".
+    // `key()` must yield nothing for "pattern"/"extraParams", or
+    // detectCallableKind's tool probe classifies this as a tool and the
+    // fallback path under test is never reached.
+    const emptyChild = {
+      get: () => undefined,
+      getRaw: () => undefined,
+    };
+    const linkDerivedCell = {
+      schema: {
+        type: "object",
+        properties: { note: { type: "string" } },
+      } as JSONSchema,
+      get: () => ({}),
+      getRaw: () => ({}),
+      asSchemaFromLinks: () => linkDerivedCell,
+      key: () => emptyChild,
+    };
+
+    const rootValue = { hiddenPing: {} };
+    const rootCell = {
+      schema: {
+        type: "object",
+        properties: { hiddenPing: { type: "object" } },
+      } as JSONSchema,
+      get: () => rootValue,
+      getRaw: () => rootValue,
+      asSchemaFromLinks: () => rootCell,
+      key: (name: string) => name === "hiddenPing" ? linkDerivedCell : absent,
+    };
+    // The input root offers nothing, so resolution falls past both ordinary
+    // paths to the forced cast.
+    const absent: {
+      schema?: JSONSchema;
+      get: () => unknown;
+      getRaw: () => unknown;
+      asSchemaFromLinks: () => unknown;
+      key: () => unknown;
+    } = {
+      get: () => undefined,
+      getRaw: () => undefined,
+      asSchemaFromLinks: () => absent,
+      key: () => emptyChild,
+    };
+    const emptyCell = {
+      schema: { type: "object" } as JSONSchema,
+      get: () => ({}),
+      getRaw: () => ({}),
+      asSchemaFromLinks: () => emptyCell,
+      key: () => absent,
+    };
+
+    const piece = {
+      getCell: () => ({
+        get: () => rootValue,
+        asSchema: () => ({ key: () => streamCell }),
+      }),
+      input: {
+        getCell: () => Promise.resolve(emptyCell),
+        set: (value: unknown) => {
+          dataWrites.push(value);
+          return Promise.resolve();
+        },
+      },
+      result: {
+        getCell: () => Promise.resolve(rootCell),
+        set: (value: unknown) => {
+          dataWrites.push(value);
+          return Promise.resolve();
+        },
+      },
+    };
+
+    const pieces = {
+      getSpace: () => "home",
+      synced: async () => {},
+      runtime: {
+        [CF_RUNTIME_ERROR_LOG]: [] as Array<{ message: string }>,
+        idle: async () => {},
+      },
+    };
+
+    return { sends, dataWrites, piece, pieces, linkDerivedCell, streamCell };
+  }
+
+  const config = {
+    apiUrl: "http://localhost:8000",
+    identity: "/tmp/test-identity.pem",
+    piece: "fid1:piece-123",
+    space: "home",
+  };
+
+  it("sends through the cell whose stream-ness was proven, not a link-derived one", async () => {
+    const harness = createFallbackHarness();
+
+    const result = await executePieceCallable(
+      config,
+      "hiddenPing",
+      ["--note", "hi"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces as never),
+        loadPiece: () => Promise.resolve(harness.piece as never),
+        isStdinTerminal: () => true,
+      },
+    );
+
+    expect(result.resolved.callableKind).toBe("handler");
+    // Dispatched as an event through the proven cell. Resolving to the
+    // link-derived cell instead leaves a cell that `.set()` treats as data.
+    expect(result.resolved.callableCell).toBe(harness.streamCell);
+    expect(harness.sends).toEqual([{ note: "hi" }]);
+    expect(harness.dataWrites).toEqual([]);
+  });
+
+  it("keeps the published payload schema for the command spec", async () => {
+    const harness = createFallbackHarness();
+
+    const result = await executePieceCallable(
+      config,
+      "hiddenPing",
+      ["--note", "hi"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces as never),
+        loadPiece: () => Promise.resolve(harness.piece as never),
+        isStdinTerminal: () => true,
+      },
+    );
+
+    // The forced cast's own schema is just the stream marker; `--help` and
+    // input validation must still see what the piece publishes.
+    expect(result.resolved.commandSpec.inputSchema).toEqual(
+      harness.linkDerivedCell.schema,
+    );
+  });
+});
+
 describe("piece call stdin payloads", () => {
   it("identifies JSON output without treating delimited fields as selectors", () => {
     expect(
@@ -927,6 +1522,344 @@ describe("piece call stdin payloads", () => {
       rawArgs: ["invoke", "--query", "--json"],
       jsonOutput: false,
     });
+  });
+
+  it("mints an invocation id when none is given and rejects a blank one", () => {
+    expect(resolveInvocationId(undefined, () => "minted-1")).toBe("minted-1");
+    expect(resolveInvocationId("caller-supplied")).toBe("caller-supplied");
+    // A blank id would claim caller-supplied idempotency while carrying
+    // nothing that distinguishes deliveries — the retry it promises would
+    // not be safe.
+    expect(() => resolveInvocationId("")).toThrow(/non-blank id/);
+    expect(() => resolveInvocationId("   ")).toThrow(/non-blank id/);
+  });
+
+  it("announces the invocation id once, at dispatch", () => {
+    const announced: string[] = [];
+    const seen: string[] = [];
+    const report = invocationPhaseReporter(
+      "inv-9",
+      (p) => seen.push(p),
+      (m) => announced.push(m),
+    );
+    // Nothing is announced before dispatch: until the event is on its way
+    // there is nothing a retry would deduplicate against.
+    report("initial_sync");
+    expect(announced).toEqual([]);
+    report("dispatched");
+    expect(announced).toEqual(["invocation: inv-9"]);
+    // Later phases, and a second dispatch, must not re-announce — a caller
+    // scraping stderr should not have to pick among several ids.
+    report("committed");
+    report("dispatched");
+    report("readback");
+    expect(announced).toEqual(["invocation: inv-9"]);
+    expect(seen).toEqual([
+      "initial_sync",
+      "dispatched",
+      "committed",
+      "dispatched",
+      "readback",
+    ]);
+  });
+
+  it("streams one wall-clock span per observed phase to stderr under --verbose", () => {
+    const lines: string[] = [];
+    const seen: string[] = [];
+    let t = 1000;
+    const observer = pieceCallPhaseObserver(
+      true,
+      (phase) => seen.push(phase),
+      (line) => lines.push(line),
+      () => t,
+    );
+    t = 1012.5;
+    observer.onPhase("dispatched");
+    t = 1093.5;
+    observer.onPhase("committed");
+    t = 1094.5;
+    observer.onPhase("readback");
+    t = 1100;
+    observer.finish();
+    // A second finish must not double-close the settled span.
+    observer.finish();
+    expect(lines).toEqual([
+      "timing: initial_sync → dispatched 12.5ms",
+      "timing: dispatched → committed 81.0ms",
+      "timing: committed → readback 1.0ms",
+      "timing: readback → settled 5.5ms",
+    ]);
+    // The furthest-phase tracker still advances for the failure report.
+    expect(seen).toEqual(["dispatched", "committed", "readback"]);
+  });
+
+  it("closes the in-flight span with the failure that ended it", () => {
+    const lines: string[] = [];
+    let t = 2000;
+    const observer = pieceCallPhaseObserver(
+      true,
+      () => {},
+      (line) => lines.push(line),
+      () => t,
+    );
+    t = 2010;
+    observer.onPhase("dispatched");
+    t = 2500;
+    observer.finish("failed");
+    // Lines stream per transition, so the spans observed before the failure
+    // are already out; the failure only closes the one in flight.
+    expect(lines).toEqual([
+      "timing: initial_sync → dispatched 10.0ms",
+      "timing: dispatched → failed 490.0ms",
+    ]);
+  });
+
+  it("emits no timing lines without --verbose while phases still advance", () => {
+    const lines: string[] = [];
+    const seen: string[] = [];
+    const observer = pieceCallPhaseObserver(
+      false,
+      (phase) => seen.push(phase),
+      (line) => lines.push(line),
+    );
+    observer.onPhase("dispatched");
+    observer.onPhase("committed");
+    observer.finish();
+    expect(lines).toEqual([]);
+    expect(seen).toEqual(["dispatched", "committed"]);
+  });
+
+  it("defaults to console.error — stdout stays exactly the command output", () => {
+    const stderrLines: string[] = [];
+    const stdoutLines: string[] = [];
+    const originalError = console.error;
+    const originalLog = console.log;
+    console.error = (...args: unknown[]) => {
+      stderrLines.push(args.join(" "));
+    };
+    console.log = (...args: unknown[]) => {
+      stdoutLines.push(args.join(" "));
+    };
+    try {
+      const observer = pieceCallPhaseObserver(true, () => {});
+      observer.onPhase("dispatched");
+      observer.finish();
+    } finally {
+      console.error = originalError;
+      console.log = originalLog;
+    }
+    expect(stderrLines).toHaveLength(2);
+    expect(stderrLines[0]).toMatch(/^timing: initial_sync → dispatched \d/);
+    expect(stderrLines[1]).toMatch(/^timing: dispatched → settled \d/);
+    expect(stdoutLines).toEqual([]);
+  });
+
+  it("closes the verbose span on the failure exit and reports the retry key", () => {
+    const lines: string[] = [];
+    const printed: string[] = [];
+    const exited: number[] = [];
+    let t = 3000;
+    const observer = pieceCallPhaseObserver(
+      true,
+      () => {},
+      (line) => lines.push(line),
+      () => t,
+    );
+    t = 3020;
+    observer.onPhase("dispatched");
+    t = 3050;
+    expect(() =>
+      exitPieceCallFailure(
+        observer,
+        new Error("send blew up"),
+        "inv-7",
+        "dispatched",
+        {
+          printError: (message) => printed.push(message),
+          exit: (code): never => {
+            exited.push(code);
+            throw new Error("exit-sentinel");
+          },
+        },
+      )
+    ).toThrow("exit-sentinel");
+    expect(lines).toEqual([
+      "timing: initial_sync → dispatched 20.0ms",
+      "timing: dispatched → failed 30.0ms",
+    ]);
+    expect(printed).toEqual([
+      "send blew up",
+      "invocation: inv-7 phase: dispatched",
+    ]);
+    expect(exited).toEqual([1]);
+  });
+
+  it("closes the verbose span before rethrowing a usage error", () => {
+    // A Cliffy ValidationError renders the usage screen upstream — but the
+    // in-flight span must still close as failed first, so malformed
+    // input/options leave a complete timing stream.
+    const lines: string[] = [];
+    const printed: string[] = [];
+    const observer = pieceCallPhaseObserver(
+      true,
+      () => {},
+      (line) => lines.push(line),
+      () => 0,
+    );
+    expect(() =>
+      exitPieceCallFailure(
+        observer,
+        new ValidationError("bad flags"),
+        "inv-8",
+        "initial_sync",
+        {
+          printError: (message) => printed.push(message),
+          exit: (): never => {
+            throw new Error("exit-sentinel");
+          },
+        },
+      )
+    ).toThrow(ValidationError);
+    expect(lines).toEqual(["timing: initial_sync → failed 0.0ms"]);
+    // The usage error reports through Cliffy, not the failure printer.
+    expect(printed).toEqual([]);
+  });
+
+  it("closes the verbose span on the pre-dispatch payload-rejection exit", () => {
+    // reportVerbInputErrorOrRethrow terminates the process from inside the
+    // promise chain, bypassing the action's catch — without the observer
+    // threading, --verbose would leave the initial_sync span dangling.
+    const lines: string[] = [];
+    const printed: string[] = [];
+    const exited: number[] = [];
+    let t = 4000;
+    const observer = pieceCallPhaseObserver(
+      true,
+      () => {},
+      (line) => lines.push(line),
+      () => t,
+    );
+    t = 4012;
+    expect(() =>
+      reportVerbInputErrorOrRethrow(
+        new VerbInputValidationError("addTopic", "missing required title"),
+        "fid1:piece-123",
+        {
+          printError: (message) => printed.push(message),
+          printHint: () => {},
+          exit: (code): never => {
+            exited.push(code);
+            throw new Error("exit-sentinel");
+          },
+        },
+        observer,
+      )
+    ).toThrow("exit-sentinel");
+    expect(lines).toEqual(["timing: initial_sync → failed 12.0ms"]);
+    expect(printed).toHaveLength(1);
+    expect(printed[0]).toMatch(/Invalid input for "addTopic"/);
+    expect(exited).toEqual([1]);
+
+    // A rethrown (non-payload) error leaves the span open: the action's own
+    // failure exit closes it later, so nothing may be emitted here.
+    const rethrowLines: string[] = [];
+    const rethrowObserver = pieceCallPhaseObserver(
+      true,
+      () => {},
+      (line) => rethrowLines.push(line),
+      () => 0,
+    );
+    expect(() =>
+      reportVerbInputErrorOrRethrow(
+        new Error("network unreachable"),
+        "fid1:piece-123",
+        undefined,
+        rethrowObserver,
+      )
+    ).toThrow("network unreachable");
+    expect(rethrowLines).toEqual([]);
+  });
+
+  it("announces per-phase lines only under the test hook", () => {
+    // Disabled (the default): no phase lines — normal output stays exactly
+    // the single dispatch announcement.
+    const silent: string[] = [];
+    const off = invocationPhaseReporter(
+      "inv-10",
+      () => {},
+      (m) => silent.push(m),
+    );
+    off("initial_sync");
+    off("dispatched");
+    off("committed");
+    expect(silent).toEqual(["invocation: inv-10"]);
+
+    // Enabled: every advance also carries `invocation: <id> phase: <phase>`,
+    // the shape failure exits already print. The `committed` line is the one
+    // the dropped-response fixture blocks on before killing its call — it
+    // must appear at committed, and not before.
+    const announced: string[] = [];
+    const seen: string[] = [];
+    const on = invocationPhaseReporter(
+      "inv-11",
+      (p) => seen.push(p),
+      (m) => announced.push(m),
+      true,
+    );
+    on("initial_sync");
+    expect(announced).toEqual(["invocation: inv-11 phase: initial_sync"]);
+    on("dispatched");
+    on("committed");
+    on("readback");
+    expect(announced).toEqual([
+      "invocation: inv-11 phase: initial_sync",
+      "invocation: inv-11",
+      "invocation: inv-11 phase: dispatched",
+      "invocation: inv-11 phase: committed",
+      "invocation: inv-11 phase: readback",
+    ]);
+    expect(seen).toEqual([
+      "initial_sync",
+      "dispatched",
+      "committed",
+      "readback",
+    ]);
+  });
+
+  it("shapes the settled Invocation JSON an agent parses", () => {
+    expect(invocationJson({ id: "inv-1", status: "settled" })).toEqual({
+      invocation: "inv-1",
+      status: "settled",
+    });
+    expect(
+      invocationJson({ id: "inv-1", status: "settled", deduplicated: true }),
+    ).toEqual({
+      invocation: "inv-1",
+      status: "settled",
+      deduplicated: true,
+    });
+    expect(
+      invocationJson({
+        id: "inv-1",
+        status: "settled",
+        result: { commentId: "c-1" },
+      }),
+    ).toEqual({
+      invocation: "inv-1",
+      status: "settled",
+      result: { commentId: "c-1" },
+    });
+    // deduplicated: false is never emitted — its absence is the signal.
+    expect(
+      invocationJson({ id: "inv-1", status: "settled", deduplicated: false }),
+    ).not.toHaveProperty("deduplicated");
+    // A verb that genuinely returned null keeps it; a value-less verb omits
+    // the key entirely, so the two stay distinguishable on the wire.
+    expect(invocationJson({ id: "inv-1", status: "settled", result: null }))
+      .toEqual({ invocation: "inv-1", status: "settled", result: null });
+    expect(
+      invocationJson({ id: "inv-1", status: "settled", result: undefined }),
+    ).not.toHaveProperty("result");
   });
 
   it('maps a bare "-" payload onto the --json-file stdin path', () => {
@@ -992,7 +1925,7 @@ describe("piece call stdin payloads", () => {
       "recordMessage",
       ["--json-file", "-"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => false,
         readTextInput: () => Promise.resolve('{"message":"from stdin"}'),
@@ -1031,7 +1964,7 @@ describe("piece call stdin payloads", () => {
       "recordMessage",
       ["--json", "-"],
       {
-        loadManager: () => Promise.resolve(harness.manager),
+        loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => false,
         readTextInput: () => Promise.resolve('{"message":"json stdin"}'),
@@ -1071,13 +2004,973 @@ describe("piece call stdin payloads", () => {
         "recordMessage",
         ["--json-file", "-"],
         {
-          loadManager: () => Promise.resolve(harness.manager),
+          loadPieces: () => Promise.resolve(harness.pieces),
           loadPiece: () => Promise.resolve(harness.piece),
           isStdinTerminal: () => false,
           readTextInput: () => Promise.resolve(""),
         },
       ),
     ).rejects.toThrow(/Expected JSON from stdin/);
+  });
+});
+
+describe("piece call wait control", () => {
+  const config = {
+    apiUrl: "http://localhost:8000",
+    identity: "/tmp/test-identity.pem",
+    piece: "fid1:piece-123",
+    space: "home",
+  };
+
+  it("waits for settlement by default, with --await as its explicit spelling", () => {
+    expect(resolveWaitControl({})).toEqual({ mode: "settle" });
+    expect(resolveWaitControl({ await: true })).toEqual({ mode: "settle" });
+  });
+
+  it("maps --no-wait to a commit-acknowledged, readback-skipped exit", () => {
+    expect(resolveWaitControl({ wait: false })).toEqual({ mode: "commit" });
+  });
+
+  it("refuses the --await --no-wait contradiction", () => {
+    expect(() => resolveWaitControl({ await: true, wait: false })).toThrow(
+      /--await and --no-wait contradict/,
+    );
+  });
+
+  it("carries the --wait bound in seconds, compatible with --await", () => {
+    // --await is the explicit spelling of "wait", and --wait names the
+    // patience of that same wait, so the two compose rather than conflict.
+    expect(resolveWaitControl({ wait: 5 })).toEqual({
+      mode: "settle",
+      boundSeconds: 5,
+    });
+    expect(resolveWaitControl({ await: true, wait: 2.5 })).toEqual({
+      mode: "settle",
+      boundSeconds: 2.5,
+    });
+  });
+
+  it('refuses a bound that spells "don\'t wait"', () => {
+    expect(() => resolveWaitControl({ wait: 0 })).toThrow(/positive/);
+    expect(() => resolveWaitControl({ wait: -1 })).toThrow(/positive/);
+    expect(() => resolveWaitControl({ wait: Number.NaN })).toThrow(/positive/);
+  });
+
+  it("returns the settlement untouched when no bound is chosen", () => {
+    const settlement = Promise.resolve("done");
+    // The same promise, not a wrapper: the default path must not gain a
+    // deadline, a race, or any timer at all.
+    expect(boundedSettlement(settlement, undefined)).toBe(settlement);
+  });
+
+  it("resolves a settlement that beats the bound and disarms the deadline", async () => {
+    // The op sanitizer proves the second half: a deadline timer left armed
+    // after settlement would leak past the end of this test and fail it.
+    await expect(boundedSettlement(Promise.resolve("done"), 60)).resolves.toBe(
+      "done",
+    );
+  });
+
+  it("propagates a settlement failure unchanged", async () => {
+    await expect(
+      boundedSettlement(Promise.reject(new Error("boom")), 60),
+    ).rejects.toThrow("boom");
+  });
+
+  it("expires with WaitBoundExpired when the call outlives the caller's patience", async () => {
+    // A promise that never settles holds the wait open by construction, so
+    // the deadline firing is the only way this test can complete — nothing
+    // races, and no timing alignment is being relied on. The real (tiny)
+    // timer is deliberate: the deadline mechanism itself is what is under
+    // test here.
+    const never = new Promise<never>(() => {});
+    const error = await boundedSettlement(never, 0.01).catch((e) => e);
+    expect(error).toBeInstanceOf(WaitBoundExpired);
+    // The wording is pinned: the handler runs in THIS process, so an expiry
+    // must not claim the invocation "continues settling" — it may never have
+    // executed or committed, and the same-id re-invoke is the recovery.
+    expect((error as WaitBoundExpired).message).toMatch(
+      /--wait bound of 0\.01s expired: the invocation may not have executed or committed — re-invoke with the same invocation id/,
+    );
+    expect((error as WaitBoundExpired).seconds).toBe(0.01);
+  });
+
+  it("skips only the readback under --no-wait: commit acknowledged, receipt never read", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptValue: { commentId: "c-1" },
+    });
+    const phases: string[] = [];
+
+    const result = await executePieceCallable(
+      config,
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-no-readback",
+        skipReadback: true,
+        onPhase: (phase) => phases.push(phase),
+      },
+    );
+
+    // Status is "committed", not "settled": the JSON must not claim a
+    // settlement nobody observed. And not "dispatched" either — the handler
+    // ran HERE and its commit was acknowledged before this returned.
+    expect(result.invocation).toEqual({
+      id: "inv-no-readback",
+      status: "committed",
+    });
+    expect(phases).toEqual(["dispatched", "committed"]);
+    expect(harness.tracker.sendOptions).toEqual([
+      { eventId: "inv-no-readback" },
+    ]);
+    // The receipt was never opened — the readback (sync + read) is the whole
+    // saving — and no quiescence drain crept in either.
+    expect(harness.tracker.receiptLinkRequested).toBeUndefined();
+    expect(harness.tracker.idleCalls).toBe(0);
+    expect(harness.tracker.syncedCalls).toBe(0);
+  });
+
+  it("still awaits the commit acknowledgement under --no-wait", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      // The commit callback never fires. --no-wait must NOT return: exiting
+      // before the acknowledgement would abandon the invocation un-executed
+      // (the handler runs in this process), not leave it settling elsewhere.
+      neverCommit: true,
+    });
+    const phases: string[] = [];
+
+    const error = await boundedSettlement(
+      executePieceCallable(config, "addComment", ["--message", "milk"], {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-held-commit",
+        skipReadback: true,
+        onPhase: (phase) => phases.push(phase),
+      }),
+      0.01,
+    ).catch((e) => e);
+
+    // Only the deadline got us out — the skip-readback path was still
+    // parked on the commit acknowledgement, exactly where it must wait.
+    expect(error).toBeInstanceOf(WaitBoundExpired);
+    expect(phases).toEqual(["dispatched"]);
+    expect(harness.tracker.receiptLinkRequested).toBeUndefined();
+  });
+
+  it("reports a deduplicated collision without reading the receipt back", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptExists: true,
+      receiptValue: { commentId: "c-original" },
+    });
+
+    const result = await executePieceCallable(
+      config,
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-dup-no-readback",
+        skipReadback: true,
+      },
+    );
+
+    // The collision is still a success — the ORIGINAL commit stands and is
+    // durable — but the original outcome is not fetched; a later same-id
+    // call reads it back.
+    expect(result.invocation).toEqual({
+      id: "inv-dup-no-readback",
+      status: "committed",
+      deduplicated: true,
+    });
+    expect(harness.tracker.receiptLinkRequested).toBeUndefined();
+  });
+
+  it("surfaces a commit failure under --no-wait as a normal failure", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      handlerFailureMessage: "Bad message payload",
+    });
+
+    // Skipping the readback must not skip the verdict: a commit that fails
+    // is reported exactly as it would be on the default path.
+    await expect(
+      executePieceCallable(config, "recordMessage", ["--message", "milk"], {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-failed-commit",
+        skipReadback: true,
+      }),
+    ).rejects.toThrow(/Handler "recordMessage" failed: Bad message payload/);
+  });
+
+  it("requires an invocation id to skip the readback", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: { type: "object", properties: {} },
+    });
+
+    await expect(
+      executePieceCallable(config, "refresh", [], {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+        skipReadback: true,
+      }),
+    ).rejects.toThrow(/requires an invocation id/);
+
+    // Refused BEFORE dispatch: skipping the readback is only sound when a
+    // later same-id call can fetch the outcome, and that needs the id.
+    expect(harness.tracker.handlerWrites).toEqual([]);
+  });
+
+  it("keeps the pre-dispatch gate ahead of a readback-skipping dispatch", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "recordMessage",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+    });
+
+    await expect(
+      executePieceCallable(
+        config,
+        "recordMessage",
+        ["--json", '{"mesage":"milk"}'],
+        {
+          loadPieces: () => Promise.resolve(harness.pieces),
+          loadPiece: () => Promise.resolve(harness.piece),
+          invocationId: "inv-no-wait-typo",
+          skipReadback: true,
+        },
+      ),
+    ).rejects.toThrow(/Invalid input for "recordMessage"/);
+
+    // A --no-wait caller never sees the settled outcome, so the gate
+    // refusing a bad payload locally — id unspent — matters even more than
+    // usual.
+    expect(harness.tracker.handlerWrites).toEqual([]);
+    expect(harness.tracker.sendOptions).toEqual([]);
+  });
+
+  it("refuses --no-wait for a tool run", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "tool",
+      cellKey: "search",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        },
+        resultSchema: { type: "object" },
+      },
+      toolResult: { ok: true },
+    });
+
+    await expect(
+      executePieceCallable(config, "search", ["--query", "tea"], {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-tool-no-wait",
+        skipReadback: true,
+      }),
+    ).rejects.toThrow(/--no-wait is not available for tool "search"/);
+
+    // The run was never started: an abandoned half-run would be worse than
+    // the refusal.
+    expect(harness.tracker.toolRunPattern).toBeUndefined();
+  });
+
+  it("carries the furthest phase as status for an unsettled invocation", () => {
+    expect(invocationJson({ id: "inv-1", status: "dispatched" })).toEqual({
+      invocation: "inv-1",
+      status: "dispatched",
+    });
+    expect(invocationJson({ id: "inv-1", status: "committed" })).toEqual({
+      invocation: "inv-1",
+      status: "committed",
+    });
+  });
+
+  it("closes the in-flight span as detached under --no-wait --verbose", () => {
+    const lines: string[] = [];
+    let t = 3000;
+    const observer = pieceCallPhaseObserver(
+      true,
+      () => {},
+      (line) => lines.push(line),
+      () => t,
+    );
+    t = 3020;
+    observer.onPhase("dispatched");
+    t = 3050;
+    observer.onPhase("committed");
+    t = 3051;
+    observer.finish("detached");
+    // "settled" would be a lie here — the readback was skipped, so nobody
+    // observed a settlement. The span sequence also documents where
+    // --no-wait stops: after the commit acknowledgement, never before it.
+    expect(lines).toEqual([
+      "timing: initial_sync → dispatched 20.0ms",
+      "timing: dispatched → committed 30.0ms",
+      "timing: committed → detached 1.0ms",
+    ]);
+  });
+});
+
+/** The address of a backing document in the linked-receipt mock below. */
+interface MockLinkedDoc {
+  id: string;
+  space: string;
+  scope?: "space" | "user" | "session";
+  /** Where inside the backing doc the link points (a link below its root). */
+  path?: (string | number)[];
+}
+
+/** One node of a mock receipt tree: `doc` marks the value at this path as a
+ * reference into another document (on the ROOT node, a stored result that is
+ * itself a reference); children without one live in the enclosing doc. */
+interface MockLinkedNode {
+  doc?: MockLinkedDoc;
+  children?: Record<string, MockLinkedNode>;
+}
+
+/** The full normalized link a real cell reports for a mock document: the
+ * space scope and a root path are what a runner-minted link carries when the
+ * fixture leaves them out. */
+function mockLink(
+  doc: MockLinkedDoc,
+  path: (string | number)[] = doc.path ?? [],
+): NormalizedFullLink {
+  return {
+    id: doc.id,
+    space: doc.space,
+    scope: doc.scope ?? "space",
+    path,
+  } as unknown as NormalizedFullLink;
+}
+
+/** A partial cell double, cast at the seam where the invocation engine takes
+ * it. Every member the engine reaches for is present; the rest of `Cell` is
+ * not. */
+function mockCell(members: Record<string, unknown>): Cell<any> {
+  return members as unknown as Cell<any>;
+}
+
+/**
+ * A receipt cell whose key()/resolveAsCell traversal mirrors the runner's:
+ * `key(segment)` reports the ENCLOSING doc's address extended by the segment
+ * (the cell's own link), and only `resolveAsCell()` reveals the backing
+ * document a stored reference points at — including at the root, where the
+ * receipt cell reports the receipt's address and resolving reveals whether
+ * the stored result is itself a reference. A collector that skipped the
+ * resolve step would read every path as receipt-internal and emit no links.
+ *
+ * Unresolved wrappers refuse traversal outright (`key()` hands back a
+ * barren cell), pinning that the collector reads descendants from RESOLVED
+ * cells only — a same-document link can redirect elsewhere, and children
+ * live under its target. The barren cell reports the receipt's own address,
+ * so descending through one by mistake shows up as a missing entry rather
+ * than a foreign document.
+ */
+function linkedReceiptCell(
+  receiptDoc: MockLinkedDoc,
+  value: unknown,
+  root: MockLinkedNode = {},
+): Cell<any> {
+  const barren: Cell<any> = mockCell({
+    get: () => undefined,
+    resolveAsCell: () => barren,
+    getAsNormalizedFullLink: () => mockLink(receiptDoc),
+    key: () => barren,
+  });
+  const build = (
+    node: MockLinkedNode,
+    doc: MockLinkedDoc,
+    pathInDoc: (string | number)[],
+  ): Cell<any> => {
+    const cell: Cell<any> = mockCell({
+      get: () => value,
+      pull: () => Promise.resolve(value),
+      resolveAsCell: () => cell,
+      getAsNormalizedFullLink: () => mockLink(doc, pathInDoc),
+      key: (segment: string) => {
+        const childNode = node.children?.[segment] ?? {};
+        const resolved = childNode.doc
+          ? build(childNode, childNode.doc, childNode.doc.path ?? [])
+          : build(childNode, doc, [...pathInDoc, segment]);
+        return mockCell({
+          get: () => undefined,
+          key: () => barren,
+          resolveAsCell: () => resolved,
+          getAsNormalizedFullLink: () => mockLink(doc, [...pathInDoc, segment]),
+        });
+      },
+    });
+    return cell;
+  };
+  const resolvedRoot = root.doc
+    ? build(root, root.doc, root.doc.path ?? [])
+    : build(root, receiptDoc, receiptDoc.path ?? []);
+  return mockCell({
+    get: () => value,
+    pull: () => Promise.resolve(value),
+    key: () => barren,
+    resolveAsCell: () => resolvedRoot,
+    getAsNormalizedFullLink: () => mockLink(receiptDoc),
+  });
+}
+
+/**
+ * A fully addressable receipt cell that logs every `key()` segment the
+ * walk requests into `requested` (as `/`-joined paths) — the observable
+ * seam for "the walk never addresses inside a live object". Descent is cut
+ * off after a small budget, so an errant walk fails a path assertion
+ * deterministically instead of racing the stack limit, whose overflow the
+ * walk's own addressability catch can swallow.
+ */
+function recordingReceiptCell(
+  doc: MockLinkedDoc,
+  requested: string[],
+  path: string[] = [],
+): Cell<any> {
+  const cell: Cell<any> = mockCell({
+    get: () => undefined,
+    resolveAsCell: () => cell,
+    getAsNormalizedFullLink: () => mockLink(doc, path),
+    key: (segment: string) => {
+      if (requested.length >= 32) {
+        throw new Error("fake cell budget exhausted");
+      }
+      const next = [...path, segment];
+      requested.push(next.join("/"));
+      return recordingReceiptCell(doc, requested, next);
+    },
+  });
+  return cell;
+}
+
+describe("collectInvocationResultLinks", () => {
+  const receiptDoc = { id: "of:receipt-1", space: "did:key:test-home" };
+  const receiptLink = mockLink(receiptDoc);
+  const receiptRef = {
+    space: "did:key:test-home",
+    id: "of:receipt-1",
+    scope: "space",
+  };
+
+  it("yields just the receipt for a plain-JSON-only result", () => {
+    const value = { total: 3, tags: ["a", "b"], nested: { deep: true } };
+    const cell = linkedReceiptCell(receiptDoc, value);
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": receiptRef,
+    });
+  });
+
+  it("skips a child key() refuses to address, keeping its siblings' links", () => {
+    // The walk's catch-and-continue: a value entry the receipt cell cannot
+    // address as a child (key() throws) contributes no link and must not
+    // abort the walk — its addressable siblings still annotate.
+    const value = { weird: { x: 1 }, comment: { body: "hi" } };
+    const inner = linkedReceiptCell(receiptDoc, value, {
+      children: {
+        comment: { doc: { id: "of:comment-1", space: "did:key:test-home" } },
+      },
+    });
+    // Wrap the RESOLVED root: the outer wrapper is deliberately unresolved
+    // (its own key() refuses traversal), so the throwing key must shadow the
+    // cell the walk actually descends through.
+    const innerRoot = inner.resolveAsCell();
+    const cell: Cell<any> = mockCell({
+      ...innerRoot,
+      resolveAsCell: () => cell,
+      key: (segment: string) => {
+        if (segment === "weird") throw new Error("not addressable");
+        return innerRoot.key(segment);
+      },
+    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": receiptRef,
+      "/comment": {
+        space: "did:key:test-home",
+        id: "of:comment-1",
+        scope: "space",
+      },
+    });
+  });
+
+  it("annotates each hop to a different backing document, rebasing below it", () => {
+    const value = {
+      comment: { body: "hi", author: { name: "b" } },
+      count: 1,
+    };
+    const cell = linkedReceiptCell(receiptDoc, value, {
+      children: {
+        comment: {
+          doc: { id: "of:comment-1", space: "did:key:test-home" },
+          children: {
+            author: {
+              doc: {
+                id: "of:author-1",
+                space: "did:key:test-home",
+                scope: "user",
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": receiptRef,
+      "/comment": {
+        space: "did:key:test-home",
+        id: "of:comment-1",
+        scope: "space",
+      },
+      // Compared against of:comment-1, not the receipt — each hop is
+      // annotated exactly once, where the document changes. The scope is
+      // part of the address and rides along.
+      "/comment/author": {
+        space: "did:key:test-home",
+        id: "of:author-1",
+        scope: "user",
+      },
+      // No "/comment/body", no "/count": a path inside the same plain JSON
+      // needs no link.
+    });
+  });
+
+  it("addresses an array element reference by its index", () => {
+    const value = { items: [{ t: "inline" }, { t: "linked" }] };
+    const cell = linkedReceiptCell(receiptDoc, value, {
+      children: {
+        items: {
+          children: {
+            "1": { doc: { id: "of:item-b", space: "did:key:test-home" } },
+          },
+        },
+      },
+    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": receiptRef,
+      "/items/1": {
+        space: "did:key:test-home",
+        id: "of:item-b",
+        scope: "space",
+      },
+    });
+  });
+
+  it("keeps the sub-document path of a link below a doc's root", () => {
+    const value = { pick: { t: "third entry" } };
+    const cell = linkedReceiptCell(receiptDoc, value, {
+      children: {
+        pick: {
+          doc: {
+            id: "of:list-1",
+            space: "did:key:test-home",
+            path: ["entries", 3],
+          },
+        },
+      },
+    });
+    // Without the path the address would name the wrong value — the list
+    // document's root rather than the entry the result actually references.
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": receiptRef,
+      "/pick": {
+        space: "did:key:test-home",
+        id: "of:list-1",
+        scope: "space",
+        path: ["entries", 3],
+      },
+    });
+  });
+
+  it("escapes pointer-special characters in path keys (RFC 6901)", () => {
+    const value = { "a/b": { linked: true } };
+    const cell = linkedReceiptCell(receiptDoc, value, {
+      children: {
+        "a/b": { doc: { id: "of:odd-key", space: "did:key:test-home" } },
+      },
+    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": receiptRef,
+      "/a~1b": {
+        space: "did:key:test-home",
+        id: "of:odd-key",
+        scope: "space",
+      },
+    });
+  });
+
+  it("resolves a result that is itself a reference — a scalar that is its own doc", () => {
+    // The design's motivating case for provenance-beside-the-value: an
+    // inline marker cannot annotate a scalar, and a scalar can be its own
+    // doc. "/" must expose the document that BACKS the value, not the
+    // receipt it was read through — and the receipt address stays available
+    // under the reserved bare key (pointer keys always start with "/", so
+    // no result path can collide with it).
+    const cell = linkedReceiptCell(receiptDoc, 42, {
+      doc: { id: "of:answer-1", space: "did:key:test-home" },
+    });
+    expect(collectInvocationResultLinks(receiptLink, cell, 42)).toEqual({
+      "/": { space: "did:key:test-home", id: "of:answer-1", scope: "space" },
+      receipt: receiptRef,
+    });
+  });
+
+  it("rebases children of a reference-backed root onto its document", () => {
+    const value = { body: "hi", author: { name: "b" } };
+    const cell = linkedReceiptCell(receiptDoc, value, {
+      doc: { id: "of:comment-1", space: "did:key:test-home" },
+      children: {
+        author: { doc: { id: "of:author-1", space: "did:key:test-home" } },
+      },
+    });
+    expect(collectInvocationResultLinks(receiptLink, cell, value)).toEqual({
+      "/": {
+        space: "did:key:test-home",
+        id: "of:comment-1",
+        scope: "space",
+      },
+      receipt: receiptRef,
+      "/author": {
+        space: "did:key:test-home",
+        id: "of:author-1",
+        scope: "space",
+      },
+      // No "/body": it lives in the ROOT's backing document — comparing it
+      // against the receipt instead would wrongly annotate every child.
+    });
+  });
+
+  it("carries the receipt's own scope on the root entry", () => {
+    const scoped = {
+      id: "of:receipt-2",
+      space: "did:key:test-home",
+      scope: "session" as const,
+    };
+    expect(
+      collectInvocationResultLinks(
+        mockLink(scoped),
+        linkedReceiptCell(scoped, {}),
+        {},
+      ),
+    ).toEqual({
+      "/": { space: "did:key:test-home", id: "of:receipt-2", scope: "session" },
+    });
+  });
+
+  it("addresses no path inside a live (non-plain) object in the result", () => {
+    // The --show-links crash shape: a stream on a returned piece is a live
+    // runtime object whose runtime/scheduler properties refer back to each
+    // other, and a walk that descends into it recurses until the stack runs
+    // out. "Terminates without throwing" is NOT a testable contract for that
+    // bug: when the overflow happens to land on the `cell.key()` call, the
+    // walk's own addressability catch swallows the RangeError and unwinds
+    // cleanly, so whether a crash is observable depends on where the stack
+    // limit falls (fake frame sizes, V8 --stack-size) — not on the walk.
+    // What the walk must guarantee is stronger and observable at this seam:
+    // it never ADDRESSES a path inside a non-plain object, whose properties
+    // belong to the runtime rather than the result. The fake records every
+    // key() the walk requests and cuts descent off after a small budget, so
+    // an errant walk fails the path assertion deterministically, far from
+    // any stack limit.
+    class FakeScheduler {
+      runtime!: FakeRuntime;
+    }
+    class FakeRuntime {
+      scheduler = new FakeScheduler();
+      constructor() {
+        this.scheduler.runtime = this;
+      }
+    }
+    class FakeStream {
+      runtime = new FakeRuntime();
+    }
+    const value = { child: { touch: new FakeStream() } };
+    const requested: string[] = [];
+    const links = collectInvocationResultLinks(
+      receiptLink,
+      recordingReceiptCell(receiptDoc, requested),
+      value,
+    );
+    // The stream itself is addressed — it is a property of the result and
+    // may carry a document of its own. Nothing below it is.
+    expect(requested).toEqual(["child", "child/touch"]);
+    expect(links).toEqual({ "/": receiptRef });
+  });
+
+  it("addresses nothing when the result is itself a live object", () => {
+    // The same contract at the root: the walk's entry guard — not only the
+    // per-child check — is what keeps a live result's properties
+    // unaddressed. With the guard on children alone, the walk enumerated a
+    // root instance and addressed "scheduler".
+    class FakeScheduler {
+      runtime!: FakeRuntime;
+    }
+    class FakeRuntime {
+      scheduler = new FakeScheduler();
+      constructor() {
+        this.scheduler.runtime = this;
+      }
+    }
+    const requested: string[] = [];
+    const links = collectInvocationResultLinks(
+      receiptLink,
+      recordingReceiptCell(receiptDoc, requested),
+      new FakeRuntime(),
+    );
+    expect(requested).toEqual([]);
+    expect(links).toEqual({ "/": receiptRef });
+  });
+});
+
+describe("piece call --show-links", () => {
+  const config = {
+    apiUrl: "http://localhost:8000",
+    identity: "/tmp/test-identity.pem",
+    piece: "fid1:piece-123",
+    space: "home",
+  };
+  const commentValue = {
+    comment: { body: "hi" },
+    count: 1,
+  };
+  const commentReceipt = () =>
+    linkedReceiptCell(
+      // Must match the harness's handlingReceiptLink, or every path would
+      // read as a foreign document.
+      { id: "of:receipt-1", space: "did:key:test-home" },
+      commentValue,
+      {
+        children: {
+          comment: {
+            doc: { id: "of:comment-1", space: "did:key:test-home" },
+          },
+        },
+      },
+    );
+  const handlerOptions = {
+    callableKind: "handler" as const,
+    cellKey: "addComment",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+      },
+      required: ["message"],
+    } as JSONSchema,
+  };
+
+  it("emits the links dictionary beside the result", async () => {
+    const harness = createPieceCallableHarness({
+      ...handlerOptions,
+      receiptCell: commentReceipt(),
+    });
+
+    const result = await executePieceCallable(
+      config,
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-links",
+        showLinks: true,
+      },
+    );
+
+    expect(result.invocation).toEqual({
+      id: "inv-links",
+      status: "settled",
+      result: commentValue,
+      links: {
+        "/": { space: "did:key:test-home", id: "of:receipt-1", scope: "space" },
+        "/comment": {
+          space: "did:key:test-home",
+          id: "of:comment-1",
+          scope: "space",
+        },
+      },
+    });
+    // And the stdout JSON carries it as a sibling of result — beside the
+    // value, never inline in it.
+    const json = invocationJson(result.invocation!);
+    expect(Object.keys(json)).toEqual([
+      "invocation",
+      "status",
+      "result",
+      "links",
+    ]);
+  });
+
+  it("leaves the Invocation JSON untouched without the flag", async () => {
+    const harness = createPieceCallableHarness({
+      ...handlerOptions,
+      receiptCell: commentReceipt(),
+    });
+
+    const result = await executePieceCallable(
+      config,
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-no-links",
+      },
+    );
+
+    expect(result.invocation).toEqual({
+      id: "inv-no-links",
+      status: "settled",
+      result: commentValue,
+    });
+    expect(invocationJson(result.invocation!)).not.toHaveProperty("links");
+  });
+
+  it("annotates a value-less verb with just the receipt", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: { type: "object", properties: {} },
+      receiptCell: linkedReceiptCell(
+        { id: "of:receipt-1", space: "did:key:test-home" },
+        {},
+      ),
+    });
+
+    const result = await executePieceCallable(config, "refresh", [], {
+      loadPieces: () => Promise.resolve(harness.pieces),
+      loadPiece: () => Promise.resolve(harness.piece),
+      isStdinTerminal: () => true,
+      invocationId: "inv-void-links",
+      showLinks: true,
+    });
+
+    // No result key — the existence-only receipt stays distinguishable from
+    // a verb that returned a value — but the receipt's address is real and
+    // the caller asked for it.
+    expect(result.invocation).toEqual({
+      id: "inv-void-links",
+      status: "settled",
+      links: {
+        "/": { space: "did:key:test-home", id: "of:receipt-1", scope: "space" },
+      },
+    });
+  });
+
+  it("keeps the tool path unchanged: resultRef stays the tool's address surface", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "tool",
+      cellKey: "search",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        },
+        resultSchema: { type: "object" },
+      },
+      toolResult: { ok: true },
+    });
+
+    const result = await executePieceCallable(
+      config,
+      "search",
+      ["--query", "tea"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        uuid: () => "tool-result-id",
+        showLinks: true,
+      },
+    );
+
+    // Links ride the Invocation JSON, which only handler invocations emit;
+    // the tool's own address already rides resultRef (WS-B), unchanged.
+    expect(result.invocation).toBeUndefined();
+    expect(JSON.parse(result.outputText!)).toEqual({ ok: true });
+    expect(result.resultRef).toEqual({
+      id: "of:tool-result-cell",
+      space: "did:key:test-home",
+      scope: "space",
+    });
+  });
+
+  it("refuses --show-links with --no-wait, and allows it with a wait", () => {
+    expect(() => resolveWaitControl({ wait: false, showLinks: true })).toThrow(
+      /--show-links needs the receipt readback/,
+    );
+    expect(resolveWaitControl({ showLinks: true })).toEqual({ mode: "settle" });
+    expect(resolveWaitControl({ wait: 5, showLinks: true })).toEqual({
+      mode: "settle",
+      boundSeconds: 5,
+    });
   });
 });
 
@@ -1136,6 +3029,71 @@ describe("piece get data errors", () => {
     expect(report?.message).toMatch(/--step/);
     expect(report?.hint).toBeUndefined();
   });
+
+  it("reports transform failures without an unrelated --input hint", () => {
+    const transformError = new PieceGetTransformError(
+      "--filter can only be applied to an array",
+    );
+    expect(isPieceGetDataError(transformError)).toBe(true);
+    const report = pieceGetDataErrorReport(transformError, {
+      input: false,
+      piece: "fid1:piece-123",
+    });
+    expect(report?.message).toBe("--filter can only be applied to an array");
+    expect(report?.hint).toBeUndefined();
+  });
+
+  it("refuses a path that lands on a verb with the call redirect and exit 1", () => {
+    const verbError = new PieceVerbReadError(
+      "addTopic",
+      "fid1:piece-123",
+      true,
+    );
+    expect(isPieceGetDataError(verbError)).toBe(true);
+    const report = pieceGetDataErrorReport(verbError, {
+      input: false,
+      piece: "fid1:piece-123",
+    });
+    // The message IS the redirect — mirroring the llm-dialog read tool's
+    // "Path resolves to a handler; use invoke() instead." — so no extra hint
+    // rides along (the --input tip would be a wrong remedy for a verb).
+    expect(report?.message).toBe(
+      "Path resolves to a verb; use 'cf piece call --piece fid1:piece-123 addTopic' instead.",
+    );
+    expect(report?.hint).toBeUndefined();
+
+    // A nested verb is not root-callable, so its report must not suggest a
+    // command that would fail — it redirects at the parent read and the
+    // verbs listing instead, still hint-free.
+    const nestedReport = pieceGetDataErrorReport(
+      new PieceVerbReadError("removeItem", "fid1:piece-123", false),
+      { input: false, piece: "fid1:piece-123" },
+    );
+    expect(nestedReport?.message).toMatch(/not directly callable/);
+    expect(nestedReport?.message).toMatch(
+      /cf piece verbs --piece fid1:piece-123/,
+    );
+    expect(nestedReport?.message).not.toContain("cf piece call");
+    expect(nestedReport?.hint).toBeUndefined();
+
+    // Threaded through the shared data-error exit: stderr message, exit 1.
+    const printed: string[] = [];
+    const exited: number[] = [];
+    expect(() =>
+      exitWithDataError(report!, {
+        printError: (m) => printed.push(m),
+        printHint: () => {},
+        exit: (code: number): never => {
+          exited.push(code);
+          throw new Error("exit-sentinel");
+        },
+      })
+    ).toThrow("exit-sentinel");
+    expect(printed).toEqual([
+      "Path resolves to a verb; use 'cf piece call --piece fid1:piece-123 addTopic' instead.",
+    ]);
+    expect(exited).toEqual([1]);
+  });
 });
 
 describe("piece link data errors", () => {
@@ -1160,6 +3118,30 @@ describe("piece link data errors", () => {
       pieceLinkDataErrorReport(new Error("network unreachable"), {
         sourcePieceId: "fid1:source-1",
         targetPieceId: "fid1:target-1",
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("piece call input errors", () => {
+  it("reports the rejection with a pointer at the verb listing", () => {
+    const report = verbInputErrorReport(
+      new VerbInputValidationError(
+        "recordMessage",
+        "missing required property message",
+      ),
+      { piece: "fid1:piece-123" },
+    );
+    expect(report?.message).toMatch(/Invalid input for "recordMessage"/);
+    expect(report?.message).toMatch(/missing required property message/);
+    expect(report?.hint).toMatch(/piece verbs/);
+    expect(report?.hint).toMatch(/fid1:piece-123/);
+  });
+
+  it("returns null for a non-input error (caller rethrows)", () => {
+    expect(
+      verbInputErrorReport(new Error("network unreachable"), {
+        piece: "fid1:piece-123",
       }),
     ).toBeNull();
   });
@@ -1197,5 +3179,423 @@ describe("exitWithDataError", () => {
     ).toThrow("exit-sentinel");
     expect(printed).toEqual(["error:boom"]);
     expect(exited).toEqual([1]);
+  });
+});
+
+describe("verbInputSchemaError", () => {
+  const objectSchema: JSONSchema = {
+    type: "object",
+    properties: { message: { type: "string" } },
+    required: ["message"],
+  };
+
+  it("accepts a payload that matches", () => {
+    expect(verbInputSchemaError({ message: "milk" }, objectSchema))
+      .toBeUndefined();
+  });
+
+  it("rejects a missing required property", () => {
+    expect(verbInputSchemaError({ mesage: "milk" }, objectSchema))
+      .toMatch(/message/);
+  });
+
+  it("rejects a payload of the wrong type", () => {
+    expect(verbInputSchemaError(["not-an-object"], objectSchema))
+      .toMatch(/object/);
+  });
+
+  it("leaves an absent payload alone so value-less verbs still send", () => {
+    expect(verbInputSchemaError(undefined, objectSchema)).toBeUndefined();
+  });
+
+  it("accepts anything when the verb declares no schema", () => {
+    expect(verbInputSchemaError({ anything: 1 }, undefined)).toBeUndefined();
+    expect(verbInputSchemaError({ anything: 1 }, true)).toBeUndefined();
+  });
+
+  // The runtime injects a property's default when the payload omits it, so
+  // requiring it here would refuse a call the verb would have accepted. This
+  // pins that the gate APPLIES the relaxation; the relaxation's own semantics
+  // ($ref chains, combinators, cycles, the `definitions` refusal) are pinned
+  // where the helpers live (runner `cfc-defaulted-required-relaxation.test.ts`
+  // — verb contract D6).
+  it("treats a defaulted property as satisfied when omitted", () => {
+    expect(verbInputSchemaError({}, {
+      type: "object",
+      properties: { mode: { type: "string", default: "fast" } },
+      required: ["mode"],
+    })).toBeUndefined();
+  });
+
+  it("accepts asCell fields given either a plain value or a link", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        target: {
+          type: "object",
+          properties: { n: { type: "number" } },
+          asCell: ["cell"],
+        },
+      },
+      required: ["target"],
+    };
+    expect(verbInputSchemaError({ target: { n: 1 } }, schema)).toBeUndefined();
+    expect(
+      verbInputSchemaError(
+        { target: { "/": { id: "of:abc", path: [], space: "did:x:y" } } },
+        schema,
+      ),
+    ).toBeUndefined();
+  });
+});
+
+describe("normalizeAbsentVerbPayload", () => {
+  it("normalizes absence to {} against a plain object schema", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      type: "object",
+      properties: { message: { type: "string" } },
+      required: ["message"],
+    })).toEqual({});
+  });
+
+  it("normalizes absence to {} through a top-level local $ref", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      $ref: "#/$defs/Event",
+      asCell: ["stream"],
+      $defs: {
+        Event: {
+          type: "object",
+          properties: { message: { type: "string" } },
+          required: ["message"],
+        },
+      },
+    } as JSONSchema)).toEqual({});
+  });
+
+  it("leaves a supplied payload untouched, object schema or not", () => {
+    const payload = { message: "milk" };
+    expect(normalizeAbsentVerbPayload(payload, {
+      type: "object",
+      properties: { message: { type: "string" } },
+    })).toBe(payload);
+    expect(normalizeAbsentVerbPayload("text", { type: "string" })).toBe(
+      "text",
+    );
+  });
+
+  it("leaves absence alone when the verb declares no schema", () => {
+    expect(normalizeAbsentVerbPayload(undefined, undefined)).toBeUndefined();
+    expect(normalizeAbsentVerbPayload(undefined, true)).toBeUndefined();
+  });
+
+  // An absent payload must keep passing a `false` schema — a supplied one is
+  // already refused by the validator ("schema rejects all values"), and
+  // normalizing here would convert every call into that refusal.
+  it("leaves absence alone against a boolean false schema", () => {
+    expect(normalizeAbsentVerbPayload(undefined, false)).toBeUndefined();
+  });
+
+  it("leaves absence alone against a non-object schema", () => {
+    expect(normalizeAbsentVerbPayload(undefined, { type: "string" }))
+      .toBeUndefined();
+    expect(normalizeAbsentVerbPayload(undefined, {
+      type: "array",
+      items: { type: "string" },
+    })).toBeUndefined();
+  });
+
+  // Refuse only on proof: a $ref nobody can resolve proves nothing about the
+  // event being an object, so absence keeps today's pass-through behavior.
+  it("leaves absence alone when the top-level $ref cannot be resolved", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      $ref: "#/$defs/Absent",
+      asCell: ["stream"],
+      $defs: { Present: { type: "object" } },
+    } as JSONSchema)).toBeUndefined();
+  });
+
+  // A boolean definition is a resolvable target that still proves nothing
+  // about the event being an object — absence passes through, like any other
+  // non-object target.
+  it("leaves absence alone when the top-level $ref names a boolean def", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      $ref: "#/$defs/Anything",
+      asCell: ["stream"],
+      $defs: { Anything: true },
+    } as JSONSchema)).toBeUndefined();
+  });
+
+  // An allOf conjunction with an object-schema branch IS an object schema —
+  // no branch choice is involved, so `{}` is exactly as meaningful as for a
+  // direct object root, and the gate then judges it the same way (refused
+  // when non-defaulted required survives relaxation, dispatched with defaults
+  // engaging when it does not).
+  it("normalizes absence to {} against an allOf of object schemas", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      allOf: [
+        {
+          type: "object",
+          properties: { mode: { type: "string", default: "fast" } },
+          required: ["mode"],
+        },
+      ],
+    } as unknown as JSONSchema)).toEqual({});
+  });
+
+  it("normalizes absence through an allOf branch behind a $ref", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      allOf: [{ $ref: "#/$defs/Base" }],
+      $defs: {
+        Base: {
+          type: "object",
+          properties: { mode: { type: "string", default: "fast" } },
+        },
+      },
+    } as unknown as JSONSchema)).toEqual({});
+  });
+
+  // Disjunctive roots stay out of scope (the D5 rule's recorded combinator
+  // boundary): normalizing `{}` against anyOf/oneOf would pick among
+  // alternatives on the caller's behalf.
+  it("leaves absence alone against anyOf/oneOf roots", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      anyOf: [{ type: "object", properties: {} }],
+    } as unknown as JSONSchema)).toBeUndefined();
+    expect(normalizeAbsentVerbPayload(undefined, {
+      oneOf: [{ type: "object", properties: {} }],
+    } as unknown as JSONSchema)).toBeUndefined();
+  });
+
+  // The schema-less handler-input shape (`{ asCell: ["stream"] }` with no
+  // type and no properties) is not an object schema; `{}` means nothing
+  // there.
+  it("leaves absence alone against a schema-less stream marker", () => {
+    expect(normalizeAbsentVerbPayload(undefined, {
+      asCell: ["stream"],
+    } as JSONSchema)).toBeUndefined();
+  });
+});
+
+describe("reportVerbInputErrorOrRethrow", () => {
+  const sink = () => {
+    const printed: string[] = [];
+    const exited: number[] = [];
+    return {
+      printed,
+      exited,
+      deps: {
+        printError: (m: string) => printed.push(`error:${m}`),
+        printHint: (m: string) => printed.push(`hint:${m}`),
+        exit: ((code: number) => {
+          exited.push(code);
+          throw new Error("exit-sentinel");
+        }) as (code: number) => never,
+      },
+    };
+  };
+
+  it("reports a rejected payload and exits 1", () => {
+    const { printed, exited, deps } = sink();
+
+    expect(() =>
+      reportVerbInputErrorOrRethrow(
+        new VerbInputValidationError(
+          "recordMessage",
+          "missing required property message",
+        ),
+        "fid1:piece-123",
+        deps,
+      )
+    ).toThrow("exit-sentinel");
+
+    expect(printed[0]).toMatch(/Invalid input for "recordMessage"/);
+    expect(printed[1]).toMatch(/piece verbs/);
+    expect(printed[1]).toMatch(/fid1:piece-123/);
+    expect(exited).toEqual([1]);
+  });
+
+  it("names the piece as <piece> when the config carries none", () => {
+    const { printed, deps } = sink();
+
+    expect(() =>
+      reportVerbInputErrorOrRethrow(
+        new VerbInputValidationError("recordMessage", "bad"),
+        undefined,
+        deps,
+      )
+    ).toThrow("exit-sentinel");
+
+    expect(printed[1]).toMatch(/<piece>/);
+  });
+
+  // Anything that is not an input rejection has to keep travelling: a network
+  // failure reported as a payload problem would send an agent to fix a payload
+  // that was fine.
+  it("re-throws an unrelated failure untouched", () => {
+    const { printed, exited, deps } = sink();
+    const original = new Error("network unreachable");
+
+    expect(() =>
+      reportVerbInputErrorOrRethrow(original, "fid1:piece-123", deps)
+    )
+      .toThrow("network unreachable");
+
+    expect(printed).toEqual([]);
+    expect(exited).toEqual([]);
+  });
+});
+
+describe("runtimeErrorLog", () => {
+  // Pinned directly rather than left to incidental coverage: which execution
+  // paths hand this a non-object runtime varies by run and sharding, and the
+  // coverage gate has flagged the resulting phantom deltas on unrelated PRs.
+  it("returns [] for non-object runtimes and runtimes without a log", () => {
+    expect(runtimeErrorLog(undefined)).toEqual([]);
+    expect(runtimeErrorLog("not a runtime")).toEqual([]);
+    expect(runtimeErrorLog({})).toEqual([]);
+    expect(runtimeErrorLog({ [CF_RUNTIME_ERROR_LOG]: "not an array" }))
+      .toEqual([]);
+  });
+
+  it("returns the recorded log when present", () => {
+    const records = [{ message: "boom" }];
+    expect(runtimeErrorLog({ [CF_RUNTIME_ERROR_LOG]: records }))
+      .toEqual(records);
+  });
+});
+
+describe("schemaIsObjectShaped", () => {
+  // Pinned directly: the gate's caller pre-filters non-object roots, so the
+  // defensive boolean-target guard is unreachable through it, and the
+  // combinator boundary this function encodes (allOf conjunctions count,
+  // disjunctions never) deserves its own record.
+  it("rejects boolean schemas and accepts object shapes", () => {
+    expect(schemaIsObjectShaped(true, true)).toBe(false);
+    expect(schemaIsObjectShaped(false, false)).toBe(false);
+    expect(schemaIsObjectShaped({ type: "object" }, {})).toBe(true);
+    expect(schemaIsObjectShaped({ properties: { a: {} } }, {})).toBe(true);
+  });
+
+  it("counts allOf conjunctions with an object branch, never disjunctions", () => {
+    expect(schemaIsObjectShaped(
+      { allOf: [{ type: "string" }, { type: "object" }] },
+      {},
+    )).toBe(true);
+    expect(schemaIsObjectShaped(
+      { anyOf: [{ type: "object" }] },
+      {},
+    )).toBe(false);
+    expect(schemaIsObjectShaped(
+      { oneOf: [{ type: "object" }] },
+      {},
+    )).toBe(false);
+  });
+});
+
+describe("renderPieceCallOutcome", () => {
+  const observerRecorder = () => {
+    const finishes: (string | undefined)[] = [];
+    return {
+      observer: {
+        finish: (end?: "settled" | "failed" | "detached") => {
+          finishes.push(end);
+        },
+      },
+      finishes,
+    };
+  };
+  const sinkRecorder = () => {
+    const rendered: string[] = [];
+    const hinted: string[] = [];
+    const errored: string[] = [];
+    return {
+      deps: {
+        render: (t: string) => rendered.push(t),
+        hint: (t: string) => hinted.push(t),
+        printError: (t: string) => errored.push(t),
+      },
+      rendered,
+      hinted,
+      errored,
+    };
+  };
+  const base = { parsed: { usedJsonInput: false }, resolved: {} };
+
+  it("help output returns before the observer finishes", () => {
+    const { observer, finishes } = observerRecorder();
+    const { deps, rendered } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      { ...base, helpText: "usage" } as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      deps,
+    );
+    assertEquals(rendered, ["usage"]);
+    assertEquals(finishes.length, 0);
+  });
+
+  it("tool output finishes the span and hints the result ref", () => {
+    const { observer, finishes } = observerRecorder();
+    const { deps, rendered, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        outputText: "{}",
+        resultRef: { id: "of:x", space: "did:key:s", scope: "space" },
+      } as ExecutedPieceCallable,
+      "tool",
+      "fid1:piece",
+      deps,
+    );
+    assertEquals(finishes, [undefined]);
+    assertEquals(rendered, ["{}"]);
+    assertEquals(hinted.length, 1);
+    assertStringIncludes(hinted[0], "of:x");
+  });
+
+  it("handler invocations render the Invocation JSON with next steps", () => {
+    const { observer, finishes } = observerRecorder();
+    const { deps, rendered, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        invocation: { id: "inv-1", status: "settled" },
+      } as unknown as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      deps,
+    );
+    assertEquals(finishes, [undefined]);
+    assertEquals(JSON.parse(rendered[0]).invocation, "inv-1");
+    assertStringIncludes(hinted[0], "NEXT STEPS");
+  });
+
+  it("confirmations route to stderr under JSON input, stdout otherwise", () => {
+    const jsonCase = observerRecorder();
+    const jsonSinks = sinkRecorder();
+    renderPieceCallOutcome(
+      jsonCase.observer,
+      { ...base, parsed: { usedJsonInput: true } } as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      jsonSinks.deps,
+    );
+    assertEquals(jsonSinks.errored.length, 1);
+    assertEquals(jsonSinks.rendered.length, 0);
+
+    const plainCase = observerRecorder();
+    const plainSinks = sinkRecorder();
+    renderPieceCallOutcome(
+      plainCase.observer,
+      { ...base } as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      plainSinks.deps,
+    );
+    assertEquals(plainSinks.errored.length, 0);
+    assertStringIncludes(plainSinks.rendered[0], 'Called handler "addTopic"');
   });
 });

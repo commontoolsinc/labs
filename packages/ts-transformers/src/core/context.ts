@@ -21,11 +21,6 @@ import {
 import { CrossStageState } from "./cross-stage-state.ts";
 import { CFHelpers } from "./cf-helpers.ts";
 
-const DEFAULT_OPTIONS: TransformationOptions = {
-  mode: "transform",
-  debug: false,
-};
-
 export interface TransformationContextConfig {
   program: ts.Program;
   sourceFile: ts.SourceFile;
@@ -46,6 +41,13 @@ export class TransformationContext {
   readonly factory: ts.NodeFactory;
   readonly sourceFile: ts.SourceFile;
   readonly options: TransformationOptions;
+  /**
+   * The cross-transformer communication registries every stage in this run
+   * shares. Either injected through `options.state` or created here; the same
+   * instance is stored back into `this.options.state` so a nested
+   * `TransformationContext` built from these options joins the same run.
+   */
+  readonly state: CrossStageState;
   readonly cfHelpers: CFHelpers;
   readonly diagnostics: TransformationDiagnostic[] = [];
   readonly tsContext: ts.TransformationContext;
@@ -60,10 +62,10 @@ export class TransformationContext {
       factory: this.factory,
       sourceFile: this.sourceFile,
     });
+    this.state = config.options?.state ?? new CrossStageState();
     this.options = {
-      ...DEFAULT_OPTIONS,
       ...config.options,
-      state: config.options?.state ?? new CrossStageState(),
+      state: this.state,
     };
   }
 
@@ -96,14 +98,12 @@ export class TransformationContext {
    * shared CrossStageState so the duplicates collapse to one. The file name is
    * part of the key because that state is shared across every file in a
    * compilation, and the range is a file-relative offset that would otherwise
-   * collide between files. With no shared state present it falls back to
-   * reporting unconditionally.
+   * collide between files.
    */
   reportDiagnosticOnce(input: DiagnosticInput): void {
     const { start, length } = this.resolveDiagnosticRange(input.node);
     const key = `${this.sourceFile.fileName}:${input.type}:${start}:${length}`;
-    const state = this.options.state;
-    if (state && !state.markDiagnosticReported(key)) {
+    if (!this.state.markDiagnosticReported(key)) {
       return;
     }
     this.reportDiagnostic(input);
@@ -156,7 +156,7 @@ export class TransformationContext {
    * array method callback scopes.
    */
   markAsArrayMethodCallback(node: ts.Node): void {
-    this.options.state?.markArrayMethodCallback(node);
+    this.state.markArrayMethodCallback(node);
     this.invalidateReactiveAnalysisCaches();
   }
 
@@ -164,7 +164,7 @@ export class TransformationContext {
    * Check if a node is an array method callback created by ClosureTransformer.
    */
   isArrayMethodCallback(node: ts.Node): boolean {
-    return this.options.state?.isArrayMethodCallback(node) ?? false;
+    return this.state.isArrayMethodCallback(node);
   }
 
   /**
@@ -173,7 +173,7 @@ export class TransformationContext {
    * authored nodes with original parent chains in pattern context.
    */
   markAsSyntheticComputeCallback(node: ts.Node): void {
-    this.options.state?.markSyntheticComputeCallback(node);
+    this.state.markSyntheticComputeCallback(node);
     this.invalidateReactiveAnalysisCaches();
   }
 
@@ -181,16 +181,16 @@ export class TransformationContext {
    * Check if a node is a synthetic compute wrapper callback.
    */
   isSyntheticComputeCallback(node: ts.Node): boolean {
-    return this.options.state?.isSyntheticComputeCallback(node) ?? false;
+    return this.state.isSyntheticComputeCallback(node);
   }
 
   markSyntheticComputeOwnedSubtree(node: ts.Node): void {
-    this.options.state?.markSyntheticComputeOwnedSubtree(node);
+    this.state.markSyntheticComputeOwnedSubtree(node);
     this.invalidateReactiveAnalysisCaches();
   }
 
   isSyntheticComputeOwnedNode(node: ts.Node): boolean {
-    return this.options.state?.isSyntheticComputeOwnedNode(node) ?? false;
+    return this.state.isSyntheticComputeOwnedNode(node);
   }
 
   /**
@@ -200,16 +200,14 @@ export class TransformationContext {
    * the `nodeLinks.schemaInjected` docs in core/mod.ts (CT-1621).
    */
   markSchemaInjected(node: ts.Node): void {
-    this.options.state?.markSchemaInjected(node);
+    this.state.markSchemaInjected(node);
   }
 
   /**
-   * Whether SchemaInjection has already finalized this node. Returns false
-   * when no state is present (so a missing registry never suppresses a real
-   * first-pass injection).
+   * Whether SchemaInjection has already finalized this node.
    */
   isSchemaInjected(node: ts.Node): boolean {
-    return this.options.state?.isSchemaInjected(node) ?? false;
+    return this.state.isSchemaInjected(node);
   }
 
   /**
@@ -220,7 +218,7 @@ export class TransformationContext {
    * consumers are schema-injection + the schema generator.
    */
   recordSchemaHint(node: ts.Node, hint: SchemaHint): void {
-    this.options.state?.recordSchemaHint(node, hint);
+    this.state.recordSchemaHint(node, hint);
   }
 
   /**
@@ -228,7 +226,7 @@ export class TransformationContext {
    * node (handles visitor-replaced nodes). Returns undefined when absent.
    */
   lookupSchemaHint(node: ts.Node): SchemaHint | undefined {
-    return this.options.state?.lookupSchemaHint(node);
+    return this.state.lookupSchemaHint(node);
   }
 
   /**
@@ -241,7 +239,7 @@ export class TransformationContext {
     fn: ts.Node,
     summary: FunctionCapabilitySummary,
   ): void {
-    this.options.state?.recordCapabilitySummary(fn, summary);
+    this.state.recordCapabilitySummary(fn, summary);
   }
 
   /**
@@ -251,7 +249,7 @@ export class TransformationContext {
   lookupCapabilitySummary(
     fn: ts.Node,
   ): FunctionCapabilitySummary | undefined {
-    return this.options.state?.lookupCapabilitySummary(fn);
+    return this.state.lookupCapabilitySummary(fn);
   }
 
   markSyntheticReactiveCollectionDeclaration(node: ts.Node): void {
@@ -265,7 +263,7 @@ export class TransformationContext {
     if (!symbol) {
       return;
     }
-    this.options.state?.markSyntheticReactiveCollection(symbol);
+    this.state.markSyntheticReactiveCollection(symbol);
     this.invalidateReactiveAnalysisCaches();
   }
 

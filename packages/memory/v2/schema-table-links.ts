@@ -4,6 +4,7 @@ import {
   linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
+import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model/fabric-value";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 export const REQUEST_SCHEMA_CAS_REF_PREFIX = "schema-cas@1:";
@@ -50,7 +51,7 @@ const isPlainRecord = (value: FabricValue): value is FabricPlainObject =>
  * engine's serialized substring check still sees instance contents
  * verbatim. If this walk ever learns to descend into an instance type, the
  * validator and `containsSyncSchemaRefString` must learn it in the same
- * change — the walker-agreement test in v2-sync-schema-table-test.ts fails
+ * change — the walker-agreement test in v2-sync-schema-table.test.ts fails
  * until they do.
  */
 export const mapLinkSchemas = (
@@ -146,7 +147,7 @@ const mapRecordChildren = (
   }
   if (!childChanged) return record;
 
-  const mapped: FabricPlainObject = {};
+  const mapped: MutableFabricPlainObjectLayer = {};
   for (let index = 0; index < entries.length; index += 1) {
     const key = entries[index][0];
     const next = mappedChildren[index];

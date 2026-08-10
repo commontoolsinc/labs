@@ -11,13 +11,21 @@ import type {
   Span,
   StructureNode,
   TokenClass,
+  ViewMode,
 } from "./model.ts";
 import type { Key } from "./keys.ts";
 import { cpLen } from "./ansi.ts";
 import {
   type DialogButton,
   type DialogState,
+  DIFF_MARGIN_WIDTH,
+  type DiffAnnotation,
+  diffAnnotationDecoration,
+  type DiffTotals,
+  diffTotalsDecoration,
+  diffTotalsWidth,
   type KeyHint,
+  labeledDiffMetadataLine,
   type Match,
   overlayBox,
   type OverlayState,
@@ -25,8 +33,10 @@ import {
 } from "./render.ts";
 import {
   clamp,
+  diffContentRowCount,
   findMatches,
   frameTop,
+  maxPagerTop,
   maxTop,
   nextMatchIndex,
   nodeAtLine,
@@ -45,6 +55,7 @@ import {
   displayLine,
   type DisplayMode,
   displayModeLabel,
+  displayWidth,
   hasNonPrintable,
   sourceColumnOf,
 } from "./display.ts";
@@ -72,15 +83,21 @@ import type {
 } from "./editsource.ts";
 import type { DirEntry, FileGateway } from "./filegateway.ts";
 import {
+  type ActiveWrapMode,
   buildWrapPlan,
-  fitWrapChrome,
+  fitViewLayout,
+  type WrapDecoration,
+  type WrapMode,
   wrappedRowAt,
+  wrappedRowForPosition,
   type WrapPlan,
 } from "./wrap.ts";
 
 export interface SessionOptions {
   color: boolean;
   showLineNumbers: boolean;
+  /** Initial representation, falling back to source when none is available. */
+  viewMode?: ViewMode;
 }
 
 type Mode =
@@ -139,6 +156,28 @@ interface ViewportAnchor {
   readonly displayCol: number;
 }
 
+interface ExpansionLayoutCache {
+  readonly decoratedPlan: WrapPlan;
+  readonly decoratedTop: number;
+  readonly basePlan: WrapPlan;
+  readonly baseTop: number;
+}
+
+interface ExpandOffer {
+  /** Screen row in the undecorated layout. */
+  readonly row: number | null;
+  /** Document line carrying the expansion triangle. */
+  readonly markerLine: number | null;
+  /** Document line passed to the context expander. */
+  readonly line: number;
+  readonly up: boolean;
+}
+
+interface ExpandEdge extends ExpandOffer {
+  readonly aimRow: number;
+  readonly room: HunkRoom;
+}
+
 interface FoldAnchor {
   readonly docLine: number;
   readonly sourceCol: number;
@@ -161,11 +200,14 @@ interface JumpEntry {
 }
 
 export class Session {
+  /** The parsed source document used for editing, offsets, and source cards. */
+  private sourceDoc: Document;
   private currentDoc: Document;
+  private viewMode: ViewMode = "source";
   private color: boolean;
   private lineNumberMode: LineNumberMode = "off";
-  /** Whether long logical lines continue on later screen rows. */
-  private wrapLines = false;
+  /** How long logical lines continue on later screen rows. */
+  private wrapMode: WrapMode = "off";
   /** How non-printable characters are shown; edit mode forces the first mode. */
   private displayMode: DisplayMode = DISPLAY_MODES[0];
   /** Indices (document order) of the diff files collapsed to a summary line.
@@ -179,16 +221,43 @@ export class Session {
   private wrapPlanCache?: {
     lines: readonly Line[];
     mode: DisplayMode;
+    wrapMode: ActiveWrapMode;
+    width: number;
+    decorations: string;
+    plan: WrapPlan;
+  };
+  private baseWrapPlanCache?: {
+    lines: readonly Line[];
+    mode: DisplayMode;
+    wrapMode: ActiveWrapMode;
     width: number;
     plan: WrapPlan;
   };
+  private expansionLayoutCache?: ExpansionLayoutCache;
+  private wrapDecorations = new Map<number, WrapDecoration>();
+  private wrapDecorationKey = "";
   private displayColumnCache?: {
     doc: Document;
     mode: DisplayMode;
     columns: Map<number, Uint32Array>;
   };
+
+  private get wrapLines(): boolean {
+    return this.wrapMode !== "off";
+  }
+
+  private get activeWrapMode(): ActiveWrapMode {
+    return this.wrapMode === "word" ? "word" : "hard";
+  }
+  private maxDisplayWidthCache?: {
+    lines: readonly Line[];
+    mode: DisplayMode;
+    width: number;
+  };
   private nonPrintCache?: { doc: Document; value: boolean };
   private fileLineCache?: { doc: Document; value: (number | null)[] | null };
+  /** Diff metadata lines, cached against the parsed document. */
+  private diffMetadataCache?: { doc: Document; lines: readonly number[] };
 
   width: number;
   height: number;
@@ -283,6 +352,7 @@ export class Session {
     source?: EditableSource,
     files?: FileGateway,
   ) {
+    this.sourceDoc = doc;
     this.currentDoc = doc;
     this.color = options.color;
     this.lineNumberMode = options.showLineNumbers ? "input" : "off";
@@ -294,10 +364,63 @@ export class Session {
     // The edit buffer mirrors the document text; for an editable file the two
     // stay in lock-step (the document is a re-parse of the buffer).
     if (source) this.buffer = new EditBuffer(doc.text);
+    if (options.viewMode === "rendered" && source?.render) {
+      this.viewMode = "rendered";
+      this.setSourceDocument(doc);
+    }
   }
 
   get doc(): Document {
     return this.currentDoc;
+  }
+
+  /** Install a newly parsed source document in the active representation. */
+  private setSourceDocument(doc: Document): void {
+    this.sourceDoc = doc;
+    if (this.viewMode === "rendered" && this.source?.render) {
+      const rendered = this.source.render(doc);
+      this.currentDoc = { ...doc, lines: rendered.lines };
+    } else {
+      this.viewMode = "source";
+      this.currentDoc = doc;
+    }
+  }
+
+  /** Change representation while keeping the same source line at the top. */
+  private setViewMode(mode: ViewMode, announce = true): boolean {
+    if (mode === this.viewMode) return false;
+    if (mode === "rendered" && !this.source?.render) return false;
+    const anchor = this.viewportAnchor();
+    this.viewMode = mode;
+    this.setSourceDocument(this.sourceDoc);
+    if (this.wrapLines) {
+      this.restoreWrappedAnchor({ ...anchor, displayCol: 0 });
+    } else {
+      this.top = anchor.foldedLine;
+      this.left = 0;
+      this.clampScroll();
+    }
+    if (this.query.length > 0) {
+      this.matches = findMatches(this.currentDoc, this.query);
+      this.currentMatch = clamp(
+        this.currentMatch,
+        0,
+        Math.max(0, this.matches.length - 1),
+      );
+    }
+    if (announce) {
+      this.message = `View: ${this.viewMode}`;
+    }
+    return true;
+  }
+
+  private toggleViewMode(): void {
+    const changed = this.setViewMode(
+      this.viewMode === "source" ? "rendered" : "source",
+    );
+    if (!changed && this.viewMode === "source") {
+      this.message = "Rendered view isn't available here.";
+    }
   }
 
   // --- file folding ----------------------------------------------------------
@@ -313,6 +436,29 @@ export class Session {
       };
     }
     return this.foldFileCache.files;
+  }
+
+  /** Whole-diff totals for the corner label on the first line, summed over the
+   * diff's files. Null when the source is not a diff, when the text parses to
+   * no diff files, or while the text cursor is active (edit mode reflows the
+   * content the label would cover). */
+  private activeDiffTotals(): DiffTotals | null {
+    if (this.cursorOn || this.source?.isDiff !== true) return null;
+    const files = this.foldFiles();
+    if (files.length === 0) return null;
+    let adds = 0;
+    let dels = 0;
+    for (const file of files) {
+      adds += file.adds;
+      dels += file.dels;
+    }
+    return { adds, dels };
+  }
+
+  /** Columns the whole-diff totals label occupies, 0 when hidden. */
+  private cornerTotalsWidth(): number {
+    const totals = this.activeDiffTotals();
+    return totals ? diffTotalsWidth(totals) : 0;
   }
 
   /** Whether the document holds any non-printable character, so cycling the
@@ -362,16 +508,53 @@ export class Session {
     if (
       this.wrapPlanCache?.lines !== lines ||
       this.wrapPlanCache.mode !== this.displayMode ||
-      this.wrapPlanCache.width !== width
+      this.wrapPlanCache.wrapMode !== this.activeWrapMode ||
+      this.wrapPlanCache.width !== width ||
+      this.wrapPlanCache.decorations !== this.wrapDecorationKey
     ) {
       this.wrapPlanCache = {
         lines,
         mode: this.displayMode,
+        wrapMode: this.activeWrapMode,
         width,
-        plan: buildWrapPlan(lines, this.displayMode, width),
+        decorations: this.wrapDecorationKey,
+        plan: buildWrapPlan(
+          lines,
+          this.displayMode,
+          width,
+          this.wrapDecorations,
+          this.activeWrapMode,
+        ),
       };
     }
     return this.wrapPlanCache.plan;
+  }
+
+  /** Wrapped text layout without transient right-edge annotations. */
+  private baseWrapPlan(): WrapPlan {
+    const lines = this.foldPlan().displayLines;
+    const width = this.contentWidth();
+    if (
+      this.baseWrapPlanCache?.lines !== lines ||
+      this.baseWrapPlanCache.mode !== this.displayMode ||
+      this.baseWrapPlanCache.wrapMode !== this.activeWrapMode ||
+      this.baseWrapPlanCache.width !== width
+    ) {
+      this.baseWrapPlanCache = {
+        lines,
+        mode: this.displayMode,
+        wrapMode: this.activeWrapMode,
+        width,
+        plan: buildWrapPlan(
+          lines,
+          this.displayMode,
+          width,
+          new Map(),
+          this.activeWrapMode,
+        ),
+      };
+    }
+    return this.baseWrapPlanCache.plan;
   }
 
   /** Number of screen rows after file folding and optional line wrapping. */
@@ -405,6 +588,28 @@ export class Session {
     const doc = this.displayDoc();
     const view = this.view();
     const sel = view.selected;
+    const expandRow = view.expandRow;
+    const diffAnnotations = view.diffAnnotations;
+    const projectedAnnotations = diffAnnotations?.flatMap(
+      (annotation): DiffAnnotation[] => {
+        if (annotation.line < from || annotation.line >= to) {
+          return [{ ...annotation, line: back(annotation.line) }];
+        }
+        if (annotation.kind === "diffMetadata") return [];
+        return [{
+          ...annotation,
+          line: rev.up ? from : Math.max(0, from - 1),
+        }];
+      },
+    );
+    const projectedTriangle = projectedAnnotations?.find((annotation) =>
+      annotation.kind !== "diffMetadata"
+    );
+    const frameAnnotations = projectedAnnotations?.filter((annotation) =>
+      annotation.kind !== "diffMetadata" ||
+      (projectedTriangle !== undefined &&
+        Math.abs(annotation.line - projectedTriangle.line) === 1)
+    );
     return {
       doc: { ...doc, lines: drop(doc.lines) },
       view: {
@@ -425,6 +630,21 @@ export class Session {
           ? view.matches.filter((m) => m.line < from || m.line >= to)
             .map((m) => ({ ...m, line: back(m.line) }))
           : null,
+        // A downward reveal's next edge can sit among the lines still to land.
+        // Until they arrive, mark the hunk-side row that currently bounds them.
+        expandRow: expandRow === null || expandRow === undefined
+          ? expandRow
+          : expandRow < from
+          ? expandRow
+          : expandRow >= to
+          ? expandRow - waiting
+          : rev.up
+          ? from
+          : Math.max(0, from - 1),
+        diffMetadataRows: frameAnnotations
+          ?.filter((annotation) => annotation.kind === "diffMetadata")
+          .map((annotation) => annotation.line),
+        diffAnnotations: frameAnnotations,
       },
     };
   }
@@ -437,31 +657,62 @@ export class Session {
   /** A document position to its screen row. A hidden line maps to its file's
    * summary, and a wrapped line maps to the segment containing `displayCol`. */
   private toDisplay(docLine: number, displayCol = 0): number {
+    return this.toDisplayWithPlan(
+      docLine,
+      displayCol,
+      this.wrapLines ? this.wrapPlan() : null,
+    );
+  }
+
+  /** Map a document position through a specific wrapped layout. */
+  private toDisplayWithPlan(
+    docLine: number,
+    displayCol: number,
+    plan: WrapPlan | null,
+  ): number {
     const fold = this.foldPlan();
     const folded = fold.docToDisplay(docLine);
     const col = fold.displayLines[folded] === this.currentDoc.lines[docLine]
       ? displayCol
       : 0;
-    return this.foldedPositionToDisplay(folded, col);
+    return this.foldedPositionToDisplayWithPlan(folded, col, plan);
   }
 
   /** A folded logical line and display column to its screen row. */
   private foldedPositionToDisplay(folded: number, displayCol = 0): number {
-    if (!this.wrapLines) return folded;
-    const plan = this.wrapPlan();
-    const first = plan.firstRow[folded] ?? 0;
-    const last = plan.lastRow[folded] ?? first;
-    return clamp(
-      first + Math.floor(Math.max(0, displayCol) / plan.rowStride),
-      first,
-      last,
+    return this.foldedPositionToDisplayWithPlan(
+      folded,
+      displayCol,
+      this.wrapLines ? this.wrapPlan() : null,
     );
+  }
+
+  /** Map a folded position through a specific wrapped layout. */
+  private foldedPositionToDisplayWithPlan(
+    folded: number,
+    displayCol: number,
+    plan: WrapPlan | null,
+  ): number {
+    if (!plan) return folded;
+    return wrappedRowForPosition(plan, folded, displayCol)?.row ??
+      plan.firstRow[folded] ?? 0;
   }
 
   /** The last screen row occupied by a document line. */
   private toDisplayEnd(docLine: number): number {
+    return this.toDisplayEndWithPlan(
+      docLine,
+      this.wrapLines ? this.wrapPlan() : null,
+    );
+  }
+
+  /** Last screen row for a document line in a specific wrapped layout. */
+  private toDisplayEndWithPlan(
+    docLine: number,
+    plan: WrapPlan | null,
+  ): number {
     const folded = this.toFolded(docLine);
-    return this.wrapLines ? this.wrapPlan().lastRow[folded] ?? 0 : folded;
+    return plan ? plan.lastRow[folded] ?? 0 : folded;
   }
 
   /** A screen row to the document line it stands for. */
@@ -481,8 +732,22 @@ export class Session {
   /** The selected node with its line range mapped into display rows (a node in a
    * collapsed file collapses onto that file's summary row). */
   private displaySelected(): StructureNode | null {
-    const node = this.selectedNode();
-    if (!node || this.collapsed.size === 0) return node;
+    const selected = this.selectedNode();
+    if (!selected) return null;
+    const node = this.viewMode === "rendered"
+      ? {
+        ...selected,
+        startCol: this.renderedLineChangesColumns(selected.startLine)
+          ? 0
+          : selected.startCol,
+        endCol: this.renderedLineChangesColumns(selected.endLine)
+          ? codePointLength(
+            this.currentDoc.lines[selected.endLine]?.text ?? "",
+          )
+          : selected.endCol,
+      }
+      : selected;
+    if (this.collapsed.size === 0) return node;
     const fold = this.foldPlan();
     const startLine = fold.docToDisplay(node.startLine);
     const endLine = fold.docToDisplay(node.endLine);
@@ -577,13 +842,7 @@ export class Session {
       0,
       Math.max(0, plan.firstRow.length - 1),
     );
-    const first = plan.firstRow[line] ?? 0;
-    const last = plan.lastRow[line] ?? first;
-    this.top = clamp(
-      first + Math.floor(anchor.displayCol / plan.rowStride),
-      first,
-      last,
-    );
+    this.top = wrappedRowForPosition(plan, line, anchor.displayCol)?.row ?? 0;
     this.clampScroll();
   }
 
@@ -603,6 +862,23 @@ export class Session {
 
   view(): ViewState {
     const o = this.overlay;
+    const expand = this.mode === "normal" && !this.overlay &&
+        !this.cursorOn && this.chord === null && this.source?.expandContext
+      ? this.expandOffer()
+      : null;
+    const offeredExpand = expand && !("blocked" in expand) ? expand : null;
+    const diffMargin = this.hasDiffMargin();
+    let diffAnnotations = diffMargin
+      ? this.displayDiffAnnotations(offeredExpand)
+      : [];
+    diffAnnotations = this.syncWrapDecorations(diffAnnotations);
+    if (!this.wrapLines) {
+      this.left = clamp(this.left, 0, this.maxLeft(diffAnnotations));
+    }
+    const expandRow = offeredExpand?.markerLine === null ||
+        offeredExpand?.markerLine === undefined
+      ? null
+      : this.toDisplay(offeredExpand.markerLine);
     const ov: OverlayState | null = this.mode === "filePicker"
       ? this.pickerOverlay()
       : this.mode === "jumpList"
@@ -628,8 +904,9 @@ export class Session {
       width: this.width,
       height: this.height,
       color: this.color,
+      isDiff: this.source?.isDiff === true,
       showLineNumbers: this.lineNumberMode !== "off",
-      wrapLines: this.wrapLines,
+      wrapMode: this.wrapMode,
       wrapPlan: this.wrapLines ? this.wrapPlan() : null,
       lineNumbers: this.lineNumberMode === "off" ? null : this.gutterNumbers(),
       displayMode: this.displayMode,
@@ -652,8 +929,18 @@ export class Session {
         ? { line: this.toFolded(this.buffer.row), col: this.buffer.col }
         : null,
       editHint: this.cursorOn ? this.editHint() : null,
-      canExpand: this.canExpand(),
+      canExpand: offeredExpand !== null,
+      expandMargin: diffMargin,
+      diffAnnotations,
+      diffTotals: this.activeDiffTotals(),
+      expandRow,
+      expandUp: offeredExpand?.up ?? null,
+      diffMetadataRows: diffMargin
+        ? this.displayAdjacentDiffMetadataRows(offeredExpand)
+        : [],
       canEdit: !this.cursorOn && !!this.source?.editable,
+      canRender: !!this.source?.render,
+      viewMode: this.viewMode,
       hasNonPrintables: this.hasNonPrintables(),
       notice: null,
       currentFile: this.currentFile(),
@@ -818,8 +1105,28 @@ export class Session {
   }
 
   private clampScroll(): void {
-    this.top = clamp(this.top, 0, maxTop(this.displayCount(), this.height));
-    this.left = this.wrapLines ? 0 : clamp(this.left, 0, this.maxLineLen);
+    this.top = clamp(this.top, 0, this.lastTop());
+    this.left = this.wrapLines ? 0 : clamp(this.left, 0, this.maxLeft());
+  }
+
+  /** Furthest vertical position for the current pager or editor mode. */
+  private lastTop(): number {
+    return this.cursorOn
+      ? maxTop(this.doc.lines.length, this.height)
+      : this.pagerLastTop(this.displayCount());
+  }
+
+  /** Furthest vertical position for a pager layout with `rowCount` rows. */
+  private pagerLastTop(rowCount: number): number {
+    const isDiff = this.source?.isDiff === true;
+    const hasTrailingEmptyLine = isDiff &&
+      this.foldPlan().displayLines.at(-1)?.text.length === 0;
+    return isDiff
+      ? maxPagerTop(
+        diffContentRowCount(rowCount, hasTrailingEmptyLine),
+        this.height,
+      )
+      : maxTop(rowCount, this.height);
   }
 
   private selectedNode(): StructureNode | null {
@@ -828,24 +1135,59 @@ export class Session {
       : null;
   }
 
+  private renderedLineChangesColumns(line: number): boolean {
+    return this.viewMode === "rendered" &&
+      this.sourceDoc.lines[line]?.text !== this.currentDoc.lines[line]?.text;
+  }
+
   /** Screen row containing the first character of a structure node. */
   private nodeStartRow(node: StructureNode): number {
-    return this.toDisplay(
+    return this.nodeStartRowWithPlan(
+      node,
+      this.wrapLines ? this.wrapPlan() : null,
+    );
+  }
+
+  /** First row of a structure node in a specific wrapped layout. */
+  private nodeStartRowWithPlan(
+    node: StructureNode,
+    plan: WrapPlan | null,
+  ): number {
+    const col = this.renderedLineChangesColumns(node.startLine)
+      ? 0
+      : node.startCol;
+    return this.toDisplayWithPlan(
       node.startLine,
-      this.displayCol(node.startLine, node.startCol),
+      this.displayCol(node.startLine, col),
+      plan,
     );
   }
 
   /** Screen row containing the last character of a structure node. */
   private nodeEndRow(node: StructureNode): number {
+    return this.nodeEndRowWithPlan(
+      node,
+      this.wrapLines ? this.wrapPlan() : null,
+    );
+  }
+
+  /** Last row of a structure node in a specific wrapped layout. */
+  private nodeEndRowWithPlan(
+    node: StructureNode,
+    plan: WrapPlan | null,
+  ): number {
     const fold = this.foldPlan();
     const folded = fold.docToDisplay(node.endLine);
     if (fold.displayLines[folded] !== this.currentDoc.lines[node.endLine]) {
-      return this.wrapLines ? this.wrapPlan().lastRow[folded] ?? 0 : folded;
+      return plan ? plan.lastRow[folded] ?? 0 : folded;
     }
-    return this.toDisplay(
+    const endCol = this.renderedLineChangesColumns(node.endLine)
+      ? codePointLength(this.currentDoc.lines[node.endLine]?.text ?? "")
+      : node.endCol;
+    return this.toDisplayWithPlan(
       node.endLine,
-      this.displayCol(node.endLine, Math.max(0, node.endCol - 1)),
+      this.displayCol(node.endLine, Math.max(0, endCol - 1)),
+      plan,
     );
   }
 
@@ -859,11 +1201,15 @@ export class Session {
     // line, where the block opens) would otherwise be off screen. Horizontal
     // scroll is left untouched for the same reason. Anchors are in display rows,
     // since a collapsed file's lines share its summary row.
-    this.top = scrollToAnchor(
-      this.nodeStartRow(node),
-      this.top,
-      this.height,
-      this.displayCount(),
+    this.top = clamp(
+      scrollToAnchor(
+        this.nodeStartRow(node),
+        this.top,
+        this.height,
+        this.displayCount(),
+      ),
+      0,
+      this.lastTop(),
     );
     this.message = "";
   }
@@ -887,7 +1233,7 @@ export class Session {
   }
 
   private openPeek(node: StructureNode, expanded = false): void {
-    const card = buildPeekCard(this.doc, node, this.semantics, expanded);
+    const card = buildPeekCard(this.sourceDoc, node, this.semantics, expanded);
     this.overlay = {
       title: card.title,
       info: card.info,
@@ -904,7 +1250,7 @@ export class Session {
    * scroll position so the newly revealed entries appear where "… N more" was. */
   private expandCard(node: StructureNode): void {
     const scroll = this.overlayScroll;
-    const card = buildPeekCard(this.doc, node, this.semantics, true);
+    const card = buildPeekCard(this.sourceDoc, node, this.semantics, true);
     this.overlay = {
       ...this.overlay!,
       info: card.info,
@@ -927,7 +1273,7 @@ export class Session {
       n.startOffset === def.startOffset && n.endOffset === def.endOffset
     );
     if (node) {
-      const card = buildPeekCard(this.doc, node, this.semantics);
+      const card = buildPeekCard(this.sourceDoc, node, this.semantics);
       this.overlay = {
         title: `definition: ${card.title}`,
         info: card.info,
@@ -940,7 +1286,7 @@ export class Session {
     } else {
       this.overlay = {
         title: `definition: ${name}  (${def.kind})`,
-        info: this.doc.lines.slice(def.startLine, def.endLine + 1),
+        info: this.sourceDoc.lines.slice(def.startLine, def.endLine + 1),
         mode: "info",
         targets: [],
         cardSel: -1,
@@ -1010,7 +1356,9 @@ export class Session {
     // workspace prefix and drop the identifying part.
     const name = target.filePath!.split(/[\\/]/).pop() ?? target.filePath!;
     this.overlay = {
-      title: `${name}  ·  line ${target.destLine + 1}`,
+      title: `${name}  ·  line ${target.destLine + 1}, column ${
+        target.destCol + 1
+      }`,
       info: lines,
       mode: "info",
       targets: [],
@@ -1050,7 +1398,10 @@ export class Session {
     if (idx < 0) idx = nodeAtLine(this.doc.flatStructure, target.destLine);
     this.selectedIndex = idx >= 0 ? idx : null;
     const node = idx >= 0 ? this.doc.flatStructure[idx] : null;
-    const destCol = this.displayCol(target.destLine, target.destCol);
+    const sourceCol = this.renderedLineChangesColumns(target.destLine)
+      ? 0
+      : target.destCol;
+    const destCol = this.displayCol(target.destLine, sourceCol);
     const destRow = this.toDisplay(target.destLine, destCol);
     // Frame the resolved node and destination together when they fit. Otherwise
     // center the destination row so the referenced text is visible.
@@ -1064,18 +1415,17 @@ export class Session {
         end = destRow;
       }
     }
-    this.top = frameTop(
-      start,
-      end,
-      this.height,
-      this.displayCount(),
+    this.top = clamp(
+      frameTop(
+        start,
+        end,
+        this.height,
+        this.displayCount(),
+      ),
+      0,
+      this.lastTop(),
     );
-    if (
-      !this.wrapLines &&
-      (destCol < this.left || destCol >= this.left + this.width)
-    ) {
-      this.left = clamp(destCol - 4, 0, this.maxLineLen);
-    }
+    this.revealColumn(target.destLine, destCol);
     this.message = `→ line ${target.destLine + 1}`;
   }
 
@@ -1197,15 +1547,10 @@ export class Session {
       this.top = clamp(
         row - Math.floor(this.contentRows() / 2),
         0,
-        maxTop(this.displayCount(), this.height),
+        this.lastTop(),
       );
     }
-    if (
-      !this.wrapLines &&
-      (col < this.left || col >= this.left + this.width)
-    ) {
-      this.left = clamp(col - 4, 0, this.maxLineLen);
-    }
+    this.revealColumn(m.line, col);
     this.message = "";
   }
 
@@ -1423,7 +1768,7 @@ export class Session {
     }
 
     const rows = this.contentRows();
-    const lastTop = maxTop(this.displayCount(), this.height);
+    const lastTop = this.lastTop();
     switch (key.name) {
       case "q":
       case "Q":
@@ -1438,6 +1783,10 @@ export class Session {
         this.mode = "search";
         this.input = "";
         this.searchAnchor = null;
+        return;
+      case "v":
+      case "V":
+        this.toggleViewMode();
         return;
       case "e":
         // Enter edit mode: reveal the text cursor at the top of the view.
@@ -1465,13 +1814,13 @@ export class Session {
       case "H":
         this.left = this.wrapLines
           ? 0
-          : clamp(this.left - HORIZONTAL_STEP, 0, this.maxLineLen);
+          : clamp(this.left - this.horizontalStep(), 0, this.maxLeft());
         return;
       case "l":
       case "L":
         this.left = this.wrapLines
           ? 0
-          : clamp(this.left + HORIZONTAL_STEP, 0, this.maxLineLen);
+          : clamp(this.left + this.horizontalStep(), 0, this.maxLeft());
         return;
       case "space":
       case "pagedown":
@@ -1537,17 +1886,21 @@ export class Session {
       case "Z": {
         const node = this.selectedNode();
         if (node) {
-          this.top = frameTop(
-            this.nodeStartRow(node),
-            this.nodeEndRow(node),
-            this.height,
-            this.displayCount(),
+          this.top = clamp(
+            frameTop(
+              this.nodeStartRow(node),
+              this.nodeEndRow(node),
+              this.height,
+              this.displayCount(),
+            ),
+            0,
+            this.lastTop(),
           );
         }
         return;
       }
       case "\\":
-        this.toggleLineWrapping();
+        this.cycleLineWrapping();
         return;
       case "#":
         this.cycleLineNumbers();
@@ -1569,7 +1922,10 @@ export class Session {
         this.expandAllFiles();
         return;
       case "T":
-        this.collapseTestFiles();
+        this.toggleFileCategory((file) => file.isTest, "test");
+        return;
+      case "M":
+        this.toggleFileCategory((file) => file.isMarkdown, "Markdown");
         return;
       case "escape": {
         const anchor = this.wrapLines ? this.viewportAnchor() : null;
@@ -1578,6 +1934,7 @@ export class Session {
         this.matches = [];
         this.message = "";
         if (anchor) this.restoreWrappedAnchor(anchor);
+        else this.clampScroll();
         return;
       }
     }
@@ -1602,10 +1959,15 @@ export class Session {
     this.message = `Non-printables: ${displayModeLabel(this.displayMode)}`;
   }
 
-  /** Toggle line wrapping while keeping the top-left content in view. */
-  private toggleLineWrapping(): void {
+  /** Step through wrapping modes while keeping the top-left content in view. */
+  private cycleLineWrapping(): void {
     const anchor = this.viewportAnchor();
-    this.wrapLines = !this.wrapLines;
+    this.wrapMode = this.wrapMode === "off"
+      ? "hard"
+      : this.wrapMode === "hard"
+      ? "word"
+      : "off";
+    this.expansionLayoutCache = undefined;
     if (this.wrapLines) {
       this.left = 0;
       this.restoreWrappedAnchor(anchor);
@@ -1614,7 +1976,7 @@ export class Session {
       this.left = anchor.displayCol;
       this.clampScroll();
     }
-    this.message = `Line wrapping: ${this.wrapLines ? "on" : "off"}`;
+    this.message = `Line wrapping: ${this.wrapMode}`;
   }
 
   // --- file-fold commands ----------------------------------------------------
@@ -1638,7 +2000,9 @@ export class Session {
         this.currentDoc.lines[node.startLine];
       return {
         docLine: node.startLine,
-        sourceCol: node.startCol,
+        sourceCol: this.renderedLineChangesColumns(node.startLine)
+          ? 0
+          : node.startCol,
         syntheticDisplayCol: synthetic && folded === anchor.foldedLine
           ? anchor.displayCol
           : undefined,
@@ -1676,8 +2040,9 @@ export class Session {
     this.top = clamp(
       row,
       0,
-      maxTop(this.displayCount(), this.height),
+      this.lastTop(),
     );
+    this.clampScroll();
   }
 
   /** Toggle the file the viewport (or selection) is on between shown and hidden. */
@@ -1723,37 +2088,49 @@ export class Session {
     this.message = "Showing all files.";
   }
 
-  /** Hide every test / test-support file, leaving the rest shown. */
-  private collapseTestFiles(): void {
+  /** Toggle one kind of file as a group. A mixed group is made fully hidden. */
+  private toggleFileCategory(
+    matches: (file: DiffFileRange) => boolean,
+    label: string,
+  ): void {
     if (!this.ensureDiffForFolding()) return;
+    const files = this.foldFiles().filter(matches);
+    if (files.length === 0) {
+      this.message = `No ${label} files.`;
+      return;
+    }
     const anchor = this.foldAnchor();
-    let n = 0;
-    for (const f of this.foldFiles()) {
-      if (f.isTest && !this.collapsed.has(f.index)) {
+    const expand = files.every((file) => this.collapsed.has(file.index));
+    let changed = 0;
+    for (const f of files) {
+      if (expand) {
+        this.collapsed.delete(f.index);
+        changed++;
+      } else if (!this.collapsed.has(f.index)) {
         this.collapsed.add(f.index);
-        n++;
+        changed++;
       }
     }
-    if (n > 0) this.applyFoldChange(anchor);
-    this.message = n > 0
-      ? `Hid ${n} test file${n === 1 ? "" : "s"}.`
-      : "No shown test files to hide.";
+    this.applyFoldChange(anchor);
+    this.message = `${expand ? "Showing" : "Hid"} ${changed} ${label} file${
+      changed === 1 ? "" : "s"
+    }.`;
   }
 
   // --- editing ---------------------------------------------------------------
 
   private scrollOrPan(name: string): void {
-    const lastTop = maxTop(this.displayCount(), this.height);
+    const lastTop = this.lastTop();
     if (name === "up") this.top = clamp(this.top - 1, 0, lastTop);
     else if (name === "down") this.top = clamp(this.top + 1, 0, lastTop);
     else if (name === "left") {
       this.left = this.wrapLines
         ? 0
-        : clamp(this.left - HORIZONTAL_STEP, 0, this.maxLineLen);
+        : clamp(this.left - this.horizontalStep(), 0, this.maxLeft());
     } else if (name === "right") {
       this.left = this.wrapLines
         ? 0
-        : clamp(this.left + HORIZONTAL_STEP, 0, this.maxLineLen);
+        : clamp(this.left + this.horizontalStep(), 0, this.maxLeft());
     }
   }
 
@@ -1764,6 +2141,7 @@ export class Session {
         "This view has no underlying file to edit.";
       return;
     }
+    const leftRenderedView = this.setViewMode("source", false);
     const wasWrapped = this.wrapLines;
     const anchor = wasWrapped ? this.viewportAnchor() : null;
     const topDoc = anchor?.docLine ?? this.toDoc(this.top);
@@ -1773,7 +2151,7 @@ export class Session {
     const cursorCol = anchor && displayedLine === this.currentDoc.lines[topDoc]
       ? this.anchorSourceCol(anchor)
       : 0;
-    this.wrapLines = false;
+    this.wrapMode = "off";
     this.cursorOn = true;
     this.selectedIndex = null;
     // Editing relies on every source column mapping to one display column, which
@@ -1787,7 +2165,13 @@ export class Session {
     this.buffer.place(topDoc, cursorCol);
     this.seedHighlighter();
     this.ensureCursorVisible();
-    if (wasWrapped) this.message = "Line wrapping turned off for editing.";
+    if (leftRenderedView && wasWrapped) {
+      this.message = "Source view; line wrapping turned off for editing.";
+    } else if (leftRenderedView) {
+      this.message = "Source view for editing.";
+    } else if (wasWrapped) {
+      this.message = "Line wrapping turned off for editing.";
+    }
   }
 
   private markFoldChanged(): void {
@@ -1917,6 +2301,7 @@ export class Session {
       case "escape":
         this.cursorOn = false;
         this.reparse(); // refresh structure before returning to navigation
+        this.ensureCursorVisible();
         return;
       case "ctrl-s":
         this.enterEditSearch();
@@ -2341,10 +2726,11 @@ export class Session {
         // fraction of a full parse because it skips the structure tree. The
         // structure (navigation, cross-references) is refreshed on the deferred
         // re-parse.
-        this.currentDoc = { ...this.currentDoc, text, lines };
+        this.sourceDoc = { ...this.sourceDoc, text, lines };
+        this.currentDoc = this.sourceDoc;
         this.needsReparse = true;
       } else {
-        this.currentDoc = this.source.parse(text);
+        this.setSourceDocument(this.source.parse(text));
         this.needsReparse = false;
       }
     }
@@ -2376,7 +2762,7 @@ export class Session {
    * the next edit re-seeds it from this authoritative parse. */
   reparse(): void {
     if (!this.source || !this.buffer || !this.needsReparse) return;
-    this.currentDoc = this.source.parse(this.buffer.text());
+    this.setSourceDocument(this.source.parse(this.buffer.text()));
     this.needsReparse = false;
     // Re-baseline the live highlighter from this authoritative parse while still
     // editing; drop it when leaving edit mode.
@@ -2408,16 +2794,116 @@ export class Session {
     const cw = this.contentWidth();
     if (b.col < this.left) this.left = b.col;
     else if (b.col >= this.left + cw) this.left = b.col - cw + 1;
-    this.left = clamp(this.left, 0, this.maxLineLen);
+    this.left = clamp(this.left, 0, this.maxLeft());
   }
 
   private contentWidth(): number {
-    const gutterWidth = this.gutterWidth();
-    const guideWidth = this.selectedNode() ? 1 : 0;
-    const fitted = this.wrapLines
-      ? fitWrapChrome(this.width, gutterWidth, guideWidth)
-      : { gutterWidth, guideWidth };
-    return Math.max(1, this.width - fitted.gutterWidth - fitted.guideWidth);
+    const fitted = fitViewLayout(
+      this.width,
+      this.gutterWidth(),
+      this.selectedNode() ? 1 : 0,
+      this.hasDiffMargin() ? DIFF_MARGIN_WIDTH : 0,
+      this.wrapLines,
+    );
+    return fitted.contentWidth + fitted.marginWidth;
+  }
+
+  /** Pager annotations currently visible beside logical document lines. */
+  private activeDiffAnnotations(): readonly DiffAnnotation[] {
+    if (
+      this.mode !== "normal" || this.overlay || this.cursorOn ||
+      this.chord !== null || !this.source?.expandContext
+    ) {
+      return [];
+    }
+    const expand = this.expandOffer();
+    return expand && !("blocked" in expand)
+      ? this.displayDiffAnnotations(expand)
+      : [];
+  }
+
+  /** Widest folded line under the active non-printable display mode. */
+  private maxDisplayWidth(): number {
+    const lines = this.foldPlan().displayLines;
+    if (
+      this.maxDisplayWidthCache?.lines !== lines ||
+      this.maxDisplayWidthCache.mode !== this.displayMode
+    ) {
+      let width = 0;
+      for (const line of lines) {
+        width = Math.max(width, displayWidth(line, this.displayMode));
+      }
+      this.maxDisplayWidthCache = { lines, mode: this.displayMode, width };
+    }
+    return this.maxDisplayWidthCache.width;
+  }
+
+  /** Source cells available on one folded line after its annotation and, on
+   * the first line, the whole-diff totals label. */
+  private lineContentWidth(
+    foldedLine: number,
+    annotations = this.activeDiffAnnotations(),
+    contentWidth = this.contentWidth(),
+  ): number {
+    const annotation = annotations.find((item) => item.line === foldedLine);
+    const annotationWidth = annotation
+      ? diffAnnotationDecoration(annotation.kind, contentWidth).firstWidth
+      : 0;
+    const totalsWidth = foldedLine === 0 ? this.cornerTotalsWidth() : 0;
+    return Math.max(1, contentWidth - annotationWidth - totalsWidth);
+  }
+
+  /** Furthest horizontal offset needed by any line under its own annotation
+   * or, on the first line, the whole-diff totals label. */
+  private maxLeft(
+    annotations: readonly DiffAnnotation[] = this.activeDiffAnnotations(),
+  ): number {
+    if (!this.hasDiffMargin()) return this.maxLineLen;
+    const contentWidth = this.contentWidth();
+    let width = this.maxDisplayWidth() - contentWidth;
+    const lines = this.foldPlan().displayLines;
+    const constrained = new Set(
+      annotations.map((annotation) => annotation.line),
+    );
+    if (this.cornerTotalsWidth() > 0) constrained.add(0);
+    for (const lineIdx of constrained) {
+      const line = lines[lineIdx];
+      if (!line) continue;
+      width = Math.max(
+        width,
+        displayWidth(line, this.displayMode) -
+          this.lineContentWidth(lineIdx, annotations, contentWidth),
+      );
+    }
+    return Math.max(0, width);
+  }
+
+  /** Horizontal pan distance for the current content width. */
+  private horizontalStep(): number {
+    if (!this.hasDiffMargin()) return HORIZONTAL_STEP;
+    const annotations = this.activeDiffAnnotations();
+    let width = this.lineContentWidth(0, annotations);
+    for (const annotation of annotations) {
+      width = Math.min(
+        width,
+        this.lineContentWidth(annotation.line, annotations),
+      );
+    }
+    return Math.max(1, Math.min(HORIZONTAL_STEP, width));
+  }
+
+  /** Bring one display column into an unwrapped viewport. */
+  private revealColumn(docLine: number, col: number): void {
+    if (this.wrapLines) return;
+    const width = this.lineContentWidth(this.toFolded(docLine));
+    if (col >= this.left && col < this.left + width) return;
+    const leading = Math.min(4, width - 1);
+    this.left = clamp(col - leading, 0, this.maxLeft());
+  }
+
+  /** Whether this pager can draw diff annotations. */
+  private hasDiffMargin(): boolean {
+    return !this.cursorOn && !!this.source?.expandContext;
   }
 
   /** Cycle the line-number gutter: off → input position → file/message line. */
@@ -2427,6 +2913,7 @@ export class Session {
     this.lineNumberMode =
       order[(order.indexOf(this.lineNumberMode) + 1) % order.length];
     if (anchor) this.restoreWrappedAnchor(anchor);
+    else this.clampScroll();
     const label = this.lineNumberMode === "off"
       ? "off"
       : this.lineNumberMode === "input"
@@ -2792,7 +3279,7 @@ export class Session {
     this.buffer.setText(result.text, result.cursorLine, 0);
     this.splitRow = null;
     this.snapCursorToEditable();
-    this.currentDoc = this.source.parse(result.text);
+    this.setSourceDocument(this.source.parse(result.text));
     this.needsReparse = false;
     if (this.cursorOn) this.seedHighlighter();
     this.clampScroll();
@@ -2817,10 +3304,10 @@ export class Session {
 
   /** Reveal more of the underlying file around a hunk (Ctrl-L). When the text
    * cursor is active the hunk is the one it sits in and the view follows the
-   * cursor; in pager mode it is the hunk at the middle of the screen, and the
-   * view holds the far edge of that hunk still so the revealed lines open a gap
-   * in front of the user. The extra context is applied to the baseline too, so
-   * it does not count as an unsaved edit. */
+   * cursor; in pager mode it is the hunk nearest one quarter down the visible
+   * content, and the view holds the far edge of that hunk still so the revealed
+   * lines open a gap in front of the user. The extra context is applied to the
+   * baseline too, so it does not count as an unsaved edit. */
   private performExpand(): void {
     if (!this.source?.expandContext || !this.buffer) {
       this.message = "Expanding context isn't available here.";
@@ -2851,6 +3338,9 @@ export class Session {
       }
       refLine = offer.line;
       up = offer.up;
+      if (this.wrapLines) {
+        this.syncWrapDecorations(this.displayDiffAnnotations(offer));
+      }
     }
     const r = this.source.expandContext(
       this.buffer.text(),
@@ -2884,8 +3374,12 @@ export class Session {
     this.buffer.setBaseline(r.baseline);
     this.buffer.setText(r.text, r.cursorLine, col);
     this.splitRow = null;
-    this.currentDoc = this.source.parse(r.text);
+    this.setSourceDocument(this.source.parse(r.text));
     this.needsReparse = false;
+    this.wrapDecorations = new Map();
+    this.wrapDecorationKey = "";
+    this.wrapPlanCache = undefined;
+    this.expansionLayoutCache = undefined;
     if (this.cursorOn) {
       this.seedHighlighter();
       this.clampScroll();
@@ -2896,7 +3390,57 @@ export class Session {
     // Pager mode: re-point the selection at the same node (its line moved), and
     // put the pinned line back on the row it was on.
     this.reselectAfterExpand(selected, moved);
-    this.top = this.toDisplay(moved(pinDoc)) - pinRow;
+    const movedPin = moved(pinDoc);
+    if (this.wrapLines) {
+      const basePlan = this.baseWrapPlan();
+      const basePin = this.toDisplayWithPlan(movedPin, 0, basePlan);
+      const baseTop = clamp(
+        basePin - pinRow,
+        0,
+        this.pagerLastTop(basePlan.rowCount),
+      );
+      this.top = baseTop;
+      const next = this.expandOffer();
+      const nextOffer = next && !("blocked" in next) ? next : null;
+      let nextAnnotations = this.displayDiffAnnotations(nextOffer);
+      let state = this.wrapDecorationState(nextAnnotations);
+      this.wrapDecorations = state.decorations;
+      this.wrapDecorationKey = state.key;
+      this.wrapPlanCache = undefined;
+      let decoratedPlan = this.wrapPlan();
+      let decoratedTop = clamp(
+        this.toDisplayWithPlan(movedPin, 0, decoratedPlan) - pinRow,
+        0,
+        this.pagerLastTop(decoratedPlan.rowCount),
+      );
+      const visible = this.metadataWithVisibleTriangle(
+        nextAnnotations,
+        decoratedPlan,
+        decoratedTop,
+      );
+      if (visible.length !== nextAnnotations.length) {
+        nextAnnotations = visible;
+        state = this.wrapDecorationState(nextAnnotations);
+        this.wrapDecorations = state.decorations;
+        this.wrapDecorationKey = state.key;
+        this.wrapPlanCache = undefined;
+        decoratedPlan = this.wrapPlan();
+        decoratedTop = clamp(
+          this.toDisplayWithPlan(movedPin, 0, decoratedPlan) - pinRow,
+          0,
+          this.pagerLastTop(decoratedPlan.rowCount),
+        );
+      }
+      this.top = decoratedTop;
+      this.expansionLayoutCache = {
+        decoratedPlan,
+        decoratedTop: this.top,
+        basePlan,
+        baseTop,
+      };
+    } else {
+      this.top = this.toDisplay(movedPin) - pinRow;
+    }
     this.clampScroll();
     // The revealed lines fill the gap the insertion point opened, so the driver
     // can walk them in from the held edge. A join is drawn in one step instead:
@@ -2946,28 +3490,54 @@ export class Session {
     this.selectedIndex = idx >= 0 ? idx : null;
   }
 
-  /** Whether a node is on screen: its display rows overlap the viewport, and it
-   * is not inside a collapsed file. A collapsed file's inner lines all map to
-   * its summary row, which overlaps the viewport whenever that row is shown, so
-   * the hidden range is excluded by its document extent instead. */
-  private nodeOnScreen(node: StructureNode): boolean {
+  /** Whether a node overlaps one viewport under a specific wrapped layout.
+   * Nodes inside a collapsed file are excluded because their hidden lines map
+   * to the visible file summary. */
+  private nodeOnScreenWithLayout(
+    node: StructureNode,
+    plan: WrapPlan | null,
+    top: number,
+  ): boolean {
     const inHiddenFile = this.foldFiles().some((f) =>
       this.collapsed.has(f.index) &&
       node.startLine > f.headerLine && node.startLine <= f.endLine
     );
     if (inHiddenFile) return false;
-    return this.nodeEndRow(node) >= this.top &&
-      this.nodeStartRow(node) < this.top + this.contentRows();
+    return this.nodeEndRowWithPlan(node, plan) >= top &&
+      this.nodeStartRowWithPlan(node, plan) < top + this.contentRows();
   }
 
-  /** The middle of the content on screen, as a display row. The rows the
-   * content occupies, rather than the rows the terminal has: a document shorter
-   * than the screen ends part-way down it, and the rows past its end are not
-   * somewhere the user is looking. */
-  private middleRow(): number {
-    const last = Math.min(this.top + this.contentRows(), this.displayCount()) -
-      1;
-    return Math.floor((this.top + last) / 2);
+  /** The row one quarter down the screen's content area. */
+  private expansionTargetRow(top: number): number {
+    return top + Math.floor((this.contentRows() - 1) / 4);
+  }
+
+  /** Expansion layout without the annotations that the chosen edge produces. */
+  private expansionLayout(): { plan: WrapPlan | null; top: number } {
+    if (!this.wrapLines) return { plan: null, top: this.top };
+    const decorated = this.wrapPlan();
+    const base = this.baseWrapPlan();
+    if (
+      this.expansionLayoutCache?.decoratedPlan === decorated &&
+      this.expansionLayoutCache.basePlan === base &&
+      this.expansionLayoutCache.decoratedTop === this.top
+    ) {
+      return { plan: base, top: this.expansionLayoutCache.baseTop };
+    }
+    const topRow = wrappedRowAt(
+      decorated,
+      clamp(this.top, 0, Math.max(0, decorated.rowCount - 1)),
+    );
+    const baseTop = topRow
+      ? wrappedRowForPosition(base, topRow.line, topRow.offset)?.row ?? 0
+      : 0;
+    this.expansionLayoutCache = {
+      decoratedPlan: decorated,
+      decoratedTop: this.top,
+      basePlan: base,
+      baseTop,
+    };
+    return { plan: base, top: baseTop };
   }
 
   /** How much context each hunk can still reveal, keyed by its header line.
@@ -2982,49 +3552,253 @@ export class Session {
     return this.roomCache.room;
   }
 
-  /** Every hunk edge the user can see: the row it sits on, the line to expand
-   * from, which way that grows, and what the file offers there. A hunk with
-   * neither edge on screen offers nothing to aim at — its boundaries are off in
-   * the dark, and growing one would happen where it could not be watched. */
-  private visibleEdges(): {
-    row: number;
-    line: number;
-    up: boolean;
-    room: HunkRoom;
-  }[] {
+  /** Lines classified as file or hunk metadata by the diff parser. */
+  private diffMetadataLines(): readonly number[] {
+    if (this.diffMetadataCache?.doc === this.currentDoc) {
+      return this.diffMetadataCache.lines;
+    }
+    const lines: number[] = [];
+    const model = parseDiff(this.currentDoc.text);
+    if (model) {
+      for (let line = 0; line < model.lines.length; line++) {
+        const kind = model.lines[line].kind;
+        if (kind === "meta" || kind === "hunk") {
+          lines.push(line);
+        }
+      }
+    }
+    this.diffMetadataCache = { doc: this.currentDoc, lines };
+    return lines;
+  }
+
+  /** Metadata line directly beyond the marked expansion edge. */
+  private adjacentDiffMetadataLine(expand: ExpandOffer | null): number | null {
+    if (!expand || expand.markerLine === null) return null;
+    const line = expand.up ? expand.line : expand.line + 1;
+    return this.diffMetadataLines().includes(line) ? line : null;
+  }
+
+  /** Screen rows of metadata directly beyond the marked expansion edge. */
+  private displayAdjacentDiffMetadataRows(
+    expand: ExpandOffer | null,
+  ): readonly number[] {
+    const line = this.adjacentDiffMetadataLine(expand);
+    if (line === null) return [];
+    const fold = this.foldPlan();
+    const folded = fold.docToDisplay(line);
+    if (fold.displayLines[folded] !== this.currentDoc.lines[line]) return [];
+    const first = this.toDisplay(line);
+    const last = this.toDisplayEnd(line);
+    const rows: number[] = [];
+    for (let row = first; row <= last; row++) rows.push(row);
+    return rows;
+  }
+
+  /** Annotations for an expansion triangle visible in the base layout. */
+  private displayDiffAnnotations(
+    expand: ExpandOffer | null,
+  ): DiffAnnotation[] {
+    const { top } = this.expansionLayout();
+    if (
+      !expand || expand.markerLine === null || expand.row === null ||
+      expand.row < top || expand.row >= top + this.contentRows()
+    ) {
+      return [];
+    }
+    const fold = this.foldPlan();
+    const marker = fold.docToDisplay(expand.markerLine);
+    if (
+      fold.displayLines[marker] !== this.currentDoc.lines[expand.markerLine]
+    ) {
+      return [];
+    }
+    const annotations: DiffAnnotation[] = [{
+      line: marker,
+      kind: expand.up ? "expandUp" : "expandDown",
+    }];
+    const metadataLine = this.adjacentDiffMetadataLine(expand);
+    if (metadataLine !== null) {
+      const metadata = fold.docToDisplay(metadataLine);
+      if (
+        fold.displayLines[metadata] === this.currentDoc.lines[metadataLine]
+      ) {
+        annotations.push({ line: metadata, kind: "diffMetadata" });
+      }
+    }
+    return annotations;
+  }
+
+  /** Apply line-specific wrap widths while keeping the viewport's source
+   * position fixed. */
+  private syncWrapDecorations(
+    annotations: readonly DiffAnnotation[],
+  ): DiffAnnotation[] {
+    let visible = [...annotations];
+    const baseTop = this.wrapLines ? this.expansionLayout().top : 0;
+    const anchor = this.wrapLines ? this.viewportAnchor() : null;
+    if (anchor) {
+      const tentative = this.wrapDecorationState(visible);
+      const plan = buildWrapPlan(
+        this.foldPlan().displayLines,
+        this.displayMode,
+        this.contentWidth(),
+        tentative.decorations,
+        this.activeWrapMode,
+      );
+      const top = this.wrappedTopForAnchor(anchor, plan);
+      visible = this.metadataWithVisibleTriangle(visible, plan, top);
+    }
+    const state = this.wrapDecorationState(visible);
+    if (state.key === this.wrapDecorationKey) return visible;
+    this.wrapDecorations = state.decorations;
+    this.wrapDecorationKey = state.key;
+    this.wrapPlanCache = undefined;
+    if (anchor) {
+      this.restoreWrappedAnchor(anchor);
+      this.expansionLayoutCache = {
+        decoratedPlan: this.wrapPlan(),
+        decoratedTop: this.top,
+        basePlan: this.baseWrapPlan(),
+        baseTop,
+      };
+    }
+    return visible;
+  }
+
+  /** Top row produced by restoring one source position in a wrapped plan. */
+  private wrappedTopForAnchor(anchor: ViewportAnchor, plan: WrapPlan): number {
+    const line = clamp(
+      anchor.foldedLine,
+      0,
+      Math.max(0, plan.firstRow.length - 1),
+    );
+    const row = wrappedRowForPosition(plan, line, anchor.displayCol)?.row ?? 0;
+    return clamp(row, 0, this.pagerLastTop(plan.rowCount));
+  }
+
+  /** Hide a metadata label when its reflow pushes the triangle off-screen. */
+  private metadataWithVisibleTriangle(
+    annotations: readonly DiffAnnotation[],
+    plan: WrapPlan,
+    top: number,
+  ): DiffAnnotation[] {
+    const triangle = annotations.find((annotation) =>
+      annotation.kind !== "diffMetadata"
+    );
+    if (
+      !triangle ||
+      !annotations.some((annotation) => annotation.kind === "diffMetadata")
+    ) {
+      return [...annotations];
+    }
+    const row = plan.firstRow[triangle.line];
+    if (row >= top && row < top + this.contentRows()) {
+      return [...annotations];
+    }
+    return annotations.filter((annotation) =>
+      annotation.kind !== "diffMetadata"
+    );
+  }
+
+  /** Wrap widths and cache identity for one set of diff annotations. */
+  private wrapDecorationState(
+    annotations: readonly DiffAnnotation[],
+  ): { decorations: Map<number, WrapDecoration>; key: string } {
+    const decorations = new Map<number, WrapDecoration>();
+    const contentWidth = this.contentWidth();
+    const totalsWidth = this.wrapLines ? this.cornerTotalsWidth() : 0;
+    const metadataLabelLine = this.wrapLines
+      ? labeledDiffMetadataLine(
+        this.foldPlan().displayLines,
+        this.displayMode,
+        contentWidth,
+        annotations,
+        totalsWidth,
+      )
+      : null;
+    if (this.wrapLines) {
+      for (const annotation of annotations) {
+        decorations.set(
+          annotation.line,
+          diffAnnotationDecoration(
+            annotation.kind,
+            contentWidth,
+            annotation.kind !== "diffMetadata" ||
+              annotation.line === metadataLabelLine,
+          ),
+        );
+      }
+      if (totalsWidth > 0) {
+        decorations.set(
+          0,
+          diffTotalsDecoration(totalsWidth, contentWidth, decorations.get(0)),
+        );
+      }
+    }
+    const key = this.wrapLines
+      ? `${contentWidth}|${this.displayMode}|${
+        metadataLabelLine ?? "-"
+      }|${totalsWidth}|${
+        annotations.map((annotation) => `${annotation.line}:${annotation.kind}`)
+          .join(",")
+      }`
+      : "";
+    return { decorations, key };
+  }
+
+  /** Every hunk boundary visible at its expansion row. `markerLine` names the
+   * first or last body line and is null when the hunk has no body. */
+  private visibleEdges(
+    plan: WrapPlan | null,
+    top: number,
+  ): ExpandEdge[] {
     const room = this.expandRoom();
     const rows = this.contentRows();
-    const onScreen = (row: number) => row >= this.top && row < this.top + rows;
-    const out = [];
+    const onScreen = (row: number) => row >= top && row < top + rows;
+    const out: ExpandEdge[] = [];
     for (const h of this.doc.flatStructure) {
-      if (h.kind !== "hunk" || !this.nodeOnScreen(h)) continue;
+      if (
+        h.kind !== "hunk" || !this.nodeOnScreenWithLayout(h, plan, top)
+      ) {
+        continue;
+      }
       const r = room.get(h.startLine);
       if (!r) continue;
-      // The top edge is the header the revealed lines land under; the bottom is
-      // the last body line they land after.
+      const firstBodyLine = h.startLine + 1;
+      const hasBody = firstBodyLine <= h.endLine;
+      // Expansion visibility stays on the hunk boundary. A separate body-line
+      // row places the marker without moving which edge Ctrl-L targets.
       for (
-        const [line, up] of [[h.startLine, true], [h.endLine, false]] as const
+        const [line, markerLine, up] of [
+          [h.startLine, hasBody ? firstBodyLine : null, true],
+          [h.endLine, hasBody ? h.endLine : null, false],
+        ] as const
       ) {
-        const row = up ? this.toDisplay(line) : this.toDisplayEnd(line);
-        if (onScreen(row)) out.push({ row, line, up, room: r });
+        const aimRow = this.toDisplayEndWithPlan(line, plan);
+        const row = markerLine === null
+          ? null
+          : this.toDisplayWithPlan(markerLine, 0, plan);
+        if (onScreen(aimRow)) {
+          out.push({ row, markerLine, aimRow, line, up, room: r });
+        }
       }
     }
     return out;
   }
 
   /** The hunk edge Ctrl-L acts on in pager mode: the visible one nearest the
-   * middle of the screen, or nearest a selected node when one sits in a hunk.
-   * Null when no edge is on screen. The edge is returned whether or not it has
-   * room, so that the offer of Ctrl-L and what Ctrl-L does agree. */
-  private expandEdge():
-    | { line: number; up: boolean; room: HunkRoom }
-    | null {
-    const edges = this.visibleEdges();
+   * row one quarter down the visible content, or nearest a selected node when
+   * one sits in a hunk. Null when no edge is on screen. The edge is returned
+   * whether or not it has room, so that the offer of Ctrl-L and what Ctrl-L
+   * does agree. */
+  private expandEdge(): ExpandEdge | null {
+    const { plan, top } = this.expansionLayout();
+    const edges = this.visibleEdges(plan, top);
     if (edges.length === 0) return null;
     // A selected node sitting in a hunk aims at that hunk, and its own row is
     // what the edges are measured from: the user picked a place to look.
     const sel = this.selectedNode();
-    const own = sel && this.nodeOnScreen(sel)
+    const own = sel && this.nodeOnScreenWithLayout(sel, plan, top)
       ? edges.filter((e) =>
         this.doc.flatStructure.some((h) =>
           h.kind === "hunk" && h.startLine <= e.line && e.line <= h.endLine &&
@@ -3032,36 +3806,46 @@ export class Session {
         )
       )
       : [];
-    const from = own.length > 0 ? this.nodeStartRow(sel!) : this.middleRow();
+    const from = own.length > 0
+      ? this.nodeStartRowWithPlan(sel!, plan)
+      : this.expansionTargetRow(top);
     const pool = own.length > 0 ? own : edges;
     // Distance in display rows: a collapsed file stands on one row, and the
     // lines it hides are not distance the eye travels.
     let best = pool[0];
     for (const e of pool) {
-      if (Math.abs(e.row - from) < Math.abs(best.row - from)) best = e;
+      const distance = Math.abs(e.aimRow - from);
+      const bestDistance = Math.abs(best.aimRow - from);
+      const available = e.up ? e.room.up : e.room.down;
+      const bestAvailable = best.up ? best.room.up : best.room.down;
+      // A hunk with no body has coincident boundaries. Prefer the direction
+      // with context when the other direction has none.
+      if (
+        distance < bestDistance ||
+        (e.aimRow === best.aimRow && available > 0 && bestAvailable === 0)
+      ) {
+        best = e;
+      }
     }
-    return { line: best.line, up: best.up, room: best.room };
-  }
-
-  /** Whether Ctrl-L would reveal anything from where the user is looking, which
-   * is what the status bar offers it on. Edit mode aims with the cursor rather
-   * than the screen, and keeps its own offer. */
-  private canExpand(): boolean {
-    if (this.cursorOn || !this.source?.expandContext) return false;
-    const offer = this.expandOffer();
-    return offer !== null && !("blocked" in offer);
+    return best;
   }
 
   /** Whether Ctrl-L would reveal anything, and what stops it when it would not.
-   * Drives both the status bar's offer of Ctrl-L and the key itself. */
+   * Drives the edge marker, the status bar's offer of Ctrl-L, and the key
+   * itself. */
   private expandOffer():
-    | { line: number; up: boolean }
+    | ExpandOffer
     | { blocked: "top" | "bottom" | "hunk" }
     | null {
     const edge = this.expandEdge();
     if (!edge) return null;
     if ((edge.up ? edge.room.up : edge.room.down) > 0) {
-      return { line: edge.line, up: edge.up };
+      return {
+        row: edge.row,
+        markerLine: edge.markerLine,
+        line: edge.line,
+        up: edge.up,
+      };
     }
     if (edge.up) return { blocked: edge.room.atFileTop ? "top" : "hunk" };
     return { blocked: edge.room.atFileBottom ? "bottom" : "hunk" };
@@ -3074,11 +3858,14 @@ export class Session {
       this.message = "Opening files isn't available here.";
       return;
     }
+    const wasCursorOn = this.cursorOn;
     this.cursorOn = false;
     // Opening the picker drops the text cursor, and cancelling it returns to
     // navigation, which reads the structure tree. Refresh it here as leaving
     // edit mode by Esc does, so that return lands on a current tree.
     this.reparse();
+    if (wasCursorOn) this.ensureCursorVisible();
+    else this.clampScroll();
     this.overlay = null;
     this.overlayStack = [];
     this.pickerDir = this.pickerStartDir();
@@ -3234,7 +4021,7 @@ export class Session {
     this.splitRow = null;
     this.highlighter = undefined; // the old highlighter was for the previous file
     this.clearFolds(); // the previous file's fold indices do not carry over
-    this.currentDoc = opened.source.parse(opened.text);
+    this.setSourceDocument(opened.source.parse(opened.text));
     this.semantics = undefined; // the old service was for the previous file
     this.mode = "normal";
     this.cursorOn = false;
@@ -3312,7 +4099,7 @@ export class Session {
     for (const file of this.foldFiles()) {
       entries.push({
         line: file.headerLine,
-        display: file.summary,
+        display: fileJumpLine(file, this.collapsed.has(file.index)),
         filterText: file.path.toLowerCase(),
         name: file.path,
       });
@@ -3407,7 +4194,7 @@ export class Session {
     this.top = clamp(
       this.toDisplay(docLine),
       0,
-      maxTop(this.displayCount(), this.height),
+      this.lastTop(),
     );
     this.left = 0;
   }
@@ -3533,6 +4320,26 @@ function commitJumpLine(shortSha: string, subject: string): Line {
   return { text, spans };
 }
 
+/** Add the category keys that affect a file to its jump-list row. Collapsed
+ * rows use the dialog's muted style. */
+function fileJumpLine(file: DiffFileRange, collapsed: boolean): Line {
+  const flags = `${file.isMarkdown ? "M" : " "}${file.isTest ? "T" : " "}`;
+  const prefix = `${flags} `;
+  const spans: Span[] = [
+    { col: 0, text: prefix, cls: "builderCall" },
+    ...file.summary.spans.map((span) => ({
+      ...span,
+      col: span.col + 3,
+    })),
+  ];
+  return {
+    text: prefix + file.summary.text,
+    spans: collapsed
+      ? spans.map((span) => ({ ...span, cls: "comment" }))
+      : spans,
+  };
+}
+
 export function helpOverlay(): {
   title: string;
   info: Line[];
@@ -3558,7 +4365,8 @@ export function helpOverlay(): {
     ["Diff files", ""],
     ["  f", "hide / show the file under the cursor (collapse to a summary)"],
     ["  F / E", "hide all files / show all files"],
-    ["  T", "hide test and test-support files"],
+    ["  T", "hide / show test and test-support files"],
+    ["  M", "hide / show Markdown files"],
     ["  i", "list the diff's files and commits, jump to one"],
     ["", ""],
     ["Structure tree", ""],
@@ -3566,7 +4374,7 @@ export function helpOverlay(): {
     ["  A / D", "parent / first child"],
     ["  Tab / ⇧Tab", "next / previous node (depth-first)"],
     ["  Z", "centre selected node"],
-    ["  ^L", "diff: reveal more of the file at the middle of the view"],
+    ["  ^L", "diff: reveal more context at the marked edge"],
     ["  Esc", "clear selection / search"],
     ["", ""],
     ["Editing (a file or a diff)", ""],
@@ -3590,8 +4398,9 @@ export function helpOverlay(): {
     ["  t", "look up a definition by name"],
     ["", ""],
     ["View", ""],
+    ["  V", "toggle source / rendered view when the language supports it"],
     ["  #", "line numbers: off / input position / file or message line"],
-    ["  \\", "wrap / unwrap long lines"],
+    ["  \\", "line wrapping: off / hard / word"],
     ["  C", "cycle non-printables: pictures / ANSI colour / hidden"],
     ["  ?", "this help   ·   Q  quit"],
   ];

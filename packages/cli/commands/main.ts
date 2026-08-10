@@ -2,12 +2,14 @@ import { Command, ValidationError } from "@cliffy/command";
 import { HelpCommand } from "@cliffy/command/help";
 import { acl } from "./acl.ts";
 import { check } from "./dev.ts";
+import { completion } from "./completion.ts";
 import { deps } from "./deps.ts";
 import { exec } from "./exec.ts";
 import { fuse } from "./fuse.ts";
 import { init } from "./init.ts";
 import { inspect } from "./inspect.ts";
 import { piece } from "./piece.ts";
+import { space } from "./space.ts";
 import { identity } from "./identity.ts";
 import { test } from "./test-command.ts";
 import { view } from "./view.ts";
@@ -44,6 +46,11 @@ FIRST TIME SETUP:
   cf id new > claude.key            # Create identity key
   export CF_IDENTITY=./claude.key   # Set default identity
   export CF_API_URL=http://localhost:${ports.toolshed}  # Set default API URL
+
+SHELL COMPLETION:
+  source <(cf completion zsh)      # add to ~/.zshrc  (bash: completion bash)
+  Completes commands and flags, plus live piece ids, callable names, and cell
+  paths. Also completes 'deno task cf ...'. See 'cf completion --help'.
 
 LOCAL DEVELOPMENT:
   ./scripts/start-local-dev.sh      # Start local servers
@@ -93,6 +100,8 @@ export const main = new Command()
   .command("deps", deps)
   // @ts-ignore for the above type issue
   .command("inspect", inspect)
+  // @ts-ignore for the above type issue
+  .command("space", space)
   .command("view", view)
   .command("exec", exec)
   // @ts-ignore for the above type issue
@@ -127,47 +136,35 @@ export const main = new Command()
       .description(
         "Internal: supervise a background FUSE child process.",
       )
-      .arguments("<mountpoint:string>")
-      .option("--api-url <url:string>", "URL of the fabric instance.")
-      .option("--identity <path:string>", "Path to an identity keyfile.")
-      .option("--exec-cli <path:string>", "Path to the cf exec shim.")
-      .option("--log-file <path:string>", "Path to the FUSE child log file.")
-      .option("--allow-other", "Pass allow_other through to the FUSE child.")
-      .option("--noattrcache", "Pass noattrcache through to the FUSE child.")
-      .option(
-        "--attrcache-timeout <seconds:string>",
-        "Pass attrcache-timeout through to the FUSE child.",
-      )
-      .option("--cfc-mode <mode:string>", "FUSE-side CFC mode.")
-      .option("--cfc-annotations", "Publish CFC annotation xattrs.")
-      .option(
-        "--cfc-xattr-namespace <namespace:string>",
-        "CFC xattr namespace.",
-      )
-      .option("--cfc-writeback-xattrs", "Enable CFC writeback xattrs.")
-      .option(
-        "--cfc-writeback-state <path:string>",
-        "CFC writeback state path.",
-      )
-      .option(
-        "--dangerously-allow-incompatible-schema",
-        "Allow incompatible source schema updates.",
-      )
-      .option("--state-path <path:string>", "Mount state file to update.")
-      .option(
-        "--supervisor-status <path:string>",
-        "Child readiness and heartbeat status file.",
-      )
-      .option("-s, --space <name:string>", "Space(s) to connect.", {
-        collect: true,
-      })
-      .action(async (options, mountpoint) => {
-        const { fuseSupervisorOptions, runFuseSupervisor } = await import(
+      .usage("<mountpoint> [options]")
+      // The supervisor argv is parsed once, by the same parser the deno
+      // entrypoint uses, so the compiled binary and `deno run` accept exactly
+      // the same flags.
+      .useRawArgs()
+      .action(async (_options: unknown, ...rawArgs: unknown[]) => {
+        const supervisorArgs = rawArgs.map((arg) => String(arg));
+        const { parseSupervisorArgs, supervisorHelp } = await import(
+          "../lib/fuse-mount-flags.ts"
+        );
+        let parsed;
+        try {
+          parsed = parseSupervisorArgs(supervisorArgs);
+        } catch (error) {
+          throw new ValidationError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+        if (parsed.help) {
+          console.log(supervisorHelp());
+          return;
+        }
+        const { runFuseSupervisor } = await import(
           "../lib/fuse-supervisor.ts"
         );
-        await runFuseSupervisor(fuseSupervisorOptions(options, mountpoint));
+        await runFuseSupervisor(parsed.options);
       }),
   )
+  .command("completion", completion)
   .command("id", identity)
   .command("init", init)
   .command("test", test)

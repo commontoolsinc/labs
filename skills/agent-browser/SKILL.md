@@ -151,7 +151,7 @@ deno run -A packages/cli/mod.ts id did "$CF_IDENTITY"
 Use distinct `--session` names when comparing identities. A different identity
 should still see unscoped/`PerSpace` data in the same space, but `PerUser` and
 `PerSession` fields resolve to separate instances and may look empty/default.
-See `docs/development/SHARED_IDENTITY.md` for the full workflow.
+See `docs/features/shared-identity.md` for the full workflow.
 
 ### Data extraction
 

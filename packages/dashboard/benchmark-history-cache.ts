@@ -4,6 +4,7 @@
 import { dashboardCacheFile } from "./history-files.ts";
 
 export const BENCHMARK_HISTORY_CACHE_DAYS = 60;
+export const BENCHMARK_HISTORY_SAMPLING_VERSION = 1;
 
 const DAY_MS = 86_400_000;
 const STORE_VERSION = 1;
@@ -22,6 +23,8 @@ export interface CachedBenchmarkRun {
   runId: number;
   runAttempt: number;
   at: number;
+  // Entries written before processor-specific charts are fetched again.
+  cpu?: string;
   metrics: Map<string, BenchmarkStats>;
 }
 
@@ -29,6 +32,7 @@ interface StoredBenchmarkRun {
   runId: number;
   runAttempt: number;
   at: number;
+  cpu?: string;
   metrics: Record<string, BenchmarkStats>;
 }
 
@@ -39,6 +43,7 @@ interface BenchmarkRunReference {
 
 export interface BenchmarkRefreshManifest {
   refreshedAt: number;
+  samplingVersion?: number;
   runs: BenchmarkRunReference[];
   result: BenchmarkRefreshResult;
 }
@@ -85,7 +90,10 @@ const isStoredRun = (value: unknown): value is StoredBenchmarkRun => {
   const run = value as StoredBenchmarkRun;
   return Number.isInteger(run.runId) && run.runId > 0 &&
     Number.isInteger(run.runAttempt) && run.runAttempt > 0 &&
-    Number.isFinite(run.at) && typeof run.metrics === "object" &&
+    Number.isFinite(run.at) &&
+    (run.cpu === undefined ||
+      (typeof run.cpu === "string" && run.cpu.trim().length > 0)) &&
+    typeof run.metrics === "object" &&
     run.metrics !== null && !Array.isArray(run.metrics) &&
     Object.values(run.metrics).every(isStats);
 };
@@ -103,6 +111,9 @@ const isRefreshManifest = (
   if (typeof value !== "object" || value === null) return false;
   const refresh = value as BenchmarkRefreshManifest;
   return Number.isFinite(refresh.refreshedAt) && refresh.refreshedAt >= 0 &&
+    (refresh.samplingVersion === undefined ||
+      Number.isInteger(refresh.samplingVersion) &&
+        refresh.samplingVersion > 0) &&
     Array.isArray(refresh.runs) && refresh.runs.every(isRunReference) &&
     (refresh.result === undefined ||
       ["data", "no-runs", "data-unavailable", "no-metric"].includes(
@@ -195,6 +206,7 @@ export class BenchmarkHistoryStore {
         runId: run.runId,
         runAttempt: run.runAttempt,
         at: run.at,
+        cpu: run.cpu,
         metrics: new Map(Object.entries(run.metrics)),
       });
     }
@@ -218,6 +230,9 @@ export class BenchmarkHistoryStore {
         ) {
           refresh = {
             refreshedAt: value.refresh.refreshedAt,
+            ...(value.refresh.samplingVersion === undefined
+              ? {}
+              : { samplingVersion: value.refresh.samplingVersion }),
             runs: value.refresh.runs.map((run) => ({ ...run })),
             result: value.refresh.result ??
               (value.refresh.runs.length ? "data" : "no-runs"),
@@ -243,7 +258,10 @@ export class BenchmarkHistoryStore {
   #merge(contents: BenchmarkHistoryContents): void {
     for (const run of contents.runs) {
       const key = runKey(run.runId, run.runAttempt);
-      if (!this.#runs.has(key)) this.#runs.set(key, run);
+      const current = this.#runs.get(key);
+      if (!current || (current.cpu === undefined && run.cpu !== undefined)) {
+        this.#runs.set(key, run);
+      }
     }
     this.#invalidatedAt = Math.max(
       this.#invalidatedAt,
@@ -332,6 +350,8 @@ export class BenchmarkHistoryStore {
 
   get refreshedAt(): number {
     return this.#refresh && this.#refresh.refreshedAt > this.#invalidatedAt &&
+        this.#refresh.samplingVersion ===
+          BENCHMARK_HISTORY_SAMPLING_VERSION &&
         this.#refresh.refreshedAt <= Date.now()
       ? this.#refresh.refreshedAt
       : 0;
@@ -341,6 +361,9 @@ export class BenchmarkHistoryStore {
     if (!this.#refresh || !this.#resolve(this.#refresh)) return null;
     return {
       refreshedAt: this.#refresh.refreshedAt,
+      ...(this.#refresh.samplingVersion === undefined
+        ? {}
+        : { samplingVersion: this.#refresh.samplingVersion }),
       runs: this.#refresh.runs.map((run) => ({ ...run })),
       result: this.#refresh.result,
     };
@@ -363,7 +386,12 @@ export class BenchmarkHistoryStore {
       runId: run.runId,
       runAttempt: run.runAttempt,
     }));
-    const refresh = { refreshedAt: at, runs: references, result };
+    const refresh = {
+      refreshedAt: at,
+      samplingVersion: BENCHMARK_HISTORY_SAMPLING_VERSION,
+      runs: references,
+      result,
+    };
     if (!this.#resolve(refresh)) {
       throw new Error("Runtime benchmark refresh contains an uncached run.");
     }
@@ -401,11 +429,14 @@ export class BenchmarkHistoryStore {
   set(run: CachedBenchmarkRun): CachedBenchmarkRun {
     const key = runKey(run.runId, run.runAttempt);
     const current = this.#runs.get(key);
-    if (current) return current;
+    if (current && (current.cpu !== undefined || run.cpu === undefined)) {
+      return current;
+    }
     const stored = {
       runId: run.runId,
       runAttempt: run.runAttempt,
       at: run.at,
+      cpu: run.cpu,
       metrics: new Map(run.metrics),
     };
     this.#runs.set(key, stored);
@@ -457,6 +488,7 @@ export class BenchmarkHistoryStore {
             runId: run.runId,
             runAttempt: run.runAttempt,
             at: run.at,
+            cpu: run.cpu,
             metrics: Object.fromEntries(run.metrics),
           })),
         };

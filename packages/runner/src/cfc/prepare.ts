@@ -9,7 +9,12 @@ import {
   internSchemaAsTaggedHashString,
 } from "@commonfabric/data-model/schema-hash";
 import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
-import { isFabricObjectOrArray } from "@commonfabric/data-model/fabric-value";
+import {
+  FabricPrimitive,
+  isFabricObjectOrArray,
+} from "@commonfabric/data-model/fabric-value";
+import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
+import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
 import {
   cloneForMutation,
   type CloneForMutationResult,
@@ -814,11 +819,36 @@ const storedMetadataFor = (
 /**
  * This returns a map whose values are always interned schemas.
  */
+const generatedOutputPathsByTarget = (
+  inputs: readonly WritePolicyInput[],
+): Map<string, readonly (readonly string[])[]> => {
+  const result = new Map<string, readonly (readonly string[])[]>();
+  for (const input of inputs) {
+    if (
+      input.kind !== "schema" || input.schema === undefined ||
+      input.schemaRole !== "output"
+    ) {
+      continue;
+    }
+    const key = targetKey(input.target);
+    const path = canonicalizeLogicalPath(input.target.path);
+    const existing = result.get(key) ?? [];
+    if (!existing.some((candidate) => arraysEqual(candidate, path))) {
+      result.set(key, [...existing, path]);
+    }
+  }
+  return result;
+};
+
 const candidateSchemasByTarget = (
   inputs: readonly WritePolicyInput[],
   identityForInput: (input: WritePolicyInput) =>
     | ImplementationIdentity
     | undefined,
+  generatedOutputPaths: ReadonlyMap<
+    string,
+    readonly (readonly string[])[]
+  >,
 ): Map<string, JSONSchema> => {
   const result = new Map<string, JSONSchema>();
   for (const input of inputs) {
@@ -841,7 +871,9 @@ const candidateSchemasByTarget = (
         ? internSchema(candidate)
         : schemasEqualIgnoringWriterStamp(existing, candidate)
         ? existing
-        : mergeCfcSchemaEnvelopes(existing, candidate), // Guaranteed interned.
+        : mergeCfcSchemaEnvelopes(existing, candidate, {
+          generatedOutputPaths: generatedOutputPaths.get(key),
+        }), // Guaranteed interned.
     );
   }
   return result;
@@ -1027,6 +1059,13 @@ const stripWriterIdentityStamp = (value: unknown): unknown => {
   return next;
 };
 
+// TODO(danfuzz): `stripWriterIdentityStamp` rebuilds every record node it
+// meets, including schema `default` VALUES, and a fabric value rebuilds as
+// `{}` — so two schemas whose only difference is a fabric-valued default
+// compare equal here, and the candidate's default is silently discarded by
+// the merge-skip decisions this feeds. The strip wants to carry
+// value-bearing keys by reference and the comparison wants a fabric-aware
+// equality.
 const schemasEqualIgnoringWriterStamp = (
   left: JSONSchema,
   right: JSONSchema,
@@ -1456,6 +1495,12 @@ export const flowReadExcluded = (
 // non-link leaf (string, number, boolean, null) makes the value content.
 // Such writes get `structure` (shape-only) stamps instead of covering
 // `derived` ones — see `pureLinkContainerPaths`.
+// TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, whose
+// `Object.values` are empty and vacuously "all links" — so a `FabricBytes`
+// leaf, or a `FabricInstance` with real contents, classifies as pure link
+// structure and the write receives shape-only stamps in place of its content
+// label. Fails open. Wants a `FabricSpecialObject` test taking the
+// content-bearing (`false`) arm.
 const isPureLinkStructure = (value: unknown): boolean => {
   if (value === undefined) return true;
   if (isPrimitiveCellLink(value)) return true;
@@ -1494,6 +1539,10 @@ const pureLinkContainerPaths = (
     );
     return;
   }
+  // TODO(danfuzz): same `isRecord` gap as `isPureLinkStructure` above: a
+  // `FabricPrimitive` is pushed as if it were a container (a stamp path for
+  // an opaque leaf), and a `FabricInstance`'s codec contents are never
+  // enumerated, so nothing nested in one gets a per-slot stamp.
   if (isRecord(value)) {
     out.push(path);
     for (const [key, member] of Object.entries(value)) {
@@ -2712,14 +2761,14 @@ const writeInstallsInitialSchemaDefault = (
     return false;
   }
   const pathTarget = { ...target, path };
-  // The cast is required: `default` is statically `ImmutableJSONValue`, whose
-  // deeply-`readonly`, `ArrayLike`-based JSON shape is not assignable to
+  // The cast is required: `default` is statically `JSONValue`, whose
+  // deeply-readonly, `ReadonlyArray`-based JSON shape is not assignable to
   // `FabricValue` -- though the runtime value is one (a native
   // `Uint8Array`/`Date` default interns to a `FabricPrimitive`).
   return previousWriteValueForTarget(tx, pathTarget) === undefined &&
     valueEqual(
       writeValueForTarget(tx, pathTarget),
-      schema.default as FabricValue,
+      schema.default,
     );
 };
 
@@ -2757,6 +2806,14 @@ const linkedWriteValueForPolicy = (
   });
 };
 
+// TODO(danfuzz): this descent (and `changedValuesAtPatternPath` below) gates
+// on `typeof value === "object"` and then `head in value`, both true-shaped
+// for a `FabricSpecialObject` — but no key of an instance's codec contents is
+// an own (or any) property, so a pattern path into one resolves to no values
+// and the policy condition it feeds is never evaluated for that content.
+// `changedValuesAtPatternPath`'s leaf case additionally compares with
+// `deepEqual`, which calls two same-class fabric values equal regardless of
+// contents, so a genuine change reads as "unchanged". Both fail open.
 const valuesAtPatternPath = (
   value: unknown,
   path: readonly string[],
@@ -2853,6 +2910,13 @@ const schemaTypeMatchesValue = (
       case "string":
         return typeof value === "string";
       default:
+        if (
+          typeof candidate === "string" &&
+          isFabricPrimitiveSchemaType(candidate)
+        ) {
+          return value instanceof FabricPrimitive &&
+            schemaTypeOfFabricPrimitive(value) === candidate;
+        }
         return true;
     }
   });
@@ -2898,6 +2962,14 @@ const policySchemaMatchesValue = (
     }
     return policySchemaMatchesValue(resolved, value, schemaRoot);
   }
+  // TODO(danfuzz): these `deepEqual` checks call two same-class fabric
+  // values equal regardless of contents, so a fabric-valued `const`/`enum`
+  // condition matches the wrong value; and the `properties` arm below admits
+  // a `FabricSpecialObject` through `isRecord` and reads `undefined` for
+  // every key, matching vacuously. Each fails open — the ifc entry applies
+  // (or the policy passes) with nothing actually checked. `valueEqual` and a
+  // `FabricSpecialObject` gate are the fabric-aware shapes;
+  // `schemaTypeMatchesValue` below already carries the type half.
   if (schema.const !== undefined && !deepEqual(schema.const, value)) {
     return false;
   }
@@ -3114,6 +3186,10 @@ const ifcEntryAppliesToAttemptedWrite = (
     sawTargetWrite = true;
     const writePath = write.address.path.slice(1).map((entry) => String(entry));
     if (pathPatternMatches(path, writePath)) {
+      // TODO(danfuzz): `deepEqual` calls two same-class fabric values equal
+      // regardless of contents, so a genuine change to a fabric-valued slot
+      // reads as "unchanged" and the ifc entry is skipped. Fails open;
+      // `valueEqual` is the fabric-aware comparison.
       return !deepEqual(write.value, write.previousValue) &&
         wildcardPolicyMatchesValue(tx, target, schema, write.value, root);
     }
@@ -3861,6 +3937,11 @@ const verifyExactCopyRequirements = (
       path: sourcePath,
     });
 
+    // TODO(danfuzz): `deepEqual` calls two same-class fabric values equal
+    // regardless of contents — under the modern cell rep even two
+    // `FabricLink`s to different documents — so an `exactCopyOf` claim over
+    // fabric-valued state verifies for values that are not copies, and the
+    // source label is carried anyway. Fails open; wants `valueEqual`.
     if (!deepEqual(sourceValue, targetValue)) {
       return `exactCopyOf failed at /${entry.path.join("/")}`;
     }
@@ -3927,6 +4008,9 @@ const verifyProjectionRequirements = (
       path: sourcePath,
     });
 
+    // TODO(danfuzz): same `deepEqual` gap as `verifyExactCopyRequirements`
+    // above — fabric-valued state verifies as a projection when it is not
+    // one. Fails open; wants `valueEqual`.
     if (!deepEqual(sourceValue, targetValue)) {
       return `projection claim failed at /${entry.path.join("/")}`;
     }
@@ -4518,7 +4602,7 @@ const ensureSchemaDocument = (
   }, {
     // System-owned canonical schema document. This is intentionally outside the
     // phase-1 value-surface attempted-target model.
-    value: schema as unknown as FabricValue,
+    value: schema,
   });
 };
 
@@ -4553,6 +4637,73 @@ export const loadSchemaDocument = (
     );
   }
   return schema;
+};
+
+/**
+ * The stored CFC schema envelope at rest for one document, as the commit path
+ * sees it.
+ *
+ * Why one function: this is the gatherer BOTH the real commit path (the merge
+ * loop in `prepareBoundaryCommit` below) and the `cf piece setsrc --check`
+ * preflight call, so the two cannot disagree about what a document carries or
+ * about what counts as a failure. The failure taxonomy is part of the
+ * contract:
+ *
+ * - `none` — the document stores no CFC metadata, so the envelope merge never
+ *   runs for it at commit time and there is genuinely nothing to reject.
+ * - `loaded` — the metadata's `schemaHash` resolved to a content-verified
+ *   schema document; `metadata` rides along for callers (the commit path) that
+ *   also need the stored label map.
+ * - `unreadable` — metadata EXISTS but its envelope cannot be loaded (missing
+ *   cid document, content-hash mismatch). The commit path records `reason` and
+ *   rejects the write in enforcing modes, so a preflight must report it as a
+ *   blocker and never as "nothing stored" — treating it as absent is exactly
+ *   how a check green-lights an update the real commit then refuses.
+ *
+ * A metadata READ failure (the transaction itself erroring) still propagates:
+ * that is an operational failure of the caller's transaction, not a property
+ * of the document, and both paths fail loudly on it today.
+ */
+export type StoredCfcEnvelope =
+  | { readonly status: "none" }
+  | {
+    readonly status: "loaded";
+    readonly schema: JSONSchema;
+    readonly metadata: CfcMetadata;
+  }
+  | { readonly status: "unreadable"; readonly reason: string };
+
+export const loadStoredCfcEnvelope = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: string;
+    scope?: Parameters<typeof normalizeCellScope>[0];
+  },
+  type: MediaType = "application/json",
+): StoredCfcEnvelope => {
+  const metadata = storedMetadataFor(
+    tx,
+    target.space,
+    target.id as URI,
+    normalizeCellScope(target.scope),
+    type,
+  );
+  if (metadata === undefined) return { status: "none" };
+  try {
+    return {
+      status: "loaded",
+      schema: loadSchemaDocument(tx, target.space, metadata.schemaHash),
+      metadata,
+    };
+  } catch (error) {
+    return {
+      status: "unreadable",
+      reason: error instanceof Error
+        ? error.message
+        : `schema load failed for ${target.id}`,
+    };
+  }
 };
 
 // Union of confidentiality (and integrity) atoms across every non-internal labeled read in the
@@ -5160,9 +5311,13 @@ export const prepareBoundaryCommit = (
     // recorded input is registered in this map, so a missing key cannot occur
     // for a real input; an unattributed write must fail closed.
     state.writePolicyInputIdentities.get(input);
+  const generatedOutputPaths = generatedOutputPathsByTarget(
+    state.writePolicyInputs,
+  );
   const candidates = candidateSchemasByTarget(
     state.writePolicyInputs,
     identityForInput,
+    generatedOutputPaths,
   );
   const writeAuthorIdentities = writePolicyIdentitiesByTarget(
     state.writePolicyInputs,
@@ -5361,41 +5516,39 @@ export const prepareBoundaryCommit = (
       if (flowJoinIsCrossSpace) crossSpaceEligible?.add(entry);
       return entry;
     };
-    const existing = storedMetadataFor(
-      tx,
-      space,
-      id,
-      scope,
-      "application/json",
-    );
+    // ONE gatherer decides what this document stores — the same function the
+    // `setsrc --check` preflight calls — so the commit path and the preflight
+    // cannot drift apart on whether an unreadable envelope counts as "nothing
+    // stored". `unreadable` records the load failure as a rejection reason
+    // exactly as the inline catches here always did.
+    const stored = loadStoredCfcEnvelope(tx, { space, id, scope });
+    if (stored.status === "unreadable") {
+      reasons.push(stored.reason);
+      continue;
+    }
+    const existing = stored.status === "loaded" ? stored.metadata : undefined;
     let storedSchema: JSONSchema | undefined;
     let mergedSchema = schema;
-    if (existing !== undefined && undefinedCandidate) {
+    if (stored.status === "loaded" && undefinedCandidate) {
+      storedSchema = stored.schema;
+      mergedSchema = storedSchema;
+    } else if (stored.status === "loaded") {
+      storedSchema = stored.schema;
       try {
-        storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
-        mergedSchema = storedSchema;
-      } catch (error) {
-        reasons.push(
-          error instanceof Error
-            ? error.message
-            : `schema load failed for ${id}`,
-        );
-        continue;
-      }
-    } else if (existing !== undefined) {
-      try {
-        storedSchema = loadSchemaDocument(tx, space, existing.schemaHash);
         mergedSchema = schemasEqualIgnoringWriterStamp(storedSchema, schema) ||
             storedSchemaCoversCandidateEnvelope(storedSchema, schema)
           ? storedSchema
-          : mergeCfcSchemaEnvelopes(storedSchema, schema);
+          : mergeCfcSchemaEnvelopes(storedSchema, schema, {
+            generatedOutputPaths: generatedOutputPaths.get(key),
+          });
       } catch (error) {
         // Tag the additive-required migration incompatibility with a stable
         // token so the default-root runnability backstop can key on THIS class
         // (recoverable by rolling forward) and leave every other CFC rejection
         // fail-closed. Only the recorded reason is tagged; the human-readable
-        // message is preserved verbatim after the token. A plain schema-load or
-        // other merge failure records its bare message as before.
+        // message is preserved verbatim after the token. Schema-LOAD failures
+        // are handled above by the shared gatherer and record their bare
+        // message as before.
         reasons.push(
           error instanceof CfcSchemaMigrationError
             ? `${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: ${error.message}`
@@ -5415,6 +5568,7 @@ export const prepareBoundaryCommit = (
         : mergeCfcSchemaEnvelopes(
           schema,
           storedSchemaClaimsForLinkWrites(storedSchema, linkWriteInputs),
+          { generatedOutputPaths: generatedOutputPaths.get(key) },
         )
       : schema;
 
@@ -6551,7 +6705,7 @@ export const prepareBoundaryCommit = (
       // System-owned embedded metadata write. Boundary evaluation is driven by
       // user-surface reads/writes plus explicit policy inputs, not by recursive
       // attempted-target tracking of this internal metadata update.
-    }, metadata as unknown as FabricValue);
+    }, metadata);
   }
   reasons.push(...verifySinkRequestCeilings(tx));
   // Single-use grant consumption (design §2.2): stage every claim the

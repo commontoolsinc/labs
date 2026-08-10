@@ -648,8 +648,7 @@ function shouldAddReactiveFor(
   const type = getTypeAtLocationWithFallback(
     expression,
     context.checker,
-    context.options.state?.typeRegistry,
-    context.options.logger,
+    context.state.typeRegistry,
   );
   return isCellLikeType(type, context.checker);
 }
@@ -726,10 +725,9 @@ function isReactiveArrayMethodCall(
       allowImplicitReactiveParameters: false,
       allowReactiveArrayCallbackParameters: false,
       sameScope: getEnclosingFunctionLikeDeclaration(call),
-      typeRegistry: context.options.state?.typeRegistry,
-      syntheticReactiveCollectionRegistry: context.options.state
-        ?.syntheticReactiveCollectionRegistry,
-      logger: context.options.logger,
+      typeRegistry: context.state.typeRegistry,
+      syntheticReactiveCollectionRegistry: context.state
+        .syntheticReactiveCollectionRegistry,
     },
   ) || isExplicitReactiveCall(target.expression, context);
 }
@@ -761,8 +759,7 @@ function shouldRetargetReactiveReference(
   const type = getTypeAtLocationWithFallback(
     target,
     context.checker,
-    context.options.state?.typeRegistry,
-    context.options.logger,
+    context.state.typeRegistry,
   );
   if (type) {
     return isBrandedCellType(type, context.checker) ||
@@ -898,8 +895,7 @@ function shouldUseStreamCause(
   const type = getTypeAtLocationWithFallback(
     target,
     context.checker,
-    context.options.state?.typeRegistry,
-    context.options.logger,
+    context.state.typeRegistry,
   );
   return isStreamLikeType(type, context.checker);
 }

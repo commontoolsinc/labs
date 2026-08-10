@@ -72,9 +72,13 @@ function followResultCellChain(
 /**
  * Ensures the piece responsible for a given storage location is running.
  *
- * Note: We don't track which pieces we've already started because calling
- * runtime.runSynced() on an already-running piece is idempotent - it simply
- * returns without doing anything. This keeps the code simple and stateless.
+ * Note: We don't track which pieces we've already started because starting an
+ * already-running piece is a no-op: this calls `runtime.start()`, which returns
+ * as soon as it finds the piece already registered, without running setup. It
+ * therefore neither re-materializes metadata nor re-validates the stored
+ * argument — a piece whose `patternSetupIdentity` names another version is not
+ * repaired through this route, only through one that reaches setup. This keeps
+ * the code simple and stateless.
  *
  * This function follows result metadata from argument or derived internal cells
  * back to the root result cell, then starts the piece if it's not already

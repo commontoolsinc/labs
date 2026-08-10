@@ -1,5 +1,5 @@
 import { createSession, DID, Identity, Session } from "@commonfabric/identity";
-import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc-atoms";
+import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc";
 import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
 import { slugIdForSpace } from "@commonfabric/runner/slugs";
 import { NameSchema } from "@commonfabric/runner/schemas";
@@ -8,6 +8,7 @@ import {
   FavoritesManager,
   JSONValue,
   PageHandle,
+  type PieceSourceView,
   Program,
   RuntimeClient,
   RuntimeClientEvents,
@@ -362,6 +363,15 @@ export class RuntimeInternals extends EventTarget {
     return page;
   }
 
+  /**
+   * A piece's source state: the pattern it runs, the origin it tracks, the
+   * history metadata it carries, and its authored source files.
+   */
+  getPieceSource(space: DID, pieceId: string): Promise<PieceSourceView> {
+    this.#check();
+    return this.#client.getPieceSource(pieceId, space);
+  }
+
   getPiecesListCell<T>(space: DID): Promise<CellHandle<T[]>> {
     this.#check();
     return this.#client.getPiecesListCell<T>(space);
@@ -403,8 +413,8 @@ export class RuntimeInternals extends EventTarget {
    * about to be displayed. Pass `start: false` for read-only consumers
    * (e.g. listing piece names): the persisted result cell is synced and
    * readable without paying pattern instantiation for every piece
-   * (CT-1623: starting all pieces on reload cost ~10s of dependency
-   * collection, either in the reload wall or on the first interaction).
+   * (starting every registered piece on reload cost about ten seconds of
+   * dependency collection, either during reload or on the first interaction).
    *
    * Cached per (space, id) — a pattern's address. A cache entry created
    * with `start: false` is upgraded (re-fetched with start) when a

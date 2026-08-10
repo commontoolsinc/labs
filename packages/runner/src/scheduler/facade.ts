@@ -1,3 +1,4 @@
+import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Cancel } from "../cancel.ts";
 import { getTopFrame } from "../builder/pattern.ts";
@@ -35,6 +36,7 @@ import type {
 import {
   CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
   INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS,
+  MAX_ACTION_STATS,
   MAX_SETTLE_STATS_HISTORY,
 } from "./constants.ts";
 import {
@@ -440,7 +442,9 @@ export class Scheduler {
 
   // Compute time tracking for auto-debounce and diagnostics
   // Keyed by action ID (source location) to persist stats across action recreation
-  private actionStats = new Map<string, ActionStats>();
+  private actionStats = new BoundedKeyMap<string, ActionStats>(
+    MAX_ACTION_STATS,
+  );
   private actionTimingState: ActionTimingState = {
     actionStats: this.actionStats,
     getActionId: (action) => this.getActionId(action),
@@ -1244,6 +1248,27 @@ export class Scheduler {
         // terminal failure) and then re-check: a landed commit can dirty
         // readers and re-trigger scheduler work.
         this.runtime.storageManager.pendingCommitsSettled().then(recheck);
+      } else if (this.disposed) {
+        // Every branch below parks on `idlePromises`, which only the execute
+        // loop drains — and `execute()` returns immediately once disposed. So
+        // parking here would park FOREVER, which is how a caller that disposed
+        // the scheduler by hand made `Runtime.dispose()` hang: its teardown
+        // awaits `scheduler.idle()`. A disposed scheduler will never run
+        // anything again, so quiescence is already final and resolving is the
+        // honest answer rather than the convenient one.
+        //
+        // Below the branches with a wake source of their own, deliberately: a
+        // running execute, background tasks, held wakes and in-flight commits
+        // all resolve off their own promise and re-check, so they still settle
+        // on a disposed scheduler and this cannot cut them short.
+        //
+        // Note this covers the parking branches WHOLESALE rather than fixing
+        // the reachable one. Clearing `scheduled` in dispose() would let the
+        // "nothing scheduled" branch resolve most of these, but only while
+        // `hasRunnablePullWork()` is false — that branch re-queues execution
+        // and parks when it is true, so the hang would come back for a
+        // scheduler disposed with pull work outstanding.
+        resolve();
       } else if (
         this.gates.hasWakeTimer() &&
         ((this.eventQueue.length > 0 &&
@@ -1279,6 +1304,18 @@ export class Scheduler {
     });
   }
 
+  /**
+   * Marks a subscribed action invalid and schedules an execution pass, exactly
+   * as a change to one of its journaled reads would. For an asynchronous
+   * completion whose terminal step writes nothing the action journals — the
+   * only remaining signal that the action must run again is the completion
+   * itself (e.g. a list coordinator's owed element setup after every awaited
+   * result document confirmed absent). No-op for an unsubscribed action.
+   */
+  invalidateAction(action: Action): void {
+    this.markAndScheduleInvalidAction(action);
+  }
+
   queueExecution(): void {
     if (this.disposed) return;
     if (this.scheduled) {
@@ -1311,6 +1348,13 @@ export class Scheduler {
       eventId?: string;
       originTx?: IExtendedStorageTransaction;
       time?: number;
+      /**
+       * Payload keys the RUNTIME itself injected into `event`'s value —
+       * provenance for the closed-world gate, forwarded from the send's
+       * internal options (never derivable from payload data). See
+       * `StreamSendOptions` (cell.ts).
+       */
+      runtimeInjectedEventKeys?: readonly string[];
     } = {},
   ): void {
     // Bind the event's wall-clock time at its causal origin. A pre-supplied time
@@ -1339,7 +1383,12 @@ export class Scheduler {
         event,
         retries,
         onCommit,
-        { eventId: opts.eventId, originTx: opts.originTx, time },
+        {
+          eventId: opts.eventId,
+          originTx: opts.originTx,
+          time,
+          runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
+        },
       );
       return;
     }
@@ -1352,6 +1401,7 @@ export class Scheduler {
       eventId: opts.eventId,
       originTx: opts.originTx,
       time,
+      runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
     });
   }
 
@@ -1373,6 +1423,7 @@ export class Scheduler {
       eventId: opts.eventId,
       originTx: opts.originTx,
       time: opts.time,
+      runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
     });
 
   // The owning pattern instance for an input stream, used to group a pattern's
@@ -1805,6 +1856,30 @@ export class Scheduler {
     }
     this.triggerIndex.clear();
     this.wakeShaper.dispose();
+    // Release waiters already parked when dispose arrived. The branch in
+    // waitForQuiescence covers idle() calls made AFTER this point; it cannot
+    // reach these, and nothing else will — `execute()` is the only other drain
+    // and it is now a no-op. Same contract the wake shaper's own dispose keeps
+    // for its drain waiters, one line up. Drained in place rather than by
+    // reassigning the field: createExecuteContinuationState() hands this exact
+    // array out, so a swap would leave any live continuation state draining the
+    // detached one.
+    //
+    // Routed back through waitForQuiescence rather than resolved here, because
+    // dispose does NOT cancel a run already under way — `execute()` tests
+    // `disposed` only on entry. Every parking branch is reached with
+    // `runningPromise` unset, so a waiter parked while execution was merely
+    // SCHEDULED is still parked once the run begins; resolving it directly
+    // would report quiescence with an action, and its commit, still going. The
+    // re-check waits on that promise and only then takes the disposed branch,
+    // which is exactly the guarantee the branch documents. It cannot re-park:
+    // the disposed branch sits above every push to this list.
+    const parked = this.idlePromises.splice(0);
+    if (parked.length > 0) {
+      this.waitForQuiescence(false).then(() => {
+        for (const resolve of parked) resolve();
+      });
+    }
     // Clean up diagnosis state
     if (this.diagnosisTimeout) {
       clearTimeout(this.diagnosisTimeout);

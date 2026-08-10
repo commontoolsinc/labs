@@ -1,6 +1,7 @@
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { z } from "zod";
 
+import { resolveGitSha } from "@/lib/build-info.ts";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
   DashRoute,
@@ -18,8 +19,14 @@ import {
 export const HealthResponseSchema = z.object({
   status: z.literal("OK"),
   timestamp: z.number(),
+  // The commit this server runs (same resolution as /api/meta). Rides the
+  // health response so clients can detect version skew without an extra
+  // request; null when unknown.
+  gitSha: z.string().nullable(),
 });
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
+
+const GIT_SHA = resolveGitSha();
 
 export const LLMHealthResponseSchema = z.object({
   status: z.enum(["healthy", "degraded", "unhealthy"]),
@@ -41,11 +48,19 @@ export const LLMHealthResponseSchema = z.object({
 });
 export type LLMHealthResponse = z.infer<typeof LLMHealthResponseSchema>;
 
+/** Header carrying the same commit as the body's `gitSha`. Clients that only
+ * need liveness + version (the cf CLI) read this instead of the body, so
+ * their health probe completes at headers-arrival — a stalled or truncated
+ * body cannot delay them. */
+export const GIT_SHA_HEADER = "x-cf-git-sha";
+
 export const index: AppRouteHandler<IndexRoute> = (c) => {
   const response: HealthResponse = {
     status: "OK",
     timestamp: Date.now(),
+    gitSha: GIT_SHA,
   };
+  if (GIT_SHA !== null) c.header(GIT_SHA_HEADER, GIT_SHA);
   return c.json(response, HttpStatusCodes.OK);
 };
 

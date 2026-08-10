@@ -59,6 +59,12 @@ export function diffValues(
   const out: ValueChange[] = [];
   const walk = (a: unknown, b: unknown, path: string[], depth: number) => {
     const here = path.join("/");
+    // TODO(danfuzz): a fabric value reaches this walk only through
+    // `annotate()`, which renders it without its contents — so two
+    // different fabric values annotate alike, compare equal here, and the
+    // diff reports no change. Seeing a fabric change needs a
+    // contents-bearing rendering (the value-debug elision TODO) or a diff
+    // over the decoded values themselves.
     if (canonical(a) === canonical(b)) return;
     if (a === undefined) {
       out.push({ path: here, kind: "added", after: b });
@@ -215,7 +221,7 @@ export function entityTimeline(
         doc = r.data ? (decodeStored(r.data) as FabricValue) : undefined;
       } else if (r.op === "patch") {
         const ops = r.data ? (decodeStored(r.data) as PatchOp[]) : [];
-        doc = applyPatch((doc ?? {}) as FabricValue, ops);
+        doc = applyPatch(doc ?? {}, ops);
       } else if (r.op === "delete") {
         doc = undefined;
       }

@@ -13,10 +13,9 @@
 
 import { action, assert, computed, pattern, UI, wish } from "commonfabric";
 import {
-  findNode,
+  findNodeByProp,
   hasExactText,
-  propsOf,
-  readValue,
+  propValue,
 } from "../test/vnode-helpers.ts";
 import CozyPoll, {
   dayKeyOf,
@@ -38,16 +37,6 @@ export const fetchMocks = [
   },
 ];
 
-const findNodeByProp = (
-  root: unknown,
-  prop: string,
-  expected: unknown,
-): unknown | undefined =>
-  findNode(root, (node) => {
-    const props = propsOf(node);
-    return props !== undefined && readValue(props[prop]) === expected;
-  });
-
 const SEEDED_OPTION: Option = {
   id: "opt-seeded",
   title: "Leftover Café",
@@ -65,97 +54,81 @@ const COLLIDING_INITIAL_USERS: User[] = [
     name: "Daffodil",
     avatar: "",
     color: "#2f6f4e",
-    joinedAt: 1,
   },
   {
     name: "Dragonfly",
     avatar: "",
     color: "#c2573a",
-    joinedAt: 2,
   },
   {
     name: "Dan",
     avatar: "",
     color: "#3b4a6b",
-    joinedAt: 3,
   },
   {
     name: "Dana",
     avatar: "",
     color: "#a33b35",
-    joinedAt: 4,
   },
   {
     name: "dan",
     avatar: "",
     color: "#b27722",
-    joinedAt: 5,
   },
   {
     name: "A",
     avatar: "",
     color: "#7c3aed",
-    joinedAt: 6,
   },
   {
     name: "a",
     avatar: "",
     color: "#2f6f4e",
-    joinedAt: 7,
   },
   {
     name: "A1",
     avatar: "",
     color: "#c2573a",
-    joinedAt: 8,
   },
   {
     name: "Bob Smith",
     avatar: "",
     color: "#3b4a6b",
-    joinedAt: 9,
   },
   {
     name: "Bob  Smith",
     avatar: "",
     color: "#a33b35",
-    joinedAt: 10,
   },
   {
     name: "👩🏽‍💻Alice",
     avatar: "",
     color: "#7c3aed",
-    joinedAt: 11,
   },
   {
     name: "👩🏽‍💻Bob",
     avatar: "",
     color: "#2f6f4e",
-    joinedAt: 12,
   },
   {
     name: "🇺🇸Alice",
     avatar: "",
     color: "#c2573a",
-    joinedAt: 13,
   },
   {
     name: "🇺🇸Bob",
     avatar: "",
     color: "#3b4a6b",
-    joinedAt: 14,
   },
   {
     name: "e\u0301Alice",
     avatar: "",
     color: "#a33b35",
-    joinedAt: 15,
   },
   {
     name: "e\u0301Bob",
     avatar: "",
     color: "#b27722",
-    joinedAt: 16,
   },
 ];
 
@@ -300,6 +273,16 @@ export default pattern(() => {
       },
     ],
   });
+
+  // Profile-first join + the header strip/viewer-chip rendering from stored
+  // profile cells are verified at the browser/integration tier (the
+  // scrabble/battleship precedent), not here: a pattern-body `#profile` wish
+  // has no resolving environment in a unit test, and an unset optional cell
+  // input reads as a truthy proxy — so there is no honest way to inject a
+  // resolvable viewer profile cell at this tier. The join LOGIC (name
+  // snapshot, equals()-keyed dedup, directory write) is covered by
+  // participant-identity-card.test.tsx, which injects those values into the
+  // card directly.
 
   // === Actions ===
 
@@ -637,12 +620,10 @@ export default pattern(() => {
       "data-vote-swatch-name",
       "👩🏽‍💻Bob",
     );
-    return readValue(propsOf(daffodil)?.role) === "img" &&
-      readValue(propsOf(daffodil)?.["aria-label"]) ===
-        "Daffodil: green vote" &&
-      readValue(propsOf(emojiBob)?.role) === "img" &&
-      readValue(propsOf(emojiBob)?.["aria-label"]) ===
-        "👩🏽‍💻Bob: red vote";
+    return propValue(daffodil, "role") === "img" &&
+      propValue(daffodil, "aria-label") === "Daffodil: green vote" &&
+      propValue(emojiBob, "role") === "img" &&
+      propValue(emojiBob, "aria-label") === "👩🏽‍💻Bob: red vote";
   });
 
   // The seeded stale vote is stored but hidden: absent from `todaysVotes`,

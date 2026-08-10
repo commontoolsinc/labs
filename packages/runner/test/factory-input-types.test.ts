@@ -69,7 +69,7 @@ const _roomBinding: MustBeTrue<
 
 const _handlerFactory: MustBeTrue<
   AssertAssignable<
-    HandlerFactory<HandlerState, void>,
+    HandlerFactory<void, HandlerState>,
     (inputs: HandlerBinding) => unknown
   >
 > = true;

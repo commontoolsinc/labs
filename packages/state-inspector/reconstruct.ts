@@ -150,10 +150,9 @@ function reconstructWithinBranch(
     )
     .get<RevRow>(branch, id, scope, rowSeq, rowSeq, rowOpIndex);
 
-  let doc: FabricValue =
-    (base && base.op === "set" && base.data
-      ? (decodeStored(base.data) as FabricValue)
-      : {}) as FabricValue;
+  let doc: FabricValue = base && base.op === "set" && base.data
+    ? (decodeStored(base.data) as FabricValue)
+    : {};
   let baseSeq = base ? base.seq : 0;
   let baseOpIndex = base ? base.op_index : -1;
 

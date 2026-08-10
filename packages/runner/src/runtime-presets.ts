@@ -77,6 +77,12 @@
  * | patternCoverage            | delta (patternTest, remoteClient, browserWorker) |
  * |                            | — test/CI statement-coverage collection, unset   |
  * |                            | elsewhere                                        |
+ * | onPatternInstantiated      | delta (patternTest only) — the vintage capture   |
+ * |                            | passes it to learn which patterns a run          |
+ * |                            | materialized and where. Observation only, and    |
+ * |                            | deliberately NOT available to the deployed       |
+ * |                            | presets: nothing in production should depend on  |
+ * |                            | being told about instantiation                   |
  * | trustSnapshotProvider      | delta (remoteClient, browserWorker)              |
  * | spaceHostMap               | delta (browserWorker only — federation routing   |
  * |                            | is decided by the shell host)                    |
@@ -101,6 +107,7 @@ import type {
   ExperimentalOptions,
   ModuleByteCache,
   NavigateCallback,
+  PatternInstantiationObserver,
   PieceCreatedCallback,
   RuntimeFetch,
   RuntimeOptions,
@@ -146,6 +153,7 @@ export const RUNTIME_OPTION_KEYS = [
   "commitBackpressure",
   "moduleByteCache",
   "patternCoverage",
+  "onPatternInstantiated",
   "fetch",
 ] as const satisfies readonly (keyof RuntimeOptions)[];
 
@@ -186,6 +194,10 @@ export const EXPERIMENTAL_ENV_VARS = {
   // Scheduler-v2 lineage (#4090) is default-on. Keep a programmatic rollback
   // override while the flag exists; no environment exposure is needed.
   commitPreconditions: null,
+  // Verb-contract WS-C: default-on since the invocation-protocol integration
+  // proof (#5244); env-reachable so a process can opt out with an explicit
+  // "false" while the flag exists.
+  plainResultReceipts: "EXPERIMENTAL_PLAIN_RESULT_RECEIPTS",
   systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
@@ -300,6 +312,8 @@ export interface PatternTestPresetParams extends CoreParams {
   cfcEnforcementMode?: CfcEnforcementMode;
   /** Statement-coverage collector for `cf test` and the pattern harnesses. */
   patternCoverage?: PatternCoverageCollector;
+  /** Records what a run materializes; see the vintage capture. */
+  onPatternInstantiated?: PatternInstantiationObserver;
 }
 
 export interface BrowserWorkerPresetParams extends CoreParams {
@@ -403,6 +417,9 @@ export const runtimePresets = {
         : {}),
       ...(params.patternCoverage !== undefined
         ? { patternCoverage: params.patternCoverage }
+        : {}),
+      ...(params.onPatternInstantiated !== undefined
+        ? { onPatternInstantiated: params.onPatternInstantiated }
         : {}),
     };
   },

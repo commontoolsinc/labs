@@ -6,6 +6,7 @@ import {
   fromBase64url,
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
+import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
@@ -26,11 +27,12 @@ import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
  * `<base64urlHash>` is the unpadded base64url encoding (RFC 4648 section 5)
  * of the hash bytes. For example: `fid1:abc123...`
  *
- * Immutable by convention: instances are `Object.freeze()`-d at construction
- * time, and the constructor assumes ownership of the `hash` bytes (callers
- * must not mutate the `Uint8Array` after passing it in, since JS cannot
- * freeze `ArrayBuffer` contents). The string form is cached internally so
- * that repeated `toString()` calls are O(1).
+ * Immutable: instances are `Object.freeze()`-d at construction time, and an
+ * instance owns its hash bytes outright, holding a buffer no other code can
+ * reach. (JS cannot freeze `ArrayBuffer` contents, so sole ownership is the
+ * defense, and it is what keeps the bytes from drifting out of agreement with
+ * the string form cached beside them.) That string form is cached so that
+ * repeated `toString()` calls are O(1).
  */
 export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   readonly #hash: Uint8Array;
@@ -39,27 +41,25 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   readonly #fullStringForm: string;
 
   /**
-   * Constructs a `FabricHash` from raw hash bytes and an algorithm tag.
-   * The instance is frozen after construction.
+   * Constructs an instance from raw hash bytes and an algorithm tag, owning
+   * the bytes outright. The instance is frozen after construction.
    *
-   * **Ownership transfer:** the caller must not mutate `hash` after passing
-   * it to the constructor. `Object.freeze` freezes the object reference but
-   * not the underlying `ArrayBuffer`, so the bytes remain technically
-   * mutable. The cached string form is computed once at construction time;
-   * post-construction mutation of the bytes would cause the internal state
-   * and `toString()` to diverge.
-   *
-   * @param hash - The raw hash bytes (ownership transferred to this instance).
-   * @param tag - Algorithm identifier (e.g., `"fid1"` for fabric ID v1).
+   * @param hash - The raw hash bytes.
+   * @param tag - Algorithm identifier (e.g., `fid1` for fabric ID v1).
+   * @param transfer - Whether the caller cedes `hash` to this instance, which
+   *   permits taking over its buffer instead of copying it. When `true`, the
+   *   caller must not use `hash` afterwards; `toOwnedUint8Array()` says what that
+   *   permission does and does not guarantee.
    */
   constructor(
     hash: Uint8Array,
     tag: string,
+    transfer: boolean = false,
   ) {
     super();
-    this.#hash = hash;
+    this.#hash = toOwnedUint8Array(hash, transfer);
     this.#tag = tag;
-    this.#justHashString = toUnpaddedBase64url(hash);
+    this.#justHashString = toUnpaddedBase64url(this.#hash);
     this.#fullStringForm = `${tag}:${this.#justHashString}`;
     Object.freeze(this);
   }
@@ -96,7 +96,10 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
     return this.#fullStringForm;
   }
 
-  /** Copies the hash bytes into `target` starting at offset 0. Returns `target`. */
+  /**
+   * Copies the hash bytes into `target` starting at offset `0`, and returns
+   * `target`.
+   */
   copyInto(target: Uint8Array): Uint8Array {
     target.set(this.#hash);
     return target;
@@ -126,11 +129,12 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
     }
     const tag = source.substring(0, colonIndex);
     const hashBase64url = source.substring(colonIndex + 1);
-    return new FabricHash(fromBase64url(hashBase64url), tag);
+    return new FabricHash(fromBase64url(hashBase64url), tag, true);
   }
 
   static #codec = Object.freeze(
     new (class HashCodec extends BaseFabricCodec {
+      /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Hash, FabricHash);
       }
@@ -153,7 +157,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
             `Hash: expected object state, got ${typeof state}`,
           );
         }
-        const { tag, hash } = state as Record<string, unknown>;
+        const { tag, hash } = state;
         if (typeof tag !== "string" || typeof hash !== "string") {
           return new ProblematicValue(
             typeTag,
@@ -162,7 +166,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
           );
         }
         try {
-          return new FabricHash(fromBase64url(hash), tag);
+          return new FabricHash(fromBase64url(hash), tag, true);
         } catch (e) {
           return new ProblematicValue(
             typeTag,

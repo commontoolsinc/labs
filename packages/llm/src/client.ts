@@ -166,6 +166,28 @@ class MockCatalog {
 // as long as tests within a single file don't run in parallel.
 const mockCatalog = new MockCatalog();
 
+let mockGate: (() => Promise<void>) | undefined;
+
+/**
+ * Hold every matched mock response open until `gate` resolves.
+ *
+ * A mock normally answers within a microtask, which is far quicker than a real
+ * model call and leaves no window in which a request is genuinely outstanding.
+ * A test that needs that window — one asking whether a quiescence barrier
+ * covers an in-flight request, rather than whether the answer eventually
+ * arrives — installs a gate, looks at the system while the request is held,
+ * then releases it.
+ *
+ * The gate is awaited before the streaming callback runs, so a held request has
+ * produced nothing at all. Pass `undefined` to remove it;
+ * `clearMockResponses()` and `resetMockMode()` also clear it.
+ */
+export function setMockResponseGate(
+  gate: (() => Promise<void>) | undefined,
+): void {
+  mockGate = gate;
+}
+
 /**
  * Enable mock mode for testing. When enabled, all LLM requests will be
  * intercepted and matched against registered mock responses.
@@ -197,6 +219,7 @@ export function disableMockMode(): void {
  */
 export function clearMockResponses(): void {
   mockCatalog.clear();
+  mockGate = undefined;
 }
 
 /**
@@ -204,6 +227,7 @@ export function clearMockResponses(): void {
  */
 export function resetMockMode(): void {
   mockCatalog.reset();
+  mockGate = undefined;
 }
 
 /**
@@ -288,6 +312,25 @@ export type ConversationFixtureEntry =
 export interface ConversationFixture {
   description?: string;
   responses: ConversationFixtureEntry[];
+}
+
+/**
+ * What a failed request points at, read off its status. The service reports a
+ * request the caller has to change apart from a provider that was busy or
+ * broken, so the hint follows the status rather than blaming the caller for
+ * everything.
+ */
+export function failureHint(status: number, parameters: string): string {
+  if (status === 429 || status === 503) {
+    return "The model provider is busy. Make the request again later.";
+  }
+  if (status >= 500) {
+    return "The LLM service or the model provider failed. The request was not the problem.";
+  }
+  if (status === 400 || status === 422) {
+    return `The LLM server or the model provider rejected the request. Check that you're passing the correct parameters (${parameters})`;
+  }
+  return "The LLM service turned the request down.";
 }
 
 function extractMessageText(
@@ -465,6 +508,7 @@ export class LLMClient {
     if (mockCatalog.isEnabled()) {
       const mockResponse = mockCatalog.findObjectResponse(request);
       if (mockResponse) {
+        if (mockGate) await mockGate();
         // Simulate async behavior
         await new Promise((resolve) => setTimeout(resolve, 0));
         return mockResponse;
@@ -480,6 +524,11 @@ export class LLMClient {
     }
 
     const endpoint = opts?.endpoint?.toString() ?? llmApiUrl;
+    // TODO(danfuzz): `assertJsonTransportSafe` above covers the SCHEMA, but
+    // the request's `messages` cross unchecked: a fabric value in message
+    // content (assembled runner-side from live cell reads) stringifies to
+    // `{}` here, silently. The payload wants the same transport-safety
+    // check the schema gets.
     const response = await fetch(endpoint + "/generateObject", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -492,7 +541,7 @@ export class LLMClient {
       console.error(
         `%c[generateObject Error]%c HTTP ${response.status}\n` +
           `Response: ${errorText}\n` +
-          `%cCommon cause: Check that you're passing the correct parameters (messages, schema, model, etc.)`,
+          `%c${failureHint(response.status, "messages, schema, model, etc.")}`,
         "color: red; font-weight: bold",
         "color: inherit",
         "color: gray; font-style: italic",
@@ -549,6 +598,7 @@ export class LLMClient {
     if (mockCatalog.isEnabled()) {
       const mockResponse = mockCatalog.findResponse(request);
       if (mockResponse) {
+        if (mockGate) await mockGate();
         // NOTE: Streaming simulation calls the callback once with the full
         // text rather than delivering incremental chunks. Tests that depend on
         // partial-chunk behavior will need a more granular mock.
@@ -582,6 +632,10 @@ export class LLMClient {
       throw new Error(TEST_GUARD_MESSAGE);
     }
 
+    // TODO(danfuzz): same gap as `generateObject` above — tool input schemas
+    // are checked with `assertJsonTransportSafe`, but the request's
+    // `messages`/`system` data is not, and a fabric value in it stringifies
+    // to `{}` here, silently.
     const response = await fetch(opts?.endpoint?.toString() ?? llmApiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -594,7 +648,7 @@ export class LLMClient {
       console.error(
         `%c[generateText Error]%c HTTP ${response.status}\n` +
           `Response: ${errorText}\n` +
-          `%cCommon cause: Check that you're passing the correct parameters (messages, prompt, model, etc.)`,
+          `%c${failureHint(response.status, "messages, prompt, model, etc.")}`,
         "color: red; font-weight: bold",
         "color: inherit",
         "color: gray; font-style: italic",

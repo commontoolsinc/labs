@@ -5,11 +5,11 @@ both our Deno and browser environments. In Deno, the assets are loaded from
 disk, and in browsers, rely on the host (`toolshed`) to serve assets at a
 well-known route (`/static/*`).
 
-## Building
+## Type library maintenance
 
-To compile the types, you will need to have the `es2023.d.ts` file available
-from the [TypeScript](https://github.com/microsoft/TypeScript) repository. The
-task assumes that will be checked out with the same parent folder as `labs`.
+The dependency guide owns the TypeScript checkout prerequisite, compiler-roll
+checks, and regeneration command for the vendored type libraries. See
+[the vendored type libraries](../../docs/development/DEPENDENCIES.md#the-vendored-type-libraries).
 
 ## Withheld globals
 

@@ -43,18 +43,34 @@ All IEEE 754 binary64 values are accepted, including `-0`, `NaN`,
 
 #### Arrays
 
-- Must be dense (no holes)
-- Must not contain `undefined` elements
-- Sparse arrays are densified during conversion (`undefined` → `null`)
-- Non-index keys (named properties) cause rejection as non-fabric
+- May be dense or sparse; holes are preserved, and are distinct from an
+  explicitly-stored `undefined`
+- Elements may be `undefined`, that being a first-class fabric value
+- Non-index keys cause rejection as non-fabric, `length` aside: named
+  (string-keyed) and symbol-keyed properties alike, whether or not they are
+  enumerable
+- Every present index must hold a *data* property; an accessor-backed
+  (getter and/or setter) index causes rejection as non-fabric
+
+See `space-model-formal-spec/1-fabric-values.md` Section 1.5 for the
+authoritative statement of these rules.
 
 #### Objects
 
-- Plain objects only (no class instances)
+- Direct `Object` instances only: the prototype must be `Object.prototype`
+  itself, so class instances and null-prototype objects alike cause rejection
 - Keys must be strings; symbol keys cause rejection as non-fabric
+- Every property must be an enumerable *data* property; accessor-backed
+  (getter and/or setter) and non-enumerable properties cause rejection as
+  non-fabric
+- The names `__proto__` and `constructor` cause rejection in the JavaScript
+  implementation. This is a reservation of that implementation — one name its
+  copy loops cannot rebuild, one that its other boundaries already refuse —
+  rather than a rule of the model; see Section 1.5 of
+  `space-model-formal-spec/1-fabric-values.md`
 - Values must be valid fabric values
-- No distinction between regular and null-prototype objects; reconstruction
-  produces regular plain objects
+- Reconstruction produces regular plain objects, which is the only object
+  shape a fabric value has
 
 ### Special Values
 
@@ -64,7 +80,8 @@ All IEEE 754 binary64 values are accepted, including `-0`, `NaN`,
 
 - **Top-level**: Indicates deletion (remove the stored value)
 - **Object property**: Treated as absent (property is omitted)
-- **Array element**: Converted to `null` during storage
+- **Array element**: Stored as `undefined`, and remains distinguishable from
+  both a hole and a `null`
 
 #### Non-Fabric Types
 
@@ -72,8 +89,9 @@ These types cannot be stored directly:
 
 - `symbol` — only registry-interned symbols are storable; unique symbols
   throw (see Symbols below)
-- `function` — throws error unless it has a `toJSON()` method
-- Class instances — throws error unless they have `toJSON()` or special handling
+- `function` — throws
+- Class instances — throw unless the class has special handling (a recognized
+  native class, or the fabric protocol)
 
 #### Symbols
 
@@ -83,7 +101,7 @@ Symbol handling at the fabric-value conversion gate:
   returns a string) are first-class fabric values, portable across realms
   and processes via their registry key
 - Unique symbols (`Symbol(desc)`) throw with the message
-  `"Cannot store unique (uninterned) symbol"`
+  ``"Not representable as a `FabricValue`: unique (uninterned) symbol"``
 - Round-trip via the `Symbol@1` JSON envelope (see
   `space-model-formal-spec/3-json-encoding.md` Section 3) and via the
   byte-level form in `space-model-formal-spec/2-hash-byte-format.md`
@@ -448,8 +466,8 @@ The system aims for an **immutable-forward** design:
 - **Plain objects and arrays** are frozen (`Object.freeze()`) upon reconstruction
 - **`FabricInstance`s** should ideally be frozen as well — this is the north
   star, though not yet a strict requirement
-- **No distinction** is made between regular and null-prototype plain objects;
-  reconstruction always produces regular plain objects
+- Reconstruction always produces regular plain objects, that being the only
+  object shape a fabric value has
 
 This immutability guarantee enables safe sharing of reconstructed values and
 aligns with the reactive system's assumption that values don't mutate in place.
@@ -557,7 +575,7 @@ internal walkers):
 ```typescript
 // Shown inside a pattern body.
 // At boundary exit (inside the context's encode walk)
-function encodeValue(value: FabricValue): JsonWireValue {
+function encodeValue(value: FabricValue): JsonCodecValue {
   const codec = registry.codecFromValue(value);
   if (codec) {
     const state = encodeValue(codec.encode(value)); // context recurses
@@ -568,7 +586,7 @@ function encodeValue(value: FabricValue): JsonWireValue {
 
 // At boundary entry (inside the context's decode walk)
 function decodeValue(
-  data: JsonWireValue,
+  data: JsonCodecValue,
   ctx: ReconstructionContext,
 ): FabricValue {
   const unwrapped = unwrapTag(data);

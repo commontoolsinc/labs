@@ -4,6 +4,7 @@ import {
   getLiftAppliedInnerCall,
   getLiftAppliedInputAndCallback,
   getTypeAtLocationWithFallback,
+  isSyntheticNode,
   isWildcardTraversalCall,
   type NormalizedDataFlow,
   visitEachChildWithJsx,
@@ -36,8 +37,8 @@ import {
   isTopmostMemberAccess,
 } from "./opaque-roots.ts";
 import {
-  assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,
+  resolveComputeWrapCandidate,
 } from "./expression-rewrite/emitters/compute-wrap-invariants.ts";
 import {
   classifyUnsupportedExpressionSiteCallRoot,
@@ -126,9 +127,7 @@ function registerReplacementType(
   original: ts.Node,
   context: TransformationContext,
 ): void {
-  const typeRegistry = context.options.state?.typeRegistry;
-  if (!typeRegistry) return;
-
+  const typeRegistry = context.state.typeRegistry;
   const originalType = getTypeAtLocationWithFallback(
     original,
     context.checker,
@@ -481,12 +480,15 @@ function rewriteTrackedOpaquePatternBody(
     }
 
     if (context.getReactiveContext(pendingWrap).kind !== "compute") {
-      assertValidComputeWrapCandidate(
+      const decision = resolveComputeWrapCandidate(
         pendingWrap,
         initializer,
         "pattern callback initializer",
         context,
       );
+      if (decision.kind === "skip-reported") {
+        return undefined;
+      }
     }
 
     return createReactiveWrapperForExpression(
@@ -1435,7 +1437,7 @@ function reportInlineReactiveRootAccesses(
       // `(items ?? []).map(...)` or similar into a synthesized
       // `.method-on-call` shape that LOOKS like the bug but isn't
       // user-authored. This is a build-time guard for user-authored shapes.
-      node.pos >= 0 &&
+      !isSyntheticNode(node) &&
       // Skip when this access is the callee of a method call AND its
       // immediate receiver is a reactive-origin call itself
       // (`Writable.of(...).for(...)`, `wish(...).key(...)`, etc.). Those

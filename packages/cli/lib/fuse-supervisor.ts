@@ -5,25 +5,15 @@ import {
   type MountStateEntry,
   writeMountStateFile,
 } from "./fuse.ts";
+import {
+  type FuseSupervisorFlags,
+  mountFlagArgs,
+  parseSupervisorArgs,
+  supervisorHelp,
+} from "./fuse-mount-flags.ts";
 
-export interface FuseSupervisorOptions {
-  mountpoint: string;
-  apiUrl: string;
-  identity: string;
-  execCli: string;
-  logFile: string;
-  spaces: string[];
-  allowOther?: boolean;
-  noattrcache?: boolean;
-  attrcacheTimeout?: string;
-  cfcMode?: string;
-  cfcAnnotations?: boolean;
-  cfcXattrNamespace?: string;
-  cfcWritebackXattrs?: boolean;
-  cfcWritebackState?: string;
-  dangerouslyAllowIncompatibleSchema?: boolean;
-  statePath?: string;
-  supervisorStatusPath?: string;
+/** The mount flags the supervisor runs with, plus its injectable surroundings. */
+export interface FuseSupervisorOptions extends FuseSupervisorFlags {
   importMetaUrl?: string;
   command?: FuseCommandConstructor;
   execPath?: string;
@@ -36,53 +26,6 @@ export interface FuseSupervisorOptions {
   addSignalListener?: (signal: Deno.Signal, handler: () => void) => void;
   removeSignalListener?: (signal: Deno.Signal, handler: () => void) => void;
   supervisorPid?: number;
-}
-
-/** Parsed command flags used to launch a FUSE supervisor. */
-export interface FuseSupervisorCliOptions {
-  apiUrl?: string;
-  identity?: string;
-  execCli?: string;
-  logFile?: string;
-  space?: string[];
-  allowOther?: boolean;
-  noattrcache?: boolean;
-  attrcacheTimeout?: string;
-  cfcMode?: string;
-  cfcAnnotations?: boolean;
-  cfcXattrNamespace?: string;
-  cfcWritebackXattrs?: boolean;
-  cfcWritebackState?: string;
-  dangerouslyAllowIncompatibleSchema?: boolean;
-  statePath?: string;
-  supervisorStatus?: string;
-}
-
-/** Convert CLI command options into the supervisor's runtime contract. */
-export function fuseSupervisorOptions(
-  options: FuseSupervisorCliOptions,
-  mountpoint: string,
-): FuseSupervisorOptions {
-  return {
-    mountpoint,
-    apiUrl: options.apiUrl ?? "",
-    identity: options.identity ?? "",
-    execCli: options.execCli ?? "",
-    logFile: options.logFile ?? "",
-    spaces: options.space ?? [],
-    allowOther: options.allowOther,
-    noattrcache: options.noattrcache,
-    attrcacheTimeout: options.attrcacheTimeout,
-    cfcMode: options.cfcMode,
-    cfcAnnotations: options.cfcAnnotations,
-    cfcXattrNamespace: options.cfcXattrNamespace,
-    cfcWritebackXattrs: options.cfcWritebackXattrs,
-    cfcWritebackState: options.cfcWritebackState,
-    dangerouslyAllowIncompatibleSchema:
-      options.dangerouslyAllowIncompatibleSchema,
-    statePath: options.statePath,
-    supervisorStatusPath: options.supervisorStatus,
-  };
 }
 
 export interface FuseCommandConstructor {
@@ -110,57 +53,20 @@ export function buildFuseChildCommand(
   const execBase = basename(execPath);
   const isCompiledBinary = execBase !== "deno" && execBase !== "deno.exe";
 
+  // The child is the daemon, so it receives the daemon's flags only: the mount
+  // state file stays with this process.
   if (isCompiledBinary) {
-    const args = ["fuse-daemon", options.mountpoint];
-    if (options.apiUrl) args.push("--api-url", options.apiUrl);
-    if (options.identity) args.push("--identity", options.identity);
-    if (options.execCli) args.push("--exec-cli", options.execCli);
-    if (options.logFile) args.push("--log-file", options.logFile);
-    if (options.allowOther) args.push("--allow-other");
-    if (options.noattrcache) args.push("--noattrcache");
-    if (options.attrcacheTimeout) {
-      args.push("--attrcache-timeout", options.attrcacheTimeout);
-    }
-    if (options.cfcMode) args.push("--cfc-mode", options.cfcMode);
-    if (options.cfcAnnotations) args.push("--cfc-annotations");
-    if (options.cfcXattrNamespace) {
-      args.push("--cfc-xattr-namespace", options.cfcXattrNamespace);
-    }
-    if (options.cfcWritebackXattrs) args.push("--cfc-writeback-xattrs");
-    if (options.cfcWritebackState) {
-      args.push("--cfc-writeback-state", options.cfcWritebackState);
-    }
-    if (options.dangerouslyAllowIncompatibleSchema) {
-      args.push("--dangerously-allow-incompatible-schema");
-    }
-    if (options.supervisorStatusPath) {
-      args.push("--supervisor-status", options.supervisorStatusPath);
-    }
-    for (const space of options.spaces) args.push("--space", space);
-    return { command: execPath, args };
+    return {
+      command: execPath,
+      args: ["fuse-daemon", options.mountpoint, ...mountFlagArgs(options)],
+    };
   }
 
   return {
     command: execPath,
     args: buildFuseChildDenoArgs({
+      ...options,
       modPath: fuseMod(options.importMetaUrl ?? import.meta.url),
-      mountpoint: options.mountpoint,
-      apiUrl: options.apiUrl,
-      identity: options.identity,
-      execCli: options.execCli,
-      logFile: options.logFile,
-      spaces: options.spaces,
-      allowOther: options.allowOther,
-      noattrcache: options.noattrcache,
-      attrcacheTimeout: options.attrcacheTimeout,
-      cfcMode: options.cfcMode,
-      cfcAnnotations: options.cfcAnnotations,
-      cfcXattrNamespace: options.cfcXattrNamespace,
-      cfcWritebackXattrs: options.cfcWritebackXattrs,
-      cfcWritebackState: options.cfcWritebackState,
-      dangerouslyAllowIncompatibleSchema:
-        options.dangerouslyAllowIncompatibleSchema,
-      supervisorStatusPath: options.supervisorStatusPath,
     }),
   };
 }
@@ -276,129 +182,6 @@ export async function cleanupFuseChild(
   await child.status.catch(() => undefined);
 }
 
-export interface ParsedSupervisorArgs {
-  options: FuseSupervisorOptions;
-  help: boolean;
-}
-
-export function parseSupervisorArgs(
-  rawArgs: string[],
-): ParsedSupervisorArgs {
-  const options: FuseSupervisorOptions = {
-    mountpoint: "",
-    apiUrl: "",
-    identity: "",
-    execCli: "",
-    logFile: "",
-    spaces: [],
-  };
-  let help = false;
-
-  for (let i = 0; i < rawArgs.length; i++) {
-    const arg = rawArgs[i];
-    switch (arg) {
-      case "--help":
-      case "-h":
-        help = true;
-        break;
-      case "--api-url":
-        options.apiUrl = requireValue(rawArgs, ++i, arg);
-        break;
-      case "--identity":
-        options.identity = requireValue(rawArgs, ++i, arg);
-        break;
-      case "--exec-cli":
-        options.execCli = requireValue(rawArgs, ++i, arg);
-        break;
-      case "--log-file":
-        options.logFile = requireValue(rawArgs, ++i, arg);
-        break;
-      case "--allow-other":
-        options.allowOther = true;
-        break;
-      case "--noattrcache":
-        options.noattrcache = true;
-        break;
-      case "--attrcache-timeout":
-        options.attrcacheTimeout = requireValue(rawArgs, ++i, arg);
-        break;
-      case "--cfc-mode":
-        options.cfcMode = requireValue(rawArgs, ++i, arg);
-        break;
-      case "--cfc-annotations":
-        options.cfcAnnotations = true;
-        break;
-      case "--cfc-xattr-namespace":
-        options.cfcXattrNamespace = requireValue(rawArgs, ++i, arg);
-        break;
-      case "--cfc-writeback-xattrs":
-        options.cfcWritebackXattrs = true;
-        break;
-      case "--cfc-writeback-state":
-        options.cfcWritebackState = requireValue(rawArgs, ++i, arg);
-        break;
-      case "--dangerously-allow-incompatible-schema":
-        options.dangerouslyAllowIncompatibleSchema = true;
-        break;
-      case "--state-path":
-        options.statePath = requireValue(rawArgs, ++i, arg);
-        break;
-      case "--supervisor-status":
-        options.supervisorStatusPath = requireValue(rawArgs, ++i, arg);
-        break;
-      case "--space":
-      case "-s":
-        options.spaces.push(requireValue(rawArgs, ++i, arg));
-        break;
-      default:
-        if (arg.startsWith("-")) {
-          throw new Error(`Unknown fuse supervisor option: ${arg}`);
-        }
-        if (options.mountpoint) {
-          throw new Error(`Unexpected fuse supervisor argument: ${arg}`);
-        }
-        options.mountpoint = arg;
-    }
-  }
-
-  return { options, help };
-}
-
-function requireValue(args: string[], index: number, flag: string): string {
-  const value = args[index];
-  if (value === undefined) {
-    throw new Error(`Missing value for ${flag}`);
-  }
-  return value;
-}
-
-export function supervisorHelp(): string {
-  return `Usage: fuse-supervisor <mountpoint> [options]
-
-Internal: supervise a background FUSE child process.
-
-Options:
-  --api-url <url>                 URL of the fabric instance
-  --identity <path>               Path to an identity keyfile
-  --exec-cli <path>               Path to the cf exec shim
-  --log-file <path>               Path to the FUSE child log file
-  --allow-other                   Pass allow_other through to the FUSE child
-  --noattrcache                   Pass noattrcache through to the FUSE child
-  --attrcache-timeout <seconds>   Pass attrcache-timeout through to the FUSE child
-  --cfc-mode <mode>               FUSE-side CFC mode
-  --cfc-annotations               Publish CFC annotation xattrs
-  --cfc-xattr-namespace <ns>      CFC xattr namespace
-  --cfc-writeback-xattrs          Enable CFC writeback xattrs
-  --cfc-writeback-state <path>    CFC writeback state path
-  --dangerously-allow-incompatible-schema
-                                  Allow incompatible source schema updates
-  --state-path <path>             Mount state file to update with child PID
-  --supervisor-status <path>      Child readiness and heartbeat status file
-  -s, --space <name>              Space(s) to connect
-  -h, --help                      Show this help
-`;
-}
-
 /**
  * Writes the mount state file. This process spawned the FUSE child, so it is the
  * only one that knows both PIDs, and it writes the file once and completely.
@@ -435,9 +218,6 @@ if (import.meta.main) {
     if (help) {
       console.log(supervisorHelp());
       Deno.exit(0);
-    }
-    if (!options.mountpoint) {
-      throw new Error("Missing mountpoint for fuse supervisor.");
     }
     await runFuseSupervisor(options);
   } catch (error) {

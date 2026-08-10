@@ -16,6 +16,8 @@ const __cfAmdHooks = undefined;
 //   new Cell<number>(10) → new Cell<number>(10, { type: "number" })
 //   new Cell<string>("hello") → new Cell<string>("hello", { type: "string" })
 //   new Cell<boolean>(true) → new Cell<boolean>(true, { type: "boolean" })
+//   new Cell<boolean | null>(null)
+//     → new Cell<boolean | null>(null, { anyOf: [{ type: "boolean" }, { type: "null" }] })
 export default function TestLiteralWidenExplicitTypeArgs() {
     const _c1 = new Cell<number>(10, {
         type: "number"
@@ -26,6 +28,13 @@ export default function TestLiteralWidenExplicitTypeArgs() {
     const _c3 = new Cell<boolean>(true, {
         type: "boolean"
     } as const satisfies __cfHelpers.JSONSchema).for("_c3", true);
+    const _c4 = new Cell<boolean | null>(null, {
+        anyOf: [{
+                type: "boolean"
+            }, {
+                type: "null"
+            }]
+    } as const satisfies __cfHelpers.JSONSchema).for("_c4", true);
     return null;
 }
 __cfHardenFn(TestLiteralWidenExplicitTypeArgs);

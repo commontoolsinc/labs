@@ -26,24 +26,25 @@ import { ProblematicValue } from "./ProblematicValue.ts";
 /**
  * A link value in the fabric type system: the modern, object-shaped form of a
  * `{ "/": { "link@1": … } }` link reference. It wraps the link's payload — a
- * {@link FabricPlainObject} of addressing fields (`id`, `space`, `scope`, `path`,
- * `overwrite`) plus an optional `schema` — as its sole nested value. The
- * data-model layer does not constrain the field set; that is a consumer concern
- * (e.g. runner's `CellLinkRefPayload`).
+ * {@link FabricPlainObject} of addressing fields (`id`, `space`, `scope`,
+ * `path`, `overwrite`) plus an optional `schema` — as its sole nested value.
+ * The data-model layer does not constrain the field set; that is a consumer
+ * concern (e.g. runner's `CellLinkRefPayload`).
  *
- * It is a {@link FabricInstance} (not a `FabricPrimitive`) precisely because the
- * payload is an **outgoing reference**: a link may carry a `schema`, an arbitrary
- * `FabricValue` that is not leaf data, so a link is a small object graph rather
- * than an immutable scalar. Like every instance, a `FabricLink` is wholeheartedly
- * mutable until frozen and immutable thereafter; the payload it holds is its one
- * nested `FabricValue`, frozen and cloned recursively by the protocol members.
+ * It is a {@link FabricInstance} (not a `FabricPrimitive`) precisely because
+ * the payload is an **outgoing reference**: a link may carry a `schema`, an
+ * arbitrary `FabricValue` that is not leaf data, so a link is a small object
+ * graph rather than an immutable scalar. Like every instance, a `FabricLink` is
+ * wholeheartedly mutable until frozen and immutable thereafter; the payload it
+ * holds is its one nested `FabricValue`, frozen and cloned recursively by the
+ * protocol members.
  */
 export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   /** The wrapped addressing payload (this link's sole outgoing reference). */
   #payload: FabricPlainObject;
 
   /**
-   * Constructs a `FabricLink` wrapping `payload`. The payload must be a plain
+   * Constructs an instance wrapping `payload`. The payload must be a plain
    * object with no prototype-pollution keys; otherwise the constructor throws
    * (death before confusion). The payload is held by reference — like every
    * `FabricInstance`, the instance is mutable until frozen, so the caller must
@@ -75,12 +76,13 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
     subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
     subFreeze(this.#payload);
-    return Object.freeze(this) as unknown as FabricValue;
+    return Object.freeze(this);
   }
 
   /**
    * Side-effect-free check mirroring `[DEEP_FREEZE]`'s canonical form: this
-   * instance is frozen and its payload is recursively deep-frozen. Never throws.
+   * instance is frozen and its payload is recursively deep-frozen. Never
+   * throws.
    */
   [IS_DEEP_FROZEN](
     subIsDeepFrozen: (value: FabricValue) => boolean,
@@ -110,6 +112,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
 
   static #codec = Object.freeze(
     new (class LinkCodec extends BaseFabricCodec {
+      /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Link, FabricLink);
       }

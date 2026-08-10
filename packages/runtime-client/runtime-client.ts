@@ -35,6 +35,9 @@ import {
   NavigateRequestNotification,
   type PatternSourcesResponse,
   PendingWritesNotification,
+  type PieceSourceAction,
+  type PieceSourceView,
+  type PieceUpdateSourceResponse,
   RequestType,
   TelemetryNotification,
   type UploadBlobResponse,
@@ -155,7 +158,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   // TODO(unused)
-  // Currently unused in shell, but a PieceManager-like layer
+  // Currently unused in shell, but a PiecesController-like layer
   // could be built using this
   async getCell<T>(
     space: DID,
@@ -300,6 +303,43 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return new PageHandle<T>(this, response.page);
   }
 
+  /**
+   * Read a piece's source state: the pattern it runs, the origin it tracks, the
+   * history metadata it carries, and its authored source files.
+   */
+  async getPieceSource(
+    pieceId: string,
+    space: DID,
+  ): Promise<PieceSourceView> {
+    const response = await this.#conn.request<RequestType.PieceGetSource>({
+      type: RequestType.PieceGetSource,
+      pieceId,
+      space,
+    });
+    return response.source;
+  }
+
+  /**
+   * Change a piece's source lifecycle state and return the resulting source
+   * view. An incompatible candidate is returned as a warning without mutation.
+   */
+  async updatePieceSource(
+    pieceId: string,
+    space: DID,
+    action: PieceSourceAction,
+    options: { confirmationToken?: string } = {},
+  ): Promise<PieceUpdateSourceResponse> {
+    return await this.#conn.request<RequestType.PieceUpdateSource>({
+      type: RequestType.PieceUpdateSource,
+      pieceId,
+      space,
+      action,
+      ...(options.confirmationToken === undefined
+        ? {}
+        : { confirmationToken: options.confirmationToken }),
+    });
+  }
+
   async getPageSlug(pageId: string, space: DID): Promise<string | undefined> {
     const response = await this.#conn.request<RequestType.PageGetSlug>({
       type: RequestType.PageGetSlug,
@@ -320,7 +360,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   /**
    * Get the pieces list cell.
-   * Subscribe to this cell to get reactive updates of all pieces in the space.
+   * Subscribe to this cell to get reactive updates of registered pieces in the
+   * space. This is not a storage-wide piece listing.
    */
   async getPiecesListCell<T>(space: DID): Promise<CellHandle<T[]>> {
     const response = await this.#conn.request<RequestType.PageGetAll>({
@@ -332,7 +373,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   /**
-   * Wait for the PieceManager to be synced with storage.
+   * Wait for the space's pieces controller to be synced with storage.
    *
    * Note: storage sync is connection-wide, so this awaits all open
    * spaces; `space` only selects which space's piece context (and its
@@ -347,11 +388,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   /**
-   * Record a runtime-learned host hint for a space (site-table v0):
-   * makes a just-learned `space → host` fact effective on the live
-   * runtime. The durable record belongs in the home-space site table;
-   * this is the immediate, in-session half. Returns whether the hint
-   * is in effect (seed wins; an opened space is never re-pointed).
+   * Record a runtime-learned HTTP or HTTPS host hint for a space
+   * (site-table v0). This makes a just-learned space-to-host fact effective
+   * on the live runtime. The durable record belongs in the home-space table;
+   * this is the immediate, in-session half. Returns whether the worker
+   * accepted or confirmed the hint. A seed or accepted late hint fixes the
+   * route for the session. The first hint can replace a read-only provisional
+   * default-host provider and replay its reads. Callers must not mount the space
+   * under this hint when the method returns false.
    */
   async registerSpaceHost(space: DID, host: string): Promise<boolean> {
     const res = await this.#conn.request<RequestType.RegisterSpaceHost>({
@@ -617,6 +661,10 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  /**
+   * Uploads a blob to the given space. `body` is not consumed -- it crosses to
+   * the runtime as a clone -- so the caller may keep using its array.
+   */
   async uploadBlob(options: {
     space: DID;
     contentType: string;
@@ -627,7 +675,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.UploadBlob,
       space: options.space,
       contentType: options.contentType,
-      body: Array.from(options.body),
+      body: options.body,
       suffix: options.suffix,
     });
   }

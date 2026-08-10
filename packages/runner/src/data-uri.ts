@@ -29,6 +29,7 @@ import {
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
+import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { type Cell, isCell } from "./cell.ts";
 import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
 import {
@@ -41,6 +42,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import type { URI } from "./sigil-types.ts";
 import {
   dataUriFromValue,
+  isFabricDataUri,
   valueFromDataUri,
 } from "@commonfabric/data-model/data-uri-codec";
 
@@ -117,7 +119,7 @@ export function dataUriFromValueWithResolvedLinks(
             [key, value],
           ) => [
             key,
-            traverseAndAddBaseIdToRelativeLinks(value as FabricValue, seen),
+            traverseAndAddBaseIdToRelativeLinks(value, seen),
           ]),
         );
       }
@@ -134,15 +136,14 @@ export function dataUriFromValueWithResolvedLinks(
 /**
  * Find any data: URI links and inline them.
  *
- * TODO(danfuzz): This `isRecord`-gated walk has no `FabricSpecialObject`
- * guard: after the link check, a non-link `FabricPrimitive`/`FabricInstance`
- * falls into the `Object.entries` descent, which walks it by enumerable own
- * props instead of treating it as a leaf. An instance with no enumerable
- * props happens to pass through by reference, but the copy-on-write branch
- * (`{ ...value }`) silently flattens any instance whose entry inlines
- * differently into a plain object. The payload walk
- * (`dataValue[path.shift()]`) indexes into decoded content with the same
- * blindness.
+ * Only this codec's media type is inlined, the one
+ * {@link dataUriFromValue} mints. A link naming a `data:` URI of any other
+ * media type is returned as it came in, on the same footing as a link
+ * naming a document in a space.
+ *
+ * A `FabricPrimitive` comes back as the same instance: a leaf holds no link to
+ * inline. A `FabricInstance` is refused, since passing one through would leave
+ * a link inside it un-inlined.
  *
  * @param value - The value to find and inline data: URI links in.
  * @returns The value with any data: URI links inlined.
@@ -151,7 +152,7 @@ export function findAndInlineDataUriLinks(value: any): any {
   if (isCellLink(value)) {
     const dataLink = parseLink(value)!;
 
-    if (dataLink.id?.startsWith("data:")) {
+    if (dataLink.id !== undefined && isFabricDataUri(dataLink.id)) {
       let dataValue: any = valueFromDataUri(dataLink.id);
       const path = [...dataLink.path];
 
@@ -164,8 +165,7 @@ export function findAndInlineDataUriLinks(value: any): any {
           const newLink = parseLink(dataValue);
           let schema = newLink.schema;
           if (schema !== undefined && path.length > 0) {
-            const cfc = new ContextualFlowControl();
-            schema = cfc.getSchemaAtPath(schema, path);
+            schema = ContextualFlowControl.getSchemaAtPath(schema, path);
           }
           // Create new link by merging dataLink with remaining path
           const newSigilLink = createSigilLinkFromParsedLink({
@@ -187,10 +187,31 @@ export function findAndInlineDataUriLinks(value: any): any {
           return findAndInlineDataUriLinks(newSigilLink);
         }
         if (path.length > 0) {
+          // TODO(danfuzz): a path segment naming something inside a
+          // `FabricInstance` indexes it by property name and yields
+          // `undefined`, because an instance's contents are reachable only
+          // through its codec. A `FabricPrimitive` needs nothing here: it is a
+          // leaf, so no path can legitimately point inside one.
           dataValue = dataValue[path.shift()!];
         } else {
           break;
         }
+      }
+
+      // The decoded payload gets the same dispatch the walk applies anywhere
+      // else. Without it the refusal below has a bypass: an instance handed
+      // over directly is refused, while the same one decoded out of a `data:`
+      // URI leaves silently, and a guard with a way around it is worse than no
+      // guard, since it reads as covering the case.
+      //
+      // Only the payload itself is checked, because a decoded payload is
+      // returned rather than walked -- nothing here descends one, so there is
+      // no descent for a nested instance to be caught by.
+      if (dataValue instanceof FabricInstance) {
+        refuseFabricInstance(
+          dataValue,
+          "when inlining a `data:` URI whose content is a `FabricInstance`",
+        );
       }
 
       return dataValue;
@@ -213,6 +234,32 @@ export function findAndInlineDataUriLinks(value: any): any {
       }
     }
     return next ?? value;
+  } else if (value instanceof FabricPrimitive) {
+    // A leaf, and `isRecord`, so it leaves ahead of the record branch below.
+    // It holds no link to inline, so returning it whole is the answer rather
+    // than an omission.
+    return value;
+  } else if (value instanceof FabricInstance) {
+    // Refused. An instance's state can carry a `data:` URI link, and inlining
+    // those is what this walk is for, so passing the value through would hand
+    // it back _untransformed_ -- the link surviving as a link, the walk's
+    // purpose defeated for everything inside the wrapper.
+    //
+    // Nothing reaches this today, de facto rather than by construction. A link
+    // ends up inside an error only if an author attaches a cell to one, which
+    // `fabricFromNativeValue()` would then convert, and nothing in the tree
+    // does that; the whole suite runs green with this throw in place.
+    //
+    // It cannot be narrowed to instances that actually carry such a link, which
+    // is the shape that would sound safer: deciding that means reading the
+    // instance's codec contents, the very traversal whose absence causes the
+    // gap. So it is all instances or none -- and a tripwire that announces
+    // itself the moment these classes see real use beats a comment nobody runs.
+    //
+    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
+    // at which point this becomes a walk rather than a refusal -- the same gap
+    // marked at the sibling walk in `dataUriFromValueWithResolvedLinks()`.
+    refuseFabricInstance(value, "when inlining `data:` URI links");
   } else if (isRecord(value)) {
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {

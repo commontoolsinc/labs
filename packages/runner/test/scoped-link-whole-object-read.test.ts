@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   cellWithScopedLinkRequiredsRelaxed,
@@ -14,7 +13,7 @@ import {
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
 import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 // Whole-object piece reads void on scoped links (CLI `cf piece get` with no
 // path returned undefined while every child path worked).
@@ -36,37 +35,8 @@ import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 // The fix lives at the piece read boundary:
 // schemaWithScopedLinkRequiredsRelaxed derives a projection schema whose
 // `required` no longer claims properties stored as narrower-scoped links,
-// and PiecePropIo.get reads through it — expressing partial visibility in
-// the schema, exactly as #4746 prescribes.
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
+// and PiecePropIo.get reads both roots and selected subtrees through it —
+// expressing partial visibility in the schema, exactly as #4746 prescribes.
 
 const signer = await Identity.fromPassphrase("scoped-link-whole-object-read");
 const space = signer.did();
@@ -96,12 +66,12 @@ const lenientResultSchema = {
 
 describe("whole-object read over a session-scoped link", () => {
   let server: MemoryV2Server.Server;
-  let writerStorage: SharedServerStorageManager;
+  let writerStorage: EmulatedStorageManager;
   let writerRt: Runtime;
 
   beforeEach(async () => {
     server = newSharedServer();
-    writerStorage = SharedServerStorageManager.connectTo(server, {
+    writerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     writerRt = new Runtime({
@@ -155,7 +125,7 @@ describe("whole-object read over a session-scoped link", () => {
     // A fresh storage manager mints a fresh sessionId — this replica is a
     // DIFFERENT session (the CLI) than the writer (the browser), so the
     // session-scoped draft doc does not exist for it.
-    const storage = SharedServerStorageManager.connectTo(server, {
+    const storage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     const rt = new Runtime({

@@ -2,7 +2,8 @@ import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
-  applyPatch,
+  applyPatchToDocument,
+  emptyEntityDocument,
   patchOpChangesParentKeySet,
   touchedPointerPaths,
 } from "./patch.ts";
@@ -21,7 +22,6 @@ import {
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
   encodeMemoryBoundary,
-  encodeMemoryBoundaryUnprovenFabricValue,
   type EntityDocument,
   type EntityId,
   isEntityDocument,
@@ -388,6 +388,7 @@ CREATE TABLE IF NOT EXISTS head (
   scope_key TEXT    NOT NULL DEFAULT 'space',
   seq       INTEGER NOT NULL,
   op_index  INTEGER NOT NULL,
+  op        TEXT    NOT NULL CHECK (op IN ('set', 'patch', 'delete')),
   PRIMARY KEY (branch, id, scope_key)
 );
 CREATE INDEX IF NOT EXISTS idx_head_branch ON head (branch);
@@ -485,10 +486,10 @@ VALUES (
 `;
 
 const UPSERT_HEAD = `
-INSERT INTO head (branch, id, scope_key, seq, op_index)
-VALUES (:branch, :id, :scope_key, :seq, :op_index)
+INSERT INTO head (branch, id, scope_key, seq, op_index, op)
+VALUES (:branch, :id, :scope_key, :seq, :op_index, :op)
 ON CONFLICT (branch, id, scope_key) DO UPDATE
-SET seq = :seq, op_index = :op_index
+SET seq = :seq, op_index = :op_index, op = :op
 `;
 
 const INSERT_SNAPSHOT = `
@@ -537,6 +538,46 @@ JOIN revision r
  AND r.seq = h.seq
  AND r.op_index = h.op_index
 WHERE h.branch = :branch AND h.id = :id AND h.scope_key = :scope_key
+`;
+
+const SELECT_CURRENT_ENTITY_IDS = `
+SELECT id
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND op <> 'delete'
+ORDER BY id ASC
+`;
+
+const SELECT_CURRENT_ENTITY_ID_PAGE = `
+SELECT id
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND op <> 'delete'
+ORDER BY id ASC
+LIMIT :limit
+`;
+
+const SELECT_CURRENT_ENTITY_ID_PAGE_AFTER = `
+SELECT id
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND op <> 'delete'
+  AND id > :after
+ORDER BY id ASC
+LIMIT :limit
+`;
+
+const SELECT_CURRENT_ENTITY_ID = `
+SELECT 1 AS present
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND id = :id
+  AND op <> 'delete'
+LIMIT 1
 `;
 
 const SELECT_AT_SEQ_LOCAL = `
@@ -652,6 +693,45 @@ WHERE session_id = :session_id
   AND local_seq = :local_seq
 `;
 
+// True-basis (CT-1910) variants of the conflict scans: identical intervals,
+// but writes produced by the reader's own session's TRUE PREDECESSORS
+// (`local_seq` below the reader's) are excluded — the accepted own layers
+// the reader's materialized view included; conflicting with them would be
+// the self-conflict that forced pending reads to over-advance their basis
+// in the first place. The exclusion is deliberately NOT session-wide: an
+// own write with a HIGHER localSeq that was accepted first (out-of-order
+// submission — e.g. the runner's hold-mode admission can release a later
+// blind commit while an earlier read-bearing commit waits) was NOT in the
+// reader's view and must conflict exactly like a foreign write. Checking
+// `local_seq` here, rather than assuming the §3.6.3 same-session ordering
+// holds on the wire, keeps the scan sound without trusting the transport.
+const SELECT_SET_DELETE_CONFLICT_EXCLUDING_SESSION = `
+SELECT r.seq AS seq
+FROM revision r
+JOIN "commit" c ON c.seq = r.commit_seq
+WHERE r.branch = :branch
+  AND r.id = :id
+  AND r.scope_key = :scope_key
+  AND r.seq > :after_seq
+  AND r.op IN ('set', 'delete')
+  AND (c.session_id <> :exclude_session OR c.local_seq >= :before_local_seq)
+ORDER BY r.seq DESC, r.op_index DESC
+LIMIT 1
+`;
+
+const SELECT_PATCH_CONFLICTS_EXCLUDING_SESSION = `
+SELECT r.seq AS seq, r.op_index AS op_index, r.data AS data
+FROM revision r
+JOIN "commit" c ON c.seq = r.commit_seq
+WHERE r.branch = :branch
+  AND r.id = :id
+  AND r.scope_key = :scope_key
+  AND r.seq > :after_seq
+  AND r.op = 'patch'
+  AND (c.session_id <> :exclude_session OR c.local_seq >= :before_local_seq)
+ORDER BY r.seq DESC, r.op_index DESC
+`;
+
 const SELECT_COMMIT_REVISIONS = `
 SELECT branch, id, scope_key, seq, op_index, op, data, commit_seq
 FROM revision
@@ -739,17 +819,23 @@ interface PreparedStatements {
   selectBranchStatus: PreparedStatement;
   selectCommitRevisions: PreparedStatement;
   selectCurrentLocal: PreparedStatement;
+  selectCurrentEntityId: PreparedStatement;
+  selectCurrentEntityIds: PreparedStatement;
+  selectCurrentEntityIdPage: PreparedStatement;
+  selectCurrentEntityIdPageAfter: PreparedStatement;
   selectExistingCommit: PreparedStatement;
   selectHead: PreparedStatement;
   selectLatestBase: PreparedStatement;
   selectLatestSnapshot: PreparedStatement;
   selectNextSeq: PreparedStatement;
   selectPatchConflicts: PreparedStatement;
+  selectPatchConflictsExcludingSession: PreparedStatement;
   selectPatchCount: PreparedStatement;
   selectPatches: PreparedStatement;
   selectPendingResolution: PreparedStatement;
   selectServerSeq: PreparedStatement;
   selectSetDeleteConflict: PreparedStatement;
+  selectSetDeleteConflictExcludingSession: PreparedStatement;
   upsertHead: PreparedStatement;
   updateBranchHead: PreparedStatement;
   deleteBranch: PreparedStatement;
@@ -816,7 +902,7 @@ export type InvocationRecord = {
   cmd: string;
   sub: string;
   args?: FabricValue;
-  [key: string]: unknown;
+  [key: string]: FabricValue;
 };
 
 export type AuthorizationRecord = FabricValue;
@@ -872,10 +958,9 @@ export type AppliedCommit = {
   schedulerDirtiedReaders?: SchedulerReaderIndexEntry[];
 };
 
-export interface ResolvedSchedulerObservationAddress
-  extends SchedulerObservationAddress {
-  scopeKey: string;
-}
+export type ResolvedSchedulerObservationAddress =
+  & SchedulerObservationAddress
+  & { scopeKey: string };
 
 type SchedulerWriteAddress = SchedulerObservationAddress & {
   scopeKey?: string;
@@ -1130,17 +1215,29 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectBranchStatus: database.prepare(SELECT_BRANCH_STATUS),
   selectCommitRevisions: database.prepare(SELECT_COMMIT_REVISIONS),
   selectCurrentLocal: database.prepare(SELECT_CURRENT_LOCAL),
+  selectCurrentEntityId: database.prepare(SELECT_CURRENT_ENTITY_ID),
+  selectCurrentEntityIds: database.prepare(SELECT_CURRENT_ENTITY_IDS),
+  selectCurrentEntityIdPage: database.prepare(SELECT_CURRENT_ENTITY_ID_PAGE),
+  selectCurrentEntityIdPageAfter: database.prepare(
+    SELECT_CURRENT_ENTITY_ID_PAGE_AFTER,
+  ),
   selectExistingCommit: database.prepare(SELECT_EXISTING_COMMIT),
   selectHead: database.prepare(SELECT_HEAD),
   selectLatestBase: database.prepare(SELECT_LATEST_BASE),
   selectLatestSnapshot: database.prepare(SELECT_LATEST_SNAPSHOT),
   selectNextSeq: database.prepare(SELECT_NEXT_SEQ),
   selectPatchConflicts: database.prepare(SELECT_PATCH_CONFLICTS),
+  selectPatchConflictsExcludingSession: database.prepare(
+    SELECT_PATCH_CONFLICTS_EXCLUDING_SESSION,
+  ),
   selectPatchCount: database.prepare(SELECT_PATCH_COUNT),
   selectPatches: database.prepare(SELECT_PATCHES),
   selectPendingResolution: database.prepare(SELECT_PENDING_RESOLUTION),
   selectServerSeq: database.prepare(SELECT_SERVER_SEQ),
   selectSetDeleteConflict: database.prepare(SELECT_SET_DELETE_CONFLICT),
+  selectSetDeleteConflictExcludingSession: database.prepare(
+    SELECT_SET_DELETE_CONFLICT_EXCLUDING_SESSION,
+  ),
   upsertHead: database.prepare(UPSERT_HEAD),
   updateBranchHead: database.prepare(UPDATE_BRANCH_HEAD),
   deleteBranch: database.prepare(DELETE_BRANCH),
@@ -1156,6 +1253,17 @@ const hasColumn = (
     { name: string }
   >;
   return rows.some((row) => row.name === column);
+};
+
+const columnDefault = (
+  database: Database,
+  table: string,
+  column: string,
+): string | null | undefined => {
+  const rows = database.prepare(`PRAGMA table_info("${table}")`).all() as Array<
+    { name: string; dflt_value: string | null }
+  >;
+  return rows.find((row) => row.name === column)?.dflt_value;
 };
 
 const hasTable = (database: Database, table: string): boolean =>
@@ -1305,6 +1413,7 @@ CREATE TABLE head (
   scope_key TEXT    NOT NULL DEFAULT 'space',
   seq       INTEGER NOT NULL,
   op_index  INTEGER NOT NULL,
+  op        TEXT    NOT NULL CHECK (op IN ('set', 'patch', 'delete')),
   PRIMARY KEY (branch, id, scope_key)
 );
 CREATE INDEX idx_head_branch ON head (branch);
@@ -1324,9 +1433,15 @@ INSERT INTO revision (branch, id, scope_key, seq, op_index, op, data, commit_seq
 SELECT branch, id, 'space', seq, op_index, op, data, commit_seq
 FROM revision_unscoped_migration;
 
-INSERT INTO head (branch, id, scope_key, seq, op_index)
-SELECT branch, id, 'space', seq, op_index
-FROM head_unscoped_migration;
+INSERT INTO head (branch, id, scope_key, seq, op_index, op)
+SELECT h.branch, h.id, 'space', h.seq, h.op_index, r.op
+FROM head_unscoped_migration h
+JOIN revision r
+  ON r.branch = h.branch
+  AND r.id = h.id
+  AND r.scope_key = 'space'
+  AND r.seq = h.seq
+  AND r.op_index = h.op_index;
 
 INSERT INTO snapshot (branch, id, scope_key, seq, value)
 SELECT branch, id, 'space', seq, value
@@ -1337,6 +1452,61 @@ DROP TABLE head_unscoped_migration;
 DROP TABLE snapshot_unscoped_migration;
 
 COMMIT;
+`);
+};
+
+const migrateHeadCurrentOp = (database: Database): void => {
+  if (
+    !hasColumn(database, "head", "op") ||
+    columnDefault(database, "head", "op") !== null
+  ) {
+    database.exec(`
+BEGIN TRANSACTION;
+
+DROP INDEX IF EXISTS idx_head_branch;
+DROP INDEX IF EXISTS idx_head_live_entity_ids;
+
+ALTER TABLE head RENAME TO head_current_op_migration;
+
+CREATE TABLE head (
+  branch    TEXT    NOT NULL,
+  id        TEXT    NOT NULL,
+  scope_key TEXT    NOT NULL DEFAULT 'space',
+  seq       INTEGER NOT NULL,
+  op_index  INTEGER NOT NULL,
+  op        TEXT    NOT NULL CHECK (op IN ('set', 'patch', 'delete')),
+  PRIMARY KEY (branch, id, scope_key)
+);
+CREATE INDEX idx_head_branch ON head (branch);
+
+INSERT INTO head (branch, id, scope_key, seq, op_index, op)
+SELECT
+  h.branch,
+  h.id,
+  h.scope_key,
+  h.seq,
+  h.op_index,
+  (
+  SELECT r.op
+  FROM revision r
+  WHERE r.branch = h.branch
+    AND r.id = h.id
+    AND r.scope_key = h.scope_key
+    AND r.seq = h.seq
+    AND r.op_index = h.op_index
+  )
+FROM head_current_op_migration h;
+
+DROP TABLE head_current_op_migration;
+
+COMMIT;
+`);
+  }
+
+  database.exec(`
+CREATE INDEX IF NOT EXISTS idx_head_live_entity_ids
+  ON head (branch, scope_key, id, op)
+  WHERE op <> 'delete';
 `);
 };
 
@@ -2153,6 +2323,7 @@ export const open = async (
   `).get() !== undefined;
   database.exec(INIT(!schedulerSchemaExists));
   migrateScopedEntityTables(database);
+  migrateHeadCurrentOp(database);
   const completeSchedulerSchema = CORE_SCHEDULER_TABLES.every((table) =>
     hasTable(database, table)
   );
@@ -2221,6 +2392,46 @@ export const listBranches = (engine: Engine): BranchState[] => {
   return (engine.statements.selectBranches.all() as BranchRow[]).map(
     toBranchState,
   );
+};
+
+export const listEntityIds = (
+  engine: Engine,
+): EntityId[] => {
+  return (engine.statements.selectCurrentEntityIds.all({
+    branch: DEFAULT_BRANCH,
+    scope_key: DEFAULT_SCOPE_KEY,
+  }) as { id: EntityId }[]).map(({ id }) => id);
+};
+
+export type EntityIdPageOptions = {
+  after?: EntityId;
+  limit: number;
+};
+
+export const listEntityIdPage = (
+  engine: Engine,
+  { after, limit }: EntityIdPageOptions,
+): EntityId[] => {
+  const statement = after === undefined
+    ? engine.statements.selectCurrentEntityIdPage
+    : engine.statements.selectCurrentEntityIdPageAfter;
+  return (statement.all({
+    branch: DEFAULT_BRANCH,
+    scope_key: DEFAULT_SCOPE_KEY,
+    limit,
+    ...(after === undefined ? {} : { after }),
+  }) as { id: EntityId }[]).map(({ id }) => id);
+};
+
+export const entityIdExists = (
+  engine: Engine,
+  id: EntityId,
+): boolean => {
+  return engine.statements.selectCurrentEntityId.get({
+    branch: DEFAULT_BRANCH,
+    scope_key: DEFAULT_SCOPE_KEY,
+    id,
+  }) !== undefined;
 };
 
 export const read = (
@@ -4966,7 +5177,7 @@ const applyCommitTransaction = (
   const authorizationRef = engine.legacyCommitMetadataRefsRequired
     ? LEGACY_EMPTY_AUTHORIZATION_REF
     : null;
-  const original = encodeMemoryBoundaryUnprovenFabricValue(commit);
+  const original = encodeMemoryBoundary(commit);
   const resolution = encodeMemoryBoundary(
     resolvedPendingReads.length > 0 ? { seq, resolvedPendingReads } : { seq },
   );
@@ -4982,9 +5193,7 @@ const applyCommitTransaction = (
       aud: LEGACY_EMPTY_INVOCATION.aud ?? null,
       cmd: LEGACY_EMPTY_INVOCATION.cmd,
       sub: LEGACY_EMPTY_INVOCATION.sub,
-      invocation: encodeMemoryBoundaryUnprovenFabricValue(
-        LEGACY_EMPTY_INVOCATION,
-      ),
+      invocation: encodeMemoryBoundary(LEGACY_EMPTY_INVOCATION),
     });
   }
   engine.statements.insertCommit.run({
@@ -5191,6 +5400,7 @@ const writeOperation = (
         scope_key: scopeKey,
         seq,
         op_index: opIndex,
+        op: "set",
       });
       return {
         id: operation.id,
@@ -5220,6 +5430,7 @@ const writeOperation = (
         scope_key: scopeKey,
         seq,
         op_index: opIndex,
+        op: "patch",
       });
       return {
         id: operation.id,
@@ -5249,6 +5460,7 @@ const writeOperation = (
         scope_key: scopeKey,
         seq,
         op_index: opIndex,
+        op: "delete",
       });
       return {
         id: operation.id,
@@ -5387,6 +5599,35 @@ const validateConfirmedReads = (
   }
 };
 
+/**
+ * Validated `basisSeq` of a pending read — the CT-1910 true-basis shape — or
+ * `undefined` for the legacy shape. In the SERVER's space-log seq space (an
+ * accepted-commit `seq`, NOT the session's localSeq space); see
+ * {@link PendingRead.basisSeq}. A basis ahead of the log claims knowledge
+ * the server never produced. (A basis AT head is legal and yields an empty
+ * scan — the same client-trusted claim a confirmed read at head makes.)
+ */
+const pendingReadBasisSeq = (
+  engine: Engine,
+  read: { id: string; basisSeq?: number },
+): number | undefined => {
+  const { basisSeq } = read;
+  if (basisSeq === undefined) {
+    return undefined;
+  }
+  if (!Number.isInteger(basisSeq) || basisSeq < 0) {
+    throw new ProtocolError(
+      `pending read on ${read.id} names a malformed basisSeq: ${basisSeq}`,
+    );
+  }
+  if (basisSeq > serverSeq(engine)) {
+    throw new ProtocolError(
+      `pending read on ${read.id} claims a basisSeq ahead of the log: ${basisSeq}`,
+    );
+  }
+  return basisSeq;
+};
+
 // Shared normalization/validation for a pending read's dependency set: a
 // non-empty array (or scalar) of integer localSeqs. Malformed shapes are a
 // protocol violation regardless of which validator (ordinary commit or
@@ -5423,9 +5664,11 @@ const resolvePendingReads = (
   for (const read of commit.reads.pending) {
     // An array localSeq names EVERY pending layer the read's view sat on:
     // each element must have resolved to an accepted commit, and staleness
-    // is checked exactly once, based at the HIGHEST element — the document's
-    // top-of-stack layer below the reader, which the array MUST include
-    // (03-commit-model.md §3.5). A scalar is the single-layer form.
+    // is checked exactly once, from the basis §3.6.3 selects — the declared
+    // `basisSeq` when present, else the resolution of the HIGHEST element —
+    // the document's top-of-stack layer below the reader, which the array
+    // MUST include (03-commit-model.md §3.5). A scalar is the single-layer
+    // form.
     const layers = pendingReadLayers(read);
     let basis: { localSeq: number; seq: number } | undefined;
     for (const localSeq of layers) {
@@ -5448,15 +5691,34 @@ const resolvePendingReads = (
       }
     }
 
-    const conflictSeq = findConflictSeq(
-      engine,
-      branch,
-      read.id,
-      resolveScopeKey(read.scope, { principal, sessionId }),
-      basis!.seq,
-      read.path,
-      read.nonRecursive ?? false,
-    );
+    // CT-1910 repair: a reader that names its true confirmed basis is
+    // scanned over the FULL interval (basisSeq, head], excluding only its
+    // own session's predecessor commits (local_seq below the reader's) —
+    // the accepted layers its materialized view included. A legacy reader
+    // (no basisSeq) keeps the max-dependency basis, so the over-advance
+    // deviation persists for it alone
+    // (docs/specs/memory-v2/09-invariants.md, INV-1).
+    const trueBasis = pendingReadBasisSeq(engine, read);
+    const conflictSeq = trueBasis !== undefined
+      ? findConflictSeq(
+        engine,
+        branch,
+        read.id,
+        resolveScopeKey(read.scope, { principal, sessionId }),
+        trueBasis,
+        read.path,
+        read.nonRecursive ?? false,
+        { sessionKey, beforeLocalSeq: commit.localSeq },
+      )
+      : findConflictSeq(
+        engine,
+        branch,
+        read.id,
+        resolveScopeKey(read.scope, { principal, sessionId }),
+        basis!.seq,
+        read.path,
+        read.nonRecursive ?? false,
+      );
     if (conflictSeq !== null) {
       throw new ConflictError(
         `stale pending read: ${read.id} via localSeq ${
@@ -5482,23 +5744,41 @@ const findConflictSeq = (
   // replace/delete changes the container the shape read observed, so it must
   // still conflict. Only Tier-2 (patch) granularity is refined.
   nonRecursive: boolean = false,
+  // True-basis reads (CT-1910): skip writes produced by this commit session
+  // key's TRUE PREDECESSOR commits (`local_seq < beforeLocalSeq`) — the
+  // reader's own accepted layers, which its view included. Own writes with
+  // a higher localSeq (accepted out of submission order) conflict like
+  // foreign writes; see the comment on the *_EXCLUDING_SESSION statements.
+  exclude?: { sessionKey: string; beforeLocalSeq: number },
 ): number | null => {
-  const setOrDeleteConflict = engine.statements.selectSetDeleteConflict.get({
+  const setDeleteStatement = exclude === undefined
+    ? engine.statements.selectSetDeleteConflict
+    : engine.statements.selectSetDeleteConflictExcludingSession;
+  const patchStatement = exclude === undefined
+    ? engine.statements.selectPatchConflicts
+    : engine.statements.selectPatchConflictsExcludingSession;
+  const exclusionParams = exclude === undefined ? {} : {
+    exclude_session: exclude.sessionKey,
+    before_local_seq: exclude.beforeLocalSeq,
+  };
+  const setOrDeleteConflict = setDeleteStatement.get({
     branch,
     id,
     scope_key: scopeKey,
     after_seq: afterSeq,
+    ...exclusionParams,
   }) as { seq: number } | undefined;
   if (setOrDeleteConflict !== undefined) {
     return setOrDeleteConflict.seq;
   }
 
   for (
-    const conflict of engine.statements.selectPatchConflicts.iter({
+    const conflict of patchStatement.iter({
       branch,
       id,
       scope_key: scopeKey,
       after_seq: afterSeq,
+      ...exclusionParams,
     }) as Iterable<{
       seq: number;
       data: string | null;
@@ -5528,12 +5808,16 @@ const schedulerObservationReadDropReason = (
     principal,
     branch,
     reads,
+    localSeq,
   }: {
     sessionKey: string;
     sessionId: SessionId;
     principal: string | undefined;
     branch: BranchName;
     reads: ClientCommit["reads"];
+    /** The observation commit's localSeq — the predecessor bound for the
+     * true-basis own-session exclusion (CT-1910). */
+    localSeq: number;
   },
 ): SchedulerObservationDropReason | undefined => {
   for (const read of reads.confirmed) {
@@ -5580,15 +5864,30 @@ const schedulerObservationReadDropReason = (
       }
     }
 
-    const conflictSeq = findConflictSeq(
-      engine,
-      branch,
-      read.id,
-      resolveScopeKey(read.scope, { principal, sessionId }),
-      basis!.seq,
-      read.path,
-      read.nonRecursive ?? false,
-    );
+    // Same CT-1910 basis selection as resolvePendingReads: true basis with
+    // predecessor-only own-session exclusion when declared, legacy
+    // max-dependency basis otherwise.
+    const trueBasis = pendingReadBasisSeq(engine, read);
+    const conflictSeq = trueBasis !== undefined
+      ? findConflictSeq(
+        engine,
+        branch,
+        read.id,
+        resolveScopeKey(read.scope, { principal, sessionId }),
+        trueBasis,
+        read.path,
+        read.nonRecursive ?? false,
+        { sessionKey, beforeLocalSeq: localSeq },
+      )
+      : findConflictSeq(
+        engine,
+        branch,
+        read.id,
+        resolveScopeKey(read.scope, { principal, sessionId }),
+        basis!.seq,
+        read.path,
+        read.nonRecursive ?? false,
+      );
     if (conflictSeq !== null) {
       return "stale-pending-read";
     }
@@ -5703,6 +6002,7 @@ const applySchedulerObservationOnlyCommit = (
     principal,
     branch,
     reads,
+    localSeq,
   });
   if (dropReason) {
     recordSchedulerObservationReplay(engine, {
@@ -6077,7 +6377,7 @@ const validateStatefulEntityRevisions = (
         seq: revision.seq,
         opIndex: revision.opIndex,
       })
-      : applyPatchDocument(document, revision.patches ?? []);
+      : applyPatchToDocument(document, revision.patches ?? []);
     rejectStoredSyncSchemaRef(document);
   }
 };
@@ -6272,7 +6572,7 @@ const reconstructPatchedDocument = (
   }) as Array<{ data: string; seq: number; op_index: number }>;
 
   for (const patch of patches) {
-    document = applyPatchDocument(
+    document = applyPatchToDocument(
       document,
       decodeStoredPatchList(patch.data),
     );
@@ -6375,8 +6675,6 @@ const ensureActiveBranch = (engine: Engine, branch: BranchName): void => {
   }
 };
 
-const emptyEntityDocument = (): EntityDocument => ({});
-
 const decodeStoredDocument = (data: string | null): EntityDocument => {
   const parsed = decodeMemoryBoundary(data ?? "null");
   if (!isEntityDocument(parsed)) {
@@ -6393,17 +6691,11 @@ const decodeStoredPatchList = (data: string | null): PatchOp[] => {
   return parsed as PatchOp[];
 };
 
-const applyPatchDocument = (
-  document: EntityDocument,
-  patches: PatchOp[],
-): EntityDocument =>
-  applyPatch(document as FabricValue, patches) as EntityDocument;
-
 const sameStoredOriginal = (
   stored: string,
   incoming: ClientCommit,
 ): boolean => {
-  return stored === encodeMemoryBoundaryUnprovenFabricValue(incoming);
+  return stored === encodeMemoryBoundary(incoming);
 };
 
 const revisionKey = (

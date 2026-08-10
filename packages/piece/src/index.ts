@@ -1,4 +1,4 @@
-export { pieceId, PieceManager } from "./manager.ts";
+export { pieceId } from "./piece-id.ts";
 export {
   assignSlug,
   resolvePieceAddress,

@@ -102,7 +102,7 @@ general piece origin model is described in `../piece-source-lifecycle.md`.
 | Slug cells: generic **redirect link to any cell** (`setSlugLink` is target-agnostic; only `resolvePieceAddress` layers a "must be a piece" check) | `packages/piece/src/slugs.ts` | Slugs can name pieces *or* patterns today, mechanically |
 | Slug ids: `hashOf({causal:{space, slug}})`; slug grammar `[a-z0-9]+(-[a-z0-9]+)*`, ≤80 chars; **`isSlugAddress(t) = !t.includes(":")`** | `packages/runner/src/slugs.ts` | The existing slug-vs-URI discriminator the grammar reuses |
 | `loadPatternByIdentity(entryIdentity, symbol, space)` | `packages/runner/src/pattern-manager.ts` | Existing by-identity load path the resolver builds on |
-| Per-space host routing: `spaceHostMap` seeds routes, `registerSpaceHost` adds a route before a space opens, and the home-space site table hydrates durable hints; foreign-host sessions are ordinary authenticated memory sessions | `packages/runner/src/storage/v2-remote-session.ts`, `packages/runner/src/storage/v2.ts`, and `packages/runtime-client/backends/runtime-processor.ts` | Reads work for a foreign space whose route is already known. A seeded route can only be confirmed. A later hint currently replaces an earlier late hint while the space remains unopened. After the space opens, only its previously registered matching hint can be confirmed. Applying a host from an explicit `cf://` reference remains planned |
+| Per-space host routing: `spaceHostMap` seeds routes, `registerSpaceHost` adds a route, and the home-space site table hydrates durable hints; foreign-host sessions are ordinary authenticated memory sessions | `packages/runner/src/storage/v2-remote-session.ts`, `packages/runner/src/storage/v2.ts`, and `packages/runtime-client/backends/runtime-processor.ts` | Reads work for a foreign space whose route is already known. A seeded route can only be confirmed. An unseeded default-host provider remains provisional until the first hint arrives or its session accepts a stateful operation. A different host cancels unfinished session setup, replaces the provisional replica, makes overlapping read-only callers use the hinted replica, and loads dependencies discovered from the hinted data. Transactions based on the old replica are rejected. A different-host hint conflicts after an ordinary or scheduler transaction, ACL setup transaction, or SQLite source registration is accepted for issue, even if its acknowledgement later fails. The first accepted late hint then remains stable. Initial table hydration selects the last valid HTTP or HTTPS entry for each space without replacing a route already accepted through IPC. A conflicting table route accepted first makes later IPC registration fail. Applying a host from an explicit `cf://` reference remains planned |
 
 ### The two "pattern by hash" handles, explicitly
 
@@ -110,7 +110,7 @@ Because both come up, and only one is the pin:
 
 - **`of:fid1:<hash>`** — the entity URI of a **cell that carries a pattern
   pointer** (a piece result cell), `toURI(createRef(...))`
-  (`packages/runner/src/uri-utils.ts:12`). A *causal* ref: resolvable (it's a
+  (`toURI`, `packages/runner/src/uri-utils.ts`). A *causal* ref: resolvable (it's a
   cell address) but not re-hash-verifiable from fetched content alone. Usable as
   a reference *starting point* (the chase reads its `patternIdentity`); never
   the pin.
@@ -209,7 +209,7 @@ hash    = 43 base64url chars  ; hashStringOf/hashOf output (value-hash.ts):
 ```
 
 (Hashes are **not** hex: `hashStringOf` emits unprefixed base64url
-(`packages/data-model/src/value-hash.ts:553`), and entity URIs carry the
+(`packages/data-model/src/value-hash.ts`), and entity URIs carry the
 `fid1:` tag inside `of:` — `of:fid1:<hash>` is what `toURI` produces. The
 base64url alphabet contains no `/`, `@`, or `:`, so pin-splitting and
 segment-splitting stay unambiguous.)
@@ -322,7 +322,7 @@ Why this shape:
 - **Valid ESM specifier.** Schemes are legal in import specifiers; resolution
   is entirely ours via the `ProgramResolver`/compiler-host seam, and TypeScript
   is satisfied through the same mechanism that resolves `commonfabric` today
-  (`packages/js-compiler/typescript/compiler.ts:176-207`).
+  (`resolveModuleNameLiterals`, `packages/js-compiler/typescript/compiler.ts`).
 - **Its durable identifier forms follow the shell's URL shapes.** A mutable
   piece uses `cf:/<space-did>/of:fid1:<piece-id>`. An immutable pattern uses the
   space-free `cf:pattern:<identity>` form. Authored static imports may still use
@@ -416,7 +416,8 @@ Mechanics:
 
 2. **The pinned hash folds into the importer's identity for free.** Module
    identity already hashes external deps as `runtime:${specifier}@${fingerprint}`
-   (`module-identity.ts:145-149`) — the specifier string contains the pin, so
+   (`packages/runner/src/module-identity.ts`) — the specifier string contains
+   the pin, so
    two importers differing only in pin have different module identities, and
    transitively different program ids (`engine.ts:computeId` hashes the source
    files, which contain the specifier). No changes to any hashing code.
@@ -613,7 +614,8 @@ Engine wraps the authored resolver; on a `cf:` specifier:
    TS program under a reserved prefix such as
    `/~cf/<identity>/<original-path>`. Thread a
    specifier-to-mounted-module alias map into the compiler so
-   `resolveModuleNameLiterals` (`compiler.ts:176`) maps the `cf:` specifier to
+   `resolveModuleNameLiterals` (`packages/js-compiler/typescript/compiler.ts`)
+   maps the `cf:` specifier to
    the mounted file. Relative imports inside the subtree resolve as ordinary
    path joins.
 
@@ -656,12 +658,13 @@ provenance-relevant flow flagged under § Security.
 ### 4. Cross-host references: no service surface at all
 
 A runtime is no longer bound to one memory host. `spaceHostMap` seeds known
-routes when storage is constructed. `registerSpaceHost` can register a later
-hint before that space opens, and the home-space site table hydrates durable
-hints into a new runtime. A foreign-host connection is an ordinary
-authenticated memory session. These mechanisms remain interim. This design
-depends only on the property that a space's cells are readable wherever the
-space lives, not on the current map or site-table shape.
+routes when storage is constructed. `registerSpaceHost` can register the first
+later hint even when an unseeded space already opened provisionally through the
+default host. The home-space site table hydrates durable hints into a new
+runtime. A foreign-host connection is an ordinary authenticated memory
+session. These mechanisms remain interim. This design depends only on the
+property that a space's cells are readable wherever the space lives, not on the
+current map or site-table shape.
 
 Once a route is in effect, a `cf://host/space/ref` reference resolves exactly
 like a local one. Slug chase, piece metadata, and `pattern:<identity>` source
@@ -685,12 +688,19 @@ Consequences:
 - **The host segment supplies a late-bound route hint.** The resolver must
   register that hint on the ordinary storage manager before it opens the
   referenced space. A seeded route wins for the current session. An accepted
-  late hint must also remain stable before the first open; a different hint is
-  a conflict. After the space opens, registration can only confirm the hint
-  that was already in effect. Any other registration attempt fails rather than
-  opening a second connection for the same space. The current registry still
-  replaces a different late hint before the first open. Host-qualified import
-  resolution must add this conflict guard when it adopts the registration path.
+  late hint remains stable before and after the first open; a different hint is
+  a conflict. An earlier default-host read is provisional rather than an
+  accepted route. The first hint invalidates that replica, reconnects it
+  through the hinted host, and replays its reads and newly discovered
+  dependencies. It cancels unfinished connection, mount, and ACL work. Read-only
+  operations that overlap replacement use the hinted replica. Transactions
+  based on the provisional replica are rejected so they can recompute from the
+  intended data. A different-host hint can replace an operation that is still
+  waiting for a session. Once the session accepts an ordinary or scheduler
+  transaction, ACL setup transaction, or SQLite source registration for issue,
+  the route is fixed even if acknowledgement later fails. Host-qualified
+  import resolution must still use this registration path before opening the
+  referenced space.
 - A cacheable, anonymous HTTP mirror for published patterns (CDN-style
   distribution to readers with no fabric identity) remains *possible* later.
   It would need an explicit anonymous visibility policy that covers the whole
@@ -861,12 +871,16 @@ unchanged.
    canonical reference must persist the route in the home-space site table
    after live registration accepts it and before committing the hostless
    reference. A seeded route can only be confirmed. Once a late hint is
-   accepted, a different hint is a conflict even before the space opens. After
-   the space opens, only the hint already in effect can be confirmed. Any other
-   attempt fails rather than silently changing the route. The current registry
-   still needs the pre-open conflict guard. This settles how a known hint enters
-   the current session. It does not settle host discovery, availability,
-   failover, or space relocation.
+   accepted, a different hint is a conflict before or after the space opens.
+   An unseeded default-host provider remains provisional until its first hint or
+   until its session accepts a stateful operation, whichever happens first. A
+   different host cancels unfinished initial or reconnect session setup, clears
+   and reconnects the provider, then replays its registered reads so reactive
+   consumers observe the intended data. Read-only operations that overlap
+   replacement move to the hinted replica. Transactions based on the
+   provisional replica are rejected. This settles how a known hint enters the
+   current session. It does not settle host discovery, availability, failover,
+   or replacement of an explicit route.
 3. **Runtime-fingerprint interaction.** A runtime fingerprint change creates a
    new executable identity for an importer whose reachable graph contains an
    external dependency, even when its authored source and fabric pins are
@@ -984,5 +998,4 @@ unchanged.
    or more than one host can serve the same space. Revisit how route changes
    are authenticated, how stale site-table entries are replaced, whether
    failover is allowed, and how an open session closes and reconnects without
-   losing or duplicating work. The site-table watcher currently races the first
-   space open, so reliable bootstrap ordering also remains part of this topic.
+   losing or duplicating work after a seed or hint has made the route explicit.

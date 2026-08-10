@@ -26,15 +26,7 @@ merge protection stores and matches the job's name on its own.
 
 `Status` runs after every pull request validation job in `deno.yml`. It runs
 after failed and skipped dependencies. It fails unless every dependency
-succeeded. Add each new pull request validation job to its `needs` list. Its
-dependencies include the reusable Dashboard workflow.
-
-The Dashboard workflow's internal `Status` job waits for the dashboard tests,
-image build, publish authorization, and any authorized publish. The reusable
-workflow reports that result to the CI workflow's `Status`. GitHub names a
-check from a called workflow by joining the calling job's name to the called
-job's name, so that one is called `Dashboard / Status` and does not collide
-with the check to require. Do not require it separately in merge protection.
+succeeded. Add each new pull request validation job to its `needs` list.
 
 Keep pull request path filters out of workflows that provide required checks.
 GitHub leaves a required check pending when a path filter prevents its workflow
@@ -109,8 +101,9 @@ duration. Matrix jobs are grouped using the trailing-parenthesis base names from
 persistent imbalance.
 
 For a requested history window, the collector retains every successful main
-push build when there are at most 90. Larger sets are reduced to about 90 time
-buckets, keeping the newest build in each bucket.
+push build when there are at most 200. Larger sets are sorted chronologically
+and reduced to exactly 200 builds spread evenly through that run sequence,
+including its oldest and newest builds.
 
 ## Step Phase Markers
 
@@ -119,6 +112,13 @@ segments — setup, work, and shutdown — so the shared scaffolding around a jo
 visually separated from the job's own work. For a matrix job this shows, per
 shard, how much wall time is setup that every shard repeats versus the unique
 work that one shard does.
+
+When the chart contains one workflow run, it draws every execution of a rerun
+job on the same row at its actual time. Each bar carries its own duration
+beside it, and its tooltip names the attempt and how that attempt ended. Failed
+attempts end in a red cross, and the delay before a retry stays blank. Charts
+covering several workflow runs use the latest execution of each job from each
+run when calculating their aggregate bars.
 
 The chart decides a step's phase from the emoji its name starts with. The emoji
 is the marker: the script never reads step wording, only the leading emoji. Every
@@ -156,6 +156,7 @@ authenticate, and bring test servers and devices up before the real work:
 | 🚧 | guard that fails the build on a banned pattern |
 | 🧪 | run tests |
 | 🧩 | run integration tests |
+| 🔁 | replay captured fixtures under today's source |
 | 🧹 | lint |
 | 🧭 | check skill facts |
 | 📄 | type-check docs |
@@ -187,12 +188,13 @@ before you "correct" a step name back to a more obvious emoji:
 - Downloading logs after a failure is shutdown, so those steps use 📋 rather than
   the 📥 or 📦 download markers.
 
-The steps GitHub injects into every job — `Set up job`, `Post …`, and
-`Complete job` — carry no marker, so the script classifies them by name (setup
-for `Set up job`, shutdown for the other two). Any other step that reaches the
-chart without a recognized marker is counted as "other", drawn in gray, and
-listed on standard error when the script runs, so a missing marker is easy to
-find and fix.
+The steps the runner injects into every job carry no marker, so the script
+classifies them by name. GitHub adds `Set up job`, `Post …`, and `Complete
+job`; the Blacksmith runners add `Set up runner` and `Complete runner`
+alongside them. The two set-up steps count as setup and the rest as shutdown.
+Any other step that reaches the chart without a recognized marker is counted as
+"other", drawn in gray, and listed on standard error when the script runs, so a
+missing marker is easy to find and fix.
 
 ## Root Test Job Shape
 
@@ -204,10 +206,12 @@ its packages with `DENO_COVERAGE_DIR` and uploads it as
 `coverage-profile-workspace-<shard>`.
 
 The root task is `tasks/test.ts`. It reads the workspace list from
-`deno.jsonc`, selects this shard's packages by round-robin over the sorted
-package-name list (`selectShardMembers`), and runs `deno task test` in every
-selected package. The test runner uses half the available cores for package
-workers. This is two package workers on the standard four-core CI runner.
+`deno.jsonc`, assigns package test units to shards by observed test cost
+(`selectShardMembers`), and runs `deno task test` in every selected package.
+Unknown packages receive a default weight, so adding a workspace member cannot
+make it fall out of CI. The test runner uses half the available cores for
+package workers. This is two package workers on the standard four-core CI
+runner.
 `TEST_CONCURRENCY` can override that default for a diagnostic run. Each shard's
 test time follows the longest chain of package tasks assigned to one worker,
 plus initialization inside the root task. Fixed workflow setup and coverage
@@ -217,28 +221,59 @@ tests. Package tests that are already running finish before the summary is
 printed.
 
 When a shard becomes the long pole, start with the `Package timings:` block
-printed by `tasks/test.ts`. The round-robin split carries no per-package
-weighting, so first check whether one shard simply drew several slow packages.
-Changing the shard count in the workflow matrix reshuffles the assignment. A
-shard-count change must also update the `coverage-profile-workspace-*` entries
-in `EXPECTED_COVERAGE_ARTIFACT_NAMES` in `tasks/coverage-check.ts`, which the
-Coverage Check gate uses to require every shard's coverage artifact.
+printed by `tasks/test.ts`. Update `WORKSPACE_TEST_WEIGHTS` in
+`tasks/test-timing-weights.ts` when package costs have drifted enough to affect
+the critical path. Changing the shard count in the workflow matrix recomputes
+the weighted assignment. A shard-count change must also update the
+`coverage-profile-workspace-*` entries in `EXPECTED_COVERAGE_ARTIFACT_NAMES` in
+`tasks/coverage-check.ts`, which the Coverage Check gate uses to require every
+shard's coverage artifact.
 
-A package too heavy for any single shard can be split internally: the cli
-package runs as three units via `CLI_TEST_SHARD` (see
+A package too heavy for any single shard can be split internally: the cli,
+piece, and tasks packages run as three units via their package-specific shard
+variables (see
 `INTERNALLY_SHARDED_PACKAGES` in `tasks/workspace-tests.ts` and
-`packages/cli/test/run-tests.ts`), so its slices spread across workspace
-shards. A package that dominates a shard can be given the same treatment. A
-slow package may also be running many independent test modules serially.
-Deno's `--parallel` mode can reduce that package's wall time, but only after
-checking for tests that share process-wide state.
+`packages/cli/test/run-tests.ts` or `tasks/run-sharded-test-files.ts`), so their
+slices spread across workspace shards. Slices of one package occupy distinct
+workspace shards whenever the matrix has enough shards. A package that
+dominates a shard can be given the same treatment. A slow package may also be
+running many independent test modules serially. Deno's `--parallel` mode can
+reduce that package's wall time, but only after checking for tests that share
+process-wide state.
+
+### Runner Test Sharding
+
+Runner test modules are assigned across five jobs by observed per-file cost.
+`RUNNER_TEST_WEIGHTS` in `tasks/test-timing-weights.ts` records only files whose
+cost materially affects placement; every other file receives a unit weight.
+The longest-processing-time assignment in `tasks/weighted-shards.ts` places
+expensive files first and uses the filename to break ties, so the result is
+stable across machines. Selector tests require every real runner test file to
+appear exactly once and keep the modeled shard loads close.
+
+Refresh the weights from timestamped `running ... from ./test/...` boundaries
+in successful CI logs. Deno's JUnit output attributes runner cases to the
+preloaded clock module, so it does not carry usable per-file runner timings.
+
+Deno runs each parallel test file on its own thread of a single process, so
+"process-wide state" means state every file shares: environment variables,
+replaced globals, and the current directory. A test that only configures a CLI
+it spawns shares nothing — `cf` in `packages/cli/test/utils.ts` takes the
+command's environment as an argument and gives it nothing else, so those tests
+stay in the parallel group.
 
 Known serial CLI tests:
 
-- `test/fuse.test.ts`, `test/inspect-remote.test.ts`,
+- `test/completion-output.test.ts`, `test/completion-providers.test.ts`,
+  `test/fuse.test.ts`, `test/inspect-remote.test.ts`,
   `test/log-level.test.ts`, `test/main-command.test.ts`,
-  `test/test-runner-compile-byte-cache.test.ts`, and
-  `test/test-runner-pattern-coverage.test.ts` mutate shared process state.
+  `test/test-runner-compile-byte-cache.test.ts`,
+  `test/test-runner-pattern-coverage.test.ts`, `test/view-commitmsg.test.ts`
+  and `test/wish-command.test.ts` set an environment variable that the test
+  process itself then reads, so another file setting the same name would
+  decide what they read.
+- `test/json-command.test.ts` and `test/runtime-creation.test.ts` replace
+  globals — the console methods and runtime prototype methods.
 - `test/view-mod-gate.test.ts` changes into a removed directory to test the
   missing-current-directory fallback.
 - `test/view-pager-pty.test.ts` drives a real pseudo-terminal, spawning a full

@@ -6,14 +6,12 @@ export type {
   TransformationContext,
   TransformationDiagnostic,
   TransformationOptions,
-  TransformMode,
 } from "./core/mod.ts";
 export {
   CrossStageState,
   injectCfHelpers,
   isLegacyInjectedEnvelope,
   PATTERN_COVERAGE_GLOBAL,
-  Pipeline,
   sourceDisablesCfTransform,
   sourceHasIgnoredDisableDirective,
   transformCfDirective,
@@ -35,9 +33,4 @@ export {
 } from "./transformers/mod.ts";
 export { ClosureTransformer } from "./closures/transformer.ts";
 export { CommonFabricTransformerPipeline } from "./cf-pipeline.ts";
-export {
-  CompositeDiagnosticTransformer,
-  type DiagnosticMessageTransformer,
-  ReactiveErrorTransformer,
-  type ReactiveErrorTransformerOptions,
-} from "./diagnostics/mod.ts";
+export { createReactiveErrorTransformer } from "./diagnostics/mod.ts";

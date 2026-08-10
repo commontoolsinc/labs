@@ -301,34 +301,3 @@ export class VDomRenderer {
     );
   }
 }
-
-/**
- * Create a new VDomRenderer.
- */
-export function createVDomRenderer(options: VDomRendererOptions): VDomRenderer {
-  return new VDomRenderer(options);
-}
-
-/**
- * Convenience function to render a cell into a container.
- * Returns a cancel function to stop rendering.
- *
- * @param container - The DOM element to render into
- * @param cellRef - The cell reference to render
- * @param options - Renderer options
- * @returns A cancel function
- */
-export async function renderVDom(
-  container: HTMLElement,
-  cellRef: CellRef,
-  options: VDomRendererOptions,
-): Promise<() => Promise<void>> {
-  const renderer = createVDomRenderer(options);
-  const cancel = await renderer.render(container, cellRef);
-
-  // Return a cancel function that also disposes the renderer
-  return async () => {
-    await cancel();
-    await renderer.dispose();
-  };
-}

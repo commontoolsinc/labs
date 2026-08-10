@@ -1,0 +1,311 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "TrustedPublishedBodyUiContract": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedPublishSnapshot",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedPublishSurface"
+            ],
+            "trustedPattern": "TrustedPublishSurface"
+          }
+        },
+        "type": "string"
+      },
+      "TrustedPublishedTitleUiContract": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedPublishSnapshot",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedPublishSurface"
+            ],
+            "trustedPattern": "TrustedPublishSurface"
+          }
+        },
+        "type": "string"
+      },
+      "TrustedReviewedBodyUiContract": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedReviewSnapshot",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedReviewSurface"
+            ],
+            "trustedPattern": "TrustedReviewSurface"
+          }
+        },
+        "type": "string"
+      },
+      "TrustedReviewedTitleUiContract": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedReviewSnapshot",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedReviewSurface"
+            ],
+            "trustedPattern": "TrustedReviewSurface"
+          }
+        },
+        "type": "string"
+      },
+      "TrustedSavedDraftBodyUiContract": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedSaveDraft",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedSaveDraftSurface"
+            ],
+            "trustedPattern": "TrustedSaveDraftSurface"
+          }
+        },
+        "type": "string"
+      },
+      "TrustedSavedDraftTitleUiContract": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedSaveDraft",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedSaveDraftSurface"
+            ],
+            "trustedPattern": "TrustedSaveDraftSurface"
+          }
+        },
+        "type": "string"
+      }
+    },
+    "properties": {
+      "draftBody": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "type": "string"
+      },
+      "draftTitle": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "type": "string"
+      },
+      "publishedBody": {
+        "$ref": "#/$defs/TrustedPublishedBodyUiContract",
+        "asCell": [
+          "cell"
+        ],
+        "default": ""
+      },
+      "publishedTitle": {
+        "$ref": "#/$defs/TrustedPublishedTitleUiContract",
+        "asCell": [
+          "cell"
+        ],
+        "default": ""
+      },
+      "reviewedBody": {
+        "$ref": "#/$defs/TrustedReviewedBodyUiContract",
+        "asCell": [
+          "cell"
+        ],
+        "default": ""
+      },
+      "reviewedTitle": {
+        "$ref": "#/$defs/TrustedReviewedTitleUiContract",
+        "asCell": [
+          "cell"
+        ],
+        "default": ""
+      },
+      "savedBody": {
+        "$ref": "#/$defs/TrustedSavedDraftBodyUiContract",
+        "asCell": [
+          "cell"
+        ],
+        "default": ""
+      },
+      "savedTitle": {
+        "$ref": "#/$defs/TrustedSavedDraftTitleUiContract",
+        "asCell": [
+          "cell"
+        ],
+        "default": ""
+      }
+    },
+    "required": [
+      "draftTitle",
+      "draftBody",
+      "savedTitle",
+      "savedBody",
+      "reviewedTitle",
+      "reviewedBody",
+      "publishedTitle",
+      "publishedBody"
+    ],
+    "type": "object"
+  },
+  "pattern": "cfc-staged-publish/main.tsx",
+  "resultSchema": {
+    "$defs": {
+      "TrustedPublishedBodyUiContract": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedPublishSnapshot",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedPublishSurface"
+            ],
+            "trustedPattern": "TrustedPublishSurface"
+          }
+        },
+        "type": "string"
+      },
+      "TrustedPublishedTitleUiContract": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedPublishSnapshot",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedPublishSurface"
+            ],
+            "trustedPattern": "TrustedPublishSurface"
+          }
+        },
+        "type": "string"
+      },
+      "TrustedReviewedBodyUiContract": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedReviewSnapshot",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedReviewSurface"
+            ],
+            "trustedPattern": "TrustedReviewSurface"
+          }
+        },
+        "type": "string"
+      },
+      "TrustedReviewedTitleUiContract": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedReviewSnapshot",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedReviewSurface"
+            ],
+            "trustedPattern": "TrustedReviewSurface"
+          }
+        },
+        "type": "string"
+      },
+      "TrustedSavedDraftBodyUiContract": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedSaveDraft",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedSaveDraftSurface"
+            ],
+            "trustedPattern": "TrustedSaveDraftSurface"
+          }
+        },
+        "type": "string"
+      },
+      "TrustedSavedDraftTitleUiContract": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedSaveDraft",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedSaveDraftSurface"
+            ],
+            "trustedPattern": "TrustedSaveDraftSurface"
+          }
+        },
+        "type": "string"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "draftBody": {
+        "type": "string"
+      },
+      "draftTitle": {
+        "type": "string"
+      },
+      "publishReviewed": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "publishedBody": {
+        "$ref": "#/$defs/TrustedPublishedBodyUiContract"
+      },
+      "publishedTitle": {
+        "$ref": "#/$defs/TrustedPublishedTitleUiContract"
+      },
+      "reviewSaved": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "reviewedBody": {
+        "$ref": "#/$defs/TrustedReviewedBodyUiContract"
+      },
+      "reviewedTitle": {
+        "$ref": "#/$defs/TrustedReviewedTitleUiContract"
+      },
+      "saveDraft": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "savedBody": {
+        "$ref": "#/$defs/TrustedSavedDraftBodyUiContract"
+      },
+      "savedTitle": {
+        "$ref": "#/$defs/TrustedSavedDraftTitleUiContract"
+      },
+      "stage": {
+        "enum": [
+          "drafting",
+          "saved",
+          "reviewed",
+          "published"
+        ]
+      }
+    },
+    "required": [
+      "draftTitle",
+      "draftBody",
+      "savedTitle",
+      "savedBody",
+      "reviewedTitle",
+      "reviewedBody",
+      "publishedTitle",
+      "publishedBody",
+      "stage",
+      "saveDraft",
+      "reviewSaved",
+      "publishReviewed",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

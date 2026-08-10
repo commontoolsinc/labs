@@ -1,14 +1,12 @@
 # cf-harness Codex Subscription Authentication — Implementation Plan
 
 Status: Implemented in `cf-harness` and covered by automated tests. Remaining
-shipping gates are live-account smoke tests, security review, root validation
-under the repository-supported Deno version, and Loom host/UI policy wiring.
+shipping gates are live-account smoke tests, security review, and Loom host/UI
+policy wiring.
 
-Validation snapshot (2026-07-23): all 500 `cf-harness` tests pass; direct type
-checking, package lint/format, docs checks, unused-dependency checks, and diff
-whitespace checks pass. The aggregate root `deno task check` stops at its
-version guard because this workspace has Deno 2.9.3 while the repository
-requires Deno >=2.8.0 and <2.9.0.
+Validation snapshot (2026-07-29): the repository pins Deno 2.9.4. The aggregate
+root `deno task check` and `deno task test` pass, including the `cf-harness`
+checks and tests.
 
 This plan adds an opt-in way for a `cf-harness` user to use their ChatGPT/Codex
 subscription instead of an OpenAI Platform API key, first through the local CLI
@@ -271,13 +269,14 @@ Tests to extend first:
 - `packages/cf-harness/test/openai-client.test.ts`
 - `packages/cf-harness/test/interactive-chat-service.test.ts`
 
-### WP1.3 — Generalize attempt provenance compatibly
+### WP1.3 — Generalize attempt provenance
 
 - [x] Add provider-neutral model-attempt records to run reports with provider,
   operation, endpoint origin, timing, request summary, status, selected request
   id, and bounded error metadata.
-- [x] Preserve reading and producing the current `gatewayAttempts` field for the
-  existing gateway until an explicit artifact-version migration removes it.
+- [x] Record each attempt exactly once, in the provider-neutral `modelAttempts`
+  field. A gateway turn carries the same kind of record as any other turn, with
+  `operation` naming the API that served it.
 - [x] Never record authorization, cookies, account ids, refresh responses, or
   arbitrary response headers.
 
@@ -400,8 +399,13 @@ Expected files:
 
 - [x] Parse chunks incrementally across arbitrary byte boundaries.
 - [x] Normalize assistant text, function calls, response id, encrypted
-  reasoning, usage, and terminal status from the provider's terminal response
-  without exposing raw SSE events to the prompt loop.
+  reasoning, usage, and terminal status from the provider's terminal response,
+  falling back to the completed `response.output_item.done` items streamed
+  earlier when the terminal event carries no assembled output — an empty array
+  or `null`, as the ChatGPT Codex backend returns under `store: false`. A
+  populated terminal output always wins (no double-counting); `failed` and
+  `incomplete` statuses still fail. Raw SSE events are not exposed to the
+  prompt loop.
 - [x] Reject malformed JSON, conflicting duplicate call ids, incomplete
   arguments, and a stream that ends without a terminal response event.
 - [x] Abort the fetch and reader immediately when the run signal aborts.

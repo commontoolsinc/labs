@@ -26,8 +26,6 @@ Lists all active renderings in a `console.table` with:
 - **index** — position in the registry
 - **container** — the DOM element being rendered into
 - **cellId** — the cell ID backing this render
-- **path** — `"worker"` (VDomRenderer) or `"legacy"` (main-thread)
-- **renderer** — `"VDomRenderer"` or `"(legacy)"`
 
 ### `tree(el?)` (async)
 
@@ -63,8 +61,7 @@ Pretty-prints the VDOM tree to the console. Output looks like:
 
 ### `stats()`
 
-Shows a `console.table` of node and listener counts per active renderer. Only
-meaningful for the worker path — legacy renders show `"(legacy)"`.
+Shows a `console.table` of node and listener counts per active renderer.
 
 - **nodeCount** — number of DOM nodes tracked by the applicator
 - **listenerCount** — number of nodes with event listeners
@@ -73,8 +70,8 @@ meaningful for the worker path — legacy renders show `"(legacy)"`.
 
 ### `nodeForId(id, el?)`
 
-Looks up a DOM node by its internal applicator node ID. Only works for
-worker-path renders (the applicator tracks node IDs).
+Looks up a DOM node by its internal applicator node ID, which the applicator
+tracks for every node it creates.
 
 ```javascript
 // Shown inside a pattern body.
@@ -89,7 +86,7 @@ Raw access to the `Map<HTMLElement, ActiveRender>` for advanced inspection.
 ```javascript
 // Shown inside a pattern body.
 commonfabric.vdom.registry
-// Map(1) { div#app => { parent, cell, renderer, path } }
+// Map(1) { div#app => { parent, cell, renderer } }
 ```
 
 ## The Debug Schema
@@ -163,4 +160,4 @@ await commonfabric.vdom.dump(document.querySelector('#my-container'))
 ## See Also
 
 - [Console Commands](console-commands.md) — full `commonfabric.*` reference
-- [Logger Internals](../logger-internals.md) — creating loggers, timing API
+- [Logger Internals](../../features/logger-internals.md) — creating loggers, timing API

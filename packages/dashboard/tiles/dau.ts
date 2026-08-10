@@ -4,7 +4,7 @@
 // A memory session's principal is the signature-checked session.open issuer, and the
 // server exports it as the user.did attribute on the memory.transact and
 // memory.subscriber.sync spans. Counting the distinct values per UTC day therefore
-// needs no new instrumentation. docs/development/active-user-counting.md records what
+// needs no new instrumentation. docs/features/active-user-counting.md records what
 // the number means: an identity is a keypair rather than a person, so this counts
 // active identities and leans on the assumption that one identity stands for one
 // human. That assumption is the tile's, not the system's.

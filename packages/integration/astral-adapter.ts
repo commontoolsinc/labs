@@ -5,6 +5,16 @@ import {
   type WaitForSelectorOptions,
 } from "@astral/astral";
 
+/**
+ * How `$`, `$$`, and `waitForSelector` resolve a selector.
+ *
+ * `native` hands the selector to the page's own `querySelector`, which stops at
+ * every shadow boundary. `pierce` matches everything `native` matches, in the
+ * light DOM, and in addition every element inside an open shadow root at any
+ * depth. A pierce query walks the page in document order and searches an
+ * element's shadow tree as soon as it reaches that element, so the first match
+ * is the first one in the rendered page.
+ */
 export type QueryStrategy = "native" | "pierce";
 
 export type SelectorOptions = {
@@ -24,12 +34,15 @@ export type ElementHandle = AstralElementHandle & {
 };
 
 export interface InteractionObserver {
+  // `element` is absent when the click was aimed at a point rather than
+  // resolved to a handle, which is how the CFC helpers dispatch: the wait that
+  // settles the control answers with coordinates, and no handle is taken.
   beforeClick?(
-    element: ElementHandle,
+    element: ElementHandle | undefined,
     point: { x: number; y: number },
   ): Promise<void> | void;
   afterClick?(
-    element: ElementHandle,
+    element: ElementHandle | undefined,
     point: { x: number; y: number },
     error?: unknown,
   ): Promise<void> | void;
@@ -285,7 +298,7 @@ export async function queryAllPierce(
       bindings,
       () =>
         bindings.Runtime.callFunctionOn({
-          functionDeclaration: contentPierceQuerySelector.toString(),
+          functionDeclaration: pierceDeclaration(contentPierceQuerySelector),
           objectId: remote.objectId,
           arguments: [
             { value: selector },
@@ -351,7 +364,9 @@ export async function waitForPierceSelector(
         bindings,
         () =>
           bindings.Runtime.callFunctionOn({
-            functionDeclaration: contentWaitForPierceSelector.toString(),
+            functionDeclaration: pierceDeclaration(
+              contentWaitForPierceSelector,
+            ),
             objectId: remote.objectId,
             arguments: [
               { value: selector },
@@ -392,29 +407,58 @@ export async function waitForPierceSelector(
   }
 }
 
-function contentPierceQuerySelector(
-  this: Document | Element,
+// The single definition of what a pierce selector matches. It runs in the page,
+// serialized into every in-page function that resolves one, so an immediate
+// query and a wait for the same selector settle on the same elements.
+//
+// The walk is document order over `root`'s descendants, entering an element's
+// open shadow tree as soon as it reaches that element, and entering `root`'s own
+// shadow tree first when `root` is an element. `root` itself is never a match,
+// which is how `querySelector` scopes a search to an element.
+function collectPierceMatches(
+  root: Document | Element,
   selector: string,
   firstOnly: boolean,
 ): Element[] {
   const matches: Element[] = [];
 
-  const visit = (root: Document | Element | ShadowRoot): boolean => {
-    for (const element of root.querySelectorAll("*")) {
-      const shadowRoot = element.shadowRoot;
-      if (!shadowRoot) continue;
-
-      for (const match of shadowRoot.querySelectorAll(selector)) {
-        matches.push(match);
+  const visit = (node: Document | Element | ShadowRoot): boolean => {
+    if (node instanceof Element && node.shadowRoot) {
+      if (visit(node.shadowRoot)) return true;
+    }
+    for (const element of node.querySelectorAll("*")) {
+      if (element.matches(selector)) {
+        matches.push(element);
         if (firstOnly) return true;
       }
-      if (visit(shadowRoot) && firstOnly) return true;
+      if (element.shadowRoot && visit(element.shadowRoot)) return true;
     }
     return false;
   };
 
-  visit(this);
+  visit(root);
   return matches;
+}
+
+// Build the `functionDeclaration` for an in-page function that resolves a pierce
+// selector. The traversal's source is declared in the enclosing scope, so the
+// serialized function's call to `collectPierceMatches` binds to it in the page
+// the same way it binds to the module-scope function here.
+function pierceDeclaration(
+  contentFunction: (this: Document | Element, ...args: never[]) => unknown,
+): string {
+  return `function (...args) {
+    const collectPierceMatches = ${collectPierceMatches.toString()};
+    return (${contentFunction.toString()}).apply(this, args);
+  }`;
+}
+
+function contentPierceQuerySelector(
+  this: Document | Element,
+  selector: string,
+  firstOnly: boolean,
+): Element[] {
+  return collectPierceMatches(this, selector, firstOnly);
 }
 
 function contentWaitForPierceSelector(
@@ -455,27 +499,8 @@ function contentWaitForPierceSelector(
     }).navigation;
     let finished = false;
 
-    const findMatch = (): Element | undefined => {
-      const visit = (
-        root: Document | Element | ShadowRoot,
-      ): Element | undefined => {
-        if (root instanceof Element && root.shadowRoot) {
-          const match = root.shadowRoot.querySelector(selector);
-          if (match) return match;
-          const nestedMatch = visit(root.shadowRoot);
-          if (nestedMatch) return nestedMatch;
-        }
-        for (const element of root.querySelectorAll("*")) {
-          const shadowRoot = element.shadowRoot;
-          if (!shadowRoot) continue;
-          const match = shadowRoot.querySelector(selector);
-          if (match) return match;
-          const nestedMatch = visit(shadowRoot);
-          if (nestedMatch) return nestedMatch;
-        }
-      };
-      return visit(this);
-    };
+    const findMatch = (): Element | undefined =>
+      collectPierceMatches(this, selector, true)[0];
 
     let state = stateOwner[stateKey];
     if (!state) {

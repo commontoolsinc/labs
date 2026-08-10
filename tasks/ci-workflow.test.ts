@@ -26,6 +26,17 @@ function jobIds(workflow: string): string[] {
   ].map((match) => match[1]);
 }
 
+function stepBlock(job: string, stepName: string): string {
+  const header = `      - name: ${stepName}\n`;
+  const start = job.indexOf(header);
+  assert(start >= 0, `${stepName} step not found`);
+
+  const bodyStart = start + header.length;
+  const nextStepOffset = job.slice(bodyStart).search(/^ {6}- name: /m);
+  const end = nextStepOffset < 0 ? job.length : bodyStart + nextStepOffset;
+  return job.slice(start, end);
+}
+
 function neededJobIds(job: string): string[] {
   const marker = "\n    needs:\n";
   const needsStart = job.indexOf(marker);
@@ -39,10 +50,40 @@ function neededJobIds(job: string): string[] {
   );
 }
 
+const workflowDirectory = new URL("../.github/workflows/", import.meta.url);
+
 async function workflow(name: string): Promise<string> {
-  return await Deno.readTextFile(
-    new URL(`../.github/workflows/${name}`, import.meta.url),
+  return await Deno.readTextFile(new URL(name, workflowDirectory));
+}
+
+async function workflowNames(): Promise<string[]> {
+  const names: string[] = [];
+  for await (const entry of Deno.readDir(workflowDirectory)) {
+    if (entry.isFile && /\.ya?ml$/.test(entry.name)) names.push(entry.name);
+  }
+  return names.sort();
+}
+
+// Drops YAML comments. A `#` after whitespace ends a plain scalar, so what is
+// left on a line is the value the workflow actually carries. Applied before
+// looking for commands, so that a comment naming a command is not read as one
+// and a comment after a command is not read as part of it.
+function withoutComments(contents: string): string {
+  return contents.replaceAll(/(^|\s)#.*$/gm, "$1");
+}
+
+function deployInvocations(contents: string): string[] {
+  return [...contents.matchAll(/^ +script: (\/opt\/cf\/deploy\.sh.*)$/gm)].map(
+    (match) => match[1],
   );
+}
+
+// Splits a command the way a shell would count its words, except that a
+// `${{ ... }}` workflow expression holds spaces and still stands for one word.
+// The expression is matched to its first `}}` so that one containing a brace,
+// as `${{ format('{0}', github.sha) }}` does, still comes out as one word.
+function commandWords(command: string): string[] {
+  return [...command.matchAll(/\$\{\{.*?\}\}|\S+/g)].map((match) => match[0]);
 }
 
 function workflowTriggers(contents: string): string {
@@ -59,7 +100,6 @@ Deno.test("Status waits for every pull request validation job", async () => {
   const gate = jobBlock(contents, "status");
   const pushOnlyJobs = new Set([
     "attest-binaries",
-    "deploy-toolshed",
     "deploy-rapids",
     "deploy-shell-staging",
   ]);
@@ -77,50 +117,12 @@ Deno.test("Status waits for every pull request validation job", async () => {
   assertStringIncludes(gate, "JOB_RESULTS: ${{ toJSON(needs) }}");
   assertStringIncludes(gate, 'select(.value.result != "success")');
   assertStringIncludes(gate, "permissions: {}");
-});
 
-Deno.test("Status calls reusable dashboard validation", async () => {
-  const deno = await workflow("deno.yml");
-  const dashboard = await workflow("dashboard-image.yml");
-  const caller = jobBlock(deno, "dashboard");
-
-  assertStringIncludes(caller, 'name: "Dashboard"');
-  assertStringIncludes(
-    caller,
-    "if: ${{ github.event_name == 'pull_request' }}",
-  );
-  assertStringIncludes(
-    caller,
-    "uses: ./.github/workflows/dashboard-image.yml",
-  );
-  assertStringIncludes(
-    caller,
-    "permissions:\n      contents: read\n      id-token: write",
-  );
-  assertStringIncludes(
-    dashboard,
-    "\npermissions:\n  contents: read\n\nconcurrency:\n",
-  );
-  assertEquals(
-    neededJobIds(jobBlock(deno, "status")).includes("dashboard"),
-    true,
-  );
-
-  const denoTriggers = workflowTriggers(deno);
-  assertStringIncludes(denoTriggers, "  pull_request:\n");
-  assertEquals(denoTriggers.includes("\n    paths:"), false);
-
-  const dashboardTriggers = workflowTriggers(dashboard);
-  assertStringIncludes(dashboardTriggers, "  workflow_call:\n");
-  assertStringIncludes(
-    dashboardTriggers,
-    "  push:\n    branches: [main]\n    paths:\n",
-  );
-  assertEquals(dashboardTriggers.includes("  pull_request:\n"), false);
-  assertStringIncludes(
-    dashboard,
-    "group: dashboard-${{ github.event.pull_request.number || github.ref }}",
-  );
+  // A path filter would leave the required check pending on a pull request
+  // that touches none of the listed paths.
+  const triggers = workflowTriggers(contents);
+  assertStringIncludes(triggers, "  pull_request:\n");
+  assertEquals(triggers.includes("\n    paths:"), false);
 });
 
 Deno.test("Coverage Comment follows the CI workflow by name", async () => {
@@ -132,87 +134,114 @@ Deno.test("Coverage Comment follows the CI workflow by name", async () => {
   assertStringIncludes(comment, `    workflows: ["${name[1]}"]\n`);
 });
 
-Deno.test("Dashboard Status verifies every reusable workflow job", async () => {
-  const contents = await workflow("dashboard-image.yml");
-  assertStringIncludes(contents, "name: Dashboard\n");
-  assertEquals(jobIds(contents).includes("dashboard_scope"), false);
+Deno.test("Dashboard publishes only from main, never from a pull request", async () => {
+  const deno = await workflow("deno.yml");
+  const dashboard = await workflow("dashboard-image.yml");
 
-  const gate = jobBlock(contents, "status");
-  const expected = jobIds(contents).filter((jobId) => jobId !== "status")
-    .sort();
-  assertEquals(neededJobIds(gate).sort(), expected);
-  for (const jobId of expected) {
-    assertStringIncludes(gate, `needs.${jobId}.result`);
-  }
-  assertStringIncludes(gate, "name: Status");
-  assertStringIncludes(gate, "if: ${{ always() }}");
-  assertStringIncludes(
-    gate,
-    "needs.publish_authorization.outputs.allowed",
-  );
-  assertStringIncludes(gate, 'TEST_RESULT" == "success"');
-  assertStringIncludes(gate, 'BUILD_RESULT" == "success"');
-  assertStringIncludes(gate, 'AUTHORIZATION_RESULT" == "success"');
-  assertStringIncludes(gate, 'PUBLISH_ALLOWED" == "true"');
-  assertStringIncludes(gate, 'PUBLISH_ALLOWED" == "false"');
-  assertStringIncludes(gate, "permissions: {}");
-});
+  assertEquals(deno.includes("dashboard-image.yml"), false);
+  assertEquals(jobIds(deno).includes("dashboard"), false);
 
-Deno.test("called dashboard validation always runs", async () => {
-  const contents = await workflow("dashboard-image.yml");
+  assertStringIncludes(dashboard, "name: Dashboard\n");
+  const triggers = workflowTriggers(dashboard);
+  assertStringIncludes(triggers, "  workflow_dispatch: {}");
+  assertStringIncludes(
+    triggers,
+    "  push:\n    branches: [main]\n    paths:\n",
+  );
+  assertEquals(triggers.includes("  pull_request:"), false);
+  assertEquals(triggers.includes("  workflow_call:"), false);
+  assertStringIncludes(
+    dashboard,
+    "\npermissions:\n  contents: read\n\nconcurrency:\n",
+  );
+  assertStringIncludes(dashboard, "group: dashboard-${{ github.ref }}");
+  assertEquals(jobIds(dashboard).sort(), ["publish", "tests"]);
 
-  for (const jobId of ["tests", "build"]) {
-    const validation = jobBlock(contents, jobId);
-    assertEquals(validation.includes("\n    needs:"), false);
-    assertEquals(validation.includes("\n    if:"), false);
-  }
+  // A manual run can name any ref, so the tests job refuses anything but main
+  // before the publish job it gates gets a credential. The guard has to fail
+  // the run, not just report: a guard that only warns lets a dispatch from any
+  // branch move the `latest` tag.
+  const tests = jobBlock(dashboard, "tests");
+  assertEquals(tests.includes("id-token: write"), false);
+  const guard = stepBlock(tests, "Verify the run is on main");
+  assertStringIncludes(guard, "if: ${{ github.ref != 'refs/heads/main' }}");
+  assertStringIncludes(guard, "\n          exit 1\n");
 
-  const authorization = jobBlock(contents, "publish_authorization");
-  assertStringIncludes(
-    authorization,
-    "needs: [tests, build]",
-  );
-  assertStringIncludes(authorization, "if: ${{ !cancelled() }}");
-  assertStringIncludes(authorization, "ACTOR_ID: ${{ github.actor_id }}");
-  assertStringIncludes(
-    authorization,
-    'if [[ ",${PUBLISHER_ACTOR_IDS}," == *",${ACTOR_ID},"* ]]; then',
-  );
-  assertStringIncludes(
-    authorization,
-    'if [[ "$BUILD_RESULT" == "success" ]]; then',
-  );
-  assertStringIncludes(
-    authorization,
-    'elif [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$member" == "true" ]]; then',
-  );
-  assertStringIncludes(
-    authorization,
-    'if [[ "$TEST_RESULT" == "success" || ("$PUSH_BRANCH" == "true" && "$RUN_ATTEMPT" -gt 1) ]]; then',
-  );
-
-  const publish = jobBlock(contents, "publish");
-  assertStringIncludes(
-    publish,
-    "needs: [tests, build, publish_authorization]",
-  );
-  assertStringIncludes(
-    publish,
-    "!cancelled() && needs.publish_authorization.outputs.allowed == 'true'",
-  );
+  const publish = jobBlock(dashboard, "publish");
+  assertStringIncludes(publish, "needs: [tests]");
+  assertEquals(publish.includes("\n    if:"), false);
   assertStringIncludes(
     publish,
     "permissions:\n      contents: read\n      id-token: write",
   );
 
-  for (
-    const jobId of [
-      "tests",
-      "build",
-      "publish_authorization",
-      "status",
-    ]
-  ) {
-    assertEquals(jobBlock(contents, jobId).includes("id-token: write"), false);
+  // Both tags go up in the one push: the immutable commit tag the infra
+  // overlay pins, and the `latest` the deployment follows.
+  const build = stepBlock(publish, "Build and push dashboard image");
+  assertStringIncludes(build, "\n          push: true\n");
+  assertStringIncludes(
+    build,
+    "\n          build-args: |\n" +
+      "            DASHBOARD_GIT_COMMIT=${{ github.sha }}\n",
+  );
+  assertStringIncludes(
+    build,
+    "\n          tags: |\n" +
+      "            ${{ env.IMAGE }}:${{ github.sha }}\n" +
+      "            ${{ env.IMAGE }}:latest\n",
+  );
+});
+
+Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () => {
+  // The bastion's /opt/cf/deploy.sh takes an environment name and a
+  // 40-character commit SHA, and nothing else. Hand it a third argument, an
+  // environment it does not know, or a revision that is not a full SHA, and it
+  // prints its usage and exits 1, failing the deploy job. That script belongs
+  // to the infra repository, so nothing else here sees it and the call sites
+  // are checked instead. docs/development/deploying.md covers the seam.
+  const environments = ["estuary", "rapids"];
+  // The revision has to expand to a full SHA, which is a property of what the
+  // expression reads rather than of the expression itself. `github.ref_name`
+  // would look just as much like a revision here and fail on the bastion, so
+  // the expressions whose value is a full SHA are named.
+  const revisions = ["${{ github.sha }}", "${{ steps.resolve.outputs.sha }}"];
+
+  const callers: string[] = [];
+  for (const name of await workflowNames()) {
+    const contents = withoutComments(await workflow(name));
+    const mentions = [...contents.matchAll(/\/opt\/cf\/deploy\.sh/g)].length;
+    if (mentions === 0) continue;
+    callers.push(name);
+
+    // Invocations are found by their one-line `script:` value. Counting the
+    // mentions of the script separately catches a call site written some other
+    // way, which would otherwise go unchecked.
+    const invocations = deployInvocations(contents);
+    assertEquals(
+      invocations.length,
+      mentions,
+      `${name}: every deploy.sh call belongs on a single script: line`,
+    );
+
+    for (const invocation of invocations) {
+      const args = commandWords(invocation).slice(1);
+      assertEquals(args.length, 2, `${name}: wrong arity in \`${invocation}\``);
+      assert(
+        args[0].startsWith("${{") || environments.includes(args[0]),
+        `${name}: unknown environment in \`${invocation}\``,
+      );
+      assert(
+        revisions.includes(args[1]),
+        `${name}: \`${args[1]}\` is not known to be a full SHA, in ` +
+          `\`${invocation}\``,
+      );
+    }
+  }
+
+  // Every workflow that calls the script is checked, so a new one is covered
+  // without being listed. The two that call it today are named to catch the
+  // case where the search comes back empty and the loop above does nothing.
+  for (const name of ["deno.yml", "deploy-production.yml"]) {
+    assert(callers.includes(name), `${name}: no deploy.sh call found`);
   }
 });

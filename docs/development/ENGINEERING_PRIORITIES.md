@@ -15,8 +15,8 @@ asking the right questions:
 
 Users don't think in these terms, but their satisfaction — or frustration —
 maps to them. Eventually each dimension should have an in-depth program
-document (like `PERFORMANCE_PROGRAM.md` for speed) that captures our
-principles, strategy, and current state.
+document (like the [performance program](PERFORMANCE_PROGRAM.md) for speed)
+that captures our principles, strategy, and current state.
 
 Product owns the prioritization across these dimensions — they collect user
 feedback, assess the most urgent needs, and decide where we focus. Engineering
@@ -52,8 +52,8 @@ observability — you can't protect what you can't measure. Users experience
 speed as "does this feel like a real tool or a toy?"
 
 *Shared across Runtime and DevX. Runtime drives most of the work
-(see `PERFORMANCE_PROGRAM.md`), but DevX choices directly affect what users
-experience.*
+(see the [performance program](PERFORMANCE_PROGRAM.md)), but DevX choices
+directly affect what users experience.*
 
 ### Capabilities
 
@@ -107,7 +107,7 @@ accordingly.
 |----------|-------------|-------|
 | Security | — | Active work, no program doc yet |
 | Correctness | — | Active work, no program doc yet |
-| Speed | `PERFORMANCE_PROGRAM.md` | Program doc in progress |
+| Speed | [Performance program](PERFORMANCE_PROGRAM.md) | Program doc in progress |
 | Capabilities | — | Active work, no program doc yet |
 | Developer Experience | — | Active work, no program doc yet |
 | Scalability | — | Deferred |

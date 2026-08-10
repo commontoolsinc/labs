@@ -14,13 +14,34 @@ today and must be migrated into this lifecycle.
 ## Status
 
 The content-addressed source and in-place pattern replacement foundations are
-implemented. Local command-line creation is implemented end to end. Automatic
-updates exist only through a specialized path for same-toolshed system sources.
-That path reconciles roots before bootstrap and checks other successfully
-instantiated patterns in the background. It is not the target model: a space
-root is an ordinary piece under this entire lifecycle. The general origin,
-history, forking, following, reverting, and repointing model in this document
-requires work unless the implementation table says otherwise.
+implemented. Local command-line creation is implemented end to end. The shared
+piece menu can detach a piece from its current origin. Its history panel can
+restore an exact retained source revision or resume following an origin from an
+earlier revision. These operations append guarded source revisions, and direct
+source edits now detach. The specialized updater also appends guarded revisions
+for same-toolshed system sources. A lifecycle-aware detached revision prevents
+that updater from reconstructing the cleared origin as legacy provenance.
+Direct Piece API creation records a detached creation revision when the exact
+source closure is available. `RuntimeClient.createPage(URL)` instead records the
+canonical HTTP or HTTPS URL as the active origin in the same transaction as its
+source-backed creation revision. Programmatically constructed patterns without
+retained source continue to run without restorable history. Retained source
+closures are reverified in the transaction that publishes each history entry.
+An unseeded space now uses the default host provisionally until a stateful
+operation is issued there. Before that cutoff, its first accepted host hint
+replaces the route and replays prior reads, including when a pattern followed a
+link before site-table hydration completed.
+
+This lifecycle slice is partial. Revisions retain the existing verified
+`pattern:<identity>` source-document closure rather than the complete authored
+program manifest specified below. Fabric URL creation, the remaining web URL
+creation paths, host-qualified fabric-link receipt, live mutable fabric
+subscriptions, complete cross-space policy enforcement, forking, and
+runtime-fingerprint handling still require work. The specialized updater still
+reconciles roots before bootstrap and checks other successfully instantiated
+same-toolshed system-source patterns in the background. A space root remains an
+ordinary piece in the target model. Cross-space history repoint is rejected
+until the checked source-replication path exists.
 
 Status labels in this document have exact meanings:
 
@@ -37,7 +58,7 @@ otherwise complete first-time creation command into an unimplemented command.
 
 ## Last updated
 
-2026-07-22
+2026-08-03
 
 ## Terms
 
@@ -120,11 +141,51 @@ retains the supplied URL in history and must persist the space DID to host route
 before it commits a hostless canonical target. If the route cannot be persisted,
 the origin transition fails without changing the piece. The transition also
 registers the accepted hint on the ordinary storage manager before opening the
-origin space. It does not create a secondary session. A conflicting seeded
-route or previously accepted late hint fails the transition. After the origin
-space opens, only the hint that was already registered can be confirmed. Any
-other route attempt fails the transition. A later load hydrates the durable
-route before resolving the canonical fabric target.
+origin space. It does not create a secondary session. A seeded route or a
+previously accepted late hint is authoritative, so a conflicting hint fails the
+transition.
+
+The default host is only a provisional route for a space that has neither a
+seed nor an accepted hint. The first accepted hint may replace that provisional
+route after its provider opens. Storage clears the provisional replica, closes
+its session, and cancels connection, initial or reconnect session signature
+creation, mount, and ACL setup work that is still in progress. It does not wait
+for the provisional host to respond. Storage opens the same provider through
+the hinted host and replays every document read registered on it. An
+asynchronous read-only operation that overlaps replacement restarts on the
+hinted replica and returns that result instead of the provisional replica's
+closure error. These operations include document reads, entity listing and
+lookup, scheduler snapshot listing, and SQLite queries.
+An existing `synced()` barrier follows the replacement and waits for those
+replayed reads on the hinted replica.
+Replay also loads CFC schema documents discovered from the hinted data.
+Reactive consumers therefore receive the intended data when site-table
+hydration loses the race with link traversal.
+
+A transaction keeps the replica from which it read its basis. Replacement
+makes a transaction holding the provisional replica inconsistent. Its commit
+is rejected and may be retried from the hinted data; it cannot carry a result
+calculated from missing provisional data into the intended host.
+Immediately before a transaction mutation is accepted for issue, storage
+rechecks every replica that supplied the transaction's read basis. This
+includes read spaces other than the mutation's target space. If any read-basis
+replica was replaced, storage rejects the transaction before handing the
+mutation to any host.
+
+Replacement is allowed until the provisional session accepts a stateful
+operation for issue. Stateful operations are ordinary transactions, scheduler
+transactions, ACL setup transactions, and injected SQLite source registration.
+Work that is still waiting for a session does not prevent replacement. When the
+hint wins that race, the old replica is invalidated before the waiting work can
+issue. A failure before issuance also leaves the route provisional.
+
+Once a stateful operation is handed to the provisional host, the route becomes
+authoritative. This remains true when the client later reports an error because
+the host may have committed the operation before its acknowledgement was lost.
+A hint naming another host is then a conflict. A hint matching the default host
+makes the route authoritative without reconnecting. After the first hint is
+accepted, a different hint remains a conflict. A later load hydrates the
+durable route before resolving the canonical fabric target.
 
 An origin is not proof of the bytes currently running. The content-addressed
 `patternIdentity` is that proof. A fabric URL that names a content-addressed
@@ -175,9 +236,10 @@ pieces; it does not generate pattern source.
    incompatible candidate leaves the current source and history unchanged. A
    piece that already has valid source can continue to run its last accepted
    source. A manual replacement still rejects invalid or unverifiable source,
-   but it may apply a structural incompatibility after the user explicitly
-   accepts the warning. Semantic compatibility is established by tests rather
-   than inferred by the runtime.
+   and it rejects a candidate that cannot use the piece's actual retained input.
+   It may apply an incompatible pattern contract or retained link after the user
+   explicitly accepts the warning. Semantic compatibility is established by
+   tests rather than inferred by the runtime.
 8. Static `cf:` imports keep their existing snapshot semantics. Following a
    piece does not make imports in that piece or in another pattern live.
 9. Creation and every later transition use ordinary authorization for the
@@ -217,9 +279,9 @@ storage schema to use these exact TypeScript field names.
 | Retained authored program | An immutable version-1 manifest for the complete authored program accepted by the current revision, including unreachable files and its exact public-subpath map | **Manifest and exports required**: source documents can retain extra roots, but no piece revision binds the exact accepted file set or public map |
 | Runtime fingerprint | The trusted runtime identity used to calculate the accepted executable pattern identity | **Authoritative provider required**: the optional module-hash input exists, but production compilation and source verification still use the empty default |
 | Runtime-neutral program digest | The version-1 digest of the canonical main filename, every authored file's runtime-neutral module identity, and the public-subpath map | **Digest and lifecycle required**: the module hash can run with the empty fingerprint, but the complete program digest is not recorded |
-| Active origin | No origin, an external `https://` URL with an entry export, a stable mutable fabric-entity URL, or a content-addressed fabric pattern URL with an export symbol | Partial: `patternSource` stores a string for system roots, but general web and fabric URL origins are not supported end to end |
-| Revision head | The stable identifier of the latest accepted source and origin state | Revision head required |
-| Source revision log | Ordered records of every accepted source and origin state, with a durable reference to each immutable authored-program manifest | Revision log required |
+| Active origin | No origin, an external `https://` URL with an entry export, a stable mutable fabric-entity URL, or a content-addressed fabric pattern URL with an export symbol | **Partial**: `patternSource` stores the active origin string. `RuntimeClient.createPage(URL)` initializes a canonical HTTP or HTTPS origin atomically with creation. Explicit history actions can clear it or restore an earlier web or fabric origin. Fabric creation, the remaining web creation paths, and reconciliation do not yet use the complete origin policy |
+| Revision head | The stable identifier of the latest accepted source and origin state | **Partial**: the last valid `pieceSourceHistory` entry is the guarded head. It is not yet mirrored in the complete source-state schema |
+| Source revision log | Ordered records of every accepted source and origin state, with a durable reference to each immutable authored-program manifest | **Partial**: source-backed direct Piece API creation, URL-backed Runtime Client creation, lifecycle-aware edits, detach, revert, repoint, provenance repair, and specialized updates append guarded records. Each record links to an existing source-document closure that is verified in the lifecycle write transaction. Programmatically constructed patterns without retained source, other creation paths, and immutable authored-program manifests remain required |
 | Descriptive repository | Optional locator shown by tooling; never followed | Implemented as `patternRepository` metadata |
 
 The runtime-neutral program digest is
@@ -432,10 +494,13 @@ when a candidate pattern is applied to an existing piece.
 The runtime can compare the previous and candidate argument schemas, result
 schemas, and retained input links. Before a manual source replacement, the
 caller compiles and verifies the candidate and runs these structural
-comparisons. A reported backward incompatibility becomes an actionable warning.
-The UI requires explicit confirmation, and command-line tooling requires an
-explicit flag, before applying it. An accepted manual replacement is a direct
-edit, so it detaches the piece and appends a revision.
+comparisons. An incompatible pattern contract or retained link becomes an
+actionable warning. The UI requires explicit confirmation, and command-line
+tooling requires an explicit flag, before applying it. A materialized retained
+input that does not satisfy the candidate argument schema is not confirmable.
+The runtime rejects that source until the input is repaired. An accepted direct
+replacement detaches the piece and appends a revision. Refollowing an accepted
+historical origin retains that origin.
 
 An automatic origin update has no user present to accept a warning. A known
 structural incompatibility therefore blocks the transition. The piece keeps its
@@ -457,8 +522,8 @@ of a schema warning does not waive this root-interface contract.
 | Concern | Target policy | Repository status |
 |---|---|---|
 | Structural schema comparison | Compare argument and result schemas and validate retained inputs when replacing an existing piece's source | **Implemented** for `PieceController.setPattern` |
-| Manual incompatible replacement | Warn with details and require explicit confirmation or a command-line flag; an accepted replacement detaches | **Warning flow required**: `setPattern` currently rejects unless `dangerouslyAllowIncompatibleSchema` is supplied, and the command line exposes that flag without a first-class warning and confirmation flow |
-| Automatic incompatible update | Reject a known structural incompatibility and keep the last accepted lifecycle state | **Automatic guard required**: the specialized system-source updater changes `patternIdentity` without the complete pre-apply comparison, and general origin reconciliation is not implemented |
+| Manual incompatible replacement | Warn about an incompatible pattern contract or retained link and require explicit confirmation or a command-line flag. Reject a candidate that cannot use the actual retained input | **Partial**: source-history actions return a one-use confirmation bound to the reviewed candidate and guarded state. `setPattern` rejects unless `dangerouslyAllowIncompatibleSchema` is supplied, and the command line exposes that flag without a first-class warning and confirmation flow |
+| Automatic incompatible update | Reject a known structural incompatibility and keep the last accepted lifecycle state | **Partial**: the specialized same-toolshed updater requires the old and candidate argument and result schemas to be exactly equal before an unattended ordinary-piece update. General origin reconciliation and the complete compatibility relation are not implemented |
 | Semantic state continuity | Verify intended stable-key, stable-cause, migration, and behavior contracts in CI | **Broader CI coverage required**: synthetic home-shaped and default-app-shaped golden replays exist, but general version-to-version fixtures remain |
 | Root-interface contract | Enforce the root role after every creation, relink, and source transition | **Root validation required**: root linking and source replacement do not validate that contract |
 
@@ -553,32 +618,183 @@ durably records it in the home-space site table. It then opens and resolves the
 origin space. The operation may commit a hostless canonical origin only after
 registration and persistence succeed.
 
+Every route source uses one origin-only grammar. A route is an absolute HTTP or
+HTTPS origin with no credentials, path beyond `/`, query, or fragment. It is
+normalized with a trailing slash. Production routes require HTTPS. An explicit
+local-development or test policy may permit HTTP. This grammar applies to the
+default host, `spaceHostMap` seeds, live registration, site-table hydration,
+host-qualified share links, and the effective host returned to an embedder. An
+invalid default or seed fails runtime initialization. An invalid live hint is
+rejected before it changes the route. Hydration ignores invalid legacy entries
+and selects the last valid entry for each DID.
+
+The authority in `cf://<authority>/<space-did>/<ref>` does not carry a transport
+scheme. Lifecycle ingestion derives HTTPS by default. Under the explicit local
+HTTP policy, a loopback authority derives HTTP instead. The resulting absolute
+origin passes through the same route normalization before registration. No
+caller derives this scheme from the shell frontend origin.
+
 If persistence fails after registration, the transition leaves the piece
 unchanged. The accepted hint may remain available in that runtime until it
 stops. A retry can confirm the same hint and attempt the durable write again.
 The operation never persists a hint that the live registry has already
 rejected.
 
+Registration and persistence use one dedicated runtime operation. The
+runtime-client exposes it to embedders through a dedicated request. Lifecycle
+code in the worker calls the same underlying operation directly. The operation
+validates the DID and host again. It synchronizes the home-space site-table cell
+before reading its value or changing the live route. A synchronization failure
+fails the operation. After synchronization, it selects the last valid existing
+route for the target DID by the same rule as hydration. It offers that route to
+the live registry before it offers the newly supplied hint. A rejection of the
+existing table route means that a seed or earlier live route is already
+authoritative. The operation then offers the supplied hint to that same
+registry. A conflict fails the operation without writing. This direct ordering
+does not depend on the asynchronous hydration watcher having processed the
+table.
+
+An accepted or confirmed supplied route is transactionally appended to the
+site-table value that was synchronized. The entry contains the DID, normalized
+host, operation-specific source, and an ISO timestamp assigned by the worker.
+The transaction keeps the synchronized table value as a commit precondition.
+
+The operation awaits `transaction.commit()` and inspects its result. It returns
+success only for an `ok` result. A resolved result containing `ConflictError` or
+`StoreError` fails the operation, as does a thrown commit error. The operation
+does not retry any of these failures automatically. A live route accepted
+before a commit failure may remain until the runtime stops.
+
+Generic optimistic cell writes do not satisfy this contract. The current
+`CellHandle.set()` and `CellHandle.push()` paths do not propagate remote commit
+failure to their caller. The dedicated request must expose live conflict and
+durable commit failure separately so a lifecycle operation or the shell can
+stop before using the target.
+
+### Host-qualified fabric-link receipt
+
+The shell can also learn a route from a user-facing fabric link that opens
+existing data instead of selecting a piece's source. Link receipt is not a
+source lifecycle transition. It uses the same route registry and durable site
+table because later lifecycle operations and ordinary pattern reads must agree
+about where the named space lives.
+
+The browser-facing share-link form is a shell URL:
+
+`<shell-http-or-https-origin>/<space-did>[/<piece-id-or-slug>]?spaceHost=<encoded-toolshed-origin>`
+
+`spaceHost` occurs exactly once. Its decoded value is an absolute HTTP or HTTPS
+origin with no credentials, path beyond `/`, query, or fragment. The receiver
+normalizes it with a trailing slash. The path contains an explicit space DID.
+It names either the space root or a piece that the ordinary shell `AppView`
+supports. A host-qualified `cf://` source reference is a different input form.
+Its bare authority does not supply the explicit HTTP or HTTPS scheme required
+by this browser-facing link.
+
+The outer URL origin identifies the shell frontend. Production share links use
+HTTPS. Local-development and test shells may use HTTP. The shell may use
+`globalThis.location.origin` for this outer origin. That value never supplies
+`spaceHost`. The shell's **Copy link** action obtains `spaceHost` from the
+effective host reported by the runtime's per-space storage manager. It does not
+substitute the shell's default API host when the space has a different
+effective host.
+
+A shell URL without `spaceHost` is an ordinary hostless navigation and supplies
+no new route. A URL with a malformed or repeated `spaceHost`, or with a space
+name instead of a DID, fails link receipt without navigation. Receiving a valid
+link does not grant read access. Ordinary fabric authorization and content
+verification still apply.
+
+Before the shell opens, mounts, or navigates to the target, it performs these
+steps:
+
+1. Parse the shell path into its DID-based `AppView`. Validate and normalize the
+   `spaceHost` toolshed origin.
+2. Send that DID and host through the dedicated failure-propagating route
+   request. The worker uses the live registry behavior exposed by
+   `RuntimeClient.registerSpaceHost` and records `source: "share-link"` in the
+   site-table entry.
+3. Wait for the request to confirm the durable transaction. Then remove
+   `spaceHost` and hand the canonical hostless `AppView` to ordinary shell
+   navigation.
+
+A rejected live hint is a route conflict. The shell does not persist that hint
+or navigate to the target through it. If persistence fails after live
+registration, the shell reports that link receipt failed and does not navigate.
+The accepted route may remain live until the runtime stops. Repeating receipt
+can confirm the same route and attempt the durable write again.
+
+Patterns receive no new routing API. They continue to store and follow
+hostless fabric references. A later runtime hydrates their routes from the
+home-space site table. Hydration may finish after a running pattern has already
+read the target space through the provisional default host. The replacement
+and replay rules below must then update that same running pattern with the
+intended data. This recovery does not require a page reload or a pattern
+restart.
+
 The runtime does not open a short-lived secondary session for origin
-resolution. A configured route and an existing live connection remain stable
-for the current session. A seeded route can only be confirmed. Once a late hint
-is accepted, a different hint is a conflict even before the space opens. After
-the space opens, only the hint already in effect can be confirmed. Any other
-attempt fails without changing the piece. It does not silently reconnect or
-allow two live connections to disagree about where the same space resides.
+resolution. A seeded route can only be confirmed. Once a late hint is accepted,
+a different hint is a conflict before or after the space opens.
+
+Opening an unseeded space on the default host does not accept that fallback as
+its route. If no stateful operation has been issued, the first late hint still
+wins. If it names another host, the storage manager invalidates and closes the
+provisional replica, replaces it in place, and settles its queued and in-flight
+reads even if its connection has not opened. Route cancellation closes
+connection, initial or reconnect session signature creation, mount, and ACL
+setup work that is still in progress. The manager then replays its registered
+document reads on the hinted host. Asynchronous document reads, entity listing
+and lookup, scheduler snapshot listing, and SQLite queries that overlap
+replacement follow the hinted replica rather than returning the provisional
+close result. A `synced()` call that already started also waits for the
+replacement and its replay. Replay includes CFC schema documents discovered
+from the hinted entities. Existing reactive readers observe the hinted space's
+data, and convergence does not remain blocked on the provisional connection.
+
+Work already holding the invalidated replica cannot commit through it. A
+transaction that read from that replica becomes inconsistent and must recompute
+from the hinted data. The issue boundary checks every read-basis space, not only
+the write target, before it hands a mutation to a host. Session construction
+checks the route generation before each mount and after each asynchronous setup
+step. It also receives the route cancellation signal, so an abandoned
+connection, signature operation, mount, or ACL query settles instead of
+remaining alive beside the replacement.
+
+The manager refuses to replace a provisional replica after its session accepts
+any stateful operation for issue. Stateful operations include ordinary and
+scheduler transactions, ACL setup transactions, and injected SQLite source
+registration. The route is fixed at issuance rather than successful
+acknowledgement because a reported error does not prove that the host rejected
+the operation. A hint can still replace work that is waiting for a session or
+is rejected before the session accepts it. Route generations prevent
+invalidated work from starting a later mount or issuing a mutation after
+replacement. Waiting scheduler observations and SQLite registrations settle
+against the invalidated replica instead of blocking convergence. Storage
+rejects only the scheduler observations whose read routes were invalidated. It
+still issues valid observations from the same batch, and a failed earlier batch
+does not strand observations queued behind it. A semantic transaction waits for
+every scheduler-observation batch that was queued ahead of it, including a
+batch another waiter has already started. If an earlier batch fails, the
+semantic transaction is not issued and receives that failure. Its unused
+sequence number is not added to the failure's retry condition. A hint that names
+the default host confirms the provisional route without rebuilding the replica.
 
 This policy settles ingestion of a known host hint. It does not yet make route
 discovery reliable. Host unavailability, replicated hosts, failover, stale
-site-table entries, authenticated space relocation, and closing and reopening
-an affected live session remain open design work.
+site-table entries, authenticated replacement of an explicit route, and
+replicated-host failover remain open design work.
 
 | Capability | Repository status | Remaining work |
 |---|---|---|
-| Register a late host hint before a space opens | **Implemented** | `StorageManager.registerSpaceHost` adds the route. A seed can only be confirmed, and an opened space accepts only its previously registered matching hint |
-| Keep an accepted late hint stable before opening | **Conflict guard required** | `StorageManager.registerSpaceHost` currently replaces a different late hint while the space remains unopened |
-| Hydrate durable hints in a new runtime | **Implemented** | The runtime processor watches the home-space site table and registers its entries. Callers that need ordering must also register through IPC before the first open |
+| Register a late host hint before a space opens | **Implemented** | `StorageManager.registerSpaceHost` adds the route. A seed can only be confirmed, and the first accepted late hint becomes authoritative |
+| Keep an accepted late hint stable before opening | **Implemented** | `StorageManager.registerSpaceHost` accepts the first late hint and rejects a different hint before or after the space opens |
+| Replace a provisional default route after opening | **Implemented** | The first late hint invalidates an unseeded provider that opened through the default host before its session accepts a stateful operation. It cancels unfinished connection, initial or reconnect session signature creation, mount, and ACL work. Registered document reads, existing sync barriers, and overlapping read-only calls continue through the hinted host, including verified CFC schema documents discovered from the hinted data. Transactions based on the old replica are rejected as inconsistent at issue time, including when they write another space. Invalid scheduler observations do not reject or strand valid observations. A matching default-host hint confirms without reconnecting. Ordinary and scheduler transactions, ACL setup, and SQLite source registration fix the route when issued, even if acknowledgement later fails |
+| Hydrate durable hints in a new runtime | **Implemented** | The runtime processor watches the home-space site table, selects its last route that passes the current HTTP or HTTPS check for each space, and registers those hints. Hydration can replace a provisional default route. A route already accepted through IPC remains fixed; a conflicting table route accepted first makes later IPC registration fail |
+| Apply one origin-only grammar to every route | **Route normalization required** | `normalizeSpaceHost` checks the HTTP or HTTPS scheme but still accepts credentials, a non-root path, a query, and a fragment. Seeds, live hints, and hydration all use that permissive rule. Bare `cf://` authorities use a lifecycle-local scheme heuristic rather than a shared route rule |
+| Append an accepted route with commit acknowledgement | **Runtime persistence API required** | Generic `CellHandle` writes either overwrite the table or return before a remote append failure can reach the caller. There is no dedicated operation that synchronizes and applies the table's existing candidate, registers the supplied route, transactionally appends it, inspects the commit result, and reports live conflict separately from persistence failure |
 | Accept a host-qualified piece origin | **Origin integration required** | No source lifecycle operation persists and registers a `cf://` hint before resolving and committing the origin |
-| Recover from host failure or space movement | **Reliability design required** | There is no authoritative route-change, failover, or live close-and-reopen protocol |
+| Receive a host-qualified fabric link in the shell | **Link-receipt integration required** | **Copy link** still copies the frontend URL. No shell path emits or receives the `spaceHost` share-link form, asks the runtime for the effective per-space host, or waits for acknowledged route persistence before navigation |
+| Replace an explicit route after host failure or space movement | **Reliability design required** | There is no authenticated route-change or failover protocol after a seed or late hint becomes authoritative |
 
 ## Reconciliation when a piece loads
 
@@ -748,26 +964,51 @@ update even when its historical runtime is no longer executable. If the current
 immutable origin is incompatible, the UI offers detach and rebuild without
 mislabeling the current creation revision as a revert target.
 
+The piece menu, opened by right-clicking a rendered piece, belongs to
+`cf-piece-menu` in the component package rather than to the shell. Every host
+that renders pieces through `cf-render`, including Loom, therefore receives the
+same lifecycle controls. It names the origin kind and shows the canonical origin
+URL alongside the recorded string when normalization changed it. It says a
+piece is detached when it records no origin. It shows the current pattern
+identity and export symbol, the identity whose setup state was installed, and
+the pattern identity a specialized update displaced. It lists the retained
+authored source files.
+
+A followed piece also has a **Stop following source** context-menu action. The
+history panel lists every recorded revision. An earlier revision offers **Use
+this version**, which restores its retained source and detaches. A revision that
+records an origin also offers **Follow this source again**, which resolves that
+origin now and keeps it active. A known structural incompatibility leaves the
+piece unchanged until the user explicitly confirms the warning. The
+confirmation token is bound to the exact compiled candidate and guarded piece
+source snapshot. It is also bound to the retained argument and the durable
+producer contracts that were checked. It cannot approve different code fetched
+later from a changed mutable origin or a different retained link. The warning
+collects pattern-contract and durable-link incompatibilities before asking for
+confirmation. A candidate that cannot use the actual retained argument is
+rejected without offering confirmation.
+
 ## Current implementation
 
 | Requested interaction | Status | Evidence and remaining work |
 |---|---|---|
 | Manually push local code with an identity key and create a piece | **Implemented** | `cf piece new` resolves a local file program, writes its content-addressed source closure in the target space, creates a piece, and authenticates through the supplied identity. `cf piece setsrc` updates the same piece. |
 | Wish a new pattern into being with an LLM-backed UI | **Partial** | The `write-and-run` example asks an LLM for pattern code and passes it to `compileAndRun`, whose callback lets the browser worker register the new piece in a space. It is not a general product affordance and does not record a source revision. The runtime `wish()` builtin is discovery, not code generation. |
-| Manually push code from a source URL and create a piece that remembers it | **CLI URL flow required** | The command-line `new` and `setsrc` commands accept local filesystem entries. `RuntimeClient.createPage(URL)` and `HttpProgramResolver` can fetch `http:` and `https:` source. Fabric resolution can resolve content-addressed patterns and same-toolshed piece references to a source identity, but its result does not carry the export symbol as origin state. Neither path gives the command line a general `https://` or `cf://` source-origin operation. `--repository` is descriptive metadata and is not an origin. |
-| Use a UI affordance to push a known source URL into an owned space | **Partial** | `fetchProgram` with `compileAndRun`, the omnibox's `fetchAndRunPattern`, and `RuntimeClient.createPage(URL)` can fetch and run indexed web programs. The resulting piece does not receive a general active source URL or a source revision. There is no corresponding fabric URL affordance. |
+| Manually push code from a source URL and create a piece that remembers it | **CLI URL flow required** | The command-line `new` and `setsrc` commands accept local filesystem entries. `RuntimeClient.createPage(URL)` fetches an HTTP or HTTPS program and records its canonical URL as the active origin with the creation revision. Fabric resolution can resolve content-addressed patterns and same-toolshed piece references to a source identity, but its result does not carry the export symbol as origin state. The command line still has no general `https://` or `cf://` source-origin operation. `--repository` is descriptive metadata and is not an origin. |
+| Use a UI affordance to push a known source URL into an owned space | **Partial** | A host can call `RuntimeClient.createPage(URL)` to fetch and run an indexed HTTP or HTTPS program with its canonical URL recorded as the active origin. `fetchProgram` with `compileAndRun` and the omnibox's `fetchAndRunPattern` can also fetch and run indexed web programs, but those paths remain history-free. There is no corresponding fabric URL affordance. |
 | Load or create from an immutable fabric URL | **Immutable URL flow required** | The source cache and fabric resolver can load verified `cf:pattern:<identity>` source and honor a trailing pin on an entity-FID reference. No product operation normalizes that URL and export symbol into immutable piece origin metadata or appends the required revision. |
-| Automatically refresh a mutable URL-origin piece when loaded | **Partial** | The shell reconciles system roots before bootstrap and checks other successfully instantiated same-toolshed system-source patterns in the background. The specialized updater changes `patternIdentity` without the complete pre-apply structural comparison. A running pattern's setup can refuse an incompatible argument shape and keep the old graph, but the metadata pointer has already changed. External web URLs and mutable fabric entity URLs do not use this path. A content-addressed or explicitly pinned fabric URL intentionally has nothing to refresh. |
+| Automatically refresh a mutable URL-origin piece when loaded | **Partial** | The shell reconciles system roots before bootstrap and checks other successfully instantiated same-toolshed system-source patterns in the background. An accepted update changes the pattern, active origin, and guarded revision history atomically. The specialized updater conservatively requires exact argument and result schema equality for unattended ordinary-piece updates and only handles same-toolshed web sources. External web URLs and mutable fabric entity URLs do not use this load path. A content-addressed or explicitly pinned fabric URL intentionally has nothing to refresh. |
 | Retain authored declaration files | **Declaration identity work required** | `computeModuleHashes` follows type-import edges, but production engine paths remove authored `.d.ts` files before module identity calculation, source-document construction, and cache persistence. Declaration-only changes can therefore reuse stale executable identities and compiled bytes. |
 | Publish explicit source subpaths | **Exports-map support required** | The `cf:` grammar parses a subpath. Compile resolution and the shared pin/update chase reject it before entry resolution, so current tooling cannot create a misleading subpath pin. There is no immutable authored-program manifest or exact public exports map. Entry imports continue to pin the entry identity. |
-| Record and propagate a runtime rebuild | **Provider and lifecycle required** | `computeModuleHashes` accepts `runtimeFingerprint`, and its unit test proves that changing the fingerprint changes a module with an external dependency. Production pattern compilation and source verification use the empty default. There is no authoritative executable-fingerprint provider. Source documents do not retain a non-empty identity fingerprint, and pieces have no revision log, runtime-neutral program digest, runtime-rebuild cause, owner-published propagation contract, or cross-runtime revert handling. |
-| Manage a space root through the ordinary piece lifecycle | **Lifecycle unification required** | A root is already a piece and the specialized updater can replace its pattern in place. Creation still stamps a raw `patternSource`, reconciliation bypasses revision history, and update authority is not durable per piece. Root updates still use a separate controller path. The creation template currently lives on the mutable home root, relative source paths are not ordinary origins, and root linking does not validate a root interface. New-root creation, legacy-root migration, and later transitions do not yet use the ordinary lifecycle path. |
+| Record and propagate a runtime rebuild | **Provider and lifecycle required** | `computeModuleHashes` accepts `runtimeFingerprint`, and its unit test proves that changing the fingerprint changes a module with an external dependency. Production pattern compilation and source verification use the empty default. There is no authoritative executable-fingerprint provider. Source documents do not retain a non-empty identity fingerprint. The partial revision log has no runtime-neutral program digest, runtime-rebuild cause, owner-published propagation contract, or cross-runtime revert handling. |
+| Manage a space root through the ordinary piece lifecycle | **Partial** | A root is already a piece. The shared menu actions work on it, and the specialized updater now appends the same guarded history records. A first lifecycle transition freezes a legacy relative source path against the space's accepted host and retains the recorded path. Creation still stamps a raw `patternSource`, update authority is not a complete durable origin record, and root updates still enter through a separate controller path. The creation template currently lives on the mutable home root, and root linking does not validate a root interface. |
 | Fork an existing piece and detach it | **Fork operation required** | Tooling can recover a piece's verified source closure, and the runtime can create another piece from a program. There is no fork operation or UI, no `forkedFrom` history, and no atomic detach contract. |
-| Follow another piece and receive its source updates | **Follow operation required** | `cf:` resolution can read another piece's current `patternIdentity`, content-addressed source can be replicated, and a running piece watches its own `patternIdentity` for in-place swaps. No operation stores an unpinned, normalized fabric entity URL as the active origin, retains the accepted origin revision, reconciles it on load, subscribes to the origin's source revision while running, or exposes follow and unfollow UI. Cross-host routing also remains incomplete. |
-| Wish an existing piece to change and detach it | **LLM edit UI required** | `PieceController.setPattern` and `cf piece setsrc` reject incompatible pattern or retained-input schemas unless `dangerouslyAllowIncompatibleSchema` is supplied. The command line exposes that override, but it does not first present the target warning and confirmation flow. There is no LLM-backed edit affordance or revision log. Existing setup writes also preserve `patternSource` and `patternRepository` when replacements omit them, so the required detach behavior is not implemented. |
-| Revert to source previously used by the same piece | **Revert operation required** | Old immutable source documents may still exist by content identity, but the piece has no index of identities it previously used and no revert operation or UI. Cache retention is not a history contract. |
-| Repoint to a web URL, mutable fabric entity URL, or immutable fabric URL previously used | **Repoint operation required** | There is no origin history, general origin resolver at piece load, repoint operation, or UI. |
-| Record every previous source and origin | **History and manifests required** | `pieceLineageSchema` and `pieceSourceCellSchema` are declarations with no readers or writers. Current pieces retain only the current `patternIdentity`, optional `patternSource`, and optional `patternRepository`. There is no immutable per-revision manifest that binds a complete authored file set. |
+| Stop following an active origin without changing the current source | **Partial** | `cf-piece-menu` exposes **Stop following source** for a piece with an active origin. `PieceController.changeSource` verifies the retained current source, atomically clears the origin without rerunning setup, and appends a detach revision. A later specialized update recognizes that revision as intentional detach. It works through `RuntimeClient` in every `cf-render` host. The complete authored-program manifest and runtime-rebuild distinction remain required. |
+| Follow another piece and receive its source updates | **Partial** | A history repoint can resolve a same-space unpinned fabric entity URL to the source piece's current pattern, apply it, and retain that URL as the active origin. The menu exposes detach and refollow controls. Cross-space repoint fails closed until checked source replication exists. Fabric URL creation, the remaining web creation paths, load reconciliation, running subscriptions, origin-revision observation, and durable cross-host routing remain required. |
+| Wish an existing piece to change and detach it | **Partial** | `PieceController.setPattern` now clears the active origin and appends a guarded direct-edit revision. When a detached, history-free, programmatically constructed predecessor has no retained source, the edit records its displaced executable identity outside restorable history and begins the source log with the new exact source. A piece with recorded history still rejects the edit when its current source is unavailable. It also rejects incompatible pattern or retained-input schemas unless `dangerouslyAllowIncompatibleSchema` is supplied. The command line exposes that override without a first-class warning flow, and there is no general LLM-backed edit affordance. |
+| Revert to source previously used by the same piece | **Partial** | The source history indexes prior pattern identities and retains their source-document closures. **Use this version** restores the selected program, clears the active origin, and appends a revert revision after compatibility checks. A complete authored-program manifest, runtime fingerprint, unreachable-file guarantee, and cross-runtime rebuild path remain required. |
+| Repoint to a web URL, mutable fabric entity URL, or immutable fabric URL previously used | **Partial** | **Follow this source again** resolves a selected historical same-space web or fabric origin now, applies its current source, retains the origin, and appends a repoint revision. An incompatibility confirmation applies the exact candidate that produced the warning. Fabric origin creation, the remaining web authoring paths, full normalization and policy enforcement, load reconciliation, checked cross-space replication, and running subscriptions remain required. |
+| Record every previous source and origin | **Partial** | `pieceSourceHistory` is an append-only list guarded by its last revision identifier, current pattern, and active origin. Each entry records the pattern, origin, operation, selected historical revision, and a link that retains a source-document closure verified in the same transaction. Direct Piece API creation records its detached initial source. URL-backed Runtime Client creation records its canonical active origin and initial source together. Recovery from an unavailable legacy source records its displaced executable identity outside restorable history rather than inventing a broken revision. Other creation paths, complete authored-program manifests, runtime fingerprints, program digests, causes, and origin revision identifiers remain required. |
 
 The implementation evidence for this table is concentrated in:
 
@@ -783,9 +1024,21 @@ The implementation evidence for this table is concentrated in:
 - [`packages/runtime-client/runtime-client.ts`](../../packages/runtime-client/runtime-client.ts)
   and
   [`packages/runtime-client/backends/runtime-processor.ts`](../../packages/runtime-client/backends/runtime-processor.ts)
-  for URL-backed page creation without origin stamping;
+  for URL-backed page creation with canonical origin and creation-history
+  stamping;
 - [`packages/piece/src/ops/pieces-controller.ts`](../../packages/piece/src/ops/pieces-controller.ts)
   for system-root origin stamping and pre-start reconciliation;
+- [`packages/piece/src/ops/piece-origin.ts`](../../packages/piece/src/ops/piece-origin.ts)
+  for origin classification, resolving historical web and fabric origins, and
+  reading a piece's source state;
+- [`packages/piece/src/ops/piece-controller.ts`](../../packages/piece/src/ops/piece-controller.ts)
+  for detach, revert, repoint, compatibility checks, and direct-edit
+  transitions;
+- [`packages/ui/src/v2/components/cf-piece-menu/cf-piece-menu.ts`](../../packages/ui/src/v2/components/cf-piece-menu/cf-piece-menu.ts)
+  and
+  [`packages/ui/src/v2/components/cf-render/cf-render.ts`](../../packages/ui/src/v2/components/cf-render/cf-render.ts)
+  for the piece menu, its source and origin panels, and the right-click that
+  opens them;
 - [`packages/patterns/system/common-fabric.tsx`](../../packages/patterns/system/common-fabric.tsx),
   [`packages/patterns/system/omnibox-fab.tsx`](../../packages/patterns/system/omnibox-fab.tsx),
   and
@@ -808,26 +1061,44 @@ The implementation evidence for this table is concentrated in:
 - `PieceController.setPattern` uses the previous identity as a concurrency
   guard and validates backward-compatible pattern and retained-input schemas.
   It can bypass both checks through `dangerouslyAllowIncompatibleSchema`.
-  Presenting the mismatch as a warning before an explicit manual override is
-  still required. The identity-only guard is a foundation, but it cannot
-  protect an origin-only transition whose source identity stays unchanged.
+  It now detaches and appends source history. The history actions present a
+  mismatch as a warning before an explicit override. The command-line and
+  general edit flows still need the same warning interaction.
+- The atomic source-transition helper compares the revision head, current
+  pattern, and active origin. It therefore protects origin-only transitions
+  whose source identity stays unchanged.
 - Fabric reference parsing and resolution support content-addressed pattern
   references, explicit pins, and same-toolshed mutable references by stable
   entity or slug. Static imports pin mutable references into source.
-- System space roots carry a `patternSource` URL path when created through
-  `ensureDefaultPattern`. Roots can check that source and replace
-  `patternIdentity` before starting. Other successfully instantiated
-  same-toolshed system-source patterns are checked in the background. This is a
-  transitional implementation and migration input, not a target lifecycle
-  exception.
+- System space roots carry a `system:` `patternSource` ref when created through
+  `ensureDefaultPattern`, naming a pattern the toolshed serves relative to its
+  patterns route. Roots can check that source and replace `patternIdentity`
+  before starting. Other successfully instantiated patterns are checked in the
+  background, and only a `system:` ref is fetched. This is a transitional
+  implementation and migration input, not a target lifecycle exception.
 - Storage supports late registration of a space-to-host hint before that space
   opens. The runtime processor hydrates durable hints from the home-space site
-  table. A seeded route can only be confirmed. An opened space accepts only its
-  previously registered matching hint. Before a space opens, however, a new
-  late hint currently replaces the previous one. Piece-origin operations do
-  not yet use this machinery.
+  table by selecting its last valid HTTP or HTTPS entry for each space. A
+  seeded route can only be confirmed. An unseeded default-host provider remains
+  provisional until its session accepts a stateful operation. The first
+  accepted hint can replace it, cancel unfinished session setup, clear its
+  replica, and replay its reads so running patterns observe the hinted space.
+  A provisional provider can move while an operation is waiting for a session.
+  Invalidated transactions are rejected and recompute from the hinted replica.
+  Once an ordinary or scheduler transaction, ACL setup transaction, or SQLite
+  source registration is issued, the route remains fixed even if its
+  acknowledgement fails. The first accepted late hint remains stable,
+  including against a later table update.
+  IPC callers must check the registration result and stop before mounting on a
+  conflict. Historical fabric origin resolution can register a matching live
+  route, but it does not yet persist that route through the site table. Generic
+  runtime-client cell writes do not propagate remote commit failure, so they
+  cannot provide acknowledged site-table persistence. The shell's **Copy link**
+  action copies its frontend URL and cannot ask the runtime for a space's
+  effective host.
 - Tooling exposes the immutable source ref, optional repository locator,
-  authored entry path, and optional current `patternSource` origin separately.
+  authored entry path, current origin, revision history, and lifecycle actions
+  separately.
 
 ## Work required
 
@@ -873,15 +1144,17 @@ The implementation evidence for this table is concentrated in:
    alias resolution outside the lifecycle resolver. Persist an
    accepted space-to-host route before removing the host from the canonical
    target. Validate and register the route before writing it to the site table,
-   then open the origin space. Fail a conflicting seeded route or previously
-   accepted late hint, including before the first open. Once the space opens,
-   fail any hint that was not already registered and matching. Do not create a
-   secondary session. Keep the supplied canonical URL in history. Do not make
-   shortlink retention part of the lifecycle contract until the open provenance
-   question is settled. Any later alias provenance must remain separate from
-   active origins and repoint targets. Keep `patternRepository` separate and
-   clear it when newly generated or directly edited code no longer belongs to
-   that repository.
+   then open the origin space. Honor the conflict guards for seeded routes and
+   previously accepted late hints. Treat an unseeded default-host provider as
+   provisional until its first hint arrives or a stateful operation is issued.
+   Before a stateful operation is issued, allow the first hint to replace and
+   reload the provider. Do not create a secondary session.
+   Keep the supplied canonical URL in history. Do not make shortlink retention
+   part of the lifecycle contract until the open provenance question is
+   settled. Any later alias provenance must remain separate from active origins
+   and repoint targets. Keep `patternRepository` separate and clear it when
+   newly generated or directly edited code no longer belongs to that
+   repository.
 4. Add origin reconciliation to the ordinary piece start path. Add an
    event-driven subscription while an unpinned mutable fabric origin is
    running. Observe its source revision rather than only its executable
@@ -907,10 +1180,11 @@ The implementation evidence for this table is concentrated in:
 6. Add command-line URL creation and explicit detach, detach-and-rebuild,
    follow, revert, and repoint operations. Add matching UI affordances,
    including the LLM-backed create and edit flows. Before a manual source
-   replacement, show structural compatibility findings and require explicit
-   confirmation or a command-line flag to continue. An accepted incompatible
-   replacement must detach. Root role validation remains mandatory after an
-   override.
+   replacement, show incompatible pattern contracts and retained links. Require
+   explicit confirmation or a command-line flag to continue. Reject a candidate
+   that cannot use the piece's actual retained input. An accepted incompatible
+   direct replacement must detach. Root role validation remains mandatory after
+   an override.
 7. Expose revision history and origin-check failures through runtime-client
    protocol types and shell views. Distinguish runtime rebuilds from authored
    source changes. Show whether revert can reuse the historical executable
@@ -923,7 +1197,80 @@ The implementation evidence for this table is concentrated in:
    table. Design reliable discovery, authenticated route replacement, host
    failover, and explicit close-and-reopen behavior for unavailable or moved
    spaces.
-9. Add CI golden replays that carry representative durable state from each
+9. Tighten `normalizeSpaceHost` to the origin-only grammar and use it for the
+   default host, `spaceHostMap` seeds, live registration, site-table hydration,
+   share-link receipt, and effective-host results. Reject invalid defaults and
+   seeds during initialization. Reject an invalid live hint before registration.
+   Ignore invalid legacy site-table entries. Move the `cf://` authority scheme
+   rule into the shared route-normalization module. Use HTTPS by default and
+   permit derived HTTP only for loopback under an explicit local-development or
+   test policy.
+   Test credentials, paths, queries, and fragments through every route input.
+   Test initialization failure, live rejection, legacy-entry filtering, and both
+   transport outcomes for a bare fabric authority.
+10. Add a dedicated failure-propagating route operation and expose it through
+   the runtime-client protocol. Revalidate its DID and normalized origin in the
+   worker. Synchronize the home site table before reading it or registering the
+   live route. Apply the synchronized table's last valid candidate for the
+   target DID to the live registry before evaluating the supplied hint. Do not
+   rely on the asynchronous hydration watcher to establish that ordering.
+   Return a conflict without writing when the supplied route is rejected. For an
+   accepted route, transactionally append the site-table entry with the
+   synchronized table read as a commit precondition. Await the commit and
+   inspect its result before returning success. Propagate resolved
+   `ConflictError` and `StoreError` results as well as thrown commit failures. Do
+   not retry them. Do not implement this operation with the optimistic
+   `CellHandle.set()` or `CellHandle.push()` paths. Expose the effective host for
+   a space through runtime IPC so share-link creation uses the per-space route.
+11. Add host-qualified fabric-link creation and receipt to the shell. **Copy
+   link** emits the specified DID-based shell URL and `spaceHost` parameter.
+   Receipt validates the shell path and toolshed origin, calls the dedicated
+   route request, and removes the parameter before ordinary `AppView`
+   navigation. Intercept an initial share URL before the target `AppView` opens
+   its space. Report malformed links, live conflicts, and durable-write failures
+   without navigating. Keep this route discovery outside pattern APIs and
+   source-origin state.
+12. Add a browser-level shell integration test with two independent toolshed
+   servers and real patterns as the user interface. Put the target data only on
+   the non-default toolshed. Open that target in a producing shell and invoke its
+   production **Copy link** action. Read the emitted URL from the browser
+   clipboard. Assert that its outer origin is the shell frontend, its path names
+   the target by explicit DID, and its sole `spaceHost` value equals the
+   non-default effective host reported by the runtime. Open that exact copied URL
+   in a receiving shell. Prove that receipt records the route durably.
+
+   Tear down the receiving runtime. Start a fresh shell runtime with the same
+   identity and durable home space. Do not provide a `spaceHostMap` seed, call
+   live registration directly, or write the site table through test setup. Run a
+   pattern whose retained input contains the corresponding hostless cross-space
+   reference. Use an observable test gate to let its provisional default-host
+   read report the missing target before site-table hydration publishes the
+   receipt's persisted hint. Then release hydration and prove that the same
+   running pattern renders the target data without a page reload or pattern
+   restart. The test may control event ordering, but it must not inject the hint
+   through a test-only registration endpoint.
+
+   Add worker-path persistence cases. Begin receipt before the initial local
+   site-table value has synchronized while the remote table already contains an
+   unrelated entry. Prove that receipt synchronizes first and preserves that
+   entry. Make synchronization fail and prove that no live registration, append,
+   navigation, or retry occurs.
+
+   Put a conflicting route for the target DID in the remote table. Hold the
+   asynchronous hydration watcher before it registers that route. Prove that
+   receipt itself applies the synchronized table candidate first, rejects the
+   supplied hint, and performs no append or navigation.
+
+   Start two receipts for different target DIDs from one synchronized table
+   snapshot. Use an event gate after both transactions capture that snapshot.
+   Commit one append, then prove that the other resolves with a real
+   `ConflictError` from the table precondition. The final table retains its
+   original entries and the successful append. The conflicted receipt does not
+   navigate or retry. Separately make an awaited commit resolve with a
+   `StoreError` and require the same shell failure behavior. A main-thread stub
+   that fails before the worker attempts the commit does not cover this
+   contract.
+13. Add CI golden replays that carry representative durable state from each
    supported prior source to its proposed replacement. These tests cover
    stable keys and causes, intended migration, and behavior that schemas cannot
    prove. Extend the current synthetic system-root replays with general
@@ -935,7 +1282,8 @@ The implementation evidence for this table is concentrated in:
    cross-space authorization and provenance, web and fabric URL policy,
    mutable versus content-addressed fabric targets, explicit pins, durable host
    routing after reload, conflicts between late hints before a target opens,
-   route conflicts after a target opens, space-root creation from a default,
+   replacement of a provisional default route after a target opens, conflicts
+   with an explicit route after a target opens, space-root creation from a default,
    changes to a default after root creation, tracked and detached root baseline
    migration, source-less legacy roots, relative-path normalization,
    root-interface rejection, runtime-fingerprint rebuilds, authorized upstream

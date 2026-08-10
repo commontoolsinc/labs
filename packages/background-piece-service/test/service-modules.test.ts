@@ -1,4 +1,4 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import {
   assert,
   assertEquals,
@@ -14,12 +14,7 @@ import {
   WorkerIPCMessageType,
 } from "../src/worker-ipc.ts";
 import { loadEnv } from "../src/env.ts";
-import {
-  getIdentity,
-  isValidDID,
-  isValidPieceId,
-  setBGPiece,
-} from "../src/utils.ts";
+import { getIdentity, isValidDID, isValidPieceId } from "../src/utils.ts";
 import {
   BackgroundPieceService,
   type BackgroundPieceServiceOptions,
@@ -49,11 +44,13 @@ import {
   runIfMain as runCastIfMain,
 } from "../cast-admin.ts";
 import * as backgroundPieceService from "../src/lib.ts";
+import { installDisconnectedWebSocket } from "./disconnected-websocket.ts";
 
 const TEST_DID = "did:key:z6Mktestspace";
 const OTHER_DID = "did:key:z6Mkotherspace";
 const PIECE_ID = `fid1:${"a".repeat(54)}`;
 const OTHER_PIECE_ID = `fid1:${"b".repeat(54)}`;
+const TEST_API_URL = "https://background-piece-service.invalid";
 
 async function runDenoSubprocess(args: string[]): Promise<void> {
   const coverageDir = Deno.env.get("DENO_COVERAGE_DIR");
@@ -198,7 +195,10 @@ function fakeRuntime(piecesCell: FakePiecesCell) {
     },
     lastGetCell: undefined as unknown,
     editWithRetry(fn: (tx: unknown) => void) {
-      fn({});
+      // The real one returns a Result and re-invokes `fn` on commit conflict.
+      // This models only the success shape; anything whose behavior depends on
+      // the conflict path wants a real `Runtime` (see `set-bg-piece.test.ts`).
+      return Promise.resolve({ ok: fn({}) });
     },
   };
 }
@@ -282,9 +282,10 @@ async function withRealWorker<T>(
     ) => Promise<Record<string, unknown>>,
   ) => Promise<T>,
 ): Promise<T> {
-  const worker = new Worker(new URL("../src/worker.ts", import.meta.url).href, {
-    type: "module",
-  });
+  const worker = new Worker(
+    new URL("./worker-test-entry.ts", import.meta.url).href,
+    { type: "module" },
+  );
   const messages: Record<string, unknown>[] = [];
   const waiters: {
     predicate: (message: Record<string, unknown>) => boolean;
@@ -405,38 +406,6 @@ describe("background piece utility functions", () => {
     );
     await Deno.remove(dir, { recursive: true });
   });
-
-  it("adds a new background piece and re-enables an existing one", async () => {
-    const piecesCell = new FakePiecesCell();
-    const runtime = fakeRuntime(piecesCell);
-
-    assertEquals(
-      await setBGPiece({
-        space: TEST_DID,
-        pieceId: PIECE_ID,
-        integration: "gmail",
-        runtime: runtime as never,
-      }),
-      true,
-    );
-    assertEquals(piecesCell.pushed.length, 1);
-
-    const existing = new FakeEntryCell(
-      pieceEntry({ disabledAt: Date.now(), status: "Disabled" }),
-    );
-    piecesCell.entries = [existing];
-    assertEquals(
-      await setBGPiece({
-        space: TEST_DID,
-        pieceId: PIECE_ID,
-        integration: "gmail",
-        runtime: runtime as never,
-      }),
-      false,
-    );
-    assertEquals(existing.value.disabledAt, 0);
-    assertEquals(existing.value.status, "Re-initializing");
-  });
 });
 
 describe("BackgroundPieceService", () => {
@@ -486,7 +455,7 @@ describe("BackgroundPieceService", () => {
     assertEquals(piecesCell.schemaSyncCount, 1);
 
     piecesCell.emit([]);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clock.settle();
     assertEquals(stopped, [TEST_DID]);
     await service.stop();
   });
@@ -533,7 +502,7 @@ describe("BackgroundPieceService", () => {
         pieceId: OTHER_PIECE_ID,
       })),
     ]);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clock.settle();
 
     assertEquals(started, [TEST_DID]);
     assertEquals(stopped, [TEST_DID]);
@@ -542,6 +511,15 @@ describe("BackgroundPieceService", () => {
 });
 
 describe("SpaceManager", () => {
+  // One freezeAround wraps this whole describe, so its timer map and logical
+  // clock persist across cases. Several cases leave a fire-and-forget
+  // WorkerController.shutdown() (from setupWorkerController) parked on a worker
+  // that never answers, so its cleanup timeout lingers in the map. Dropping
+  // every pending timer after each case keeps a leftover from firing in a later
+  // case — here or in a following describe once this one's trailing
+  // auto-advance runs.
+  afterEach(() => clock.reset());
+
   it("schedules, runs, retries, disables, and removes pieces", async () => {
     await withMockWorker(async () => {
       const entry = new FakeEntryCell(pieceEntry());
@@ -629,8 +607,12 @@ describe("SpaceManager", () => {
 
       manager.start();
       manager.start();
-      await new Promise((resolve) => setTimeout(resolve, 2));
+      // execLoop parks on sleep(pollingIntervalMs) each pass; let it reach the
+      // first park, stop it, then fire the parked sleep so the loop observes
+      // isRunning === false and exits.
+      await clock.settle();
       await manager.stop();
+      await clock.tick(1);
       assertEquals(
         (manager as never as { isRunning: boolean }).isRunning,
         false,
@@ -701,10 +683,14 @@ describe("SpaceManager", () => {
         shutdown: () => Promise.resolve(),
       };
       (manager as never as { isRunning: boolean }).isRunning = true;
-      setTimeout(() => {
-        (manager as never as { isRunning: boolean }).isRunning = false;
-      }, 2);
-      await (manager as never as { execLoop: () => Promise<void> }).execLoop();
+      // isReady() === false: the loop parks on sleep(pollingIntervalMs). Let it
+      // reach the park, clear isRunning, then fire the parked sleep so it exits.
+      const idleLoop = (manager as never as { execLoop: () => Promise<void> })
+        .execLoop();
+      await clock.settle();
+      (manager as never as { isRunning: boolean }).isRunning = false;
+      await clock.tick(1);
+      await idleLoop;
 
       (manager as never as { workerController: unknown }).workerController = {
         isReady: () => true,
@@ -713,12 +699,16 @@ describe("SpaceManager", () => {
       (manager as never as { activePiece: FakeEntryCell | null }).activePiece =
         entry;
       (manager as never as { isRunning: boolean }).isRunning = true;
-      setTimeout(() => {
-        (manager as never as { activePiece: FakeEntryCell | null })
-          .activePiece = null;
-        (manager as never as { isRunning: boolean }).isRunning = false;
-      }, 2);
-      await (manager as never as { execLoop: () => Promise<void> }).execLoop();
+      // isReady() === true with an active piece: the loop parks until the active
+      // piece clears.
+      const activeLoop = (manager as never as { execLoop: () => Promise<void> })
+        .execLoop();
+      await clock.settle();
+      (manager as never as { activePiece: FakeEntryCell | null }).activePiece =
+        null;
+      (manager as never as { isRunning: boolean }).isRunning = false;
+      await clock.tick(1);
+      await activeLoop;
 
       (manager as never as { pendingTasks: unknown[] }).pendingTasks = [{
         pieceId: PIECE_ID,
@@ -726,10 +716,14 @@ describe("SpaceManager", () => {
         timestamp: Date.now() + 10,
       }];
       (manager as never as { isRunning: boolean }).isRunning = true;
-      setTimeout(() => {
-        (manager as never as { isRunning: boolean }).isRunning = false;
-      }, 2);
-      await (manager as never as { execLoop: () => Promise<void> }).execLoop();
+      // The only pending task is scheduled in the future: the loop parks until
+      // it comes due.
+      const futureLoop = (manager as never as { execLoop: () => Promise<void> })
+        .execLoop();
+      await clock.settle();
+      (manager as never as { isRunning: boolean }).isRunning = false;
+      await clock.tick(1);
+      await futureLoop;
 
       const calls: string[] = [];
       (manager as never as { workerController: unknown }).workerController = {
@@ -775,9 +769,12 @@ describe("SpaceManager", () => {
       });
 
       manager.watch([entry as never]);
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      // Let the initial worker finish initializing before injecting the error.
+      await clock.settle();
       MockWorker.instances.at(-1)!.error("terminal failure");
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      // The terminal error disables the space and starts a replacement worker,
+      // which initializes on the same reactive turn.
+      await clock.settle();
 
       assert(entry.value.disabledAt > 0);
       assertStringIncludes(entry.value.status, "TerminalError");
@@ -788,6 +785,10 @@ describe("SpaceManager", () => {
 
   it("disables pieces when worker initialization fails", async () => {
     await withMockWorker(async () => {
+      // The first worker never answers, so its initialize request times out and
+      // the space is disabled. Every worker built after it answers, so the
+      // replacement the failure path starts initializes and the recreation loop
+      // stops rather than spinning.
       MockWorker.respondByDefault = false;
       const entry = new FakeEntryCell(pieceEntry());
       const manager = new SpaceManager({
@@ -798,11 +799,11 @@ describe("SpaceManager", () => {
         deactivationTimeoutMs: 1,
         timeoutMs: 1,
       });
+      MockWorker.respondByDefault = true;
       manager.watch([entry as never]);
-      setTimeout(() => {
-        MockWorker.respondByDefault = true;
-      }, 0);
-      await new Promise((resolve) => setTimeout(resolve, 8));
+      // Advance past the first worker's initialize timeout (timeoutMs: 1); the
+      // rejection disables the space and starts a replacement that answers.
+      await clock.tick(1);
 
       assert(entry.value.disabledAt > 0);
       assertStringIncludes(entry.value.status, "Failed to initialize worker");
@@ -830,7 +831,7 @@ describe("SpaceManager", () => {
       await (manager as never as {
         setupWorkerController: () => Promise<void>;
       }).setupWorkerController();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await clock.settle();
 
       assertEquals(removed, true);
       await manager.stop();
@@ -880,7 +881,7 @@ describe("background worker", () => {
         WorkerIPCMessageType.Initialize,
         {
           did: identity.did(),
-          toolshedUrl: "memory://bg-worker-test",
+          toolshedUrl: TEST_API_URL,
           rawIdentity: identity.serialize(),
           experimental: { modernCellRep: true },
         },
@@ -894,7 +895,7 @@ describe("background worker", () => {
         WorkerIPCMessageType.Initialize,
         {
           did: identity.did(),
-          toolshedUrl: "memory://bg-worker-test",
+          toolshedUrl: TEST_API_URL,
           rawIdentity: identity.serialize(),
         },
       );
@@ -1134,7 +1135,7 @@ describe("background piece service entry point", () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const runtime = createMainRuntime(
       {
-        API_URL: "memory://main-runtime-test",
+        API_URL: TEST_API_URL,
         OPERATOR_PASS: "operator",
         IDENTITY: undefined,
         ENV: "test",
@@ -1203,7 +1204,7 @@ describe("background piece service entry point", () => {
 
     try {
       signals.SIGINT();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await clock.settle();
     } catch (_error) {
       // The fake exit throws so the test can observe it.
     }
@@ -1269,7 +1270,7 @@ describe("background piece service entry point", () => {
     );
     try {
       callback();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await clock.settle();
     } catch (_error) {
       // The fake exit throws so the test can observe it.
     }
@@ -1310,6 +1311,17 @@ describe("background piece service entry point", () => {
 });
 
 describe("cast admin entry point", () => {
+  let restoreWebSocket: (() => void) | undefined;
+
+  beforeEach(() => {
+    restoreWebSocket = installDisconnectedWebSocket();
+  });
+
+  afterEach(() => {
+    restoreWebSocket?.();
+    restoreWebSocket = undefined;
+  });
+
   function fakeCastDependencies(
     overrides: Partial<CastAdminDependencies> = {},
   ): CastAdminDependencies & { exitCodes: number[] } {
@@ -1350,7 +1362,7 @@ describe("cast admin entry point", () => {
       readTextFile: () =>
         Promise.resolve("export default pattern(() => ({}));"),
       createSession: () => Promise.resolve({ fakeSession: true } as never),
-      createPieceManager: () => ({
+      createPiecesController: () => ({
         ready: Promise.resolve(),
         runPersistent: () => Promise.resolve({ entityId: "fid1:cast" }),
       }),
@@ -1379,14 +1391,14 @@ describe("cast admin entry point", () => {
     assertEquals(dependencies.envGet, Deno.env.get);
 
     const identity = await Identity.generate({ implementation: "noble" });
-    const runtime = createCastRuntime("memory://cast-default-deps", identity);
+    const runtime = createCastRuntime(TEST_API_URL, identity);
     try {
       const session = await dependencies.createSession({
         identity,
         spaceDid: identity.did() as never,
       });
-      const pieceManager = dependencies.createPieceManager(session, runtime);
-      await pieceManager.ready;
+      const pieces = dependencies.createPiecesController(session, runtime);
+      await pieces.ready;
     } finally {
       await runtime.dispose();
     }
@@ -1395,7 +1407,7 @@ describe("cast admin entry point", () => {
   it("compiles the actual admin pattern source", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const runtime = createUncachedCompileRuntime(
-      "memory://cast-admin-compile",
+      TEST_API_URL,
       identity,
     );
     try {
@@ -1444,7 +1456,7 @@ describe("cast admin entry point", () => {
 
   it("creates the cast runtime", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
-    const runtime = createCastRuntime("memory://cast-runtime-test", identity);
+    const runtime = createCastRuntime(TEST_API_URL, identity);
     const cell = runtime.getCell(identity.did(), "cast-runtime-test", {
       type: "object",
       properties: {},
@@ -1458,7 +1470,7 @@ describe("cast admin entry point", () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const consulted = new Set<string>();
     const runtime = createCastRuntime(
-      "memory://cast-env-reader",
+      TEST_API_URL,
       identity,
       (key) => {
         consulted.add(key);

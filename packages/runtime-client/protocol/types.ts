@@ -89,6 +89,8 @@ export enum RequestType {
   PageStop = "page:stop",
   PageGetAll = "page:getAll",
   PageSynced = "page:synced",
+  PieceGetSource = "piece:getSource",
+  PieceUpdateSource = "piece:updateSource",
 
   // VDOM operations (main -> worker)
   VDomMount = "vdom:mount",
@@ -133,6 +135,17 @@ export type IPCRemoteResponse = {
 
 export type IPCRemoteMessage = IPCRemoteNotification | IPCRemoteResponse;
 
+/**
+ * Base of every request a handler receives.
+ *
+ * **Ownership.** Any value reaching a handler implementation is owned outright
+ * by the receiver: it is guaranteed not to be shared elsewhere already, and not
+ * to become shared later, except by the receiver's own action. A handler may
+ * therefore retain, mutate, or cede what it is given without defending itself.
+ *
+ * That is a requirement on whatever delivers a request, not a property of any
+ * particular transport -- see `RuntimeTransport.send()`.
+ */
 export interface BaseRequest {
   type: RequestType;
 }
@@ -236,12 +249,47 @@ export interface CellGetRequest extends BaseRequest {
   // so a caller that needs both pays one round-trip instead of a separate
   // CellGetCfcLabel request.
   includeCfcLabel?: boolean;
+  // Opt in to having the read cell's own schema-bearing ref returned. Useful
+  // when `meta` names a link field (pattern/argument/result): the resolved
+  // cell's ref lets the caller subscribe to it or read it again directly,
+  // and its schema carries the declarations (e.g. stream fields) that the
+  // value alone does not.
+  includeRef?: boolean;
 }
+
+/**
+ * A cell's value as this connection carries it: the data a cell holds, with a
+ * `CellRef` wherever a cell sits.
+ *
+ * Distinct from `JSONValue` in the two ways the traffic actually differs: a
+ * present `undefined` is a value a cell can hold, and the containers are
+ * readonly.
+ *
+ * TODO(danfuzz): this still cannot carry the whole `FabricValue` domain. A
+ * `FabricSpecialObject` has no representation here, and neither does a
+ * `bigint` or a `symbol`, both of which are `FabricValue` arms. The transport
+ * is `postMessage` rather than JSON, so that is a gap rather than a limit --
+ * though structured clone alone does not close it, a class instance arriving
+ * with its prototype and private fields gone. `JsonCodec`
+ * (`@commonfabric/data-model/codec-json`) is the mechanism, already used for
+ * blob-upload bodies in `backends/runtime-processor.ts`. Until then
+ * `CellHandle.serialize()` refuses all three, so what the gap costs is a throw
+ * rather than silent loss.
+ */
+export type WireCellValue =
+  | null
+  | undefined
+  | boolean
+  | number
+  | string
+  | readonly WireCellValue[]
+  | { readonly [key: string]: WireCellValue }
+  | CellRef;
 
 export interface CellSetRequest extends BaseRequest {
   type: RequestType.CellSet;
   cell: CellRef;
-  value: JSONValue;
+  value: WireCellValue;
 }
 
 // A read-modify-write append (`CellHandle.push`). Same wire shape as CellSet —
@@ -251,13 +299,13 @@ export interface CellSetRequest extends BaseRequest {
 export interface CellPushRequest extends BaseRequest {
   type: RequestType.CellPush;
   cell: CellRef;
-  value: JSONValue;
+  value: WireCellValue;
 }
 
 export interface CellSendRequest extends BaseRequest {
   type: RequestType.CellSend;
   cell: CellRef;
-  event: JSONValue;
+  event: WireCellValue;
 }
 
 export interface CellSubscribeRequest extends BaseRequest {
@@ -322,18 +370,19 @@ export interface ResolveSpaceNameRequest extends BaseRequest {
 }
 
 /**
- * Record a runtime-learned host hint for a space (site-table v0).
+ * Record a runtime-learned HTTP or HTTPS host hint for a space (site-table v0).
  * The durable record is the home-space site table; this IPC lets an
  * embedder make a just-learned hint (e.g. from a share link) effective
  * on the live runtime without waiting for a sync round-trip. The
- * worker's refusal semantics apply: seed wins, opened spaces are never
- * re-pointed.
+ * worker returns whether it accepted or confirmed the hint. A seed, an
+ * accepted late hint fixes the route for the session. A read-only unseeded
+ * provider opened through the default host remains provisional.
  *
- * ORDERING CONTRACT: an embedder that will mount a space it just
- * learned the host for must send this BEFORE the first mount of that
- * space — once a space opens against the default host, the
- * opened-space rule pins it for the session. The table is the durable
- * record; this IPC is the ordering guarantee.
+ * ORDERING CONTRACT: an embedder sends a newly learned hint before it relies
+ * on the space and proceeds only when the worker returns true. The first hint
+ * replaces and reloads a read-only provisional default-host provider. An
+ * accepted site-table route can reject a conflicting IPC hint. The IPC does
+ * not override a seed or route already accepted for the session.
  */
 export interface RegisterSpaceHostRequest extends BaseRequest {
   type: RequestType.RegisterSpaceHost;
@@ -491,7 +540,12 @@ export interface UploadBlobRequest extends BaseRequest {
   /** The space the blob belongs to — uploads target ITS host. */
   space: DID;
   contentType: string;
-  body: number[];
+  /**
+   * The blob's bytes. The type has to stay structured-clone-able, this being an
+   * IPC payload: a class does not survive the crossing, where a typed array
+   * does and carries whole rather than element by element.
+   */
+  body: Uint8Array;
   suffix?: string;
 }
 
@@ -625,6 +679,90 @@ export interface PageGetAllRequest extends BaseRequest {
 export interface PageSyncedRequest extends BaseRequest {
   type: RequestType.PageSynced;
   space: DID;
+}
+
+/**
+ * Read one piece's source state: the pattern it runs, the origin it tracks, the
+ * history metadata it carries, and its authored source files. See
+ * `docs/specs/piece-source-lifecycle.md`.
+ */
+export interface PieceGetSourceRequest extends BaseRequest {
+  type: RequestType.PieceGetSource;
+  space: DID;
+  pieceId: string;
+}
+
+/** How a piece's origin URL resolves. */
+export type PieceOriginKind = "web" | "fabric-piece" | "fabric-pattern";
+
+export interface PieceOriginView {
+  url: string;
+  kind: PieceOriginKind;
+  /** The URL as recorded on the piece, when normalization changed it. */
+  recorded?: string;
+}
+
+export interface PiecePatternRefView {
+  identity: string;
+  symbol: string;
+}
+
+export type PieceSourceRevisionOperation =
+  | "baseline"
+  | "create"
+  | "edit"
+  | "origin-update"
+  | "detach"
+  | "revert"
+  | "follow"
+  | "repoint";
+
+export interface PieceSourceRevisionView {
+  revisionId: string;
+  timestamp: number;
+  pattern: PiecePatternRefView;
+  origin?: PieceOriginView;
+  operation: PieceSourceRevisionOperation;
+  selectedRevisionId?: string;
+}
+
+export interface PieceSourceView {
+  space: DID;
+  pieceId: string;
+  name?: string;
+  pattern?: PiecePatternRefView;
+  setupPattern?: PiecePatternRefView;
+  displacedPattern?: PiecePatternRefView & { displacedAt?: number };
+  origin?: PieceOriginView;
+  repository?: string;
+  entry?: string;
+  files: PatternSourceFile[];
+  history: PieceSourceRevisionView[];
+  currentRevisionId?: string;
+}
+
+export interface PieceSourceResponse {
+  source: PieceSourceView;
+}
+
+export type PieceSourceAction =
+  | { kind: "detach" }
+  | { kind: "restore"; revisionId: string }
+  | { kind: "follow"; revisionId: string };
+
+export interface PieceUpdateSourceRequest extends BaseRequest {
+  type: RequestType.PieceUpdateSource;
+  space: DID;
+  pieceId: string;
+  action: PieceSourceAction;
+  /** Opaque token returned with an incompatibility warning. */
+  confirmationToken?: string;
+}
+
+export interface PieceUpdateSourceResponse extends PieceSourceResponse {
+  compatibilityWarning?: string;
+  confirmationToken?: string;
+  executionWarning?: string;
 }
 
 /** Common shape for one-way main -> worker notifications. */
@@ -777,6 +915,8 @@ export type IPCClientRequest =
   | PageStopRequest
   | PageGetAllRequest
   | PageSyncedRequest
+  | PieceGetSourceRequest
+  | PieceUpdateSourceRequest
   | RuntimeSyncedRequest
   | ResolveSpaceNameRequest
   | RegisterSpaceHostRequest
@@ -803,6 +943,9 @@ export interface CellGetResponse extends JSONValueResponse {
   // Present only when the request set `includeCfcLabel`. `undefined` is a valid
   // value (the cell carries no label); the field is omitted when not requested.
   cfcLabel?: CfcLabelView | undefined;
+  // Present only when the request set `includeRef` and the read resolved to a
+  // cell (a raw-metadata read has no cell to reference).
+  cell?: CellRef;
 }
 
 export interface CellResponse {
@@ -897,31 +1040,14 @@ export interface PendingWritesNotification {
 }
 
 /**
- * VDOM operation for IPC.
+ * The vocabulary of DOM mutations carried by a VDOM batch. The worker
+ * reconciler that produces them and the main-thread applicator that consumes
+ * them both live in `@commonfabric/html`, which defines the union; the protocol
+ * re-exports it so a message shape and the ops inside it cannot describe
+ * different things.
  */
-export type VDomOp =
-  | { op: "create-element"; nodeId: number; tagName: string }
-  | { op: "create-text"; nodeId: number; text: string }
-  | { op: "update-text"; nodeId: number; text: string }
-  | { op: "set-prop"; nodeId: number; key: string; value: JSONValue }
-  | { op: "remove-prop"; nodeId: number; key: string }
-  | { op: "set-event"; nodeId: number; eventType: string; handlerId: number }
-  | { op: "remove-event"; nodeId: number; eventType: string }
-  | { op: "set-binding"; nodeId: number; propName: string; cellRef: CellRef }
-  | {
-    op: "insert-child";
-    parentId: number;
-    childId: number;
-    beforeId: number | null;
-  }
-  | {
-    op: "move-child";
-    parentId: number;
-    childId: number;
-    beforeId: number | null;
-  }
-  | { op: "remove-node"; nodeId: number }
-  | { op: "set-attrs"; nodeId: number; attrs: Record<string, JSONValue> };
+import type { VDomOp } from "@commonfabric/html/vdom-ops";
+export type { VDomOp };
 
 /**
  * VDOM batch notification sent from worker to main thread.
@@ -955,6 +1081,8 @@ export type RemoteResponse =
   | TriggerTraceResponse
   | WriteStackTraceResponse
   | PageResponse
+  | PieceSourceResponse
+  | PieceUpdateSourceResponse
   | SlugResponse
   | SpaceResponse
   | VDomMountResponse
@@ -1145,6 +1273,14 @@ export type Commands = {
   [RequestType.PageGetAll]: {
     request: PageGetAllRequest;
     response: CellResponse;
+  };
+  [RequestType.PieceGetSource]: {
+    request: PieceGetSourceRequest;
+    response: PieceSourceResponse;
+  };
+  [RequestType.PieceUpdateSource]: {
+    request: PieceUpdateSourceRequest;
+    response: PieceUpdateSourceResponse;
   };
   [RequestType.GetSpaceRootPattern]: {
     request: PageGetSpaceDefault;

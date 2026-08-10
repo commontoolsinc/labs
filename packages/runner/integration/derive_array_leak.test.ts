@@ -13,7 +13,7 @@ import { Identity, Session } from "@commonfabric/identity";
 import { env } from "@commonfabric/integration";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { compileAndSavePattern, Runtime } from "../src/index.ts";
-import { PieceManager } from "@commonfabric/piece";
+import { PiecesController } from "@commonfabric/piece/ops";
 
 (Error as any).stackTraceLimit = 100;
 
@@ -104,9 +104,9 @@ async function runTest() {
     storageManager,
   });
 
-  // Create piece manager for the specified space
-  const pieceManager = new PieceManager(session, runtime);
-  await pieceManager.ready;
+  // Create the pieces controller for the specified space
+  const pieces = new PiecesController(session, runtime);
+  await pieces.ready;
 
   // Read the pattern file content
   const patternContent = await Deno.readTextFile(
@@ -120,7 +120,7 @@ async function runTest() {
   );
   console.log("Pattern compiled successfully");
 
-  const piece = (await pieceManager.runPersistent(pattern, {})).asSchema({
+  const piece = (await pieces.runPersistent(pattern, {})).asSchema({
     type: "object",
     properties: {
       value: { type: "number" },

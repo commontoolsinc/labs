@@ -48,10 +48,9 @@ function testContext(checker: ts.TypeChecker): TransformationContext {
   return {
     checker,
     factory: ts.factory,
-    options: {
-      state: {
-        typeRegistry: new WeakMap<ts.Node, ts.Type>(),
-      },
+    options: {},
+    state: {
+      typeRegistry: new WeakMap<ts.Node, ts.Type>(),
     },
     cfHelpers: {
       getHelperExpr: (name: string) => ts.factory.createIdentifier(name),

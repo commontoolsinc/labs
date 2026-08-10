@@ -84,11 +84,14 @@ describe("throttle - bounded freshness", () => {
 
     runtime.scheduler.setThrottle(effect, 30_000);
     source.withTx(tx).send(2);
-    await tx.commit();
+    // Drain the commit round trip with the clock held: awaiting it under
+    // auto-advance would fire the armed throttle wake early. The drain lets
+    // the scheduler tick observe the dirty gated node and arm the shared
+    // wake before the clear, without the throttle window elapsing.
+    const throttledCommit = tx.commit();
     tx = runtime.edit();
-    // Yield through the already-queued scheduler tick so it observes the dirty
-    // gated node and arms the shared wake before the clear.
     await clock.settle();
+    await throttledCommit;
     expect(observed).toBe(1);
 
     runtime.scheduler.clearThrottle(effect);
@@ -315,10 +318,14 @@ describe("throttle - bounded freshness", () => {
     expect(effectCount).toBe(1);
     expect(result.get()).toBe(2);
 
-    // Change source - effect is scheduled but throttled
+    // Change source - effect is scheduled but throttled. Drain the commit
+    // round trip with the clock held so the throttle window cannot elapse
+    // under auto-advance before the intermediate assertion.
     source.withTx(tx).send(5);
-    await tx.commit();
+    const throttledCommit = tx.commit();
     tx = runtime.edit();
+    await clock.settle();
+    await throttledCommit;
     await clock.tick(80);
     expect(effectCount).toBe(1);
     expect(result.get()).toBe(2);
@@ -379,10 +386,14 @@ describe("throttle - bounded freshness", () => {
     expect(effectCount).toBe(1);
     expect(result.get()).toBe(2);
 
+    // Drain the commit round trip with the clock held so the throttle window
+    // cannot elapse under auto-advance before the parked-state assertion.
     runtime.scheduler.resetFilterStats();
     source.withTx(tx).send(5);
-    await tx.commit();
+    const throttledCommit = tx.commit();
     tx = runtime.edit();
+    await clock.settle();
+    await throttledCommit;
 
     await clock.tick(80);
     expect(effectCount).toBe(1);

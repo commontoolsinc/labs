@@ -14,7 +14,9 @@ import {
 } from "../lib/view/diffdoc.ts";
 import { createDiffHighlighter, diffSource } from "../lib/view/diffedit.ts";
 import { type GitRunner, realGit } from "../lib/view/commitmsg.ts";
+import { renderFrame } from "../lib/view/render.ts";
 import { Session } from "../lib/view/session.ts";
+import { stripAnsi } from "../lib/view/ansi.ts";
 import { promptText } from "./view-helpers.ts";
 
 function press(s: Session, ...names: string[]): void {
@@ -321,6 +323,222 @@ export const shown = 2;
       )?.cls,
       "comment",
       "the deferred parse keeps original removed lines in context",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: stateful languages keep complete-file colours after edits", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const cases = [
+      {
+        path: "notes.md",
+        file: ["```python", "before", "```", ""].join("\n"),
+        cls: "string",
+      },
+      {
+        path: "config.jsonc",
+        file: ["/* opening", "before", "*/", ""].join("\n"),
+        cls: "comment",
+      },
+      {
+        path: "template.ts",
+        file: ["const value = `", "before", "`;", ""].join("\n"),
+        cls: "template",
+      },
+    ] as const;
+    const ws: DiffWorkspace = {
+      resolve: (path) => join(root, path),
+      read: (path) => {
+        try {
+          return Deno.readTextFileSync(path);
+        } catch {
+          return null;
+        }
+      },
+    };
+
+    for (const testCase of cases) {
+      Deno.writeTextFileSync(join(root, testCase.path), testCase.file);
+      const diff = [
+        `diff --git a/${testCase.path} b/${testCase.path}`,
+        `--- a/${testCase.path}`,
+        `+++ b/${testCase.path}`,
+        "@@ -2 +2 @@",
+        "-old",
+        "+before",
+        "",
+      ].join("\n");
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const source = diffSource(ws, built.edit);
+      const highlighter = source.createHighlighter!(diff, built.doc.lines);
+      const editedText = diff.replace("+before", "+after");
+      const edited = highlighter.update(editedText);
+      const editedLine = edited[editedText.split("\n").indexOf("+after")];
+      assertEquals(
+        editedLine.spans.find((span) => span.text === "after")?.cls,
+        testCase.cls,
+        `${testCase.path} live colour`,
+      );
+
+      const editedAgainText = editedText.replace("+after", "+again");
+      const editedAgain = highlighter.update(editedAgainText);
+      const editedAgainLine = editedAgain[
+        editedAgainText.split("\n").indexOf("+again")
+      ];
+      assertEquals(
+        editedAgainLine.spans.find((span) => span.text === "again")?.cls,
+        testCase.cls,
+        `${testCase.path} repeated live colour`,
+      );
+
+      const reparsed = source.parse(editedAgainText);
+      const parsedLine = reparsed.lines[
+        editedAgainText.split("\n").indexOf("+again")
+      ];
+      assertEquals(
+        parsedLine.spans.find((span) => span.text === "again")?.cls,
+        testCase.cls,
+        `${testCase.path} deferred colour`,
+      );
+    }
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: a local string edit leaves surrounding template state intact", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const file = [
+      "const value = `head ${",
+      '  "AAHED"',
+      "} tail`;",
+      "",
+    ].join("\n");
+    const path = join(root, "template.ts");
+    Deno.writeTextFileSync(path, file);
+    const diff = [
+      "diff --git a/template.ts b/template.ts",
+      "--- a/template.ts",
+      "+++ b/template.ts",
+      "@@ -2,2 +2,2 @@",
+      '-  "AAHE"',
+      '+  "AAHED"',
+      " } tail`;",
+      "",
+    ].join("\n");
+    const ws: DiffWorkspace = {
+      resolve: () => path,
+      read: () => file,
+    };
+    const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+    const highlighter = diffSource(ws, built.edit).createHighlighter!(
+      diff,
+      built.doc.lines,
+    );
+    const editedText = diff.replace('"AAHED"', '"AAHEDS"');
+    const edited = highlighter.update(editedText);
+    const raw = editedText.split("\n");
+    const stringLine = edited[raw.indexOf('+  "AAHEDS"')];
+    assertEquals(
+      stringLine.spans.find((span) => span.text === '"AAHEDS"')?.cls,
+      "string",
+    );
+    const tailLine = edited[raw.indexOf(" } tail`;")];
+    assertEquals(
+      tailLine.spans.find((span) => span.text.includes(" tail`"))?.cls,
+      "template",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: a local string edit retains same-line contextual colours", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const file = [
+      "const obj = {",
+      '  label: "AAHED",',
+      "};",
+      "",
+    ].join("\n");
+    const path = join(root, "object.ts");
+    Deno.writeTextFileSync(path, file);
+    const diff = [
+      "diff --git a/object.ts b/object.ts",
+      "--- a/object.ts",
+      "+++ b/object.ts",
+      "@@ -2 +2 @@",
+      '-  label: "AAHE",',
+      '+  label: "AAHED",',
+      "",
+    ].join("\n");
+    const ws: DiffWorkspace = {
+      resolve: () => path,
+      read: () => file,
+    };
+    const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+    const highlighter = diffSource(ws, built.edit).createHighlighter!(
+      diff,
+      built.doc.lines,
+    );
+    const editedText = diff.replace('"AAHED"', '"AAHEDS"');
+    const highlighted = highlighter.update(editedText);
+    const line = highlighted[
+      editedText.split("\n").indexOf('+  label: "AAHEDS",')
+    ];
+    assertEquals(
+      line.spans.find((span) => span.text === "label")?.cls,
+      "propertyName",
+    );
+    assertEquals(
+      line.spans.find((span) => span.text === '"AAHEDS"')?.cls,
+      "string",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: an edit beside a string escape updates later hunks", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const first = 'const v = "a\\"b"; // \\';
+    const editedFirst = 'const v = "a\\x"b"; // \\';
+    const file = `${first}\nNEXT token\n`;
+    const path = join(root, "state.ts");
+    Deno.writeTextFileSync(path, file);
+    const diff = [
+      "diff --git a/state.ts b/state.ts",
+      "--- a/state.ts",
+      "+++ b/state.ts",
+      "@@ -1 +1 @@",
+      "-old first",
+      `+${first}`,
+      "@@ -2 +2 @@",
+      "-old next",
+      "+NEXT token",
+      "",
+    ].join("\n");
+    const ws: DiffWorkspace = {
+      resolve: () => path,
+      read: () => file,
+    };
+    const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+    const highlighter = diffSource(ws, built.edit).createHighlighter!(
+      diff,
+      built.doc.lines,
+    );
+    const editedText = diff.replace(`+${first}`, `+${editedFirst}`);
+    const highlighted = highlighter.update(editedText);
+    const nextLine = highlighted[editedText.split("\n").indexOf("+NEXT token")];
+    assertEquals(
+      nextLine.spans.find((span) => span.text === "NEXT token")?.cls,
+      "string",
     );
   } finally {
     Deno.removeSync(root, { recursive: true });
@@ -1055,9 +1273,35 @@ Deno.test("diffedit: Ctrl-L reveals more of the file above the hunk", () => {
 Deno.test("diffedit: Ctrl-L expands context in pager mode (no text cursor)", () => {
   const { s, done } = expandSession();
   try {
+    // A twelve-row content area puts its quarter-screen target above the hunk.
+    s.resize(80, 13);
     // No arrow press, so the text cursor is never revealed: we are in the pager.
-    assertEquals(s.view().cursor, null, "no text cursor");
-    assert(s.view().canExpand, "the status line advertises expand");
+    const view = s.view();
+    assertEquals(view.cursor, null, "no text cursor");
+    assert(view.canExpand, "the status line advertises expand");
+    assertEquals(view.expandRow, 5, "the first hunk body line is marked");
+    assertEquals(
+      view.diffMetadataRows,
+      [4],
+      "only the adjacent header is marked",
+    );
+    assertEquals(view.diffAnnotations, [
+      { line: 5, kind: "expandUp" },
+      { line: 4, kind: "diffMetadata" },
+    ]);
+    const rows = renderFrame(s.displayDoc(), view).map(stripAnsi);
+    assert(
+      rows[0].endsWith("+1 −1"),
+      "the first line carries the whole-diff totals, not a marker",
+    );
+    for (let row = 1; row < 4; row++) {
+      assertEquals(rows[row].at(-1), " ", "earlier metadata is not marked");
+    }
+    assert(
+      rows[4].endsWith("^L█"),
+      "the hunk header labels the available expansion",
+    );
+    assertEquals(rows[5].at(-1), "◥", "the marker points upward");
     s.handleKey({ name: "ctrl-l" });
     const lines = s.doc.text.split("\n");
     // The hunk on screen expanded; with nothing selected it grows upward first.
@@ -1068,6 +1312,120 @@ Deno.test("diffedit: Ctrl-L expands context in pager mode (no text cursor)", () 
     // Revealing context is not an edit: a clean quit needs no save prompt.
     press(s, "q");
     assert(s.quit, "quit without a save prompt");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: the expansion marker appears only in pager navigation", () => {
+  const { s, done } = expandSession();
+  try {
+    // A twelve-row content area puts its quarter-screen target above the hunk.
+    s.resize(80, 13);
+    assertEquals(s.view().expandRow, 5, "navigation marks the chosen edge");
+    assertEquals(s.view().diffMetadataRows, [4]);
+    press(s, "/");
+    assertEquals(s.view().expandRow, null, "search owns the next key");
+    assertEquals(
+      s.view().diffMetadataRows,
+      [],
+      "search hides its neighboring block",
+    );
+    press(s, "escape", "?");
+    assert(s.view().overlay !== null, "help is open");
+    assertEquals(s.view().expandRow, null, "an overlay owns the next key");
+    assertEquals(s.view().diffMetadataRows, [], "an overlay hides the block");
+    press(s, "escape");
+    assertEquals(s.view().expandRow, 5, "leaving help restores the marker");
+    press(s, "ctrl-x");
+    assertEquals(s.view().expandRow, null, "a chord owns the next key");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: a wrapped hunk header keeps the expansion triangle on the body", () => {
+  const { s, done } = expandSession();
+  try {
+    s.resize(9, 30);
+    press(s, "\\");
+    const view = s.view();
+    const headerFirstRow = view.wrapPlan!.firstRow[4];
+    const headerLastRow = view.wrapPlan!.lastRow[4];
+    const firstBodyFirstRow = view.wrapPlan!.firstRow[5];
+    assertEquals(view.expandRow, firstBodyFirstRow);
+    const rows = renderFrame(s.displayDoc(), view).map(stripAnsi);
+    for (let row = headerFirstRow; row <= headerLastRow; row++) {
+      const rendered = rows[row - view.top];
+      assertEquals(
+        rendered.at(-1),
+        "█",
+        "every wrapped hunk-header row is marked as metadata",
+      );
+      assertEquals(
+        rendered.endsWith("^L█"),
+        row === headerFirstRow,
+        "the first wrapped row carries the line's Ctrl-L label",
+      );
+    }
+    assertEquals(
+      rows[firstBodyFirstRow - view.top].at(-1),
+      "◥",
+      "the marker sits on the first body line",
+    );
+    s.handleKey({ name: "ctrl-l" });
+    assertEquals(
+      s.doc.text.split("\n")[4],
+      "@@ -1,5 +1,5 @@",
+      "Ctrl-L expands the marked top edge",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: adjacent metadata waits until its triangle is visible", () => {
+  const { s, done } = expandSession();
+  try {
+    s.resize(80, 6);
+    const view = s.view();
+    assertEquals(view.top, 0);
+    assertEquals(view.expandRow, 5, "the body marker sits below the viewport");
+    assertEquals(view.diffMetadataRows, [4], "the neighboring header is known");
+    assertEquals(view.diffAnnotations, []);
+    const rows = renderFrame(s.displayDoc(), view).map(stripAnsi);
+    assertEquals(
+      rows[4].at(-1),
+      " ",
+      "the visible header has no block without its triangle",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: wrapped metadata does not reflow its triangle off-screen", () => {
+  const { s, done } = expandSession();
+  try {
+    s.resize(15, 9);
+    press(s, "\\");
+    const first = s.view();
+    const firstRows = renderFrame(s.displayDoc(), first).map(stripAnsi);
+    assertEquals(first.top, 0);
+    assertEquals(first.diffAnnotations, [{ line: 5, kind: "expandUp" }]);
+    assert(
+      firstRows.some((row) => row.endsWith("◥")),
+      "the expansion triangle remains visible",
+    );
+    assert(
+      firstRows.every((row) => !row.includes("^L") && !row.endsWith("█")),
+      "metadata is hidden when its extra wrapping would hide the triangle",
+    );
+
+    const second = s.view();
+    assertEquals(second.top, first.top);
+    assertEquals(second.diffAnnotations, first.diffAnnotations);
+    assertEquals(renderFrame(s.displayDoc(), second).map(stripAnsi), firstRows);
   } finally {
     done();
   }
@@ -1102,7 +1460,8 @@ Deno.test("diffedit: in pager mode Ctrl-L expands the selected hunk", () => {
     );
     // Select the second hunk via the structure tree (no text cursor), then
     // expand: the choice of hunk must follow the selection, not a stale buffer.
-    // Left alone the middle of the screen would reach down from the first.
+    // The quarter-screen target reaches up from the first hunk. Selecting the
+    // second hunk makes the selection govern the expansion instead.
     let guard = 0;
     while ((s.view().selected?.startLine ?? -1) !== 9 && guard++ < 200) {
       s.handleKey({ name: "tab" });
@@ -1138,6 +1497,8 @@ Deno.test("diffedit: in pager mode Ctrl-L expands the selected hunk", () => {
 Deno.test("diffedit: pager Ctrl-L keeps the hunk header in view when expanding up from the top", () => {
   const { s, done } = expandSession();
   try {
+    // A twelve-row content area puts its quarter-screen target above the hunk.
+    s.resize(80, 13);
     assertEquals(s.view().top, 0, "starts at the top, pager mode");
     s.handleKey({ name: "ctrl-l" }); // expands up (reveals alpha/beta)
     // The header and preamble sit above the insertion point, so they do not
@@ -1188,8 +1549,19 @@ Deno.test("diffedit: pager Ctrl-L fills a short screen from the held edge", () =
     );
     // Scroll down so the hunk body is at the top and the header is off screen.
     for (let i = 0; i < 6; i++) s.handleKey({ name: "j" });
+    const view = s.view();
+    assertEquals(view.expandRow, 7, "the last hunk body line is marked");
+    assertEquals(s.displayDoc().lines[view.expandRow!].text, " line22");
+    assertEquals(
+      renderFrame(s.displayDoc(), view).map(
+        stripAnsi,
+      )[view.expandRow! - view.top]
+        .at(-1),
+      "◢",
+      "the marker points down from the last body line",
+    );
     s.handleKey({ name: "ctrl-l" });
-    // The middle of the screen sits in the hunk's lower half, so the lines come
+    // The quarter-screen target is in the hunk's lower half, so the lines come
     // from below it and what follows the hunk is held still. Ten lines land on
     // a five-row screen, so they fill it from that held edge: the last of them
     // is on screen and the hunk has been pushed off the top.
@@ -1201,7 +1573,7 @@ Deno.test("diffedit: pager Ctrl-L fills a short screen from the held edge", () =
   }
 });
 
-Deno.test("diffedit: in pager mode Ctrl-L with the whole-file node selected still expands a hunk", () => {
+Deno.test("diffedit: a whole-file selection uses the quarter-screen expansion target", () => {
   const root = Deno.makeTempDirSync();
   try {
     // Long enough to back FAR_DIFF's second hunk, which sits at line 30.
@@ -1231,15 +1603,27 @@ Deno.test("diffedit: in pager mode Ctrl-L with the whole-file node selected stil
     s.handleKey({ name: "tab" }); // selects the whole-file node, whose start line
     // is the "diff --git" header — in no hunk.
     assertEquals(s.view().selected?.label, "▸ m.ts");
+    assertEquals(
+      s.view().expandUp,
+      true,
+      "the quarter-screen target chooses an upward edge",
+    );
+    assertEquals(
+      s.view().expandRow,
+      10,
+      "the second hunk's top edge wins the equal-distance choice",
+    );
     s.handleKey({ name: "ctrl-l" });
-    // It must resolve to a hunk, not report nothing. The whole diff is on
-    // screen, so the middle of the content is nearest the first hunk's bottom
-    // edge and that is the one that grows.
+    // The target is equally far from the first hunk's bottom and the second
+    // hunk's top. The second edge has more context available.
     assert(s.view().message.startsWith("Showing line"), s.view().message);
-    assert(s.doc.text.includes("@@ -4,13 +4,13 @@"), s.doc.text);
     assert(
-      s.doc.text.includes("@@ -30,3 +30,3 @@"),
-      "the other hunk is untouched",
+      s.doc.text.includes("@@ -4,3 +4,3 @@"),
+      "the first hunk is untouched",
+    );
+    assert(
+      s.doc.text.includes("@@ -20,13 +20,13 @@"),
+      "the second hunk expanded upward",
     );
   } finally {
     Deno.removeSync(root, { recursive: true });

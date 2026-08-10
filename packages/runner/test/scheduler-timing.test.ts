@@ -17,6 +17,48 @@ import type {
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import { BoundedKeyMap } from "@commonfabric/utils/cache";
+import type { ActionStats } from "../src/telemetry.ts";
+import { getActionStats, recordActionTime } from "../src/scheduler/timing.ts";
+
+describe("action timing stats", () => {
+  // Each action instance gets its own id, so a pattern that keeps creating
+  // actions — a list projecting a window that moves — would otherwise add a
+  // stats entry per instance for the life of the runtime.
+  const stateFor = (actionStats: BoundedKeyMap<string, ActionStats>) => ({
+    actionStats,
+    getActionId: (action: Action) => (action as { id?: string }).id ?? "?",
+  });
+  const actionWithId = (id: string) =>
+    Object.assign(() => {}, { id }) as unknown as Action;
+
+  it("bounds the stats map and drops the least recently run entry", () => {
+    const actionStats = new BoundedKeyMap<string, ActionStats>(20_000);
+    const state = stateFor(actionStats);
+    for (let index = 0; index < 25_000; index++) {
+      recordActionTime(state, actionWithId(`action-${index}`), 1, index);
+    }
+    expect(actionStats.size).toBeLessThanOrEqual(20_000);
+    expect(getActionStats(state, "action-0")).toBeUndefined();
+    expect(getActionStats(state, "action-24999")).toBeDefined();
+  });
+
+  it("keeps an action that keeps running", () => {
+    const actionStats = new BoundedKeyMap<string, ActionStats>(20_000);
+    const state = stateFor(actionStats);
+    const survivor = actionWithId("survivor");
+    recordActionTime(state, survivor, 1, 0);
+    for (let index = 0; index < 25_000; index++) {
+      recordActionTime(state, actionWithId(`action-${index}`), 1, index + 1);
+      if (index % 100 === 0) {
+        recordActionTime(state, survivor, 1, index + 1);
+      }
+    }
+    const stats = getActionStats(state, survivor);
+    expect(stats).toBeDefined();
+    expect(stats!.runCount).toBe(251);
+  });
+});
 
 describe("debounce and throttling", () => {
   let storageManager: SchedulerTestStorageManager;
@@ -353,12 +395,10 @@ describe("debounce and throttling", () => {
 
       expect(runCount).toBe(0);
     } finally {
-      await local.tx.commit();
-      // NB: only the scheduler is disposed above (the behaviour under test).
-      // Calling runtime.dispose() here as well leaks a still-pending promise
-      // (the runtime dispose path does not compose with an already-disposed
-      // scheduler), so we close storage directly.
-      await local.storageManager.close();
+      // The scheduler is disposed above as the behaviour under test, and the
+      // real teardown still runs over it — see scheduler-dispose-idle.test.ts
+      // for the contract that makes the two compose.
+      await disposeSchedulerTestRuntime(local);
     }
   });
 

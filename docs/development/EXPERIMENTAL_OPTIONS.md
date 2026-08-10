@@ -28,8 +28,9 @@ was last checked against the code.
 | Flag | Toggle via | Default today | Originally added by | Planned end state | Status |
 |------|-----------|---------------|---------------------|-------------------|---------------------|
 | [`modernCellRep`](#moderncellrep) | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental` | off | Dan Bornstein (#3818) | graduate to always-on, then delete flag | implemented, off by default |
-| [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | graduate to always-on | implemented, off by default, rollout in progress |
+| [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | SUPERSEDED — no longer graduating to always-on: the persisted form is replaced by the v2 basis index and the flag deletes with it ([`serving-loop.md`](../specs/server-side-execution/serving-loop.md) §3b; plan Phase 1 stage C) | implemented, off by default; graduation stopped pending that replacement |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
+| [`plainResultReceipts`](#plainresultreceipts) | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental` | on | Mike Salisbury (verb contract WS-C) | fold into receipt semantics and delete flag after a bake period | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete flag | implemented, on in the shell |
 | [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | on | Robin McCollum (#4659) | graduate to unconditional behavior, then delete flag | implemented, on by default |
@@ -41,8 +42,9 @@ was last checked against the code.
 | [`cfcDeclaredMonotonicity`](#cfcdeclaredmonotonicity) | `RuntimeOptions.cfcDeclaredMonotonicity` | `off` | Bernhard Seefeld (#4647) | `observe` first, then `enforce` (must soak before the §8.12.7 route 2b event ships) | implemented, off by default |
 | [`cfcPrefixProvenanceStats`](#cfcprefixprovenancestats) | `RuntimeOptions.cfcPrefixProvenanceStats` (per-deployment; not env-wired) | `false` | Bernhard Seefeld (#4623) | stays a measurement opt-in; fold in or remove after Stage 0 | implemented, off by default, measurement only |
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
-| [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
+| [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237); `hold` removed CT-1925 (#5110) | keep `preempt` as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
+| [`ownWriteEcho`](#ownwriteecho) | `setOwnWriteEchoConfig()` (server-side only, not negotiated) | on | Robin McCollum (CT-1965) | remove the switch once the echo has field-soaked | implemented, on by default |
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off | Ben Follington (#4937; shell toggle #4974) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default, not yet measured over real latency |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
@@ -60,9 +62,9 @@ B](#appendix-b-related-toggles-that-are-not-experimental-flags).
 These flags make up the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). They
 are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
-`undefined`, which means "take the built-in default". `commitPreconditions` and
-`computedCellIds` default on; the other flags in this category default off
-unless their section says otherwise.
+`undefined`, which means "take the built-in default". `commitPreconditions`,
+`plainResultReceipts`, and `computedCellIds` default on; the other flags in
+this category default off unless their section says otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
@@ -70,8 +72,9 @@ The mapping from environment variable to flag is defined once, canonically, as
 and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
 the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines.
-Five flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
-`eagerSourceAnnotation`, `systemPatternAutoUpdate`, `computedCellIds`);
+Six flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
+`eagerSourceAnnotation`, `plainResultReceipts`, `systemPatternAutoUpdate`,
+`computedCellIds`);
 `commitPreconditions` is deliberately mapped to `null` there, which records
 "not env-reachable" as a decision rather than an omission.
 The mapping accepts exactly `"true"` and `"false"`; any other value is ignored
@@ -137,6 +140,50 @@ propagate](#how-flags-propagate).
   are absent or stale; graduate the default to on across the fleet; then fold
   the behavior into the base scheduler and delete the flag.
 
+### `plainResultReceipts`
+
+- **Toggle via.** `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env var, or
+  `RuntimeOptions.experimental.plainResultReceipts`. The env mapping accepts
+  exactly `"true"` and `"false"` (the category's canonical parsing: any other
+  value — `1`, `yes`, `TRUE` — is ignored with a warning, leaving the built-in
+  default in place), so the opt-out while the flag exists is an explicit
+  `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false`.
+- **Added by.** Mike Salisbury, verb-contract WS-C
+  (`docs/history/plans/pattern-verb-contract-implementation.md`).
+- **Purpose.** A handler's return value containing reactives/cells projects
+  into its per-event receipt cell via the result-pattern path, but a **plain
+  JSON return is discarded** — the receipt-only branch writes `{}`. Under this
+  flag the receipt carries the (already-normalized) return instead, so a
+  caller — or a same-id retry that collides on the create-only receipt — can
+  read the verb's result back by receipt address. `{}` remains the shape for
+  value-less handlers. The value goes through the receipt cell's standard
+  write flow (`set` → `diffAndUpdate`), the same conversion any cell write
+  gets: plain JSON persists as-is and a live `Cell` handle converts to a
+  link — so a one-line setter verb (`action(() => cell.set(...))`, whose
+  expression body implicitly returns the cell `set()` hands back for
+  chaining) records a link to the mutated cell in its receipt. Receipts
+  reflect what was returned. Requires `commitPreconditions` (the receipt
+  write itself) to be active, which it is by default.
+- **Current default and planned end state.** On by default. The gate the plan's
+  governing decision 2 set — the integration suite proving readback end to
+  end — was satisfied by the three-topic fixture (#5244): caller-supplied
+  event id, a dropped-response retry and a same-id replay with a different
+  payload, both reading the ORIGINAL declared result back off the receipt,
+  cross-process against an isolated toolshed. An explicit `false` (env or
+  programmatic) remains a rollback override while the flag exists. After a
+  bake period the behavior folds into base receipt semantics and the flag is
+  deleted.
+- **Status on 2026-08-03.** Implemented, on by default (default flipped after
+  #5244's proof; the receipt write's standard-flow conversion landed
+  separately in #5262). Both flag states are pinned in
+  `packages/runner/test/scheduler-event-receipts.test.ts` and
+  `packages/runner/test/declared-result-e2e.test.ts`; the flag-off cases pass
+  `plainResultReceipts: false` explicitly.
+- **Path to removal.** Let the default-on behavior soak; then delete the flag
+  and make the projection unconditional in `handleJavaScriptHandlerResult`'s
+  receipt-only branch, remove the env mapping and the explicit-off tests, and
+  update the receipt content note in `docs/specs/scheduler-v2/README.md` §7.6.
+
 ### `commitPreconditions`
 
 - **Toggle via.** `RuntimeOptions.experimental.commitPreconditions` only. It has
@@ -158,9 +205,12 @@ propagate](#how-flags-propagate).
 - **Current default and planned end state.** On by default as part of
   scheduler-v2 speculation lineage and receipt enforcement. An explicit
   programmatic `false` remains a rollback override; under that override,
-  single-use grants fail closed rather than silently becoming multi-use. The
-  planned end state is to remove the rollback flag and make the behavior
-  unconditional.
+  single-use grants fail closed rather than silently becoming multi-use, and
+  no handling publishes a receipt address on its transaction
+  (`tx.handlingReceiptLink` stays absent) — nothing creates or create-only
+  marks that cell while the flag is off, so an address would name a witness
+  that does not exist. The planned end state is to remove the rollback flag
+  and make the behavior unconditional.
 - **Status on 2026-07-10.** Implemented for lineage commits and event-result
   receipts, single-use grant consumption, and the memory protocol; on by
   default, with explicit programmatic opt-out retained temporarily.
@@ -561,22 +611,52 @@ the per-epic implementation notes).
   (#4237, 2026-06-22).
 - **Purpose.** Chooses what the client does with a new commit whose reads land on
   an identifier that is still catching up after an earlier conflict. Values are
-  `off`, `preempt`, and `hold`. `preempt` assumes the commit will conflict and
-  reverts and re-runs it locally without sending. `hold` waits for the catch-up,
-  re-runs the server's precondition check locally against the now-current
-  confirmed sequence numbers, reverts only the genuinely stale commits, and
-  sends the rest.
-- **Current default and planned end state.** `off` by default. Both non-default
-  modes were measured on the lunch-poll workload: `preempt` was net-negative
-  (it pre-empted commits that would have succeeded), and `hold` was neutral
-  (safe but no win, because the staleness there is only knowable on the server).
-  The code comment warns not to enable either mode without re-measuring on the
-  target workload.
-- **Status on 2026-07-08.** Implemented, off by default. It is a tuning dial that
+  `off` and `preempt`. `preempt` assumes the commit will conflict and reverts and
+  re-runs it locally without sending.
+- **Removed value: `hold`.** A precise mode also existed: wait for the catch-up,
+  re-run the server's precondition check locally against the now-current
+  confirmed sequence numbers, revert only the genuinely stale commits, and send
+  the rest. It was removed CT-1925 (PR #5110 review): `hold` let an
+  earlier read-bearing commit sit at the admission gate while a later,
+  independent blind commit proceeded straight to `session.transact`, violating
+  the increasing-`localSeq` send order `docs/specs/memory-v2/04-protocol.md`
+  §3.9 requires per session (reproduced same-session admission order
+  `[1, 3, 2]` against the real engine). It was also the reachability story for
+  a real soundness hole in CT-1910's own-session exclusion before that landed
+  as predecessor-only (soundness-neutral regardless of send order) — so by the
+  time of removal `hold` was soundness-neutral but still protocol-violating,
+  and every future §3.9-reliant design (e.g. CT-1910 phase-2 inference, which
+  leans on FIFO arrival) would otherwise have had to re-discover the hazard. It
+  had also never shown a measured win: neutral on lunch-poll (safe but no win,
+  because the staleness is only knowable on the server, not locally).
+- **Current default and planned end state.** `off` by default. `preempt` was
+  measured net-negative on the lunch-poll workload (it pre-empted commits that
+  would have succeeded). The code comment warns not to enable it without
+  re-measuring on the target workload.
+- **Status on 2026-07-31.** Implemented, off by default. It is a tuning dial that
   has not shown a win on the workloads measured so far.
-- **Path to removal.** Either it finds a workload where a non-default mode pays
-  off and graduates into a documented tuning knob, or it is removed once the
-  underlying conflict-retry behavior is settled and the experiment is closed.
+- **Path to removal.** Either it finds a workload where `preempt` pays off and
+  graduates into a documented tuning knob, or it is removed once the underlying
+  conflict-retry behavior is settled and the experiment is closed.
+
+### `ownWriteEcho`
+
+- **Toggle via.** `setOwnWriteEchoConfig()` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts). Server-side only; not
+  a hello capability — every client generation handles the echoed frames, so
+  there is nothing to negotiate.
+- **Added by.** Robin McCollum, for CT-1965.
+- **Purpose.** A sync frame includes a doc unless the writing session provably
+  holds it: own accepted `patch`-produced heads ride the covering frame as full
+  post-apply documents (merged state the writer cannot extrapolate), while own
+  `set`- and `delete`-produced heads stay elided. Off restores full echo
+  suppression — the pre-CT-1965 behavior, where promotion extrapolates every
+  own write from the client's own ops.
+- **Current default and planned end state.** On by default. The switch exists
+  as an operational backstop while the echo field-soaks.
+- **Status on 2026-08-08.** Implemented and on by default.
+- **Path to removal.** After the echo has soaked in production, delete the
+  config trio and the suppression branch it re-enables.
 
 ### `syncSchemaTableV2`
 
@@ -602,10 +682,6 @@ the per-epic implementation notes).
 > Two neighbours in the same handshake are related but are not runtime-toggleable
 > experimental flags:
 >
-> - **`syncSchemaTable`** is the older, index-keyed predecessor of
->   `syncSchemaTableV2`. It is hardwired to `false` in `getMemoryProtocolFlags`
->   and has no config function; it is effectively dead and can be deleted from
->   the protocol types once no peer negotiates it.
 > - **`sqliteCommitRowLabelEval`** is a build-inherent capability, hardwired to
 >   `true`, advertising that this build's engine evaluates row-label rules at
 >   commit time. It is not configuration: an older server that lacks the
@@ -613,6 +689,15 @@ the per-epic implementation notes).
 >   keeps its write gate failing closed. It was added by Bernhard Seefeld in
 >   "server-side commit-time row-label re-derivation (Epic E4, Phase 3.c)"
 >   (#4552). It is permanent.
+> - **`verdictCatchUpMarkers`** is a build-inherent capability, hardwired to
+>   `true`, advertising that the server stages a `caughtUpLocalSeq` catch-up
+>   obligation for every accept and conflict rejection, delivered on the
+>   batched fan-out (CT-1927; `04-protocol.md` §4.11.2). It is not
+>   configuration: the CLIENT keys verdict parking on it — an accepted
+>   commit's promotion waits for the marker only when the server advertises
+>   the capability AND a sync consumer is live; against an older server (or
+>   with no watch view) verdicts apply immediately, the historical behavior.
+>   Added by Robin McCollum (CT-1927). It is permanent.
 > - **`pendingReadStacks`** is a build-inherent capability, hardwired to `true`,
 >   advertising that this build's engine resolves array-`localSeq` pending reads
 >   (the full-stack dependency sets of CT-1872 1c; `resolvePendingReads` in
@@ -632,7 +717,23 @@ the per-epic implementation notes).
 >   verdicts. Added on CT-1872 (PR #4606). Path to removal: retire
 >   the scalarization fallback once every server in the fleet advertises the
 >   capability; the flag itself then reads as permanent documentation of the
->   wire shape, and the successor design is tracked as CT-1910.
+>   wire shape. (The CT-1910 basis repair — `basisSeq` on pending reads,
+>   scanned with own-session exclusion — landed WITHOUT a capability of its
+>   own: servers ignore unknown read fields, so clients attach it
+>   unconditionally and older servers keep the legacy max-dependency basis.
+>   CT-1910's remaining scope, server-inferred dependencies, stays a
+>   follow-on protocol step.)
+> - **`entityIdListing`** is a build-inherent capability, hardwired to `true`.
+>   It advertises that the memory server can list live space-scoped entity
+>   identifiers without returning stored values. Older servers omit it, which
+>   parses as `false`. It is permanent.
+> - **`entityIdPagination`** is a build-inherent capability, hardwired to
+>   `true`. It advertises snapshot-checked, server-capped pages for
+>   `entity-id.list`. Older servers return the historical complete response.
+>   It is permanent.
+> - **`entityIdLookup`** is a build-inherent capability, hardwired to `true`.
+>   It advertises identifier-only `entity-id.exists` point lookup. Older
+>   servers omit it, which parses as `false`. It is permanent.
 
 ### `experimentalConcurrentWatchRefresh`
 
@@ -748,6 +849,71 @@ the per-epic implementation notes).
 - **Path to removal.** Fold the default into permanent documented behavior
   and shrink the exec.ts recheck delay, or retire the NFS dial entirely if
   FUSE-T's FSKit backend (macOS 26+) replaces the NFS backend.
+
+---
+
+## Flag-gated tripwires
+
+Some code paths refuse a value they cannot yet handle, by throwing and naming
+what is missing, rather than accepting it and doing something plausible but
+wrong. The `FabricInstance` checks in the runner's binding walks are the
+recurring example: such a value is a container reached by its codec contents
+rather than by property name, and a walk that cannot yet descend one would
+otherwise hand it back whole, leaving a binding nested inside it silently
+unresolved.
+
+These throws are **discovery instruments**. Each one that fires names a site
+that owes work — for a flag-gated site, work the flag needs before it can
+graduate — which is more useful than a quiet wrong answer that surfaces later
+as corrupted data.
+
+**The invariant that makes this safe rather than merely lucky:** nothing that
+reaches one of these throws is believed to be in production use. That is what a
+tripwire asserts, and it is what makes refusing the right answer — refusing
+costs nothing if nobody is doing the thing, and says so immediately if somebody
+is.
+
+The invariant holds in two strengths, and it is worth knowing which one a given
+site has:
+
+- **By construction**, where an experiment flag gates the only path that
+  arrives. A default configuration never reaches the throw, and any arrival is
+  something a flag was deliberately turned on to reach.
+- **De facto**, where the value is shipped and ungated and simply has no
+  production caller yet. A `FabricError` is exposed to pattern authors
+  (`builder/factory.ts`) and reaches these throws with every flag off; a
+  `FabricBytes` written from the client reaches `CellHandle.serialize()`'s
+  refusal the same way. Nothing stops such a call being written tomorrow. What
+  makes the tripwire safe today is that none exists.
+
+The second is the weaker claim, but it does not fail quietly, and that is the
+point. Add a production use of one of these values and the throw fires — at the
+moment the use is added, in the change that added it — leaving exactly two
+honest ways forward: implement the handling the throw names, or back the use
+out. So the tripwire is its own enforcement, which is why an ungated site is
+legitimate. What it is not is a flag, so do not cite this section as though one
+stood behind every throw.
+
+Three obligations follow, and they are the reason this is recorded here rather
+than at any one of the sites:
+
+- **Adding a feature.** If your change would let a value reach one of these
+  throws in a default configuration, you have three options and they are all
+  fine: gate the change on an experiment flag, implement the handling the throw
+  names first, or do not add the use. What is not an option is shipping the use
+  and leaving the throw reachable in production.
+- **Adding a throw.** Say which strength it has. A de-facto one is legitimate —
+  several exist — but it is a claim about the callers that exist today, so it
+  should be made deliberately rather than assumed from this section.
+- **Meeting one.** A throw firing is the instrument working, not a defect in it.
+  Implement the missing handling at the site it names — for a flag-gated site
+  that work *is* the flag's graduation work — or back out the use that reached
+  it. What is not on the list is exempting the value so the walk stays quiet.
+
+Worked example: with [`modernCellRep`](#moderncellrep) on, a link is a
+`FabricLink` and therefore a `FabricInstance`, so ordinary links reach these
+checks and throw. That is expected, and the set of sites it lights up is a
+useful part of the remaining work for that flag.
 
 ---
 
@@ -886,7 +1052,8 @@ design docs).
 The Category 1 flags are declared as the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). The
 `Runtime` constructor merges the provided flags with the built-in defaults
-(`commitPreconditions` true, the other Category 1 flags false),
+(`commitPreconditions`, `plainResultReceipts`, and `computedCellIds` true, the
+other Category 1 flags false),
 propagates each one to its ambient control point, and then reads the effective
 state back so that `runtime.experimental.*` reflects what is actually in effect.
 
@@ -944,11 +1111,11 @@ scheduler-v2 spec documents still mention it as part of their migration history.
 
 ### `esmModuleLoader` / `CF_ESM_MODULE_LOADER` (removed)
 
-The flag that selected the ESM module-record loader over the older AMD bundle
-path during the content-addressed module-loading rollout. (An early draft of the
-plan called it `EXPERIMENTAL_ESM_MODULE_LOADER`.) It was defaulted on, and then
-the flag, the AMD bundle pipeline, and the AMD compilation cache were all
-removed; the ESM loader is now the only loader. See
+The flag that selected the ESM module-record loader during the
+content-addressed module-loading rollout. (An early draft of the plan called it
+`EXPERIMENTAL_ESM_MODULE_LOADER`.) It was defaulted on, and then the flag and
+the whole-bundle loader and cache it switched away from were all removed; the
+ESM module-record loader is now the only loader. See
 [`docs/history/specs/module-loading-implementation-plan.md`](../history/specs/module-loading-implementation-plan.md),
 whose status header records the removal.
 
@@ -978,7 +1145,8 @@ sweep does not mistake them for missing experimental flags:
   (forward the web worker's console to the main thread), `telemetryEnabled`
   (browser OpenTelemetry), `showDebuggerView`, `themePreference`.
 - **Runner diagnostics** (environment): `CF_TRAVERSE_CAPTURE`,
-  `CF_TRAVERSE_CAPTURE_MAX`, `CF_TRAVERSE_DIAGNOSTICS`.
+  `CF_TRAVERSE_CAPTURE_MAX`, `CF_TRAVERSE_DIAGNOSTICS`. What each one does is in
+  [the configuration reference](./CONFIGURATION.md#runner-diagnostics).
 - **CLI controls** (environment): `CF_EXEC_SHEBANG`, `CF_CLI_TRACE_TIMINGS`,
   `CF_PROFILE_DONE_MARKER`.
 - **Operational and build toggles**: `MEMORY_ACL_MODE` (`off` / `observe` /

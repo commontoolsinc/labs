@@ -17,6 +17,7 @@ import type {
   SchemaWithoutCell,
   Stream,
   StripCell,
+  toEncodableForm,
   toJSON,
 } from "./types.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
@@ -26,7 +27,8 @@ import {
   connectInputAndOutputs,
 } from "./node-utils.ts";
 import { assertNotInActionExecution } from "./action-context.ts";
-import { moduleToJSON } from "./json-utils.ts";
+import { moduleToEncodableForm } from "./to-encodable-form.ts";
+import { toJSONMethod } from "./json-member.ts";
 import {
   brandTrustedBuilderArtifact,
   getArtifactEntryRef,
@@ -130,9 +132,10 @@ export function createNodeFactory<T = any, R = any>(
     moduleSpec.implementation = implementation;
   }
 
-  const module: Module & toJSON = {
+  const module: Module & toEncodableForm & toJSON = {
     ...moduleSpec,
-    toJSON: () => moduleToJSON(module),
+    toJSON: toJSONMethod,
+    toEncodableForm: () => moduleToEncodableForm(module),
   };
   // A module with ifc confidentiality on its argument schema should have at least
   // that value on its result schema
@@ -140,15 +143,18 @@ export function createNodeFactory<T = any, R = any>(
     module.argumentSchema,
     module.resultSchema,
   );
-  const factory = Object.assign((inputs: FactoryInput<T>): Reactive<R> => {
-    const outputs = reactive<R>(undefined, module.resultSchema);
-    const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
+  const factory = Object.assign(
+    (inputs: FactoryInput<T>): Reactive<R> => {
+      const outputs = reactive<R>(undefined, module.resultSchema);
+      const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
 
-    connectInputAndOutputs(node);
-    (outputs as OpaqueCell<R>).connect(node);
+      connectInputAndOutputs(node);
+      (outputs as OpaqueCell<R>).connect(node);
 
-    return outputs;
-  }, module) as ModuleFactory<T, R>;
+      return outputs;
+    },
+    module,
+  ) as ModuleFactory<T, R>;
   factory.asScope = (scope: CellScope) =>
     createNodeFactory({ ...module, defaultScope: scope });
   // Provenance brand: every node factory (lift / handler / byRef / the list-op
@@ -397,7 +403,7 @@ function handlerInternal<E, T>(
     | undefined,
   stateSchema?: JSONSchema | { proxy: true },
   handler?: (event: E, props: T) => any,
-): HandlerFactory<T, E> {
+): HandlerFactory<E, T> {
   let writableProxy = false;
   if (typeof eventSchema === "function") {
     if (
@@ -428,7 +434,7 @@ function handlerInternal<E, T>(
     stateSchema as JSONSchema | undefined,
   );
 
-  const module: Handler<T, E> & toJSON & {
+  const module: Handler<E, T> & toEncodableForm & toJSON & {
     bind: (inputs: FactoryInput<StripCell<T>>) => Stream<E>;
   } = {
     type: "javascript",
@@ -438,7 +444,8 @@ function handlerInternal<E, T>(
     // Overriding the default `bind` method on functions. The wrapper will bind
     // the actual inputs, so they'll be available as `this`
     bind: (inputs: FactoryInput<StripCell<T>>) => factory(inputs),
-    toJSON: () => moduleToJSON(module),
+    toJSON: toJSONMethod,
+    toEncodableForm: () => moduleToEncodableForm(module),
     ...(schema !== undefined && { argumentSchema: schema }),
     ...(writableProxy && { writableProxy: true }),
   };
@@ -487,28 +494,50 @@ export function handler<
   eventSchema: E,
   stateSchema: T,
   handler: (event: Schema<E>, props: Schema<T>) => any,
-): HandlerFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
+): HandlerFactory<SchemaWithoutCell<E>, SchemaWithoutCell<T>>;
 export function handler<E, T>(
   eventSchema: JSONSchema,
   stateSchema: JSONSchema,
   handler: (event: E, props: T) => any,
-): HandlerFactory<T, E>;
+): HandlerFactory<E, T>;
 export function handler<E, T>(
   handler: (Event: E, props: T) => any,
   options: { proxy: true },
-): HandlerFactory<T, E>;
+): HandlerFactory<E, T>;
 export function handler<E, T>(
   handler: (event: E, props: T) => any,
-): HandlerFactory<T, E>;
-export function handler<E, T>(
+): HandlerFactory<E, T>;
+// Declared results, reached only by naming all three type arguments — the
+// same explicit-only rule as `action`'s result overload, mirrored here and in
+// api's `HandlerFunction` (both halves are hand-maintained; an overload
+// present in only one of them is unreachable from patterns while the other's
+// tests stay green). The `=> any` overloads above absorb every inferred call
+// first, so an incidental return never declares a result.
+export function handler<E, T, R>(
+  eventSchema: JSONSchema,
+  stateSchema: JSONSchema,
+  handler: (event: E, props: T) => R,
+): HandlerFactory<E, T, R>;
+export function handler<E, T, R>(
+  handler: (event: E, props: T) => R,
+  options: { proxy: true },
+): HandlerFactory<E, T, R>;
+export function handler<E, T, R>(
+  handler: (event: E, props: T) => R,
+): HandlerFactory<E, T, R>;
+export function handler<E, T, R = void>(
   eventSchema:
     | JSONSchema
     | ((event: E, props: T) => any)
     | undefined,
   stateSchema?: JSONSchema | { proxy: true },
   handler?: (event: E, props: T) => any,
-): HandlerFactory<T, E> {
-  return handlerInternal(eventSchema, stateSchema, handler);
+): HandlerFactory<E, T, R> {
+  return handlerInternal(eventSchema, stateSchema, handler) as HandlerFactory<
+    E,
+    T,
+    R
+  >;
 }
 
 // unsafe closures: doesn't need any arguments.
@@ -604,9 +633,30 @@ export const assert: (fn: () => boolean) => Reactive<AssertRecord> = (
  */
 // Overload 1: Zero-parameter callback returns Stream<void>
 export function action(_event: () => void): Stream<void>;
-// Overload 2: Parameterized callback returns Stream<T>
-export function action<T>(_event: (event: T) => void): Stream<T>;
-export function action<T>(_event: (event?: T) => void): Stream<T> {
+// Overload 2: Parameterized callback returns Stream<E>
+export function action<E>(_event: (event: E) => void): Stream<E>;
+// Overload 3: a declared result, reached only by supplying both type arguments
+// explicitly — `action<AddTopic, TopicRef>((e) => { ...; return ref })`.
+//
+// The result is NOT inferred from the callback, deliberately. A concise arrow
+// body returns whatever its last call evaluates to, and the common ones return
+// values rather than void — `Cell.set` returns the cell (api `ISettable`), so
+// `action((id: string) => selected.set(id))` would infer a `Cell` result and
+// silently declare a verb result nobody wrote. TypeScript cannot tell that
+// incidental return from a deliberate one, so overload 2 absorbs every
+// callback (anything is assignable to a void-returning signature) and a result
+// has to be asked for by name.
+//
+// Contextual typing does not reach here either: annotating the binding
+// `const v: Stream<E, R> = action(...)` still selects overload 2 and fails to
+// assign. That failure is the intended one — dropping a declared result is a
+// compile error naming `[CELL_RESULT_TYPE]`, not silence.
+export function action<E, R>(
+  _event: (event: E) => R,
+): Stream<E, R>;
+export function action<E, R = void>(
+  _event: (event?: E) => R,
+): Stream<E, R> {
   throw new Error(
     "action() must be used with CTS transforms enabled - remove /// <cf-disable-transform /> from your file",
   );

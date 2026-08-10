@@ -183,12 +183,12 @@ export const listToolHandler = handler(
       resultMessage = `Saved new item`;
     }
 
-    // Write result for LLM
+    // Write result for LLM. The result cell is the tool's declared channel;
+    // a plain return here would be silently discarded (and is a transformer
+    // error under the verb contract unless the handler declares a result).
     if (input.result) {
       input.result.set({ success: true, message: resultMessage });
     }
-
-    return { success: true, message: resultMessage };
   },
 );
 

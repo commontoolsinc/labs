@@ -3,7 +3,7 @@
 > **Status**: Implemented (shipped as the scheduler in PR #4288); this spec
 > governs the current behavior and is updated with it.
 > **Replaces**: the behavior described in
-> `docs/history/specs/pull-based-scheduler/README.md`
+> [the pull-based scheduler record](../../history/specs/pull-based-scheduler/README.md)
 > **Companion records** (archived point-in-time documents):
 > [`current-system-inventory.md`](../../history/specs/scheduler-v2/current-system-inventory.md)
 > — every mechanism in the v1 scheduler and what subsumes it here;
@@ -11,8 +11,13 @@
 > the executed v1→v2 phase plan;
 > [`implementation/`](../../history/specs/scheduler-v2/implementation/00-README.md)
 > — the executed work orders (start at `00-README.md`).
-> **Persistence**: builds on `docs/specs/persistent-scheduler-state.md`
-> (the observation/rehydration model carries over with a smaller payload).
+> **Persistence**: builds on
+> [persistent scheduler state](../persistent-scheduler-state.md). The
+> observation and rehydration model carries over with a smaller payload.
+> [Per-document rehydration](per-doc-rehydration.md) defines restoration for
+> descendant piece documents.
+> [Incremental observation adoption](incremental-observation-adoption.md)
+> extends that state into ongoing multi-user operation.
 
 This document re-derives the scheduler from first principles. It specifies the
 model, the invariants, the node state machine, the algorithms, and the
@@ -744,7 +749,9 @@ correctness comes from cancellation, not staging:
    Ownership of a commit-gated start begins when the start is scheduled, not
    when its post-commit callback installs it. Cancelling the parent or lineage
    before that commit tombstones the pending start, so the callback must not
-   install it. After installation, cancellation may stop only the exact local
+   install it; stopping the result key does the same, so a piece the user
+   stopped before the origin commit does not start afterwards. After
+   installation, cancellation may stop only the exact local
    registration installed by that attempt; if another attempt has replaced or
    won the same result key, its registration remains live. This prevents a
    receipt-losing duplicate from stopping the winner.
@@ -779,7 +786,16 @@ the same `{ resultFor: cause }` cell that hosts a launched pattern when the
 handler returns one; when the handler launches nothing, the cell is simply
 the receipt. This gives handlers the same shape as computations: one
 canonical output document per unit of work, whose creation doubles as the
-exactly-once witness.
+exactly-once witness. A receipt-only handling carries the handler's normalized
+return, so the verb's result is readable back by receipt address; the
+experimental `plainResultReceipts` flag governs that projection and defaults
+on — an explicit `false` restores the older discard-everything-to-`{}`
+behavior while the flag exists (`docs/development/EXPERIMENTAL_OPTIONS.md`;
+verb-contract plan). A value-less handler still writes `{}`. That value is
+written through the receipt cell's standard write conversion — plain JSON
+persists as-is, a live cell handle converts to a link, so a one-line setter
+verb's receipt links to the cell it mutated. The create-only witness
+semantics are unchanged either way.
 
 For an inline, non-navigation handler result, an `inSpace` child does not move
 that canonical handler-result wrapper into the child space. The result/receipt
@@ -850,7 +866,12 @@ phase E).
 **Computation-launched children are outside I10.** Computations are
 idempotent and re-runnable; their children converge through deterministic
 ids and normal re-runs, and orphaned registrations are bounded by the same
-retry budget. (The exhausted-retry zombie is accepted as pre-existing; the
+retry budget. The runner is nonetheless stricter for the launches it can tie
+to a transaction: a child whose setup transaction does not become durable has
+its registration stopped rather than left for a re-run to converge over, since
+the bookkeeping a coordinator keeps would otherwise make that re-run skip the
+staging the child needs. [Runner child-run
+ownership](../runner-child-run-ownership.md) states the rules. (The exhausted-retry zombie is accepted as pre-existing; the
 implementation should leave a watch-this comment at the retry-exhaustion
 sites.)
 
@@ -933,11 +954,28 @@ the bound is exhausted, `idle()` resolves while retry wakes continue at their
 rate-limited cadence; every actual idle boundary resets the episode counters so
 a later, unrelated demand wave receives its own full convergence allowance.
 
+A disposed scheduler releases idle waiters — those already parked, at dispose,
+and any requested afterwards. Quiescence is final once nothing can run again,
+and the conditions above are all reached through the execute loop, which a
+disposed scheduler no longer enters: waiting on them would be waiting forever,
+not waiting. This is what lets `Runtime.dispose()` run over a scheduler a caller
+has already disposed, since its teardown awaits `idle()`.
+
+Releasing is not immediate, because disposing does not cancel a run already
+under way. Waiters with a wake source outside the execute loop — a run in
+flight, background tasks, held wakes, in-flight commits — still settle on their
+own first, and only then does the disposed case apply. This matters for waiters
+parked BEFORE dispose: every parking branch is reached with no run in flight, so
+a waiter parked while execution was merely scheduled is still parked once the
+run begins, and releasing it at dispose would report quiescence while an action
+and its commit were still going.
+
 ---
 
 ## 9. Persistence and rehydration
 
-The durable model is `docs/specs/persistent-scheduler-state.md`; v2 keeps its
+The durable model is
+[Persistent Scheduler State](../persistent-scheduler-state.md); v2 keeps its
 architecture (observation rows attached to commits, server-side read/write
 indexes for dirtying inactive pieces, durable dirty/stale markers, fingerprint
 validation) and shrinks the per-observation payload.
@@ -961,8 +999,9 @@ the fingerprint string is versioned so v1 observations are simply misses.
   resumed piece **tree**: descendants — sub-pattern nodes and
   map/filter/flatMap per-element runs, each persisted under its own
   `pieceId` — register against their own bucket from the same listing
-  (`per-doc-rehydration.md`). Each node registers in resume mode: look up
-  the observation; on fingerprint match, install `reads` (+ gate config)
+  ([per-document rehydration](per-doc-rehydration.md)). Each node registers in
+  resume mode: look up the observation; on fingerprint match, install `reads`
+  (+ gate config)
   directly into the indexes, set `status = clean`, or `invalid` if durable
   dirty markers say so; on miss/mismatch, degrade that node to `fresh`
   behind a bounded synced-hold. The successful listing path has already synced,

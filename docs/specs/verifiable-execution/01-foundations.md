@@ -1,13 +1,13 @@
 # CF Protocol: Foundations (Sections 1–4)
 
-See `docs/specs/verifiable-execution/README.md` for navigation.
+See the [verifiable-execution document map](README.md) for navigation.
 
 ## Conventions
 
 - **Normative language:** “MUST”, “SHOULD”, etc are used in the RFC 2119 sense.
 - **Content addressing:** Hashes and references are computed via this project's
   `hashOf()` function.
-- **Types:** Where practical, names and shapes align with `packages/memory/interface.ts`.
+- **Types:** Where practical, names and shapes align with the memory package: the fact model in `packages/memory/interface.ts`, and the commit and protocol shapes in `packages/memory/v2.ts`.
 
 ---
 

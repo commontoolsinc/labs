@@ -4,7 +4,6 @@ import {
   type CompiledModuleArtifact,
   type EvaluateResult,
   type Exports,
-  type Harness,
   type HarnessedFunction,
   type ResolvedFabricPin,
   type RuntimeProgram,
@@ -36,7 +35,7 @@ import {
 } from "./compile-interleave.ts";
 import { type MemorySpace, Runtime } from "../runtime.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { StaticCache } from "@commonfabric/static";
+import type { StaticCache } from "@commonfabric/static";
 import {
   pretransformProgramForModules,
   transformInjectHelperModule,
@@ -166,7 +165,7 @@ export interface EngineOptions {
   hideInternalStackFrames?: boolean;
 }
 
-export class Engine extends EventTarget implements Harness {
+export class Engine extends EventTarget {
   private runtimeInternals: RuntimeInternals | undefined;
   private compilerInternals: CompilerInternals | undefined;
   private ctRuntime: Runtime;
@@ -400,10 +399,8 @@ export class Engine extends EventTarget implements Harness {
           getTransformedProgram: options.getTransformedProgram
             ? (nextProgram) => options.getTransformedProgram?.(nextProgram)
             : undefined,
-          diagnosticMessageTransformer: new (compilerStack()
-            .ReactiveErrorTransformer)({
-            verbose: options.verboseErrors,
-          }),
+          diagnosticMessageTransformer: compilerStack()
+            .createReactiveErrorTransformer(options.verboseErrors),
           beforeTransformers: (program) => {
             const pipeline = new (compilerStack()
               .CommonFabricTransformerPipeline)({
@@ -821,6 +818,10 @@ export class Engine extends EventTarget implements Harness {
     const emitted = compiler.compileToModules(resolvedForCompile, {
       runtimeModules: Engine.runtimeModuleNames(),
       specifierAliases,
+      // These bytes are durable stored source nobody can re-author;
+      // authoring-hygiene diagnostics (a now-unused @ts-expect-error) must
+      // not brick the reload (CT-1916).
+      storedSource: true,
       beforeTransformers: (program) => {
         const pipeline = new (compilerStack()
           .CommonFabricTransformerPipeline)({
@@ -1123,7 +1124,7 @@ export class Engine extends EventTarget implements Harness {
           verify: false, // already verified at compile time
         });
       } catch (error) {
-        // Module evaluation runs outside an isolate `exec`, so errors thrown
+        // Module evaluation runs outside an `exec` call, so errors thrown
         // at module scope would otherwise surface with a censored (empty) or
         // raw-coordinate stack. Materialize + source-map it here (once),
         // matching how invoked-function errors are mapped.
@@ -1142,16 +1143,20 @@ export class Engine extends EventTarget implements Harness {
       // Per-module namespaces keyed by content identity (stripped from the
       // `cf:module/<identity>` specifier) for the in-memory identity cache.
       const exportsByIdentity = new Map<string, Exports>();
+      // Where each module came from, keyed the same way. A pattern loaded BY
+      // IDENTITY carries no program (see `patternFromMain`), so without this
+      // its source location is unrecoverable at the point of use — the
+      // information exists right here and was simply not written down.
+      const sourcePathByIdentity = new Map<string, string>();
       const MODULE_SPECIFIER_PREFIX = "cf:module/";
       for (const [path, specifier] of graph.specifierByPath) {
         const namespace = loaded.importNow(specifier) as Exports;
         const fileName = ctx.fileNameForPath(path);
         exportMap[fileName] = namespace;
         if (specifier.startsWith(MODULE_SPECIFIER_PREFIX)) {
-          exportsByIdentity.set(
-            specifier.slice(MODULE_SPECIFIER_PREFIX.length),
-            namespace,
-          );
+          const identity = specifier.slice(MODULE_SPECIFIER_PREFIX.length);
+          exportsByIdentity.set(identity, namespace);
+          sourcePathByIdentity.set(identity, fileName);
         }
         for (const [exportName, value] of Object.entries(namespace)) {
           // Only object/function exports are sub-pattern candidates. Skip the
@@ -1194,6 +1199,7 @@ export class Engine extends EventTarget implements Harness {
         main,
         exportMap,
         exportsByIdentity,
+        sourcePathByIdentity,
         registrationsByIdentity: graph.registrationSink,
       };
     } finally {
@@ -1407,19 +1413,18 @@ export class Engine extends EventTarget implements Harness {
     });
   }
 
-  // Invokes a function that should've came from this isolate (unverifiable).
-  // We use this to hook into the isolate's source mapping functionality.
+  // Invokes a function that should've came from this SES runtime
+  // (unverifiable). We use this to hook into its source mapping functionality.
   invoke(fn: () => any): any {
     // Scheduler dictates this is a synchronous function,
     // and if we have functions from this source, this should already
     // be set up.
-    // Some tests invoke values outside of this isolate, so just
+    // Some tests invoke values outside of this SES runtime, so just
     // execute and return if runtime internals have not been initialized.
     if (!this.runtimeInternals && !this.sesRuntime) {
       return fn();
     }
-    return this.getSESRuntime().getIsolate("__engine-invoke__").value(fn)
-      .invoke().inner();
+    return this.getSESRuntime().exec(fn);
   }
 
   getInvocation(source: string): HarnessedFunction {

@@ -4,6 +4,7 @@ import {
   type CellScope,
   type JSONSchema,
   type LinkScope,
+  type SchemaScope,
 } from "./builder/types.ts";
 import { type MemorySpace } from "./cell.ts";
 import {
@@ -39,6 +40,17 @@ function parseScopedIdSegment(idSegment: string): {
 }
 
 /**
+ * A follow cap declared by the schema at `depth` path segments from this
+ * link's root, remembered because narrowing past that segment drops the
+ * declaring schema. See {@link NormalizedLink.scopeCaps}.
+ */
+export type ScopeCapAtDepth = {
+  /** Number of leading `path` segments the declaring schema addresses. */
+  depth: number;
+  scope: SchemaScope;
+};
+
+/**
  * Normalized link structure returned by parsers
  */
 export type NormalizedLink = {
@@ -48,6 +60,29 @@ export type NormalizedLink = {
   scope?: LinkScope;
   schema?: JSONSchema;
   overwrite?: "redirect"; // "this" gets normalized away to undefined
+  /**
+   * Follow caps declared by schemas ABOVE this link's leaf, ascending by
+   * depth. `schema` only describes the leaf, so a cap declared mid-path — an
+   * `asCell` entry's `scope` on an ancestor — is otherwise lost the moment
+   * `key()` narrows past it, and `resolveLink` has nothing to check when it
+   * discovers the stored link at that ancestor. Populated by `Cell.key()`,
+   * which is the one place that walks the schema segment by segment.
+   *
+   * Read-side only: this is never serialized into a sigil link, never part of
+   * link identity (`areNormalizedLinksSame`), and must never be stamped onto a
+   * followed link's own scope (CT-1623).
+   *
+   * Caps are MONOTONIC across `asSchema()`: reinterpreting an address can
+   * tighten a cap (the next `key()` merges the narrower of the two) but never
+   * lift one. Clearing them on `asSchema` looks tempting — it is a sibling
+   * with a different schema, so carrying provenance from the discarded one
+   * reads as surprising — but it would turn every `asSchema`-based read
+   * helper into a cap bypass. `cellWithScopedLinkRequiredsRelaxed`, the piece
+   * read boundary itself, ends in `cell.asSchema(relaxed)`; the ancestor caps
+   * a narrowed cell carries exist nowhere else, so dropping them there would
+   * silently lift the caps that boundary is supposed to enforce.
+   */
+  scopeCaps?: readonly ScopeCapAtDepth[];
 };
 
 /**
@@ -218,7 +253,7 @@ export function parseAliasBinding(
   // document minted from the result cell and the partialCause (see
   // getDerivedInternalCellLink), in the alias's own `scope` — not a path
   // within the base document, so it cannot be parsed against a base link.
-  // Callers must convert it via unwrapOneLevelAndBindtoDoc instead.
+  // Callers must convert it via unwrapOneLevelAndBindToDoc instead.
   if (alias.partialCause !== undefined) {
     throw new Error(
       `Cannot parse partialCause alias as link: ${JSON.stringify(value)}`,

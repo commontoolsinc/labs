@@ -2,11 +2,11 @@
 // disable lint for this type
 // deno-lint-ignore-file ban-types
 import type {
+  AnyStream,
   CELL_LIKE,
   CellLike,
   JSXElement,
   RenderNode,
-  Stream,
 } from "commonfabric";
 
 /**
@@ -2873,12 +2873,22 @@ type CFEvent<T> = {
   };
 };
 
+// A stream of ANY arity is bindable, including one that declares a result.
+// Deliberate, not incidental: the point of the verb contract is that one verb
+// serves both the UI and an agent calling it through `cf piece call`, so a
+// verb must not become UI-unbindable by declaring what it returns. The result
+// is simply unobserved here — the DOM has nowhere to put it, and the caller
+// that wants it reads the invocation receipt.
+//
+// Spelled `AnyStream` rather than `Stream<T> | Stream<void>` because that pair
+// pins the arity: it means `Stream<T, void> | Stream<void, void>`, which a
+// returning verb does not satisfy, making `onClick={addTopic}` a hard error
+// for exactly the verbs the contract exists to enable.
 type EventHandler<T> =
   | CellLike<CFEvent<T> | T>
   | ((event: CFEvent<T>) => void)
   | (() => void)
-  | Stream<T>
-  | Stream<void>;
+  | AnyStream;
 
 // `Piece` is not a pattern type.
 type Piece = any;
@@ -2914,7 +2924,6 @@ interface CFIFrameElement extends CFHTMLElement {}
 interface CFHStackElement extends CFHTMLElement {}
 interface CFFabElement extends CFHTMLElement {}
 interface CFModalElement extends CFHTMLElement {}
-interface CFModalProviderElement extends CFHTMLElement {}
 interface CFChevronButtonElement extends CFHTMLElement {}
 interface CFCardElement extends CFHTMLElement {}
 interface CFListItemElement extends CFHTMLElement {}
@@ -2928,7 +2937,6 @@ interface CFToolbarElement extends CFHTMLElement {}
 interface CFKbdElement extends CFHTMLElement {}
 interface CFKeybindElement extends CFHTMLElement {}
 interface CFRenderElement extends CFHTMLElement {}
-interface CFCellContextElement extends CFHTMLElement {}
 interface CFCFCAuthorshipElement extends CFHTMLElement {}
 interface CFCFCLabelElement extends CFHTMLElement {}
 interface CFCFCRenderBoundaryElement extends CFHTMLElement {}
@@ -3387,8 +3395,10 @@ interface CFScrollAttributes<T> extends CFHTMLAttributes<T> {
 
 interface CFCellLinkAttributes<T> extends CFHTMLAttributes<T> {
   "link"?: string;
-  "$cell": CellLike<any>;
+  "label"?: string;
+  "$cell"?: CellLike<any>;
   "spaceName"?: string;
+  "static"?: boolean;
 }
 
 interface CFSpaceLinkAttributes<T> extends CFHTMLAttributes<T> {
@@ -3587,12 +3597,6 @@ interface CFRenderAttributes<T> extends CFHTMLAttributes<T> {
   "variant"?: "full" | "chip" | "tile";
 }
 
-interface CFCellContextAttributes<T> extends CFHTMLAttributes<T> {
-  "$cell": CellLike<any>;
-  "label"?: string;
-  "inline"?: boolean;
-}
-
 interface CFCFCLabelAttributes<T> extends CFHTMLAttributes<T> {
   "$value"?: CellLike<unknown>;
   "value"?: unknown;
@@ -3689,8 +3693,6 @@ interface CFModalAttributes<T> extends CFHTMLAttributes<T> {
   "oncf-modal-opened"?: EventHandler<void>;
   "oncf-modal-closed"?: EventHandler<void>;
 }
-
-interface CFModalProviderAttributes<T> extends CFHTMLAttributes<T> {}
 
 interface CFChevronButtonAttributes<T> extends CFHTMLAttributes<T> {
   "expanded"?: boolean;
@@ -5056,10 +5058,6 @@ declare global {
         CFModalAttributes<CFModalElement>,
         CFModalElement
       >;
-      "cf-modal-provider": CFDOM.DetailedHTMLProps<
-        CFModalProviderAttributes<CFModalProviderElement>,
-        CFModalProviderElement
-      >;
       "cf-file-download": CFDOM.DetailedHTMLProps<
         CFFileDownloadAttributes<CFFileDownloadElement>,
         CFFileDownloadElement
@@ -5123,10 +5121,6 @@ declare global {
       "cf-render": CFDOM.DetailedHTMLProps<
         CFRenderAttributes<CFRenderElement>,
         CFRenderElement
-      >;
-      "cf-cell-context": CFDOM.DetailedHTMLProps<
-        CFCellContextAttributes<CFCellContextElement>,
-        CFCellContextElement
       >;
       "cf-cfc-authorship": CFDOM.DetailedHTMLProps<
         CFCFCAuthorshipAttributes<CFCFCAuthorshipElement>,

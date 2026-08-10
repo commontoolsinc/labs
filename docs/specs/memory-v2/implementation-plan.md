@@ -14,7 +14,7 @@ hash-addressed JSON facts plus subscription-id live updates to:
 ## Current Status
 
 This file and
-[10-implementation-guidance.md](/Users/berni/src/labs.exp-memory-impl-4/docs/specs/memory-v2/10-implementation-guidance.md)
+[10-implementation-guidance.md](10-implementation-guidance.md)
 are the authoritative implementation notes for the current code. They describe
 what is shipped now and what remains explicitly deferred, even where sections
 04-06 still describe the broader target design.
@@ -27,7 +27,8 @@ Implemented on the current branch:
   `graph.query`, `session.watch.set`, `session.watch.add`, `session.ack`,
   `response`, and `session/effect`
 - session-scoped watch-union sync with catch-up frames, `removes`, and
-  conflict-time sync flushing
+  per-verdict catch-up markers with client-side verdict parking (conflicts
+  and accepts, CT-1927)
 - one-shot `graph.query` support for `branch` and `atSeq`
 - `session.watch.add` duplicate-id handling: identical definitions are no-ops,
   changed definitions are rejected
@@ -83,7 +84,7 @@ memory route.
 
 - Rewrite this file to reflect the actual execution plan.
 - Rewrite
-  [10-implementation-guidance.md](/Users/berni/src/labs.exp-memory-impl-4/docs/specs/memory-v2/10-implementation-guidance.md)
+  [10-implementation-guidance.md](10-implementation-guidance.md)
   so it no longer points implementers at `fact` / `value` tables, commit hashes,
   or invocation-id-scoped subscriptions.
 - Keep sections 01-06, 10, and this file aligned enough that the code can use
@@ -127,8 +128,13 @@ memory route.
 - Recompute watch-union results per session and emit:
   - `upserts` for relevant current entity state
   - `removes` when an entity leaves the watch union
-- Flush already-committed relevant sync before returning `ConflictError`, so the
-  client can retry on fresh state.
+- Return transact verdicts inline before the independently batched fan-out;
+  serialize transaction publication and fan-out with one lock per space. Send
+  the verdict while the transaction holds the lock, finish its post-commit
+  scheduler bookkeeping, and release the lock for fan-out. Stage a
+  `caughtUpLocalSeq` catch-up obligation for accepts and conflict rejections
+  (CT-1927), delivered by the batched fan-out, so the CLIENT parks each verdict's
+  state application until the marker covers it.
 
 ## Phase 3: Client Rewrite
 

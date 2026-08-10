@@ -25,13 +25,14 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Can't access variable in nested scope | Variable scoping limitation | Pre-compute grouped data or use lift() with explicit params ([reactivity-issues](reactivity-issues.md#variable-scoping-in-reactive-contexts)) |
 | "Cannot access cell via closure" | Using lift() with closure | Pass all reactive deps as params to lift() ([@reactivity](../../common/concepts/reactivity.md)) |
 | CLI `get` returns stale computed values | `piece set` doesn't trigger recompute | Run `piece step` after `set` to trigger re-evaluation ([cli-debugging](cli-debugging.md#stale-computed-values-after-piece-set)) |
+| A field reads as `undefined` though the value is there; rendering the same path works | The field is typed `unknown`, whose schema the runner reads back as undefined while keeping the link | Name the field on the operand reading it — a lift/computed operand shape, or a `Cell<>` in a handler ([gotchas/unknown-typed-field-reads-undefined](gotchas/unknown-typed-field-reads-undefined.md)) |
 | Browser UI stale after a handler write | The write usually worked — the cell, piece, or render path is what to check | Inspect actual cell state first via `readCell`; don't rewrite the mutation ([gotchas/browser-stale-ui](gotchas/browser-stale-ui.md)) |
 | "handler() should be defined at module scope" | handler() inside pattern body | Move handler() outside pattern ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | UI churning, high CPU, never settles | Non-idempotent computed or action cycle | Run `await commonfabric.detectNonIdempotent()` ([non-idempotent-detection](non-idempotent-detection.md)) |
 | `non-idempotent raw:map` or `Reactive graph did not settle ... Actions: raw:map` | Mapped render body is doing work during render, often an event prop invoking `.send()` immediately | Inspect `.map()` JSX for `onClick={stream.send(...)}` or other render-time writes ([gotchas/immediate-event-invocation](gotchas/immediate-event-invocation.md)) |
 | "Function creation is not allowed in pattern context" | Helper function inside pattern | Move function to module scope ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | "Class creation is not allowed in pattern context" | Class declared/expressed inside pattern body | Move class to module scope; a method reading a captured reactive value sees a stale snapshot ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
-| "A method/getter/setter/function-valued property ... on an object literal in pattern or render context ..." (`pattern-context:object-member`) | A function-valued member on an object literal that becomes pattern result data | A getter or `toJSON()` freezes a snapshot when the result is stored; a method, setter, or function property is a value the reactive data model cannot store. Use a plain property or `computed(() => ...)` field for a value, or a module-scope `handler()`/`lift()` for behavior ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
+| "A method/getter/setter/function-valued property ... on an object literal in pattern or render context ..." (`pattern-context:object-member`) | A function-valued member on an object literal that becomes pattern result data | A getter freezes a snapshot when the result is stored; a method, setter, or function property (`toJSON` included) is a value the reactive data model cannot store. Use a plain property or `computed(() => ...)` field for a value, or a module-scope `handler()`/`lift()` for behavior ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | "lift() should not be immediately invoked inside a pattern" | `lift(...)(args)` inside pattern | Use `computed()` instead, or define lift() at module scope ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | Click handler does nothing, ID lookup fails silently | Using custom `id` property for lookups | Use `equals()` for identity, not custom IDs ([gotchas/custom-id-property-pitfall](gotchas/custom-id-property-pitfall.md)) |
 | Selection overwrites item data, `.set()` changes wrong value | Storing Cell reference directly | Box the reference: `{ item }` instead of `item` ([gotchas/cell-reference-overwrite](gotchas/cell-reference-overwrite.md)) |
@@ -73,6 +74,7 @@ inside computed(); Stream subscribe doesn't exist; binding the whole item to
 - [Scoped Cell Pitfalls](gotchas/scoped-cell-pitfalls.md) - `PerSpace`/`PerUser`/`PerSession` gotchas, incl. guarding render-path `.get().map()` against undefined-before-sync
 - [Closure Capture in Nested map()](gotchas/closure-capture-in-nested-map.md) - `(cellCall() ?? []).map(...)` nested in an outer `.map(...)` is a code smell; three recipes (map the cell directly; pre-bake top-level computed; local computed bridge)
 - [Browser UI Stale After a Handler Write](gotchas/browser-stale-ui.md) - Inspect actual cell state before assuming the write failed
+- [A Field Typed `unknown` Reads Back as Undefined](gotchas/unknown-typed-field-reads-undefined.md) - The reading operand's schema decides what materializes; naming the field is what makes the read follow the link
 
 ### Error Categories
 
@@ -85,7 +87,9 @@ inside computed(); Stream subscribe doesn't exist; binding the whole item to
 
 - [Console Commands](console-commands.md) - `globalThis.commonfabric.*` browser console reference
   - Starts with common tasks: read piece data, dump the rendered VDOM, diagnose
-    churn, find dead handlers, watch values, agent-browser recipes
+    churn, find dead handlers, watch values, agent-browser recipes — including
+    why a sub-pattern's cell can read `undefined` at an `of:` id while its value
+    lives at the `computed:` id of the same hash
   - Reference tail covers logger counts/timing/baselines/flags and worker traces
 - **Server-side write trace** — set `CF_DEBUG_MEMORY_WRITES=1` on the toolshed to
   log every memory write as `[memwrite] c=<conn> op=… id=… scope=… vhash=…`,
@@ -96,7 +100,7 @@ inside computed(); Stream subscribe doesn't exist; binding the whole item to
   See
   [`memwrite-trace.ts`](../../../packages/toolshed/routes/storage/memory/memwrite-trace.ts).
 - [VDOM Debug Helpers](vdom-debug.md) - `commonfabric.vdom.*` VDOM tree inspection
-- [Logger Internals](../logger-internals.md) - Creating loggers in runtime code (`getLogger`, timing, flags)
+- [Logger Internals](../../features/logger-internals.md) - Creating loggers in runtime code (`getLogger`, timing, flags)
 
 ### Diagnosis
 
@@ -117,4 +121,3 @@ inside computed(); Stream subscribe doesn't exist; binding the whole item to
 - [@reactivity](../../common/concepts/reactivity.md) - Reactivity system
 - [@writeable](../../common/concepts/types-and-schemas/writable.md) - Writable type system
 - [@COMPONENTS](../../common/components/COMPONENTS.md) - UI components
-- [@CELL_CONTEXT](../../common/components/CELL_CONTEXT.md) - Debug tool details

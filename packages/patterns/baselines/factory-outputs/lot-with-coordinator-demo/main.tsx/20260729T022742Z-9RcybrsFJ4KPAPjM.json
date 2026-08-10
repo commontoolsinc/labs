@@ -1,0 +1,130 @@
+{
+  "argumentSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+  },
+  "pattern": "factory-outputs/lot-with-coordinator-demo/main.tsx",
+  "resultSchema": {
+    "$defs": {
+      "CommuteMode": {
+        "enum": [
+          "drive",
+          "transit",
+          "bike",
+          "wfh",
+          "other"
+        ]
+      },
+      "ParkingSpot": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "spotNumber": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "spotNumber",
+          "label",
+          "notes",
+          "active"
+        ],
+        "type": "object"
+      },
+      "Person": {
+        "properties": {
+          "commuteMode": {
+            "$ref": "#/$defs/CommuteMode"
+          },
+          "defaultSpot": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priorityRank": {
+            "type": "number"
+          },
+          "spotPreferences": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "vehicles": {
+            "items": {
+              "$ref": "#/$defs/Vehicle"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "commuteMode",
+          "spotPreferences",
+          "defaultSpot",
+          "priorityRank"
+        ],
+        "type": "object"
+      },
+      "Vehicle": {
+        "properties": {
+          "color": {
+            "type": "string"
+          },
+          "make": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "plateId": {
+            "type": "string"
+          },
+          "plateState": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "plateId",
+          "plateState",
+          "color",
+          "make",
+          "model"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "people": {
+        "items": {
+          "$ref": "#/$defs/Person"
+        },
+        "type": "array"
+      },
+      "spots": {
+        "items": {
+          "$ref": "#/$defs/ParkingSpot"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "people",
+      "spots"
+    ],
+    "type": "object"
+  }
+}

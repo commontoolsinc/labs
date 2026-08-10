@@ -1,4 +1,8 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
+import {
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
@@ -19,16 +23,24 @@ import type {
   SandboxCommandRequest,
   SandboxCommandResult,
   SandboxRuntime,
+  SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
 
 class FakeSandboxRuntime implements SandboxRuntime {
-  readonly kind = "docker-runsc-cfc" as const;
   readonly shellRequests: SandboxShellRequest[] = [];
 
   constructor(
     private readonly shellResults: SandboxCommandResult[] = [],
   ) {}
+
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: this.defaultWorkingDirectory(),
+      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+    };
+  }
 
   resolvePath(path: string, cwd = this.defaultWorkingDirectory()): string {
     return normalize(path.startsWith("/") ? path : `${cwd}/${path}`);
@@ -36,6 +48,10 @@ class FakeSandboxRuntime implements SandboxRuntime {
 
   isPathWithinWorkspace(path: string): boolean {
     return path === "/workspace" || path.startsWith("/workspace/");
+  }
+
+  isPathWithinAllowedRoots(path: string): boolean {
+    return this.isPathWithinWorkspace(path);
   }
 
   defaultWorkingDirectory(): string {
@@ -422,7 +438,7 @@ Deno.test({
           const body = JSON.parse(String(init?.body)) as {
             messages: Array<{ role: string }>;
           };
-          const payload = body.messages.some((message) =>
+          const payload = chatViewOfRequest(body).messages.some((message) =>
               message.role === "tool"
             )
             ? {
@@ -452,7 +468,10 @@ Deno.test({
               }],
             };
           return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+              { status: 200 },
+            ),
           );
         },
       });
@@ -639,35 +658,38 @@ Deno.test({
         },
         resultRef: result.runState.toolOutputs[0],
       });
-      assertEquals(persistedReport.gatewayAttempts?.length, 2);
       assertEquals(persistedReport.modelAttempts?.length, 2);
       assertEquals(
         persistedReport.modelAttempts?.map((attempt) => attempt.providerId),
         ["openai-compatible-gateway", "openai-compatible-gateway"],
       );
       assertEquals(
-        persistedReport.gatewayAttempts?.map((attempt) => attempt.sequence),
+        persistedReport.modelAttempts?.map((attempt) => attempt.operation),
+        ["responses", "responses"],
+      );
+      assertEquals(
+        persistedReport.modelAttempts?.map((attempt) => attempt.sequence),
         [1, 2],
       );
       assertEquals(
-        persistedReport.gatewayAttempts?.map((attempt) => attempt.modelTurn),
+        persistedReport.modelAttempts?.map((attempt) => attempt.modelTurn),
         [1, 2],
       );
       assertEquals(
-        persistedReport.gatewayAttempts?.map((attempt) => attempt.runId),
+        persistedReport.modelAttempts?.map((attempt) => attempt.runId),
         ["run-loop-persisted", "run-loop-persisted"],
       );
       assertEquals(
-        persistedReport.gatewayAttempts?.[0].outcome,
+        persistedReport.modelAttempts?.[0].outcome,
         "http_response",
       );
-      assertEquals(persistedReport.gatewayAttempts?.[0].httpStatus, 200);
+      assertEquals(persistedReport.modelAttempts?.[0].httpStatus, 200);
       assertEquals(
         {
-          model: persistedReport.gatewayAttempts?.[0].request.model,
-          messageCount: persistedReport.gatewayAttempts?.[0].request
+          model: persistedReport.modelAttempts?.[0].request.model,
+          messageCount: persistedReport.modelAttempts?.[0].request
             .messageCount,
-          toolCount: persistedReport.gatewayAttempts?.[0].request.toolCount,
+          toolCount: persistedReport.modelAttempts?.[0].request.toolCount,
         },
         {
           model: "gpt-5.4",
@@ -676,15 +698,15 @@ Deno.test({
         },
       );
       assert(
-        (persistedReport.gatewayAttempts?.[0].request.serializedBytes ?? 0) >
+        (persistedReport.modelAttempts?.[0].request.serializedBytes ?? 0) >
           0,
       );
       assertEquals(
-        persistedReport.gatewayAttempts?.[1].request.messageCount,
+        persistedReport.modelAttempts?.[1].request.messageCount,
         3,
       );
       assertEquals(
-        JSON.stringify(persistedReport.gatewayAttempts).includes(
+        JSON.stringify(persistedReport.modelAttempts).includes(
           "Summarize the todo file.",
         ),
         false,
@@ -813,12 +835,13 @@ Deno.test({
           const body = JSON.parse(String(init?.body)) as {
             messages: Array<{ role: string; content?: string }>;
           };
-          const hasToolResponse = body.messages.some((message) =>
-            message.role === "tool"
-          );
-          const toolResponseCount = body.messages.filter((message) =>
-            message.role === "tool"
-          ).length;
+          const hasToolResponse = chatViewOfRequest(body).messages.some((
+            message,
+          ) => message.role === "tool");
+          const toolResponseCount =
+            chatViewOfRequest(body).messages.filter((message) =>
+              message.role === "tool"
+            ).length;
           const payload = !hasToolResponse
             ? {
               choices: [{
@@ -869,7 +892,10 @@ Deno.test({
               }],
             };
           return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+              { status: 200 },
+            ),
           );
         },
       });
@@ -1082,7 +1108,10 @@ Deno.test({
                 },
               }],
             };
-          return new Response(JSON.stringify(payload), { status: 200 });
+          return new Response(
+            JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+            { status: 200 },
+          );
         },
       });
 
@@ -1286,7 +1315,7 @@ Deno.test({
           model: "gpt-5.4",
           cfcEnforcementMode: "enforce-explicit",
         }),
-        fetchFn: () => {
+        fetchFn: (_input, init) => {
           requestCount += 1;
           const payload = requestCount === 1
             ? {
@@ -1348,7 +1377,10 @@ Deno.test({
               }],
             };
           return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+              { status: 200 },
+            ),
           );
         },
       });
@@ -1523,7 +1555,7 @@ Deno.test({
           const body = JSON.parse(String(init?.body)) as {
             messages: Array<{ role: string }>;
           };
-          const payload = body.messages.some((message) =>
+          const payload = chatViewOfRequest(body).messages.some((message) =>
               message.role === "tool"
             )
             ? {
@@ -1556,7 +1588,10 @@ Deno.test({
               }],
             };
           return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+              { status: 200 },
+            ),
           );
         },
       });
@@ -1705,7 +1740,7 @@ Deno.test({
           const body = JSON.parse(String(init?.body)) as {
             messages: Array<{ role: string }>;
           };
-          const payload = body.messages.some((message) =>
+          const payload = chatViewOfRequest(body).messages.some((message) =>
               message.role === "tool"
             )
             ? {
@@ -1737,7 +1772,10 @@ Deno.test({
               }],
             };
           return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+              { status: 200 },
+            ),
           );
         },
       });

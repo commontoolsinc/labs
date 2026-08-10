@@ -18,6 +18,11 @@ import type {
   AsCellType,
   Cell,
   ComparableCell,
+  FabricBytes,
+  FabricEpochDays,
+  FabricEpochNsec,
+  FabricHash,
+  FabricRegExp,
   FactoryInput,
   HandlerFactory,
   JSONSchema,
@@ -181,6 +186,11 @@ type SchemaCore<
   : T extends { type: "number" | "integer" } ? number
   : T extends { type: "boolean" } ? boolean
   : T extends { type: "null" } ? null
+  : T extends { type: "FabricBytes" } ? FabricBytes
+  : T extends { type: "FabricEpochDays" } ? FabricEpochDays
+  : T extends { type: "FabricEpochNsec" } ? FabricEpochNsec
+  : T extends { type: "FabricHash" } ? FabricHash
+  : T extends { type: "FabricRegExp" } ? FabricRegExp
   : T extends { type: "array" }
     ? T extends { items: infer I } ? SchemaArrayItems<I, Root, Depth, WrapCells>
     : unknown[]
@@ -269,6 +279,9 @@ type SchemaInner<
  * - $ref resolution (both "#" and "#/path/to/def")
  * - anyOf unions
  * - Primitive types (string, number, boolean, null)
+ * - Fabric-primitive types ("FabricBytes", "FabricEpochDays",
+ *   "FabricEpochNsec", "FabricHash", "FabricRegExp"), each inferring the
+ *   corresponding `FabricPrimitive` interface from this package
  * - Arrays with typed items
  * - Objects with typed properties (required and optional)
  * - Cell and Stream wrapping via asCell/asStream
@@ -422,7 +435,7 @@ declare module "commonfabric" {
       eventSchema: E,
       stateSchema: T,
       handler: (event: Schema<E>, props: Schema<T>) => any,
-    ): HandlerFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
+    ): HandlerFactory<SchemaWithoutCell<E>, SchemaWithoutCell<T>>;
   }
 
   // Augment WishFunction with schema-based overloads

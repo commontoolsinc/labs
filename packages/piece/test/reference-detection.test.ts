@@ -4,7 +4,7 @@ import { isObject, isRecord } from "@commonfabric/utils/types";
 
 /**
  * These tests focus on the core functionality used by our piece reference detection
- * without requiring the full PieceManager setup
+ * without requiring the full PiecesController setup
  */
 describe("Reference detection core functionality", () => {
   // Test detection of object structures similar to cell links

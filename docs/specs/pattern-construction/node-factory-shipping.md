@@ -79,17 +79,20 @@ protocol. An inline pattern closes over the values to bind, and the resulting
 All three factory kinds are already callable function objects with useful
 descriptor state:
 
-- `PatternFactory.toJSON()` emits `$patternRef`, `argumentSchema`, and
+- `PatternFactory.toEncodableForm()` emits `$patternRef`, `argumentSchema`, and
   `resultSchema` at the storage boundary.
-- `ModuleFactory.toJSON()` and `HandlerFactory.toJSON()` emit module
-  descriptors, using `$implRef` for addressable JavaScript implementations.
+- `ModuleFactory.toEncodableForm()` and `HandlerFactory.toEncodableForm()` emit
+  module descriptors, using `$implRef` for addressable JavaScript
+  implementations.
 - `asScope()` and `PatternFactory.inSpace()` return derived callable factories.
 - verified exports and `__cfReg` values already enter the generic artifact
   index, regardless of factory kind.
 
-The existing `toJSON()` path is a one-way conversion. Native conversion calls
-`toJSON()` on a function and replaces the function with inert plain data.
-Generic reads do not recreate a callable factory. Pattern-valued list builtins
+The existing `toEncodableForm()` path is a one-way conversion. The runtime's
+artifact walk (`packages/runner/src/encodable-form.ts`) replaces each factory
+with inert plain data before the value reaches the data model, which has no
+route to a function of its own. Generic reads do not recreate a callable
+factory. Pattern-valued list builtins
 and LLM tools compensate with bespoke `$patternRef` handling.
 
 Serialization alone also does not make a symbolic factory callable. Pattern
@@ -165,7 +168,7 @@ The same applies to modules and handlers:
 interface FactoryInputs {
   value: string;
   transform: ModuleFactory<{ value: string }, { length: number }>;
-  select: HandlerFactory<{ source: string }, { id: string }>;
+  select: HandlerFactory<{ id: string }, { source: string }>;
 }
 
 const useFactories = pattern<FactoryInputs>(({
@@ -389,7 +392,7 @@ deep-frozenness; the side-table state is not canonical until sealing succeeds.
 
 `FactoryStateV1.ref` always names the complete builder factory artifact, as
 returned by `getArtifactEntryRef(factory)` through its root token. It is never
-copied from `moduleToJSON(...).$implRef`: that legacy ref names an
+copied from `moduleToEncodableForm(...).$implRef`: that legacy ref names an
 implementation-resolution record and may not recover the factory descriptor or
 methods.
 
@@ -615,7 +618,7 @@ against the parent binding context, writes or links them into this cell while
 preserving CFC labels, and supplies the cell to alias resolution.
 
 The alias vocabulary gains `{ $alias: { cell: "params", path, ... } }`.
-`unwrapOneLevelAndBindtoDoc`, `sendValueToBinding`, and direct sub-pattern setup
+`unwrapOneLevelAndBindToDoc`, `sendValueToBinding`, and direct sub-pattern setup
 accept that pseudo-root only when the invocation has a params cell. Nested
 links resolve relative to their original parent before the hidden cell is
 populated; cross-space links remain links rather than copied values. On resume,

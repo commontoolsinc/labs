@@ -9,7 +9,7 @@ export interface LlmResultState<T = unknown> {
   error?: string;
   partial?: string;
   requestHash?: string;
-  messages?: unknown;
+  messages?: readonly unknown[];
   groundingSources?: unknown;
 }
 
@@ -49,5 +49,32 @@ export function waitForLlmSettled<T = unknown>(
     runtime,
     cell,
     (value) => value?.pending === false,
+  );
+}
+
+/**
+ * Resolve with the value of `llmDialog`'s result cell, once the conversation
+ * has settled on exactly `expectedCount` messages.
+ *
+ * A turn appends the user's message, and appends again once the request
+ * settles. A tool call adds the call and its result to the turn that made it.
+ * So the first exchange leaves two messages and the second leaves four, and a
+ * count names the turn a test waits for. Every turn ends in the same settled
+ * state, and the count is what tells them apart.
+ *
+ * Everything `waitForLlmSettled` says about `runtime` and about reading at
+ * quiescence applies here too.
+ */
+export function waitForLlmMessages(
+  runtime: Runtime,
+  // deno-lint-ignore no-explicit-any
+  cell: Cell<any>,
+  expectedCount: number,
+): Promise<LlmResultState> {
+  return waitForCellValue<LlmResultState>(
+    runtime,
+    cell,
+    (value) =>
+      value?.pending === false && value.messages?.length === expectedCount,
   );
 }

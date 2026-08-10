@@ -111,7 +111,7 @@ try {
       type: WorkerIPCMessageType.Initialize,
       data: {
         did: identity.did(),
-        toolshedUrl: "memory://worker-handler-test",
+        toolshedUrl: "https://background-piece-service.invalid",
         rawIdentity: identity.serialize(),
       },
     },
@@ -178,7 +178,7 @@ try {
       key: (key: string) => key === "bgUpdater" ? updater : undefined,
     };
     let getCalls = 0;
-    const manager = {
+    const pieces = {
       runtime: {
         getCellFromEntityId: (space: string) => {
           assertEquals(space, TEST_DID);
@@ -191,7 +191,7 @@ try {
           "activeEntry" in overrides ? overrides.activeEntry : { active: true },
         );
       },
-      get: () => {
+      getPieceCell: () => {
         getCalls++;
         return Promise.resolve(loadedPiece);
       },
@@ -199,7 +199,7 @@ try {
     setWorkerStateForTesting({
       initialized: true,
       spaceId: TEST_DID as never,
-      manager: manager as never,
+      pieces: pieces as never,
       runtime: {
         idle: overrides.idle ?? (() => Promise.resolve()),
       } as never,
@@ -217,7 +217,7 @@ try {
   assertEquals(state.sends.length, 4);
 
   setWorkerStateForTesting({
-    manager: {} as never,
+    pieces: {} as never,
     spaceId: undefined as never,
   });
   await assertRejects(

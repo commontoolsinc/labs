@@ -18,7 +18,8 @@ import {
   saveCredential,
   type StoredCredential,
 } from "../lib/credentials.ts";
-import { ROOT_KEY } from "../../shared/mod.ts";
+import { ROOT_KEY } from "../lib/root-key.ts";
+import "../components/VBox.ts";
 
 type AuthFlow = "register" | "login";
 
@@ -98,7 +99,8 @@ export class XLoginView extends BaseView {
       gap: 0.5rem;
     }
 
-    input, textarea {
+    input,
+    textarea {
       width: 100%;
       padding: 0.75rem 1rem;
       margin-bottom: 0.5rem;

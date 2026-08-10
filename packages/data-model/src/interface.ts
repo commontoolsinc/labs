@@ -21,8 +21,23 @@
  * `instanceof FabricSpecialObject` check wherever code needs to recognize any
  * fabric-system value without caring which branch of the hierarchy it
  * belongs to.
+ *
+ * The `@commonfabric/FabricSpecialObject` member is a nominal brand, and
+ * exists only in the type system: `declare` emits no runtime member, and
+ * nothing ever reads the key. Without it the class is structurally empty, so
+ * *every* object satisfies `FabricSpecialObject` — which in turn makes every
+ * object satisfy `FabricValue`, since that union includes this type. The brand
+ * is what makes `FabricValue` mean anything as a static claim.
+ *
+ * It is a well-known string key rather than a `unique symbol` because that
+ * would require importing a symbol *value*, and this file is deliberately free
+ * of runtime imports (see the file header). `packages/api/index.ts` declares
+ * the identical member; the two must agree exactly, or a value branded by one
+ * will not satisfy the other.
  */
-export abstract class FabricSpecialObject {}
+export abstract class FabricSpecialObject {
+  declare readonly "@commonfabric/FabricSpecialObject": true;
+}
 
 //
 // Fabric instance protocol
@@ -38,6 +53,14 @@ export abstract class FabricSpecialObject {}
  * than this class directly; `BaseFabricInstance` is where shared
  * template-method scaffolding (such as `shallowClone()`) lives.
  *
+ * An instance holds all of its state privately and makes it reachable only
+ * through members, so it has no own properties at all. A structural view of
+ * one -- a spread, `Object.keys()`, a naive walk -- therefore sees nothing.
+ * Mutable state is exposed as an accessor pair over a private field, whose
+ * setter is responsible for honoring the instance's frozen state:
+ * `Object.freeze()` bears only on own properties and so cannot enforce that
+ * on its own.
+ *
  * Subclasses must implement `deepClone()` and `shallowClone()`; both are
  * normally inherited from `BaseFabricInstance` as template methods, with the
  * subclass supplying the symbol-keyed clone core each one calls. The
@@ -49,16 +72,16 @@ export abstract class FabricInstance extends FabricSpecialObject {
   /**
    * Returns a new deep clone of this instance with equivalent data but no
    * shared structure for any unfrozen data in the original. When `frozen ===
-   * true`, produces a frozen instance with maximal structural sharing, including
-   * returning `this` if it is already deep-frozen. When `frozen === false`,
-   * produces a deeply-mutable instance with no visible shared reference
+   * true`, produces a frozen instance with maximal structural sharing,
+   * including returning `this` if it is already deep-frozen. When `frozen ===
+   * false`, produces a deeply-mutable instance with no visible shared reference
    * structure with the original.
    *
-   * The concrete template-method implementation lives on
-   * `BaseFabricInstance` (deferring to the `[DEEP_CLONE_CORE]` sibling,
-   * mirroring the `shallowClone()`/`[SHALLOW_UNFROZEN_CLONE]()` split); this
-   * declaration just pins the protocol surface so that callers can invoke it
-   * through a `FabricInstance` reference.
+   * The concrete template-method implementation lives on `BaseFabricInstance`
+   * (deferring to the `[DEEP_CLONE_CORE]` sibling, mirroring the
+   * `shallowClone()`/`[SHALLOW_UNFROZEN_CLONE]()` split); this declaration just
+   * pins the protocol surface so that callers can invoke it through a
+   * `FabricInstance` reference.
    */
   abstract deepClone(frozen: boolean): FabricInstance;
 
@@ -93,6 +116,7 @@ export abstract class FabricInstance extends FabricSpecialObject {
  * See Section 1.4.5 and 1.4.6 of the formal spec.
  */
 export abstract class FabricPrimitive extends FabricSpecialObject {
+  /** Constructs an instance. */
   constructor() {
     super();
   }
@@ -103,29 +127,29 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
 //
 
 /**
- * The full set of values that the fabric storage layer can represent. This
- * is the strongly-typed "middle layer" of the three-layer architecture:
+ * The full set of values that the fabric storage layer can represent. This is
+ * the strongly-typed "middle layer" of the three-layer architecture:
  *
- *   JavaScript "wild west" (`unknown`) <-> `FabricValue` <-> Serialized (`Uint8Array`)
+ *     JavaScript "wild west" (`unknown`)
+ *       <-> `FabricValue`
+ *       <-> serialized (`Uint8Array`)
  *
- * Most native JS object types enter the fabric layer via wrapper classes
- * that extend `FabricInstance`; other special values extend `FabricPrimitive`.
- * Both of those reach `FabricValue` through the common `FabricSpecialObject`
- * arm. The non-object values (`bigint` and the other scalars) are direct
- * members of the union instead, not routed through that arm. Some native types
- * are converted to fabric primitives during conversion.
+ * Most native JS object types enter the fabric layer via wrapper classes that
+ * extend `FabricInstance`; other special values extend `FabricPrimitive`. Both
+ * of those reach `FabricValue` through the common `FabricSpecialObject` arm.
+ * The non-object values (`bigint` and the other scalars) are direct members of
+ * the union instead, not routed through that arm. Some native types are
+ * converted to fabric primitives during conversion.
  *
  * `undefined` is preserved.
  *
- * `symbol` values are restricted at runtime to **registry-interned** symbols
- * -- those for which `Symbol.keyFor(s)` returns a string. These are
- * portable across realms and processes via their registry key. Unique
- * symbols (`Symbol(desc)`) are not portable and are rejected at the fabric
- * boundary. TypeScript's `symbol` type cannot distinguish the two, so the
- * gate is a runtime one. Note also that the fabric-value path
- * separately rejects all symbols at the entrance (relaxation deferred to a
- * follow-up); the type union admits `symbol` so the lower layers (hashing,
- * JSON encoding) can be written and tested ahead of that gate change.
+ * `symbol` values are restricted at runtime to **registry-interned** symbols --
+ * those for which `Symbol.keyFor(s)` returns a string. These are portable
+ * across realms and processes via their registry key. Unique symbols
+ * (`Symbol(desc)`) are not portable and are rejected at the fabric boundary.
+ * TypeScript's `symbol` type cannot distinguish the two, so the gate is a
+ * runtime one, and it is the same gate at every point a symbol is admitted or
+ * refused: `Symbol.keyFor(value) !== undefined`.
  *
  * **Deep-frozen honesty (mandatory).** A `FabricValue` must report its frozen
  * state truthfully and permanently. In particular, a fabric record or array is
@@ -155,18 +179,25 @@ export type FabricValue =
   // -- undefined --
   | undefined;
 
-/** Array of fabric values. */
-export interface FabricArray extends ArrayLike<FabricValue> {}
+/** A fabric value other than `null` or `undefined`. */
+export type NonNullableFabricValue = NonNullable<FabricValue>;
+
+/** Read-only array of fabric values. */
+export interface FabricArray extends ReadonlyArray<FabricValue> {}
 
 /**
  * Object/record of fabric values.
  *
- * Note: `.__proto__` and `constructor()` properties are not currently guarded
- * against at the type level or at runtime in clone/conversion internals.
- * If prototype pollution becomes a concern, add boundary validation where
- * values enter the fabric system (e.g., `fabricFromNativeValue()`).
+ * The names `__proto__` and `constructor` are refused at the boundaries where
+ * values enter or leave storage, so no `FabricPlainObject` carries one. The
+ * type cannot say as much -- a string index signature admits every string --
+ * so the guarantee is the boundary's, not TypeScript's. Note the internal copy
+ * loops are unguarded and rely on it: they rebuild records by assignment,
+ * which for `__proto__` would repoint the copy's prototype rather than
+ * creating a property.
  */
-export interface FabricPlainObject extends Record<string, FabricValue> {}
+export interface FabricPlainObject
+  extends Readonly<Record<string, FabricValue>> {}
 
 /**
  * Single "layer" of fabric conversion -- the result of shallow conversion
@@ -179,20 +210,30 @@ export type FabricValueLayer =
   | unknown[]
   | Record<string, unknown>;
 
+/** A mutable array root whose elements remain fabric values. */
+export type MutableFabricArrayLayer = FabricValue[];
+
+/** A mutable record root whose values remain fabric values. */
+export type MutableFabricPlainObjectLayer = Record<string, FabricValue>;
+
+/**
+ * A fabric value with a mutable root container. Nested containers remain
+ * ordinary (readonly) `FabricValue`s, so this models a single construction
+ * layer rather than a deep thaw.
+ */
+export type MutableFabricValueLayer =
+  | Exclude<FabricValue, FabricArray | FabricPlainObject>
+  | MutableFabricArrayLayer
+  | MutableFabricPlainObjectLayer;
+
 /**
  * Union of raw native JS **object** types that the fabric type system can
  * convert into `FabricInstance` wrappers or `FabricPrimitive` values. These
  * are the inputs to the "sausage grinder" -- `shallowFabricFromNativeValue()`
- * accepts `FabricValue | FabricNativeObject`, meaning callers can pass in
- * either already-fabric data or raw native JS objects. The conversion
- * produces `FabricInstance` wrappers or `FabricPrimitive` values that live
- * inside `FabricValue`.
- *
- * The `{ toJSON(): unknown }` arm covers objects (and functions) that are
- * convertible to fabric form via their `toJSON()` method. This is a
- * `toJSON()`-based conversion path, included here so the
- * `isFabricCompatible()` type predicate
- * (`value is FabricValue | FabricNativeObject`) remains sound.
+ * accepts `unknown`, so callers can hand it already-fabric data or raw native
+ * JS objects alike, and whatever it cannot represent is rejected there rather
+ * than excluded by the signature. The conversion produces `FabricInstance`
+ * wrappers or `FabricPrimitive` values that live inside `FabricValue`.
  *
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
  * and belongs directly in `FabricValue` without wrapping.
@@ -203,8 +244,7 @@ export type FabricNativeObject =
   | Set<unknown>
   | Date
   | RegExp
-  | Uint8Array
-  | { toJSON(): unknown };
+  | Uint8Array;
 
 /**
  * A `FabricValue`, a `FabricNativeObject`, or a deep tree thereof -- the values

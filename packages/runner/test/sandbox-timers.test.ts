@@ -1,11 +1,12 @@
+/// <reference path="./clock.d.ts" />
 // The SES pattern compartment endows no timers (part of the structural barrier
-// pinned by security-timing.test.ts). Pattern code that needs a delay — API
-// clients doing retry/backoff — must therefore guard its timer use: read
+// pinned by security-timing.test.ts). Code that wants a delay in both a host
+// context and a compartment must therefore guard its timer use: read
 // `globalThis.setTimeout` (a member access that yields undefined in-sandbox,
-// not a ReferenceError) and no-op when it is absent, so backoff degrades to an
-// immediate retry rather than throwing. These tests pin that the compartment
+// not a ReferenceError) and no-op when it is absent, so the wait degrades to an
+// immediate return rather than throwing. These tests pin that the compartment
 // omits the timers, that a RAW `setTimeout(...)` call throws inside it, and
-// that the guard used by the API clients resolves immediately there.
+// that the guard resolves immediately there.
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
@@ -14,9 +15,8 @@ import {
 } from "../src/sandbox/ses-runtime.ts";
 import { createModuleCompartmentGlobals } from "../src/sandbox/compartment-globals.ts";
 
-// The exact backoff guard the API clients use (airtable-client, gmail-send-client,
-// google-docs-client, google-docs-comment-orchestrator, and the importer-prompt
-// template). Evaluated verbatim inside a real compartment.
+// The exact guard `calendar-write-client`'s waitIfTimersAreAvailable uses.
+// Evaluated verbatim inside a real compartment.
 const GUARDED_BACKOFF_SRC = `async function () {
   const sleep = (ms) => {
     if (ms <= 0) return Promise.resolve();
@@ -74,8 +74,10 @@ describe("sandbox timers (channel: no fine clock)", () => {
 
   it("the same guard DOES wait when a timer is present (host behavior unchanged)", async () => {
     // Outside the sandbox (this test's own Deno global has setTimeout), the guard
-    // takes the real-wait branch, so the API clients' plain-Deno unit tests keep
-    // exercising actual backoff.
+    // takes the waiting branch, so the API clients' plain-Deno unit tests keep
+    // exercising actual backoff. This runs under the package's fake clock, so the
+    // waiting branch's `setTimeout` is a frozen test-file timer: it does not
+    // resolve on its own, and `clock.tick` advances logical time to fire it.
     const sleep = (ms: number): Promise<void> => {
       if (ms <= 0) return Promise.resolve();
       const timer =
@@ -89,7 +91,8 @@ describe("sandbox timers (channel: no fine clock)", () => {
     const p = sleep(10).then(() => {
       fired = true;
     });
-    expect(fired).toBe(false); // did not resolve synchronously — a real wait
+    expect(fired).toBe(false); // did not resolve synchronously — the waiting branch
+    await clock.tick(10);
     await p;
     expect(fired).toBe(true);
   });

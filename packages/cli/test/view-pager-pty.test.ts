@@ -317,11 +317,19 @@ Deno.test({
         await p.sendExpectingRedraw("j");
         await p.sendExpectingRedraw("k");
         await p.send("\\");
-        await p.expect("Line wrapping: on", "backslash enables line wrapping");
+        await p.expect(
+          "Line wrapping: hard",
+          "backslash enables hard wrapping",
+        );
+        await p.send("\\");
+        await p.expect(
+          "Line wrapping: word",
+          "backslash enables word wrapping",
+        );
         await p.send("\\");
         await p.expect(
           "Line wrapping: off",
-          "backslash disables line wrapping",
+          "backslash cycles back to unwrapped lines",
         );
         await p.send("G");
         await p.expect("END", "the end-of-document position indicator");

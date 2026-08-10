@@ -7,6 +7,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isSigilLink } from "../src/link-utils.ts";
 import { type SigilLink } from "../src/sigil-types.ts";
 import { JSONSchema } from "../src/builder/types.ts";
@@ -83,7 +84,26 @@ describe("getAsLink method", () => {
     expect(linkRefPayload(link).path).toEqual(["nested", "value"]);
   });
 
-  it("should return sigil format for both getAsLink and toJSON", () => {
+  it("should render as the link it names in a debug string", () => {
+    // `toCompactDebugString` honors the JSON protocol, and pattern-test
+    // assertion diagnostics render their operands with it. Without the member,
+    // rendering a value holding a cell walks the cell's own members into the
+    // runtime, so the rendering carries per-process detail -- the runtime's id
+    // among it -- and reports differently each run.
+    const cell = runtime.getCell<{ value: number }>(
+      space,
+      "cell-debug-render-test",
+      undefined,
+      tx,
+    );
+    cell.set({ value: 42 });
+
+    const link = toCompactDebugString(cell.toSigilLinkOrNull());
+    expect(toCompactDebugString(cell)).toBe(link);
+    expect(toCompactDebugString({ held: cell })).toBe(`{"held":${link}}`);
+  });
+
+  it("should return sigil format for both getAsLink and toSigilLinkOrNull", () => {
     const cell = runtime.getCell<{ value: number }>(
       space,
       "getAsLink-json-test",
@@ -93,19 +113,19 @@ describe("getAsLink method", () => {
     cell.set({ value: 42 });
 
     const link = cell.getAsLink();
-    const json = cell.toJSON();
+    const sigilLink = cell.toSigilLinkOrNull();
 
     // getAsLink returns sigil format
     expect(link).toHaveProperty("/");
     expect(linkRefPayload(link)).toBeDefined();
 
-    // toJSON now also returns sigil format (includes space for cross-space references)
-    expect(json).not.toBeNull();
-    const jsonPayload = linkRefPayload(json as SigilLink);
-    expect(jsonPayload.id).toBeDefined();
-    expect(jsonPayload.path).toEqual([]);
-    // Verify space is included for cross-space resolution
-    expect(jsonPayload.space).toEqual(space);
+    // So does the link a cell reaches storage as, space included so a
+    // cross-space reference resolves.
+    expect(sigilLink).not.toBeNull();
+    const payload = linkRefPayload(sigilLink as SigilLink);
+    expect(payload.id).toBeDefined();
+    expect(payload.path).toEqual([]);
+    expect(payload.space).toEqual(space);
   });
 
   it("should create relative links with base parameter - same document", () => {

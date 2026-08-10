@@ -1,58 +1,14 @@
 import { computed, pattern, UI } from "commonfabric";
+import {
+  findElement,
+  findNodeByProp,
+  readValue,
+} from "../test/vnode-helpers.ts";
 import GeneratedArt, {
   deriveGeneratedArtFetchState,
   generatedImageUrlFor,
   safeImageUrl,
 } from "./generated-art.tsx";
-
-const isRecord = (value: unknown): value is Record<PropertyKey, unknown> =>
-  typeof value === "object" && value !== null;
-
-const readValue = (value: unknown): unknown => {
-  if (!isRecord(value) || typeof value.get !== "function") {
-    return value;
-  }
-  return (value.get as () => unknown)();
-};
-
-const propsOf = (node: unknown): Record<PropertyKey, unknown> | undefined => {
-  const value = readValue(node);
-  if (!isRecord(value)) return undefined;
-  const props = readValue(value.props);
-  return isRecord(props) ? props : undefined;
-};
-
-const childrenArray = (children: unknown): unknown[] => {
-  const value = readValue(children);
-  if (Array.isArray(value)) return value;
-  return value === undefined || value === null || typeof value === "boolean"
-    ? []
-    : [value];
-};
-
-const childNodes = (node: unknown): unknown[] => {
-  const value = readValue(node);
-  if (Array.isArray(value)) return value;
-  if (!isRecord(value)) return [];
-  const ui = value[UI];
-  return [
-    ...(ui === undefined || ui === value ? [] : [ui]),
-    ...childrenArray(value.children),
-  ];
-};
-
-const findNodeByProp = (
-  root: unknown,
-  prop: string,
-  expected: unknown,
-): unknown | undefined => {
-  const value = readValue(root);
-  const props = propsOf(value);
-  if (props && readValue(props[prop]) === expected) return value;
-  return childNodes(value)
-    .map((child) => findNodeByProp(child, prop, expected))
-    .find((child) => child !== undefined);
-};
 
 const STORED_IMAGE =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ";
@@ -71,18 +27,6 @@ export const fetchMocks = [
     base64Body: TINY_PNG_BASE64,
   },
 ];
-
-// Walk the rendered tree for a vnode by element name (e.g. "img", "cf-image").
-const findNodeByName = (
-  root: unknown,
-  name: string,
-): unknown | undefined => {
-  const value = readValue(root);
-  if (isRecord(value) && readValue(value.name) === name) return value;
-  return childNodes(value)
-    .map((child) => findNodeByName(child, name))
-    .find((child) => child !== undefined);
-};
 
 export default pattern(() => {
   const art = GeneratedArt({
@@ -122,13 +66,13 @@ export default pattern(() => {
   );
 
   const assert_gated_instance_shows_fallback_only = computed(() =>
-    findNodeByName(gated[UI], "img") === undefined &&
-    findNodeByName(gated[UI], "cf-image") === undefined
+    findElement(gated[UI], "img") === undefined &&
+    findElement(gated[UI], "cf-image") === undefined
   );
 
   const assert_empty_prompt_shows_fallback_only = computed(() =>
-    findNodeByName(empty[UI], "img") === undefined &&
-    findNodeByName(empty[UI], "cf-image") === undefined
+    findElement(empty[UI], "img") === undefined &&
+    findElement(empty[UI], "cf-image") === undefined
   );
 
   const assert_generation_outputs_materialize = computed(() =>
@@ -137,7 +81,7 @@ export default pattern(() => {
   );
 
   const assert_generated_overlay_renders = computed(() =>
-    findNodeByName(generating[UI], "cf-image") !== undefined
+    findElement(generating[UI], "cf-image") !== undefined
   );
 
   const assert_safe_image_url_accepts_web_urls = computed(() =>

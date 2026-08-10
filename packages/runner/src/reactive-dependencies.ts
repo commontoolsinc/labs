@@ -1,4 +1,4 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isPlainContainer, isRecord } from "@commonfabric/utils/types";
 import {
   type FabricValue,
   valueEqual,
@@ -141,6 +141,14 @@ export function determineTriggeredActions(
   const afterValues: FabricValue[] = [after];
 
   // *LastObject: Last key-able object along currentPath
+  //
+  // TODO(danfuzz): `isRecord` counts a `FabricSpecialObject` as key-able, so
+  // the descent below indexes into one: every key reads `undefined` (or, via
+  // the prototype chain, an accessor result) on both the before and after
+  // side, so a subscriber path continuing below a `FabricInstance` compares
+  // equal-by-vacancy and its action never triggers, however the instance's
+  // contents changed. The `shallowEqual` marker at the bottom of this file
+  // covers the leaf comparison; this is the descent's half of the same gap.
   let beforeLastObject = isRecord(before) ? 0 : -1;
   let afterLastObject = isRecord(after) ? 0 : -1;
 
@@ -267,22 +275,31 @@ function commonPrefixLength(
  * trigger re-evaluation. Deep value changes inside existing keys should not.
  *
  * - Links: compared by identity (deepEqual), since a link IS the pointer.
- * - Objects: changed iff the key set changed (not the values).
+ * - Plain objects: changed iff the key set changed (not the values).
  * - Arrays: changed iff the key set changed (not the values).
- * - Primitives: changed iff the value changed.
+ * - Everything else: an opaque leaf, changed iff its value changed.
  *
- * NOTE: FabricSpecialObjects (FabricBytes / other FabricPrimitives) are NOT
- * meaningfully handled here. They hold state in private fields with zero
- * enumerable own-props, so the object branch below compares them by their
- * (empty) key set and calls any two "unchanged" — detecting neither an in-place
- * value change nor a class/type change. They are kept off this path upstream:
- * query-result-proxy materializes a FabricPrimitive as an atomic value (a
- * recursive read), so its change-detection runs through `valueEqual`, not here.
- * And the intended behavior here is genuinely ambiguous: for an opaque, keyless
- * leaf, should a "shallow" read react to a class/type change (its shape) or to
- * any value change (it being atomic)? We don't decide — if a FabricSpecialObject
- * ever reaches here via a nonRecursive read, treat it as an unhandled gap, not
- * defined behavior.
+ * Comparing by key set is only meaningful for a plain object or array, where
+ * the key set IS the shallow structure and a subscriber on a deeper path still
+ * catches a changed value underneath it. It says nothing useful about any
+ * other object: a `FabricPrimitive` holds its state in private fields, so
+ * comparing key sets reports every two of them as unchanged — and because that
+ * state sits behind no enumerable key, no deeper subscriber path reaches it
+ * either. The change goes unnoticed at every depth, which is what separates
+ * this from a plain object's values being skipped by design. Those are leaves,
+ * and a leaf is compared by value.
+ *
+ * That resolves an ambiguity this function used to leave open — whether a
+ * shallow read of an opaque leaf should react to a change of class or to any
+ * change of value. Treating non-plain values as leaves answers "any change of
+ * value", which is also what the recursive path answers, so the same value
+ * gets the same verdict whichever way it is read.
+ *
+ * A leaf whose comparison `valueEqual()` cannot perform will throw, and that
+ * is deliberate: the classes it currently cannot compare are ones whose
+ * protocol members are unimplemented stubs. A stub announcing itself loudly is
+ * worth more than a quiet answer derived from it, and swallowing the failure
+ * would let an unfinished class shape behavior here. Do not add a `catch`.
  */
 function shallowEqual(
   before: FabricValue,
@@ -293,7 +310,7 @@ function shallowEqual(
     return valueEqual(before, after);
   }
 
-  if (isRecord(before) && isRecord(after)) {
+  if (isPlainContainer(before) && isPlainContainer(after)) {
     const beforeKeys = Object.keys(before);
     const afterKeys = Object.keys(after);
     if (beforeKeys.length !== afterKeys.length) return false;
@@ -304,7 +321,10 @@ function shallowEqual(
     return beforeKeys.every((k) => Object.hasOwn(after, k));
   }
 
-  // Primitives (null, number, string, boolean, undefined)
+  // Opaque leaf: compared by value. `valueEqual()` leads with `Object.is()`,
+  // so an identical pair short-circuits before any structural work.
+  // TODO(danfuzz): `FabricInstance` cases will currently end up here, and we
+  // should be treating them more like the plain container cases above.
   return valueEqual(before, after);
 }
 

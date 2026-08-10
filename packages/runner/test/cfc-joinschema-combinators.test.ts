@@ -10,9 +10,8 @@ import type { JSONSchema } from "../src/builder/types.ts";
 // silently dropped — an under-tainting fail-open in the core algebra. The LUB
 // must union the confidentiality of every branch a value could match.
 describe("ContextualFlowControl.lubSchema combinator descent", () => {
-  const cfc = new ContextualFlowControl();
   const atomsOf = (schema: JSONSchema) =>
-    (cfc.lubSchema(schema) ?? []).map((a) => a).sort();
+    (ContextualFlowControl.lubSchema(schema) ?? []).map((a) => a).sort();
 
   it("unions confidentiality across anyOf branches", () => {
     expect(atomsOf({

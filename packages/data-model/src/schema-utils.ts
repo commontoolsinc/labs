@@ -1,12 +1,10 @@
-/**
- * Runtime utilities for working with JSONSchema values.
- */
+/** Runtime utilities for working with JSONSchema values. */
 
 import type {
   JSONSchema,
   JSONSchemaObj,
-  JSONSchemaObjMutable,
   JSONSchemaTypes,
+  MutableJSONSchemaObj,
   SchemaPathSelector,
 } from "@commonfabric/api";
 
@@ -17,7 +15,8 @@ import {
   internSchemaAsTaggedHashString,
   isInternedSchema,
 } from "./schema-hash.ts";
-import { type FabricValue } from "./interface.ts";
+import { FabricPrimitive, type FabricValue } from "./interface.ts";
+import { schemaTypeOfFabricPrimitive } from "./fabric-primitives/index.ts";
 
 /**
  * Map from `JSONSchema` type names (and special names) to corresponding
@@ -125,13 +124,13 @@ export function toDeepFrozenSchema<T extends JSONSchema | undefined>(
 export function cloneSchemaMutable(
   schema: JSONSchema | undefined,
   deep: boolean = false,
-): JSONSchemaObjMutable {
+): MutableJSONSchemaObj {
   if (schema === undefined) return {};
   if (typeof schema === "boolean") return schema ? {} : { not: true };
   return cloneIfNecessary(schema, {
     frozen: false,
     deep,
-  }) as JSONSchemaObjMutable;
+  }) as MutableJSONSchemaObj;
 }
 
 /**
@@ -185,7 +184,7 @@ export function schemaWithProperties(
   // freezing the `schema`/`overrides` inputs in place -- so the subsequent
   // `toDeepFrozenSchema(result, true)` only has to seal the (owned) top.
   const result = shallowMutableClone(
-    { ...schema, ...overrides } as FabricValue,
+    { ...schema, ...overrides },
   ) as JSONSchemaObj;
   return isInternedSchema(schema)
     ? internSchema(result)
@@ -260,6 +259,11 @@ export function schemaForValueType(
         return getBasicSchema("null");
       } else if (Array.isArray(value)) {
         return getBasicSchema("array");
+      } else if (value instanceof FabricPrimitive) {
+        // A fabric primitive gets its specific type name (e.g.
+        // "FabricBytes") rather than "object": it is an opaque leaf, so
+        // "object" would invite structural keywords that cannot apply.
+        return getBasicSchema(schemaTypeOfFabricPrimitive(value));
       }
       break;
     }
@@ -283,9 +287,7 @@ export function schemaForValueType(
   return getBasicSchema(type);
 }
 
-/**
- * Gets the standard interned empty schema _object_, a literal `{}`.
- */
+/** Gets the standard interned empty schema _object_, a literal `{}`. */
 export function emptySchemaObject() {
   const key = "emptySchema";
   const found = BASIC_SCHEMAS[key];
@@ -299,15 +301,18 @@ export function emptySchemaObject() {
 
 /**
  * Common shape of the two canonical-selector maps. Its key type spans both
- * maps' keys, so a single variable selected between the object `WeakMap` and the
- * primitive `Map` accepts the un-narrowed interned schema as a key — without
- * TypeScript collapsing the two maps' key types to `never` (which is what a bare
- * `WeakMap | Map` union does).
+ * maps' keys, so a single variable selected between the object `WeakMap` and
+ * the primitive `Map` accepts the un-narrowed interned schema as a key —
+ * without TypeScript collapsing the two maps' key types to `never` (which is
+ * what a bare `WeakMap | Map` union does).
  */
 type CanonicalSelectorMap = {
+  /** Returns the selectors for `key`, or `undefined` if there are none. */
   get(
     key: JSONSchema | undefined,
   ): Map<string, WeakRef<SchemaPathSelector>> | undefined;
+
+  /** Sets the selectors for `key`. */
   set(
     key: JSONSchema | undefined,
     value: Map<string, WeakRef<SchemaPathSelector>>,
@@ -328,8 +333,8 @@ type CanonicalSelectorMap = {
  * reference its schema — the outer `WeakMap` key — pinning both forever.
  * Dead refs are dropped lazily on lookup.
  *
- * As a `WeakMap`, this can only map from GC-able objects, so {@link
- * #canonicalSelectorsByPrimitiveSchema} handles primitives.
+ * As a `WeakMap`, this can only map from GC-able objects, so primitives are
+ * handled by {@link #canonicalSelectorsByPrimitiveSchema}.
  */
 const canonicalSelectorsByObjectSchema = new WeakMap<
   object,
@@ -337,8 +342,8 @@ const canonicalSelectorsByObjectSchema = new WeakMap<
 >();
 
 /**
- * Like {@link #canonicalSelectorsByObjectSchema}, except for primitive-valued schemas
- * including the "schema" `undefined`.
+ * Like {@link #canonicalSelectorsByObjectSchema}, except for primitive-valued
+ * schemas including the "schema" `undefined`.
  */
 const canonicalSelectorsByPrimitiveSchema = new Map<
   boolean | undefined,

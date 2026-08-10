@@ -4,6 +4,12 @@ To add a new piece to the space's piece registry, use the `addPiece` handler
 exported by the default app pattern. **Never** push to `pieceRegistry`
 directly.
 
+Registration is the root of the supported piece-discovery APIs. An
+unregistered piece must be published through a searchable collection or remain
+reachable by following links from a known piece. An orphan piece does not
+appear in the ordinary piece listings or searches. See
+[Finding Pieces](../concepts/piece-discovery.md).
+
 ## Why
 
 - **Type safety** — no `as any` casts needed
@@ -110,7 +116,7 @@ wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
 The `addPiece` handler is defined in `default-app.tsx` and exported as a
 `Stream<{ piece: MentionablePiece }>`. Internally it checks for duplicates
 and writes to the owned `pieceRegistry` Writable. The runtime infrastructure
-(`PieceManager.add()`) also uses this handler — patterns should follow the
+(`PiecesController.add()`) also uses this handler — patterns should follow the
 same approach.
 
 The `#allPieces` wish target and `allPieces` output have been removed. Use
@@ -119,7 +125,8 @@ The `#allPieces` wish target and `allPieces` output have been removed. Use
 The default app retains the old `allPieces` owned-cell cause for a one-time
 migration. When `pieceRegistry` is empty, it copies the legacy list and marks
 the migration complete. Existing canonical data wins when both cells contain
-data. `#pieceRegistry` and `PieceManager` can read the retired registry from a
+data. `#pieceRegistry` and `PiecesController` can read the retired registry
+from a
 provenance-free legacy default-app root that remains pinned to its old source.
 
 See [handler()](../concepts/handler.md) for handler mechanics and

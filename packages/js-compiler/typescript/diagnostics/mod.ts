@@ -1,4 +1,4 @@
-export { Checker } from "./checker.ts";
+export { Checker, isNonFatalDiagnosticCode } from "./checker.ts";
 export {
   CompilationError,
   type CompilationErrorType,

@@ -6,7 +6,32 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Schema } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 
-export const REQUEST_TIMEOUT = 1000 * 5; // 5 seconds
+/**
+ * How long a claimed request mutex is believed before another replica may take
+ * it over.
+ *
+ * This is not a bound on the request. A request issued here ends when its
+ * promise settles or its AbortSignal fires, and `fetch.ts` decides from its own
+ * state, not from the clock, whether it already has one in flight. The only
+ * reader is a replica that finds a claim it did not make and has to decide
+ * whether the replica that made it is still there. Nothing in the runner
+ * reports another replica's presence, so that question has no event to wait on
+ * and a staleness bound is the only answer available.
+ *
+ * The value is left where it was. Once an early takeover no longer costs a
+ * result, the size is a trade with a cost on both sides: too low sends a second
+ * copy of the request to the remote peer whenever another replica looks in
+ * while one is running, too high leaves a replica that arrives before the bound
+ * elapses looking at a claim it will not take over and has no reason to
+ * re-examine, so the piece keeps showing a spinner. A duplicate request is
+ * wasted work; a spinner that never resolves is a dead end, so the trade goes
+ * to the lower value. A caller whose endpoint is slow enough that duplicates
+ * matter raises its own bound with `options.mutexTimeoutMs`.
+ *
+ * `docs/features/fetch-request-deadlines.md` records why this bound stays
+ * and what an early takeover costs.
+ */
+export const MUTEX_STALE_AFTER = 1000 * 5;
 
 export const internalSchema = internSchema(
   {
@@ -82,10 +107,12 @@ export function computeInputHash<T extends Record<string, any>>(
 }
 
 /**
- * Attempts to claim the mutex for a request. Only claims if no other
- * request is active or if the previous request has timed out.
- * When claiming, sets pending=true and clears result/error to maintain
- * the invariant that result/error are undefined while pending.
+ * Attempts to claim the mutex for a request. Only claims if no other request
+ * is active, or if the standing claim was made longer than `timeout` ago and is
+ * therefore treated as abandoned (see {@link MUTEX_STALE_AFTER}). Claiming sets
+ * pending=true and records the claim in `internal`; the caller clears
+ * result/error to maintain the invariant that result/error are undefined while
+ * pending.
  */
 export async function tryClaimMutex<T extends Record<string, any>>(
   runtime: Runtime,
@@ -97,7 +124,7 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   requestId: string,
   snapshotInputs: (cell: Cell<T>) => T,
   expectedInputHash?: string,
-  timeout: number = REQUEST_TIMEOUT,
+  timeout: number = MUTEX_STALE_AFTER,
 ): Promise<{
   claimed: boolean;
   inputs: T;
@@ -131,7 +158,7 @@ export async function tryClaimMutex<T extends Record<string, any>>(
     }
     // Can claim if:
     // 1. Nothing is pending, OR
-    // 2. Previous request timed out
+    // 2. The standing claim has gone stale and is treated as abandoned
     const canClaim = !isPending ||
       (currentInternal.lastActivity < now - timeout);
 

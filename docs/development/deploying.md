@@ -1,0 +1,85 @@
+# Deploying a commit
+
+A commit reaches a server host by way of the bastion. The deploy jobs in CI
+open an SSH connection to the bastion and run one command there,
+`/opt/cf/deploy.sh`, passing the environment to deploy and the commit to deploy
+to it. That script does the rest: it deploys the binaries that CI already built
+and uploaded for that commit. The shell is a static site rather than a server,
+and reaches its bucket another way; "The staging shell" below covers it.
+
+Two jobs do this:
+
+| Job | Workflow | Environment passed | Trigger |
+| --- | --- | --- | --- |
+| `deploy-rapids` | `.github/workflows/deno.yml` | `rapids`, written out in the step | every push to `main` |
+| `deploy-estuary` | `.github/workflows/deploy-production.yml` | `DEPLOYMENT_ENVIRONMENT` variable | manual dispatch, naming the ref to deploy |
+
+The production job reads the environment name from a repository variable rather
+than naming it, because the variable is defined on the GitHub environment the
+job declares.
+
+The staging job waits on `attest-binaries`, because the script deploys binaries
+rather than building them. There is nothing for it to deploy until that job has
+uploaded the artifacts for the commit. The production job downloads those same
+artifacts itself, and fails with a message naming the commit if they are not
+there.
+
+Staging used to deploy to toolshed as well, from a `deploy-toolshed` job in
+`.github/workflows/deno.yml`. Toolshed has been decommissioned and rapids
+replaces it, so that job is gone and `deploy-rapids` is the only staging
+deploy. The `deploy-rapids` job still declares GitHub's `toolshed` environment,
+which is where its bastion credentials live; renaming that environment is a
+repository-settings change, and the job has to be updated in the same change.
+
+## The wrapper is owned by another repository
+
+`/opt/cf/deploy.sh` is not in this repository. The
+[infra repository](https://github.com/commontoolsinc/infra) generates it, in
+`ansible/playbooks/bastion.yml`, and writes it to the bastion when that
+playbook runs. Nothing here reads it, imports it, or tests it against the real
+thing.
+
+The script validates what it is given, and it takes exactly two arguments: an
+environment name it recognizes, and a 40-character commit SHA. Given anything
+else — an extra argument, an unknown environment, a revision that is not a
+full SHA — it prints its usage and exits with status 1, and the deploy job
+fails without deploying anything.
+
+This is the seam to be careful about. The staging deploy jobs run only on
+`main`, so a deploy step that no longer matches the script cannot fail on the
+pull request that introduces it. It fails on the first push to `main`
+afterwards, and then on every push after that until someone fixes it. The
+`Deploy steps call the bastion wrapper the way it accepts` case in
+[`tasks/ci-workflow.test.ts`](../../tasks/ci-workflow.test.ts) reads the
+`script:` line out of each deploy step and checks it against that contract, so
+a mismatch fails on the pull request instead.
+
+Changing the argument list therefore takes a change in each repository, in
+order: land the infra change, apply the bastion playbook so the host has the
+new script, then change the call sites here.
+
+## The staging shell
+
+The `deploy-shell-staging` job in `.github/workflows/deno.yml` publishes the
+shell on every push to `main`. It does not touch the bastion: it builds
+`packages/shell` and copies the result into the `staging-commontools-dev`
+bucket, which is served at <https://staging.commontools.dev/>. Each build also
+lands under `builds/<commit>/` so a page that is already open keeps the exact
+module graph it started with.
+
+The shell has to be told which API host to talk to, because it is served from a
+different origin than the API it calls. The `STAGING_SHELL_API_URL` variable
+carries that host, and the build substitutes it into the bundle. It is a
+variable rather than a secret: the value ends up in a bundle that anyone can
+read, so hiding it from review buys nothing and costs the ability to see what
+staging points at. The host it names is the one `deploy-rapids` keeps current.
+
+Publishing is not the same as working, and this job cannot tell the difference
+by uploading alone — it makes no request to the API it just configured. So it
+checks three things instead. An unset variable fails the job before the build,
+because a shell built with no API host falls back to its own origin, and that
+origin serves static assets and no API. The built bundle must then contain the
+host that was passed in. Finally the scripts are read back out of the bucket
+and checked again, so a green job means the objects being served name the host
+they should. That last read goes to the bucket rather than to the site's
+address, because the CDN may still be serving the previous build.

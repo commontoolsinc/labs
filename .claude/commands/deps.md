@@ -14,3 +14,6 @@ OPTIONAL:
 - Playwright MCP — fallback browser driver for `/tour` when agent-browser is
   unavailable:
   - `claude mcp add playwright npx '@playwright/mcp@latest'`
+
+When adding or rolling repository dependencies, follow
+[`docs/development/DEPENDENCIES.md`](../../docs/development/DEPENDENCIES.md).

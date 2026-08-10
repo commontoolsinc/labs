@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import {
   BENCHMARK_HISTORY_CACHE_DAYS,
+  BENCHMARK_HISTORY_SAMPLING_VERSION,
   BenchmarkHistoryStore,
   type BenchmarkStats,
 } from "./benchmark-history-cache.ts";
@@ -28,18 +29,21 @@ Deno.test("runtime benchmark history persists usable and empty artifacts", async
       runId: 101,
       runAttempt: 1,
       at: now - DAY_MS,
+      cpu: "AMD EPYC 7763 64-Core Processor",
       metrics: new Map([["packages/a.bench.ts > works", stats(1_000)]]),
     });
     writer.set({
       runId: 101,
       runAttempt: 2,
       at: now - DAY_MS,
+      cpu: "INTEL(R) XEON(R) PLATINUM 8573C",
       metrics: new Map([["packages/a.bench.ts > works", stats(1_500)]]),
     });
     writer.set({
       runId: 102,
       runAttempt: 1,
       at: now,
+      cpu: "AMD EPYC 9V74 80-Core Processor",
       metrics: new Map(),
     });
     writer.markRefreshed(now - 1_000, writer.list());
@@ -53,7 +57,9 @@ Deno.test("runtime benchmark history persists usable and empty artifacts", async
       1_500,
     );
     assertEquals(reader.get(101)?.runAttempt, 2);
+    assertEquals(reader.get(101)?.cpu, "INTEL(R) XEON(R) PLATINUM 8573C");
     assertEquals(reader.get(102)?.metrics.size, 0);
+    assertEquals(reader.get(102)?.cpu, "AMD EPYC 9V74 80-Core Processor");
     assertEquals(reader.refreshedAt, now - 1_000);
     assertEquals(
       reader.refreshedRuns()?.map((run) => [run.runId, run.runAttempt]),
@@ -65,6 +71,45 @@ Deno.test("runtime benchmark history persists usable and empty artifacts", async
         () => false,
       ),
       false,
+    );
+  } finally {
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("runtime benchmark history replaces CPU-less data", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "benchmark-history-" });
+  const file = `${directory}/history.json`;
+  const now = Date.now();
+  try {
+    const legacy = new BenchmarkHistoryStore(file);
+    await legacy.load();
+    legacy.set({
+      runId: 125,
+      runAttempt: 1,
+      at: now,
+      metrics: new Map([["packages/a.bench.ts > works", stats(1_000)]]),
+    });
+    await legacy.save(now);
+
+    const migrated = new BenchmarkHistoryStore(file);
+    await migrated.load();
+    assertEquals(migrated.get(125)?.cpu, undefined);
+    migrated.set({
+      runId: 125,
+      runAttempt: 1,
+      at: now,
+      cpu: "AMD EPYC 7763 64-Core Processor",
+      metrics: new Map([["packages/a.bench.ts > works", stats(2_000)]]),
+    });
+    await migrated.save(now);
+
+    const reader = new BenchmarkHistoryStore(file);
+    await reader.load();
+    assertEquals(reader.get(125)?.cpu, "AMD EPYC 7763 64-Core Processor");
+    assertEquals(
+      reader.get(125)?.metrics.get("packages/a.bench.ts > works")?.p99,
+      2_000,
     );
   } finally {
     await Deno.remove(directory, { recursive: true });
@@ -394,7 +439,7 @@ Deno.test("runtime benchmark history rejects malformed cache structures before m
   }
 });
 
-Deno.test("runtime benchmark history reads manifests written before result labels", async () => {
+Deno.test("runtime benchmark history refreshes legacy manifests without dropping their runs", async () => {
   const directory = await Deno.makeTempDir({ prefix: "benchmark-history-" });
   const file = `${directory}/history.json`;
   const now = Date.now();
@@ -418,6 +463,16 @@ Deno.test("runtime benchmark history reads manifests written before result label
     const store = new BenchmarkHistoryStore(file);
     await store.load();
     assertEquals(store.refresh?.result, "data");
+    assertEquals(store.refresh?.samplingVersion, undefined);
+    assertEquals(store.refreshedAt, 0);
+    assertEquals(store.refreshedRuns()?.map((run) => run.runId), [550]);
+
+    store.markRefreshed(now, store.list());
+    assertEquals(
+      store.refresh?.samplingVersion,
+      BENCHMARK_HISTORY_SAMPLING_VERSION,
+    );
+    assertEquals(store.refreshedAt, now);
   } finally {
     await Deno.remove(directory, { recursive: true });
   }

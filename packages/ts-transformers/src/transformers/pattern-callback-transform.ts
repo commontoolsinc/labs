@@ -89,12 +89,9 @@ export function registerCapabilitySummary(
   interprocedural: boolean,
   defaultsByParamName?: ReadonlyMap<string, readonly CapabilityParamDefault[]>,
 ): void {
-  // No cross-stage state → nowhere to record; skip the analysis work entirely.
-  if (!context.options.state) return;
-
   const summary = analyzeFunctionCapabilities(callback, {
     checker: context.checker,
-    typeRegistry: context.options.state?.typeRegistry,
+    typeRegistry: context.state.typeRegistry,
     interprocedural,
   });
 

@@ -8,6 +8,20 @@
 import type { Cfc, CurrentPrincipal, WriteAuthorizedBy } from "./cfc.ts";
 
 // ============================================================================
+// Common internal definitions
+// ============================================================================
+
+/**
+ * Recursively removes `readonly` from all properties of `T`.
+ *
+ * Copy of `Mutable` from `@commonfabric/utils/types`. These two definitions
+ * should be unified; see that module for the canonical version.
+ */
+type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
+  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
+  : T;
+
+// ============================================================================
 // Fabric Value Types
 // ============================================================================
 //
@@ -25,11 +39,26 @@ import type { Cfc, CurrentPrincipal, WriteAuthorizedBy } from "./cfc.ts";
 // declaration here (interface + constructor + declare-const with `new`).
 
 /**
+ * The nominal brand key declared on `FabricSpecialObject`. It exists only in
+ * the type system — a runtime instance never carries the key; `instanceof
+ * FabricSpecialObject` is its runtime form. Schema `required` presence
+ * checks must therefore treat this key as satisfied by any fabric value
+ * rather than probing for it with `in`.
+ */
+export const FABRIC_SPECIAL_OBJECT_BRAND = "@commonfabric/FabricSpecialObject";
+
+/**
  * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
  * single `instanceof` check for any fabric-system value type.
+ *
+ * The `@commonfabric/FabricSpecialObject` member is a nominal brand with no
+ * runtime existence — see the canonical declaration in
+ * `data-model/src/interface.ts` for why it is a well-known string key and not
+ * a `unique symbol`. The two declarations must agree exactly.
  */
-// deno-lint-ignore no-empty-interface
-export interface FabricSpecialObject {}
+export interface FabricSpecialObject {
+  readonly "@commonfabric/FabricSpecialObject": true;
+}
 
 export interface FabricSpecialObjectConstructor {
   prototype: FabricSpecialObject;
@@ -41,6 +70,10 @@ export declare const FabricSpecialObject:
 
 /**
  * Abstract base class for values that participate in the fabric protocol.
+ *
+ * An instance holds all of its state privately and makes it reachable only
+ * through members, so it has no own properties at all. A structural view of
+ * one -- a spread, `Object.keys()`, a naive walk -- therefore sees nothing.
  */
 export interface FabricInstance extends FabricSpecialObject {
   shallowClone(frozen: boolean): FabricInstance;
@@ -109,7 +142,7 @@ export interface FabricHash extends FabricPrimitive {
 }
 
 export interface FabricHashConstructor {
-  new (hash: Uint8Array, tag: string): FabricHash;
+  new (hash: Uint8Array, tag: string, transfer?: boolean): FabricHash;
   prototype: FabricHash;
 }
 
@@ -141,19 +174,118 @@ export declare const FabricLink: FabricLinkConstructor;
  */
 export interface FabricBytes extends FabricPrimitive {
   readonly length: number;
-  slice(start?: number, end?: number): Uint8Array;
+  slice(start?: number, end?: number): Uint8Array<ArrayBuffer>;
   copyInto(target: Uint8Array, offset?: number, length?: number): number;
 }
 
 export interface FabricBytesConstructor {
-  new (bytes: Uint8Array): FabricBytes;
+  new (bytes: Uint8Array, transfer?: boolean): FabricBytes;
   prototype: FabricBytes;
 }
 
 export declare const FabricBytes: FabricBytesConstructor;
 
 /**
+ * An immutable regular expression. Extends `FabricPrimitive` -- treated like a
+ * primitive in the fabric type system (always frozen, passes through
+ * conversion unchanged).
+ *
+ * The pattern is held as a flavor / source / flags triple rather than as a
+ * native `RegExp`, so that flavors with no native representation can still be
+ * carried. `value` reconstitutes a native `RegExp` where one exists.
+ */
+export interface FabricRegExp extends FabricPrimitive {
+  readonly source: string;
+  readonly flags: string;
+  readonly flavor: string;
+
+  /**
+   * A fresh native `RegExp` equivalent to this value, returned anew on each
+   * call so the internal instance is never aliased out. Throws for a flavor
+   * with no native `RegExp` representation.
+   */
+  readonly value: RegExp;
+}
+
+export interface FabricRegExpConstructor {
+  new (regex: RegExp): FabricRegExp;
+  new (flavor: string, source: string, flags: string): FabricRegExp;
+  prototype: FabricRegExp;
+}
+
+export declare const FabricRegExp: FabricRegExpConstructor;
+
+/**
+ * Structured state for constructing a `FabricError`. The fixed-schema slots
+ * are `FabricValue`-typed; `extras` carries any custom enumerable properties,
+ * whose keys must not collide with the slot names.
+ */
+export type FabricErrorState = {
+  /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
+  readonly type: string;
+  /** The `.name` property. Omit to mean "same as `type`". */
+  readonly name?: string | null | undefined;
+  /** The `.message` property. */
+  readonly message: string;
+  /** The `.stack` property, or `undefined`. */
+  readonly stack: string | undefined;
+  /** The `.cause` value, in `FabricValue` form, or `undefined`. */
+  readonly cause: FabricValue | undefined;
+  /** Custom enumerable own properties, in `FabricValue` form. */
+  readonly extras?:
+    | Iterable<readonly [string, FabricValue]>
+    | Readonly<Record<string, FabricValue>>
+    | undefined;
+};
+
+/**
+ * An error carried as fabric data. Extends `FabricInstance` (not
+ * `FabricPrimitive`): it holds fixed-schema slots plus a bag of extras, and
+ * `cause` may be an arbitrary `FabricValue`, so it is a small object graph
+ * rather than a leaf.
+ *
+ * Like every `FabricInstance` it is mutable until frozen, and every mutator --
+ * the slot setters along with `setExtra()` and `deleteExtra()` -- throws once
+ * the instance is frozen.
+ */
+export interface FabricError extends FabricInstance {
+  type: string;
+  name: string;
+  message: string;
+  stack: string | undefined;
+  cause: FabricValue | undefined;
+
+  getExtra(key: string): FabricValue | undefined;
+  hasExtra(key: string): boolean;
+  setExtra(key: string, value: FabricValue): void;
+  deleteExtra(key: string): boolean;
+  readonly extraSize: number;
+  extraKeys(): IterableIterator<string>;
+  extraEntries(): IterableIterator<[string, FabricValue]>;
+}
+
+export interface FabricErrorConstructor {
+  new (state: FabricErrorState): FabricError;
+  fromNativeError(error: Error): FabricError;
+  prototype: FabricError;
+}
+
+export declare const FabricError: FabricErrorConstructor;
+
+// TODO(danfuzz): `FabricMap` and `FabricSet` are deliberately absent from the
+// declarations above. Both need substantial rework before they are useful, and
+// declaring them here would imply a utility they do not yet have. Their
+// absence is a decision, not an oversight; revisit once that rework lands.
+
+/**
  * The full set of values that the fabric storage layer can represent.
+ *
+ * From a typesystem perspective, all `FabricValue`s are immutable (deeply
+ * read-only), _except_ members of the `FabricInstance` tree. `FabricInstance`s
+ * expose arbitrary methods which can cause a change of instance state including
+ * changing the set of outgoing references from the instance. This is an
+ * _intentional_ hole, because TypeScript has no ergonomic/pithy way to express
+ * the desired semantics. (To be clear, it _can_ be done, just not cleanly.)
  */
 export type FabricValue =
   | null
@@ -167,11 +299,42 @@ export type FabricValue =
   | FabricPlainObject
   | undefined;
 
-/** An array of fabric values. */
-export interface FabricArray extends ArrayLike<FabricValue> {}
+/** A fabric value other than `null` or `undefined`. */
+export type NonNullableFabricValue = NonNullable<FabricValue>;
 
-/** An object/record of fabric values. */
-export interface FabricPlainObject extends Record<string, FabricValue> {}
+/** Read-only array of fabric values. */
+export interface FabricArray extends ReadonlyArray<FabricValue> {}
+
+/** Read-only object/record of fabric values. */
+export interface FabricPlainObject
+  extends Readonly<Record<string, FabricValue>> {}
+
+// ============================================================================
+// Fabric Execution Value Types
+// ============================================================================
+
+/**
+ * A value that can appear in an in-memory fabric execution graph.
+ *
+ * Unlike a {@link FabricValue}, a `FabricExecValue` may contain functions and
+ * therefore is not necessarily durable or serializable. Its arrays and plain
+ * objects recursively contain only other execution values.
+ */
+export type FabricExecValue =
+  | FabricValue
+  | FabricExecFunction
+  | FabricExecArray
+  | FabricExecPlainObject;
+
+/** A callable leaf in a {@link FabricExecValue} graph. */
+export type FabricExecFunction = (...args: any[]) => any;
+
+/** Read-only array of fabric execution values. */
+export interface FabricExecArray extends ReadonlyArray<FabricExecValue> {}
+
+/** Read-only plain object whose string-keyed values are execution values. */
+export interface FabricExecPlainObject
+  extends Readonly<Record<string, FabricExecValue>> {}
 
 // ============================================================================
 // Runtime Constants
@@ -179,8 +342,6 @@ export interface FabricPlainObject extends Record<string, FabricValue> {}
 
 // Runtime constants - defined by @commonfabric/runner/src/builder/types.ts
 // These are ambient declarations since the actual values are provided by the runtime environment
-export declare const ID: unique symbol;
-export declare const ID_FIELD: unique symbol;
 
 // Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over patterns.
@@ -232,6 +393,28 @@ export declare const CELL_BRAND: unique symbol;
  * infer U (T would be a phantom parameter and inference produces `unknown`).
  */
 export declare const CELL_INNER_TYPE: unique symbol;
+
+/**
+ * Symbol for the phantom property carrying a verb's declared result type.
+ *
+ * `Stream<E, R>` already discriminates on `R` without this, because
+ * `ICreatable<Stream<E, R>>` puts the stream in `for()`'s return position.
+ * That is incidental: it survives only as long as `Stream` extends
+ * `ICreatable` with a signature mentioning the full type. Were that to change
+ * — `for(cause): this`, say — `R` would fall back to a phantom parameter,
+ * `Stream<E, R>` and `Stream<E>` would become mutually assignable, and a
+ * declared result would start being dropped on assignment with nothing to
+ * catch it.
+ *
+ * So the discrimination is pinned locally instead of inherited, the same
+ * device {@link CELL_INNER_TYPE} uses for the same class of problem.
+ *
+ * Nothing reads this at runtime — a verb's result schema travels on
+ * `module.resultSchema`, never on the stream cell's own schema, which stays
+ * the event/payload schema that `cf piece verbs` publishes and that
+ * `piece call` validates against.
+ */
+export declare const CELL_RESULT_TYPE: unique symbol;
 
 /**
  * Minimal cell type with just the brand, no methods.
@@ -372,8 +555,8 @@ export type MetaField =
   | MetaLinkField
   | "patternIdentity" // content-addressed {identity, symbol} pattern reference
   | "patternSetupIdentity" // setup-completion {identity, symbol} marker
-  | "patternSource" // provenance: the source a piece tracks for updates (a
-  // toolshed pattern path, or later a `cf:` fabric ref)
+  | "patternSource" // active web or `cf:` source origin
+  | "pieceSourceHistory" // append-only source revisions and retention roots
   | "patternRepository" // optional caller-supplied repository locator
   | "displacedPattern" // {identity, symbol, displacedAt}: the prior pattern
   // reference recorded when system-pattern auto-update replaces an unloadable
@@ -749,7 +932,7 @@ export interface IKeyable<out T, Wrap extends HKT> {
  * Uses non-distributive conditionals to handle union types correctly.
  */
 export type WrapOrPreserve<T, Wrap extends HKT> = [T] extends [Cell<any>] ? T
-  : [T] extends [Stream<any>] ? T
+  : [T] extends [AnyStream] ? T
   : [T] extends [ComparableCell<any>] ? T
   : [T] extends [ReadonlyCell<any>] ? T
   : [T] extends [WriteonlyCell<any>] ? T
@@ -1244,12 +1427,53 @@ export interface AsStream extends HKT {
   type: Stream<this["_A"]>;
 }
 
-export interface Stream<T>
+/**
+ * `R` is the verb's declared result — what a caller reads back from the
+ * handling's receipt. It defaults to `void`: a stream that declares nothing
+ * is a value-less verb, which is the overwhelmingly common shape and stays
+ * spelled `Stream<Event>`.
+ *
+ * A `Stream<E, R>` does not satisfy a `Stream<E>`, or vice versa, so a
+ * declared result cannot be dropped on assignment (see
+ * {@link CELL_RESULT_TYPE} for why that is pinned here rather than inherited).
+ */
+export interface Stream<E, R = void>
   extends
-    BrandedCell<T, "stream">,
-    IAnyCell<T>,
-    ICreatable<Stream<T>>,
-    IStreamable<T> {}
+    BrandedCell<E, "stream">,
+    IAnyCell<E>,
+    ICreatable<Stream<E, R>>,
+    IStreamable<E> {
+  readonly [CELL_RESULT_TYPE]: R;
+}
+
+/**
+ * Any stream, whatever its arity — the canonical way for a type-level guard to
+ * ask "is this a stream?".
+ *
+ * Detection must not depend on how many type parameters `Stream` happens to
+ * have. Spelling a guard `[T] extends [Stream<any>]` pins it to
+ * `Stream<any, void>`, which a verb declaring a result does not satisfy, so
+ * every such guard stops matching the moment a result exists — silently, since
+ * a value-less stream still matches and value-less is the common case.
+ *
+ * This is the mechanism the other two layers already use, which is why neither
+ * broke when the result parameter arrived: the runtime reads the cell kind
+ * (`Cell.isStream`) and the schema generator reads `CELL_BRAND`. Only the type
+ * layer matched the full generic instantiation.
+ */
+export type AnyStream = AnyBrandedCell<any, "stream">;
+
+/** The event a stream accepts, recovered without naming the stream's arity. */
+export type StreamEventOf<T> = T extends AnyBrandedCell<infer E, "stream"> ? E
+  : never;
+
+/**
+ * The result a stream declares, `void` when it declares none. Reads the
+ * `CELL_RESULT_TYPE` pin directly — the complementary half of what that
+ * property is for, not a workaround for it.
+ */
+export type StreamResultOf<T> = T extends
+  { readonly [CELL_RESULT_TYPE]: infer R } ? R : void;
 
 export declare const Stream: CellTypeConstructor<AsStream>;
 
@@ -1341,6 +1565,7 @@ type CellWrappedData<T> =
   | T
   | AnyBrandedCell<T>
   | (T extends Array<infer U> ? Array<FactoryInput<U>>
+    : T extends ReadonlyArray<infer U> ? ReadonlyArray<FactoryInput<U>>
     : T extends object ? { [K in keyof T]: FactoryInput<T[K]> }
     : never);
 export declare const CELL_LIKE: unique symbol;
@@ -1369,10 +1594,11 @@ export type StripCell<T> =
     // Non-distributive for everything else (preserves unions like RenderNode)
     : StripCellInner<T>;
 
-type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - it's a callable interface
+type StripCellInner<T> = [T] extends [AnyStream] ? T // Preserve the stream whole - it's a callable interface
   : [T] extends [AnyBrandedCell<infer U>] ? StripCell<U>
   : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
   : [T] extends [Array<infer U>] ? StripCell<U>[]
+  : [T] extends [ReadonlyArray<infer U>] ? readonly StripCell<U>[]
   // deno-lint-ignore ban-types
   : [T] extends [Function] ? T // Preserve function types
   : [T] extends [object] ? { [K in keyof T]: StripCell<T[K]> }
@@ -1408,6 +1634,7 @@ export type FactoryInput<T> =
   // Combined into single check to reduce type instantiation overhead.
   | ([NonNullable<T>] extends [VNode | UIRenderable] ? JSXElement : never)
   | (T extends Array<infer U> ? Array<FactoryInput<U>>
+    : T extends ReadonlyArray<infer U> ? ReadonlyArray<FactoryInput<U>>
     : T extends object ? { [K in keyof T]: FactoryInput<T[K]> }
     : T);
 
@@ -1437,8 +1664,7 @@ export type UnwrapCell<T> =
  * is a type utility that allows any part of type T to be wrapped in AnyCell<>,
  * and allow any part of T that is currently wrapped in AnyCell<> to be used
  * unwrapped. This is designed for use with cell method parameters, allowing
- * flexibility in how values are passed. The ID and ID_FIELD metadata symbols
- * allows controlling id generation and can only be passed to write operations.
+ * flexibility in how values are passed.
  */
 export type AnyCellWrapping<T> =
   // Handle existing AnyBrandedCell<> types, allowing unwrapping
@@ -1447,10 +1673,12 @@ export type AnyCellWrapping<T> =
     // Handle arrays
     : T extends Array<infer U>
       ? Array<AnyCellWrapping<U>> | AnyBrandedCell<Array<AnyCellWrapping<U>>>
+    : T extends ReadonlyArray<infer U> ?
+        | ReadonlyArray<AnyCellWrapping<U>>
+        | AnyBrandedCell<ReadonlyArray<AnyCellWrapping<U>>>
     // Handle objects (excluding null)
     : T extends object ?
         | { [K in keyof T]: AnyCellWrapping<T[K]> }
-          & { [ID]?: AnyCellWrapping<JSONValue>; [ID_FIELD]?: string }
         | AnyBrandedCell<{ [K in keyof T]: AnyCellWrapping<T[K]> }>
     // Handle primitives
     : T | AnyBrandedCell<T>;
@@ -1460,28 +1688,84 @@ export type AnyCellWrapping<T> =
 // TODO(seefeld): Subset of internal type, just enough to make it
 // differentiated. But this isn't part of the public API, so we need to find a
 // different way to handle this.
-export interface Pattern {
+export interface Pattern extends FabricExecPlainObject {
   argumentSchema: JSONSchema;
   resultSchema: JSONSchema;
   defaultScope?: CellScope;
 }
-export interface Module {
+export interface Module extends FabricExecPlainObject {
   type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
   defaultScope?: CellScope;
 }
 
+/**
+ * The member `JSON.stringify()` consults -- that name and no other. A builder
+ * artifact carries it, module and factory alike, delegating to
+ * `toEncodableForm`.
+ *
+ * A factory because a factory is what pattern source holds, and stringifying
+ * one is an idiom that source uses. A module because `JSON.stringify` reaches
+ * one THROUGH A GRAPH: an internal pattern graph holds live modules, whose
+ * `implementation` is a function, and `JSON.stringify` drops a
+ * function-valued member without a word.
+ *
+ * Its return stays `unknown`, unlike its sibling below: this is a public
+ * protocol whose contract permits any return, and outside values match this
+ * type without being builder artifacts at all.
+ */
 export type toJSON = {
   toJSON(): unknown;
 };
 
-export type Handler<T = any, R = any> = Module & {
-  with: (inputs: FactoryInput<StripCell<T>>) => Stream<R>;
+/**
+ * The member by which a value produces the form in which it gets encoded.
+ * Distinct from `toJSON` in saying nothing about JSON: what it returns is a
+ * value the data model can represent, which reaches storage without being
+ * stringified on the way.
+ *
+ * Two kinds of value carry it, and the type spans both rather than describing
+ * only the one that composes into the factory types below. A `Cell` returns the
+ * link that stands for it, or `null` for a cell that has no link yet, and a
+ * record-shaped bound would exclude both of those -- `null` plainly, and the
+ * link because one arm of it is a class, which carries no index signature.
+ *
+ * An artifact's form is always a record even so, and says so where it is built:
+ * `moduleToEncodableForm` and `patternToEncodableForm` declare
+ * {@link FabricExecPlainObject}. The narrower promise belongs at the producer,
+ * which can keep it, rather than at a name two unrelated kinds of value share.
+ *
+ * {@link FabricExecValue}, NOT {@link FabricValue}: a form can still hold live
+ * functions. A module whose implementation is a nested pattern with no entry ref
+ * returns that pattern's graph embedded, and such a graph holds live
+ * modules -- so the module form's `implementation` admits a `Pattern` and the
+ * pattern form's `result` admits a function. That is precisely why the artifact
+ * walk descends into what this returns rather than treating it as finished:
+ * typing it as durable would assert the very thing the walk cannot assume.
+ */
+export type toEncodableForm = {
+  toEncodableForm(): FabricExecValue;
+};
+
+/**
+ * Verb-shaped type parameters read the same way throughout this file and the
+ * builder: **`E`** is the event a verb accepts, **`R`** is the result it
+ * declares back to a caller (`void` for the value-less majority), and **`T`**
+ * is the handler's bound state, present only where there is one.
+ *
+ * `Handler` and `HandlerFactory` take them event-first — `Handler<E, T, R>` —
+ * the same order `handler()`'s own type parameters and `Stream<E, R>` read,
+ * so one tuple means the same thing at the declaration, the builder call, and
+ * the produced stream (#5161).
+ */
+export type Handler<E = any, T = any, R = void> = Module & {
+  with: (inputs: FactoryInput<StripCell<T>>) => Stream<E, R>;
 };
 
 export type NodeFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
   & (Module | Handler | Pattern)
   & toJSON
+  & toEncodableForm
   & {
     asScope(scope: CellScope): NodeFactory<T, R>;
   };
@@ -1490,6 +1774,7 @@ export type PatternFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
   & Pattern
   & toJSON
+  & toEncodableForm
   & {
     asScope(scope: CellScope): PatternFactory<T, R>;
     inSpace(space?: string | AnyCell<unknown>): PatternFactory<T, R>;
@@ -1499,53 +1784,70 @@ export type ModuleFactory<T, R> =
   & ((inputs: FactoryInput<T>) => Reactive<R>)
   & Module
   & toJSON
+  & toEncodableForm
   & {
     asScope(scope: CellScope): ModuleFactory<T, R>;
   };
 
-export type HandlerFactory<T, R> =
-  & ((inputs: FactoryInput<StripCell<T>>) => Stream<R>)
-  & Handler<T, R>
-  & toJSON;
+export type HandlerFactory<E, T, R = void> =
+  & ((inputs: FactoryInput<StripCell<T>>) => Stream<E, R>)
+  & Handler<E, T, R>
+  & toJSON
+  & toEncodableForm;
 
 // JSON types
 
+/**
+ * Pure deeply-immutable JSON value.
+ */
 export type JSONValue =
   | null
   | boolean
   | number
   | string
   | JSONArray
-  | JSONObject & IDFields;
+  | JSONObject;
 
-export interface JSONArray extends ArrayLike<JSONValue> {}
+export interface JSONArray extends ReadonlyArray<JSONValue> {}
 
-export interface JSONObject extends Record<string, JSONValue> {}
+export interface JSONObject extends Readonly<Record<string, JSONValue>> {}
 
-// Annotations when writing data that help determine the entity id. They are
-// removed before sending to storage.
-export interface IDFields {
-  [ID]?: unknown;
-  [ID_FIELD]?: unknown;
+/**
+ * Deeply-mutable version of `JSONValue`.
+ */
+export type MutableJSONValue = Mutable<JSONValue>;
+
+/**
+ * Fabric-primitive validation types -- a non-standard addition to the JSON
+ * Schema `type` vocabulary. Each name identifies a concrete `FabricPrimitive`
+ * class from the data-model, and a value matches by prototype (`instanceof`),
+ * not by structure. `"object"` also accepts these values -- every fabric
+ * primitive is a subtype of `"object"` the way an `"integer"` value satisfies
+ * a `"number"` schema -- so schemas that predate this vocabulary keep working.
+ */
+export const FABRIC_PRIMITIVE_SCHEMA_TYPES = Object.freeze(
+  [
+    "FabricBytes",
+    "FabricEpochDays",
+    "FabricEpochNsec",
+    "FabricHash",
+    "FabricRegExp",
+  ] as const,
+);
+
+export type FabricPrimitiveSchemaType =
+  typeof FABRIC_PRIMITIVE_SCHEMA_TYPES[number];
+
+const FABRIC_PRIMITIVE_SCHEMA_TYPE_SET: ReadonlySet<string> = new Set(
+  FABRIC_PRIMITIVE_SCHEMA_TYPES,
+);
+
+/** Whether the given schema type names a `FabricPrimitive` class. */
+export function isFabricPrimitiveSchemaType(
+  type: string,
+): type is FabricPrimitiveSchemaType {
+  return FABRIC_PRIMITIVE_SCHEMA_TYPE_SET.has(type);
 }
-
-/**
- * Recursively adds `readonly` to all properties of `T`.
- *
- * Mirrors the definition in `@commonfabric/utils/types` but is duplicated here
- * so that `@commonfabric/api` remains dependency-free.
- */
-type Immutable<T> = T extends ReadonlyArray<infer U>
-  ? ReadonlyArray<Immutable<U>>
-  : T extends object ? ({ readonly [P in keyof T]: Immutable<T[P]> })
-  : T;
-
-/**
- * Deeply-readonly version of `JSONValue`. Used in `JSONSchemaObj` for fields
- * like `default`, `const`, `enum`, and `examples` whose values must not be
- * mutated after construction.
- */
-export type ImmutableJSONValue = Immutable<JSONValue>;
 
 // Valid values for the "type" property of a JSONSchema
 export type JSONSchemaTypes =
@@ -1557,7 +1859,8 @@ export type JSONSchemaTypes =
   | "boolean"
   | "null"
   | "undefined" // undefined is a non-standard addition
-  | "unknown"; // unknown is a non-standard addition
+  | "unknown" // unknown is a non-standard addition
+  | FabricPrimitiveSchemaType; // non-standard; see FABRIC_PRIMITIVE_SCHEMA_TYPES
 
 // We can use a more complex asCell specifier to handle things like
 // `Cell<Cell<T>>` with `{ asCell: ["cell", "cell"] }`.
@@ -1601,8 +1904,8 @@ export type JSONSchemaObj = {
 
   // Validation for any
   readonly type?: JSONSchemaTypes | readonly JSONSchemaTypes[];
-  readonly enum?: readonly ImmutableJSONValue[]; // not validated
-  readonly const?: ImmutableJSONValue; // not validated
+  readonly enum?: readonly JSONValue[]; // not validated
+  readonly const?: JSONValue; // not validated
   // Validation for numeric - none applied
   readonly multipleOf?: number;
   readonly maximum?: number;
@@ -1636,16 +1939,14 @@ export type JSONSchemaObj = {
   // Meta-Data
   readonly title?: string;
   readonly description?: string;
-  readonly default?: ImmutableJSONValue;
+  readonly default?: JSONValue;
   readonly readOnly?: boolean;
   readonly writeOnly?: boolean;
-  readonly examples?: readonly ImmutableJSONValue[];
+  readonly examples?: readonly JSONValue[];
   readonly $schema?: string;
   readonly $comment?: string;
 
   // Common Fabric extensions
-  readonly [ID]?: unknown;
-  readonly [ID_FIELD]?: unknown;
   readonly scope?: SchemaScope;
   // Discovery hashtags from the doc comment (lowercased, without the leading
   // `#`). Populated by the schema generator; mirrors the description text.
@@ -1654,11 +1955,11 @@ export type JSONSchemaObj = {
   readonly asCell?: readonly AsCellType[];
   // temporarily used to assign labels like "confidential"
   readonly ifc?: {
-    readonly confidentiality?: readonly ImmutableJSONValue[];
-    readonly integrity?: readonly ImmutableJSONValue[];
-    readonly addIntegrity?: readonly ImmutableJSONValue[];
-    readonly requiredIntegrity?: readonly ImmutableJSONValue[];
-    readonly maxConfidentiality?: readonly ImmutableJSONValue[];
+    readonly confidentiality?: readonly JSONValue[];
+    readonly integrity?: readonly JSONValue[];
+    readonly addIntegrity?: readonly JSONValue[];
+    readonly requiredIntegrity?: readonly JSONValue[];
+    readonly maxConfidentiality?: readonly JSONValue[];
     readonly ownerPrincipal?: string | CurrentPrincipal;
     readonly writeAuthorizedBy?:
       | readonly string[]
@@ -1695,26 +1996,16 @@ export type JSONSchemaObj = {
 };
 
 /**
- * Recursively removes `readonly` from all properties of `T`.
- *
- * Copy of `Mutable` from `@commonfabric/utils/types`. These two definitions
- * should be unified; see that module for the canonical version.
- */
-type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
-  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
-  : T;
-
-/**
  * A deep-mutable variant of `JSONSchemaObj`. Recursively strips `readonly`
  * from all properties, making the schema safe to build up incrementally.
  */
-export type JSONSchemaObjMutable = Mutable<JSONSchemaObj>;
+export type MutableJSONSchemaObj = Mutable<JSONSchemaObj>;
 
 /**
- * A `JSONSchemaObjMutable` or a boolean. JSON Schema allows `true` (accept any
+ * A `MutableJSONSchemaObj` or a boolean. JSON Schema allows `true` (accept any
  * value) and `false` (reject all values) as valid schemas.
  */
-export type JSONSchemaMutable = JSONSchemaObjMutable | boolean;
+export type MutableJSONSchema = MutableJSONSchemaObj | boolean;
 
 export type * from "./cfc.ts";
 export { CFC_CANONICAL_ALIAS_NAMES } from "./cfc.ts";
@@ -1862,7 +2153,7 @@ export type BuiltInLLMTool =
       extraParams?: Record<string, any>;
       useResultSchemaForObservation?: boolean;
     }
-    | { handler: Stream<any> | Reactive<any>; pattern?: never }
+    | { handler: AnyStream | Reactive<any>; pattern?: never }
   );
 
 /**
@@ -1883,7 +2174,7 @@ export interface BuiltInLLMParams {
   stop?: string;
   maxTokens?: number;
   builtinTools?: boolean;
-  observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+  observationMaxConfidentiality?: readonly JSONValue[];
   /**
    * Specifies the mode of operation for the LLM.
    * - `"json"`: Indicates that the LLM should process and return data in JSON format.
@@ -1964,7 +2255,7 @@ export type BuiltInGenerateObjectParams =
     system?: string;
     cache?: boolean;
     maxTokens?: number;
-    observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+    observationMaxConfidentiality?: readonly JSONValue[];
     schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
@@ -1991,7 +2282,7 @@ export type BuiltInGenerateObjectParams =
     system?: string;
     cache?: boolean;
     maxTokens?: number;
-    observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+    observationMaxConfidentiality?: readonly JSONValue[];
     schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
@@ -2098,35 +2389,76 @@ export interface BuiltInCompileAndRunState<T> {
 // derived from these types, so it would silently downgrade live cells to dead
 // values. (`SELF` and the consumer-facing factory result deliberately use the
 // same unstripped `R`.)
+/**
+ * The reserved output fields the runtime reads off a pattern's result, each
+ * typed so a value of the wrong shape under a reserved key is a compile error.
+ * `[NAME]` names the piece; `[UI]`, `[TILE_UI]` and `[CHIP_UI]` are its
+ * renderings; `[FS]` is its filesystem projection. Each is `FactoryInput`-
+ * wrapped so a reactive value (a `computed()`, a cell) is accepted alongside a
+ * plain one.
+ */
+type ReservedOutput = {
+  [NAME]?: FactoryInput<string>;
+  [TYPE]?: FactoryInput<string>;
+  [UI]?: FactoryInput<VNode> | JSXElement;
+  [TILE_UI]?: FactoryInput<VNode> | JSXElement;
+  [CHIP_UI]?: FactoryInput<VNode> | JSXElement;
+  [FS]?: FactoryInput<FsProjection>;
+};
+
+/**
+ * Attach the reserved fields to an object return, so a reserved key is typed
+ * in the return position without disturbing the author's own output shape: a
+ * pattern that omits them is unaffected. A pattern that returns a bare value
+ * or `undefined` (not an object) is passed through untouched — there is no
+ * reserved field to type there.
+ */
+type WithReservedOutput<R> = R extends object ? R & ReservedOutput : R;
+
+/**
+ * Values a pattern can return that are not objects, and so carry no reserved
+ * fields to check. Unioned into the explicit-`<T>` overloads' return so a
+ * pattern that returns a bare value (e.g. `string | undefined`) still type-
+ * checks there, where the output type is not a constrained parameter.
+ */
+type NonObjectOutput =
+  | string
+  | number
+  | bigint
+  | boolean
+  | symbol
+  | null
+  | undefined;
+
 export interface PatternFunction {
   // Function-only overload: T and R inferred from function
   <T, R>(
     fn: (
       input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
-    ) => FactoryInput<R>,
+    ) => WithReservedOutput<FactoryInput<R>>,
   ): PatternFactory<StripCell<T>, R>;
 
   // Function-only overload: T explicit, R inferred
   <T>(
     fn: (
       input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<any> },
-    ) => any,
-  ): PatternFactory<StripCell<T>, ReturnType<typeof fn>>;
+    ) => (object & ReservedOutput) | NonObjectOutput,
+  ): PatternFactory<StripCell<T>, any>;
 
   // Function + schema overload: T explicit, R inferred
   <T>(
     fn: (
       input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<any> },
-    ) => any,
+    ) => (object & ReservedOutput) | NonObjectOutput,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
-  ): PatternFactory<StripCell<T>, ReturnType<typeof fn>>;
+  ): PatternFactory<StripCell<T>, any>;
 
   // Function + schema overload: T and R explicit
   <T, R>(
     fn: (
       input: Reactive<RequireDefaults<T>> & { [SELF]: Reactive<R> },
-    ) => FactoryInput<R>,
+    ) => WithReservedOutput<FactoryInput<R>>,
     argumentSchema: JSONSchema,
     resultSchema?: JSONSchema,
   ): PatternFactory<StripCell<T>, R>;
@@ -2215,7 +2547,7 @@ export interface LiftFunction {
 // methods — `.get()/.set()`, `.send()`, `.exec()/.query()` — not data containers
 // to map over).
 export type HandlerState<T> = T extends Cell<any> ? T
-  : T extends Stream<any> ? T
+  : T extends AnyStream ? T
   : T extends SqliteDb<any> ? T
   : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
   : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
@@ -2227,17 +2559,36 @@ export interface HandlerFunction {
     eventSchema: JSONSchema,
     stateSchema: JSONSchema,
     handler: (event: E, props: HandlerState<T>) => any,
-  ): HandlerFactory<T, E>;
+  ): HandlerFactory<E, T>;
 
   // Without schemas
   <E, T>(
     handler: (event: E, props: T) => any,
     options: { proxy: true },
-  ): HandlerFactory<T, E>;
+  ): HandlerFactory<E, T>;
 
   <E, T>(
     handler: (event: E, props: HandlerState<T>) => any,
-  ): HandlerFactory<T, E>;
+  ): HandlerFactory<E, T>;
+
+  // Declared results, reached only by naming all three type arguments —
+  // `ActionFunction`'s explicit-only rule, for the same reason: the `=> any`
+  // forms above absorb every callback first, so an incidental return never
+  // declares a result; a result must be asked for by name.
+  <E, T, R>(
+    eventSchema: JSONSchema,
+    stateSchema: JSONSchema,
+    handler: (event: E, props: HandlerState<T>) => R,
+  ): HandlerFactory<E, T, R>;
+
+  <E, T, R>(
+    handler: (event: E, props: T) => R,
+    options: { proxy: true },
+  ): HandlerFactory<E, T, R>;
+
+  <E, T, R>(
+    handler: (event: E, props: HandlerState<T>) => R,
+  ): HandlerFactory<E, T, R>;
 }
 
 /**
@@ -2251,11 +2602,24 @@ export interface HandlerFunction {
  * computed(() => expr) becomes a lift-applied computation with closure
  * extraction.
  */
+/**
+ * This is the surface a PATTERN sees — `commonfabric` resolves to this file, so
+ * these overloads and `builder/module.ts`'s `action()` must carry the same
+ * signatures. They are maintained by hand and drift silently: an overload
+ * present only in the builder is invisible to every pattern, which is how the
+ * result overload below was initially missed.
+ */
 export type ActionFunction = {
   // Overload 1: Zero-parameter callback returns Stream<void>
   (fn: () => void): Stream<void>;
-  // Overload 2: Parameterized callback returns Stream<T>
-  <T>(fn: (event: T) => void): Stream<T>;
+  // Overload 2: Parameterized callback returns Stream<E>
+  <E>(fn: (event: E) => void): Stream<E>;
+  // Overload 3: a declared result, reached only by naming both type arguments.
+  // Never inferred — a concise arrow body returns whatever its last call
+  // evaluates to, and `Cell.set` returns the cell, so inference would declare
+  // results nobody wrote. Overload 2 absorbs every callback because anything is
+  // assignable to a void-returning signature.
+  <E, R>(fn: (event: E) => R): Stream<E, R>;
 };
 
 export type ComputedFunction = <T>(fn: () => T) => Reactive<T>;
@@ -2901,7 +3265,11 @@ type StripDefaultField<T> = IsAny<T> extends true ? T
 type StripDefaultFieldInner<T> = T extends Cell<infer U>
   ? Cell<StripDefaultUnion<U>>
   : T extends OpaqueCell<infer U> ? OpaqueCell<StripDefaultUnion<U>>
-  : T extends Stream<infer U> ? Stream<StripDefaultUnion<U>>
+  // Rebuilt, so both halves are named explicitly: detection is
+  // brand-based, but the reconstruction still has to carry R across or
+  // a returning verb silently comes back value-less.
+  : T extends AnyStream
+    ? Stream<StripDefaultUnion<StreamEventOf<T>>, StreamResultOf<T>>
   : T extends ComparableCell<infer U> ? ComparableCell<StripDefaultUnion<U>>
   : T extends ReadonlyCell<infer U> ? ReadonlyCell<StripDefaultUnion<U>>
   : T extends WriteonlyCell<infer U> ? WriteonlyCell<StripDefaultUnion<U>>
@@ -3151,7 +3519,7 @@ export type Props = {
     | null
     | undefined
     | Cell<any>
-    | Stream<any>;
+    | AnyStream;
 };
 
 /** A child in a view can be one of a few things */

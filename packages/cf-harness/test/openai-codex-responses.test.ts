@@ -125,6 +125,70 @@ Deno.test("Codex Responses client sends the pinned owner-authenticated request",
   assertEquals(body.prompt_cache_key, "run-123");
 });
 
+Deno.test("Codex Responses supports stable affinity and reasoning controls", async () => {
+  let body: Record<string, unknown> | undefined;
+  let headers: Headers | undefined;
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      headers = new Headers(init?.headers);
+      return Promise.resolve(sse({
+        type: "response.completed",
+        response: {
+          status: "completed",
+          output: [{
+            type: "message",
+            content: [{ type: "output_text", text: "done" }],
+          }],
+        },
+      }));
+    },
+  });
+
+  await client.complete({
+    model: "gpt-5.6-sol",
+    transcript: [{ role: "user", content: "hi" }],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "ephemeral-run",
+    cacheAffinityKey: "stable-session",
+    reasoningEffort: "low",
+  });
+
+  assertEquals(headers?.get("session-id"), "stable-session");
+  assertEquals(body?.prompt_cache_key, "stable-session");
+  assertEquals(body?.reasoning, { effort: "low" });
+  assertEquals(body?.prompt_cache_options, undefined);
+});
+
+Deno.test("Codex Responses rejects API prompt cache mode controls", async () => {
+  let resolvedCredential = false;
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: {
+      resolve: () => {
+        resolvedCredential = true;
+        return Promise.resolve(credential);
+      },
+    },
+  });
+
+  await assertRejects(
+    () =>
+      client.complete({
+        model: "gpt-5.6-sol",
+        transcript: [{ role: "user", content: "hi" }],
+        tools: [],
+        nativeModelToolIds: [],
+        runId: "run-123",
+        promptCacheMode: "explicit",
+      }),
+    Error,
+    "prompt cache mode controls are not supported by openai-codex",
+  );
+  assertEquals(resolvedCredential, false);
+});
+
 Deno.test("Codex Responses client bounds stable run affinity identifiers", async () => {
   const longRunId = `${"parent-run-".repeat(8)}subagent.123`;
   const requests: Array<{ headers: Headers; body: Record<string, unknown> }> =
@@ -184,6 +248,90 @@ Deno.test("Codex Responses client bounds stable run affinity identifiers", async
   assertEquals(requestIds[0] === requestIds[1], false);
 });
 
+Deno.test("Codex Responses client recovers streamed output items when store:false empties the terminal output", async () => {
+  // The ChatGPT Codex backend streams each completed item via
+  // `response.output_item.done` but, with `store: false`, returns an EMPTY
+  // `output` array on `response.completed`. The client must fall back to the
+  // streamed items or it silently drops the model's message and tool calls
+  // (observed live: agents did nothing, 0 tool calls, empty final text).
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () =>
+      Promise.resolve(sse(
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "message",
+            id: "msg_1",
+            role: "assistant",
+            content: [{ type: "output_text", text: "on it" }],
+          },
+        },
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            id: "fc_1",
+            call_id: "call_1",
+            name: "bash",
+            arguments: '{"command":"uname -a"}',
+          },
+        },
+        {
+          type: "response.completed",
+          response: { id: "resp_stream", status: "completed", output: [] },
+        },
+      )),
+  });
+
+  const result = await client.complete({
+    model: "gpt-5.4",
+    transcript: [{ role: "user", content: "explore" }],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "run-stream",
+  });
+
+  assertEquals(result.assistant.content, "on it");
+  assertEquals(result.assistant.toolCalls?.[0]?.id, "call_1");
+  assertEquals(result.assistant.toolCalls?.[0]?.function.name, "bash");
+});
+
+Deno.test("Codex Responses client recovers streamed output items when the terminal output is null", async () => {
+  // The same backend has also been observed returning `output: null` (not just
+  // an empty array) with valid streamed items. Treat null like empty.
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: { resolve: () => Promise.resolve(credential) },
+    fetchFn: () =>
+      Promise.resolve(sse(
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            id: "fc_1",
+            call_id: "call_1",
+            name: "bash",
+            arguments: '{"command":"whoami"}',
+          },
+        },
+        {
+          type: "response.completed",
+          response: { id: "resp_null", status: "completed", output: null },
+        },
+      )),
+  });
+
+  const result = await client.complete({
+    model: "gpt-5.4",
+    transcript: [{ role: "user", content: "who" }],
+    tools: [],
+    nativeModelToolIds: [],
+    runId: "run-null",
+  });
+
+  assertEquals(result.assistant.toolCalls?.[0]?.function.name, "bash");
+});
+
 Deno.test("Codex Responses client normalizes tool calls and preserves encrypted continuation", async () => {
   const requestBodies: Array<Record<string, unknown>> = [];
   const client = new OpenAICodexResponsesClient({
@@ -231,7 +379,6 @@ Deno.test("Codex Responses client normalizes tool calls and preserves encrypted 
     {
       version: 1,
       sourceModel: "gpt-5.4",
-      responseId: "resp_tools",
       output: [{
         type: "reasoning",
         id: "rs_1",
@@ -587,6 +734,7 @@ Deno.test("Codex Responses client parses CRLF SSE split across byte boundaries",
     inputTokens: 3,
     outputTokens: 2,
     totalTokens: 5,
+    estimateWithheldReason: "provider-pricing-unavailable",
   });
 });
 

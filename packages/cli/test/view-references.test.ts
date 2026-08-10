@@ -2,6 +2,7 @@ import { assert, assertEquals } from "@std/assert";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";
 import {
   ancestorsOf,
+  collectIdentUses,
   findDependencies,
   findReferences,
 } from "../lib/view/references.ts";
@@ -146,6 +147,34 @@ Deno.test("findDependencies: excludes the node's own declarations", () => {
   const deps = findDependencies(doc, p);
   // `t` and `url` are declared inside the pattern, not dependencies.
   assert(!deps.some((d) => d.name === "t"), "local binding t is not a dep");
+});
+
+Deno.test("findDependencies: member calls do not match same-named declarations", () => {
+  for (const name of ["run", "render", "__cfLift_1"]) {
+    const doc = parseDocument(`function ${name}() {}
+worker.${name}();`);
+    const statement = doc.flatStructure.find((node) =>
+      node.startLine === 1 &&
+      (node.kind === "statement" || node.kind === "builder")
+    )!;
+    assertEquals(findDependencies(doc, statement), [], name);
+  }
+});
+
+Deno.test("collectIdentUses: a called member can match the selected binding's name", () => {
+  const doc = parseDocument("const run = worker.run();");
+  const binding = doc.flatStructure.find((node) => node.name === "run")!;
+  const uses = collectIdentUses(doc, binding);
+  assert(
+    uses.some((use) =>
+      use.name === "run" && use.useOffset === doc.text.lastIndexOf("run")
+    ),
+    "the called member remains available for an exact-position lookup",
+  );
+  assert(
+    !uses.some((use) => use.useOffset === binding.nameOffset),
+    "the binding declaration is not a use",
+  );
 });
 
 Deno.test("ancestorsOf: chain from section down to the parent", () => {

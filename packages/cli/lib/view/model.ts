@@ -1,10 +1,11 @@
 /**
  * Shared data model for the `cf view` pager.
  *
- * The pipeline is: raw text -> {@link parseDocument} (TypeScript parser) ->
- * {@link Document} -> {@link renderFrame}. Everything downstream of the parser
- * operates on these structures, never on the TypeScript AST directly, which
- * keeps the renderer pure and testable.
+ * The pipeline is: raw text -> the selected language's document parser ->
+ * optional source-to-rendered line projection -> {@link Document} ->
+ * {@link renderFrame}. Everything downstream of the language operates on these
+ * structures, never on a concrete parser tree directly, which keeps the
+ * renderer pure and testable.
  */
 
 /**
@@ -47,6 +48,9 @@ export type TokenClass =
   | "diffHunk" // a `@@ -a,b +c,d @@` hunk header
   | "diffMeta"; // diff metadata: `diff --git`, `index`, `---`, `+++`, …
 
+/** Which representation of the underlying source the pager is displaying. */
+export type ViewMode = "source" | "rendered";
+
 /** A coloured run of text on a single logical (pre-wrap) source line. */
 export interface Span {
   /** 0-based column where this span starts on its line. */
@@ -55,14 +59,25 @@ export interface Span {
   readonly cls: TokenClass;
   /** Nesting depth for `bracket` spans, used for rainbow colouring. */
   readonly bracketDepth?: number;
+  /** Symbol name to resolve only at this position, not by matching span text. */
+  readonly exactDefinitionName?: string;
+  /** Single-line spelling used when displaying an exact definition target. */
+  readonly exactDefinitionDisplayName?: string;
+  /** Rich-text modifiers used by rendered document views. */
+  readonly bold?: boolean;
+  readonly italic?: boolean;
+  readonly underline?: boolean;
+  readonly strikethrough?: boolean;
 }
 
-/** One source line: the verbatim text plus its coloured spans. */
+/** One logical display line and its coloured spans. */
 export interface Line {
   readonly text: string;
   readonly spans: readonly Span[];
   /** Full-row background tint for diff views (added/removed lines). */
   readonly bg?: "add" | "del";
+  /** The rendered text omits source content that a changed diff line must show. */
+  readonly renderedSourceHidden?: boolean;
 }
 
 /** Kinds of structural nodes surfaced in the navigation tree. */
@@ -229,7 +244,7 @@ export function flattenStructure(
 
 /** Fully parsed document handed to the renderer and pager. */
 export interface Document {
-  /** Verbatim source text exactly as piped in. */
+  /** Verbatim source text exactly as piped in, in either view mode. */
   readonly text: string;
   readonly lines: readonly Line[];
   /** Root-level structure nodes (sections, or top-level statements). */

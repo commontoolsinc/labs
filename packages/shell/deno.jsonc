@@ -7,7 +7,6 @@
     "serve": "deno run -A ../felt/cli.ts serve .",
     "dev": "deno task clean && API_URL=https://toolshed.saga-castor.ts.net deno run -A ../felt/cli.ts dev .",
     "dev-local": "deno task clean && API_URL=http://localhost:$TOOLSHED_PORT deno run -A ../felt/cli.ts dev .",
-    "dev-clusterduck": "deno task clean && API_URL='http://localhost:7001' deno run -A ../felt/cli.ts dev .",
     "integration": "LOG_LEVEL=warn deno test -A $INTEGRATION_TEST_FLAGS ./integration/*.test.ts",
     // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
     "test": "deno test --no-check --allow-net=127.0.0.1 --allow-read --allow-write --allow-run --allow-env test/*.test.ts"
@@ -16,6 +15,7 @@
     "./shared": "./shared/mod.ts"
   },
   "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "@lit/context": "npm:@lit/context@^1.1.6",
     "@lit/task": "npm:@lit/task@^1.0.3",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1",

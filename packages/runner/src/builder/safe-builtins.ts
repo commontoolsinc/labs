@@ -42,9 +42,11 @@ export function sandboxDateNow(): number {
   throw new TimeCapabilityError(
     "The ambient clock (Date.now() / new Date()) is not available in this " +
       "context. Read it inside a handler (it reports the triggering event's " +
-      "time, coarsened to one second), or for reactive display read the #now " +
-      'clock (wish({ query: "#now" }) or #now/N). Formatting a known timestamp ' +
-      "with new Date(ms) is unaffected.",
+      "time, coarsened to one second), or for a live clock read the interval " +
+      '#now wish (wish({ query: "#now/N" }), N in seconds). The bare "#now" ' +
+      "wish is not a clock — it durably captures the piece's first-ever load " +
+      "time and never advances (use it for created-at stamps). Formatting a " +
+      "known timestamp with new Date(ms) is unaffected.",
   );
 }
 

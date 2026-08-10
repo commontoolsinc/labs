@@ -214,10 +214,10 @@ describe("shell piece tests", () => {
       // on the result cell, drains the scheduler, and resolves once the value
       // reaches its target, so the sequential checks (0, then -1, then -2) each
       // wait on a real committed change rather than a timer.
-      const resultCell = controller.manager().getResult(currentPiece.getCell());
+      const resultCell = controller.getResult(currentPiece.getCell());
       const awaitResultValue = (target: number): Promise<unknown> =>
         waitForCellValue<{ value?: number }>(
-          controller.manager().runtime,
+          controller.runtime,
           resultCell,
           (value) => value?.value === target,
         );
@@ -285,7 +285,7 @@ describe("shell piece tests", () => {
       await awaitResultValue(-2);
 
       // Compilation-cache contract: the piece's cold compile above was written
-      // back to the IDB-backed CachedCompiler. A FRESH worker must then load
+      // back to the content-addressed cell cache. A FRESH worker must then load
       // the piece from that cache — zero in-client compilations during the
       // piece load. Flush the write-backs first: a write still in flight when
       // the fresh worker reads the cache forces a recompile (the flake this
@@ -469,10 +469,7 @@ describe("shell piece tests", () => {
           global.__ctRuntimeDisposed = disposeInternals();
           return global.__ctRuntimeDisposed;
         };
-        await globalThis.app.apply({
-          type: "set-identity",
-          identity: undefined,
-        });
+        await globalThis.app.setIdentity(undefined);
       });
       // The swap clears the global only after it has called the wrapped
       // dispose(), so once the runtime is gone the disposal promise is stashed.

@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { SchemaGenerator } from "../../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: type-to-schema parity", () => {
@@ -16,7 +16,7 @@ describe("Schema: type-to-schema parity", () => {
       await getTypeFromCode(code, "PatternInput");
     const { type: oType, checker: oChecker, typeNode: oNode } =
       await getTypeFromCode(code, "PatternOutput");
-    const gen = createSchemaTransformerV2();
+    const gen = new SchemaGenerator();
     const u = asObjectSchema(gen.generateSchema(uType, uChecker, uNode));
     const i = asObjectSchema(gen.generateSchema(iType, iChecker, iNode));
     const o = asObjectSchema(gen.generateSchema(oType, oChecker, oNode));
@@ -58,7 +58,7 @@ describe("Schema: type-to-schema parity", () => {
 
     const { type, checker } = await getTypeFromCode(code, "UserInfo");
     const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
+      new SchemaGenerator().generateSchema(type, checker),
     );
 
     expect(schema.type).toBe("object");

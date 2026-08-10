@@ -38,9 +38,20 @@ if (
   Deno.exit(0);
 }
 
-// Run deno check on the file
-const check = new Deno.Command("deno", {
-  args: ["check", filePath],
+// Run deno check on the file.
+//
+// `--no-lock`: `deno check` rewrites `deno.lock` whenever a checked file's
+// dependency graph names a specifier the lock does not have yet — the ordinary
+// "add a dependency" edit. `deno.lock` is tracked, and this hook fires on every
+// `.ts` edit, so without the flag an edit dirtied a file the author never
+// touched and it went out in their next commit. Measured in a scratch project.
+// Type errors are still reported; only lockfile integrity goes unchecked here,
+// and CI checks that against the real lock.
+// `Deno.execPath()`: the check runs under the Deno running this hook, not
+// whichever `deno` comes first on `PATH`, so the type errors it reports are the
+// ones the pinned compiler reports.
+const check = new Deno.Command(Deno.execPath(), {
+  args: ["check", "--no-lock", filePath],
   stdout: "piped",
   stderr: "piped",
 });

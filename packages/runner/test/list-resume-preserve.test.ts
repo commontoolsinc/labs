@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type { Signer } from "@commonfabric/memory/interface";
@@ -31,65 +31,104 @@ import {
 // that genuinely settles falsy/undefined is still excluded — convergence, not
 // freeze).
 //
-// The window is timing-dependent, so this test forces it deterministically: a
-// loopback transport delays delivery of the per-element predicate documents
-// (boolean-valued) relative to everything else, modeling a real reload where the
-// per-element results rehydrate after the aggregate container has loaded. The
-// container's `kept` entries are `{ keep, label }` objects, so the boolean
-// predicate documents are cleanly separable from the container document. The
-// test asserts that the `kept` list is never observed as empty or a strict
-// shrink during the resume window.
+// The reload is staged in the transport rather than timed. A resume asks
+// storage for two batches of documents: the aggregate's own container together
+// with the input list, and, behind it, the per-element runs. Both are held. The
+// test lets the coordinator run once against nothing, releases the container
+// batch, lets it reconcile while the per-element batch is still withheld, and
+// only then releases that. Each step waits on an edge the transport reports, so
+// the sequence is the same on every run.
+//
+// Delaying the second batch on a timer instead cannot promise that sequence.
+// The coordinator's resume work and the delivery are then ordered by whatever
+// the event loop did on that run, so the window is wide, narrow or closed by
+// luck and the assertions below check a different scenario each time.
 
 const signer = await Identity.fromPassphrase("list resume preserve");
 const space = signer.did();
 
-// Per-element result docs are separated from the aggregate container by the
-// schema type their query carries. A `filter` predicate result is a boolean and
-// its sync carries `"type":"boolean"`; a `flatMap` op result here is a number
-// (the container's own query carries no scalar item type, only `asCell` slots),
-// so the two builtins pass distinct matchers below.
-const FILTER_CHILD_DOC = /"type":"boolean"/;
-const FLATMAP_CHILD_DOC = /"type":"number"/;
+// Which batch a sync belongs to, read off the schemas it carries. The
+// per-element batch carries the run argument's schema, whose sole required
+// property is `element`; it is recognized first, because it also mentions the
+// aggregate. The top-level batch carries the pattern's own result schema, whose
+// required property is the aggregate's key.
+const PER_ELEMENT_BATCH = /"required":\["element"\]/;
+const TOP_LEVEL_BATCH = /"required":\["(?:kept|values)"\]/;
 
-function delayingLoopback(
-  server: MemoryV2Server.Server,
-  childDelayMs: number,
-  childDoc: RegExp,
-  onDelay: () => void,
-): MemoryV2Client.Transport {
-  const inner = MemoryV2Client.loopback(server);
-  return {
-    send: (p: string) => inner.send(p),
-    close: () => inner.close(),
-    setReceiver: (r: (p: string) => void) => {
-      inner.setReceiver((payload: string) => {
-        if (childDelayMs > 0 && childDoc.test(payload)) {
-          onDelay();
-          setTimeout(() => r(payload), childDelayMs);
-        } else {
-          r(payload);
-        }
-      });
-    },
-    setCloseReceiver: (r: (e?: Error) => void) => inner.setCloseReceiver?.(r),
-  };
+/**
+ * A transport gate that holds the two resume batches and releases them on the
+ * test's word, in the order a reload delivers them.
+ *
+ * Each stage exposes a promise that resolves the first time a document of that
+ * stage is held back. That is the edge the test waits on: the storage layer has
+ * answered, so the batch is known to exist and to be withheld, rather than the
+ * test guessing at when it might turn up.
+ */
+class ResumeBatchGate {
+  readonly #held: [string[], string[]] = [[], []];
+  readonly #open: [boolean, boolean] = [false, false];
+  readonly #resolve: [(() => void) | undefined, (() => void) | undefined];
+  #deliver: (payload: string) => void = () => {};
+  /** Resolves once a top-level document has been held back. */
+  readonly topHeld: Promise<void>;
+  /** Resolves once a per-element document has been held back. */
+  readonly elementsHeld: Promise<void>;
+  constructor() {
+    let resolveTop!: () => void;
+    let resolveElements!: () => void;
+    this.topHeld = new Promise<void>((resolve) => {
+      resolveTop = resolve;
+    });
+    this.elementsHeld = new Promise<void>((resolve) => {
+      resolveElements = resolve;
+    });
+    this.#resolve = [resolveTop, resolveElements];
+  }
+  #stageOf(payload: string): 0 | 1 | undefined {
+    if (PER_ELEMENT_BATCH.test(payload)) return 1;
+    if (TOP_LEVEL_BATCH.test(payload)) return 0;
+    return undefined;
+  }
+  wrap(inner: MemoryV2Client.Transport): MemoryV2Client.Transport {
+    return {
+      send: (payload: string) => inner.send(payload),
+      close: () => inner.close(),
+      setReceiver: (receive: (payload: string) => void) => {
+        this.#deliver = receive;
+        inner.setReceiver((payload: string) => {
+          const stage = this.#stageOf(payload);
+          if (stage === undefined || this.#open[stage]) {
+            receive(payload);
+            return;
+          }
+          this.#held[stage].push(payload);
+          this.#resolve[stage]?.();
+          this.#resolve[stage] = undefined;
+        });
+      },
+      setCloseReceiver: (r: (e?: Error) => void) => inner.setCloseReceiver?.(r),
+    };
+  }
+  /** How many documents of a stage are currently held back. */
+  heldCount(stage: 0 | 1): number {
+    return this.#held[stage].length;
+  }
+  /** Open a stage and flush every document it holds. */
+  release(stage: 0 | 1): void {
+    this.#open[stage] = true;
+    for (const payload of this.#held[stage].splice(0)) this.#deliver(payload);
+  }
 }
 
-class DelayingSessionFactory implements SessionFactory {
+class GatedSessionFactory implements SessionFactory {
   constructor(
     private readonly getServer: () => MemoryV2Server.Server,
-    private readonly childDelayMs: number,
-    private readonly childDoc: RegExp,
-    private readonly onDelay: () => void,
+    private readonly gate?: ResumeBatchGate,
   ) {}
   async create(spaceId: string, sgnr?: Signer) {
+    const base = MemoryV2Client.loopback(this.getServer());
     const client = await MemoryV2Client.connect({
-      transport: delayingLoopback(
-        this.getServer(),
-        this.childDelayMs,
-        this.childDoc,
-        this.onDelay,
-      ),
+      transport: this.gate ? this.gate.wrap(base) : base,
     });
     const session = await client.mount(
       spaceId,
@@ -100,42 +139,39 @@ class DelayingSessionFactory implements SessionFactory {
   }
 }
 
-class DelayingStorageManager extends StorageManager {
+class GatedStorageManager extends StorageManager {
   static make(
     as: Identity,
     server: MemoryV2Server.Server,
-    childDelayMs: number,
-    childDoc: RegExp,
-    onDelay: () => void = () => {},
-  ): DelayingStorageManager {
-    return new DelayingStorageManager(
+    gate?: ResumeBatchGate,
+  ): GatedStorageManager {
+    return new GatedStorageManager(
       { as, memoryHost: new URL("memory://") } as Options,
       server,
-      childDelayMs,
-      childDoc,
-      onDelay,
+      gate,
     );
   }
   private constructor(
     options: Options,
     server: MemoryV2Server.Server,
-    childDelayMs: number,
-    childDoc: RegExp,
-    onDelay: () => void,
+    gate?: ResumeBatchGate,
   ) {
-    super(
-      options,
-      new DelayingSessionFactory(
-        () => server,
-        childDelayMs,
-        childDoc,
-        onDelay,
-      ),
-    );
+    super(options, new GatedSessionFactory(() => server, gate));
   }
   override registerSpaceHost(): boolean {
     return false;
   }
+}
+
+function makeServer(): MemoryV2Server.Server {
+  return new MemoryV2Server.Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
+  });
 }
 
 const PROGRAM: RuntimeProgram = {
@@ -170,136 +206,148 @@ const labelsOf = (v: unknown): string[] | null =>
     ? null
     : ["<non-array>"];
 
-describe("list builtin resume preservation", () => {
-  let server: MemoryV2Server.Server;
-  let sm1: DelayingStorageManager;
-  let sm2: DelayingStorageManager;
-  let delayed: number;
+/**
+ * Build the aggregate in a first runtime, then resume in a second runtime
+ * behind the batch gate: release the container and input list, let the
+ * coordinator reconcile while the per-element runs are still held, then
+ * release those and let it converge. Asserts that the aggregate converges to
+ * the durable value and was never observed empty or shrunk on the way, and that
+ * the window was genuinely open — a run that never held a batch back fails
+ * rather than passing vacuously.
+ */
+async function runResumePreservation<T>(
+  program: RuntimeProgram,
+  items: readonly unknown[],
+  cellId: string,
+  resultKey: string,
+  shapeOf: (value: unknown) => T[] | null,
+  expected: T[],
+): Promise<void> {
+  const server = makeServer();
+  const sm1 = GatedStorageManager.make(signer, server);
+  const gate = new ResumeBatchGate();
+  const sm2 = GatedStorageManager.make(signer, server, gate);
 
-  beforeEach(() => {
-    delayed = 0;
-    server = new MemoryV2Server.Server({
-      authorizeSessionOpen(message) {
-        const principal = (message.authorization as { principal?: unknown })
-          ?.principal;
-        return typeof principal === "string" ? principal : undefined;
-      },
-      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-    });
-    sm1 = DelayingStorageManager.make(signer, server, 0, FILTER_CHILD_DOC);
-    sm2 = DelayingStorageManager.make(
-      signer,
-      server,
-      80,
-      FILTER_CHILD_DOC,
-      () => delayed++,
-    );
+  // CREATE (runtime A): build the durable, non-empty aggregate.
+  const rt1 = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: sm1,
   });
-  afterEach(async () => {
-    await sm1?.close();
-    await sm2?.close();
-    await server?.close();
+  const compiled = await rt1.patternManager.compilePattern(program, { space });
+  const tx0 = rt1.edit();
+  const rc1 = rt1.getCell<Record<string, unknown>>(
+    space,
+    cellId,
+    compiled.resultSchema,
+    tx0,
+  );
+  rt1.run(tx0, compiled, { items }, rc1);
+  await tx0.commit();
+  // pull() reads to quiescence and settled() waits for the scheduler, storage
+  // sync and any async builtin work; both converge internally, so no pump loop.
+  await rc1.pull();
+  await rt1.settled();
+  await rt1.patternManager.flushCompileCacheWrites();
+  await sm1.synced();
+  expect(shapeOf(rc1.key(resultKey).getAsQueryResult())).toEqual(expected);
+  // The second runtime reads what this one wrote, and the test closes the
+  // store itself once both are done.
+  await rt1.dispose({ closeStorage: false });
+
+  // RELOAD (runtime B): cold cache, both resume batches held.
+  const rt2 = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: sm2,
   });
-
-  it("preserves a durable filter result while per-element children resync", async () => {
-    // CREATE (runtime A): build the durable, non-empty filtered list.
-    const rt1 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: sm1,
-    });
-    const compiled1 = await rt1.patternManager.compilePattern(PROGRAM, {
+  const trajectory: (T[] | null)[] = [];
+  try {
+    await rt2.patternManager.compilePattern(program, { space });
+    const tx = rt2.edit();
+    const rc2 = rt2.getCell<Record<string, unknown>>(
       space,
-    });
-    const tx0 = rt1.edit();
-    const rc1 = rt1.getCell<{ kept: { label: string }[] }>(
-      space,
-      "lr-result",
-      compiled1.resultSchema,
-      tx0,
+      cellId,
+      compiled.resultSchema,
+      tx,
     );
-    const h1 = rt1.run(tx0, compiled1, { items: ITEMS }, rc1);
-    await tx0.commit();
-    for (let k = 0; k < 10; k++) {
-      await h1.pull();
-      await rt1.idle();
-    }
-    await rt1.patternManager.flushCompileCacheWrites();
-    await sm1.synced();
-    expect(
-      (rc1.key("kept").getAsQueryResult() ?? []).map((x: { label: string }) =>
-        x.label
-      ),
-    ).toEqual(EXPECTED);
-    rt1.scheduler.dispose();
+    await tx.commit();
 
-    // RELOAD (runtime B): cold cache, with per-element predicate documents
-    // delivered late so the container loads before the children.
-    const rt2 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: sm2,
+    const cancel = rc2.key(resultKey).sink((v) => {
+      trajectory.push(shapeOf(v));
     });
-    const trajectory: (string[] | null)[] = [];
     try {
-      await rt2.patternManager.compilePattern(PROGRAM, { space });
-      const tx = rt2.edit();
-      const rc2 = rt2.getCell<{ kept: { label: string }[] }>(
-        space,
-        "lr-result",
-        compiled1.resultSchema,
-        tx,
-      );
-      await tx.commit();
+      // Start reads documents from both batches, so it is kicked off here and
+      // awaited at the end: the window has to be open while it runs.
+      const starting = rt2.start(rc2);
 
-      const cancel = rc2.key("kept").sink((v) => {
-        trajectory.push(labelsOf(v));
-      });
+      // Let the coordinator run once against a container that has not loaded
+      // at all, which is the state a reload starts from, before handing it the
+      // top-level batch.
+      await gate.topHeld;
+      expect(gate.heldCount(0)).toBeGreaterThan(0);
+      await rt2.idle();
+      gate.release(0);
 
-      const started = await rt2.start(rc2);
-      expect(started).toBe(true);
+      // The window. The container now holds its durable value and the
+      // coordinator reconciles against it while the per-element runs are still
+      // withheld. idle() drives the scheduler to quiescence without blocking on
+      // those documents the way pull() would.
+      await gate.elementsHeld;
+      await rt2.idle();
+      expect(gate.heldCount(1)).toBeGreaterThan(0);
+      trajectory.push(shapeOf(rc2.key(resultKey).get()));
 
-      for (let k = 0; k < 24; k++) {
-        await rc2.pull();
-        await rt2.idle();
-        trajectory.push(labelsOf(rc2.key("kept").get()));
-      }
-      cancel();
+      gate.release(1);
+      expect(await starting).toBe(true);
 
-      // Self-check: the harness only exercises the bug if it actually deferred
-      // some per-element documents. If the storage payload shape changes so the
-      // matcher no longer fires, fail loudly rather than pass vacuously.
-      expect(delayed).toBeGreaterThan(0);
-
-      const finalLabels = (rc2.key("kept").getAsQueryResult() ?? []).map(
-        (x: { label: string }) => x.label,
-      );
-      // Converges to the durable value.
-      expect(finalLabels).toEqual(EXPECTED);
-
-      // Never transiently emptied or shrunk during the resume window. On
-      // failure the offending values (the empty/partial snapshots) are shown;
-      // the full trajectory is logged for context.
-      const shrank = trajectory.filter(
-        (t) => t !== null && t.length > 0 && t.length < EXPECTED.length,
-      );
-      const empties = trajectory.filter((t) => t !== null && t.length === 0);
-      if (shrank.length > 0 || empties.length > 0) {
-        console.log("kept trajectory:", JSON.stringify(trajectory));
-      }
-      expect(empties).toEqual([]);
-      expect(shrank).toEqual([]);
+      // Converge: pull() re-reads to quiescence now that the children have
+      // landed, and settled() flushes the reconcile their arrival triggers.
+      await rc2.pull();
+      await rt2.settled();
+      trajectory.push(shapeOf(rc2.key(resultKey).get()));
     } finally {
-      await rt2.dispose();
-      await rt1.dispose();
+      await rt2.idle();
+      cancel();
     }
+
+    // Converges to the durable value.
+    expect(shapeOf(rc2.key(resultKey).getAsQueryResult())).toEqual(expected);
+
+    // Never transiently emptied or shrunk during the resume window. On failure
+    // the offending values (the empty/partial snapshots) are shown; the full
+    // trajectory is logged for context.
+    const observed = trajectory.filter((t): t is T[] => t !== null);
+    const shrank = observed.filter(
+      (t) => t.length > 0 && t.length < expected.length,
+    );
+    const empties = observed.filter((t) => t.length === 0);
+    if (shrank.length > 0 || empties.length > 0) {
+      console.log(`${resultKey} trajectory:`, JSON.stringify(trajectory));
+    }
+    expect(empties).toEqual([]);
+    expect(shrank).toEqual([]);
+  } finally {
+    await rt2.dispose({ closeStorage: false });
+    await sm1.close();
+    await sm2.close();
+    await server.close();
+  }
+}
+
+describe("list builtin resume preservation", () => {
+  it("preserves a durable filter result while per-element children resync", async () => {
+    await runResumePreservation(
+      PROGRAM,
+      ITEMS,
+      "lr-result",
+      "kept",
+      labelsOf,
+      EXPECTED,
+    );
   });
 });
 
-// The flatMap mirror. The op result is a number, so each per-element result
-// doc's sync carries `"type":"number"`, which the aggregate container's own
-// slot-link query does not — that is the matcher the reload uses to deliver the
-// per-element results late. Each element carries a distinct `n` so the skip test
-// can assert exactly which element is omitted; the per-test self-check on the
-// delayed count guards against the matcher drifting if the payload shape moves.
+// The flatMap mirror. Each element carries a distinct `n` so the skip test can
+// assert exactly which element is omitted.
 const FLATMAP_ITEMS = [
   { keep: true, n: 1, label: "a" },
   { keep: true, n: 2, label: "b" },
@@ -381,139 +429,35 @@ const numbersOf = (v: unknown): number[] | null =>
   Array.isArray(v) ? (v as number[]) : v == null ? null : [NaN];
 
 describe("flatMap builtin resume preservation", () => {
-  let server: MemoryV2Server.Server;
-  let sm1: DelayingStorageManager;
-  let sm2: DelayingStorageManager;
-  let delayed: number;
-
-  beforeEach(() => {
-    delayed = 0;
-    server = new MemoryV2Server.Server({
-      authorizeSessionOpen(message) {
-        const principal = (message.authorization as { principal?: unknown })
-          ?.principal;
-        return typeof principal === "string" ? principal : undefined;
-      },
-      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-    });
-    sm1 = DelayingStorageManager.make(signer, server, 0, FLATMAP_CHILD_DOC);
-    sm2 = DelayingStorageManager.make(
-      signer,
-      server,
-      80,
-      FLATMAP_CHILD_DOC,
-      () => delayed++,
-    );
-  });
-  afterEach(async () => {
-    await sm1?.close();
-    await sm2?.close();
-    await server?.close();
-  });
-
-  async function runFlatMapResume(
-    program: RuntimeProgram,
-    items: typeof FLATMAP_ITEMS,
-    expected: number[],
-  ): Promise<void> {
-    // CREATE (runtime A): build the durable, non-empty flattened list.
-    const rt1 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: sm1,
-    });
-    const compiled1 = await rt1.patternManager.compilePattern(program, {
-      space,
-    });
-    const tx0 = rt1.edit();
-    const rc1 = rt1.getCell<{ values: number[] }>(
-      space,
-      "fm-result",
-      compiled1.resultSchema,
-      tx0,
-    );
-    const h1 = rt1.run(tx0, compiled1, { items }, rc1);
-    await tx0.commit();
-    for (let k = 0; k < 10; k++) {
-      await h1.pull();
-      await rt1.idle();
-    }
-    await rt1.patternManager.flushCompileCacheWrites();
-    await sm1.synced();
-    expect(rc1.key("values").getAsQueryResult() ?? []).toEqual(expected);
-    rt1.scheduler.dispose();
-
-    // RELOAD (runtime B): cold cache, per-element result docs delivered late so
-    // the container loads before the children.
-    const rt2 = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager: sm2,
-    });
-    const trajectory: (number[] | null)[] = [];
-    try {
-      await rt2.patternManager.compilePattern(program, { space });
-      const tx = rt2.edit();
-      const rc2 = rt2.getCell<{ values: number[] }>(
-        space,
-        "fm-result",
-        compiled1.resultSchema,
-        tx,
-      );
-      await tx.commit();
-
-      const cancel = rc2.key("values").sink((v) => {
-        trajectory.push(numbersOf(v));
-      });
-
-      const started = await rt2.start(rc2);
-      expect(started).toBe(true);
-
-      for (let k = 0; k < 24; k++) {
-        await rc2.pull();
-        await rt2.idle();
-        trajectory.push(numbersOf(rc2.key("values").get()));
-      }
-      cancel();
-
-      // Self-check: fail loudly if the matcher stopped firing, rather than pass
-      // vacuously.
-      expect(delayed).toBeGreaterThan(0);
-
-      const finalValues = rc2.key("values").getAsQueryResult() ?? [];
-      // Converges to the durable value.
-      expect(finalValues).toEqual(expected);
-
-      // Never transiently emptied or shrunk during the resume window.
-      const shrank = trajectory.filter(
-        (t) => t !== null && t.length > 0 && t.length < expected.length,
-      );
-      const empties = trajectory.filter((t) => t !== null && t.length === 0);
-      if (shrank.length > 0 || empties.length > 0) {
-        console.log("values trajectory:", JSON.stringify(trajectory));
-      }
-      expect(empties).toEqual([]);
-      expect(shrank).toEqual([]);
-    } finally {
-      await rt2.dispose();
-      await rt1.dispose();
-    }
-  }
-
   it("preserves a durable flatMap result while per-element children resync", async () => {
-    await runFlatMapResume(FLATMAP_PROGRAM, FLATMAP_ITEMS, FLATMAP_EXPECTED);
+    await runResumePreservation(
+      FLATMAP_PROGRAM,
+      FLATMAP_ITEMS,
+      "fm-result",
+      "values",
+      numbersOf,
+      FLATMAP_EXPECTED,
+    );
   });
 
   it("skips a flatMap element that settles undefined without dropping the list", async () => {
-    await runFlatMapResume(
+    await runResumePreservation(
       FLATMAP_SKIP_PROGRAM,
       FLATMAP_ITEMS,
+      "fm-skip-result",
+      "values",
+      numbersOf,
       FLATMAP_SKIP_EXPECTED,
     );
   });
 
   it("spreads a flatMap element whose op returns an array across a resume", async () => {
-    await runFlatMapResume(
+    await runResumePreservation(
       FLATMAP_SPREAD_PROGRAM,
       FLATMAP_ITEMS,
+      "fm-spread-result",
+      "values",
+      numbersOf,
       FLATMAP_SPREAD_EXPECTED,
     );
   });

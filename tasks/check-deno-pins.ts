@@ -4,11 +4,11 @@
 // the pin in mise.toml.
 //
 // mise.toml is the canonical pin: mise installs that version for developers,
-// and .github/actions/deno-setup reads it at job time for CI. Two other places
+// and .github/actions/deno-setup reads it at job time for CI. Other places
 // encode a version and can drift, so this script checks them:
 //
-// - Dockerfile.toolshed bakes the version into its FROM lines, which cannot
-//   read a file. Each denoland/deno image tag must equal the pin.
+// - The root deployment Dockerfiles bake the version into their FROM lines,
+//   which cannot read a file. Each denoland/deno image tag must equal the pin.
 // - tasks/check.sh accepts a range of versions (so a developer without mise
 //   can still build, at the cost of a warning). The range must contain the
 //   pin, otherwise the version mise installs would fail the check.
@@ -23,7 +23,10 @@ import { dirname, fromFileUrl, join } from "@std/path";
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 
 const MISE_TOML = "mise.toml";
-const DOCKERFILE = "Dockerfile.toolshed";
+const DOCKERFILES = [
+  "Dockerfile.dashboard",
+  "Dockerfile.toolshed",
+] as const;
 const CHECK_SH = "tasks/check.sh";
 const DENO_SETUP_ACTION = ".github/actions/deno-setup/action.yml";
 
@@ -111,7 +114,7 @@ export function versionInRange(
 // of each misalignment found. An empty result means everything agrees.
 export function findProblems(files: {
   miseToml: string;
-  dockerfile: string;
+  dockerfiles: Record<string, string>;
   checkSh: string;
   denoSetupAction: string;
 }): string[] {
@@ -134,16 +137,20 @@ export function findProblems(files: {
     ];
   }
 
-  const dockerVersions = parseDockerfileDenoVersions(files.dockerfile);
-  if (dockerVersions.length === 0) {
-    problems.push(`${DOCKERFILE}: no denoland/deno FROM lines found`);
-  }
-  for (const version of dockerVersions) {
-    if (version !== pin) {
-      problems.push(
-        `${DOCKERFILE}: FROM denoland/deno:${version} does not match the ` +
-          `${MISE_TOML} pin ${pin}`,
-      );
+  for (const dockerfile of DOCKERFILES) {
+    const dockerVersions = parseDockerfileDenoVersions(
+      files.dockerfiles[dockerfile] ?? "",
+    );
+    if (dockerVersions.length === 0) {
+      problems.push(`${dockerfile}: no denoland/deno FROM lines found`);
+    }
+    for (const version of dockerVersions) {
+      if (version !== pin) {
+        problems.push(
+          `${dockerfile}: FROM denoland/deno:${version} does not match the ` +
+            `${MISE_TOML} pin ${pin}`,
+        );
+      }
     }
   }
 
@@ -208,7 +215,11 @@ export async function main(root: string = REPO_ROOT): Promise<number> {
   const read = (path: string) => Deno.readTextFile(join(root, path));
   const files = {
     miseToml: await read(MISE_TOML),
-    dockerfile: await read(DOCKERFILE),
+    dockerfiles: Object.fromEntries(
+      await Promise.all(
+        DOCKERFILES.map(async (path) => [path, await read(path)]),
+      ),
+    ),
     checkSh: await read(CHECK_SH),
     denoSetupAction: await read(DENO_SETUP_ACTION),
   };

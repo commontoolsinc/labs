@@ -65,6 +65,56 @@ SCHEMA_INCOMPATIBLE_PATTERN_SRC="$SCRIPT_DIR/pattern/schema-incompatible.tsx"
 CUSTOM_EXPORT="customPatternExport" # for testing this feature
 SECTION="${CF_CLI_INTEGRATION_SECTION:-${1:-all}}"
 
+# A fresh invocation id. uuidgen is not present on every runner image, so this
+# falls back to Python, which the timing helper above already requires.
+new_invocation_id() {
+  if command -v uuidgen > /dev/null 2>&1; then
+    uuidgen
+  else
+    python3 -c 'import uuid; print(uuid.uuid4())'
+  fi
+}
+
+# Kill a backgrounded `cf` invocation. `cf` is a shell function, so $! is the
+# subshell rather than the Deno process doing the work; killing only the
+# subshell would leave that child running and still able to commit. Take the
+# children first, then the subshell.
+kill_process_tree() {
+  local pid="$1"
+  local child
+  for child in $(pgrep -P "$pid" 2>/dev/null); do
+    kill_process_tree "$child"
+  done
+  kill "$pid" 2> /dev/null || true
+  wait "$pid" 2> /dev/null || true
+}
+
+# Count the messages a piece recorded. A piece that has never handled an event
+# has nothing materialized to read, which reads as zero messages rather than as
+# a failure — the same tolerance read_piece_value_or_default gives scalars.
+message_count() {
+  local piece_id="$1"
+  local raw
+  raw=$(cf piece get $SPACE_ARGS --piece "$piece_id" messages 2>/dev/null || true)
+  if [ -z "$raw" ]; then
+    printf '0\n'
+    return 0
+  fi
+  printf '%s\n' "$raw" | jq 'length'
+}
+
+# Assert a piece recorded exactly `expected` messages.
+assert_message_count() {
+  local piece_id="$1"
+  local expected="$2"
+  local message="$3"
+  local actual
+  actual=$(message_count "$piece_id")
+  if [ "$actual" != "$expected" ]; then
+    error "$message (expected $expected, got $actual)"
+  fi
+}
+
 setup_space() {
   if [ -z "$API_URL" ]; then
     error "API_URL must be defined."
@@ -210,6 +260,29 @@ run_piece_values() {
     cf piece inspect --json $SPACE_ARGS --piece "$schema_piece_id" |
       jq -r '.patternRef.identity'
   )
+
+  # The preflight answers the same question without touching the piece.
+  if cf piece setsrc --check $SPACE_ARGS --piece "$schema_piece_id" \
+    "$SCHEMA_INCOMPATIBLE_PATTERN_SRC" \
+    >"$WORK_DIR/incompatible-check.out" \
+    2>"$WORK_DIR/incompatible-check.err"; then
+    error "setsrc --check should fail for an incompatible source."
+  fi
+  if ! grep -q "cannot replace the source" "$WORK_DIR/incompatible-check.err"; then
+    error "setsrc --check did not report the verdict."
+  fi
+  if ! grep -q "not backward compatible" "$WORK_DIR/incompatible-check.err"; then
+    error "setsrc --check did not name the rule that refused it."
+  fi
+  if [ "$(
+    cf piece inspect --json $SPACE_ARGS --piece "$schema_piece_id" |
+      jq -r '.patternRef.identity'
+  )" != "$schema_identity_before" ]; then
+    error "setsrc --check changed the piece source."
+  fi
+  # A compatible source clears the same preflight, and still applies nothing.
+  cf piece setsrc --check $SPACE_ARGS --piece "$schema_piece_id" \
+    "$SCHEMA_COMPATIBLE_PATTERN_SRC" >/dev/null
 
   if cf piece setsrc $SPACE_ARGS --piece "$schema_piece_id" \
     "$SCHEMA_INCOMPATIBLE_PATTERN_SRC" \
@@ -501,6 +574,461 @@ run_piece_call() {
   echo "Successfully ran CLI piece call integration tests for ${API_URL}/${SPACE}/${CALLABLE_PIECE_ID}."
 }
 
+# Retry semantics for caller-supplied invocation ids (verb contract WS-D/D3).
+# Every scenario ends with the SAME assertion — exactly one message recorded —
+# because that is the property an agent depends on: a retry it cannot avoid
+# must never double-apply the mutation.
+run_piece_call_retry() {
+  setup_space
+
+  echo "Testing invocation-id retry semantics..."
+
+  RETRY_PIECE_ID=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  echo "Created retry-scenario piece: $RETRY_PIECE_ID"
+
+  # --- 1. A failure before dispatch leaves nothing behind. ------------------
+  # An unreachable API cannot dispatch, so the mutation provably never
+  # happened and no invocation id was ever announced to retry with. The
+  # caller's correct move is a fresh id, and that must yield exactly one.
+  set +e
+  cf piece call --api-url="http://127.0.0.1:1" --identity="$IDENTITY" --space="$SPACE" \
+    --piece "$RETRY_PIECE_ID" --invocation "never-dispatched" \
+    recordMessage -- --message "pre-dispatch" > /dev/null 2>&1
+  PRE_DISPATCH_STATUS=$?
+  set -e
+  if [ "$PRE_DISPATCH_STATUS" -eq 0 ]; then
+    error "A call to an unreachable API should fail, not report success"
+  fi
+  assert_message_count "$RETRY_PIECE_ID" 0 \
+    "A pre-dispatch failure must not record a message"
+
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_ID" --invocation "$(new_invocation_id)" \
+    recordMessage -- --message "pre-dispatch" > /dev/null
+  assert_message_count "$RETRY_PIECE_ID" 1 \
+    "A fresh-id retry after a pre-dispatch failure should record exactly one message"
+
+  # --- 2. Dispatched, then the caller died before acknowledgement. ----------
+  # The riskiest window: the event is on its way and the caller cannot know
+  # whether it committed. The kill is triggered by the CLI's own dispatch
+  # announcement, so this lands in the window deterministically rather than
+  # by racing a clock. Either outcome (committed or not) must leave exactly
+  # one message once the same id is retried.
+  RETRY_PIECE_2=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  INVOCATION_2=$(new_invocation_id)
+  ANNOUNCE_FIFO=$(mktemp -u)
+  mkfifo "$ANNOUNCE_FIFO"
+  set +e
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_2" --invocation "$INVOCATION_2" \
+    recordMessage -- --message "dispatched-then-killed" > /dev/null 2> "$ANNOUNCE_FIFO" &
+  CALL_PID=$!
+  set -e
+  # Blocking read on the pipe — no poll, no deadline. If the process exits
+  # without announcing, the writer closes and the read ends at EOF.
+  ANNOUNCED=""
+  while IFS= read -r line; do
+    case "$line" in
+      *"invocation: $INVOCATION_2"*)
+        ANNOUNCED="yes"
+        break
+        ;;
+    esac
+  done < "$ANNOUNCE_FIFO"
+  kill_process_tree "$CALL_PID"
+  rm -f "$ANNOUNCE_FIFO"
+  if [ -z "$ANNOUNCED" ]; then
+    error "cf piece call should announce its invocation id at dispatch"
+  fi
+
+  # Whether the killed call got its commit in is genuinely racy, and both
+  # outcomes are correct — but they exercise different machinery, so record
+  # which one happened instead of letting a weak pass look like a strong one.
+  # If it committed, the retry MUST collide; if it did not, the retry must
+  # apply cleanly. Asserting only "exactly one" would also pass with
+  # --invocation ignored entirely, whenever the first commit failed to land.
+  COMMITTED_BEFORE_KILL=$(message_count "$RETRY_PIECE_2")
+  set +e
+  RETRY_2=$(cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_2" --invocation "$INVOCATION_2" \
+    recordMessage -- --message "dispatched-then-killed" 2>/dev/null)
+  RETRY_2_STATUS=$?
+  set -e
+  if [ "$RETRY_2_STATUS" -ne 0 ]; then
+    error "Retrying a killed-after-dispatch call should exit 0, got $RETRY_2_STATUS"
+  fi
+  echo "killed-after-dispatch: committed before kill = $COMMITTED_BEFORE_KILL"
+  if [ "$COMMITTED_BEFORE_KILL" = "1" ]; then
+    echo "$RETRY_2" | jq -e '.deduplicated == true' > /dev/null ||
+      error "The killed call had committed, so its retry must deduplicate, got: $RETRY_2"
+  elif echo "$RETRY_2" | jq -e '.deduplicated == true' > /dev/null; then
+    # An `x && error` here would abort under set -e on the expected path,
+    # where jq exits non-zero; an if-condition is exempt.
+    error "The killed call never committed, so its retry must not deduplicate, got: $RETRY_2"
+  fi
+  assert_message_count "$RETRY_PIECE_2" 1 \
+    "Retrying a killed-after-dispatch call with the same id should leave exactly one message"
+
+  # --- 3. The commit succeeded but the response was lost. ------------------
+  # The retry collides on the handling's receipt, settles as success (exit 0)
+  # rather than as an error, and says so with deduplicated.
+  RETRY_PIECE_3=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  INVOCATION_3=$(new_invocation_id)
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_3" --invocation "$INVOCATION_3" \
+    recordMessage -- --message "lost-response" > /dev/null
+
+  set +e
+  REPLAY=$(cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_3" --invocation "$INVOCATION_3" \
+    recordMessage -- --message "lost-response" 2>/dev/null)
+  REPLAY_STATUS=$?
+  set -e
+  if [ "$REPLAY_STATUS" -ne 0 ]; then
+    error "A same-id retry should exit 0, got status $REPLAY_STATUS"
+  fi
+  echo "$REPLAY" | jq -e '.deduplicated == true' > /dev/null ||
+    error "A same-id retry should report deduplicated, got: $REPLAY"
+  echo "$REPLAY" | jq -e --arg id "$INVOCATION_3" '.invocation == $id' > /dev/null ||
+    error "A same-id retry should echo the caller's invocation id, got: $REPLAY"
+  assert_message_count "$RETRY_PIECE_3" 1 \
+    "A same-id retry after a successful commit should leave exactly one message"
+
+  # --- 4. A fresh process retrying the same id reads the ORIGINAL back. ----
+  # Sending a different payload under an id that already settled must not
+  # overwrite the original: the id identifies the invocation, so the second
+  # call reports the first one's outcome rather than applying its own.
+  RETRY_PIECE_4=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  INVOCATION_4=$(new_invocation_id)
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_4" --invocation "$INVOCATION_4" \
+    recordMessage -- --message "original-payload" > /dev/null
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_4" --invocation "$INVOCATION_4" \
+    recordMessage -- --message "second-payload" > /dev/null
+  assert_message_count "$RETRY_PIECE_4" 1 \
+    "Reusing a settled id with a different payload should leave exactly one message"
+  LAST=$(cf piece get $SPACE_ARGS --piece "$RETRY_PIECE_4" lastMessage)
+  if [ "$LAST" != '"original-payload"' ]; then
+    error "The settled invocation's outcome should stand, got lastMessage: $LAST"
+  fi
+
+  # --- 5. A payload the verb cannot accept is refused, id intact. ----------
+  # The schema rejection happens before dispatch, so the id is never spent.
+  # That is the whole point: an agent that typos a field and retries under
+  # the same idempotency key must get its corrected call executed, not
+  # deduplicated against a handling that ran with no event.
+  RETRY_PIECE_5=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  INVOCATION_5=$(new_invocation_id)
+  set +e
+  BAD_PAYLOAD=$(cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_5" --invocation "$INVOCATION_5" \
+    recordMessage -- --json '{"mesage":"typo"}' 2>&1)
+  BAD_STATUS=$?
+  set -e
+  if [ "$BAD_STATUS" -eq 0 ]; then
+    error "A payload failing the verb's schema should fail, got: $BAD_PAYLOAD"
+  fi
+  case "$BAD_PAYLOAD" in
+    *'Invalid input for "recordMessage"'*) ;;
+    *) error "A schema rejection should name the verb, got: $BAD_PAYLOAD" ;;
+  esac
+  assert_message_count "$RETRY_PIECE_5" 0 \
+    "A refused payload must not record a message"
+
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_5" --invocation "$INVOCATION_5" \
+    recordMessage -- --message "corrected" > /dev/null
+  assert_message_count "$RETRY_PIECE_5" 1 \
+    "A refused call never spent its id, so the corrected retry should record one"
+  LAST_5=$(cf piece get $SPACE_ARGS --piece "$RETRY_PIECE_5" lastMessage)
+  if [ "$LAST_5" != '"corrected"' ]; then
+    error "The corrected retry's payload should stand, got lastMessage: $LAST_5"
+  fi
+
+  # --- 6. An absent payload the verb cannot run without is refused, id intact.
+  # The mirror of scenario 5 for the second-most-likely agent mistake:
+  # forgetting the payload rather than misspelling a field. `recordNote`'s
+  # event schema sits behind a top-level local $ref, so the CLI derives no
+  # flags from it and an explicit `invoke` with no payload parses to an
+  # absent (undefined) event. Before the absent-payload gate (verb contract
+  # D5) this dispatched: the handler ran with no event, recorded
+  # "(no event)", and the receipt spent the invocation id — the corrected
+  # same-id retry then reported deduplicated with the correction never
+  # applied. Now the gate normalizes absence to {} against the resolved
+  # object schema and refuses because `required` survives relaxation, so
+  # nothing dispatches and the same id still buys the corrected call.
+  RETRY_PIECE_6=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  INVOCATION_6=$(new_invocation_id)
+  set +e
+  ABSENT_OUT=$(cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_6" --invocation "$INVOCATION_6" \
+    recordNote -- invoke 2>&1)
+  ABSENT_STATUS=$?
+  set -e
+  if [ "$ABSENT_STATUS" -eq 0 ]; then
+    error "An absent payload against a required-fields verb should fail, got: $ABSENT_OUT"
+  fi
+  case "$ABSENT_OUT" in
+    *'Invalid input for "recordNote"'*'no payload was supplied'*) ;;
+    *) error "An absent-payload refusal should say no payload was supplied, got: $ABSENT_OUT" ;;
+  esac
+  assert_message_count "$RETRY_PIECE_6" 0 \
+    "A refused absent-payload call must not record a message"
+
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_6" --invocation "$INVOCATION_6" \
+    recordNote -- --json '{"note":"corrected"}' > /dev/null
+  assert_message_count "$RETRY_PIECE_6" 1 \
+    "The refused call never spent its id, so the corrected retry should record one"
+  LAST_6=$(cf piece get $SPACE_ARGS --piece "$RETRY_PIECE_6" lastMessage)
+  if [ "$LAST_6" != '"corrected"' ]; then
+    error "The corrected retry's payload should stand, got lastMessage: $LAST_6"
+  fi
+
+  echo "Successfully ran CLI piece call retry integration tests for ${API_URL}."
+}
+
+# The three-topic end-to-end fixture (verb contract D4, integration half):
+# the graph from the live session, run against an isolated toolshed. An
+# umbrella topic and two children are created through verbs that DECLARE
+# results (the C1 authoring surface); every settled call's Invocation JSON
+# must carry the result read back off the handling's receipt (C4's
+# plainResultReceipts + D2). Results flow schema-free (the C3 deferral):
+# the value path is the whole proof, and nothing here reads a result schema
+# from the durable store. The retry of a deliberately dropped response must
+# read the ORIGINAL result (the assertion D3 could not make with void
+# verbs). The live-board half of D4 stays open, gated on the write-storm
+# machinery (plan: Risks).
+run_three_topic_fixture() {
+  setup_space
+
+  echo "Testing the three-topic end-to-end fixture (declared verb results)..."
+
+  # Result readback is the point of this fixture, so the plain-return
+  # projection is on for every call. The handler executes in the CLI's own
+  # runtime, which reads the flag from the environment; the registry accepts
+  # exactly "true"/"false" (EXPERIMENTAL_OPTIONS.md).
+  export EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true
+
+  # Per-command wall-clock baseline (the plan's session-mode decision reads
+  # these numbers). Reuses the harness's own timing wrapper; per-phase
+  # --verbose timings (#5233) are not on this branch, so wall-clock around
+  # each command is the honest measure.
+  local saved_timings="${CF_CLI_INTEGRATION_TIMINGS:-}"
+  local saved_timings_file="${CF_CLI_INTEGRATION_TIMINGS_FILE:-}"
+  D4_TIMINGS=$(mktemp)
+  export CF_CLI_INTEGRATION_TIMINGS=1
+  export CF_CLI_INTEGRATION_TIMINGS_FILE="$D4_TIMINGS"
+
+  TOPIC_PIECE_ID=$(cf piece new $SPACE_ARGS "$SCRIPT_DIR/pattern/topic-graph.tsx")
+  echo "Created topic-graph piece: $TOPIC_PIECE_ID"
+
+  # --- 1. Create the umbrella; its declared result is the child reference. --
+  INV_UMBRELLA=$(new_invocation_id)
+  UMBRELLA_PAYLOAD='{"title":"Umbrella","body":"Tracks the D4 fixture family.","agentName":"fable-d4"}'
+  UMBRELLA_JSON=$(cf piece call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
+    --invocation "$INV_UMBRELLA" createTopic -- --json "$UMBRELLA_PAYLOAD" 2>/dev/null)
+  echo "$UMBRELLA_JSON" | jq -e --arg id "$INV_UMBRELLA" \
+    '.invocation == $id and .status == "settled"' > /dev/null ||
+    error "The umbrella create should settle under the caller's id, got: $UMBRELLA_JSON"
+  UMBRELLA_ID=$(echo "$UMBRELLA_JSON" | jq -re '.result.topic.id') ||
+    error "The umbrella create's Invocation JSON should carry its declared result, got: $UMBRELLA_JSON"
+  UMBRELLA_PATH=$(echo "$UMBRELLA_JSON" | jq -re '.result.topic.path')
+  # The returned reference addresses the canonical child directly — no list
+  # scan, no correlation by index.
+  UMBRELLA_ENTRY=$(cf piece get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" "$UMBRELLA_PATH")
+  echo "$UMBRELLA_ENTRY" | jq -e --arg id "$UMBRELLA_ID" \
+    '.id == $id and .title == "Umbrella" and
+     .body == "Tracks the D4 fixture family." and .createdBy == "fable-d4"' > /dev/null ||
+    error "The umbrella's returned reference should open the canonical child, got: $UMBRELLA_ENTRY"
+
+  # --- 2. Child A references the umbrella BY ITS RETURNED ID. ---------------
+  # The umbrella id below came off the result readback, so the reference
+  # graph is built from returned references, never from prior knowledge.
+  INV_CHILD_A=$(new_invocation_id)
+  CHILD_A_PAYLOAD=$(jq -cn --arg u "$UMBRELLA_ID" \
+    '{title: "Child A", body: ("Refines " + $u + "."), agentName: "fable-d4",
+      references: [$u]}')
+  CHILD_A_JSON=$(cf piece call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
+    --invocation "$INV_CHILD_A" createTopic -- --json "$CHILD_A_PAYLOAD" 2>/dev/null)
+  CHILD_A_ID=$(echo "$CHILD_A_JSON" | jq -re '.result.topic.id') ||
+    error "Child A's Invocation JSON should carry its declared result, got: $CHILD_A_JSON"
+  CHILD_A_PATH=$(echo "$CHILD_A_JSON" | jq -re '.result.topic.path')
+
+  # --- 3. Child B's response is deliberately dropped. -----------------------
+  # The commit-then-lost-response window is entered deterministically, not by
+  # racing a clock: the call runs with the CLI's test-only phase
+  # announcements on (CF_TEST_ANNOUNCE_INVOCATION_PHASES — stderr lines of
+  # the form `invocation: <id> phase: <phase>`, emitted only under that env
+  # var), and a blocking pipe read waits for `phase: committed`, which the
+  # CLI prints only once the handling's durable commit is acknowledged and
+  # before the response is consumed. Only then is the process killed, so
+  # commit-before-kill is a property of the mechanism, not of the schedule.
+  INV_CHILD_B=$(new_invocation_id)
+  CHILD_B_PAYLOAD=$(jq -cn --arg u "$UMBRELLA_ID" \
+    '{title: "Child B", body: ("Extends " + $u + "."), agentName: "fable-d4",
+      references: [$u]}')
+  ANNOUNCE_FIFO=$(mktemp -u)
+  mkfifo "$ANNOUNCE_FIFO"
+  set +e
+  # The killed dispatch's timing line (written only if its wrapper survives
+  # the kill) goes to a separate file so the baseline's command count is
+  # exact rather than ±1 on the kill race.
+  CF_CLI_INTEGRATION_TIMINGS_FILE="$D4_TIMINGS.killed" \
+  CF_TEST_ANNOUNCE_INVOCATION_PHASES=1 \
+    cf piece call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" --invocation "$INV_CHILD_B" \
+    createTopic -- --json "$CHILD_B_PAYLOAD" > /dev/null 2> "$ANNOUNCE_FIFO" &
+  CALL_PID=$!
+  set -e
+  COMMIT_ANNOUNCED=""
+  while IFS= read -r line; do
+    case "$line" in
+      *"invocation: $INV_CHILD_B phase: committed"*)
+        COMMIT_ANNOUNCED="yes"
+        break
+        ;;
+    esac
+  done < "$ANNOUNCE_FIFO"
+  kill_process_tree "$CALL_PID"
+  rm -f "$ANNOUNCE_FIFO"
+  if [ -z "$COMMIT_ANNOUNCED" ]; then
+    error "The dropped call must reach its committed phase before the kill; the phase announcement never arrived"
+  fi
+
+  # The kill landed only after the durable commit, so the create MUST be
+  # visible — a hard assertion, not a recorded race branch. If the kill ever
+  # lands pre-commit, the scenario fails here.
+  TOPICS_AFTER_KILL=$(cf piece get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" topics 2>/dev/null | jq 'length')
+  if [ "$TOPICS_AFTER_KILL" != "3" ]; then
+    error "The dropped create committed before the kill, so three topics must exist, got: $TOPICS_AFTER_KILL"
+  fi
+
+  set +e
+  CHILD_B_JSON=$(cf piece call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
+    --invocation "$INV_CHILD_B" createTopic -- --json "$CHILD_B_PAYLOAD" 2>/dev/null)
+  CHILD_B_STATUS=$?
+  set -e
+  if [ "$CHILD_B_STATUS" -ne 0 ]; then
+    error "Retrying the dropped create under the same id should exit 0, got $CHILD_B_STATUS"
+  fi
+  # The commit provably preceded the kill, so the retry MUST collide on the
+  # create-only receipt and settle as the ORIGINAL handling — every run.
+  echo "$CHILD_B_JSON" | jq -e '.deduplicated == true' > /dev/null ||
+    error "The dropped create had committed, so its retry must deduplicate, got: $CHILD_B_JSON"
+  # The retry's Invocation JSON carries the settled handling's result — the
+  # readback the caller acts on after losing a response.
+  CHILD_B_ID=$(echo "$CHILD_B_JSON" | jq -re '.result.topic.id') ||
+    error "The dropped create's retry should read the result back, got: $CHILD_B_JSON"
+  CHILD_B_PATH=$(echo "$CHILD_B_JSON" | jq -re '.result.topic.path')
+
+  # --- 4. The settled id replayed with a DIFFERENT payload. -----------------
+  # The assertion D3 left open (its verbs were void): the collision on the
+  # create-only receipt must hand back the ORIGINAL handling's result — not
+  # silence, and not anything derived from the imposter payload.
+  IMPOSTER_PAYLOAD='{"title":"Child B imposter","body":"Must not exist.","agentName":"impostor"}'
+  set +e
+  REPLAY_JSON=$(cf piece call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
+    --invocation "$INV_CHILD_B" createTopic -- --json "$IMPOSTER_PAYLOAD" 2>/dev/null)
+  REPLAY_STATUS=$?
+  set -e
+  if [ "$REPLAY_STATUS" -ne 0 ]; then
+    error "A same-id replay should exit 0, got $REPLAY_STATUS"
+  fi
+  echo "$REPLAY_JSON" | jq -e '.deduplicated == true' > /dev/null ||
+    error "A same-id replay should deduplicate, got: $REPLAY_JSON"
+  assert_json_eq \
+    "$(echo "$REPLAY_JSON" | jq '.result')" \
+    "$(echo "$CHILD_B_JSON" | jq '.result')" \
+    "The replay must read the ORIGINAL result back, got: $REPLAY_JSON (original: $CHILD_B_JSON)"
+
+  # --- 5. Revise the umbrella to reference both children. -------------------
+  INV_REVISE=$(new_invocation_id)
+  REVISE_PAYLOAD=$(jq -cn --arg u "$UMBRELLA_ID" --arg a "$CHILD_A_ID" --arg b "$CHILD_B_ID" \
+    '{id: $u, body: ("Umbrella over " + $a + " and " + $b + "."),
+      agentName: "fable-d4-editor", references: [$a, $b]}')
+  REVISE_JSON=$(cf piece call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
+    --invocation "$INV_REVISE" reviseBody -- --json "$REVISE_PAYLOAD" 2>/dev/null)
+  echo "$REVISE_JSON" | jq -e --arg id "$UMBRELLA_ID" --arg path "$UMBRELLA_PATH" \
+    '.status == "settled" and .result.topic.id == $id and .result.topic.path == $path' > /dev/null ||
+    error "reviseBody should return the umbrella's own reference, got: $REVISE_JSON"
+
+  # --- 6. Exactly three topics; references, reciprocals, attribution. -------
+  # One step so the derived views (topicCount, referencedBy) recompute from
+  # the committed writes: acknowledgement is transaction-local (D2), so the
+  # calls above deliberately never waited for derived recomputation.
+  cf piece step $SPACE_ARGS --piece "$TOPIC_PIECE_ID"
+
+  COUNT=$(cf piece get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" topicCount)
+  if [ "$COUNT" != "3" ]; then
+    error "Exactly three topics should exist, got topicCount: $COUNT"
+  fi
+  TOPICS_LEN=$(cf piece get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" topics | jq 'length')
+  if [ "$TOPICS_LEN" != "3" ]; then
+    error "Exactly three topics should exist, got topics length: $TOPICS_LEN"
+  fi
+
+  # Each returned reference opens its canonical child: revised body and both
+  # attributions on the umbrella; create-time state and the umbrella edge on
+  # each child. Child B must be the dropped create's payload — the imposter
+  # payload must not have applied.
+  UMBRELLA_FINAL=$(cf piece get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" "$UMBRELLA_PATH")
+  echo "$UMBRELLA_FINAL" | jq -e \
+    --arg id "$UMBRELLA_ID" --arg a "$CHILD_A_ID" --arg b "$CHILD_B_ID" \
+    '.id == $id and .createdBy == "fable-d4" and .bodyUpdatedBy == "fable-d4-editor" and
+     .body == ("Umbrella over " + $a + " and " + $b + ".") and
+     .references == [$a, $b]' > /dev/null ||
+    error "The revised umbrella should carry both child references and revision attribution, got: $UMBRELLA_FINAL"
+  CHILD_A_FINAL=$(cf piece get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" "$CHILD_A_PATH")
+  echo "$CHILD_A_FINAL" | jq -e --arg id "$CHILD_A_ID" --arg u "$UMBRELLA_ID" \
+    '.id == $id and .title == "Child A" and .createdBy == "fable-d4" and
+     .bodyUpdatedBy == "" and .references == [$u]' > /dev/null ||
+    error "Child A's returned reference should open the canonical child, got: $CHILD_A_FINAL"
+  CHILD_B_FINAL=$(cf piece get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" "$CHILD_B_PATH")
+  echo "$CHILD_B_FINAL" | jq -e --arg id "$CHILD_B_ID" --arg u "$UMBRELLA_ID" \
+    '.id == $id and .title == "Child B" and .createdBy == "fable-d4" and
+     .references == [$u]' > /dev/null ||
+    error "Child B's returned reference should open the dropped create's canonical child, got: $CHILD_B_FINAL"
+
+  # The reciprocal derived references (this fixture's crossrefs analogue):
+  # children point up at the umbrella, the revised umbrella points down at
+  # both children, derived — never persisted.
+  RECIPROCAL=$(cf piece get $SPACE_ARGS --piece "$TOPIC_PIECE_ID" referencedBy)
+  echo "$RECIPROCAL" | jq -e \
+    --arg u "$UMBRELLA_ID" --arg a "$CHILD_A_ID" --arg b "$CHILD_B_ID" \
+    '.[$u] == [$a, $b] and .[$a] == [$u] and .[$b] == [$u]' > /dev/null ||
+    error "Reciprocal derived references should link umbrella and children both ways, got: $RECIPROCAL"
+
+  # --- Baseline the plan's session-mode decision reads. ---------------------
+  echo "[d4-baseline] payload bytes:" \
+    "umbrella=$(printf %s "$UMBRELLA_PAYLOAD" | wc -c | tr -d ' ')" \
+    "child-a=$(printf %s "$CHILD_A_PAYLOAD" | wc -c | tr -d ' ')" \
+    "child-b=$(printf %s "$CHILD_B_PAYLOAD" | wc -c | tr -d ' ')" \
+    "revise=$(printf %s "$REVISE_PAYLOAD" | wc -c | tr -d ' ')"
+  echo "[d4-baseline] cf commands (excluding the killed dispatch): $(wc -l < "$D4_TIMINGS" | tr -d ' ')"
+  sed 's/^/[d4-baseline] /' "$D4_TIMINGS"
+  rm -f "$D4_TIMINGS" "$D4_TIMINGS.killed"
+
+  if [ -n "$saved_timings" ]; then
+    export CF_CLI_INTEGRATION_TIMINGS="$saved_timings"
+  else
+    unset CF_CLI_INTEGRATION_TIMINGS
+  fi
+  if [ -n "$saved_timings_file" ]; then
+    export CF_CLI_INTEGRATION_TIMINGS_FILE="$saved_timings_file"
+  else
+    unset CF_CLI_INTEGRATION_TIMINGS_FILE
+  fi
+  unset EXPERIMENTAL_PLAIN_RESULT_RECEIPTS
+
+  echo "Successfully ran the three-topic end-to-end fixture for ${API_URL}/${SPACE}/${TOPIC_PIECE_ID}."
+}
+
+# The verb-result walkthrough. Delegates to the standalone script rather than
+# restating its assertions here: that script is what
+# docs/common/verbs-over-the-cli.md tells a reader to run, so the documented
+# artifact is the tested one and the two cannot drift. It deploys its own
+# fixture and takes its own space.
+#
+# It is also the regression test for the `--show-links` link walk: its
+# address-and-call step annotates a returned piece that owns a verb, which is
+# the shape that used to exhaust the stack.
+run_verbs_walkthrough() {
+  echo "Running the verb-result walkthrough..."
+  API_URL="$API_URL" bash "$SCRIPT_DIR/verbs-over-the-cli.sh" ||
+    error "The verb-result walkthrough failed."
+  echo "Successfully ran the verb-result walkthrough for ${API_URL}."
+}
+
 run_wish() {
   setup_space
 
@@ -534,6 +1062,8 @@ case "$SECTION" in
     run_piece_values
     run_piece_links
     run_piece_call
+    run_piece_call_retry
+    run_three_topic_fixture
     run_wish
     ;;
   piece-basics)
@@ -548,9 +1078,21 @@ case "$SECTION" in
     ;;
   piece-call)
     run_piece_call
+    run_piece_call_retry
+    run_three_topic_fixture
+    run_verbs_walkthrough
+    ;;
+  piece-call-retry)
+    run_piece_call_retry
+    ;;
+  three-topic)
+    run_three_topic_fixture
     ;;
   wish)
     run_wish
+    ;;
+  verbs)
+    run_verbs_walkthrough
     ;;
   *)
     error "Unknown CLI integration section: $SECTION"

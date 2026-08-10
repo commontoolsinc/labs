@@ -31,6 +31,7 @@ import {
   type Schema,
   type SchemaWithoutCell,
   SELF,
+  type toEncodableForm,
   type toJSON,
   type UnsafeBinding,
 } from "./types.ts";
@@ -43,10 +44,11 @@ import {
 } from "./node-utils.ts";
 import {
   type CellAliasResolver,
-  moduleToJSON,
-  patternToJSON,
-  toJSONWithAliasBindings,
-} from "./json-utils.ts";
+  moduleToEncodableForm,
+  patternToEncodableForm,
+  withAliasBindings,
+} from "./to-encodable-form.ts";
+import { toJSONMethod } from "./json-member.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import {
   REPLAYABLE_BUILTIN_REFS,
@@ -77,7 +79,13 @@ import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 /** Declare a pattern
  *
  * @param fn A function that creates the pattern graph
- * @param argumentSchema An optional JSONSchema for the pattern inputs
+ * @param argumentSchema An optional JSONSchema for the pattern inputs. A
+ *   pattern that takes no inputs may pass `false` (the JSON Schema that
+ *   matches nothing) -- but do not copy that shape into a pattern that does
+ *   take inputs: a `false` argument schema silently drops every argument
+ *   supplied at run time, so each input reads as `undefined` with no error.
+ *   A pattern with inputs needs a real argument schema here (the position
+ *   cannot be skipped when a `resultSchema` is also passed).
  * @param resultSchema An optional JSONSchema for the pattern outputs
  *
  * @returns A pattern node factory that also serializes as pattern.
@@ -525,7 +533,7 @@ function factoryFromPattern<T, R>(
     }
   };
   // Creates a query (i.e. aliases) into the cells for the result
-  const result = toJSONWithAliasBindings(
+  const result = withAliasBindings(
     outputs ?? {},
     resolveCellAlias,
     true,
@@ -548,17 +556,17 @@ function factoryFromPattern<T, R>(
     applyArgumentIfcToResult(argumentSchema, resultSchemaArg) ?? {};
 
   const serializedNodes = Array.from(allNodes).map((node) => {
-    const module = toJSONWithAliasBindings(
+    const module = withAliasBindings(
       node.module,
       resolveCellAlias,
       false,
     ) as unknown as Module;
-    const inputs = toJSONWithAliasBindings(
+    const inputs = withAliasBindings(
       node.inputs,
       resolveCellAlias,
       false,
     )!;
-    const outputs = toJSONWithAliasBindings(
+    const outputs = withAliasBindings(
       node.outputs,
       resolveCellAlias,
       false,
@@ -566,7 +574,7 @@ function factoryFromPattern<T, R>(
     return { module, inputs, outputs } satisfies Node;
   });
 
-  const pattern: Pattern & toJSON = {
+  const pattern: Pattern & toEncodableForm & toJSON = {
     argumentSchema: sanitizeSchemaForLinks(argumentSchema, KeepAsCell.All),
     resultSchema: sanitizeSchemaForLinks(resultSchema, KeepAsCell.OnlyStream),
     ...(derivedInternalCells.length > 0 ? { derivedInternalCells } : {}),
@@ -574,7 +582,9 @@ function factoryFromPattern<T, R>(
     nodes: serializedNodes,
     // Important that this refers to patternFactory, as .program will be set on
     // pattern afterwards (see factory.ts:exportsCallback)
-    toJSON: () => patternToJSON(patternFactory),
+    toEncodableForm: () => patternToEncodableForm(patternFactory),
+    // What `JSON.stringify(SomePattern)` answers, which pattern source uses.
+    toJSON: () => patternToEncodableForm(patternFactory),
   };
 
   const makePatternFactory = (
@@ -583,13 +593,14 @@ function factoryFromPattern<T, R>(
   ): PatternFactory<T, R> => {
     const factory = Object.assign(
       (inputs: FactoryInput<T>): Reactive<R> => {
-        const module: Module & toJSON = {
+        const module: Module & toEncodableForm & toJSON = {
           type: "pattern",
           implementation: factory,
           ...(factory.defaultScope !== undefined
             ? { defaultScope: factory.defaultScope }
             : {}),
-          toJSON: () => moduleToJSON(module),
+          toJSON: toJSONMethod,
+          toEncodableForm: () => moduleToEncodableForm(module),
         };
 
         const outputs = reactive<R>();
@@ -616,8 +627,9 @@ function factoryFromPattern<T, R>(
       {
         ...pattern,
         ...(defaultScope !== undefined ? { defaultScope } : {}),
-        toJSON: () => patternToJSON(factory),
-      } as Pattern & toJSON,
+        toEncodableForm: () => patternToEncodableForm(factory),
+        toJSON: () => patternToEncodableForm(factory),
+      } as Pattern & toEncodableForm & toJSON,
     ) as PatternFactory<T, R>;
 
     // `asScope` / `inSpace` mint fresh factory objects; record them as
@@ -906,6 +918,13 @@ function assignComputedCellKinds(
       }
       return;
     }
+    // TODO(danfuzz): `isRecord` admits a `FabricInstance`, whose
+    // `Object.entries` are empty, so it takes this branch and collects
+    // nothing instead of falling to the fail-safe `collectAll()` below. A
+    // cell root reachable only through the instance's codec contents is
+    // then never disqualified from the `computed` tag — the ack-and-drop
+    // this function exists to prevent. (A `FabricPrimitive` passes the same
+    // gate, harmlessly: it holds no cell roots.)
     if (isRecord(target) && !isReactive(target)) {
       const properties =
         isRecord(schema.properties) && !Array.isArray(schema.properties)

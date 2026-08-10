@@ -39,33 +39,26 @@ import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
-import {
-  fabricFromNativeValue,
-  type FabricValue,
-} from "@commonfabric/data-model/fabric-value";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { stripEntityUriScheme } from "../entity-kind.ts";
-import { columnDeclaresIfc } from "@commonfabric/memory/v2";
+import {
+  columnDeclaresIfc,
+  type SqliteDbRef as WireSqliteDbRef,
+  type SqliteParamsWire,
+} from "@commonfabric/memory/v2";
 import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
-type SqliteDbRef = {
-  id: string;
-  tables?: Record<string, unknown>;
-  // The author-declared scope of the SqliteDb cell (space/user/session). The
-  // server folds this into the on-disk filename so user/session-scoped dbs get
-  // a per-user / per-session file. Absent ⇒ "space" (the default, unqualified).
-  scope?: CellScope;
-  // The db's owner — the principal that created the SqliteDb cell, captured
-  // once at handle creation (CFC Phase 3: resolves the row rule's dbOwner()
-  // and the ceiling's __ctDbOwner placeholder; never the acting reader).
-  owner?: string;
+// The wire shape (`id`, `tables`, `scope`, `owner`) is the memory protocol's
+// own `SqliteDbRef`; only `rev` is added here.
+type SqliteDbRef = WireSqliteDbRef & {
   // db.exec's optimistic-concurrency revision (bumped per write, cell.ts). A
   // handle re-derivation must carry it forward: deleting it changes the handle
   // value, which every consumer hashing the handle (e.g. sqliteQuery's
   // reactOn) sees as "new inputs".
   rev?: number;
 };
-type WireParams = readonly unknown[] | Record<string, unknown> | undefined;
+type WireParams = SqliteParamsWire | undefined;
 
 const errMsg = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -117,7 +110,7 @@ function readDbRef(value: unknown): SqliteDbRef {
         ? cloneIfNecessary(
           ref.tables as Parameters<typeof cloneIfNecessary>[0],
           { frozen: false },
-        ) as Record<string, unknown>
+        ) as SqliteDbRef["tables"]
         : undefined,
       // Validate at the boundary: an invalid scope value must not flow into
       // query execution / on-disk filename derivation.
@@ -140,7 +133,7 @@ function readDbRef(value: unknown): SqliteDbRef {
  * probe: a resolved rule always validates; a null-riddled one never does.
  */
 function dbTablesResolved(
-  tables: Record<string, unknown> | undefined,
+  tables: SqliteDbRef["tables"],
 ): boolean {
   if (tables === undefined) return true;
   for (const t of Object.values(tables)) {
@@ -527,7 +520,7 @@ export function sqliteDatabase(
         scope,
       );
       const options = inputsCell.withTx(tx).get() as
-        | { tables?: Record<string, unknown> }
+        | { tables?: SqliteDbRef["tables"] }
         | undefined;
       // `handle` is a builtin RESULT cell (makeResultCell), and result cells
       // are always `of:`-schemed — the computed kind applies only to derived
@@ -568,7 +561,7 @@ export function sqliteDatabase(
         ? cloneIfNecessary(
           merged as Parameters<typeof cloneIfNecessary>[0],
           { frozen: false },
-        ) as Record<string, unknown>
+        ) as SqliteDbRef["tables"]
         : undefined;
       // Fail closed on an UNRESOLVED materialization (this runtime loaded the
       // pattern but not every linked doc under `tables`): writing it would
@@ -576,7 +569,7 @@ export function sqliteDatabase(
       // that resolves fully (the creator, at least) writes the inline form.
       if (prior === undefined || dbTablesResolved(tables)) {
         // RAW write, not `.set()`: this first action run can execute inside
-        // the pattern's builder frame, where `set` [ID]-anchors every object
+        // the pattern's builder frame, where `set` anchors every object
         // in an array — splitting a rule's term list into per-element entity
         // docs (the very shape the materialization above exists to avoid).
         // The raw write stores the subtree verbatim; `onlyIfDifferent` keeps
@@ -590,7 +583,7 @@ export function sqliteDatabase(
             // Carry db.exec's write revision forward — dropping it would make
             // this re-derivation look like "new inputs" to every handle hasher.
             ...(typeof prior?.rev === "number" && { rev: prior.rev }),
-          }) as FabricValue,
+          }),
           true,
         );
       }

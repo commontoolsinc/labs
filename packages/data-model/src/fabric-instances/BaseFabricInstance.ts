@@ -1,4 +1,5 @@
 import { FabricInstance, type FabricValue } from "@/interface.ts";
+import { toCompactDebugString } from "@/value-debug.ts";
 // Used only inside method bodies: this import participates in a module cycle
 // with `deep-freeze.ts` (which imports this module's symbols and class for its
 // generic dispatch), which is safe for call-time function use but must not be
@@ -80,6 +81,23 @@ export abstract class BaseFabricInstance extends FabricInstance {
   //
 
   /**
+   * Custom inspector, so that a `console.log()` or a debugger shows what this
+   * value IS. The default rendering is `{}`: state lives in private fields,
+   * which have no enumerable own properties for an inspector to find.
+   *
+   * Delegates to the canonical debug renderer rather than formatting here, so
+   * that this surface improves whenever that one does. Instance state is
+   * elided as `(...)`.
+   *
+   * Duplicated on `BaseFabricPrimitive`, unavoidably. There is no shared base
+   * class below `FabricSpecialObject`, and `FabricSpecialObject` itself is the
+   * runtime-import-free abstract contract, so it cannot reach `value-debug`.
+   */
+  [Symbol.for("Deno.customInspect")](): string {
+    return toCompactDebugString(this);
+  }
+
+  /**
    * Deeply freezes this instance in place: freezes this instance's own
    * internal slot(s) and recurses into each nested `FabricValue` by calling
    * the provided `subFreeze` callback on it. Implementations must NOT import
@@ -95,28 +113,28 @@ export abstract class BaseFabricInstance extends FabricInstance {
   ): FabricValue;
 
   /**
-   * Indicates whether this instance is already deeply frozen, without
-   * mutating it. Checks this instance's own internal slot(s) are in
-   * canonical deep-frozen form and recurses into each nested `FabricValue`
-   * via the provided `subIsDeepFrozen` callback, returning the boolean
-   * conjunction. Implementations must NOT import or call the deep-frozen
-   * type guard directly -- recursion is handed through the callback,
-   * mirroring `[DEEP_FREEZE]`'s callback shape and avoiding an import cycle.
+   * Indicates whether this instance is already deeply frozen, without mutating
+   * it. Checks this instance's own internal slot(s) are in canonical
+   * deep-frozen form and recurses into each nested `FabricValue` via the
+   * provided `subIsDeepFrozen` callback, returning the boolean conjunction.
+   * Implementations must NOT import or call the deep-frozen type guard directly
+   * -- recursion is handed through the callback, mirroring `[DEEP_FREEZE]`'s
+   * callback shape and avoiding an import cycle.
    *
-   * Side-effect-free and must not throw: an instance that is not in
-   * canonical deep-frozen form returns `false`.
+   * Side-effect-free and must not throw: an instance that is not in canonical
+   * deep-frozen form returns `false`.
    *
    * **Deep-frozen honesty (mandatory).** This report must be truthful and
    * permanent: an implementation must not return `true` unless the instance is,
    * and will remain, deeply immutable (including its private slots). Once it
-   * reports deep-frozen, that is permanent for the life of the instance.
-   * The rest of the system -- the data model in general and `isDeepFrozen()`
+   * reports deep-frozen, that is permanent for the life of the instance. The
+   * rest of the system -- the data model in general and `isDeepFrozen()`
    * specifically, but also the entire codebase that _uses_ the data model -- is
-   * entitled to rely on this: a deep-frozen proof is cached by root identity and
-   * not re-validated, so an instance that lies here (reports deep-frozen while
-   * still mutable) can corrupt data-model invariants, exactly as any other
-   * broken class contract can. Making this correct is the implementing class's
-   * responsibility, not something the freeze-checking code papers over.
+   * entitled to rely on this: a deep-frozen proof is cached by root identity
+   * and not re-validated, so an instance that lies here (reports deep-frozen
+   * while still mutable) can corrupt data-model invariants, exactly as any
+   * other broken class contract can. Making this correct is the implementing
+   * class's responsibility, not something the freeze-checking code papers over.
    */
   abstract [IS_DEEP_FROZEN](
     subIsDeepFrozen: (value: FabricValue) => boolean,

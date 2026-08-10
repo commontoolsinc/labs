@@ -12,7 +12,7 @@ the product needs server-side. Its route groups (`app.ts`) tell the story:
 - `storage/memory` — **the** sync endpoint: `GET /api/storage/memory` with a
   WebSocket upgrade, bridging each socket to the memory server of Chapter 9
   (one SQLite engine per space, sessions, watches).
-- `ai/llm` (+ `ai/img`, `ai/voice`, `ai/webreader`) — the LLM proxy behind
+- `ai/llm` (+ `ai/img`, `ai/voice`) — the LLM proxy behind
   `generateText`/`generateObject` (Chapter 5): model routing, caching,
   feedback. Patterns never hold API keys; the capability is mediated
   server-side.

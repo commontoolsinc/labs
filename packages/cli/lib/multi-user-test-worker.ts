@@ -10,6 +10,18 @@
  * participant pattern, whose `tests` steps the orchestrator drives via a
  * small request/response protocol.
  *
+ * The `{ label }` / `{ await }` markers travel through that same shared
+ * space, each participant announcing into its own marker document.
+ * Announcing commits the marker; awaiting waits for it to arrive here. The
+ * announcing participant settles each step before the next, so the server
+ * holds everything it wrote before it holds the marker. A replica that has
+ * the marker therefore reads the rest from a server that already has it:
+ * documents inside this replica's watch set arrive in a fan-out frame the
+ * server computes by diffing current storage, which cannot carry the marker
+ * while omitting an earlier write it has not yet sent, and a document
+ * outside that set is fetched on demand by the assertion's own `pull()`.
+ * That is what lets an assertion be read once.
+ *
  * Realm isolation is required, not an optimization: two runtimes in one
  * realm cross-talk through module-level state (verified-load registries,
  * frame stack).
@@ -49,6 +61,9 @@ import {
   Identity,
   type KeyPairRaw,
 } from "@commonfabric/identity";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { defer } from "@commonfabric/utils/defer";
+import { asAssertRecord, formatAssertRecord } from "./assert-record.ts";
 import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
 
 export interface WorkerRequest {
@@ -81,11 +96,31 @@ export interface ParticipantInitResult {
 const SETUP_CAUSE = "multi-user-test-setup";
 const SETTLE_FAST_MS = 2;
 
+/**
+ * One marker document per participant, so the only writer of a document is
+ * the participant it belongs to. Announcing is then conflict-free whatever
+ * order participants announce in, including from a replica that predates
+ * another participant's announcement.
+ */
+function markersCause(participant: string): string {
+  return `multi-user-test-markers:${participant}`;
+}
+
+/** Markers one participant has announced, one property per marker name. */
+const markersSchema = {
+  type: "object",
+  additionalProperties: { type: "boolean" },
+  default: {},
+} as const;
+
 let runtime: Runtime | undefined;
 let storageManager:
   | { synced(): Promise<void>; close(): Promise<void> }
   | undefined;
 let engine: Engine | undefined;
+/** Every participant's marker document, keyed by participant name. */
+const markersCells = new Map<string, Cell<Record<string, boolean>>>();
+let selfParticipant: string | undefined;
 let stepCells: Cell<unknown>[] = [];
 let patternCoverage: PatternCoverageCollector | undefined;
 // Test-declared fetch mocks (`fetchMocks` export), populated after compile;
@@ -118,6 +153,49 @@ async function settle(maxIterations = 20): Promise<void> {
     await rt().idle();
     await storageManager!.synced();
     if (performance.now() - start < SETTLE_FAST_MS) return;
+  }
+}
+
+function markersCellFor(participant: string): Cell<Record<string, boolean>> {
+  const cell = markersCells.get(participant);
+  if (!cell) {
+    throw new Error(`No marker document for participant "${participant}"`);
+  }
+  return cell;
+}
+
+/**
+ * Resolve once `marker` is present in this replica's copy of the marker
+ * document `announcedBy` writes.
+ *
+ * The wait sleeps on the cell's sink, so it wakes on the commit that carries
+ * the marker rather than on a clock, and it reads the value once the
+ * scheduler is quiescent.
+ */
+async function waitForMarker(
+  announcedBy: string,
+  marker: string,
+): Promise<void> {
+  const cell = markersCellFor(announcedBy);
+  let changed = defer<void>();
+  const cancel = cell.sink(() => {
+    changed.resolve();
+    changed = defer<void>();
+  });
+  try {
+    while (true) {
+      await rt().idle();
+      // Captured before the read, so a change racing the check wakes the next
+      // attempt instead of being missed.
+      const next = changed.promise;
+      if (cell.get()?.[marker] === true) return;
+      await next;
+    }
+  } finally {
+    // Cancelling while the action that reported a value is still finalizing
+    // does not stick, because finalizing an action resubscribes it.
+    await rt().idle();
+    cancel();
   }
 }
 
@@ -287,6 +365,20 @@ const handlers: Record<
       );
     }
 
+    // Subscribe to every participant's marker document before any step runs,
+    // so an announcement is already in this replica's watch set when it is
+    // made rather than being fetched after the fact.
+    selfParticipant = args.participant as string;
+    for (const name of args.participants as string[]) {
+      const cell = rt().getCell<Record<string, boolean>>(
+        space,
+        markersCause(name),
+        markersSchema,
+      );
+      await cell.sync();
+      markersCells.set(name, cell);
+    }
+
     // Minimal wish("#default") environment, seeded once by the first worker.
     if (args.seedDefaults === true) {
       const setupTx = rt().edit();
@@ -401,12 +493,24 @@ const handlers: Record<
     return {};
   },
 
-  /** Pull an assertion step's value; the orchestrator handles retries. */
+  /** Evaluate an assertion step, reporting what a false value held. */
   async assertion({ index }) {
     const stepCell = stepCells[index as number];
     const value = await (stepCell.key("assertion" as never) as Cell<unknown>)
       .pull();
-    return { passed: value === true };
+    if (value === true) return { passed: true };
+    // An `assert(...)` assertion carries the operands recorded by the
+    // evaluation that produced this value, so report them.
+    const record = asAssertRecord(value);
+    if (record) {
+      return record.ok
+        ? { passed: true }
+        : { passed: false, error: formatAssertRecord(record) };
+    }
+    return {
+      passed: false,
+      error: `Expected true, got ${toCompactDebugString(value)}`,
+    };
   },
 
   /** Materialize one VDOM target, then remove its renderer demand. */
@@ -419,9 +523,30 @@ const handlers: Record<
     return {};
   },
 
-  /** Let in-flight work and incoming subscription pushes land. */
-  async settle() {
-    await settle(6);
+  /**
+   * Announce a coordination marker as a durable write, ordered after every
+   * commit this participant has already made.
+   */
+  async label({ marker }) {
+    const tx = rt().edit();
+    markersCellFor(selfParticipant!).withTx(tx).key(marker as string).set(true);
+    rt().prepareTxForCommit?.(tx);
+    // A dropped marker is a wait that never ends, so the commit's verdict is
+    // read rather than assumed.
+    const result = await tx.commit();
+    if (result.error) {
+      throw new Error(
+        `Announcing marker "${marker}" failed: ${result.error.message}`,
+      );
+    }
+    await settle();
+    return {};
+  },
+
+  /** Wait for another participant's marker to reach this replica. */
+  async awaitMarker({ announcedBy, marker }) {
+    await waitForMarker(announcedBy as string, marker as string);
+    await settle();
     return {};
   },
 
@@ -469,6 +594,8 @@ const handlers: Record<
 
   async dispose() {
     stepCells = [];
+    markersCells.clear();
+    selfParticipant = undefined;
     continuousUiCancel?.();
     continuousUiCancel = undefined;
     continuousUiErrors.length = 0;

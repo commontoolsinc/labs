@@ -7,11 +7,13 @@ import {
   formatViewerTimes,
   renderTile,
   shell,
-  SHELL_VERSION,
 } from "./render.ts";
-import { humanSpan } from "./lib.ts";
-import { REPO } from "./config.ts";
+import { humanSpan, STATUS_DOT } from "./lib.ts";
+import { TEXTURE_WIDTH } from "./palette.ts";
 import { FAVICON_VERSION } from "./favicon.ts";
+import { liveUpdateStream } from "./stream-client.ts";
+
+const TEST_VERSION = "1".repeat(40);
 
 function view(over: Partial<TileView> = {}): TileView {
   return { label: "labs ci", status: "good", ...over };
@@ -78,7 +80,7 @@ Deno.test("renderTile: an absent value/sub/hint/aside renders nothing rather tha
   const html = renderTile(view());
   assertEquals(
     html,
-    `<div class="tile good"><p class="lbl"><span class="dot green"></span> labs ci<span class="spacer"></span></p></div>`,
+    `<div class="tile good"><div class="texture"></div><p class="lbl"><span class="dot green"></span> labs ci<span class="spacer"></span></p></div>`,
   );
 });
 
@@ -170,7 +172,7 @@ Deno.test("shell: the grid and the wide tiles land in their own slots", () => {
     `<div class="tile bad wide">w</div>`,
     3,
     30_000,
-    SHELL_VERSION,
+    TEST_VERSION,
     "bad",
   );
   assertStringIncludes(
@@ -193,24 +195,33 @@ Deno.test("shell: the grid and the wide tiles land in their own slots", () => {
 });
 
 Deno.test("shell: the freshness age and the refresh interval reach both the text and the script", () => {
-  const html = shell("", "", 7, 45_000, SHELL_VERSION, "good");
+  const html = shell("", "", 7, 45_000, TEST_VERSION, "good");
   assertStringIncludes(html, `<span id="agotext">updated 7s ago</span>`);
   assertStringIncludes(html, "const REFRESH = 45000;");
-  assertStringIncludes(html, `const SHELL_VERSION = ${SHELL_VERSION};`);
-  assertStringIncludes(html, "let base = 7;");
-  assertStringIncludes(html, `new EventSource('/events')`);
   assertStringIncludes(
     html,
-    `es.onmessage = (e) => { if (e.data === 'reload') location.reload(); };`,
+    `const SHELL_VERSION = ${JSON.stringify(TEST_VERSION)};`,
   );
+  assertStringIncludes(html, "let base = 7;");
+  assertStringIncludes(html, `new EventSource('/events')`);
   assertStringIncludes(html, `es.addEventListener('update'`);
+  assertStringIncludes(html, `es.addEventListener('ping', alive)`);
+  assertStringIncludes(html, `es.addEventListener('open', alive)`);
+  assertStringIncludes(
+    html,
+    `es.addEventListener('error', () => { updates.lost(); paint(); });`,
+  );
   assertStringIncludes(html, `reconcileTiles(grid, update.gridHtml)`);
   assertStringIncludes(html, `reconcileTiles(wide, update.wideHtml)`);
   assertStringIncludes(
     html,
     `if (update.shellVersion !== SHELL_VERSION) { location.reload(); return; }`,
   );
-  assertEquals(html.match(/location\.reload\(\)/g)?.length, 2);
+  assertEquals(
+    html.match(/location\.reload\(\)/g)?.length,
+    1,
+    "a version mismatch is the one thing that navigates the page",
+  );
   assertStringIncludes(
     html,
     `if (current.outerHTML === next.outerHTML) return current;`,
@@ -218,6 +229,96 @@ Deno.test("shell: the freshness age and the refresh interval reach both the text
   assertStringIncludes(html, `nextScroller.scrollTop = scrollTop`);
   assertStringIncludes(html, `active.dataset.focusKey ?? null`);
   assertStringIncludes(html, `link.dataset.focusKey === focusedKey`);
+});
+
+Deno.test("shell: the page watches its own stream and reopens one that stops delivering", () => {
+  const html = shell("", "", 0, 45_000, TEST_VERSION, "good");
+  // The silence the page reconnects on is the silence that turns the dot red.
+  assertStringIncludes(html, "const RED_AFTER = REFRESH + 10000;");
+  assertStringIncludes(html, `ago * 1000 <= RED_AFTER ? 'amber' : 'red'`);
+  assertStringIncludes(html, `const updates = liveUpdateStream(RED_AFTER, () => {`);
+  assertStringIncludes(
+    html,
+    `badge.textContent = updates.check(now) ? '● LIVE' : '● OFFLINE';`,
+  );
+  assertStringIncludes(html, `document.addEventListener('visibilitychange', paint);`);
+  assertStringIncludes(html, `addEventListener('online', paint);`);
+});
+
+// The functions the page runs are authored as TypeScript here and reach the
+// browser as the text of `Function.prototype.toString()`. That text has to be
+// JavaScript the browser accepts, and it has to stand alone: a reference to
+// anything outside the function is a name the page does not have. Neither
+// property is visible to a test that only looks for substrings.
+Deno.test("shell: the injected script is JavaScript, and each injected function stands alone", () => {
+  const script = shell("", "", 0, 45_000, TEST_VERSION, "good")
+    .match(/<script>([\s\S]*)<\/script>/)![1];
+  // Parses the whole body without running it, which is where a leftover type
+  // annotation or generic parameter would show up.
+  new Function(script);
+
+  // Evaluated on its own, outside its module, so a reference to anything at
+  // module scope throws instead of quietly resolving.
+  const source = script.match(
+    /const liveUpdateStream = ([\s\S]*?);\n {2}const badge =/,
+  )![1];
+  const injected = new Function(`return (${source});`)() as typeof liveUpdateStream;
+
+  const opened: { readyState: number; closed: boolean; close(): void }[] = [];
+  const live = injected(55_000, () => {
+    const stream = {
+      readyState: 0,
+      closed: false,
+      close() {
+        this.closed = true;
+      },
+    };
+    opened.push(stream);
+    return stream;
+  });
+  assert(live.check(0), "the page starts out hearing the server that served it");
+  assertEquals(opened.length, 1);
+  opened[0].readyState = 1;
+  live.heard(0);
+  assert(live.check(54_999));
+  assertEquals(opened.length, 1, "a stream that is delivering is left alone");
+  assertEquals(live.check(55_000), false, "and one that goes quiet is replaced");
+  assertEquals(opened.length, 2);
+  assert(opened[0].closed);
+});
+
+Deno.test("shell: live data and runtime settings keep the compatibility version", () => {
+  const first = shell(
+    `<div class="tile good">first</div>`,
+    "",
+    0,
+    30_000,
+    TEST_VERSION,
+    "good",
+  );
+  const second = shell(
+    `<div class="tile bad">second</div>`,
+    `<div class="tile warn wide">third</div>`,
+    999,
+    30_000,
+    TEST_VERSION,
+    "bad",
+    123,
+    456,
+  );
+  const differentRefresh = shell(
+    "",
+    "",
+    0,
+    60_000,
+    TEST_VERSION,
+    "good",
+  );
+  const embedded = (html: string): string =>
+    html.match(/const SHELL_VERSION = "([^"]+)";/)?.[1] ?? "";
+  assertEquals(embedded(first), TEST_VERSION);
+  assertEquals(embedded(second), TEST_VERSION);
+  assertEquals(embedded(differentRefresh), TEST_VERSION);
 });
 
 Deno.test("formatViewerTimes: the viewer's formatter replaces the UTC fallback", () => {
@@ -233,7 +334,7 @@ Deno.test("formatViewerTimes: the viewer's formatter replaces the UTC fallback",
 });
 
 Deno.test("shell: the browser runs the viewer-time formatter", () => {
-  const html = shell("", "", 0, 30_000, SHELL_VERSION, "good");
+  const html = shell("", "", 0, 30_000, TEST_VERSION, "good");
   const source = formatViewerTimes.toString();
   assertStringIncludes(source, `time[data-viewer-time][datetime]`);
   assert(
@@ -255,8 +356,104 @@ Deno.test("shell: the browser runs the viewer-time formatter", () => {
   );
 });
 
+Deno.test("shell: the texture fades out towards the bottom of its own tile", () => {
+  const html = shell(renderTile(view({ status: "bad" }), "labs-ci"), "", 0, 30_000, TEST_VERSION, "bad");
+  assertStringIncludes(html, `<div class="texture"></div>`);
+  // Measured against the tile: whole for its top seventh, gone seven tenths
+  // of the way down.
+  assertStringIncludes(
+    html,
+    ".texture{position:absolute;inset:0;z-index:-1;overflow:hidden;mask-image:linear-gradient(to bottom,#000 15%,transparent 70%)}",
+  );
+  // Measured against the turned frame the texture is drawn in.
+  assertStringIncludes(
+    html,
+    ".texture::before{content:\"\";position:absolute;top:50%;left:50%;",
+  );
+  for (const status of ["unknown", "warn", "bad"]) {
+    assertStringIncludes(html, `.tile.${status} .texture::before{`);
+  }
+  // The stroked textures are drawn at the width the palette sets, inside the
+  // data URI that carries them.
+  const strokes = [...html.matchAll(/stroke-width%3D%22([\d.]+)%22/g)];
+  assertEquals(strokes.length, 2, "one stroked texture each for warn and bad");
+  for (const stroke of strokes) assertEquals(Number(stroke[1]), TEXTURE_WIDTH);
+  // A pattern repeats at the size of the artwork that draws it. The two are
+  // written separately into the CSS, and a pattern drawn at one size and tiled
+  // at another is stretched.
+  const tiles = [
+    ...html.matchAll(
+      /width%3D%22(\d+)%22%20height%3D%22(\d+)%22[^;]*;background-size:(\d+)px (\d+)px/g,
+    ),
+  ];
+  assertEquals(tiles.length, 2, "both stroked textures set their own size");
+  for (const [, width, height, sizeX, sizeY] of tiles) {
+    assertEquals(sizeX, width, "the pattern tiles at the width it is drawn at");
+    assertEquals(sizeY, height, "and at the height it is drawn at");
+  }
+});
+
+Deno.test("shell: the turned texture layer still covers a tile far wider than it is tall", () => {
+  const html = shell("", "", 0, 30_000, TEST_VERSION, "bad");
+  const layer = /\.texture::before\{[^}]*width:(\d+)%[^}]*\}/.exec(html);
+  assert(layer, "the texture layer sets its own size");
+  assertStringIncludes(layer[0], "aspect-ratio:1");
+  assertStringIncludes(layer[0], "top:50%;left:50%");
+  assertStringIncludes(layer[0], "translate(-50%,-50%)");
+  // Turning a square about its centre sweeps its corners inward, so the layer
+  // covers the tile only while half its side still reaches the tile's corner.
+  // That reach is the tile's half-diagonal. The layer is measured off the
+  // tile's width alone, so the shape that strains it is a tall narrow tile:
+  // the tightest the wall's grid gets is a tile 0.94 as tall as it is wide,
+  // and this asks for room well past that.
+  const tallest = 1.5;
+  const halfSide = Number(layer[1]) / 100 / 2;
+  assert(
+    halfSide >= Math.hypot(1, tallest) / 2,
+    `a layer of ${layer[1]}% of the tile width leaves the corners of a tile ${
+      tallest
+    } times as tall as it is wide outside it once turned`,
+  );
+});
+
+Deno.test("shell: the header dot takes a shape per status, not just a color", () => {
+  const html = shell(renderTile(view(), "labs-ci"), "", 0, 30_000, TEST_VERSION, "good");
+  // The dot is empty and its shape is drawn by a layer inside it.
+  assertStringIncludes(html, `.dot::before{content:"";position:absolute;inset:0}`);
+  const shapes = (["good", "warn", "bad", "unknown"] as Status[]).map((status) => {
+    const rule = new RegExp(`\\.dot\\.${STATUS_DOT[status]}::before\\{([^}]*)\\}`).exec(html);
+    assert(rule, `${status} has a rule for its dot`);
+    return rule[1];
+  });
+  assertEquals(
+    new Set(shapes).size,
+    shapes.length,
+    "no two statuses draw the same dot, so the shape alone says which is which",
+  );
+  // A ring rather than a disc, for the one status that is an absence of news.
+  assertStringIncludes(shapes[3], "border:2px solid");
+  for (const shape of shapes.slice(0, 3)) assert(!shape.includes("border:"));
+});
+
+Deno.test("shell: a tile's wash and border grow with the seriousness of its status", () => {
+  const html = shell("", "", 0, 30_000, TEST_VERSION, "good");
+  const alphas = (["good", "warn", "bad"] as Status[]).map((status) => {
+    const rule = new RegExp(
+      `\\.tile\\.${status},\\.tile\\.wide\\.${status}\\{border-color:rgba\\([\\d,]+,([\\d.]+)\\);background:rgba\\([\\d,]+,([\\d.]+)\\)\\}`,
+    ).exec(html);
+    assert(rule, `${status} has a tile rule`);
+    return { edge: Number(rule[1]), wash: Number(rule[2]) };
+  });
+  for (let i = 1; i < alphas.length; i++) {
+    assert(alphas[i].edge > alphas[i - 1].edge, "each border is stronger than the last");
+    assert(alphas[i].wash > alphas[i - 1].wash, "each wash is stronger than the last");
+  }
+  // A tile that cannot tell takes no color at all.
+  assertStringIncludes(html, ".tile.unknown,.tile.wide.unknown{border-color:#2f333c}");
+});
+
 Deno.test("shell: server-measured red age changes the favicon after one hour", () => {
-  const html = shell("", "", 0, 1000, SHELL_VERSION, "good");
+  const html = shell("", "", 0, 1000, TEST_VERSION, "good");
   assertStringIncludes(
     html,
     `const FAVICON_CRY_AFTER_MS = ${FAVICON_CRY_AFTER_MS}`,
@@ -268,7 +465,7 @@ Deno.test("shell: server-measured red age changes the favicon after one hour", (
     "",
     0,
     1000,
-    SHELL_VERSION,
+    TEST_VERSION,
     "bad",
     1_234,
     567,
@@ -317,9 +514,9 @@ Deno.test("shell: server-measured red age changes the favicon after one hour", (
   assert(!html.includes("faviconSvg"));
 });
 
-Deno.test("shell: the repo name in the header is escaped", () => {
+Deno.test("shell: the header names the Fabric Wall shortcut", () => {
   assertStringIncludes(
-    shell("", "", 0, 1000, SHELL_VERSION, "good"),
-    `<span>${REPO.replace(/&/g, "&amp;")}</span>`,
+    shell("", "", 0, 1000, TEST_VERSION, "good"),
+    "<span>go/fabricwall</span>",
   );
 });

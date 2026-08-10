@@ -1,6 +1,7 @@
 // Shared helpers used across tiles and the core.
 import type { Status } from "./types.ts";
 import { PROD_SERVICE } from "./config.ts";
+import { RUNNING_COLOR, STATUS_COLOR } from "./palette.ts";
 import {
   type GitHubPrimaryRateLimit,
   performanceGitHubRateLimit,
@@ -150,14 +151,7 @@ export const STATUS_DOT: Record<Status, string> = { good: "green", warn: "amber"
 export const escapeHtml = (s: string) =>
   s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
 
-// Per-status left edge for a sparkline's fade gradient — a shade just below the
-// tile's own (status-tinted) background, so the line fades up out of the tile.
-export const SPARK_FADE: Record<Status, string> = {
-  good: "#0e1915",
-  warn: "#1a1713",
-  bad: "#1e1113",
-  unknown: "#121317",
-};
+export { SPARK_FADE } from "./palette.ts";
 
 // How a sparkline caption spells a day span, consistently across tiles:
 // "5 days", "1 day", "<1 day".
@@ -256,6 +250,16 @@ export function durationTag(ms: number): string {
   return `<span style="position:absolute;left:1px;bottom:0;font-size:9px;line-height:1;color:#c7ccd4;pointer-events:none">${escapeHtml(humanSpan(ms))}</span>`;
 }
 
+function scaleValues(
+  vals: number[],
+  scale: { trim?: number; minValues?: number } | undefined,
+): number[] {
+  const count = Math.max(0, Math.floor(scale?.trim ?? 0));
+  const minimum = Math.max(count * 2 + 2, scale?.minValues ?? 0);
+  if (count === 0 || vals.length < minimum) return vals;
+  return [...vals].sort((a, b) => a - b).slice(count, -count);
+}
+
 // A trend line from a numeric series (oldest -> newest). With `highlight`, the
 // trailing `count` points are overdrawn in a second color (e.g. to pick out the
 // most recent runs against a longer trend). The vertical scale is normalized to
@@ -266,13 +270,17 @@ export function durationTag(ms: number): string {
 // fraction 0..1 of the width (for placing several sparklines on one shared axis —
 // e.g. a real time axis); a series that doesn't reach the ends occupies only part
 // of the width. Without it, points are spaced evenly. The line has no label of its
-// own — a tile's `duration` slot draws the span in the corner.
+// own — a tile's `duration` slot draws the span in the corner. `scale.trim`
+// excludes that many values from each end of the sorted scale inputs without
+// removing the points themselves. A series below `scale.minValues`, or too short
+// to leave two scale values, keeps its full range.
 export function sparkline(
   vals: number[],
   color: string,
   highlight?: { count: number; color: string; scaleAll?: boolean },
   fadeFrom?: string,
   xs?: number[],
+  scale?: { trim?: number; minValues?: number },
 ): string {
   if (vals.length < 2) return "";
   const w = 220, h = 26;
@@ -280,7 +288,8 @@ export function sparkline(
   // series in view while still brightening the tail (for series whose recent
   // window can sit far from the historical range, e.g. a near-zero error rate).
   const recent = highlight && !highlight.scaleAll ? vals.slice(-highlight.count) : vals;
-  const lo = Math.min(...recent), hi = Math.max(...recent);
+  const scaled = scaleValues(recent, scale);
+  const lo = Math.min(...scaled), hi = Math.max(...scaled);
   const pad = (hi - lo) * 0.125 || 0.5; // 12.5% each side ≈ +25% range; a floor for a flat series
   const min = lo - pad, rng = (hi + pad) - min;
   // Place each point at its `xs` fraction of the width (shared axis), else evenly.
@@ -314,7 +323,10 @@ export function sparkline(
     const tail = pts.slice(vals.length - highlight.count);
     lines.push(`<polyline points="${tail.join(" ")}" fill="none" stroke="${highlight.color}" stroke-width="2"/>`);
   }
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="24" preserveAspectRatio="none" style="margin-top:9px">${defs}${lines.join("")}</svg>`;
+  // The svg is a block, so the chart's box is the height it draws: an inline svg
+  // sits on a text baseline, and the line box around it reserves descender space
+  // underneath.
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="24" preserveAspectRatio="none" style="display:block;margin-top:9px">${defs}${lines.join("")}</svg>`;
 }
 
 // Overlaid trend lines (each oldest -> newest) sharing one vertical scale, each
@@ -322,21 +334,43 @@ export function sparkline(
 // right-hand gutter at the line's end height, in the line color. With
 // `opts.fadeFrom`, each line fades from that color on the far left up to its own
 // color, reaching full color by the midpoint (or by the start of the highlight,
-// if that comes sooner) — like the ci-duration sparkline. `opts.highlight`
-// redraws the trailing `count` points of every line in a lighter tint of that
-// line's own color, picking out the slice that feeds the headline while keeping
-// each line identifiable. All overlays are HTML/gradient, so the
-// preserveAspectRatio="none" stretch can't distort them. Returns "" until there
-// are at least two points to plot. The span it covers is drawn separately by a
-// tile's `duration` slot.
+// if that comes sooner) — like the ci-duration sparkline. A series' `xs`
+// places its points on a shared horizontal axis. Its `highlightCount` redraws
+// its trailing points, including explicit markers, in a lighter tint.
+// `opts.highlight` supplies the count for series that do not set one. `maxXGap`
+// breaks a path when adjacent horizontal positions are farther apart than that
+// fraction of the chart. `showSinglePoint` draws explicit markers for a
+// one-sample series and for points isolated by those breaks. All overlays are
+// HTML or gradients, so preserveAspectRatio="none" cannot distort them. The
+// span it covers is drawn separately by a tile's `duration` slot. `opts.scale`
+// has the same trimming behavior as `sparkline`.
 export function multiSparkline(
-  series: { vals: number[]; color: string; label?: string }[],
-  opts: { fadeFrom?: string; highlight?: { count: number } } = {},
+  series: {
+    vals: number[];
+    color: string;
+    label?: string;
+    xs?: number[];
+    highlightCount?: number;
+    maxXGap?: number;
+    showSinglePoint?: boolean;
+  }[],
+  opts: {
+    fadeFrom?: string;
+    highlight?: { count: number };
+    scale?: { trim?: number; minValues?: number };
+  } = {},
 ): string {
-  const all = series.flatMap((s) => s.vals);
-  const points = Math.max(0, ...series.map((s) => s.vals.length));
-  if (points < 2 || all.length === 0) return "";
-  const w = 220, h = 34, min = Math.min(...all), max = Math.max(...all), rng = (max - min) || 1;
+  const drawable = series.filter((line) =>
+    line.vals.length >= 2 ||
+    (line.showSinglePoint === true && line.vals.length === 1)
+  );
+  const all = drawable.flatMap((line) => line.vals);
+  if (!all.length) return "";
+  const scaled = scaleValues(all, opts.scale);
+  const lo = Math.min(...scaled), hi = Math.max(...scaled);
+  // Match sparkline's centered flat range when trimming leaves two equal values.
+  const pad = scaled === all || lo !== hi ? 0 : 0.5;
+  const w = 220, h = 34, min = lo - pad, max = hi + pad, rng = (max - min) || 1;
   const yv = (v: number) => h - 3 - ((v - min) / rng) * (h - 6);
 
   // Each line fades from `fadeFrom` on the left up to its own color, reaching full
@@ -344,14 +378,24 @@ export function multiSparkline(
   // that comes sooner (so the base is solid before the handoff). userSpaceOnUse
   // keeps the transition at the same screen x for every line and avoids the
   // zero-bbox quirk when a line is flat.
-  const edge = opts.highlight && points > 1
-    ? Math.max(0, Math.min(1, (points - opts.highlight.count) / (points - 1)))
-    : 1;
-  const tf = Math.min(0.5, edge);
-  const off = String(+tf.toFixed(3));
   const defs: string[] = [];
-  const strokeFor = (color: string): string => {
+  const highlightCount = (
+    line: (typeof series)[number],
+  ): number => line.highlightCount ?? opts.highlight?.count ?? 0;
+  const highlightEdge = (line: (typeof series)[number]): number => {
+    const count = highlightCount(line);
+    if (count < 2) return 1;
+    if (count >= line.vals.length) return 0;
+    const index = line.vals.length - count;
+    return line.xs?.length === line.vals.length
+      ? line.xs[index]
+      : index / (line.vals.length - 1);
+  };
+  const strokeFor = (line: (typeof series)[number]): string => {
+    const color = line.color;
     if (!opts.fadeFrom) return color;
+    const tf = Math.min(0.5, Math.max(0, highlightEdge(line)));
+    const off = String(+tf.toFixed(3));
     const id = `mspk-${opts.fadeFrom.replace(/[^0-9a-fA-F]/g, "")}-${color.replace(/[^0-9a-fA-F]/g, "")}-${Math.round(tf * 100)}`;
     if (!defs.some((d) => d.includes(`"${id}"`))) {
       defs.push(
@@ -362,27 +406,110 @@ export function multiSparkline(
     }
     return `url(#${id})`;
   };
-  const hl = opts.highlight;
-  const poly = (pts: string[], stroke: string) => `<polyline points="${pts.join(" ")}" fill="none" stroke="${stroke}" stroke-width="2"/>`;
-  const drawn = series.filter((s) => s.vals.length >= 2).map((s) => ({
-    s,
-    pts: s.vals.map((v, i) => `${(i / (s.vals.length - 1) * w).toFixed(1)},${yv(v).toFixed(1)}`),
-  }));
+  const highlightStartIndex = (
+    line: (typeof series)[number],
+    pointCount: number,
+  ): number | undefined => {
+    const count = Math.min(highlightCount(line), pointCount);
+    return count >= 2 && count < pointCount ? pointCount - count : undefined;
+  };
+  type SparkPoint = { index: number; x: number; px: number; py: number };
+  const splitPoints = (
+    points: SparkPoint[],
+    maxXGap: number | undefined,
+  ): SparkPoint[][] => {
+    const segments: SparkPoint[][] = [];
+    for (const point of points) {
+      const current = segments[segments.length - 1];
+      const previous = current?.[current.length - 1];
+      const tolerance = maxXGap === undefined || previous === undefined
+        ? 0
+        : Number.EPSILON * 4 *
+          Math.max(
+            1,
+            Math.abs(point.x),
+            Math.abs(previous.x),
+            Math.abs(maxXGap),
+          );
+      if (
+        previous === undefined ||
+        (maxXGap !== undefined &&
+          Math.abs(point.x - previous.x) > maxXGap + tolerance)
+      ) {
+        segments.push([point]);
+      } else {
+        current.push(point);
+      }
+    }
+    return segments;
+  };
+  const svgPoint = (point: SparkPoint) =>
+    `${point.px.toFixed(1)},${point.py.toFixed(1)}`;
+  const poly = (pts: string[], stroke: string) =>
+    `<polyline points="${pts.join(" ")}" fill="none" stroke="${stroke}" stroke-width="2"/>`;
+  const marker = (point: SparkPoint, color: string) =>
+    `<circle cx="${point.px.toFixed(1)}" cy="${
+      point.py.toFixed(1)
+    }" r="1.0" fill="${escapeHtml(color)}"/>`;
+  const drawn = drawable.filter((s) => s.vals.length >= 2).map((s) => {
+    const points = s.vals.map((v, i) => {
+      const x = s.xs?.length === s.vals.length
+        ? s.xs[i]
+        : i / (s.vals.length - 1);
+      return { index: i, x, px: x * w, py: yv(v) };
+    });
+    return {
+      s,
+      points,
+      segments: splitPoints(points, s.maxXGap),
+    };
+  });
   // Every base first, then every tint, so a line drawn later cannot paint over an
   // earlier line's tint where the two cross inside the highlighted slice.
-  const bases = drawn.map(({ s, pts }) => poly(pts, strokeFor(s.color))).join("");
+  const bases = drawn.map(({ s, segments }) => {
+    const paths = segments.filter((segment) => segment.length >= 2);
+    if (!paths.length) return "";
+    const stroke = strokeFor(s);
+    return paths.map((path) => poly(path.map(svgPoint), stroke)).join("");
+  }).join("");
   // The trailing slice, redrawn in a lighter tint of each line's own color. A
   // slice covering the whole line marks nothing off, so it is left alone.
-  const tints = drawn.map(({ s, pts }) => {
-    const n = hl ? Math.min(hl.count, pts.length) : 0;
-    return n >= 2 && n < pts.length ? poly(pts.slice(pts.length - n), lighten(s.color)) : "";
+  const tints = drawn.map(({ s, points }) => {
+    const start = highlightStartIndex(s, points.length);
+    if (start === undefined) return "";
+    return splitPoints(points.slice(start), s.maxXGap)
+      .filter((segment) => segment.length >= 2)
+      .map((segment) => poly(segment.map(svgPoint), lighten(s.color)))
+      .join("");
   }).join("");
-  const lines = bases + tints;
+  const isolatedMarkers = drawn.map(({ s, points, segments }) => {
+    if (!s.showSinglePoint) return "";
+    const highlightStart = highlightStartIndex(s, points.length);
+    return segments
+      .filter((segment) => segment.length === 1)
+      .map((segment) => {
+        const point = segment[0];
+        const color = highlightStart !== undefined &&
+            point.index >= highlightStart
+          ? lighten(s.color)
+          : s.color;
+        return marker(point, color);
+      })
+      .join("");
+  }).join("");
+  const singleSeriesMarkers = drawable
+    .filter((s) => s.vals.length === 1)
+    .map((s) => {
+      const x = s.xs?.length === 1 ? s.xs[0] : 0.5;
+      return marker({ index: 0, x, px: x * w, py: yv(s.vals[0]) }, s.color);
+    })
+    .join("");
+  const lines = bases + tints + isolatedMarkers + singleSeriesMarkers;
   const defsBlock = defs.length ? `<defs>${defs.join("")}</defs>` : "";
 
-  const labeled = series.filter((s) => s.label !== undefined && s.vals.length >= 2);
+  const labeled = drawable.filter((s) => s.label !== undefined);
   if (labeled.length === 0) {
-    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="32" preserveAspectRatio="none" style="margin-top:9px">${defsBlock}${lines}</svg>`;
+    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="32" preserveAspectRatio="none" style="display:block;margin-top:9px">${defsBlock}${lines}</svg>`;
   }
   const RH = 32; // rendered svg height, px
   // Each label sits at its line's end height; when a chart is drawn its value
@@ -420,7 +547,13 @@ export function thin<T>(arr: T[], max: number): T[] {
 export function strip(cells: { outcome: string; href: string }[], cols: number): string {
   if (!cells.length) return "";
   const col = (d: string) =>
-    d === "green" ? "#43c574" : d === "red" ? "#e2504a" : d === "run" ? "#6ea8fe" : "#7c828c";
+    d === "green"
+      ? STATUS_COLOR.good
+      : d === "red"
+      ? STATUS_COLOR.bad
+      : d === "run"
+      ? RUNNING_COLOR
+      : STATUS_COLOR.unknown;
   const html = cells.map((c) =>
     `<a class="cell" href="${escapeHtml(c.href)}" target="_blank" rel="noopener" style="background:${col(c.outcome)}"></a>`
   ).join("");

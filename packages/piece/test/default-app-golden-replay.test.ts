@@ -4,18 +4,25 @@ import {
   getPatternIdentityRef,
   isLink,
   resolveEntryIdentity,
+  resolveSystemPatternSource,
   Runtime,
 } from "@commonfabric/runner";
 import {
   EmulatedStorageManager,
+  newLoopbackServer,
 } from "@commonfabric/runner/storage/cache.deno";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { createSession, Identity } from "@commonfabric/identity";
-import { PieceManager } from "../src/manager.ts";
 import {
-  DEFAULT_APP_PATTERN_URL,
+  DEFAULT_APP_PATTERN_SOURCE,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
+
+// The route that ref expands to — what the toolshed serves, and what the
+// worker names the module by when it compiles the pattern over HTTP.
+const DEFAULT_APP_PATTERN_PATH = resolveSystemPatternSource(
+  DEFAULT_APP_PATTERN_SOURCE,
+)!;
 
 // Golden replay for non-home root state across an in-place update.
 //
@@ -26,38 +33,7 @@ import {
 
 const signer = await Identity.fromPassphrase("default-app golden replay");
 
-const EMULATED_AUDIENCE = "did:key:z6Mk-runner-emulated-memory";
-
-function newSharedServer(): MemoryV2Server.Server {
-  return new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: { audience: EMULATED_AUDIENCE },
-  });
-}
-
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      // deno-lint-ignore no-explicit-any
-      { as: signer, memoryHost: new URL("memory://") } as any,
-      () => server,
-    );
-    manager.#sharedServer = server;
-    return manager;
-  }
-
-  #sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.#sharedServer;
-  }
-}
+const newSharedServer = (): MemoryV2Server.Server => newLoopbackServer();
 
 // A default-app-shaped root before and after the registry rename. V2 keeps the
 // old owned-cell cause privately and migrates its contents into the new cell
@@ -108,9 +84,9 @@ const SEEDED_PIECES = ["note:groceries", "note:standup", "notebook:trip"];
 /** Content identity a toolshed would serve for `source`. */
 function identityForSource(source: string): Promise<string> {
   return resolveEntryIdentity(
-    DEFAULT_APP_PATTERN_URL,
+    DEFAULT_APP_PATTERN_PATH,
     (name) =>
-      name === DEFAULT_APP_PATTERN_URL
+      name === DEFAULT_APP_PATTERN_PATH
         ? Promise.resolve(source)
         : Promise.reject(new Error(`not found: ${name}`)),
   );
@@ -133,7 +109,7 @@ function installFetchStub(): StubControls {
       : input.url;
     const url = new URL(href);
 
-    if (url.pathname === DEFAULT_APP_PATTERN_URL) {
+    if (url.pathname === DEFAULT_APP_PATTERN_PATH) {
       if (url.searchParams.has("identity")) {
         return new Response(await identityForSource(source), {
           headers: { "content-type": "text/plain" },
@@ -156,16 +132,15 @@ function installFetchStub(): StubControls {
 describe("default-app golden replay (state survives an in-place roll-forward)", () => {
   let stub: StubControls;
   let server: MemoryV2Server.Server;
-  let storageManager: SharedServerStorageManager;
+  let storageManager: EmulatedStorageManager;
   let runtime: Runtime;
-  let manager: PieceManager;
   let controller: PiecesController;
 
   beforeEach(async () => {
     stub = installFetchStub();
     stub.setSource(ROOT_V1);
     server = newSharedServer();
-    storageManager = SharedServerStorageManager.connectTo(server);
+    storageManager = EmulatedStorageManager.connectTo(server, { as: signer });
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
@@ -175,9 +150,8 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
       identity: signer,
       spaceName: "golden-replay-" + crypto.randomUUID(),
     });
-    manager = new PieceManager(session, runtime);
-    await manager.synced();
-    controller = new PiecesController(manager);
+    controller = new PiecesController(session, runtime);
+    await controller.synced();
   });
 
   afterEach(async () => {
@@ -227,7 +201,7 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     // Let the pattern watcher observe the meta change and re-instantiate, then
     // pull the root so the new instance actually executes (pull-based graph).
     await runtime.idle();
-    const rolled = (await manager.getDefaultPattern(false))!;
+    const rolled = (await controller.getDefaultPattern(false))!;
     await rolled.pull();
 
     const registryRoot = rolled.asSchema(
@@ -290,9 +264,9 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
           ].join("\n"),
         }],
       },
-      { space: manager.getSpace() },
+      { space: controller.getSpace() },
     );
-    const profile = await manager.runPersistent<{ name: string }>(
+    const profile = await controller.runPersistent<{ name: string }>(
       profilePattern,
       {},
       "cold update profile",
@@ -301,41 +275,42 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
       root.withTx(tx).key("allPieces").set([...SEEDED_PIECES]);
     });
     await piece.setInput({ label: "durable", profile });
-    const storedProfile = (manager.getArgument(root).getRawUntyped() as {
+    const storedProfile = (controller.getArgument(root).getRawUntyped() as {
       profile?: unknown;
     }).profile;
     expect(isLink(storedProfile)).toBe(true);
     await runtime.idle();
-    await manager.synced();
-    await manager.stopPiece(root);
+    await controller.synced();
+    await controller.stopPiece(root);
 
     stub.setSource(ROOT_V2);
     const session = await createSession({
       identity: signer,
-      spaceName: manager.getSpaceName()!,
+      spaceName: controller.getSpaceName()!,
     });
-    const readerStorage = SharedServerStorageManager.connectTo(server);
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
     const freshRuntime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager: readerStorage,
       experimental: { systemPatternAutoUpdate: true },
     });
-    const freshManager = new PieceManager(session, freshRuntime);
-    const freshController = new PiecesController(freshManager);
+    const freshController = new PiecesController(session, freshRuntime);
     let cancelPieceRegistrySink: (() => void) | undefined;
 
     try {
-      await freshManager.synced();
+      await freshController.synced();
       const profileLink = profile.getAsNormalizedFullLink();
       const readerReplica = readerStorage.open(
-        manager.getSpace(),
+        controller.getSpace(),
       ) as unknown as {
         get?: (uri: string, scope?: unknown) => unknown;
       };
       expect(
         readerReplica.get?.(profileLink.id, profileLink.scope),
       ).toBeUndefined();
-      const coldRoot = await freshManager.getDefaultPattern(false);
+      const coldRoot = await freshController.getDefaultPattern(false);
       expect(coldRoot).toBeDefined();
       expect(
         await freshController.checkAndUpdateDefaultPattern(coldRoot),
@@ -365,7 +340,7 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
         await identityForSource(ROOT_V2),
       );
       expect(pieceRegistry).toEqual(SEEDED_PIECES);
-      const updatedArgument = freshManager.getArgument(updatedRoot);
+      const updatedArgument = freshController.getArgument(updatedRoot);
       await updatedArgument.pull();
       expect(updatedArgument.get()).toEqual({
         label: "durable",
@@ -387,15 +362,15 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
       root.withTx(tx).key("allPieces").set([...SEEDED_PIECES]);
     });
     await runtime.idle();
-    await manager.stopPiece(root);
+    await controller.stopPiece(root);
 
     stub.setSource(ROOT_V2);
     const currentPattern = await runtime.patternManager.compilePattern(
       {
-        main: DEFAULT_APP_PATTERN_URL,
-        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: ROOT_V2 }],
+        main: DEFAULT_APP_PATTERN_PATH,
+        files: [{ name: DEFAULT_APP_PATTERN_PATH, contents: ROOT_V2 }],
       },
-      { space: manager.getSpace() },
+      { space: controller.getSpace() },
     );
     const currentRef = runtime.patternManager.getArtifactEntryRef(
       currentPattern,
@@ -411,12 +386,12 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
       root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
     });
     expect(metadataUpdate.error).toBeUndefined();
-    const metadataOnlyRoot = (await manager.getDefaultPattern(false))!;
+    const metadataOnlyRoot = (await controller.getDefaultPattern(false))!;
     expect(getPatternIdentityRef(metadataOnlyRoot)).toEqual(currentRef);
     expect(metadataOnlyRoot.getMetaRaw("schema")).not.toEqual(
       currentPattern.resultSchema,
     );
-    await manager.startPiece(metadataOnlyRoot);
+    await controller.startPiece(metadataOnlyRoot);
     expect(metadataOnlyRoot.key("pieceRegistry").getRaw()).toBeUndefined();
 
     const outcome = await controller.checkAndUpdateDefaultPattern(

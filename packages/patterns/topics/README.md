@@ -74,11 +74,20 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
 
 ## Headless / agent use
 
-Agents are first-class participants. Against a deployed board piece:
+Agents are first-class participants. **Deployed lag:** a live board can run an
+older pattern than this source — the Estuary team board does today — and an
+older schema silently discards fields it does not declare. Until a migration
+lands, `body`-at-create and the loud rejections described here may not be live
+on a given board; check `cf piece verbs`, whose listing carries the deployed
+pattern's source identity, before relying on either. Against a deployed board
+piece:
 
 ```bash
-cf piece call --piece <board> addTopic '{"title":"...","agentName":"Sol"}'
-cf piece get  --piece <board> topics --input      # then address a topic piece
+cf piece call --piece <board> addTopic \
+  '{"title":"...","body":"the initial living document","agentName":"Sol"}'
+# -> { "result": { "topic": … } }: the topic this call created
+cf piece get --piece <board> topics --input \
+  --schema title,createdAt,lastActivityAt,commentCount
 cf piece call --piece <topic> addComment \
   '{"body":"point-in-time progress update","agentName":"Sol"}'
 cf piece call --piece <topic> setBody \
@@ -87,6 +96,77 @@ cf piece call --piece <topic> addLink \
   '{"kind":"pr","url":"https://github.com/org/repo/pull/123","label":"PR #123","agentName":"Sol"}'
 ```
 
+**A full-board survey is one bounded read of `index`.** Each row is the child
+reference plus scalar summaries (`title`, `createdAt`, `createdBy`,
+`commentCount`, `lastActivityAt`) and the prose reference edges as sibling
+references — every reference declared through a title-only schema, so the read
+cannot expand a topic's body, thread, or verbs no matter how it is projected:
+
+```bash
+cf piece get --piece <board> index --step
+```
+
+The board input links to complete Topic objects, including bodies, threads,
+handlers, and cross-reference data. Targeted headless discovery beyond the index
+should therefore combine an exact/range `--filter` with a concise `--schema`
+instead of materializing the whole corpus:
+
+```bash
+cf piece get --piece <board> topics --input \
+  --filter '.title == "<exact title>"' \
+  --schema title,lastActivityAt,commentCount
+cf piece get --piece <board> topics --input \
+  --filter '.lastActivityAt >= <epoch-milliseconds>' \
+  --schema title,lastActivityAt,commentCount,createdBy.kind,createdBy.name
+cf piece get --piece <board> crossrefs --step \
+  --filter '.topic.title == "<exact title>"' \
+  --schema fid,topic.title,topic.lastActivityAt,topic.commentCount
+cf piece get --piece <topic> comments --input \
+  --filter '.author.name == "Sol" or .authorName == "Sol"' \
+  --schema sentAt,author.kind,author.name,authorName,body
+cf piece get --piece <topic> links --input \
+  --filter '.kind == "pr"' --schema kind,url,label,addedAt
+```
+
+Filtering happens before projection and preserves list order. The jq-inspired
+predicate subset supports paths, JSON literals, comparisons, boolean operators,
+and parentheses; it does not provide substring search, regexes, sorting, or an
+arbitrary jq pipeline. These transforms execute as a session-scoped computed
+pattern expression, so their CFC metadata behavior matches authored
+filter/map/lift expressions. The durable `topics --input` list remains evidence
+when the computed `crossrefs --step` index cannot materialize, but only a
+successful crossref row supplies the canonical Topic fid.
+
 Every agent-authored mutation carries `agentName`; there is no preceding “set
 current name” call. Fabric's operation history retains the authenticated human
 principal, while the stored snapshot disambiguates which agent acted.
+
+**Every mutating verb returns what it recorded.** `addTopic` returns the topic
+it created — the piece itself, so the caller addresses the new topic straight
+from the create instead of filing it and then searching the board for it.
+`addComment` and `addLink` return the appended record, `setBody` the persisted
+body plus the attribution it wrote; each carries fields the pattern resolved
+(the structured author derived from `agentName`, the write-time timestamp) that
+a caller cannot compute for itself. Counts are deliberately not returned: these
+appends are mergeable ops, so a length observed inside one handling is not a
+fact about the resulting list — read `commentCount` when you want the count.
+
+A returned value reaches the caller through the handling's receipt. A result
+carrying a piece (`addTopic`) arrives on any runtime; the plain records
+(`addComment`, `addLink`, `setBody`) additionally need `plainResultReceipts`,
+which is `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true` until that flag's default
+flips (`docs/development/EXPERIMENTAL_OPTIONS.md`). Without it those three verbs
+still perform their write and simply report no result.
+
+`addTopic` takes the body at create (optional): a topic born with a body appears
+with it atomically — no reader observes a title-only halfway state, and no
+follow-up `setBody` is needed to finish filing (the verb contract's atomic-unit
+rule, `docs/plans/pattern-verb-contract.md`). Body-at-create is not a body
+_update_: `bodyUpdatedBy`/`bodyUpdatedAt` stay unset.
+
+Invalid mutations **throw** instead of silently returning (verb contract rule
+4): an empty title, an empty comment body, a blank or non-http(s) link URL, and
+a blank `agentName` on any verb all surface as a failed call — a nonzero CLI
+exit — never as apparent success. An _omitted_ `agentName` remains the tolerated
+legacy-caller path. The UI composer wrappers keep their silent guards: an empty
+draft is a non-event in a composer, not a headless mutation.

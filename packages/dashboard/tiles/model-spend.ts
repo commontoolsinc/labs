@@ -5,7 +5,7 @@
 // running monthly total).
 //
 // The two providers with a daily series are charted as one line each over the
-// trailing ~45 days, dimmed except for the current-month slice that feeds the
+// trailing ~45 days, dimmed except for the daily-rate window that feeds the
 // headline (like the github-ci-spend sparkline), with each line's month-to-date
 // total in the right gutter. The headline is the projected full-month spend,
 // extrapolated from the recent daily rate — spilling into last month's tail when
@@ -19,15 +19,15 @@
 // the gateway exposes tokens, not dollars — these provider APIs are the
 // authoritative source of spend.
 import type { Status, Tile, TileView } from "../types.ts";
-import { budgetStatus, multiSparkline, readBudget, SPARK_FADE, usd } from "../lib.ts";
-import { calendarMonth, MIN_WINDOW_DAYS, projectMonthly, PROVIDER_LAG_DAYS, settled } from "./github-ci-spend.ts";
+import { budgetStatus, readBudget, usd } from "../lib.ts";
+import { DAY_MS, SPEND_HISTORY_DAYS, spendChart, summarizeDailySpend } from "../spend.ts";
 
 // The provider billing APIs are slow — OpenAI's costs endpoint alone takes ~12-16s
 // for a 46-day query and slows further under repeated calls — and this tile pages
 // over ~45 days, so give each request generous headroom. A request that would have
 // returned shouldn't be cut off, stranding the whole provider as "$???".
 const TIMEOUT = 30000;
-const SPARK_DAYS = 45; // trailing calendar days the per-provider lines cover
+const PROVIDER_LAG_DAYS = 1;
 const OPENAI_COLOR = "#10a37f";
 const ANTHROPIC_COLOR = "#d97757";
 
@@ -108,29 +108,6 @@ async function openrouterMonthly(key: string): Promise<number> {
   return data.data.usage_monthly;
 }
 
-// Month-to-date total and a projected full-month total from a provider's daily map.
-function summarize(
-  byDay: Map<string, number>,
-  year: number,
-  month0: number,
-  dayOfMonth: number,
-): { mtd: number; projected: number } {
-  const daysInMonth = new Date(Date.UTC(year, month0 + 1, 0)).getUTCDate();
-  // Every day of this month, for the headline total. Quiet days inside the month
-  // count toward the rate: a fortnight carrying spend on two days is a low daily
-  // rate, not a fortnight of two days.
-  const thisMonth = calendarMonth(byDay, year, month0);
-  const mtd = thisMonth.reduce((s, v) => s + v, 0);
-  const coveredThis = settled(thisMonth, dayOfMonth, PROVIDER_LAG_DAYS).length;
-  const pm0 = month0 === 0 ? 11 : month0 - 1;
-  const py = month0 === 0 ? year - 1 : year;
-  // Last month's days have had this month's elapsed days on top of their own to
-  // settle, so only the first day or two of a month leaves any of it unknown.
-  const prev = calendarMonth(byDay, py, pm0);
-  const lastMonthDaily = settled(prev, prev.length + dayOfMonth, PROVIDER_LAG_DAYS);
-  return { mtd, projected: projectMonthly(mtd, coveredThis, daysInMonth, lastMonthDaily) };
-}
-
 export const modelSpend: Tile = {
   id: "model-spend",
   intervalMs: 3_600_000,
@@ -148,8 +125,7 @@ export const modelSpend: Tile = {
     const month0 = now.getUTCMonth();
     const dayOfMonth = now.getUTCDate();
     const daysInMonth = new Date(Date.UTC(year, month0 + 1, 0)).getUTCDate();
-    const monthStartStr = `${year}-${String(month0 + 1).padStart(2, "0")}-01`;
-    const startMs = Date.now() - (SPARK_DAYS + 1) * 86_400_000;
+    const startMs = now.getTime() - (SPEND_HISTORY_DAYS + 1) * DAY_MS;
     const startSec = Math.floor(startMs / 1000);
     const startISO = `${new Date(startMs).toISOString().slice(0, 10)}T00:00:00Z`;
 
@@ -160,8 +136,12 @@ export const modelSpend: Tile = {
       orKey ? openrouterMonthly(orKey).catch(() => null) : Promise.resolve(null),
     ]);
 
-    const oa = oaMap ? summarize(oaMap, year, month0, dayOfMonth) : null;
-    const an = anMap ? summarize(anMap, year, month0, dayOfMonth) : null;
+    const oa = oaMap
+      ? summarizeDailySpend(oaMap, now, { lagDays: PROVIDER_LAG_DAYS })
+      : null;
+    const an = anMap
+      ? summarizeDailySpend(anMap, now, { lagDays: PROVIDER_LAG_DAYS })
+      : null;
     const or = orMonthly !== null
       ? { mtd: orMonthly, projected: dayOfMonth > 0 ? (orMonthly / dayOfMonth) * daysInMonth : orMonthly }
       : null;
@@ -180,38 +160,24 @@ export const modelSpend: Tile = {
       ? budgetStatus(totalProjected, readBudget(ctx.env("MODEL_MONTHLY_BUDGET")))
       : "unknown";
 
-    // A shared daily grid across the two charted providers so their lines overlay
-    // on one axis, in-range gaps filled with 0, ending on the last day with data.
-    const days = new Set<string>();
-    for (const m of [oaMap, anMap]) if (m) for (const d of m.keys()) days.add(d);
-    let chart = "";
-    let durationMs = 0;
-    if (days.size >= 2) {
-      const sorted = [...days].sort();
-      const dayMs = (k: string) => Date.parse(`${k}T00:00:00Z`);
-      const end = dayMs(sorted[sorted.length - 1]);
-      const start = Math.max(dayMs(sorted[0]), end - (SPARK_DAYS - 1) * 86_400_000);
-      durationMs = end - start + 86_400_000;
-      const grid: string[] = [];
-      for (let t = start; t <= end; t += 86_400_000) grid.push(new Date(t).toISOString().slice(0, 10));
-      const lineFor = (m: Map<string, number>, color: string, mtd: number) => ({
-        vals: grid.map((d) => m.get(d) ?? 0),
-        color,
-        label: usd(mtd),
-      });
-      const lines = [];
-      if (oaMap && oa) lines.push(lineFor(oaMap, OPENAI_COLOR, oa.mtd));
-      if (anMap && an) lines.push(lineFor(anMap, ANTHROPIC_COLOR, an.mtd));
-      // Mark the slice the projection rates: this month, reaching back to
-      // MIN_WINDOW_DAYS when the month is younger than that, since projectMonthly
-      // borrows that many days from last month's tail. The mark takes in every day
-      // of this month the grid holds, where the projection stops at the last day
-      // that has settled, and one mark covers both providers though each settles on
-      // its own days. It approximates the window rather than tracking it exactly.
-      const current = grid.filter((d) => d >= monthStartStr).length;
-      const windowDays = Math.min(grid.length, Math.max(current, MIN_WINDOW_DAYS));
-      chart = multiSparkline(lines, { fadeFrom: SPARK_FADE[status], highlight: { count: windowDays } });
-    }
+    const chart = spendChart(
+      [
+        {
+          spend: oaMap ? { byDay: oaMap } : null,
+          color: OPENAI_COLOR,
+          label: oa ? usd(oa.mtd) : undefined,
+          lagDays: PROVIDER_LAG_DAYS,
+        },
+        {
+          spend: anMap ? { byDay: anMap } : null,
+          color: ANTHROPIC_COLOR,
+          label: an ? usd(an.mtd) : undefined,
+          lagDays: PROVIDER_LAG_DAYS,
+        },
+      ],
+      now,
+      status,
+    );
 
     // The key line. Charted providers show a swatch (their own MTD sits at the line
     // end on the chart, or inline when there's no chart yet); OpenRouter (no line,
@@ -220,7 +186,7 @@ export const modelSpend: Tile = {
     // header aside; the span the chart covers goes to the tile's duration slot.
     const swatch = (c: string) => `<span class="swatch" style="background:${c}"></span>`;
     const charted = (p: { mtd: number } | null, name: string, color: string) =>
-      p ? (chart ? `${swatch(color)} ${name}` : `${swatch(color)} ${name} ${usd(p.mtd)}`) : `${name} $???`;
+      p ? (chart.chart ? `${swatch(color)} ${name}` : `${swatch(color)} ${name} ${usd(p.mtd)}`) : `${name} $???`;
     const seg: string[] = [];
     if (oaKey) seg.push(charted(oa, "OpenAI", OPENAI_COLOR));
     if (anKey) seg.push(charted(an, "Anthropic", ANTHROPIC_COLOR));
@@ -234,8 +200,8 @@ export const modelSpend: Tile = {
       // lower bound, since the absent provider would add to it (≥).
       value: `${complete ? "~" : "≥"}${usd(totalProjected)}/mo`,
       aside: `<span class="hmtd">${usd(totalMtd)} MTD</span>`,
-      extra: legend + chart,
-      duration: durationMs,
+      extra: legend + chart.chart,
+      duration: chart.duration,
     };
   },
 };

@@ -15,7 +15,10 @@
  *       : FallbackAsyncLocalStore) as new <T>() => AsyncLocalStore<T>;
  */
 export interface AsyncLocalStore<T> {
+  /** Returns the currently bound value, or `undefined` if there is none. */
   getStore(): T | undefined;
+
+  /** Calls `fn` with `value` bound, and returns what it returns. */
   run<R>(value: T, fn: () => R): R;
 }
 

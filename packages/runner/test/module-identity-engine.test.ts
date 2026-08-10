@@ -91,8 +91,10 @@ describe("Engine implementation identity", () => {
   });
 
   it("hashes module identity over PRISTINE authored source, not the helper-injected form (CT-1740)", async () => {
-    // module-loading.md:204-207, 531-535, 543: a module's identity is over its
-    // AUTHORED TypeScript, BEFORE the pretransform helper-injection decoration,
+    // module-loading.md §"Module Identity: Merkle hash over the import graph"
+    // (`normSrc`) and §"Stability and sensitivity properties": a module's
+    // identity is over its AUTHORED TypeScript, BEFORE the pretransform
+    // helper-injection decoration,
     // so it is TCB-version independent. Folding in the injection (the bug)
     // rotates a module's identity whenever the decoration changes between
     // compiles — which is the CT-1740 `writeAuthorizedBy` stamp divergence

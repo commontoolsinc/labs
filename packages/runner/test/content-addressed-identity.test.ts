@@ -118,24 +118,27 @@ describe("content-addressed action identity", () => {
       .implementation;
     expect(reimpl).toBe(impl);
 
-    const json =
-      (refactory as unknown as { toJSON: () => Record<string, unknown> })
-        .toJSON();
-    expect(json.$implRef).toBeDefined();
-    expect("implementation" in json).toBe(false);
+    const encodable = (refactory as unknown as {
+      toEncodableForm: () => Record<string, unknown>;
+    })
+      .toEncodableForm();
+    expect(encodable.$implRef).toBeDefined();
+    expect("implementation" in encodable).toBe(false);
   });
 
   it("serializes javascript modules with $implRef only (no legacy fields)", async () => {
     const pattern = await setup();
     const module = handlerModuleOf(pattern);
-    const json = (module as Module & { toJSON?: () => unknown }).toJSON
-      ? (module as Module & { toJSON: () => unknown }).toJSON() as Record<
-        string,
-        unknown
-      >
-      : JSON.parse(JSON.stringify(module));
+    const encodable =
+      (module as Module & { toEncodableForm?: () => unknown }).toEncodableForm
+        ? (module as Module & { toEncodableForm: () => unknown })
+          .toEncodableForm() as Record<
+            string,
+            unknown
+          >
+        : JSON.parse(JSON.stringify(module));
 
-    const ref = json.$implRef as { identity: string; symbol: string };
+    const ref = encodable.$implRef as { identity: string; symbol: string };
     expect(ref).toBeDefined();
     const provenance = getVerifiedProvenance(
       module.implementation as HarnessedFunction,
@@ -145,18 +148,18 @@ describe("content-addressed action identity", () => {
     // PR E1 (the flip): the legacy `implementationRef` is no longer written,
     // and the body stays omitted because this runtime's engine resolves the
     // `$implRef` through its content-addressed implementation index.
-    expect("implementationRef" in json).toBe(false);
-    expect("implementation" in json).toBe(false);
+    expect("implementationRef" in encodable).toBe(false);
+    expect("implementation" in encodable).toBe(false);
   });
 
   it("a $implRef-only module survives artifact-index eviction (engine implementation index)", async () => {
     const pattern = await setup();
     const module = handlerModuleOf(pattern);
-    const json = (module as Module & { toJSON: () => unknown })
-      .toJSON() as Record<string, unknown>;
-    const ref = json.$implRef as { identity: string; symbol: string };
+    const encodable = (module as Module & { toEncodableForm: () => unknown })
+      .toEncodableForm() as Record<string, unknown>;
+    const ref = encodable.$implRef as { identity: string; symbol: string };
     expect(ref).toBeDefined();
-    expect("implementation" in json).toBe(false);
+    expect("implementation" in encodable).toBe(false);
 
     // The engine's implementation index admits the ref directly (this is the
     // strong, session-lifetime index that replaces the legacy registry's
@@ -188,7 +191,7 @@ describe("content-addressed action identity", () => {
     const nodes = pattern.nodes.map((node) =>
       (node.module as Module).type === "javascript" &&
         (node.module as Module).wrapper === "handler"
-        ? { ...node, module: json as unknown as Module }
+        ? { ...node, module: encodable as unknown as Module }
         : node
     );
     const rehydrated = { ...pattern, nodes } as unknown as Pattern;
@@ -383,15 +386,15 @@ export default pattern<{ value: number }>(({ value }) => ({
       (n.module as Module).type === "javascript"
     );
     expect(node).toBeDefined();
-    const live = node!.module as Module & { toJSON?: () => unknown };
-    const json =
-      (live.toJSON
-        ? live.toJSON()
+    const live = node!.module as Module & { toEncodableForm?: () => unknown };
+    const encodable =
+      (live.toEncodableForm
+        ? live.toEncodableForm()
         : JSON.parse(JSON.stringify(live))) as Record<string, unknown>;
-    const ref = json.$implRef as { identity: string; symbol: string };
+    const ref = encodable.$implRef as { identity: string; symbol: string };
     expect(ref).toBeDefined();
-    delete json.implementationRef;
-    delete json.implementation;
+    delete encodable.implementationRef;
+    delete encodable.implementation;
 
     // With both legacy fields gone, neither the legacy-registry arm (needs
     // module.implementationRef) nor the stringified-source fallback (needs
@@ -403,7 +406,7 @@ export default pattern<{ value: number }>(({ value }) => ({
       runtime.patternManager.artifactFromIdentitySync(ref.identity, ref.symbol),
     ).toBeDefined();
 
-    const stripped = trustModule(runtime, json as unknown as Module);
+    const stripped = trustModule(runtime, encodable as unknown as Module);
     const tx = runtime.edit();
     const resultCell = runtime.getCell<number>(
       signer.did(),

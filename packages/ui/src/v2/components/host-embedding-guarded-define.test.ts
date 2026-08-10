@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-// Host-embedding contract seam 5 (docs/development/HOST_EMBEDDING.md §5): every
+// Host-embedding contract seam 5 (docs/features/host-embedding.md §5): every
 // cf-* component's index.ts guards its customElements.define with
 // `if (!customElements.get(tag))`, so importing a component module twice — or
 // importing a component whose tag is already registered — is a no-op instead of
@@ -17,6 +17,7 @@ import { expect } from "@std/expect";
 const components: Array<{ tag: string; path: string }> = [
   { tag: "cf-render", path: "./cf-render/index.ts" },
   { tag: "cf-cell-link", path: "./cf-cell-link/index.ts" },
+  { tag: "cf-piece-menu", path: "./cf-piece-menu/index.ts" },
   { tag: "cf-profile-badge", path: "./cf-profile-badge/index.ts" },
   { tag: "cf-toolbar", path: "./cf-toolbar/index.ts" },
 ];

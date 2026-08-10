@@ -2,8 +2,6 @@ import ts from "typescript";
 import { TransformationContext } from "./mod.ts";
 import { CrossStageState } from "./cross-stage-state.ts";
 
-export type TransformMode = "transform" | "error";
-
 /**
  * Hints for schema generation that override default behavior.
  * Used to communicate access patterns (like array-property-only access)
@@ -115,13 +113,14 @@ export type SchemaHints = WeakMap<ts.Node, SchemaHint>;
 export type SyntheticReactiveCollectionRegistry = WeakSet<ts.Symbol>;
 
 export interface TransformationOptions {
-  readonly mode?: TransformMode;
-  readonly debug?: boolean;
-  readonly logger?: (message: string) => void;
   /**
    * Single owner of the pipeline's cross-transformer communication registries
    * (typeRegistry, schemaHints, the marker sets, etc.). Replaces the formerly
    * separate registry fields. See `CrossStageState`.
+   *
+   * This is the injection point for a caller that wants several runs to share
+   * one set of registries. A `TransformationContext` built without one creates
+   * its own and stores it back here, so `context.state` is always present.
    */
   readonly state?: CrossStageState;
   /**
@@ -234,16 +233,5 @@ export abstract class Transformer {
 export abstract class HelpersOnlyTransformer extends Transformer {
   override filter(context: TransformationContext): boolean {
     return context.cfHelpers.sourceHasHelpers();
-  }
-}
-
-export class Pipeline {
-  #transformers: Transformer[];
-  constructor(transformers: Transformer[]) {
-    this.#transformers = transformers;
-  }
-
-  toFactories(program: ts.Program): ts.TransformerFactory<ts.SourceFile>[] {
-    return this.#transformers.map((t) => t.toFactory(program));
   }
 }

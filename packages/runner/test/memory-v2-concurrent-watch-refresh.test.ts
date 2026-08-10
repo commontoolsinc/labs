@@ -3,7 +3,7 @@
  * refresh round trips may overlap up to a bounded window instead of the default
  * strict single-flight. (The memory-client ordering guarantees — wire order
  * across the set/add family and ordered delivery through the real server — are
- * covered in packages/memory/test/v2-concurrent-watch-refresh-test.ts, where
+ * covered in packages/memory/test/v2-concurrent-watch-refresh.test.ts, where
  * the in-package server/loopback helpers are available.)
  *
  * Everything here is event-driven (no wall-clock sleeps): progress is awaited
@@ -18,8 +18,7 @@ import {
   type SessionSync,
   type SessionSyncUpsert,
 } from "@commonfabric/memory/v2";
-import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
-import { defaultSettings } from "../src/storage/v2.ts";
+import type { IStorageProvider } from "../src/storage/interface.ts";
 import {
   ScriptedSessionTransport,
   type ScriptedTransportMessage,
@@ -34,7 +33,7 @@ const space = signer.did();
 // the concurrency test proves the observed max equals this.
 const WINDOW = 8;
 
-type TestProvider = IStorageProviderWithReplica & {
+type TestProvider = IStorageProvider & {
   get(uri: URI): EntityDocument | undefined;
   sync(
     uri: URI,
@@ -150,7 +149,6 @@ function makeProvider(concurrent: boolean) {
     as: signer,
     memoryHost: new URL(`memory://concurrent-refresh-${concurrent}`),
     settings: {
-      ...defaultSettings,
       experimentalConcurrentWatchRefresh: concurrent,
     },
   }, new SingleSessionFactory(transport));

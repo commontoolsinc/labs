@@ -87,6 +87,17 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [estuary-source-migration-2026-08-04.md](packages/patterns/lunch-poll/estuary-source-migration-2026-08-04.md)
+  — rehearsal and live `setsrc` moving the Estuary lunch poll onto the mainline
+  pattern, August 2026.
+- [two-toolchain-vintage-rehearsal.md](two-toolchain-vintage-rehearsal.md)
+  — first old-toolchain vintage capture (2026-06-18 `home.tsx`): procedure,
+  capture script, and measurements, August 2026.
+- [cf-view-language-coverage-2026-07.md](packages/cli/cf-view-language-coverage-2026-07.md)
+  — active-repository syntax inventory and `cf view` support snapshot, July
+  2026.
+- [cf-view-rendered-markdown-impact-2026-07.md](packages/cli/cf-view-rendered-markdown-impact-2026-07.md)
+  — source/rendered pager and Markdown feature impact report, July 2026.
 - [cf-json-argument-audit-2026-07.md](packages/cli/cf-json-argument-audit-2026-07.md)
   — command-by-command audit of `cf --json` behavior, July 2026.
 - [cts-docs-audit-2026-07.md](cts-docs-audit-2026-07.md) —
@@ -104,12 +115,36 @@ One line per archived document; each document's header carries the fuller
 - [piece-timeout-hangs-investigation.md](packages/cli/piece-timeout-hangs-investigation.md)
   — why the CLI tool-result poll was replaced event-driven and why the
   piece-start and sync bounds could not be removed at the CLI layer, July 2026.
+- [2026-07-27-session-paging-out-of-memory.md](packages/patterns/agent-sessions-debug/2026-07-27-session-paging-out-of-memory.md)
+  — paging the agent-sessions debug table exhausts the browser runtime's heap,
+  July 2026.
+- [2026-07-28-list-window-child-retention.md](packages/runner/2026-07-28-list-window-child-retention.md)
+  — why a moving list window retained every child run it started, and what the
+  fix covered, July 2026.
+- [2026-07-28-completed-transaction-retention.md](packages/runner/2026-07-28-completed-transaction-retention.md)
+  — a completed transaction kept the activity of everything it read, and the
+  unbounded document cache that still exhausts a browser tab, July 2026.
+- [2026-08-04-coverage-gate-base-branch-drift.md](development/2026-08-04-coverage-gate-base-branch-drift.md)
+  — why Coverage Check failed `packages/runner` at random: the ratchet graded a
+  pull request merged with a newer `main` against an older `main` baseline,
+  August 2026.
+- [pattern-update-open-argument-investigation.md](plans/pattern-update-open-argument-investigation.md)
+  — why the open-argument update class went unvalidated on the repair path, and
+  the correction of an earlier measurement that named the wrong mechanism,
+  July 2026.
 
 ### Executed plans and work orders
 
+- [cf-harness implementation plan](packages/cf-harness/docs/IMPLEMENTATION_PLAN.md)
+  — April 2026 package bootstrap plan and implementation checkpoint.
 - [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md)
   and [its test plan](plans/2026-03-17-ct-exec-fuse-callables-test-plan.md) —
   `cf exec` and mounted callable files.
+- [pattern-update-state-continuity.md](plans/pattern-update-state-continuity.md)
+  — the Tier 2 state-continuity gate: capture and replay machinery,
+  test-populated vintages, and value comparison, executed 2026-07/08. Records
+  the measurements that decided the design, including the ones that reversed
+  it (raw beats gzipped storage; a cross-DID restore reads fine).
 - [assertion-diagnostics.md](plans/assertion-diagnostics.md) — power-assert
   operand reporting for pattern-test assertions, with the compile-time
   constraints that shaped it, executed 2026-07.
@@ -117,6 +152,20 @@ One line per archived document; each document's header carries the fuller
   — the CFC future-work epics (clause core, exchange rules/policy,
   observation classes, integrity floors, sqlite row-set, deployment flips),
   executed 2026-07.
+- [pattern-verb-contract-implementation.md](plans/pattern-verb-contract-implementation.md)
+  — the verb-contract workstreams as built: the `topics` Part 1 rework, the
+  `Stream<E, R>` authoring surface, the invocation protocol with caller-supplied
+  ids and receipt readback, and the client affordances. Records the C3
+  result-schema withdrawal, the closed-world event-emission migration the update
+  gate forced, and the measurements behind each, July–August 2026.
+- [shaped-reads-implementation.md](plans/shaped-reads-implementation.md) — the
+  read-layer stages, the reasoning for ordering session-scoped invocation ids
+  ahead of anything that publishes a receipt address, and the descriptive-receipt
+  decision, August 2026.
+- [retiring-llm-tool-call-deadlines.md](development/proposals/retiring-llm-tool-call-deadlines.md)
+  — replacing the LLM tool-call deadline with a run-scoped quiescence barrier,
+  and narrowing the dialog message-drop heuristic the deadline's argument did
+  not reach, executed 2026-07.
 - [STANDARD_DECORATORS_MIGRATION_PLAN.md](development/STANDARD_DECORATORS_MIGRATION_PLAN.md)
   — the cutover to standard decorators.
 - [content-addressed-action-identity-implementation-plan.md](specs/content-addressed-action-identity-implementation-plan.md)
@@ -171,6 +220,9 @@ One line per archived document; each document's header carries the fuller
   — trusted-agent tool-input integrity scoping.
 - [compilation-cache.md](specs/compilation-cache.md) — the removed AMD
   compilation cache.
+- [module-loading-amd-bundle-identity.md](specs/module-loading-amd-bundle-identity.md)
+  — the removed AMD bundle pipeline and the bundle-grained identity defect that
+  motivated content-addressed module loading.
 - [module-loading-verifier-and-engine-design.md](specs/module-loading-verifier-and-engine-design.md)
   — verifier port and engine integration.
 - [capability-wrappers.md](specs/pattern-construction/capability-wrappers.md)
@@ -189,6 +241,10 @@ One line per archived document; each document's header carries the fuller
   — transformer design records.
 - [MIGRATION_SUMMARY.md](packages/ui/src/v2/MIGRATION_SUMMARY.md) — the ui v2
   migration.
+- [CELL_CONTROLLER_DESIGN.md](packages/ui/src/v2/core/CELL_CONTROLLER_DESIGN.md)
+  — the pitch for the ui v2 CellController, July 2025. The controller shipped;
+  the transaction strategies, change grouping, batching, validation and
+  undo/redo it proposes did not.
 - [unified-storage-stack.md](future-tasks/unified-storage-stack.md) —
   DocImpl-era storage-unification plan, superseded by the v2 stack.
 - [hierarchical-params-spec.md](packages/ts-transformers/docs/hierarchical-params-spec.md)
@@ -199,6 +255,13 @@ One line per archived document; each document's header carries the fuller
 
 ### Investigations, journals, and working notes
 
+- [2026-08-lunch-poll-join-name-fill-timeout.md](development/debugging/2026-08-lunch-poll-join-name-fill-timeout.md)
+  — why the lunch poll's intermittent `#lp-join-name` fill timeout is not a
+  fill-helper problem: the field never renders because the "Continue as guest"
+  handler's write does not reach the rendered view, and settling the view before
+  the fill does not change it. Includes a local reproduction, August 2026.
+- [cf-harness Loom migration notes](packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md)
+  — April 2026 pre-integration assessment of Loom's Codex batch and interactive paths.
 - [bug3-suggestion-alias-verification-2026-07.md](packages/patterns/bug3-suggestion-alias-verification-2026-07.md)
   — verification that the December 2025 survey's Bug 3 (Counter values
   rendering as raw `$alias` objects when instantiated via `fetchAndRunPattern`)
@@ -233,6 +296,10 @@ One line per archived document; each document's header carries the fuller
 - [2026-07-binary-artifact-transfer.md](development/performance/2026-07-binary-artifact-transfer.md)
   — binary artifact file and byte transfer snapshot before the per-binary
   workflow split, July 2026.
+- [coverage-ratchet-noise-2026-07-28.md](development/coverage-ratchet-noise-2026-07-28.md)
+  — why a rename-only pull request owed coverage debt: a wall-clock-guarded
+  diagnostic and a shard re-partition each moved the `packages/runner`
+  uncovered-line count with no change to that package, July 2026.
 - [scoped-cells-field-notes.md](development/scoped-cells-field-notes.md) —
   field journal from the first scoped-cell patterns.
 - [2026-07-02-convergence-evidence-appendix.md](plans/2026-07-02-convergence-evidence-appendix.md)
@@ -265,6 +332,12 @@ One line per archived document; each document's header carries the fuller
 - [09-remediation-direction.md](specs/scheduler-v2/addenda/09-remediation-direction.md)
   — scheduler-v2 addendum: remediation direction — coalesce/dedup, not
   version-skip.
+- [server-side-execution/](specs/server-side-execution/README.md) — the v1
+  server-primary execution learning run (2026-07-07 → 2026-08-02): original
+  design, implementation plan, context-lattice claims, client-passivity
+  design, claim-deletion scoping, and the orchestration log carrying the
+  full lesson record. Superseded by the live
+  [server-primary execution v2 spec](../specs/server-side-execution/README.md).
 - [OPTIMIZATION-JOURNAL.md](packages/runner/test/traverse-replay/OPTIMIZATION-JOURNAL.md)
   — traverse optimization log.
 - [SCHEMA_INJECTION_NOTES.md](packages/ts-transformers/SCHEMA_INJECTION_NOTES.md),

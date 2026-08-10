@@ -4,7 +4,6 @@ import { Identity } from "@commonfabric/identity";
 import {
   type Cell,
   getCellOrThrow,
-  ID as FABRIC_ID,
   isCell,
   isCellResult,
   type JSONSchema,
@@ -12,19 +11,21 @@ import {
 } from "@commonfabric/runner";
 import {
   EmulatedStorageManager,
+  newLoopbackServer,
   StorageManager,
 } from "@commonfabric/runner/storage/cache.deno";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { cf, checkStderr, stripAnsi } from "./utils.ts";
 import {
+  checkPiecePattern,
   getCellValue,
   inspectPiece,
   listPieces,
   newPiece,
   PieceResultProjectionError,
+  PieceVerbReadError,
   recreateSpaceRootPattern,
   resolveLinkEndpointAddress,
   resolvePieceConfig,
@@ -38,16 +39,24 @@ import { pieceId, SlugResolutionError } from "@commonfabric/piece";
 import { setResultCell } from "../../runner/src/result-utils.ts";
 import { toCell } from "../../runner/src/back-to-cell.ts";
 import {
+  checkPieceSourceFromCommand,
   formatPatternIdentity,
   formatPatternRef,
   localPatternEntry,
   normalizeApiUrl,
   parseLink,
+  parsePieceGetTransformOptions,
   parsePieceOptions,
   parseSpaceOptions,
   piece,
   setPieceSourceFromCommand,
 } from "../commands/piece.ts";
+import { safeStringify } from "../lib/render.ts";
+import {
+  parsePieceGetFilter,
+  parsePieceGetProjection,
+  PieceGetTransformError,
+} from "../lib/piece-get-transform.ts";
 
 const API_URL = "https://cf.dev";
 const SPACE = "common-knowledge";
@@ -125,7 +134,7 @@ describe("cli piece parsing", () => {
     )).toBe("https://user:pass@rapids.saga-castor.ts.net/base");
   });
 
-  it("force-closes loadManager storage before disposing failed runtime", async () => {
+  it("force-closes loadPieces storage before disposing failed runtime", async () => {
     let disposeCalls = 0;
     let closeNowCalls = 0;
     const cleanupOrder: string[] = [];
@@ -168,7 +177,7 @@ describe("cli piece parsing", () => {
     expect(disposeCalls).toBe(1);
   });
 
-  it("does not dispose loadManager runtime after successful initialization", async () => {
+  it("does not dispose loadPieces runtime after successful initialization", async () => {
     let disposeCalls = 0;
 
     const result = await withRuntimeCleanupOnFailure({
@@ -371,23 +380,17 @@ describe("cli piece parsing", () => {
   });
 
   it("recreateSpaceRootPattern() targets the explicit space", async () => {
-    const seen: { config?: SpaceConfig; manager?: object } = {};
+    const seen: { config?: SpaceConfig } = {};
     const pieceId = await recreateSpaceRootPattern({
       apiUrl: API_URL,
       space: SPACE,
       identity: ID,
     }, {
-      loadManager: (config) => {
+      loadPieces: (config) => {
         seen.config = config;
-        const manager = {};
-        seen.manager = manager;
-        return Promise.resolve(manager as any);
-      },
-      createController: (manager) => {
-        expect(manager).toBe(seen.manager);
-        return {
+        return Promise.resolve({
           recreateDefaultPattern: () => Promise.resolve({ id: PIECE }),
-        };
+        } as any);
       },
     });
 
@@ -410,17 +413,38 @@ describe("cli piece parsing", () => {
     expect(code).toBe(0);
   });
 
-  it("shows search as a space-scoped command with JSON output", async () => {
+  it("shows search as a registered-piece command with JSON output", async () => {
     const { code, stdout, stderr } = await cf("piece search --help");
     checkStderr(stderr);
     const output = stripAnsi(stdout.join("\n"));
     expect(output).toContain(
-      "Search readable input and result data in every piece.",
+      "Search input and result data in registered pieces.",
     );
     expect(output).toContain("<query>");
     expect(output).toContain("--space <space>");
     expect(output).toContain("--json");
     expect(code).toBe(0);
+  });
+
+  it("describes listing and mapping as registry-backed", async () => {
+    const commands = [
+      {
+        args: "piece ls --help",
+        description: "List pieces registered in the space.",
+      },
+      {
+        args: "piece map --help",
+        description: "Show registered pieces and the connections between them",
+      },
+    ];
+    for (const command of commands) {
+      const { code, stdout, stderr } = await cf(command.args);
+      checkStderr(stderr);
+      const output = stripAnsi(stdout.join("\n"));
+      expect(output).toContain(command.description);
+      expect(output).not.toContain("all pieces");
+      expect(code).toBe(0);
+    }
   });
 
   it("documents the piece registry in link help", async () => {
@@ -524,11 +548,255 @@ describe("cli piece parsing", () => {
     );
   });
 
-  it("offers a one-session step option for piece result reads", () => {
+  it("offers computed transforms for piece reads", () => {
     const getFlags = piece.getCommand("get")!.getOptions().flatMap((option) =>
       option.flags
     );
     expect(getFlags).toContain("--step");
+    expect(getFlags).toContain("--filter");
+    expect(getFlags).toContain("--schema");
+  });
+
+  it("parses piece get transform options", async () => {
+    expect(await parsePieceGetTransformOptions({})).toBeUndefined();
+
+    const filterOnly = await parsePieceGetTransformOptions({
+      filter: ".active",
+    });
+    expect(filterOnly?.filter?.source).toBe(".active");
+    expect(filterOnly?.projection).toBeUndefined();
+
+    const schemaOnly = await parsePieceGetTransformOptions({
+      schema: "id,name",
+    });
+    expect(schemaOnly?.filter).toBeUndefined();
+    expect(schemaOnly?.projection?.source).toBe("id,name");
+
+    const both = await parsePieceGetTransformOptions({
+      filter: ".active",
+      schema: "id",
+    });
+    expect(both?.filter?.source).toBe(".active");
+    expect(both?.projection?.source).toBe("id");
+  });
+
+  it("passes parsed transforms through the piece get command action", async () => {
+    const { code, stderr } = await cf(
+      "piece get " +
+        "--identity ./definitely-missing-piece-get-review.key " +
+        "--api-url https://cf.dev --space common-knowledge " +
+        `--piece ${PIECE} --filter .active --schema id`,
+    );
+    expect(code).toBe(1);
+    expect(stderr.join("\n")).toContain(
+      "definitely-missing-piece-get-review.key",
+    );
+  });
+
+  it("applies get transforms to the selected path cell", async () => {
+    const targetCell = { marker: "selected-path-cell" };
+    const rootCell = {
+      key: (...path: Array<string | number>) => {
+        expect(path).toEqual(["items"]);
+        return targetCell;
+      },
+    };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          input: { get: () => Promise.resolve(undefined) },
+          result: {
+            get: () => {
+              throw new Error("transform reads must not materialize result");
+            },
+            getCell: () => Promise.resolve(rootCell),
+          },
+        }),
+      runtime: { marker: "runtime" },
+      getSpace: () => "did:key:test-space",
+    };
+    const filter = parsePieceGetFilter(".id == 2");
+
+    const value = await getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["items"],
+      { transform: { filter } },
+      {
+        loadPieces: () => Promise.resolve(controller as any),
+        resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
+        derivePieceGetValue: (runtime, space, source, transform) => {
+          expect(runtime).toBe(controller.runtime as any);
+          expect(space).toBe("did:key:test-space");
+          expect(source).toBe(targetCell as any);
+          expect(transform.filter).toBe(filter);
+          return Promise.resolve([{ id: 2 }]);
+        },
+      },
+    );
+
+    expect(value).toEqual([{ id: 2 }]);
+  });
+
+  it("preserves transform errors that are not result projection failures", async () => {
+    const transformError = new PieceGetTransformError("invalid transform");
+    const targetCell = {};
+    const rootCell = { key: () => targetCell };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          result: { getCell: () => Promise.resolve(rootCell) },
+        }),
+      runtime: {},
+      getSpace: () => "did:key:test-space",
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      [],
+      { transform: { filter: parsePieceGetFilter(".active") } },
+      {
+        loadPieces: () => Promise.resolve(controller as any),
+        resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
+        derivePieceGetValue: () => Promise.reject(transformError),
+      },
+    )).rejects.toBe(transformError);
+  });
+
+  it("reports projection failures encountered during transformed reads", async () => {
+    const targetCell = {
+      schema: { type: "number" },
+      getRaw: () => ({ "/": "missing-session-count" }),
+    };
+    const rootCell = {
+      schema: {
+        type: "object",
+        properties: { count: { type: "number" } },
+        required: ["count"],
+      },
+      key: () => targetCell,
+    };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          result: { getCell: () => Promise.resolve(rootCell) },
+        }),
+      runtime: {},
+      getSpace: () => "did:key:test-space",
+    };
+    const deps = {
+      loadPieces: () => Promise.resolve(controller as any),
+      resolvePieceAddress: (_pieces: any, id: string) => Promise.resolve(id),
+    };
+    const options = {
+      transform: { filter: parsePieceGetFilter(".active") },
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["count"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () =>
+          Promise.reject(
+            new Error('Cannot access path "count" - property not found'),
+          ),
+      },
+    )).rejects.toThrow(PieceResultProjectionError);
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["count"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () => Promise.resolve(undefined),
+      },
+    )).rejects.toThrow(PieceResultProjectionError);
+  });
+
+  it("distinguishes failed transforms, JSON null, and absent sources", async () => {
+    let sourceRaw: unknown;
+    const targetCell = {
+      schema: { type: ["object", "null"] },
+      getRaw: () => sourceRaw,
+    };
+    const rootCell = { key: () => targetCell };
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          input: { getCell: () => Promise.resolve(rootCell) },
+        }),
+      runtime: {},
+      getSpace: () => "did:key:test-space",
+    };
+
+    const options = {
+      input: true,
+      transform: { projection: await parsePieceGetProjection("id") },
+    };
+    const deps = {
+      loadPieces: () => Promise.resolve(controller as any),
+      resolvePieceAddress: (_pieces: any, id: string) => Promise.resolve(id),
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["value"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () => {
+          sourceRaw = { id: "loaded-during-transform" };
+          return Promise.resolve(undefined);
+        },
+      },
+    )).rejects.toThrow("This is not JSON null");
+
+    sourceRaw = null;
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["value"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () => Promise.resolve(null),
+      },
+    )).resolves.toBeNull();
+
+    sourceRaw = undefined;
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["value"],
+      options,
+      {
+        ...deps,
+        derivePieceGetValue: () => Promise.resolve(undefined),
+      },
+    )).resolves.toBeUndefined();
+  });
+
+  it("offers per-phase timing output for piece call", () => {
+    const callFlags = piece.getCommand("call")!.getOptions().flatMap((option) =>
+      option.flags
+    );
+    expect(callFlags).toContain("--verbose");
+  });
+
+  it("offers wait control for piece call", () => {
+    const callFlags = piece.getCommand("call")!.getOptions().flatMap((option) =>
+      option.flags
+    );
+    expect(callFlags).toContain("--await");
+    expect(callFlags).toContain("--wait");
+    expect(callFlags).toContain("--no-wait");
+  });
+
+  it("offers result-link annotation for piece call", () => {
+    const callFlags = piece.getCommand("call")!.getOptions().flatMap((option) =>
+      option.flags
+    );
+    expect(callFlags).toContain("--show-links");
   });
 
   it("steps, reads, syncs, and stops in one get operation", async () => {
@@ -569,12 +837,10 @@ describe("cli piece parsing", () => {
           },
         });
       },
-      stop: (id: string) => {
+      stopPiece: (id: string) => {
         order.push(`stop:${id}`);
         return Promise.resolve();
       },
-    };
-    const manager = {
       runtime: {
         idle: () => {
           order.push("runtime.idle");
@@ -582,7 +848,7 @@ describe("cli piece parsing", () => {
         },
       },
       synced: () => {
-        order.push("manager.synced");
+        order.push("pieces.synced");
         return Promise.resolve();
       },
     };
@@ -598,9 +864,8 @@ describe("cli piece parsing", () => {
       ["value"],
       { step: true },
       {
-        loadManager: () => Promise.resolve(manager as any),
-        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
+        resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
       },
     );
 
@@ -610,10 +875,13 @@ describe("cli piece parsing", () => {
       "piece.pull",
       "result.key:value",
       "result.pull",
-      "manager.synced",
+      "pieces.synced",
       "runtime.idle",
-      "manager.synced",
+      "pieces.synced",
       "result.get",
+      // The read-path guard classifies the read path after the value read
+      // (verb contract WS-F), descending to the same key once more.
+      "result.key:value",
       `stop:${PIECE}`,
     ]);
   });
@@ -639,9 +907,8 @@ describe("cli piece parsing", () => {
       [],
       {},
       {
-        loadManager: () => Promise.resolve({} as any),
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
       },
     ).catch((error) => error);
     expect(error).toBeInstanceOf(PieceResultProjectionError);
@@ -669,9 +936,8 @@ describe("cli piece parsing", () => {
       [],
       {},
       {
-        loadManager: () => Promise.resolve({} as any),
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
       },
     )).resolves.toBeUndefined();
   });
@@ -709,11 +975,34 @@ describe("cli piece parsing", () => {
       ["count"],
       {},
       {
-        loadManager: () => Promise.resolve({} as any),
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
       },
     )).rejects.toThrow(PieceResultProjectionError);
+  });
+
+  it("rethrows a read failure that is not a path/projection condition", async () => {
+    const controller = {
+      get: () =>
+        Promise.resolve({
+          input: { get: () => Promise.resolve(undefined) },
+          result: {
+            get: () => Promise.reject(new Error("network unreachable")),
+            getCell: () =>
+              Promise.resolve({ schema: undefined, getRaw: () => undefined }),
+          },
+        }),
+    };
+
+    await expect(getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["count"],
+      {},
+      {
+        resolvePieceAddress: (_manager, id) => Promise.resolve(id),
+        loadPieces: () => Promise.resolve(controller as any),
+      },
+    )).rejects.toThrow("network unreachable");
   });
 
   it("preserves schema-valid undefined over present raw data", async () => {
@@ -739,11 +1028,380 @@ describe("cli piece parsing", () => {
       [],
       {},
       {
-        loadManager: () => Promise.resolve({} as any),
         resolvePieceAddress: (_manager, id) => Promise.resolve(id),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
       },
     )).resolves.toBeUndefined();
+  });
+
+  describe("read-path guard (verb contract WS-F)", () => {
+    /** Minimal cell double for the guard's classification walk: value
+     * access, key() descent, and asSchemaFromLinks identity — the same
+     * surface piece-verbs.test.ts doubles for listPieceCallables. Its
+     * asSchema models the real forced-cast semantics: the cast schema
+     * survives resolution for inline values and schema-less links, so a
+     * forced probe answers "stream" for ANY name. The guard is certain-only
+     * and must never consult that cast — the data reads below go through
+     * this double to pin it. */
+    function guardCell(value: unknown): {
+      get: () => unknown;
+      getRaw: () => unknown;
+      asSchemaFromLinks: () => unknown;
+      asSchema: (schema: unknown) => unknown;
+      key: (...segments: (string | number)[]) => unknown;
+    } {
+      const self = {
+        get: () => value,
+        getRaw: () => value,
+        asSchemaFromLinks: () => self,
+        asSchema: (_schema: unknown) => ({
+          key: (_name: string) => ({ isStream: () => true }),
+        }),
+        key: (...segments: (string | number)[]) => {
+          let child: unknown = value;
+          for (const segment of segments) {
+            child = typeof child === "object" && child !== null
+              ? (child as Record<string | number, unknown>)[segment]
+              : undefined;
+          }
+          return guardCell(child);
+        },
+      };
+      return self;
+    }
+
+    const readPath = (value: unknown, path: (string | number)[]): unknown =>
+      path.reduce(
+        (current: unknown, segment) =>
+          typeof current === "object" && current !== null
+            ? (current as Record<string | number, unknown>)[segment]
+            : undefined,
+        value,
+      );
+
+    const RESULT_VALUE = {
+      title: "Groceries",
+      addItem: { $stream: true },
+      nested: {
+        list: ["milk"],
+        removeItem: { $stream: true },
+      },
+      search: {
+        pattern: { argumentSchema: { type: "object" } },
+        extraParams: {},
+      },
+    };
+
+    const guardDeps = (piece: unknown) => ({
+      resolvePieceAddress: (_pieces: unknown, id: string) =>
+        Promise.resolve(id),
+      loadPieces: () =>
+        Promise.resolve(
+          {
+            get: () => Promise.resolve(piece),
+            runtime: {},
+            getSpace: () => "did:key:test-space",
+          } as never,
+        ),
+    });
+
+    const guardPiece = (
+      resultValue: unknown,
+      pieceCell?: unknown,
+      inputValue?: unknown,
+    ) => ({
+      input: {
+        get: (path: (string | number)[]) =>
+          Promise.resolve(readPath(inputValue, path)),
+        getCell: () => Promise.resolve(guardCell(inputValue)),
+      },
+      result: {
+        get: (path: (string | number)[]) =>
+          Promise.resolve(readPath(resultValue, path)),
+        getCell: () => Promise.resolve(guardCell(resultValue)),
+      },
+      ...(pieceCell ? { getCell: () => pieceCell } : {}),
+    });
+
+    const config = {
+      apiUrl: API_URL,
+      space: SPACE,
+      identity: ID,
+      piece: PIECE,
+    };
+
+    it("refuses a root verb path, pointing at cf piece call", async () => {
+      const deps = guardDeps(guardPiece(RESULT_VALUE));
+      const error = await getCellValue(config, ["addItem"], {}, deps)
+        .catch((error) => error);
+      expect(error).toBeInstanceOf(PieceVerbReadError);
+      expect((error as Error).message).toBe(
+        `Path resolves to a verb; use 'cf piece call --piece ${PIECE} addItem' instead.`,
+      );
+
+      // A root verb on the input cell redirects the same way: the dispatcher
+      // resolves result root then input root, so it is callable by name.
+      const inputDeps = guardDeps(
+        guardPiece(undefined, undefined, { setup: { $stream: true } }),
+      );
+      await expect(
+        getCellValue(config, ["setup"], { input: true }, inputDeps),
+      ).rejects.toThrow(/use 'cf piece call/);
+    });
+
+    it("refuses on the stored schema marker even when the value reads empty", async () => {
+      // The second definite signal: the link-derived schema answers as a
+      // stream while the read value is an empty object (the marker survives
+      // in stored links even when the serialization is bare).
+      const rootCell = {
+        get: () => ({ notify: {} }),
+        key: (name: string) => ({
+          asSchemaFromLinks: () => ({ isStream: () => name === "notify" }),
+        }),
+      };
+      const piece = {
+        input: {
+          get: () => Promise.resolve(undefined),
+          getCell: () => Promise.resolve(guardCell(undefined)),
+        },
+        result: {
+          get: () => Promise.resolve({}),
+          getCell: () => Promise.resolve(rootCell),
+        },
+      };
+      await expect(getCellValue(config, ["notify"], {}, guardDeps(piece)))
+        .rejects.toThrow(/use 'cf piece call/);
+    });
+
+    it("refuses a nested verb path without suggesting an uncallable command", async () => {
+      // `cf piece call` resolves root-level names only, so `cf piece call
+      // removeItem` would fail — the refusal must not suggest it. It says
+      // why the read refused and where to go instead.
+      const deps = guardDeps(guardPiece(RESULT_VALUE));
+      const error = await getCellValue(
+        config,
+        ["nested", "removeItem"],
+        {},
+        deps,
+      ).catch((error) => error);
+      expect(error).toBeInstanceOf(PieceVerbReadError);
+      expect((error as Error).message).toBe(
+        "Path resolves to a verb that is not directly callable: verbs are " +
+          "invoked at the piece's root surface. Read the parent object " +
+          "instead, or list the callable verbs with " +
+          `'cf piece verbs --piece ${PIECE}'.`,
+      );
+      expect((error as Error).message).not.toContain("cf piece call");
+    });
+
+    it("reads a probe-classifiable but marker-less output (fails open)", async () => {
+      // The CTS integration shape: a plain data output the forced-stream
+      // probe would classify as callable (the cast schema survives
+      // resolution, so the probe answers "stream" for it), with no stored
+      // marker and no sentinel. The dispatcher and the listing may
+      // over-include it — a read guard must not: the read succeeds.
+      const pieceCell = {
+        asSchema: () => ({
+          key: (_name: string) => ({ isStream: () => true }),
+        }),
+      };
+      const deps = guardDeps(
+        guardPiece(
+          { lastMessage: { text: "hi" }, count: 3 },
+          pieceCell,
+        ),
+      );
+      await expect(getCellValue(config, ["lastMessage"], {}, deps))
+        .resolves.toEqual({ text: "hi" });
+      await expect(getCellValue(config, ["count"], {}, deps)).resolves.toBe(3);
+    });
+
+    it("refuses a verb whose result projection also fails", async () => {
+      // The shape a real board hits: reading `addTopic` on an unstepped piece
+      // fails the result-projection check BEFORE the verb is classified, so
+      // the caller was told "use --step" — advice that sends them to re-run a
+      // read which can never succeed, because a verb is not a materializable
+      // result. The verb refusal has to win over the projection error.
+      const verbCell = {
+        schema: { type: "object" },
+        getRaw: () => ({ "/": "stream-link" }),
+        asSchemaFromLinks: () => verbCell,
+      };
+      const rootCell = {
+        schema: {
+          type: "object",
+          properties: { addTopic: { type: "object" } },
+          required: ["addTopic"],
+        },
+        get: () => ({ addTopic: { $stream: true } }),
+        key: () => verbCell,
+      };
+      const piece = {
+        result: {
+          // The read yields nothing: the projection could not materialize it.
+          get: () => Promise.resolve(undefined),
+          getCell: () => Promise.resolve(rootCell),
+        },
+      };
+      const error = await getCellValue(
+        config,
+        ["addTopic"],
+        {},
+        guardDeps(piece),
+      )
+        .catch((error) => error);
+      expect(error).toBeInstanceOf(PieceVerbReadError);
+      expect((error as Error).message).toContain("cf piece call");
+      expect((error as Error).message).not.toContain("--step");
+    });
+
+    it("refuses a verb read through a transform, not a projection error", async () => {
+      // The transform path has its own projection-failure exits, so a verb
+      // read through --filter/--schema must reach the same refusal: asking a
+      // stream to project is the same mistake whichever route it takes.
+      const verbCell = {
+        schema: { type: "object" },
+        getRaw: () => ({ "/": "stream-link" }),
+        asSchemaFromLinks: () => verbCell,
+      };
+      const rootCell = {
+        schema: {
+          type: "object",
+          properties: { addTopic: { type: "object" } },
+          required: ["addTopic"],
+        },
+        get: () => ({ addTopic: { $stream: true } }),
+        key: () => verbCell,
+      };
+      const piece = {
+        result: {
+          get: () => Promise.resolve(undefined),
+          getCell: () => Promise.resolve(rootCell),
+        },
+      };
+      const deps = guardDeps(piece);
+      const options = { transform: { filter: parsePieceGetFilter(".active") } };
+
+      // The transform throws the "Cannot access path" shape a real projection
+      // failure raises.
+      const thrown = await getCellValue(config, ["addTopic"], options, {
+        ...deps,
+        derivePieceGetValue: () =>
+          Promise.reject(
+            new Error('Cannot access path "addTopic" - property not found'),
+          ),
+      }).catch((error) => error);
+      expect(thrown).toBeInstanceOf(PieceVerbReadError);
+      expect((thrown as Error).message).toContain("cf piece call");
+
+      // And the same when the transform simply yields nothing.
+      const empty = await getCellValue(config, ["addTopic"], options, {
+        ...deps,
+        derivePieceGetValue: () => Promise.resolve(undefined),
+      }).catch((error) => error);
+      expect(empty).toBeInstanceOf(PieceVerbReadError);
+    });
+
+    it("fails open when classification itself fails", async () => {
+      // A cell surface that throws during the guard's walk must never turn
+      // a successful read into a refusal: the guard swallows the failure
+      // and the value wins.
+      const throwingRoot = {
+        get: () => ({ field: "ok" }),
+        key: () => {
+          throw new Error("no traversal surface");
+        },
+      };
+      const piece = {
+        input: {
+          get: () => Promise.resolve(undefined),
+          getCell: () => Promise.resolve(guardCell(undefined)),
+        },
+        result: {
+          get: () => Promise.resolve("ok"),
+          getCell: () => Promise.resolve(throwingRoot),
+        },
+      };
+      await expect(getCellValue(config, ["field"], {}, guardDeps(piece)))
+        .resolves.toBe("ok");
+    });
+
+    it("still reads plain data, tool bindings, and a verb's parent object", async () => {
+      const deps = guardDeps(
+        guardPiece(RESULT_VALUE, undefined, { config: { retries: 2 } }),
+      );
+      await expect(getCellValue(config, ["title"], {}, deps)).resolves.toBe(
+        "Groceries",
+      );
+      await expect(getCellValue(config, ["nested", "list"], {}, deps))
+        .resolves.toEqual(["milk"]);
+      await expect(
+        getCellValue(config, ["config"], { input: true }, deps),
+      ).resolves.toEqual({ retries: 2 });
+      // A tool binding reads as data — the llm-dialog read tool reads tools
+      // too; only streams have a serialization no reader wants.
+      await expect(getCellValue(config, ["search"], {}, deps)).resolves
+        .toEqual(RESULT_VALUE.search);
+      // Only the path that lands ON the verb refuses: its parent object —
+      // named or the path-less full result — keeps reading, verbs included.
+      await expect(getCellValue(config, ["nested"], {}, deps)).resolves
+        .toEqual(RESULT_VALUE.nested);
+      await expect(getCellValue(config, [], {}, deps)).resolves.toEqual(
+        RESULT_VALUE,
+      );
+    });
+
+    it("renders an unshaped parent read without stream runtime internals", async () => {
+      const signer = await Identity.fromPassphrase("piece-get-live-stream");
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+      });
+
+      try {
+        const tx = runtime.edit();
+        const cell = runtime.getCell<{
+          name: string;
+          submit: { $stream: boolean };
+        }>(signer.did(), "piece-get-live-stream", undefined, tx);
+        cell.set({ name: "Ada", submit: { $stream: true } });
+        const schema = {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            submit: { type: "object", asCell: ["stream"] },
+          },
+        } as const satisfies JSONSchema;
+        await tx.commit();
+        await runtime.idle();
+        const value = cell.asSchema(schema).get();
+        const submit = value.submit;
+        expect(isCell(submit)).toBe(true);
+        const expectedLink = (submit as unknown as { toJSON(): unknown })
+          .toJSON();
+
+        const read = await getCellValue(
+          config,
+          [],
+          {},
+          guardDeps({ result: { get: () => Promise.resolve(value) } }),
+        );
+        const json = safeStringify(read);
+
+        expect(json.length).toBeLessThan(2000);
+        expect(json).not.toContain("scheduler");
+        expect(json).not.toContain("circular reference");
+        expect(json).not.toContain('"runtime"');
+        expect(JSON.parse(json)).toEqual({
+          name: "Ada",
+          submit: expectedLink,
+        });
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
   });
 
   it("rejects repository metadata when resetting the home pattern", async () => {
@@ -812,6 +1470,87 @@ describe("cli piece parsing", () => {
     });
   });
 
+  it("aims the setsrc preflight at the same piece and entry the apply would use", async () => {
+    // A preflight that resolves a different target than the apply is worse
+    // than none, so the check parses the same options and hands the same entry
+    // down. It must also apply nothing — no `setPiecePattern` here at all.
+    let checked: unknown;
+    const { config, report, summary } = await checkPieceSourceFromCommand(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: "/tmp/test.key",
+        piece: PIECE,
+        mainExport: "named",
+        repository: "https://github.com/commontoolsinc/labs",
+        root: "/repo",
+      },
+      "/repo/pattern.tsx",
+      {
+        checkPiecePattern: (config, entry) => {
+          checked = { config, entry };
+          return Promise.resolve({
+            compatible: true,
+            issues: {},
+            candidate: { identity: "A".repeat(43), symbol: "default" },
+          });
+        },
+      },
+    );
+
+    expect(report.compatible).toBe(true);
+    expect(summary).toContain("can replace the source");
+    expect(checked).toEqual({
+      config,
+      entry: {
+        mainPath: "/repo/pattern.tsx",
+        mainExport: "named",
+        repository: "https://github.com/commontoolsinc/labs",
+        rootPath: "/repo",
+      },
+    });
+  });
+
+  it("fails the setsrc preflight loudly enough to gate a script", async () => {
+    // `--check` is meant to sit in front of a deploy, so a refusal has to be a
+    // non-zero exit and not just prose on stdout — and it has to carry the
+    // rules' own reason so the operator knows what to fix. It reports as a
+    // data error (plain stderr + exit 1), not a Cliffy ValidationError, so
+    // the verdict is not buried under a usage screen.
+    const printed: string[] = [];
+    let exitCode: number | undefined;
+    class ExitSentinel extends Error {}
+    await expect(checkPieceSourceFromCommand(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: "/tmp/test.key",
+        piece: PIECE,
+      },
+      "/repo/pattern.tsx",
+      {
+        checkPiecePattern: () =>
+          Promise.resolve({
+            compatible: false,
+            issues: { schema: "result narrowed: label" },
+            message: "result narrowed: label",
+            candidate: { identity: "D".repeat(43), symbol: "default" },
+          }),
+        exit: {
+          printError: (message) => printed.push(message),
+          exit: (code) => {
+            exitCode = code;
+            throw new ExitSentinel();
+          },
+        },
+      },
+    )).rejects.toThrow(ExitSentinel);
+
+    expect(exitCode).toBe(1);
+    expect(printed.join("\n")).toContain("cannot replace the source");
+    expect(printed.join("\n")).toContain("result narrowed: label");
+  });
+
   it("lists pattern provenance and isolates unreadable pieces", async () => {
     const patternRef = {
       identity: "A".repeat(43),
@@ -844,8 +1583,7 @@ describe("cli piece parsing", () => {
       space: SPACE,
       identity: ID,
     }, {
-      loadManager: () => Promise.resolve({} as any),
-      createController: () => controller as any,
+      loadPieces: () => Promise.resolve(controller as any),
     });
 
     expect(listed).toEqual([
@@ -919,7 +1657,10 @@ describe("cli piece parsing", () => {
           searchablePiece(
             "of:internal-symbol",
             "Internal symbol metadata",
-            { [FABRIC_ID]: "Needle in internal identity metadata" },
+            {
+              [Symbol("internal metadata")]:
+                "Needle in internal identity metadata",
+            },
             {},
           ),
           searchablePiece(
@@ -944,8 +1685,7 @@ describe("cli piece parsing", () => {
     };
     const config = { apiUrl: API_URL, space: SPACE, identity: ID };
     const deps = {
-      loadManager: () => Promise.resolve({} as any),
-      createController: () => controller as any,
+      loadPieces: () => Promise.resolve(controller as any),
     };
 
     const matches = await searchPieces(config, "NEEDLE", deps);
@@ -982,8 +1722,7 @@ describe("cli piece parsing", () => {
     };
     const config = { apiUrl: API_URL, space: SPACE, identity: ID };
     const deps = {
-      loadManager: () => Promise.resolve({} as any),
-      createController: () => controller as any,
+      loadPieces: () => Promise.resolve(controller as any),
     };
 
     expect(await searchPieces(config, "048", deps)).toEqual([{
@@ -1022,8 +1761,7 @@ describe("cli piece parsing", () => {
     };
     const config = { apiUrl: API_URL, space: SPACE, identity: ID };
     const deps = {
-      loadManager: () => Promise.resolve({} as any),
-      createController: () => controller as any,
+      loadPieces: () => Promise.resolve(controller as any),
     };
 
     expect(
@@ -1083,8 +1821,7 @@ describe("cli piece parsing", () => {
         { apiUrl: API_URL, space: SPACE, identity: ID },
         "absent search value",
         {
-          loadManager: () => Promise.resolve({} as any),
-          createController: () => controller as any,
+          loadPieces: () => Promise.resolve(controller as any),
           reportSearchError: (_pieceId, _source, error) => errors.push(error),
         },
       ),
@@ -1121,8 +1858,7 @@ describe("cli piece parsing", () => {
           { apiUrl: API_URL, space: SPACE, identity: ID },
           "needle",
           {
-            loadManager: () => Promise.resolve({} as any),
-            createController: () => controller as any,
+            loadPieces: () => Promise.resolve(controller as any),
           },
         ),
       ).toEqual([]);
@@ -1161,8 +1897,7 @@ describe("cli piece parsing", () => {
         { apiUrl: API_URL, space: SPACE, identity: ID },
         "needle",
         {
-          loadManager: () => Promise.resolve({} as any),
-          createController: () => controller as any,
+          loadPieces: () => Promise.resolve(controller as any),
           reportSearchError: (_pieceId, source, error) =>
             errors.push({ source, error }),
         },
@@ -1201,8 +1936,7 @@ describe("cli piece parsing", () => {
     };
     const config = { apiUrl: API_URL, space: SPACE, identity: ID };
     const deps = {
-      loadManager: () => Promise.resolve({} as any),
-      createController: () => controller as any,
+      loadPieces: () => Promise.resolve(controller as any),
     };
 
     expect(await searchPieces(config, "MASSE", deps)).toEqual([{
@@ -1309,8 +2043,7 @@ describe("cli piece parsing", () => {
       };
       const config = { apiUrl: API_URL, space: SPACE, identity: ID };
       const deps = {
-        loadManager: () => Promise.resolve({} as any),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
       };
 
       expect(await searchPieces(config, "nested runtime", deps)).toEqual([{
@@ -1360,8 +2093,7 @@ describe("cli piece parsing", () => {
       };
       expect(
         await searchPieces(config, "nested runtime cell", {
-          loadManager: () => Promise.resolve({} as any),
-          createController: () => viewController as any,
+          loadPieces: () => Promise.resolve(viewController as any),
         }),
       ).toEqual([{
         id: "of:multiple-runtime-cell-views",
@@ -1402,8 +2134,7 @@ describe("cli piece parsing", () => {
       };
       expect(
         await searchPieces(config, "surviving nested", {
-          loadManager: () => Promise.resolve({} as any),
-          createController: () => partialController as any,
+          loadPieces: () => Promise.resolve(partialController as any),
           reportSearchError: (_pieceId, _source, error) =>
             nestedErrors.push(error),
         }),
@@ -1648,8 +2379,7 @@ describe("cli piece parsing", () => {
       };
       const config = { apiUrl: API_URL, space: SPACE, identity: ID };
       const deps = {
-        loadManager: () => Promise.resolve({} as any),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
       };
 
       expect(
@@ -1869,8 +2599,7 @@ describe("cli piece parsing", () => {
         error: unknown;
       }> = [];
       const searchDeps = {
-        loadManager: () => Promise.resolve({} as any),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
         reportSearchError: (
           pieceId: string,
           source: "input data" | "result data" | "metadata",
@@ -1978,8 +2707,7 @@ describe("cli piece parsing", () => {
           { apiUrl: API_URL, space: SPACE, identity: ID },
           "cyclic ownership",
           {
-            loadManager: () => Promise.resolve({} as any),
-            createController: () => controller as any,
+            loadPieces: () => Promise.resolve(controller as any),
             reportSearchError: (_pieceId, _source, error) => errors.push(error),
           },
         ),
@@ -1999,32 +2727,7 @@ describe("cli piece parsing", () => {
       "cf piece search cold runtime test",
     );
     const space = signer.did();
-    const audience = "did:key:z6Mk-runner-emulated-memory";
-    const server = new MemoryV2Server.Server({
-      authorizeSessionOpen(message) {
-        const principal = (message.authorization as { principal?: unknown })
-          ?.principal;
-        return typeof principal === "string" ? principal : undefined;
-      },
-      sessionOpenAuth: { audience },
-    });
-
-    class SharedStorage extends EmulatedStorageManager {
-      static connect(server: MemoryV2Server.Server): SharedStorage {
-        const manager = new SharedStorage(
-          { as: signer, memoryHost: new URL("memory://") } as any,
-          () => server,
-        );
-        manager.#server = server;
-        return manager;
-      }
-
-      #server!: MemoryV2Server.Server;
-
-      protected override server(): MemoryV2Server.Server {
-        return this.#server;
-      }
-    }
+    const server = newLoopbackServer();
 
     const leafSchema = {
       type: "object",
@@ -2041,7 +2744,9 @@ describe("cli piece parsing", () => {
       properties: { middle: { ...middleSchema, asCell: ["cell"] } },
       required: ["middle"],
     } as const satisfies JSONSchema;
-    const writerStorage = SharedStorage.connect(server);
+    const writerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
     const writer = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: writerStorage,
@@ -2071,7 +2776,9 @@ describe("cli piece parsing", () => {
     await writeTx.commit();
     await writerStorage.synced();
 
-    const readerStorage = SharedStorage.connect(server);
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
     const reader = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager: readerStorage,
@@ -2103,8 +2810,7 @@ describe("cli piece parsing", () => {
           },
           "cold-cache-needle",
           {
-            loadManager: () => Promise.resolve({} as any),
-            createController: () => controller as any,
+            loadPieces: () => Promise.resolve(controller as any),
           },
         ),
       ).toEqual([{
@@ -2148,8 +2854,7 @@ describe("cli piece parsing", () => {
         },
         "large-array-needle",
         {
-          loadManager: () => Promise.resolve({} as any),
-          createController: () => controller as any,
+          loadPieces: () => Promise.resolve(controller as any),
         },
       ),
     ).toEqual([{
@@ -2228,8 +2933,7 @@ describe("cli piece parsing", () => {
       };
       const config = { apiUrl: API_URL, space: SPACE, identity: ID };
       const deps = {
-        loadManager: () => Promise.resolve({} as any),
-        createController: () => controller as any,
+        loadPieces: () => Promise.resolve(controller as any),
       };
       const match = [{
         id: "of:stale-array-proxy",
@@ -2334,8 +3038,7 @@ describe("cli piece parsing", () => {
         },
         "needle",
         {
-          loadManager: () => Promise.resolve({} as any),
-          createController: () => controller as any,
+          loadPieces: () => Promise.resolve(controller as any),
           reportSearchError: (pieceId, source, error) =>
             errors.push({ pieceId, source, error }),
         },
@@ -2389,9 +3092,6 @@ describe("cli piece parsing", () => {
     const repository = "https://github.com/commontoolsinc/labs";
     const entry = { mainPath: "/repo/main.tsx", repository };
     const program = {} as any;
-    const manager = {
-      add: () => Promise.resolve(),
-    };
     let createOptions: unknown;
     let setPatternOptions: unknown;
     const createdPiece = { id: PIECE, getCell: () => ({} as any) };
@@ -2401,14 +3101,15 @@ describe("cli piece parsing", () => {
       entry,
       { start: false },
       {
-        loadManager: () => Promise.resolve(manager as any),
-        createController: () => ({
-          ensureDefaultPattern: () => Promise.resolve({}),
-          create: (_program: unknown, options: unknown) => {
-            createOptions = options;
-            return Promise.resolve(createdPiece);
-          },
-        } as any),
+        loadPieces: () =>
+          Promise.resolve({
+            add: () => Promise.resolve(),
+            ensureDefaultPattern: () => Promise.resolve({}),
+            create: (_program: unknown, options: unknown) => {
+              createOptions = options;
+              return Promise.resolve(createdPiece);
+            },
+          } as any),
         getPinnedProgramFromFile: () => Promise.resolve(program),
       },
     );
@@ -2422,17 +3123,17 @@ describe("cli piece parsing", () => {
       piece: "notes",
     };
     const deps = {
-      loadManager: () => Promise.resolve(manager as any),
+      loadPieces: () =>
+        Promise.resolve({
+          get: () =>
+            Promise.resolve({
+              setPattern: (_program: unknown, options: unknown) => {
+                setPatternOptions = options;
+                return Promise.resolve();
+              },
+            }),
+        } as any),
       resolvePieceAddress: () => Promise.resolve(PIECE),
-      createController: () => ({
-        get: () =>
-          Promise.resolve({
-            setPattern: (_program: unknown, options: unknown) => {
-              setPatternOptions = options;
-              return Promise.resolve();
-            },
-          }),
-      } as any),
       getPinnedProgramFromFile: () => Promise.resolve(program),
     };
 
@@ -2451,6 +3152,50 @@ describe("cli piece parsing", () => {
     });
   });
 
+  it("resolves the piece and pinned program before checking compatibility", async () => {
+    // The preflight has to reach the SAME piece the apply would, through the
+    // same address resolution and the same pinned program — a check against a
+    // different target, or against source with different imports resolved, is
+    // worse than no check at all.
+    const entry = { mainPath: "/repo/main.tsx" };
+    const program = {} as any;
+    let resolvedPiece: unknown;
+    let checkedProgram: unknown;
+    const report = {
+      compatible: false,
+      issues: { schema: "output narrowed" },
+      message: "output narrowed",
+      candidate: { identity: "C".repeat(43), symbol: "default" },
+    };
+
+    const result = await checkPiecePattern(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: "notes" },
+      entry,
+      {
+        loadPieces: () =>
+          Promise.resolve({
+            get: (id: string) => {
+              resolvedPiece = id;
+              return Promise.resolve({
+                checkPattern: (candidate: unknown) => {
+                  checkedProgram = candidate;
+                  return Promise.resolve(report);
+                },
+              });
+            },
+          } as any),
+        resolvePieceAddress: () => Promise.resolve(PIECE),
+        getPinnedProgramFromFile: () => Promise.resolve(program),
+      },
+    );
+
+    expect(resolvedPiece).toBe(PIECE);
+    expect(checkedProgram).toBe(program);
+    // The verdict is passed through verbatim: the CLI reports the rules'
+    // finding, it does not re-interpret it.
+    expect(result).toEqual(report);
+  });
+
   it("returns pattern provenance from piece inspection", async () => {
     const patternRef = {
       identity: "B".repeat(43),
@@ -2460,20 +3205,20 @@ describe("cli piece parsing", () => {
     const inspected = await inspectPiece(
       { apiUrl: API_URL, space: SPACE, identity: ID, piece: "notes" },
       {
-        loadManager: () => Promise.resolve({} as any),
         resolvePieceAddress: () => Promise.resolve(PIECE),
-        createController: () => ({
-          get: () =>
-            Promise.resolve({
-              id: PIECE,
-              name: () => "Notes",
-              getPatternRef: () => Promise.resolve(patternRef),
-              input: { get: () => Promise.resolve({ title: "Input" }) },
-              result: { get: () => Promise.resolve({ title: "Result" }) },
-              readingFrom: () => Promise.resolve([]),
-              readBy: () => Promise.resolve([]),
-            }),
-        } as any),
+        loadPieces: () =>
+          Promise.resolve({
+            get: () =>
+              Promise.resolve({
+                id: PIECE,
+                name: () => "Notes",
+                getPatternRef: () => Promise.resolve(patternRef),
+                input: { get: () => Promise.resolve({ title: "Input" }) },
+                result: { get: () => Promise.resolve({ title: "Result" }) },
+                readingFrom: () => Promise.resolve([]),
+                readBy: () => Promise.resolve([]),
+              }),
+          } as any),
       },
     );
 
@@ -2491,14 +3236,14 @@ describe("cli piece parsing", () => {
       {
         loadIdentity: () =>
           Promise.resolve({ did: () => "did:key:home" } as any),
-        loadManager: () => Promise.resolve({} as any),
         getProgramFromFile: () => Promise.resolve({} as any),
-        createController: () => ({
-          recreateDefaultPattern: (options: unknown) => {
-            recreateOptions = options;
-            return Promise.resolve({ id: PIECE });
-          },
-        } as any),
+        loadPieces: () =>
+          Promise.resolve({
+            recreateDefaultPattern: (options: unknown) => {
+              recreateOptions = options;
+              return Promise.resolve({ id: PIECE });
+            },
+          } as any),
       },
     );
 
@@ -2525,7 +3270,7 @@ describe("cli piece parsing", () => {
       identity: ID,
       piece: "demo",
     }, {
-      loadManager: (config: SpaceConfig) => {
+      loadPieces: (config: SpaceConfig) => {
         expect(config.space).toBe(SPACE);
         return Promise.resolve(manager as any);
       },
@@ -2546,7 +3291,7 @@ describe("cli piece parsing", () => {
       identity: ID,
       piece: "of:fid1:piece-123",
     }, {
-      loadManager: () => Promise.resolve({} as any),
+      loadPieces: () => Promise.resolve({} as any),
     });
 
     expect(resolved.piece).toBe("of:fid1:piece-123");

@@ -19,11 +19,12 @@
 ./scripts/share-pattern-via-tailscale.sh --down                                 # Tear that down
 ```
 
-To make source-run build metadata describe the checkout the same way compiled
-binaries do, pass the current revision into the start script:
+Source-run build metadata describes the checkout the same way compiled
+binaries do: `start-local-dev.sh` defaults `COMMIT_SHA` to the checkout's
+current HEAD, and an explicit value in the environment overrides that default:
 
 ```bash
-COMMIT_SHA="$(git rev-parse HEAD)" ./scripts/start-local-dev.sh --bg-updater
+COMMIT_SHA="<some-other-sha>" ./scripts/start-local-dev.sh --bg-updater
 ```
 
 The script's children inherit the value: toolshed uses it as the source-run
@@ -33,6 +34,24 @@ deployed shell selects the immutable `/builds/<sha>` namespace. `COMMIT_SHA` is
 descriptive metadata, not a system-pattern update gate. The updater instead
 compiles the downloaded source/import closure and requires its entry identity
 to equal `?identity` before changing the persisted root.
+
+The cf CLI resolves its own commit the same way (baked build metadata for
+compiled binaries, the checkout's HEAD for source runs) and compares it
+against the server's self-reported commit on every server-touching command,
+warning on stderr when the two differ. The server side rides the `/_health`
+response the CLI's health check already fetches (the same value `/api/meta`
+reports), so the check adds no request of its own.
+
+The warning is graded, because the two directions are different problems. A
+cf newer than its server is the normal local-dev state (the checkout moved
+on; the server kept running) and gets a compact heads-up naming how far
+behind the server is. A cf **older** than its server is the dangerous
+direction — the server speaks a protocol this cf predates — and gets a loud
+OUTDATED warning. Direction is proven by git ancestry in the checkout's
+history, so it is available to source runs whose history contains the
+server's commit; diverged or unorderable pairs (including compiled binaries)
+get the undirected wording. Set `CF_SKIP_VERSION_CHECK=1` to skip the check
+when running mismatched versions on purpose.
 
 To let teammates interact with a locally-hosted pattern (e.g. "host latest-main
 `<pattern>` locally with `--inspect` and export it over Tailscale"), use
@@ -99,13 +118,13 @@ It is a shared, publicly-derivable key — every developer who derives it gets
 the same DID. Never use it against a server other people use, and don't deploy
 your own work as it even locally: it collapses you into the server principal
 (and into one identity for user counting — see
-[`active-user-counting.md`](./active-user-counting.md)). Full policy:
-[`SHARED_IDENTITY.md`](./SHARED_IDENTITY.md).
+[`active-user-counting.md`](../features/active-user-counting.md)). Full policy:
+[`shared-identity.md`](../features/shared-identity.md).
 
 For workflows that touch `PerUser`, `PerSession`, favorites, or home-space
 state, use one shared identity in both browser and CLI. The browser login screen
 can import a CLI PKCS8/PEM key via `Import CLI Key`. See
-[`SHARED_IDENTITY.md`](./SHARED_IDENTITY.md).
+[`shared-identity.md`](../features/shared-identity.md).
 
 **First-time browser login:**
 
@@ -251,6 +270,12 @@ This happens when OAuth or API calls hit port 5173 (frontend) instead of port 80
 
 When editing `cf-*` components in `packages/ui/`, restart the local dev server to ensure the updated code is running.
 
+The shell's dev server watches `packages/shell/src` only, so a change anywhere
+else in the workspace — `packages/ui`, `packages/runtime-client`, and the rest —
+does not trigger a rebuild, and the browser keeps serving the previous bundle.
+Touching any file under `packages/shell/src` rebuilds everything the shell
+bundles, which is quicker than a restart.
+
 ---
 
 ## Background Piece Service (Optional)
@@ -321,4 +346,4 @@ Or use the `<cf-updater>` component in your piece's UI.
 | `AuthorizationError` on system space | System space not yet bootstrapped | Register a piece (e.g., via OAuth) to auto-create it, or run optional `add-admin-piece` |
 | Piece not polling | Not registered | Register via `/api/integrations/bg` |
 
-See `packages/background-piece-service/CLAUDE.md` for more details.
+See `packages/background-piece-service/AGENTS.md` for more details.

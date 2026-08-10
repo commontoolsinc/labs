@@ -35,7 +35,7 @@ footgun anywhere shared: derive or browser-import it against a server other
 people use and you all become the *same* principal — seeing and overwriting
 each other's `PerUser` data. Use a unique `id new` key for your own identity;
 reserve `implicit trust` for deliberately acting as a local dev server's
-operator. See `docs/development/SHARED_IDENTITY.md`.
+operator. See `docs/features/shared-identity.md`.
 
 ## Passkeys: the browser login
 
@@ -141,10 +141,10 @@ carries a strict Content-Security-Policy meta tag
 to the host); per the CSP spec, a nested `srcdoc` document *must inherit*
 those policies — so the **inner** iframe, which holds the guest code,
 cannot shed them. The guest gets no direct data access at all: reads,
-writes, subscriptions, and LLM calls cross the boundary as a postMessage
-IPC protocol mediated by the host (`src/ipc.ts`), which applies policy per
-request. The package README is candid that exfiltration hardening (e.g.
-covert channels via permitted fetches) is ongoing work.
+writes, and subscriptions cross the boundary as a postMessage IPC protocol
+mediated by the host (`src/ipc.ts`), which applies policy per request. The
+package README is candid that exfiltration hardening (e.g. covert channels
+via permitted fetches) is ongoing work.
 
 **Beyond the rings — Contextual Flow Control (CFC).** The rings bound what
 untrusted code *can do*; CFC (`packages/runner/src/cfc/`) tracks what data

@@ -9,6 +9,7 @@ import {
 } from "./favicon.ts";
 import { faviconSvg } from "./favicon-artwork.ts";
 import { FAVICON_FACES } from "./favicon-types.ts";
+import { STATUS_COLOR } from "./palette.ts";
 
 Deno.test("faviconStatus: red wins, then orange, and gray never replaces green", () => {
   assertEquals(faviconStatus([]), "good");
@@ -22,29 +23,44 @@ Deno.test("faviconStatus: red wins, then orange, and gray never replaces green",
 Deno.test("favicon artwork: each face has one matching URL-backed raster icon", () => {
   const artwork: Record<
     FaviconFace,
-    { color: string; mouth: string; detail?: string }
+    {
+      color: string;
+      shape: string;
+      eyes: readonly [number, number];
+      mouth: string;
+      drop?: number;
+      detail?: string;
+    }
   > = {
     good: {
-      color: "#43c574",
+      color: STATUS_COLOR.good,
+      shape: `<rect x="2" y="2" width="28" height="28" rx="9"/>`,
+      eyes: [12, 20],
       mouth: `d="M11 19c2.8 2.6 7.2 2.6 10 0"`,
     },
-    warn: { color: "#e0a852", mouth: `d="M11 20h10"` },
+    warn: {
+      color: STATUS_COLOR.warn,
+      shape: `<path d="M16 2 30 29H2Z"/>`,
+      eyes: [13, 19],
+      mouth: `d="M11 20h10"`,
+      drop: 3.2,
+    },
     bad: {
-      color: "#e2504a",
+      color: STATUS_COLOR.bad,
+      shape: `<path d="M10 2h12l8 8v12l-8 8H10l-8-8V10Z"/>`,
+      eyes: [12, 20],
       mouth: `d="M11 21c2.8-2.6 7.2-2.6 10 0"`,
     },
     "bad-crying": {
-      color: "#e2504a",
+      color: STATUS_COLOR.bad,
+      shape: `<path d="M10 2h12l8 8v12l-8 8H10l-8-8V10Z"/>`,
+      eyes: [12, 20],
       mouth: `d="M10.5 22c3-4 8-4 11 0"`,
       detail: `fill="#9edcff"`,
     },
   };
-  for (
-    const [status, { color, mouth, detail }] of Object.entries(artwork) as [
-      FaviconFace,
-      { color: string; mouth: string; detail?: string },
-    ][]
-  ) {
+  for (const status of FAVICON_FACES) {
+    const { color, shape, eyes, mouth, drop, detail } = artwork[status];
     assertEquals(
       faviconHref(status),
       `/favicon.png?status=${status}&v=${FAVICON_VERSION}`,
@@ -60,8 +76,16 @@ Deno.test("favicon artwork: each face has one matching URL-backed raster icon", 
     }
     const svg = faviconSvg(status);
     assertStringIncludes(svg, `fill="${color}"`);
-    assertStringIncludes(svg, `<circle cx="12" cy="14"`);
+    assertStringIncludes(svg, shape);
+    assertStringIncludes(svg, `<circle cx="${eyes[0]}" cy="14" r="2"`);
+    assertStringIncludes(svg, `<circle cx="${eyes[1]}" cy="14" r="2"`);
     assertStringIncludes(svg, `<path ${mouth}`);
+    assertStringIncludes(svg, `stroke-width="2.2"`);
+    if (drop === undefined) {
+      assert(!svg.includes("translate"), `${status} keeps its face level`);
+    } else {
+      assertStringIncludes(svg, `<g transform="translate(0 ${drop})">`);
+    }
     if (detail) assertStringIncludes(svg, detail);
     if (status === "bad-crying") {
       assertStringIncludes(svg, `d="M12 16.5`);

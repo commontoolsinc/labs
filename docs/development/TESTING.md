@@ -17,6 +17,10 @@ deno task test
 
 ### Tests that start Deno
 
+For deliberate import-map and lockfile changes, follow the
+[dependency maintenance guide](DEPENDENCIES.md). This section covers the
+separate requirement that verification tests preserve the checked-in graph.
+
 Dependency installation and verification are separate parts of CI. Installation
 may fetch registry metadata and package contents. Verification must use the
 dependency graph recorded in `deno.lock` without resolving package versions
@@ -33,6 +37,32 @@ This boundary keeps a verification test independent of mutable registry
 metadata. It also makes an accidental dependency graph change fail as an
 out-of-date lockfile instead of silently resolving a different graph.
 
+Both helpers start the Deno that is running the test, found through
+`Deno.execPath()`. Starting the program named `deno` instead would find whatever
+copy comes first on `PATH`, which is a different version than the pin in
+`mise.toml` on any machine whose shell Deno is not that pin. The versions share
+one cache directory and each reads transpiled sources only from its own part of
+it, so a test that collects a coverage profile under one version and reports it
+under the other gets a report with every file missing.
+
+Deno resolves an allowlist entry of `deno` through `PATH` as well, so
+`--allow-run=deno` refuses the very binary the test is running under. Name that
+binary instead of widening the grant. A task line can compute it, because `deno`
+inside one runs the Deno running the task whatever `PATH` says:
+
+```
+--allow-run=$(deno eval "console.log(Deno.execPath())")
+```
+
+A test launched from a script can read `Deno.execPath()` directly, as
+`packages/dashboard/test/runner.ts` does with `--allow-run=${Deno.execPath()},git`.
+
+That a task's `deno` is the running one rather than one found on `PATH` is what
+makes the computed form name the right binary, so
+`packages/test-support/src/isolated-deno.test.ts` holds it in place: it runs a
+task with a decoy `deno` as the only entry on the child's `PATH` and fails if the
+decoy is the one that runs.
+
 ### Test Structure
 
 - **Unit tests**: Use `@std/testing/bdd` (`describe`/`it`) with `@std/expect` for assertions
@@ -42,16 +72,27 @@ out-of-date lockfile instead of silently resolving a different graph.
 **Unit test example:**
 
 ```typescript
-// Shown at module scope.
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-describe("Feature", () => {
-  it("should do something", () => {
-    expect(result).toBe(expected);
+import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
+
+describe("deep-freeze", () => {
+  describe("isDeepFrozen()", () => {
+    it("returns `false` for a plain unfrozen object", () => {
+      expect(isDeepFrozen({ a: 1 })).toBe(false);
+    });
   });
 });
 ```
+
+Note the shape: one top-level `describe()` named after the file under test, a
+nested `describe()` per function, and an `it()` reading as a verb phrase that
+completes the word "it".
+[Unit test coding style](unit-test-coding-style.md) covers that shape in full:
+where a test file goes, what it is called, how class and function tests nest,
+which assertions to reach for, and the matcher traps that produce a green test
+proving nothing.
 
 **Integration test example:**
 
@@ -148,11 +189,22 @@ run directory.
 
 ## Related documentation
 
+- [unit-test-coding-style.md](unit-test-coding-style.md) — how a unit test file
+  is shaped: where it lives and what it is called, the single top-level
+  `describe()` and the blocks nested under it, how an `it()` description is
+  worded, `expect()` over `assert*()`, and the matcher traps that yield a green
+  test which proves nothing. Read it before writing a new test file.
 - [waiting-in-tests.md](waiting-in-tests.md) — waiting in tests: prefer
   primitives that resolve on a real event over polling with a timeout. Covers
   the event-driven primitives, the `check-no-waitfor` CI guard that keeps new
   polling `waitFor` out of the integration suites, and the deliberate exceptions
   where a bounded poll is the honest observation — read it before adding a poll.
+- [waiting-in-tests-rationale.md](waiting-in-tests-rationale.md) — the analysis
+  and case studies behind that guidance: the full argument against bounded
+  timeouts, the sizing of the deno-web-test backstop, retired real-clock
+  exemptions, the FUSE exec suite's design, and the production waits that apply
+  the same principle. Not needed to write a test; read it before changing the
+  wait machinery itself.
 - [COVERAGE.md](COVERAGE.md) — how CI measures coverage. It explains the two
   mechanisms (Deno's V8 coverage for runtime code, and transformer-based
   coverage for authored patterns) and how both feed the coverage-debt gate.
@@ -161,10 +213,16 @@ run directory.
 - [BENCHMARKS.md](BENCHMARKS.md) — how `*.bench.ts` files run in CI, how the
   team ops dashboard charts their trends, and the naming and stdout
   constraints a bench file must satisfy.
-- [LLM_TESTING.md](LLM_TESTING.md) — testing patterns and server routes that
-  call the LLM, including the test-environment guard and conversation fixtures.
+- [llm-testing.md](../features/llm-testing.md) — testing patterns and server
+  routes that call the LLM, including the test-environment guard and
+  conversation fixtures.
 - [UI_TESTING.md](UI_TESTING.md) — testing shadow DOM components in browser
   integration tests.
+- [../specs/pattern-update-testing.md](../specs/pattern-update-testing.md) —
+  the two CI gates standing between an incompatible pattern and every piece
+  running it: contract compatibility (`deno task pattern-compat`) and state
+  continuity (`deno task pattern-vintage`), what each proves, and what an
+  author does to add a pattern to the fixture set.
 - [../common/workflows/pattern-testing.md](../common/workflows/pattern-testing.md)
   — writing and running pattern tests with `cf test`. The agent-oriented version
   is [../common/ai/pattern-testing-guide.md](../common/ai/pattern-testing-guide.md),

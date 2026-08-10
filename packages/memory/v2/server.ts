@@ -1,3 +1,4 @@
+import type { FabricPlainObject } from "@commonfabric/api";
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
@@ -8,13 +9,18 @@ import {
   dbNeedsColumnProvenance,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
-  encodeMemoryBoundaryUnprovenFabricValue,
   type EntityDocument,
+  type EntityIdListRequest,
+  type EntityIdListResult,
+  type EntityIdLookupRequest,
+  type EntityIdLookupResult,
+  getOwnWriteEchoConfig,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
+  MAX_ENTITY_ID_PAGE_SIZE,
   type Operation,
   parseMemoryProtocolFlags,
   type ResponseMessage,
@@ -115,7 +121,6 @@ const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
 const DEFAULT_SESSION_OPEN_CHALLENGE_TTL_SECONDS = 300;
 const SESSION_OPEN_CHALLENGE_BYTES = 32;
-
 // SQLite resource caps (mirror the `sqlite.query` wire-parse caps; also applied
 // to the folded-write path, which is parsed loosely as part of a `transact`).
 const MAX_SQLITE_SQL_LENGTH = 100_000;
@@ -337,6 +342,15 @@ const sessionKey = (space: string, sessionId: string): string =>
 
 type Send = (message: ServerMessage) => void;
 
+type PublishTransactVerdict = (
+  response: ResponseMessage<Engine.AppliedCommit>,
+) => void;
+
+type TransactDecision = {
+  response: ResponseMessage<Engine.AppliedCommit>;
+  postCommit?: () => Promise<void>;
+};
+
 type SessionOpenAuthContext = {
   audience: string;
   challenge: SessionOpenChallenge;
@@ -351,9 +365,16 @@ type SessionHandle = {
   sessionId: string;
 };
 
+/** Kind of the LAST operation an origin commit applied to a doc — decides the
+ * own-write echo shape at flush (CT-1965): `set`/`delete` heads are elided
+ * (the writer provably holds their outcome), `patch` heads ride the frame as
+ * full post-apply documents. */
+type DirtyOp = "set" | "patch" | "delete";
+
 type DirtyOrigin = {
   sessionId: string;
   seq: number;
+  op: DirtyOp;
 };
 
 class Connection {
@@ -635,7 +656,7 @@ class Connection {
         this.send(response);
         return;
       }
-      case "transact":
+      case "transact": {
         if (
           !this.requireSession(
             parsed.requestId,
@@ -645,8 +666,19 @@ class Connection {
         ) {
           return;
         }
-        this.send(await this.server.transact(parsed));
+        // Publishing inside the per-space transaction lock makes the verdict
+        // visible before any fan-out for the same space can acquire that lock.
+        await this.server.transact(parsed, (verdict) => {
+          this.send(verdict);
+        });
+        // A self-deauthorizing ACL commit defers the writer's terminal
+        // session/revoked until after its verdict; deliver it now.
+        this.server.deliverDeferredSelfRevocation(
+          parsed.space,
+          parsed.sessionId,
+        );
         return;
+      }
       case "graph.query":
         if (
           !this.requireSession(
@@ -659,6 +691,46 @@ class Connection {
         }
         {
           const response = await this.server.graphQuery(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
+      case "entity-id.list":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.server.listEntityIds(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
+      case "entity-id.exists":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.server.entityIdExists(parsed);
           this.sendSessionResponse(
             parsed.space,
             parsed.sessionId,
@@ -812,15 +884,37 @@ class Connection {
         { adoptionObservations: this.#persistentSchedulerState },
       );
       if (this.#closed) {
+        // Evaluation already advanced the session cache past this content;
+        // roll the delivery state back so a later pass (or a resumed
+        // session) recomputes and redelivers it.
+        if (effect !== null) {
+          this.server.rollbackUndeliveredSync(space, sessionId, effect);
+        }
         return;
       }
       // ACL revocation can remove the session while watch evaluation awaits
-      // its engine. Never emit the already-computed effect after that removal.
+      // its engine. Never emit the already-computed effect after that removal
+      // (the session is gone from the registry — nothing to roll back into).
       if (this.shouldSuppressSessionSend(space, sessionId)) {
         continue;
       }
       if (effect !== null) {
-        this.send(effect);
+        try {
+          this.send(effect);
+        } catch (error) {
+          // The send boundary is the commit point for sync state. A send
+          // that throws is the only delivery failure visible in-process, so
+          // no buffering pretends otherwise (a dying socket loses frames
+          // silently either way — reconnect hardening owns that case):
+          // roll back exactly what evaluation advanced, so the next pass
+          // recomputes and redelivers from durable state (CT-1927 review,
+          // rounds 5-6).
+          this.server.rollbackUndeliveredSync(space, sessionId, effect);
+          console.warn(
+            "memory v2: sync send failed; delivery state rolled back for recomputation",
+            error,
+          );
+        }
       }
     }
   }
@@ -849,6 +943,10 @@ export class Server {
   #dirtyOriginsBySpace = new Map<string, Map<string, DirtyOrigin>>();
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
   #refreshing: Promise<void> | null = null;
+  // Transactions and fan-out share one publication turn per space. A verdict
+  // is sent while its transaction owns the turn, so a sync frame cannot expose
+  // the decision first. Different spaces retain independent turns.
+  #publicationBySpace = new Map<string, Promise<void>>();
   // The owner commit is synchronous, but cross-space scheduler fan-out awaits
   // other engines. Preserve owner apply order across concurrent connections so
   // an older mirror cannot land after a newer one.
@@ -887,7 +985,18 @@ export class Server {
     readonly options: {
       sessions?: SessionRegistry;
       store?: URL;
-      subscriptionRefreshDelayMs?: number;
+      /**
+       * Coalescing delay for the batched subscription fan-out, in
+       * milliseconds. `"manual"` never arms the refresh timer: dirty spaces
+       * accumulate and fan out only through the explicit synchronization
+       * points — `flushSessions()`, or `idle()`, which drains held fan-out
+       * to keep its quiescence contract. This is the fan-out gate for
+       * controlled-staleness tests, immune to fake-clock auto-advance,
+       * which fires any armed timer regardless of its nominal delay. A
+       * partial `flushSessions(spaces)` in manual mode leaves the other
+       * dirty spaces held for the next explicit call.
+       */
+      subscriptionRefreshDelayMs?: number | "manual";
       authorizeSessionOpen: (
         message: SessionOpenRequest,
         context: SessionOpenAuthContext,
@@ -1190,6 +1299,26 @@ export class Server {
    *  receives no further pushes — but is NOT sent the terminal revocation, so
    *  it gets this transact's response first (a self-removal otherwise reads as
    *  a failure). Its next message fails closed as an unknown session. */
+  // Writer sessions that de-authorized themselves in a commit: their
+  // session/revoked is held until after the transact verdict goes out.
+  #deferredSelfRevocations = new Map<string, string | null>();
+
+  deliverDeferredSelfRevocation(space: string, sessionId: string): void {
+    const key = `${space}\0${sessionId}`;
+    const connectionId = this.#deferredSelfRevocations.get(key);
+    if (connectionId === undefined) {
+      return;
+    }
+    this.#deferredSelfRevocations.delete(key);
+    if (connectionId !== null) {
+      this.#connections.get(connectionId)?.revokeSession(
+        space,
+        sessionId,
+        "unauthorized",
+      );
+    }
+  }
+
   #revokeDeauthorizedSessions(
     engine: Engine.Engine,
     space: string,
@@ -1204,11 +1333,17 @@ export class Server {
       // pushes, and its next message fails closed (Unknown session).
       this.#sessions.remove(space, session.id);
       if (session.id === writerSessionId) {
-        // The writer's own session — it just removed its own access. Removal
-        // already stopped its pushes and denies its next message; do NOT also
-        // send the terminal session/revoked, which the client treats as
-        // terminal and would turn this transact's successful self-removal into
-        // a reported failure.
+        // The writer's own session — it just removed its own access. Do not
+        // send the terminal session/revoked BEFORE its transact response
+        // (the client treats it as terminal and would turn this successful
+        // self-removal into a reported failure) — but it MUST still arrive
+        // after the verdict: the session is detached, so no marker frame
+        // can ever reach it, and the revocation is what releases the
+        // client's parked accept (consumer-teardown application).
+        this.#deferredSelfRevocations.set(
+          `${space}\0${session.id}`,
+          session.ownerConnectionId,
+        );
         continue;
       }
       if (session.ownerConnectionId !== null) {
@@ -1258,6 +1393,8 @@ export class Server {
   async close(): Promise<void> {
     this.cancelScheduledRefresh();
     await this.#refreshing;
+    await this.drainSpacePublicationLocks();
+    await this.drainPostCommitSchedulerSideEffects();
     for (const engine of this.#engines.values()) {
       Engine.close(await engine);
     }
@@ -1267,18 +1404,29 @@ export class Server {
   }
 
   /**
-   * Drains any in-flight or scheduled subscription refresh, returning when
-   * the server has no pending work. Tests use this to drain the
-   * module-level singleton's `#refreshTimer` between cases so it doesn't
-   * leak across the Deno test boundary -- the singleton survives across
-   * tests but its pending timer must not.
+   * Drains per-space publication turns, post-commit scheduler bookkeeping, and
+   * any in-flight or scheduled subscription refresh, returning when the server
+   * has no pending work. Tests use this to prevent the module-level singleton's
+   * work from leaking across Deno test boundaries.
+   *
+   * Callers stop submitting work before awaiting this method. A sustained
+   * stream of new work can extend the drain indefinitely.
    *
    * `flushSessions()` (called with no `spaces` argument) cancels any
    * pending timer, runs the refresh loop to completion, and intentionally
    * does not reschedule, so a single call is sufficient.
    */
   async idle(): Promise<void> {
-    if (this.#refreshTimer !== null || this.#refreshing !== null) {
+    await this.drainSpacePublicationLocks();
+    await this.drainPostCommitSchedulerSideEffects();
+    // Dirty spaces with no timer armed are manual mode's held fan-out.
+    // idle() is an explicit synchronization point exactly like
+    // flushSessions(), so it drains them rather than returning with
+    // pending work — "manual" gates the TIMER, not the explicit calls.
+    if (
+      this.#refreshTimer !== null || this.#refreshing !== null ||
+      this.#dirtySpaces.size > 0
+    ) {
       await this.flushSessions();
     }
   }
@@ -1296,50 +1444,52 @@ export class Server {
     id: string,
     value: EntityDocument["value"],
   ): Promise<Engine.AppliedCommit> {
-    const engine = await this.openEngine(space);
-    if (this.#aclMode() !== "off") {
-      if (id === aclDocId(space)) {
-        throw new Engine.ProtocolError(
-          "direct writes may not mutate the ACL document",
-        );
+    return await this.withSpacePublicationLock(space, async () => {
+      const engine = await this.openEngine(space);
+      if (this.#aclMode() !== "off") {
+        if (id === aclDocId(space)) {
+          throw new Engine.ProtocolError(
+            "direct writes may not mutate the ACL document",
+          );
+        }
+        const aclState = this.#aclState(engine, space);
+        if (aclState.kind === "invalid") {
+          throw new Engine.ProtocolError(
+            `space ${space} has invalid ACL state`,
+          );
+        }
+        if (
+          aclState.kind === "missing" &&
+          Engine.serverSeq(engine) === 0
+        ) {
+          throw new Engine.ProtocolError(
+            `space ${space} requires an ACL genesis commit before direct writes`,
+          );
+        }
       }
-      const aclState = this.#aclState(engine, space);
-      if (aclState.kind === "invalid") {
-        throw new Engine.ProtocolError(
-          `space ${space} has invalid ACL state`,
-        );
-      }
-      if (
-        aclState.kind === "missing" &&
-        Engine.serverSeq(engine) === 0
-      ) {
-        throw new Engine.ProtocolError(
-          `space ${space} requires an ACL genesis commit before direct writes`,
-        );
-      }
-    }
-    const commit = Engine.applyCommit(engine, {
-      sessionId: this.#directSessionId,
-      space,
-      commit: {
-        localSeq: ++this.#directLocalSeq,
-        reads: { confirmed: [], pending: [] },
-        operations: [{
-          op: "set",
-          id,
-          value: { value },
-        }],
-      },
+      const commit = Engine.applyCommit(engine, {
+        sessionId: this.#directSessionId,
+        space,
+        commit: {
+          localSeq: ++this.#directLocalSeq,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id,
+            value: { value },
+          }],
+        },
+      });
+      this.markSpaceDirty(space, [toDirtyKey(id)]);
+      await this.runPostCommitSchedulerSideEffects(
+        space,
+        commit,
+        [],
+        new Map(),
+        undefined,
+      );
+      return commit;
     });
-    await this.runPostCommitSchedulerSideEffects(
-      space,
-      commit,
-      [],
-      new Map(),
-      undefined,
-    );
-    this.markSpaceDirty(space, [toDirtyKey(id)]);
-    return commit;
   }
 
   /**
@@ -1362,7 +1512,7 @@ export class Server {
     params: SqliteParamsWire | undefined,
     scopeKey: string,
     wantColumns: boolean,
-  ): Promise<{ rows: unknown[]; columns?: SqliteResultColumn[] }> {
+  ): Promise<{ rows: FabricPlainObject[]; columns?: SqliteResultColumn[] }> {
     // Apply the statement guard BEFORE the file-existence short-circuit, so a
     // rejected statement (non-SELECT, core-table/qualified ref, ATTACH/PRAGMA,
     // multi-statement) is refused even against a never-written cell-db rather
@@ -1946,18 +2096,57 @@ export class Server {
     }
   }
 
-  transact(
+  /**
+   * Decides a transaction under its space's publication lock.
+   *
+   * `publishVerdict`, when provided by a live connection, runs while the lock
+   * is held and before post-commit scheduler bookkeeping. Fan-out for the space
+   * begins only after both steps finish and the lock is released.
+   */
+  async transact(
     message: TransactRequest,
+    publishVerdict?: PublishTransactVerdict,
   ): Promise<ResponseMessage<Engine.AppliedCommit>> {
+    return await this.withSpacePublicationLock(message.space, async () => {
+      const decision = await this.decideTransaction(message);
+      let verdictError: { value: unknown } | undefined;
+      try {
+        publishVerdict?.(decision.response);
+      } catch (error) {
+        verdictError = { value: error };
+      }
+      try {
+        await decision.postCommit?.();
+      } catch (postCommitError) {
+        if (verdictError !== undefined) {
+          throw new AggregateError(
+            [verdictError.value, postCommitError],
+            "Verdict publication and post-commit bookkeeping both failed",
+          );
+        }
+        throw postCommitError;
+      }
+      if (verdictError !== undefined) {
+        throw verdictError.value;
+      }
+      return decision.response;
+    });
+  }
+
+  private async decideTransaction(
+    message: TransactRequest,
+  ): Promise<TransactDecision> {
     const session = this.#sessions.get(message.space, message.sessionId);
     if (session === null) {
-      return Promise.resolve(respondTypedError<Engine.AppliedCommit>(
-        message.requestId,
-        toError("SessionError", "Unknown session for space"),
-      ));
+      return {
+        response: respondTypedError<Engine.AppliedCommit>(
+          message.requestId,
+          toError("SessionError", "Unknown session for space"),
+        ),
+      };
     }
-
-    return tracer.startActiveSpan(
+    let postCommit: (() => Promise<void>) | undefined;
+    const response = await tracer.startActiveSpan(
       "memory.transact",
       async (span): Promise<ResponseMessage<Engine.AppliedCommit>> => {
         span.setAttribute("space.did", message.space);
@@ -1994,7 +2183,10 @@ export class Server {
           ) {
             return respondTypedError<Engine.AppliedCommit>(
               message.requestId,
-              toError("SessionError", "Unknown or replaced session for space"),
+              toError(
+                "SessionError",
+                "Unknown or replaced session for space",
+              ),
             );
           }
           const invalid = this.#validateAclCommit(
@@ -2104,37 +2296,62 @@ export class Server {
               detachDatabase(engine.database, alias);
             }
           }
+          // Mark dirty immediately after the durable apply so the next batch
+          // reflects this write and can carry its catch-up marker. Each dirty
+          // key is classified by the LAST op this commit applied to it: that
+          // op produced the head this commit leaves behind, so it alone
+          // decides the flush-time echo shape.
+          const dirtyOps = new Map<string, DirtyOp>();
+          for (const operation of message.commit.operations) {
+            if (operation.op === "sqlite") continue;
+            dirtyOps.set(
+              toDirtyKey(operation.id, declaredScope(operation.scope)),
+              operation.op,
+            );
+          }
+          this.markSpaceDirty(message.space, dirtyOps.keys(), {
+            sessionId: message.sessionId,
+            seq: commit.seq,
+            ops: dirtyOps,
+          });
+          // Stage the accept's catch-up obligation with the dirty mark. The
+          // verdict response leaves this request before the independently
+          // scheduled batch can send its covering frame. The batched fan-out
+          // stamps `caughtUpLocalSeq >= this localSeq` on the next frame to
+          // this session (an otherwise-empty frame if nothing it watches is
+          // dirty), and the CLIENT holds the accepted commit's promotion —
+          // pending overlay to confirmed mirror — until that marker arrives.
+          // The frame therefore reflects every decided outcome ≤ W for the
+          // docs it covers.
+          // Dirty-origin tracking decides the echo shape for the session's
+          // own accepted writes (CT-1965): set- and delete-produced heads are
+          // elided from the frame — the writer provably holds their outcome,
+          // and the verdict plus marker promote it — while patch-produced
+          // heads ride the frame as full post-apply documents, since merged
+          // state is truth the writer cannot extrapolate. REJECTED commits'
+          // docs are staged origin-less (stageConflictRefreshDirtyIds), so
+          // repair frames DO cover them.
+          session.pendingCaughtUpLocalSeq = Math.max(
+            session.pendingCaughtUpLocalSeq,
+            message.commit.localSeq,
+          );
           if (aclTouched) {
             this.#invalidateAclCapabilities(message.space);
             // Pass the writing session so it isn't sent the terminal revocation
             // before its own transact response (the client treats session/revoked
-            // as terminal). It's still dropped from the registry, so a
-            // self-deauthorized writer receives no further pushes.
+            // as terminal). It is dropped from the registry immediately —
+            // fan-out resolves registered sessions only — and its terminal
+            // session/revoked is DEFERRED until after the verdict is sent
+            // (deliverDeferredSelfRevocation): the revocation is what tells
+            // the client its marker channel is gone, so its parked accept
+            // applies immediately instead of waiting for a marker no
+            // detached session will ever be delivered.
             this.#revokeDeauthorizedSessions(
               engine,
               message.space,
               message.sessionId,
             );
           }
-          await this.runPostCommitSchedulerSideEffects(
-            message.space,
-            commit,
-            schedulerObservations,
-            previousReadSpaces,
-            session,
-          );
-          this.markSpaceDirty(
-            message.space,
-            message.commit.operations
-              .filter((operation) => operation.op !== "sqlite")
-              .map((operation) =>
-                toDirtyKey(operation.id, declaredScope(operation.scope))
-              ),
-            {
-              sessionId: message.sessionId,
-              seq: commit.seq,
-            },
-          );
           span.setAttribute("commit.seq", commit.seq);
           span.setAttribute(
             "entity.count",
@@ -2142,6 +2359,16 @@ export class Server {
               operation.op !== "sqlite"
             ).length,
           );
+          // The verdict is published before this work begins, while the
+          // per-space lock continues to exclude document fan-out.
+          postCommit = () =>
+            this.runPostCommitSchedulerSideEffects(
+              message.space,
+              commit,
+              schedulerObservations,
+              previousReadSpaces,
+              session,
+            );
           return {
             type: "response",
             requestId: message.requestId,
@@ -2189,7 +2416,10 @@ export class Server {
           span.recordException(
             error instanceof Error ? error : new Error(messageText),
           );
-          span.setStatus({ code: SpanStatusCode.ERROR, message: messageText });
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: messageText,
+          });
           return respondTypedError<Engine.AppliedCommit>(
             message.requestId,
             responseError,
@@ -2199,6 +2429,7 @@ export class Server {
         }
       },
     );
+    return { response, postCommit };
   }
 
   async graphQuery(
@@ -2259,6 +2490,144 @@ export class Server {
       };
     } catch (error) {
       return respondTypedError<GraphQueryResult>(
+        message.requestId,
+        toError(
+          "QueryError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
+  async listEntityIds(
+    message: EntityIdListRequest,
+  ): Promise<ResponseMessage<EntityIdListResult>> {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
+      return respondTypedError<EntityIdListResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+
+    try {
+      const engine = await this.openEngine(message.space);
+      const deny = this.#authorizeCurrentSessionWithEngine(
+        engine,
+        message.space,
+        message.sessionId,
+        session,
+        "READ",
+      );
+      if (deny) {
+        return respondTypedError<EntityIdListResult>(message.requestId, deny);
+      }
+
+      const serverSeq = Engine.serverSeq(engine);
+      if (
+        message.expectedServerSeq !== undefined &&
+        message.expectedServerSeq !== serverSeq
+      ) {
+        return respondTypedError<EntityIdListResult>(
+          message.requestId,
+          toError(
+            "SnapshotChangedError",
+            `entity identifier snapshot changed from server sequence ${message.expectedServerSeq} to ${serverSeq}`,
+          ),
+        );
+      }
+
+      if (
+        message.after === undefined && message.limit === undefined &&
+        message.expectedServerSeq === undefined
+      ) {
+        const ids = Engine.listEntityIdPage(engine, {
+          limit: MAX_ENTITY_ID_PAGE_SIZE + 1,
+        });
+        if (ids.length > MAX_ENTITY_ID_PAGE_SIZE) {
+          return respondTypedError<EntityIdListResult>(
+            message.requestId,
+            toError(
+              "ProtocolError",
+              `unpaginated entity identifier listing exceeds ${MAX_ENTITY_ID_PAGE_SIZE} entries; use pagination`,
+            ),
+          );
+        }
+        return {
+          type: "response",
+          requestId: message.requestId,
+          ok: {
+            serverSeq,
+            ids,
+          },
+        };
+      }
+
+      const limit = Math.min(
+        message.limit ?? MAX_ENTITY_ID_PAGE_SIZE,
+        MAX_ENTITY_ID_PAGE_SIZE,
+      );
+      const rows = Engine.listEntityIdPage(engine, {
+        after: message.after,
+        limit: limit + 1,
+      });
+      const ids = rows.slice(0, limit);
+      const nextAfter = rows.length > limit ? ids.at(-1) : undefined;
+
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: {
+          serverSeq,
+          ids,
+          ...(nextAfter === undefined ? {} : { nextAfter }),
+        },
+      };
+    } catch (error) {
+      return respondTypedError<EntityIdListResult>(
+        message.requestId,
+        toError(
+          "QueryError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
+  async entityIdExists(
+    message: EntityIdLookupRequest,
+  ): Promise<ResponseMessage<EntityIdLookupResult>> {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
+      return respondTypedError<EntityIdLookupResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+
+    try {
+      const engine = await this.openEngine(message.space);
+      const deny = this.#authorizeCurrentSessionWithEngine(
+        engine,
+        message.space,
+        message.sessionId,
+        session,
+        "READ",
+      );
+      if (deny) {
+        return respondTypedError<EntityIdLookupResult>(message.requestId, deny);
+      }
+
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: {
+          serverSeq: Engine.serverSeq(engine),
+          exists: Engine.entityIdExists(engine, message.id),
+        },
+      };
+    } catch (error) {
+      return respondTypedError<EntityIdLookupResult>(
         message.requestId,
         toError(
           "QueryError",
@@ -2692,6 +3061,75 @@ export class Server {
     };
   }
 
+  /** Roll back the delivery state a computed-but-undelivered sync frame
+   * advanced: forget the frame's docs from the session cache (so the next
+   * evaluation cannot elide them as already-snapshotted), re-stage its
+   * marker obligation, and re-dirty its ids origin-less so a pass is
+   * scheduled and the docs fan out authoritatively. Rollback rather than
+   * buffering: only a locally-throwing send is visible in-process, and a
+   * dying socket loses "successfully sent" frames just the same — the
+   * durable repair for that is resume-time catch-up, not a server-side
+   * buffer. A doc REMOVED by the lost frame is the accepted residue: its
+   * cache entry is already gone and cannot be re-diffed; the client keeps
+   * it until a full re-evaluation or reconnect (watch-shrink removes are
+   * advisory today). */
+  rollbackUndeliveredSync(
+    space: string,
+    sessionId: string,
+    undelivered: SessionEffectMessage,
+  ): void {
+    const session = this.#sessions.get(space, sessionId);
+    if (session === null) {
+      return;
+    }
+    const sync = undelivered.effect;
+    const ids: string[] = [];
+    for (const upsert of sync.upserts) {
+      session.entities.delete(
+        cacheKeyForEntity(
+          upsert.branch,
+          upsert.id,
+          declaredScope(upsert.scope),
+        ),
+      );
+      ids.push(toDirtyKey(upsert.id, declaredScope(upsert.scope)));
+    }
+    for (const remove of sync.removes) {
+      // The remove's cache entry died when the frame was built; re-insert a
+      // tombstone claiming the client still holds the doc, and force the
+      // next sync through a FULL evaluation — the incremental path never
+      // emits removes, so only a full re-diff (tombstone present, entity
+      // absent) regenerates the removal for the client.
+      const scope = declaredScope(remove.scope);
+      session.entities.set(cacheKeyForEntity(remove.branch, remove.id, scope), {
+        branch: remove.branch,
+        id: remove.id,
+        scope,
+        seq: 0,
+        deleted: true,
+      });
+      session.trackedIds.add(toDirtyKey(remove.id, scope));
+      session.forceFullResync = true;
+      ids.push(toDirtyKey(remove.id, scope));
+    }
+    if (sync.caughtUpLocalSeq !== undefined) {
+      // The marker was consumed into `caughtUpLocalSeq` when the frame was
+      // built; rewind BOTH counters or the re-staged obligation compares
+      // as already-satisfied and never re-fires. A temporarily lowered
+      // caughtUpLocalSeq is safe to expose (resume reporting is
+      // client-side monotonic).
+      session.pendingCaughtUpLocalSeq = Math.max(
+        session.pendingCaughtUpLocalSeq,
+        sync.caughtUpLocalSeq,
+      );
+      session.caughtUpLocalSeq = Math.min(
+        session.caughtUpLocalSeq,
+        sync.caughtUpLocalSeq - 1,
+      );
+    }
+    this.markSpaceDirty(space, ids);
+  }
+
   syncSessionForConnection(
     space: string,
     sessionId: string,
@@ -2702,6 +3140,22 @@ export class Server {
     const session = this.#sessions.get(space, sessionId);
     if (session === null) {
       return Promise.resolve(null);
+    }
+    // The catch-up marker is consumed into `session.caughtUpLocalSeq` (and
+    // stamped on the frame) DURING evaluation; capture the pre-call values
+    // so a throwing evaluation can restore them — the marker is the one
+    // piece of delivery state a lost frame cannot regenerate through the
+    // dirty-batch requeue (CT-1927 review, round 6).
+    const preCallCaughtUp = session.caughtUpLocalSeq;
+    const preCallPending = session.pendingCaughtUpLocalSeq;
+    const preCallForceFullResync = session.forceFullResync;
+    if (session.forceFullResync) {
+      // Rollback re-inserted tombstones for a lost frame's removes; only a
+      // full evaluation re-diffs them out. Self-clearing (restored by the
+      // catch below if evaluation throws).
+      session.forceFullResync = false;
+      dirtyIds = undefined;
+      dirtyOrigins = undefined;
     }
     return tracer.startActiveSpan(
       "memory.subscriber.sync",
@@ -2720,6 +3174,7 @@ export class Server {
             pendingCaughtUpLocalSeq > session.caughtUpLocalSeq;
           const finishCatchUp = async (
             sync: SessionSync,
+            candidateTrackedIds?: ReadonlySet<string>,
           ): Promise<SessionEffectMessage> => {
             if (hasPendingCatchUp) {
               session.caughtUpLocalSeq = Math.max(
@@ -2736,6 +3191,7 @@ export class Server {
               sessionId,
               sync,
               options,
+              candidateTrackedIds,
             );
             return {
               type: "session/effect",
@@ -2838,24 +3294,52 @@ export class Server {
             const upserts: SessionCacheEntry[] = [];
             for (const [key, entry] of updates) {
               const previous = session.entities.get(key);
-              session.entities.set(key, entry);
-              session.trackedIds.add(
-                toDirtyKey(entry.id, declaredScope(entry.scope)),
-              );
               if (!sameSnapshot(previous, entry)) {
                 const dirtyKey = toDirtyKey(
                   entry.id,
                   declaredScope(entry.scope),
                 );
                 const origin = dirtyOrigins?.get(dirtyKey);
-                if (
-                  origin === undefined ||
-                  origin.sessionId !== sessionId ||
-                  origin.seq !== entry.seq
-                ) {
+                // Include the doc unless the writer provably holds it
+                // (CT-1965). An origin matching this session AND the head seq
+                // means the head is exactly this session's own accepted
+                // write; under the per-space publication lock nothing can
+                // have moved it since, so `entry.doc` IS that commit's
+                // post-apply document. A `set`/`delete` head is then elided —
+                // the client supplied the bytes (or the absence) and the
+                // verdict + marker promote them — while a `patch` head is
+                // delivered in full: its post-apply state can contain merged
+                // foreign content the writer's own ops cannot reproduce.
+                const held = origin !== undefined &&
+                  origin.sessionId === sessionId &&
+                  origin.seq === entry.seq &&
+                  (origin.op !== "patch" || !getOwnWriteEchoConfig());
+                if (!held) {
                   upserts.push(entry);
                 }
               }
+            }
+            // The session cache commits only after the frame is fully
+            // built: a throw during marker/adoption attachment must leave
+            // the diff recomputable, or the requeued batch would elide the
+            // lost frame's docs as already-snapshotted (CT-1927 review,
+            // round 6).
+            const commitEntities = () => {
+              for (const [key, entry] of updates) {
+                session.entities.set(key, entry);
+                session.trackedIds.add(
+                  toDirtyKey(entry.id, declaredScope(entry.scope)),
+                );
+              }
+            };
+            // The frame-under-construction's watch scope: committed tracked
+            // ids plus this batch's — observation attachment must scope
+            // against THIS set, not the yet-uncommitted session state.
+            const candidateTrackedIds = new Set(session.trackedIds);
+            for (const [, entry] of updates) {
+              candidateTrackedIds.add(
+                toDirtyKey(entry.id, declaredScope(entry.scope)),
+              );
             }
             const toSeq = Engine.serverSeq(engine);
             if (upserts.length === 0) {
@@ -2864,14 +3348,14 @@ export class Server {
               // fromSeq is not stale. emptyCatchUp receives the original fromSeq
               // explicitly, so this does not mutate the bounds of this sync (the
               // Cubic fix keeps fromSeq pinned to the pre-refresh value).
+              commitEntities();
               session.lastSyncedSeq = Math.max(session.lastSyncedSeq, toSeq);
               return await emptyCatchUp(fromSeq, toSeq);
             }
-            session.lastSyncedSeq = toSeq;
             recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
               watches: session.watches.length,
             });
-            return await finishCatchUp({
+            const message = await finishCatchUp({
               type: "sync",
               fromSeq,
               toSeq,
@@ -2880,7 +3364,10 @@ export class Server {
                 left.id.localeCompare(right.id)
               ),
               removes: [],
-            });
+            }, candidateTrackedIds);
+            commitEntities();
+            session.lastSyncedSeq = toSeq;
+            return message;
           }
 
           const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
@@ -2898,14 +3385,39 @@ export class Server {
             session.lastSyncedSeq,
             serverSeq,
           );
-          session.graphs = graphs;
-          session.entities = entities;
-          session.trackedIds = trackedIdsFromEntries(entities.values());
-          session.lastSyncedSeq = serverSeq;
+          // As above: commit the re-evaluated watch state only once the
+          // frame is built, so a throw leaves the diff recomputable. The
+          // empty-sync branch commits first — its frame carries no doc
+          // novelty, and the marker counters are restored by the catch.
+          const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
+          const commitWatchState = () => {
+            session.graphs = graphs;
+            session.entities = entities;
+            session.trackedIds = evaluatedTrackedIds;
+            session.lastSyncedSeq = serverSeq;
+          };
           if (isEmptySync(sync)) {
+            commitWatchState();
             return await emptyCatchUp(sync.fromSeq, sync.toSeq);
           }
-          return await finishCatchUp(sync);
+          const message = await finishCatchUp(sync, evaluatedTrackedIds);
+          commitWatchState();
+          return message;
+        } catch (error) {
+          // A throwing evaluation may have consumed the marker obligation
+          // (finishCatchUp advances caughtUpLocalSeq before adoption
+          // attachment, which can also throw). Roll both counters back to
+          // their pre-call values so the obligation re-stages and a later
+          // pass re-emits the marker; document state needs no restore here
+          // — the caller's requeue machinery re-dirties the batch.
+          session.caughtUpLocalSeq = preCallCaughtUp;
+          session.pendingCaughtUpLocalSeq = Math.max(
+            session.pendingCaughtUpLocalSeq,
+            preCallPending,
+          );
+          session.forceFullResync = session.forceFullResync ||
+            preCallForceFullResync;
+          throw error;
         } finally {
           span.end();
         }
@@ -2926,6 +3438,7 @@ export class Server {
     sessionId: string,
     sync: SessionSync,
     options?: { adoptionObservations?: boolean },
+    candidateTrackedIds?: ReadonlySet<string>,
   ): Promise<void> {
     if (
       options?.adoptionObservations !== true ||
@@ -2944,7 +3457,13 @@ export class Server {
       // inside the watch boundary that scopes every other byte of this push.
       const session = this.#sessions.get(space, sessionId);
       if (session === null) return;
-      const trackedIds = session.trackedIds;
+      // The session cache commits only after the frame is built, so during
+      // catch-up construction `session.trackedIds` is the PREVIOUS watch
+      // scope. The caller passes the candidate set for the frame being
+      // built; scoping against the stale set would drop rows for newly
+      // reached entities or admit rows for entities leaving the watch
+      // (CT-1927 review, round 7).
+      const trackedIds = candidateTrackedIds ?? session.trackedIds;
       const adoptionSurfaceTracked = (
         observation: Engine.SchedulerActionObservation,
       ): boolean =>
@@ -3007,7 +3526,14 @@ export class Server {
   markSpaceDirty(
     space: string,
     dirtyIds?: Iterable<string>,
-    origin?: DirtyOrigin,
+    // Op kinds are per-doc (one commit can set A and patch B), so the origin
+    // carries a per-dirty-key map; absent keys classify as "patch" — the
+    // never-elide shape.
+    origin?: {
+      sessionId: string;
+      seq: number;
+      ops: ReadonlyMap<string, DirtyOp>;
+    },
   ): void {
     if (dirtyIds !== undefined) {
       let ids = this.#dirtyDocsBySpace.get(space);
@@ -3021,11 +3547,28 @@ export class Server {
         this.#dirtyOriginsBySpace.set(space, origins);
       }
       for (const id of dirtyIds) {
+        const alreadyDirty = ids.has(id);
         ids.add(id);
         if (origin === undefined) {
           origins?.delete(id);
+        } else if (
+          alreadyDirty &&
+          origins?.get(id)?.sessionId !== origin.sessionId
+        ) {
+          // Mixed provenance (CT-1927): the doc already carries UNDELIVERED
+          // novelty from a different origin (a foreign write, or an
+          // unattributed staging). Overwriting the origin would let the new
+          // writer's echo suppression hide that foreign novelty from the
+          // writer itself while its sync cursor still advances past it.
+          // Clear the origin instead: mixed docs fan out authoritatively to
+          // every session, the writer included.
+          origins?.delete(id);
         } else {
-          origins?.set(id, origin);
+          origins?.set(id, {
+            sessionId: origin.sessionId,
+            seq: origin.seq,
+            op: origin.ops.get(id) ?? "patch",
+          });
         }
       }
       if (origins?.size === 0) {
@@ -3088,7 +3631,10 @@ export class Server {
   }
 
   private scheduleRefresh(): void {
-    if (this.#dirtySpaces.size === 0 || this.#refreshTimer !== null) {
+    if (
+      this.options.subscriptionRefreshDelayMs === "manual" ||
+      this.#dirtySpaces.size === 0 || this.#refreshTimer !== null
+    ) {
       return;
     }
     this.#refreshTimer = setTimeout(
@@ -3107,7 +3653,14 @@ export class Server {
         this.#lastRefreshDurationMs * 2,
       ),
     );
-    await this.flushSessions();
+    try {
+      await this.flushSessions();
+    } catch (error) {
+      // The failed batch was requeued and rescheduled by refreshLoop; a
+      // timer-driven pass has no caller to surface to, so log rather than
+      // leak an unhandled rejection.
+      console.warn("memory v2: scheduled refresh failed; requeued", error);
+    }
   }
 
   private async waitForConnectionQueuesToDrain(
@@ -3150,6 +3703,40 @@ export class Server {
     }
   }
 
+  /**
+   * Runs one transaction or fan-out turn at a time for `space`.
+   *
+   * A transaction arriving during fan-out waits for that turn to finish. Locks
+   * for other spaces remain independent, so the latency coupling is local to
+   * one space.
+   */
+  private async withSpacePublicationLock<T>(
+    space: string,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.#publicationBySpace.get(space) ?? Promise.resolve();
+    const release = Promise.withResolvers<void>();
+    const queued = previous.then(() => release.promise);
+    this.#publicationBySpace.set(space, queued);
+
+    await previous;
+    try {
+      return await run();
+    } finally {
+      release.resolve();
+      if (this.#publicationBySpace.get(space) === queued) {
+        this.#publicationBySpace.delete(space);
+      }
+    }
+  }
+
+  /** Waits until every queued per-space publication turn has settled. */
+  private async drainSpacePublicationLocks(): Promise<void> {
+    while (this.#publicationBySpace.size > 0) {
+      await Promise.all(this.#publicationBySpace.values());
+    }
+  }
+
   private async refreshLoop(initial?: Set<string>): Promise<void> {
     let pending = initial;
     while (true) {
@@ -3166,41 +3753,98 @@ export class Server {
         return;
       }
 
-      for (const space of spaces) {
-        this.#dirtySpaces.delete(space);
-      }
       pending = undefined;
 
       for (const space of spaces) {
-        const dirtyIds = this.#dirtyDocsBySpace.get(space);
-        if (dirtyIds !== undefined) {
-          this.#dirtyDocsBySpace.delete(space);
-        }
-        const dirtyOrigins = this.#dirtyOriginsBySpace.get(space);
-        if (dirtyOrigins !== undefined) {
-          this.#dirtyOriginsBySpace.delete(space);
-        }
-        // Fan-out is a scheduled/batched timer decoupled from transact, so it
-        // must be its own root span. `root: true` makes that explicit — the
-        // context manager propagates the active context into timer callbacks,
-        // so without it this span could parent under whichever memory.transact
-        // happened to schedule the refresh.
-        await tracer.startActiveSpan(
-          "memory.fanout",
-          { root: true },
-          async (span) => {
-            span.setAttribute("space.did", space);
-            span.setAttribute("subscriber.count", this.#connections.size);
-            span.setAttribute("dirty.count", dirtyIds?.size ?? 0);
-            try {
-              for (const connection of this.#connections.values()) {
-                await connection.refreshDirty(space, dirtyIds, dirtyOrigins);
+        await this.withSpacePublicationLock(space, async () => {
+          // Removed at its own processing turn (CT-1927): pre-deleting the
+          // whole selection meant a failure mid-batch stranded every
+          // not-yet-processed space — dirty maps intact but the space no
+          // longer discoverable.
+          this.#dirtySpaces.delete(space);
+          const dirtyIds = this.#dirtyDocsBySpace.get(space);
+          if (dirtyIds !== undefined) {
+            this.#dirtyDocsBySpace.delete(space);
+          }
+          const dirtyOrigins = this.#dirtyOriginsBySpace.get(space);
+          if (dirtyOrigins !== undefined) {
+            this.#dirtyOriginsBySpace.delete(space);
+          }
+          // Fan-out is a scheduled/batched timer decoupled from transact, so it
+          // must be its own root span. `root: true` makes that explicit — the
+          // context manager propagates the active context into timer callbacks,
+          // so without it this span could parent under whichever memory.transact
+          // happened to schedule the refresh.
+          try {
+            await tracer.startActiveSpan(
+              "memory.fanout",
+              { root: true },
+              async (span) => {
+                span.setAttribute("space.did", space);
+                span.setAttribute("subscriber.count", this.#connections.size);
+                span.setAttribute("dirty.count", dirtyIds?.size ?? 0);
+                try {
+                  for (const connection of this.#connections.values()) {
+                    await connection.refreshDirty(
+                      space,
+                      dirtyIds,
+                      dirtyOrigins,
+                    );
+                  }
+                } finally {
+                  span.end();
+                }
+              },
+            );
+          } catch (error) {
+            // Requeue the consumed batch (CT-1927): the dirty state was taken
+            // before fan-out, so a failure here would otherwise orphan it —
+            // no later refresh fires unless another write happens, and the
+            // batched refresh is the delivery path the staged catch-up
+            // markers rely on. Merge UNDER anything that accrued meanwhile
+            // (newer provenance wins), reschedule, and rethrow so callers
+            // see the failure.
+            this.#dirtySpaces.add(space);
+            if (dirtyIds !== undefined) {
+              let current = this.#dirtyDocsBySpace.get(space);
+              if (current === undefined) {
+                current = new Set();
+                this.#dirtyDocsBySpace.set(space, current);
               }
-            } finally {
-              span.end();
+              let currentOrigins = this.#dirtyOriginsBySpace.get(space);
+              for (const id of dirtyIds) {
+                if (current.has(id)) {
+                  // The id was re-dirtied while the failed batch was in
+                  // flight. Provenance survives only when BOTH batches agree
+                  // on the same session; otherwise the merged novelty is
+                  // mixed and must fan out authoritatively — restoring the
+                  // newer origin alone would echo-suppress the consumed
+                  // batch's foreign/unattributed novelty (CT-1927 review).
+                  const restoredOrigin = dirtyOrigins?.get(id);
+                  const currentOrigin = currentOrigins?.get(id);
+                  if (
+                    currentOrigin !== undefined &&
+                    restoredOrigin?.sessionId !== currentOrigin.sessionId
+                  ) {
+                    currentOrigins?.delete(id);
+                  }
+                  continue;
+                }
+                current.add(id);
+                const origin = dirtyOrigins?.get(id);
+                if (origin !== undefined) {
+                  if (currentOrigins === undefined) {
+                    currentOrigins = new Map();
+                    this.#dirtyOriginsBySpace.set(space, currentOrigins);
+                  }
+                  currentOrigins.set(id, origin);
+                }
+              }
             }
-          },
-        );
+            this.scheduleRefresh();
+            throw error;
+          }
+        });
       }
 
       if (initial !== undefined) {
@@ -3214,9 +3858,7 @@ export class Server {
     if (parsed?.type === "hello") {
       const response = respondToHello(parsed);
       if (response.type !== "hello.ok") {
-        return Promise.resolve(
-          encodeMemoryBoundaryUnprovenFabricValue(response),
-        );
+        return Promise.resolve(encodeMemoryBoundary(response));
       }
       return Promise.resolve(encodeMemoryBoundary({
         type: "response",
@@ -3297,6 +3939,13 @@ export class Server {
     });
     this.#schedulerSideEffectsByOwnerSpace.set(ownerSpace, tracked);
     return tracked;
+  }
+
+  /** Waits until every queued owner-space scheduler update has settled. */
+  private async drainPostCommitSchedulerSideEffects(): Promise<void> {
+    while (this.#schedulerSideEffectsByOwnerSpace.size > 0) {
+      await Promise.all(this.#schedulerSideEffectsByOwnerSpace.values());
+    }
   }
 
   private async applyPostCommitSchedulerSideEffects(
@@ -3611,6 +4260,48 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       query: parsed.query as unknown as GraphQueryRequest["query"],
+    };
+  }
+
+  if (
+    parsed.type === "entity-id.list" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    (parsed.after === undefined || typeof parsed.after === "string") &&
+    (parsed.limit === undefined ||
+      (isNonNegativeInteger(parsed.limit) && parsed.limit > 0)) &&
+    (parsed.expectedServerSeq === undefined ||
+      isNonNegativeInteger(parsed.expectedServerSeq))
+  ) {
+    return {
+      type: "entity-id.list",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      ...(parsed.after === undefined
+        ? {}
+        : { after: parsed.after as EntityIdListRequest["after"] }),
+      ...(parsed.limit === undefined ? {} : { limit: parsed.limit }),
+      ...(parsed.expectedServerSeq === undefined
+        ? {}
+        : { expectedServerSeq: parsed.expectedServerSeq }),
+    };
+  }
+
+  if (
+    parsed.type === "entity-id.exists" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    typeof parsed.id === "string"
+  ) {
+    return {
+      type: "entity-id.exists",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      id: parsed.id as EntityIdLookupRequest["id"],
     };
   }
 

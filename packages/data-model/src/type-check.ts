@@ -1,5 +1,6 @@
-import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
-import { type Immutable, isPlainObject } from "@commonfabric/utils/types";
+import { isInertArray } from "@commonfabric/utils/arrays";
+import { isInertPlainObject } from "@commonfabric/utils/objects";
+import { isPlainObject, unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
 import {
   type FabricPlainObject,
@@ -15,7 +16,8 @@ import { BaseFabricPrimitive } from "./fabric-primitives/BaseFabricPrimitive.ts"
  * `FabricSpecialObject`s (both `FabricInstance` and `FabricPrimitive`),
  * `undefined`, and arrays with `undefined` elements or sparse holes
  * -- in addition to the base fabric types (`null`, `boolean`, `number`,
- * `string`, plain objects, dense arrays).
+ * `string`, plain objects, dense arrays). An array must be a direct `Array`
+ * instance; a subclass instance is not a fabric value.
  *
  * This function is a TypeScript type guard for `FabricValueLayer`.
  */
@@ -41,13 +43,19 @@ export function isFabricValueLayer(
       }
       if (Array.isArray(value)) {
         // Arrays with `undefined` elements and sparse holes are accepted, but
-        // not arrays with non-index properties.
-        return isArrayWithOnlyIndexProperties(value);
+        // not arrays carrying named or symbol-keyed properties, nor an
+        // accessor-backed index, nor an indirect instance such as an `Array`
+        // subclass (all live code rather than inert data).
+        return isInertArray(value);
       }
       // Plain objects are accepted; class instances are not (except
-      // `FabricSpecialObject`, handled above).
-      const proto = Object.getPrototypeOf(value);
-      return proto === null || proto === Object.prototype;
+      // `FabricSpecialObject`, handled above). `FabricPlainObject` is keyed by
+      // `string`, so a symbol key has no representation either, and neither
+      // does a non-enumerable string key; an accessor-backed property is live
+      // code rather than inert data. The names this runtime reserves are a
+      // separate question from inertness -- see `unsafeObjectKeyIn()`.
+      return isInertPlainObject(value) &&
+        (unsafeObjectKeyIn(value) === undefined);
     }
 
     case "symbol": {
@@ -66,15 +74,19 @@ export function isFabricValueLayer(
  * Indicates whether the value is a `FabricValue` -- a recursive check of exact
  * structural membership in the `FabricValue` type, independent of frozen-ness.
  *
- * Returns `true` for any scalar (`null`, `undefined`, `boolean`, `number`
- * -- including `-0`, `NaN`, and `±Infinity` -- `string`, `bigint`, and
+ * Returns `true` for any scalar (`null`, `undefined`, `boolean`, `number` --
+ * including `-0`, `NaN`, and `±Infinity` -- `string`, `bigint`, and
  * registry-interned (`Symbol.for(...)`) symbols), any `FabricInstance` or
- * `FabricPrimitive`, an array of `FabricValue`s with no enumerable non-index
- * properties (sparse holes allowed), or a plain object whose values are all
- * `FabricValue`s. Returns `false` for a `function` or a unique (uninterned)
- * symbol -- whether the value itself or reached anywhere within it -- and for
- * any other class instance (`Date`, `Map`, ...) not representable as a
- * `FabricValue`. Handles circular references.
+ * `FabricPrimitive`, a direct `Array` instance holding `FabricValue`s with no
+ * named or symbol-keyed properties, `length` aside (sparse holes allowed), or a
+ * plain object whose values are all `FabricValue`s. Returns `false` for a
+ * `function` or a unique (uninterned) symbol -- whether the value itself or
+ * reached anywhere within it -- for an accessor-backed (getter/setter) property
+ * anywhere, plain-object keyed or array-indexed alike, which makes its
+ * container non-inert, for an `Array` subclass instance or other
+ * indirectly-rooted array, whose prototype is live code the same way an
+ * accessor is, and for any other class instance (`Date`, `Map`, ...) not
+ * representable as a `FabricValue`. Handles circular references.
  *
  * This is a *membership* check, not a frozen-ness check: a structurally-valid
  * but unfrozen object or array is still a `FabricValue`. For the deep-frozen
@@ -85,8 +97,8 @@ export function isFabricValueLayer(
  * membership check must not invoke.
  *
  * Contrast the shallow, single-level sibling `isFabricValueLayer()` and
- * `isFabricCompatible()` (which additionally accepts native values *convertible*
- * to fabric form).
+ * `isFabricCompatible()` (which additionally accepts native values
+ * *convertible* to fabric form).
  */
 export function isFabricValue(value: unknown): value is FabricValue {
   // Fast leaf paths first, so a function or a primitive answers without
@@ -132,18 +144,26 @@ export function isFabricValue(value: unknown): value is FabricValue {
       // type and does not recurse.
       return true;
     } else if (Array.isArray(item)) {
-      // Arrays with enumerable named (non-index) properties have no fabric
-      // representation.
-      if (!isArrayWithOnlyIndexProperties(item)) return false;
+      // Arrays with named (non-index) or symbol-keyed properties have no
+      // fabric representation; an accessor-backed index is live code rather
+      // than inert data, as is the prototype of an indirect instance such as
+      // an `Array` subclass.
+      if (!isInertArray(item)) return false;
       for (let i = 0; i < item.length; i++) {
         if (!(i in item)) continue; // sparse hole
         if (!check(item[i])) return false;
       }
       return true;
     } else if (isPlainObject(item)) {
-      const record = item as Record<string, unknown>;
-      for (const key of Object.keys(record)) {
-        if (!check(record[key])) return false;
+      // Symbol-keyed and non-enumerable string-keyed properties have no fabric
+      // representation, the same as an array's non-index properties; an
+      // accessor-backed property is live code rather than inert data. The
+      // names this runtime reserves are a separate question from inertness --
+      // see `unsafeObjectKeyIn()`.
+      if (!isInertPlainObject(item)) return false;
+      if (unsafeObjectKeyIn(item) !== undefined) return false;
+      for (const key of Object.keys(item)) {
+        if (!check(item[key])) return false;
       }
       return true;
     } else {
@@ -172,28 +192,28 @@ export function isFabricValue(value: unknown): value is FabricValue {
  */
 export function isFabricObjectOrArray(
   value: FabricValue,
-): value is FabricValue & object;
-export function isFabricObjectOrArray(
-  value: Immutable<FabricValue>,
-): value is Immutable<FabricValue> & object;
-export function isFabricObjectOrArray(value: unknown): boolean {
+): value is FabricValue & object {
   return typeof value === "object" && value !== null;
 }
 
 /**
- * Narrows to the plain-record arm of `FabricValue` (`FabricPlainObject`): an object
- * whose prototype is `Object.prototype` or `null`. This rejects arrays,
+ * Narrows to the plain-record arm of `FabricValue` (`FabricPlainObject`): an
+ * object whose prototype is `Object.prototype` or `null`. This rejects arrays,
  * `FabricSpecialObject`s, and other class instances (`Date`, `Map`, …), none of
- * which are representable as a `FabricPlainObject`. Unlike a bare `isRecord()` check,
- * it preserves the value type — `FabricPlainObject`'s string index of `FabricValue`
- * keeps an indexed value typed as a `FabricValue`.
+ * which are representable as a `FabricPlainObject`. Unlike a bare `isRecord()`
+ * check, it preserves the value type — `FabricPlainObject`'s string index of
+ * `FabricValue` keeps an indexed value typed as a `FabricValue`.
+ *
+ * This asks a shape question -- "may I read this by property name?" -- of a
+ * value the type already says is a `FabricValue`, and a null-prototype object
+ * answers yes as readily as any other record. That makes it deliberately looser
+ * than membership: a `FabricPlainObject` is `Object.prototype`-rooted, so
+ * `isFabricValue()` refuses the null-prototype object this accepts. The
+ * looseness costs nothing, the input being out of contract either way, and it
+ * keeps callers holding un-validated values from losing a reader they can use.
  */
 export function isFabricPlainObject(
   value: FabricValue,
-): value is FabricPlainObject;
-export function isFabricPlainObject(
-  value: Immutable<FabricValue>,
-): value is Immutable<FabricPlainObject>;
-export function isFabricPlainObject(value: unknown): boolean {
+): value is FabricPlainObject {
   return isPlainObject(value);
 }

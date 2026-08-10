@@ -16,6 +16,8 @@ import {
   buildCrossSpaceLinkIndex,
   buildInspectorBundle,
   buildSpaceGraph,
+  commitChurn,
+  commitsPerMinute,
   contendedEntities,
   convergence,
   type ConvergenceResult,
@@ -666,6 +668,87 @@ export const inspect = new Command()
         for (const r of rows) {
           console.log(
             `${r.writes}\twrites\t${r.sessions} sessions\t${r.id}\t(${r.scope})`,
+          );
+        }
+      });
+    } finally {
+      s.close();
+    }
+  })
+  /* inspect churn */
+  .command(
+    "churn <space:string>",
+    "Write rate over time: commits/revisions per bucket, and what drove the " +
+      "busiest one. The storm-and-settle view `hot` cannot give.",
+  )
+  .option("--bucket <seconds:number>", "Bucket width in seconds.", {
+    default: 60,
+  })
+  .option(
+    "--since <time:string>",
+    "Lower bound on commit time (inclusive). Also widens the curve to cover " +
+      "the whole window asked for.",
+  )
+  .option(
+    "--until <time:string>",
+    "Upper bound on commit time (exclusive). This is the observation " +
+      "boundary: pass the moment you stopped watching and the trailing quiet " +
+      "buckets are reported, which is what shows a storm SETTLED rather than " +
+      "merely ended at the last write.",
+  )
+  .option("--top <n:number>", "Entities to attribute the peak bucket to.", {
+    default: 10,
+  })
+  .option("--branch <branch:string>", "Branch (default: '').")
+  .action(async (options, space) => {
+    const s = await openByToken(space, options);
+    try {
+      const report = commitChurn(s, {
+        branch: options.branch,
+        bucketSeconds: options.bucket,
+        since: options.since,
+        until: options.until,
+        top: options.top,
+      });
+      out(!!options.json, report, () => {
+        if (report.peak === null) {
+          console.log("no timed commits in window");
+        } else {
+          const width = String(
+            Math.max(...report.buckets.map((b) => b.commits)),
+          ).length;
+          for (const b of report.buckets) {
+            const peak = b.startEpoch === report.peak.startEpoch
+              ? " ←peak"
+              : "";
+            console.log(
+              `${b.start}\t${String(b.commits).padStart(width)} commits\t` +
+                `${b.revisions} revisions${peak}`,
+            );
+          }
+          console.log(
+            `\n${report.totals.commits} commits / ${report.totals.revisions} ` +
+              `revisions over ${report.buckets.length} × ${report.bucketSeconds}s` +
+              `\npeak ${report.peak.start}: ${
+                commitsPerMinute(report.peak, report.bucketSeconds).toFixed(1)
+              } commits/min` +
+              // Where writing stopped, against where watching stopped. A curve
+              // that merely ran out of data ends on its last write; one that
+              // was observed through a quiet period ends after it. Only the
+              // second is evidence of a settle, and they render identically
+              // without both numbers.
+              `\nlast commit ${report.lastCommit}, observed through ${report.to}`,
+          );
+          for (const e of report.peakEntities) {
+            console.log(
+              `  ${e.writes}\twrites\t${e.sessions} sessions\t${e.id}\t(${e.scope})`,
+            );
+          }
+        }
+        if (report.untimedCommits > 0) {
+          console.log(
+            `\nnote: ${report.untimedCommits} commit(s) have unparseable ` +
+              `created_at and are absent from every bucket.`,
           );
         }
       });

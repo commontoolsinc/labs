@@ -7,6 +7,8 @@ import type {
 import type {
   CommitPrecondition,
   EntityDocument,
+  EntityIdListOptions,
+  EntityIdListResult,
   PatchOp,
   SchedulerActionSnapshotQuery,
   SchedulerExecutionContextKey,
@@ -20,13 +22,10 @@ import type {
 import type { EntityId } from "../create-ref.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
-  type Assertion,
   type AuthorizationError as IAuthorizationError,
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
   type DID,
-  type Fact,
-  type Invariant as IClaim,
   type MemorySpace,
   type QueryError as IQueryError,
   type Result,
@@ -63,19 +62,7 @@ import type {
 } from "../cfc/mod.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 
-export type {
-  Assertion,
-  DID,
-  Fact,
-  IClaim,
-  MediaType,
-  MemorySpace,
-  Result,
-  Signer,
-  State,
-  Unit,
-  URI,
-};
+export type { DID, MediaType, MemorySpace, Result, Signer, State, Unit, URI };
 export type ChangeGroup = unknown;
 
 /**
@@ -139,14 +126,17 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * Open a new connection to the storage provider associated with the given
    * space.
    */
-  open(space: MemorySpace): IStorageProviderWithReplica;
+  open(space: MemorySpace): IStorageProvider;
 
   /**
-   * Record a runtime-learned host hint for a space (federation site
-   * table). Optional: managers without remote, per-space resolution
+   * Record a runtime-learned HTTP or HTTPS host hint for a space
+   * (federation site table). Optional: managers without remote resolution
    * (emulated/test) simply don't implement it. Returns true when the
-   * hint is in effect; false when refused (seeded differently, or the
-   * space's connection is already open to another host).
+   * hint is accepted or confirms a configured or accepted route. The first
+   * hint can replace an unseeded provider's provisional default route before
+   * that route issues a stateful operation. Returns false on a conflict with a
+   * seed or accepted hint, or after a stateful operation has been issued
+   * through the provisional route.
    */
   registerSpaceHost?(space: MemorySpace, host: string): boolean;
 
@@ -318,18 +308,6 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
 
 export interface IRemoteStorageProviderSettings {
   /**
-   * Number of subscriptions remote storage provider is allowed to have per
-   * space.
-   */
-  maxSubscriptionsPerSpace: number;
-
-  /**
-   * Amount of milliseconds we will spend waiting on WS connection before we
-   * abort.
-   */
-  connectionTimeout: number;
-
-  /**
    * EXPERIMENTAL (default off): allow more than one watch-refresh round trip
    * to be in flight per space at once, up to a bounded window
    * (`CONCURRENT_WATCH_REFRESH_WINDOW`). By default watch acquisition is strict
@@ -342,12 +320,6 @@ export interface IRemoteStorageProviderSettings {
    * docs/development/EXPERIMENTAL_OPTIONS.md.
    */
   experimentalConcurrentWatchRefresh?: boolean;
-}
-
-export interface LocalStorageOptions {
-  as: Signer;
-  id?: string;
-  settings?: IRemoteStorageProviderSettings;
 }
 
 export interface IStorageProvider {
@@ -379,16 +351,22 @@ export interface IStorageProvider {
    */
   destroy(): Promise<void>;
 
-  /**
-   * Get the storage provider's replica.
-   *
-   * @returns The storage provider's replica.
-   */
-  getReplica(): string | undefined;
-}
-
-export interface IStorageProviderWithReplica extends IStorageProvider {
+  /** The replica holding this space's documents. */
   replica: ISpaceReplica;
+
+  /** Establish the authenticated space session without reading entity values. */
+  ensureSession?(): Promise<void>;
+
+  /** List live space-scoped entity identifiers without loading their values. */
+  listEntityIds?(): Promise<string[] | undefined>;
+
+  /** List one page from a stable live entity-identifier snapshot. */
+  listEntityIdPage?(
+    options?: EntityIdListOptions,
+  ): Promise<EntityIdListResult | undefined>;
+
+  /** Test one live space-scoped entity identifier without loading its value. */
+  entityIdExists?(id: string): Promise<boolean | undefined>;
 
   /**
    * Internal scheduler persistence query. Memory v2 providers implement this
@@ -694,11 +672,11 @@ export interface IMemoryChange {
   /**
    * Value memory address had before change.
    */
-  before: Immutable<FabricValue>;
+  before: FabricValue;
   /**
    * Value memory address has after change.
    */
-  after: Immutable<FabricValue>;
+  after: FabricValue;
 }
 
 export type StorageTransactionStatus =
@@ -723,6 +701,32 @@ export type StorageTransactionStatus =
  * will send it to an upstream storage provider which will either accept, if no
  * invariants have being invalidated, or reject and fail commit.
  */
+
+/**
+ * Options for {@link IStorageTransaction.commit}.
+ */
+export interface TransactionCommitOptions {
+  /**
+   * When the returned promise resolves.
+   *
+   * - `"coverage"` (default): on accept, once the caller's subscribed view
+   *   reflects the committed write, its watch-set consequences, and the
+   *   foreign novelty it was applied on top of (marker coverage, spec
+   *   §4.11.2); on rejection, after the read-repair gate, so a retry runs
+   *   against the repaired base.
+   * - `"verdict"`: as soon as the commit's fate is sealed — the accept
+   *   verdict or the rejection receipt — without the coverage wait, the
+   *   read-repair wait, the synced() hold, or the post-commit effect run
+   *   (still tracked via postCommitEffectsSettled()). For callers whose
+   *   premise is "durably decided but not yet fanned out":
+   *   controlled-staleness test fixtures foremost. Only the RETURNED
+   *   promise changes: state application still parks, and commit
+   *   callbacks and the pending-commit barrier remain on the full
+   *   settlement timeline (coverage on accept, read repair on rejection).
+   */
+  resolveAt?: "coverage" | "verdict";
+}
+
 export interface IStorageTransaction {
   /**
    * Optional change group used to associate commits with scheduler actions.
@@ -769,6 +773,13 @@ export interface IStorageTransaction {
    */
   enableMultiSpaceWrites?(order?: readonly MemorySpace[]): void;
   /**
+   * Confirm that every replica supplying this transaction's read basis is
+   * still the active replica for its space. Storage calls this immediately
+   * before issuing a mutation so a route replacement cannot carry a result
+   * computed from the old replica into another space.
+   */
+  validateReplicaRoutes?(): Result<Unit, IStorageTransactionInconsistent>;
+  /**
    * Optional read-only mode hook used by runtime-generated fallback read
    * transactions.
    */
@@ -794,8 +805,8 @@ export interface IStorageTransaction {
    * memory transaction. When there are no semantic writes, storage backends may
    * still commit this metadata as an internal no-op observation.
    */
-  setSchedulerObservation?(observation: unknown): void;
-  getSchedulerObservation?(): unknown;
+  setSchedulerObservation?(observation: FabricValue): void;
+  getSchedulerObservation?(): FabricValue;
 
   /**
    * Optional commit-time preconditions attached to this transaction's commit in
@@ -825,8 +836,11 @@ export interface IStorageTransaction {
    * by identity, a numeric increment, or a value removed by identity. The commit
    * emits these as the corresponding mergeable op (which the server resolves
    * against durable state) and drops the op's path from the commit's conflict
-   * read set, so concurrent and stale-base writes merge rather than clobber. The
-   * op catalog and folding rules live in ./mergeable-ops.ts.
+   * read set, so concurrent and stale-base writes merge rather than clobber.
+   * Recording is an intent, not a guarantee: a later write that reshapes the
+   * same collection, or a recorded tail that no longer describes the local value
+   * at commit, falls the path back to the whole-value diff. The op catalog,
+   * folding rules, and that fallback live in ./mergeable-ops.ts.
    */
   recordMergeableOp?(
     address: IMemorySpaceAddress,
@@ -834,12 +848,19 @@ export interface IStorageTransaction {
   ): void;
 
   /**
-   * Abandon the mergeable fast path for the array at `address`. A caller that
-   * rewrites the whole array in a way a recorded mergeable op cannot represent —
-   * an in-place reshape such as sort/reverse/splice after a push — calls this so
-   * the commit emits the whole-array diff (the correct local value) instead of a
-   * tail-relative op whose recorded tail no longer identifies the appended
-   * elements. A path with no recorded op is left untouched.
+   * Abandon the mergeable fast path for the arrays covered by `address`. A
+   * caller that rewrites an array in a way a recorded mergeable op cannot
+   * represent — an in-place reshape such as sort/reverse/splice after a push, or
+   * a whole-value overwrite — calls this so the commit emits the whole-array
+   * diff (the correct local value) instead of a tail-relative op whose recorded
+   * tail no longer identifies the appended elements.
+   *
+   * This covers every recorded op AT or BENEATH `address`, since a write to an
+   * enclosing object rewrites the arrays inside it too, and nothing above it, so
+   * a write beneath an array (an element edit) leaves that array's op alone. A
+   * path carrying no op yet is left untouched — not because a reshape before an
+   * op is harmless, but because that case is caught at commit instead, when the
+   * op's recorded tail is checked against the value it claims to describe.
    */
   poisonMergeableOp?(address: IMemorySpaceAddress): void;
 
@@ -908,13 +929,42 @@ export interface IStorageTransaction {
   status(): StorageTransactionStatus;
 
   /**
-   * Helper that is the same as `reader().read()` but more convenient, as it
-   * combines error capturing in one call.
-   *
    * Reads a value from a (local) memory address and captures corresponding
    * `Read` in the transaction invariants. If value was written in read memory
    * address in this transaction read will return value that was written as
    * opposed to value stored.
+   *
+   * Read will fail with `InactiveTransactionError` if transaction is no longer
+   * active.
+   *
+   * A slot that does not exist reads as a successful result holding
+   * `undefined`. Reading *through* something that cannot hold the rest of the
+   * path is an error instead: `INotFoundError` when an intermediate is absent,
+   * `ITypeMismatchError` when one is a primitive. The read is recorded either
+   * way, so the assumption about non-existence is upheld at commit.
+   *
+   * A document that does not exist at all is the one case where a first path
+   * segment already counts as reading through something absent: the root
+   * (`path: []`) reads as `undefined`, while any deeper path fails with
+   * `INotFoundError` naming the document.
+   *
+   * ```ts
+   *  const w = tx.write({ space, type, id, path: [] }, {
+   *    title: "Hello world",
+   *    content: [
+   *       { text: "Beautiful day", format: "bold" }
+   *    ]
+   *  })
+   *  assert(w.ok)
+   *
+   *  assert(tx.read({ space, type, id, path: ['title'] }).ok?.value === "Hello world")
+   *  // A missing slot is a successful read of `undefined`
+   *  assert(tx.read({ space, type, id, path: ['author'] }).ok?.value === undefined)
+   *  // Reaching through the missing `author` is not
+   *  assert(tx.read({ space, type, id, path: ['author', 'address'] }).error.name === 'NotFoundError')
+   *  // An array's `length` reads as its length
+   *  assert(tx.read({ space, type, id, path: ['content', 'length'] }).ok?.value === 1)
+   * ```
    *
    * @param address - Memory address to read from.
    * @param options - Optional read options including metadata
@@ -938,17 +988,6 @@ export interface IStorageTransaction {
   ): Result<Unit, ReadError>;
 
   /**
-   * Creates a memory space writer for this transaction. Fails if transaction is
-   * no longer in progress or if writer for the different space was already open
-   * on this transaction. Requesting a writer for the same memory space will
-   * return same writer instance.
-   */
-  writer(space: MemorySpace): Result<ITransactionWriter, WriterError>;
-
-  /**
-   * Helper that is the same as `writer().write()` but more convenient, as it
-   * combines error capturing in one call.
-   *
    * Writes a value into a storage at a given address & captures it in the
    * transaction invariants.
    *
@@ -970,15 +1009,6 @@ export interface IStorageTransaction {
   writeBatch?(
     writes: Iterable<ITransactionWriteRequest>,
   ): Result<Unit, WriterError | WriteError>;
-
-  /**
-   * Creates a memory space reader for inside this transaction. Fails if
-   * transaction is no longer in progress. Requesting a reader for the same
-   * memory space will return same reader instance.
-   */
-  reader(
-    space: MemorySpace,
-  ): Result<ITransactionReader, ReaderError>;
 
   /**
    * Transaction can be cancelled which causes storage provider to stop keeping
@@ -1007,10 +1037,33 @@ export interface IStorageTransaction {
    * error. Commit is NOT idempotent — it does not replay the original result.
    *
    * When this method returns, the changes will have been committed locally,
-   * but may not be visible to another runtime. When the returned promise
-   * resolves, the data is fully committed and available to other processes.
+   * but may not be visible to another runtime. The commit is fully durable
+   * and available to other processes at the VERDICT; the returned promise
+   * (by default) resolves later, at coverage — once the server's first
+   * subscription update after the write has been integrated, so the
+   * caller's view reflects the write, any docs it made newly reachable,
+   * and the foreign novelty it was applied on top of. On rejection the
+   * promise resolves after the read-repair gate, so a retry runs against
+   * the repaired base. {@link TransactionCommitOptions.resolveAt}
+   * `"verdict"` resolves at fate-sealing instead; effects gated on
+   * durability alone hook {@link IExtendedStorageTransaction.addVerdictCallback}
+   * or {@link commitVerdict} rather than this promise.
    */
-  commit(): Promise<Result<Unit, CommitError>>;
+  commit(
+    options?: TransactionCommitOptions,
+  ): Promise<Result<Unit, CommitError>>;
+
+  /**
+   * Resolves with the same result as {@link commit}, but no later than the
+   * moment the commit's fate is known — the server verdict or a local
+   * rejection. The commit promise itself may resolve later: it additionally
+   * waits for the subscribed view to reflect the committed write (or the
+   * read-repair gate on rejection). Effects gated on durability alone
+   * (verdict callbacks, the outbox flush) hook this instead of the commit
+   * promise. Optional: backends without the split fall back to the commit
+   * promise.
+   */
+  commitVerdict?(): Promise<Result<Unit, CommitError>>;
 
   /**
    * Optional native commit draft hook for storage backends that can consume a
@@ -1019,8 +1072,7 @@ export interface IStorageTransaction {
   getNativeCommit?(space: MemorySpace): NativeStorageCommit | undefined;
 }
 
-export interface IExtendedStorageTransaction
-  extends Omit<IStorageTransaction, "reader" | "writer"> {
+export interface IExtendedStorageTransaction extends IStorageTransaction {
   tx: IStorageTransaction;
 
   /**
@@ -1029,6 +1081,29 @@ export interface IExtendedStorageTransaction
    * runner to derive the handler result cell's cause (spec §7.6).
    */
   dispatchedEventId?: string;
+
+  /**
+   * Payload keys the RUNTIME itself injected into the dispatched event's
+   * value (e.g. the LLM tool-call path's `result` cell). Set by the
+   * scheduler's event dispatch from the send's internal options; consumed by
+   * the runner's closed-world gate to exempt exactly these keys from an
+   * `additionalProperties: false` event schema. Provenance, not shape: the
+   * marker travels out-of-band from the injection site, so payload DATA can
+   * never claim it — a caller-supplied `result` field, link-valued or not,
+   * arrives unmarked and is judged like any other undeclared field.
+   */
+  dispatchedRuntimeInjectedEventKeys?: readonly string[];
+
+  /**
+   * The durable address of this handling's result/receipt cell (spec §7.6:
+   * "the receipt is the handling's result cell"). Set by the runner when a
+   * handler's outcome is written; consumed by a sender's commit callback to
+   * hand the caller a readable handle — on success AND on a create-only
+   * receipt collision, where it addresses the winner's original outcome
+   * (verb contract WS-D). Structural exposure so no caller ever reconstructs
+   * the `{ $ctx, $event }` cause or parses error prose.
+   */
+  handlingReceiptLink?: NormalizedFullLink;
 
   /**
    * The wall-clock instant (ms) of the event whose dispatch opened this
@@ -1304,21 +1379,60 @@ export interface IExtendedStorageTransaction
   hasPendingPostCommitEffects(): boolean;
 
   /**
-   * Add a callback to be called when the transaction commit completes.
-   * The callback receives the transaction as a parameter and is called
-   * regardless of whether the commit succeeded or failed.
+   * Resolves once the current commit's post-commit effect layer — verdict
+   * callbacks and the CFC outbox flush — has run. The effects run at the
+   * verdict, so this may resolve before the commit promise itself, which
+   * additionally waits for the subscribed view to reflect the write.
+   * Barriers that wait for a fire-and-forget commit's effects (work
+   * registration, the sqlite query RPC + writeback) wait on this rather
+   * than the commit promise: the promise's extra wait is on incoming watch
+   * frames, which quiescence must not depend on. Resolved when no commit
+   * is in flight.
+   */
+  postCommitEffectsSettled(): Promise<void>;
+
+  /**
+   * Add a callback to be called when the transaction settles. The callback
+   * receives the transaction as a parameter and is called regardless of
+   * whether the commit succeeded or failed. `abort()` settles the transaction
+   * too, and delivers a `StorageTransactionAborted` error to the callback: the
+   * writes it staged are discarded either way, so a callback that compensates
+   * a failed commit describes the rollback an abort performs as well.
    *
    * Internal-only hook. Callbacks may run after failed commits and therefore
    * must not perform external side effects or release external requests. Use
    * the CFC post-commit outbox for effectful work that should happen only after
    * a successful commit.
    *
-   * Note: Callbacks are called synchronously after commit completes.
+   * A callback that undoes in-memory state must check that the state it is
+   * about to undo is still the state this transaction established. Another
+   * transaction can reach the same deterministic address and take ownership
+   * before this one settles.
+   *
+   * Note: Callbacks are called synchronously after the transaction settles.
    * If a callback throws, the error is logged but doesn't affect other callbacks.
    *
-   * @param callback - Function to call after commit
+   * @param callback - Function to call when the transaction settles
    */
   addCommitCallback(
+    callback: (
+      tx: IExtendedStorageTransaction,
+      result: Result<Unit, CommitError>,
+    ) => void,
+  ): void;
+
+  /**
+   * Add a callback that fires when the commit's fate is sealed — the
+   * accept verdict or the rejection receipt — BEFORE the waits the commit
+   * promise (and commit callbacks) additionally sit out: view coverage on
+   * accept, the read-repair gate on rejection. For work gated on
+   * durability alone; a consumer that acts on the post-commit view (a
+   * compensation reading the repaired base, a retry) belongs on
+   * {@link addCommitCallback}. Same once-only dispatch and error isolation
+   * as commit callbacks; on synchronous fates (abort, pre-storage
+   * rejection) both layers fire together, verdict first.
+   */
+  addVerdictCallback(
     callback: (
       tx: IExtendedStorageTransaction,
       result: Result<Unit, CommitError>,
@@ -1450,62 +1564,6 @@ export interface IExtendedStorageTransaction
   };
 }
 
-export interface ITransactionReader {
-  did(): MemorySpace;
-  /**
-   * Reads a value from a (local) memory address and captures corresponding
-   * `Read` in the the transaction invariants. If value was written in read
-   * memory address in this transaction read will return value that was written
-   * as opposed to value stored.
-   *
-   * Read will fail with `InactiveTransactionError` if transaction is no longer
-   * active.
-   *
-   * Read will fail with `INotFoundError` when reading inside a memory address
-   * that does not exist in local replica. The `Read` invariant is still
-   * captured however to ensure that assumption about non existence is upheld.
-   *
-   * ```ts
-   *  const w = tx.write({ type, id, path: [] }, {
-   *    title: "Hello world",
-   *    content: [
-   *       { text: "Beautiful day", format: "bold" }
-   *    ]
-   *  })
-   *  assert(w.ok)
-   *
-   *  assert(tx.read({ type, id, path: ['author'] }).ok === undefined)
-   *  assert(tx.read({ type, id, path: ['author', 'address'] }).error.name === 'NotFoundError')
-   *  // JS specific getters are not supported
-   *  assert(tx.read({ type, id, path: ['content', 'length'] }).ok?.value === undefined)
-   *  assert(tx.read({ type, id, path: ['title'] }).ok?.value === "Hello world")
-   *  // Referencing non-existing facts produces errors
-   *  assert(tx.read({ type: 'bad/mime', id, path: ['author'] }).error.name === 'NotFoundError')
-   * ```
-   *
-   * @param address - Memory address to read from
-   * @param options - Optional read options including metadata
-   */
-  read(
-    address: IMemoryAddress,
-    options?: IReadOptions,
-  ): Result<IAttestation, ReadError>;
-}
-
-export interface ITransactionWriter extends ITransactionReader {
-  /**
-   * Write a value into a storage at a given address & captures it in the
-   * transaction invariants. Write will fail with `IStorageTransactionError`
-   * if transaction has an error state. Write will fail with
-   * `IStorageTransactionClosed` if transaction is done.
-   */
-  write(
-    address: IMemoryAddress,
-    value?: FabricValue,
-    options?: IWriteOptions,
-  ): Result<IAttestation, WriteError>;
-}
-
 /**
  * Error that is produced when transaction is being updated after it was already
  * aborted.
@@ -1556,6 +1614,7 @@ export type StorageTransactionFailed =
   | StorageTransactionRejected;
 
 export type StorageTransactionRejected =
+  | IStorageTransactionInconsistent
   | IConflictError
   | IPreconditionFailedError
   | IStoreError
@@ -1626,8 +1685,6 @@ export type WriteError =
   | IReadOnlyAddressError
   | ITypeMismatchError;
 
-export type ReaderError = InactiveTransactionError;
-
 export type WriterError =
   | InactiveTransactionError
   | IStorageTransactionWriteIsolationError
@@ -1641,7 +1698,7 @@ export interface IStorageTransactionComplete extends IStorageError {
  * Represents adddress within the memory space which is like pointer inside the
  * fact value in the memory.
  */
-export interface IMemoryAddress {
+export type IMemoryAddress = {
   /**
    * URI to an entity. It corresponds to `of` field in the memory protocol.
    */
@@ -1660,11 +1717,11 @@ export interface IMemoryAddress {
    * address. It is a path within the `is` field of the fact in memory protocol.
    */
   path: readonly MemoryAddressPathComponent[];
-}
+};
 
-export interface IMemorySpaceAddress extends IMemoryAddress {
+export type IMemorySpaceAddress = IMemoryAddress & {
   space: MemorySpace;
-}
+};
 
 export type MemoryAddressPathComponent = string;
 
@@ -1704,14 +1761,10 @@ export interface ISpaceReplica extends ISpace {
 
   getDocument(id: URI, scope?: CellScope): EntityDocument | undefined;
 
-  commit?(
-    transaction: ITransaction,
-    source?: IStorageTransaction,
-  ): Promise<Result<Unit, StorageTransactionRejected>>;
-
   commitNative?(
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
+    options?: TransactionCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>>;
 }
 
@@ -1719,6 +1772,7 @@ export type PushError =
   | IQueryError
   | IStoreError
   | IConnectionError
+  | IStorageTransactionInconsistent
   | IConflictError
   | IPreconditionFailedError
   | TransactionError
@@ -1734,13 +1788,6 @@ export interface IStoreError extends IStorageError {
   readonly name: "StoreError";
   readonly cause: IStorageError;
 }
-
-/**
- * Archive of the journal keyed by memory space. Each read attestation
- * are represented as `claims` and write attestation are represented as
- * `facts`.
- */
-export type JournalArchive = Map<MemorySpace, ITransaction>;
 
 export interface ITransactionJournal {
   activity(): Iterable<Activity>;
@@ -1758,8 +1805,8 @@ export interface TransactionReactivityLog {
 
 export interface TransactionWriteDetail {
   address: IMemorySpaceAddress;
-  value?: Immutable<FabricValue>;
-  previousValue?: Immutable<FabricValue>;
+  value?: FabricValue;
+  previousValue?: FabricValue;
   /**
    * Pre-transaction slot presence at `address.path` — distinguishes an
    * absent slot from a present slot holding `undefined`, which
@@ -1772,7 +1819,7 @@ export interface TransactionWriteDetail {
 
 export interface TransactionReadDetail {
   address: IMemorySpaceAddress;
-  value?: Immutable<FabricValue>;
+  value?: FabricValue;
 }
 
 export type NativeStorageCommitOperation =
@@ -1800,7 +1847,7 @@ export type NativeStorageCommitOperation =
 
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
-  schedulerObservation?: unknown;
+  schedulerObservation?: FabricValue;
   preconditions?: readonly CommitPrecondition[];
   /**
    * Folded SQLite write ops, applied in the same wire commit as `operations`
@@ -1808,16 +1855,6 @@ export interface NativeStorageCommit {
    * doc-pending / touched / notify machinery.
    */
   sqliteOps?: readonly SqliteOperation[];
-}
-
-export interface ITransaction {
-  claims: IClaim[];
-
-  facts: Fact[];
-}
-
-export interface IStorageEdit {
-  for(space: MemorySpace): ITransaction;
 }
 
 export type Activity = Variant<{
@@ -1916,13 +1953,13 @@ export interface ITypeMismatchError extends IStorageError {
  */
 export interface IAttestation {
   readonly address: IMemoryAddress;
-  readonly value?: Immutable<FabricValue>;
+  readonly value?: FabricValue;
 }
 
 // An IAttestation where the address is an IMemorySpaceAddress
 export interface IMemorySpaceAttestation {
   readonly address: IMemorySpaceAddress;
-  readonly value?: Immutable<FabricValue>;
+  readonly value?: FabricValue;
 }
 
 // Re-export transaction wrapper utilities from implementation

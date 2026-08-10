@@ -8,7 +8,7 @@ import {
   TypeScriptCompiler,
   TypeScriptCompilerOptions,
 } from "../mod.ts";
-import { StaticCacheFS } from "@commonfabric/static";
+import { StaticCache } from "@commonfabric/static";
 
 type TestDef =
   & { name: string; source: string; expectedError?: string }
@@ -32,18 +32,85 @@ const TESTS: TestDef[] = [
       "Argument of type 'string' is not assignable to parameter of type 'number'.",
   },
   {
+    // Parse errors fail at the syntactic gate, before type-checking.
     name: "Throws: Invalid source",
     source: "}x",
-    expectedError: "Cannot find name 'x'.",
+    expectedError: "Declaration or statement expected.",
+  },
+  {
+    // `noCheck` skips type-checking, never parsing. With noEmitOnError off,
+    // this explicit gate is the only thing between malformed source and a
+    // malformed emit.
+    name: "Throws: syntax error still fatal under noCheck",
+    source: "export const x = ;",
+    noCheck: true,
+    expectedError: "Expression expected.",
+  },
+  {
+    // The most permissive mode combination: storedSource turns noEmitOnError
+    // off and noCheck skips semantics — the explicit syntactic gate is the
+    // ONLY thing standing, and it must still stand.
+    name: "Throws: syntax error still fatal under storedSource + noCheck",
+    source: "export const x = ;",
+    storedSource: true,
+    noCheck: true,
+    expectedError: "Expression expected.",
   },
   {
     name: "Throws: Invalid import",
     source: "import { foo } from './foo.ts';export default foo()",
     expectedError: "Cannot find module './foo.ts'",
   },
+  {
+    // Authoring surfaces stay strict: with the author present, the right fix
+    // for a stale directive is removing it.
+    name: "Throws: unused @ts-expect-error is fatal when authoring",
+    source: [
+      "const add = (x: number, y: number): number => x + y;",
+      "// @ts-expect-error -- suppressed an error under an older type env",
+      "export default add(1, 2);",
+      "",
+    ].join("\n"),
+    expectedError: "Unused '@ts-expect-error' directive.",
+  },
+  {
+    // Stored sources are recompiled by every future toolchain against
+    // PLATFORM-supplied types; a directive that becomes unnecessary when
+    // those types improve must not brick the reload (CT-1916 — 2026-07-28
+    // estuary, loom-mobile patterns vs. a jsx.d.ts that gained a prop).
+    name: "Unused @ts-expect-error compiles under storedSource",
+    source: [
+      "const add = (x: number, y: number): number => x + y;",
+      "// @ts-expect-error -- suppressed an error under an older type env",
+      "export default add(1, 2);",
+      "",
+    ].join("\n"),
+    storedSource: true,
+  },
+  {
+    // The tolerance is code-2578-narrow: a directive that still covers a
+    // REAL error keeps suppressing it in either mode, and errors outside any
+    // directive still fail (covered by "Throws: type check failure" above).
+    name: "@ts-expect-error still suppresses a live error",
+    source: [
+      "const add = (x: number, y: number): number => x + y;",
+      "// @ts-expect-error -- intentionally wrong argument type",
+      "export default add('1', 2);",
+      "",
+    ].join("\n"),
+  },
+  {
+    // storedSource must not weaken real type errors — only hygiene codes.
+    name: "Throws: real type error still fatal under storedSource",
+    source:
+      "function add(x:number, y:number): number {return x+y}; export default add(`0`, 2);",
+    storedSource: true,
+    expectedError:
+      "Argument of type 'string' is not assignable to parameter of type 'number'.",
+  },
 ];
 
-const staticCache = new StaticCacheFS();
+const staticCache = StaticCache.fromFileSystem();
 const types = await getTypeScriptEnvironmentTypes(staticCache);
 types["commonfabric.d.ts"] = await staticCache.getText(
   "types/commonfabric.d.ts",
@@ -79,7 +146,7 @@ describe("TypeScriptCompiler", () => {
     expect(main.js).toContain('require("./math/subtract.ts")');
     expect(main.js).toContain("exports.run");
     expect(main.sourceMap).toBeDefined();
-    // No AMD wrapper / define() — this is bare CommonJS.
+    // Bare CommonJS: no bundler wrapper, no `define()` registration.
     expect(main.js).not.toContain("define(");
     expect(modules.get("/utils.ts")!.js).toContain("exports.add");
   });
@@ -114,6 +181,40 @@ describe("TypeScriptCompiler", () => {
     expect(collected.modules.get("/main.ts")?.policyManifests).toEqual([
       manifest,
     ]);
+  });
+
+  it("compileToModulesCollecting reports stale directives AND real errors", async () => {
+    // The corpus check is an AUTHORING surface — no stored-source tolerance:
+    // an unused @ts-expect-error is reported (for the author to remove)
+    // alongside real type errors, each attributed to its file.
+    const compiler = new TypeScriptCompiler(types);
+    const resolved = await compiler.resolveProgram(
+      new InMemoryProgram("/main.ts", {
+        "/main.ts": [
+          "import { bad } from './bad.ts';",
+          "const add = (x: number, y: number): number => x + y;",
+          "// @ts-expect-error -- suppressed under an older type env",
+          "export default add(1, 2) + bad;",
+          "",
+        ].join("\n"),
+        "/bad.ts": "export const bad: number = 'not a number';\n",
+      }),
+    );
+    const collected = compiler.compileToModulesCollecting(resolved);
+    // The emit pass re-reports per-file diagnostics, so assert the SET of
+    // attributed files rather than exact multiplicity.
+    expect([...new Set(collected.diagnostics.map((d) => d.file))].sort())
+      .toEqual([
+        "/bad.ts",
+        "/main.ts",
+      ]);
+    const byFile = Object.fromEntries(
+      collected.diagnostics.map((d) => [d.file, d.message]),
+    );
+    expect(byFile["/main.ts"]).toContain("Unused '@ts-expect-error'");
+    expect(byFile["/bad.ts"]).toContain(
+      "Type 'string' is not assignable to type 'number'.",
+    );
   });
 
   it("compileToModulesInterleaved emits byte-identical output to compileToModules", async () => {

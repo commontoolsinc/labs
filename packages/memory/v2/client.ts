@@ -1,14 +1,19 @@
+import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import {
   type ClientCommit,
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
-  encodeMemoryBoundaryUnprovenFabricValue,
+  type EntityId,
+  type EntityIdListOptions,
+  type EntityIdListResult,
+  type EntityIdLookupResult,
   type EntitySnapshot,
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryResult,
+  MAX_ENTITY_ID_PAGE_SIZE,
   MEMORY_PROTOCOL,
   type MemoryProtocolFlags,
   parseMemoryProtocolFlags,
@@ -44,6 +49,7 @@ export type Transport = {
 
 export type ConnectOptions = {
   transport: Transport;
+  signal?: AbortSignal;
 };
 
 export type MountOptions = {
@@ -53,8 +59,8 @@ export type MountOptions = {
 };
 
 export type SessionOpenAuth = {
-  invocation: Record<string, unknown>;
-  authorization: unknown;
+  invocation: FabricPlainObject;
+  authorization: FabricValue;
 };
 
 export type SessionOpenAuthContext = {
@@ -102,6 +108,42 @@ const compareEntitySnapshot = (
   (left.scope ?? "space").localeCompare(right.scope ?? "space") ||
   left.id.localeCompare(right.id);
 
+const runWithAbortSignal = async <T>(
+  signal: AbortSignal | undefined,
+  fallbackMessage: string,
+  start: () => T | PromiseLike<T>,
+): Promise<T> => {
+  const abortError = (): Error =>
+    signal?.reason instanceof Error
+      ? signal.reason
+      : new Error(fallbackMessage);
+  if (signal?.aborted) {
+    throw abortError();
+  }
+  if (signal === undefined) {
+    return await start();
+  }
+
+  const cancelled = Promise.withResolvers<never>();
+  const cancel = (): void => cancelled.reject(abortError());
+  signal.addEventListener("abort", cancel, { once: true });
+  let work: Promise<T>;
+  try {
+    work = Promise.resolve(start());
+  } catch (error) {
+    signal.removeEventListener("abort", cancel);
+    throw error;
+  }
+  if (signal.aborted) {
+    cancel();
+  }
+  try {
+    return await Promise.race([work, cancelled.promise]);
+  } finally {
+    signal.removeEventListener("abort", cancel);
+  }
+};
+
 export class Client {
   #pending = new Map<string, PromiseWithResolvers<unknown>>();
   #spaces = new Set<SpaceSession>();
@@ -130,8 +172,25 @@ export class Client {
 
   static async connect(options: ConnectOptions): Promise<Client> {
     const client = new Client(options.transport);
-    await client.hello();
-    return client;
+    const abortError = (): Error =>
+      options.signal?.reason instanceof Error
+        ? options.signal.reason
+        : new Error("memory client connection cancelled");
+    const closeForAbort = (): void => {
+      void client.close().catch(() => {});
+    };
+    options.signal?.addEventListener("abort", closeForAbort, { once: true });
+    try {
+      if (options.signal?.aborted) throw abortError();
+      await client.hello();
+      if (options.signal?.aborted) throw abortError();
+      return client;
+    } catch (error) {
+      await client.close().catch(() => {});
+      throw options.signal?.aborted ? abortError() : error;
+    } finally {
+      options.signal?.removeEventListener("abort", closeForAbort);
+    }
   }
 
   /** The flags the SERVER advertised in its `hello.ok` (null before the first
@@ -156,13 +215,34 @@ export class Client {
     space: string,
     options: MountOptions = {},
     openAuthFactory?: SessionOpenAuthFactory,
+    signal?: AbortSignal,
   ): Promise<SpaceSession> {
-    const auth = await openAuthFactory?.(
-      space,
-      options,
-      this.sessionOpenAuthContext(),
+    const auth = await runWithAbortSignal(
+      signal,
+      "memory session mount cancelled",
+      () =>
+        openAuthFactory?.(
+          space,
+          options,
+          this.sessionOpenAuthContext(),
+        ),
     );
-    const result = await this.openSession(space, options, auth);
+    const result = await runWithAbortSignal(
+      signal,
+      "memory session mount cancelled",
+      () => this.openSession(space, options, auth),
+    );
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error
+        ? signal.reason
+        : new Error("memory session mount cancelled");
+    }
+    // Between openSession resolving (the session now exists server-side)
+    // and the registration below, a session-scoped frame would find no
+    // routing entry. Unreachable for a transport that delivers one frame
+    // per event-loop task: this continuation is synchronous plus
+    // microtasks, which drain before the next task, and only a
+    // resume-mount has frames to deliver that early.
     const session = new SpaceSession(
       this,
       space,
@@ -170,6 +250,7 @@ export class Client {
       result.sessionToken,
       result.serverSeq,
       openAuthFactory,
+      signal,
     );
     this.#spaces.add(session);
     return session;
@@ -179,7 +260,7 @@ export class Client {
     this.#spaces.delete(session);
   }
 
-  async request<Result>(message: Record<string, unknown>): Promise<Result> {
+  async request<Result>(message: FabricPlainObject): Promise<Result> {
     await this.ensureConnected();
     // `ensureConnected()` is async even when the transport is already live, so
     // close() can run while this request is suspended there. Recheck before
@@ -190,8 +271,15 @@ export class Client {
     }
     const requestId = message.requestId as string;
     const pending = Promise.withResolvers<unknown>();
+    // The rejection handler below only attaches after the transport send
+    // completes, and send suspends across event-loop turns on any real
+    // transport — close()'s rejectPending() can fire in that window with
+    // no handler attached yet, surfacing as an unhandled rejection. The
+    // pre-attached no-op keeps the window closed; the await below still
+    // observes the rejection.
+    pending.promise.catch(() => {});
     this.#pending.set(requestId, pending);
-    await this.transport.send(encodeMemoryBoundaryUnprovenFabricValue(message));
+    await this.transport.send(encodeMemoryBoundary(message));
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
@@ -255,13 +343,15 @@ export class Client {
   private async hello(): Promise<void> {
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
-    await this.transport.send(encodeMemoryBoundary({
-      type: "hello",
-      protocol: MEMORY_PROTOCOL,
-      flags: getMemoryProtocolFlags(),
-    }));
     try {
-      await ack.promise;
+      await Promise.all([
+        this.transport.send(encodeMemoryBoundary({
+          type: "hello",
+          protocol: MEMORY_PROTOCOL,
+          flags: getMemoryProtocolFlags(),
+        })),
+        ack.promise,
+      ]);
       this.#connected = true;
     } finally {
       this.#helloPending = null;
@@ -522,6 +612,12 @@ export class SpaceSession {
   #readyOnConnection = true;
   #restoring = false;
   #caughtUpLocalSeq = 0;
+
+  /** Invoked when a restore REPLACES the session (a new session id, or the
+   * same id re-opened without resume): the marker epoch reset, so
+   * marker-keyed client state (parked accepted promotions) must be
+   * reconciled immediately (CT-1927). */
+  onSessionReplaced: (() => void) | undefined;
   // Highest caughtUpLocalSeq already pushed into the WatchView (via a real sync
   // or a synthetic forward). Subscribers such as runner storage only advance
   // their own caught-up seq from emitted syncs, so a resume that promotes
@@ -540,6 +636,7 @@ export class SpaceSession {
     sessionToken: string | undefined,
     serverSeq: number,
     private readonly openAuthFactory?: SessionOpenAuthFactory,
+    private readonly routeSignal?: AbortSignal,
   ) {
     this.#sessionId = sessionId;
     this.#sessionToken = sessionToken;
@@ -574,13 +671,21 @@ export class SpaceSession {
     }
   }
 
-  async transact(commit: ClientCommit): Promise<AppliedCommit> {
+  /**
+   * `beforeIssue` runs after the open-session check and before this mutation
+   * enters the session's outstanding request state. Throwing prevents issue.
+   */
+  async transact(
+    commit: ClientCommit,
+    beforeIssue?: () => void,
+  ): Promise<AppliedCommit> {
     this.#assertOpen();
     const existing = this.#outstandingCommits.get(commit.localSeq);
     if (existing) {
       return await existing.pending.promise;
     }
 
+    beforeIssue?.();
     const pending = Promise.withResolvers<AppliedCommit>();
     this.#outstandingCommits.set(commit.localSeq, {
       commit,
@@ -610,6 +715,50 @@ export class SpaceSession {
       space: this.space,
       sessionId: this.#sessionId,
       query,
+    });
+
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  async listEntityIds(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult | undefined> {
+    this.#assertOpen();
+    if (this.client.serverFlags?.entityIdListing !== true) {
+      return undefined;
+    }
+    const pagination = this.client.serverFlags.entityIdPagination === true;
+    if (!pagination && Object.keys(options).length > 0) {
+      return undefined;
+    }
+    const result = await this.client.request<EntityIdListResult>({
+      type: "entity-id.list",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      ...(pagination
+        ? { ...options, limit: options.limit ?? MAX_ENTITY_ID_PAGE_SIZE }
+        : {}),
+    });
+
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  async entityIdExists(
+    id: EntityId,
+  ): Promise<EntityIdLookupResult | undefined> {
+    this.#assertOpen();
+    if (this.client.serverFlags?.entityIdLookup !== true) {
+      return undefined;
+    }
+    const result = await this.client.request<EntityIdLookupResult>({
+      type: "entity-id.exists",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      id,
     });
 
     this.noteResult(result.serverSeq);
@@ -646,11 +795,14 @@ export class SpaceSession {
   async registerSqliteDiskSource(
     id: string,
     path: string,
+    beforeIssue?: () => void,
   ): Promise<SqliteRegisterDiskSourceResult> {
     this.#assertOpen();
+    const requestId = crypto.randomUUID();
+    beforeIssue?.();
     return await this.client.request<SqliteRegisterDiskSourceResult>({
       type: "sqlite.register-disk-source",
-      requestId: crypto.randomUUID(),
+      requestId,
       space: this.space,
       sessionId: this.#sessionId,
       id,
@@ -1021,10 +1173,11 @@ export class SpaceSession {
     if (!this.#concurrentWatchRefresh) {
       // Single-flight (default): send + apply run together, chained on the
       // prior mutation's completion. Nothing is issued until the previous
-      // mutation fully resolves. Structurally identical to the pre-concurrency
-      // path (a single `work` closure chained on the mutation promise, then
-      // `await`-ed) so its microtask timing — which some downstream ordering
-      // depends on — is unchanged.
+      // mutation fully resolves. `apply` runs in the microtask cascade
+      // rooted at the response frame's delivery, and one-frame-per-turn
+      // transports (loopback included) cannot deliver a later effect frame
+      // until that cascade completes — so no handleEffect can mutate the
+      // watch view between the response resolving and `apply` running.
       const previous = this.#watchApply;
       const current = previous.catch(() => undefined).then(async () =>
         apply(await send())
@@ -1139,16 +1292,26 @@ export class SpaceSession {
       seenSeq: this.#serverSeq,
       sessionToken: this.#sessionToken,
     };
-    const auth = await this.openAuthFactory?.(
-      this.space,
-      session,
-      this.client.sessionOpenAuthContext(),
+    const auth = await runWithAbortSignal(
+      this.routeSignal,
+      "memory session route cancelled",
+      () =>
+        this.openAuthFactory?.(
+          this.space,
+          session,
+          this.client.sessionOpenAuthContext(),
+        ),
     );
-    const restored = await this.client.openSession(this.space, {
-      sessionId: this.#sessionId,
-      seenSeq: this.#serverSeq,
-      sessionToken: this.#sessionToken,
-    }, auth);
+    const restored = await runWithAbortSignal(
+      this.routeSignal,
+      "memory session route cancelled",
+      () =>
+        this.client.openSession(this.space, {
+          sessionId: this.#sessionId,
+          seenSeq: this.#serverSeq,
+          sessionToken: this.#sessionToken,
+        }, auth),
+    );
     const sessionChanged = restored.sessionId !== oldSessionId;
     const sessionReplaced = sessionChanged || restored.resumed !== true;
     this.#sessionId = restored.sessionId;
@@ -1170,6 +1333,12 @@ export class SpaceSession {
       this.#caughtUpLocalSeq = 0;
       this.#forwardedCaughtUpLocalSeq = 0;
       this.rejectCaughtUpLocalSeqWaiters(sessionChangedError);
+      // The marker epoch died with the old session: obligations it staged
+      // are gone, and the fresh session's markers know nothing of the old
+      // localSeqs. Consumers holding marker-keyed state (the runner's
+      // parked accepted promotions, CT-1927) must reconcile now rather
+      // than wait for markers that can never arrive.
+      this.onSessionReplaced?.();
     }
     this.noteCaughtUpLocalSeq(restored.caughtUpLocalSeq);
 
@@ -1475,16 +1644,51 @@ export class WatchView {
 
 export const connect = Client.connect;
 
+// Loopback delivers server frames on zero-delay TIMER turns, one frame per
+// turn, like a socket: no response or push ever arrives inside the sender's
+// own await cascade, so code that accidentally depends on "nothing arrives
+// until I yield" fails here the way it would against a deployment. One
+// frame per macrotask also guarantees a frame's full microtask cascade
+// (response resolution, request() continuation, caller continuation)
+// completes before the next frame delivers. Client→server keeps awaiting
+// the server's processing: the server's fan-out drain-wait counts a frame
+// from receive() entry, and a send that merely enqueued would let fan-out
+// read heads that predate a write already handed to the transport. Frames
+// staged at close() are dropped — nothing arrives after the socket is
+// gone. Remaining fidelity gap: setCloseReceiver is a no-op, so a
+// server-initiated disconnect is invisible over loopback.
 export const loopback = (server: Server): Transport => {
   let receiver = (_payload: string) => {};
+  let closed = false;
+  const queue: string[] = [];
+  let pump: ReturnType<typeof setTimeout> | null = null;
+  const drainOne = () => {
+    pump = null;
+    if (closed) return;
+    const frame = queue.shift();
+    if (frame === undefined) return;
+    receiver(frame);
+    if (queue.length > 0) schedule();
+  };
+  const schedule = () => {
+    pump ??= setTimeout(drainOne, 0);
+  };
   const connection = server.connect((message) => {
-    receiver(encodeMemoryBoundaryUnprovenFabricValue(message));
+    if (closed) return;
+    queue.push(encodeMemoryBoundary(message));
+    schedule();
   });
   return {
     async send(payload: string) {
       await connection.receive(payload);
     },
     close() {
+      closed = true;
+      if (pump !== null) {
+        clearTimeout(pump);
+        pump = null;
+      }
+      queue.length = 0;
       connection.close();
       return Promise.resolve();
     },

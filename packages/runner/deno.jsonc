@@ -6,7 +6,9 @@
     // See that file and docs/development/waiting-in-tests.md. --no-check: the
     // global `clock` type lives in test/clock.d.ts, which `deno task check` sees
     // by type-checking the package directory as one program.
-    "test": "ENV=test deno test --no-check --preload=test/clock-preload.ts --allow-ffi --allow-env --allow-read --allow-write=/tmp,/var/folders --allow-run=git test/*.test.ts",
+    // --allow-run=git,deno: window-retention-release.test.ts re-invokes deno
+    // for a helper that needs --expose-gc and the real clock.
+    "test": "ENV=test deno test --no-check --preload=test/clock-preload.ts --allow-ffi --allow-env --allow-read --allow-write=/tmp,/var/folders --allow-run=git,deno test/*.test.ts",
     "bench": {
       "description": "Run Cell benchmarks for performance analysis",
       "command": "deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check test/*.bench.ts"
@@ -14,6 +16,7 @@
     "integration": "LOG_LEVEL=warn deno test -A $INTEGRATION_TEST_FLAGS ./integration/*.test.ts"
   },
   "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1",
     "ses": "npm:ses@^2.2.0",
     "typescript": "npm:typescript@6.0.3"
@@ -25,8 +28,6 @@
     "./slugs": "./src/slugs.ts",
     "./schemas": "./src/schemas.ts",
     "./telemetry-otel-bridge": "./src/telemetry-otel-bridge.ts",
-    "./storage/inspector": "./src/storage/inspector.ts",
-    "./storage/telemetry": "./src/storage/telemetry.ts",
     "./storage/write-stack-trace": "./src/storage/write-stack-trace.ts",
     "./traverse": "./src/traverse.ts",
     "./storage/cache": "./src/storage/cache.ts",
@@ -34,6 +35,7 @@
     "./toolshed-http-auth": "./src/toolshed-http-auth.ts",
     "./cfc": "./src/cfc/mod.ts",
     "./cfc/label-view-core": "./src/cfc/label-view-core.ts",
-    "./cfc/migration-reason": "./src/cfc/migration-reason.ts"
+    "./cfc/migration-reason": "./src/cfc/migration-reason.ts",
+    "./cfc/schema-sanitization": "./src/cfc/schema-sanitization.ts"
   }
 }

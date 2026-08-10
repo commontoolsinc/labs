@@ -288,7 +288,7 @@ function extractDefaultValuesInternal(
         ) &&
         validateSchemaValue(canonical, candidate.value, resolvedRoot) ===
           undefined
-      ).map((candidate) => candidate.value as FabricValue);
+      ).map((candidate) => candidate.value);
       return validCandidates.length > 0 &&
           validCandidates.every((candidate) =>
             schemaDefaultValueEqual(candidate, validCandidates[0])
@@ -303,6 +303,14 @@ function extractDefaultValuesInternal(
       canonical.properties &&
       isRecord(canonical.properties)
     ) {
+      // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, so a
+      // fabric-valued `default` under an object-with-properties schema skips
+      // this scalar return and proceeds below: `shallowMutableClone` returns
+      // a `FabricPrimitive` by identity (it is inherently frozen), so the
+      // first property-default assignment throws a `TypeError`; a
+      // `FabricInstance` gets own data properties grafted onto its clone
+      // that its codec never reads, and ships as the pattern's argument
+      // default. Wants a `FabricSpecialObject` test taking this return.
       if (
         Object.hasOwn(canonical, "default") &&
         !isRecord(canonical.default)
@@ -319,7 +327,7 @@ function extractDefaultValuesInternal(
       // children as inexpensive defense-in-depth against accidental deeper
       // mutation of the shared default.
       const obj = shallowMutableClone(
-        (isRecord(canonical.default) ? canonical.default : {}) as FabricValue,
+        isRecord(canonical.default) ? canonical.default : {},
       ) as Record<string, FabricValue>;
       for (
         const [propKey, propSchema] of Object.entries(canonical.properties)

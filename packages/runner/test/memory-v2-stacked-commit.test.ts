@@ -13,12 +13,14 @@ import { Identity } from "@commonfabric/identity";
 import type { FabricValue } from "@commonfabric/api";
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import {
+  type CommitPrecondition,
   type EntityDocument,
   getMemoryProtocolFlags,
   type PatchOp,
   resetPersistentSchedulerStateConfig,
   type SessionSync,
   setPersistentSchedulerStateConfig,
+  type SqliteOperation,
 } from "@commonfabric/memory/v2";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import {
@@ -40,7 +42,7 @@ import { applyPatch } from "../../memory/v2/patch.ts";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import type {
-  IStorageProviderWithReplica,
+  IStorageProvider,
   StorageNotification,
 } from "../src/storage/interface.ts";
 import { setConflictAdmissionMode } from "../src/storage/v2.ts";
@@ -68,7 +70,7 @@ const DOCS = {
 } as const;
 type DocKey = keyof typeof DOCS;
 
-type TestProvider = IStorageProviderWithReplica & {
+type TestProvider = IStorageProvider & {
   get(uri: URI): EntityDocument | undefined;
 };
 
@@ -104,6 +106,7 @@ type ScriptedOutcome =
     kind: "accept";
     remoteInterleave?: RemoteCommit;
     responseGate?: Promise<void>;
+    onReceipt?: () => void;
     /**
      * Skip validateReads for this commit. Forces the "impossible" late
      * accept — a server verdict resolving a pending dependency the client
@@ -120,17 +123,20 @@ type ScriptedOutcome =
     retryAfterSeq?: number;
     remoteInterleave?: RemoteCommit;
     responseGate?: Promise<void>;
+    onReceipt?: () => void;
   }
   | {
     kind: "dropThenReplayAccept";
     remoteInterleave?: RemoteCommit;
     responseGate?: Promise<void>;
+    onReceipt?: () => void;
   }
   | {
     kind: "dropThenReplayReject";
     message?: string;
     remoteInterleave?: RemoteCommit;
     responseGate?: Promise<void>;
+    onReceipt?: () => void;
   };
 type RemoteCommit = {
   label: string;
@@ -270,7 +276,10 @@ class ScriptedServerModel {
       // commit, and staleness is scanned once, based at the HIGHEST element
       // (the doc's top-of-stack below the reader). Scanning lower layers
       // would false-conflict with the session's own later stacked writes —
-      // the exact hazard the max-basis rule exists to avoid.
+      // the exact hazard the max-basis rule exists to avoid. (This double
+      // keeps the LEGACY basis; the CT-1910 true-basis path — `basisSeq`
+      // with own-session exclusion — is exercised against the real engine
+      // in packages/memory/test/v2-pending-read-basis-overadvance.test.ts.)
       const layers = Array.isArray(read.localSeq)
         ? read.localSeq
         : [read.localSeq];
@@ -455,9 +464,9 @@ class ScriptedModelTransport extends ScriptedSessionTransport {
         // cascade tests (and the stress bookkeeping) use it to distinguish
         // "sent, verdict in flight" from "never sent".
         this.model.transactLocalSeqs.push(commit.localSeq);
-        const responseGate = this.model.scripted.get(
-          commit.localSeq,
-        )?.responseGate;
+        const scripted = this.model.scripted.get(commit.localSeq);
+        scripted?.onReceipt?.();
+        const responseGate = scripted?.responseGate;
         const verdictTask = new Promise<void>((resolveVerdict) => {
           setTimeout(() => {
             void (async () => {
@@ -550,6 +559,16 @@ type PushSyncOptions = {
 
 type Harness = ReturnType<typeof createHarness>;
 
+// The scripted transports advertise no verdictCatchUpMarkers by default
+// (see memory-v2-test-utils), so fixtures here script the legacy world:
+// verdicts apply immediately. The parked-accept tests opt into the new
+// contract with MarkerContractTransport and push their markers explicitly.
+class MarkerContractTransport extends ScriptedModelTransport {
+  protected override helloFlags() {
+    return { ...getMemoryProtocolFlags(), verdictCatchUpMarkers: true };
+  }
+}
+
 const createHarness = (
   options: {
     transport?: (model: ScriptedServerModel) => ScriptedModelTransport;
@@ -582,8 +601,11 @@ const createHarness = (
           | { op: "delete"; id: URI; type: MIME }
         >;
         schedulerObservation?: unknown;
+        preconditions?: readonly CommitPrecondition[];
+        sqliteOps?: readonly SqliteOperation[];
       },
       source?: unknown,
+      options?: { resolveAt?: "coverage" | "verdict" },
     ): Promise<
       { ok: Record<PropertyKey, never>; error?: undefined } | {
         ok?: undefined;
@@ -620,24 +642,34 @@ const createHarness = (
     source?: unknown,
   ): { localSeq: number; promise: Promise<any> } => {
     const localSeq = nextLocalSeq++;
-    const promise = replica.commitNative({
-      operations: operations.map((operation) =>
-        operation.op === "delete"
-          ? { op: "delete", id: operation.id, type: DOCUMENT_MIME }
-          : {
-            op: "set",
-            id: operation.id,
-            type: DOCUMENT_MIME,
-            value: { value: operation.value },
-          }
-      ),
-    }, source);
+    // resolveAt verdict: this harness's whole subject is the verdict /
+    // parked-application choreography, with catch-up markers delivered
+    // only by explicit pushSync. A coverage-resolving promise would wait
+    // for a marker the test has not sent yet — a deadlock the test runner
+    // abandons silently ("Promise resolution is still pending").
+    const promise = replica.commitNative(
+      {
+        operations: operations.map((operation) =>
+          operation.op === "delete"
+            ? { op: "delete", id: operation.id, type: DOCUMENT_MIME }
+            : {
+              op: "set",
+              id: operation.id,
+              type: DOCUMENT_MIME,
+              value: { value: operation.value },
+            }
+        ),
+      },
+      source,
+      { resolveAt: "verdict" },
+    );
     return { localSeq, promise };
   };
 
   return {
     model,
     transport,
+    sessionFactory,
     storageManager,
     provider,
     replica,
@@ -700,6 +732,16 @@ const schedulerObservationFor = (actionId: string) => ({
   materializerWriteEnvelopes: [],
   status: "success",
 });
+
+const schedulerBatchActionIds = (harness: Harness): string[][] =>
+  [...harness.model.applied.values()]
+    .filter((record) => record.commit.schedulerObservationBatch !== undefined)
+    .sort((left, right) => left.applied.seq - right.applied.seq)
+    .map((record) =>
+      record.commit.schedulerObservationBatch!.map((entry) =>
+        (entry.schedulerObservation as { actionId: string }).actionId
+      )
+    );
 
 Deno.test("memory v2 ignores no-op scheduler observations when persistent scheduler state is off", async () => {
   resetPersistentSchedulerStateConfig();
@@ -796,6 +838,226 @@ Deno.test("memory v2 flushes no-op scheduler batches before semantic writes", as
   }
 });
 
+Deno.test("memory v2 keeps a semantic write behind every queued scheduler batch", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = createHarness();
+  const firstStarted = Promise.withResolvers<void>();
+  const releaseFirst = Promise.withResolvers<void>();
+  const secondStarted = Promise.withResolvers<void>();
+  const releaseSecond = Promise.withResolvers<void>();
+  try {
+    const first = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:first"),
+    });
+    harness.model.setOutcome(2, {
+      kind: "accept",
+      responseGate: releaseFirst.promise,
+      onReceipt: () => firstStarted.resolve(),
+    });
+    await firstStarted.promise;
+
+    const second = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:second"),
+    });
+    harness.model.setOutcome(5, {
+      kind: "accept",
+      responseGate: releaseSecond.promise,
+      onReceipt: () => secondStarted.resolve(),
+    });
+    await Promise.resolve();
+
+    const write = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("write") },
+      }],
+    });
+
+    releaseFirst.resolve();
+    await secondStarted.promise;
+    await Promise.resolve();
+    assertEquals(harness.model.transactLocalSeqs, [2, 5]);
+
+    releaseSecond.resolve();
+    await Promise.all([
+      assertResultOk(first),
+      assertResultOk(second),
+      assertResultOk(write),
+    ]);
+    assertEquals(harness.model.transactLocalSeqs, [2, 5, 4]);
+  } finally {
+    releaseFirst.resolve();
+    releaseSecond.resolve();
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 does not hold a semantic write behind a later scheduler batch", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = createHarness();
+  const firstStarted = Promise.withResolvers<void>();
+  const releaseFirst = Promise.withResolvers<void>();
+  const secondStarted = Promise.withResolvers<void>();
+  const releaseSecond = Promise.withResolvers<void>();
+  let writeWasIssued = false;
+  try {
+    const first = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:first"),
+    });
+    harness.model.setOutcome(2, {
+      kind: "accept",
+      responseGate: releaseFirst.promise,
+      onReceipt: () => firstStarted.resolve(),
+    });
+    await firstStarted.promise;
+
+    const write = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("write") },
+      }],
+    });
+    harness.model.setOutcome(3, {
+      kind: "accept",
+      onReceipt: () => {
+        writeWasIssued = true;
+      },
+    });
+
+    const second = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:second"),
+    });
+    harness.model.setOutcome(5, {
+      kind: "accept",
+      responseGate: releaseSecond.promise,
+      onReceipt: () => secondStarted.resolve(),
+    });
+
+    releaseFirst.resolve();
+    await secondStarted.promise;
+    await Promise.resolve();
+    assert(writeWasIssued);
+
+    releaseSecond.resolve();
+    await Promise.all([
+      assertResultOk(first),
+      assertResultOk(write),
+      assertResultOk(second),
+    ]);
+  } finally {
+    releaseFirst.resolve();
+    releaseSecond.resolve();
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 separates observations across a semantic write boundary", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = createHarness();
+  try {
+    const first = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:first"),
+    });
+    const write = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("write") },
+      }],
+    });
+    const second = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:second"),
+    });
+
+    await Promise.all([
+      assertResultOk(first),
+      assertResultOk(write),
+      assertResultOk(second),
+    ]);
+    assertEquals(schedulerBatchActionIds(harness), [
+      ["action:first"],
+      ["action:second"],
+    ]);
+  } finally {
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+const assertNonDocumentSchedulerBoundary = async (
+  directCommit: Parameters<Harness["replica"]["commitNative"]>[0],
+) => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = createHarness();
+  try {
+    const first = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:first"),
+    });
+    const direct = harness.replica.commitNative(directCommit);
+    const second = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:second"),
+    });
+    harness.model.setOutcome(4, {
+      kind: "rejectConflict",
+      message: "preceding observation rejected",
+    });
+
+    await assertConflict(first, "preceding observation rejected");
+    await assertConflict(direct, "preceding observation rejected");
+    await assertResultOk(second);
+    assertEquals(harness.model.transactLocalSeqs, [4, 5]);
+    assertEquals(
+      harness.model.rejected.get(4)?.commit.schedulerObservationBatch?.map(
+        (entry) =>
+          (entry.schedulerObservation as { actionId: string }).actionId,
+      ),
+      ["action:first"],
+    );
+    assertEquals(schedulerBatchActionIds(harness), [["action:second"]]);
+  } finally {
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+};
+
+Deno.test("memory v2 keeps a sqlite-only commit inside its scheduler boundary", async () => {
+  await assertNonDocumentSchedulerBoundary({
+    operations: [],
+    sqliteOps: [{
+      op: "sqlite",
+      db: { id: "of:scheduler-sqlite-boundary" },
+      sql: "CREATE TABLE boundary (value TEXT)",
+    }],
+  });
+});
+
+Deno.test("memory v2 keeps a preconditioned direct commit inside its scheduler boundary", async () => {
+  await assertNonDocumentSchedulerBoundary({
+    operations: [],
+    schedulerObservation: schedulerObservationFor("action:preconditioned"),
+    preconditions: [{
+      kind: "entity-value-hash",
+      id: DOCS.C,
+      valueHash: null,
+    }],
+  });
+});
+
 const visibleValue = (provider: TestProvider, id: URI) => {
   const value = provider.get(id)?.value;
   return value === undefined ? undefined : clone(value);
@@ -874,7 +1136,7 @@ const applyOperation = (
     );
   }
   const next = applyPatch(
-    { value: clone(current) ?? {} } as FabricValue,
+    { value: clone(current) ?? {} },
     operation.patches,
   ) as { value?: RootValue };
   return next.value;
@@ -973,6 +1235,17 @@ const expectVisible = (
   }
 };
 
+const hasPendingOverlay = (harness: Harness, id: URI): boolean =>
+  (harness.provider as unknown as {
+    schedulerHasPendingWriteOverlapping?: (
+      addresses: Array<
+        { space: string; id: URI; scope: "space"; path: string[] }
+      >,
+    ) => boolean;
+  }).schedulerHasPendingWriteOverlapping?.([
+    { space, id, scope: "space", path: [] },
+  ]) === true;
+
 const assertResultOk = async (promise: Promise<any>) => {
   assertEquals(await promise, { ok: {} });
 };
@@ -1025,15 +1298,19 @@ const beginPatch = (
   value: RootValue,
   source?: unknown,
 ) =>
-  harness.replica.commitNative({
-    operations: [{
-      op: "patch",
-      id,
-      type: DOCUMENT_MIME,
-      patches,
-      value: { value },
-    }],
-  }, source);
+  harness.replica.commitNative(
+    {
+      operations: [{
+        op: "patch",
+        id,
+        type: DOCUMENT_MIME,
+        patches,
+        value: { value },
+      }],
+    },
+    source,
+    { resolveAt: "verdict" },
+  );
 
 const seedAccepted = async (
   harness: Harness,
@@ -1973,11 +2250,559 @@ Deno.test("memory v2 stacked commits: reading through the session's own two-deep
   }
 });
 
+Deno.test("memory v2 stacked commits: pending reads carry the doc's true confirmed basis (CT-1910)", async () => {
+  const harness = await createHarness();
+  try {
+    // Confirm a baseline for A so the doc's confirmed basis is non-zero,
+    // then stack an optimistic layer and read through it.
+    const c1 = beginSet(harness, DOCS.A, valueFor("c1"));
+    harness.model.setOutcome(c1.localSeq, { kind: "accept" });
+    await assertResultOk(c1.promise);
+
+    const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
+    harness.model.setOutcome(c2.localSeq, { kind: "accept" });
+    const c3 = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("c3"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    harness.model.setOutcome(c3.localSeq, { kind: "accept" });
+    await assertResultOk(c2.promise);
+    await assertResultOk(c3.promise);
+
+    // The wire read names its dependency layer AND the confirmed basis the
+    // view sat on — the seq c1's acceptance advanced the doc to. Before
+    // CT-1910 that basis was discarded whenever layers existed, leaving the
+    // server's staleness scan anchored at the dependency's resolution.
+    const sent = harness.model.applied.get(c3.localSeq);
+    assertExists(sent);
+    const confirmedBasis = harness.model.applied.get(c1.localSeq)!.applied.seq;
+    assertEquals(
+      sent.commit.reads.pending.map((read) => ({
+        localSeq: read.localSeq,
+        basisSeq: read.basisSeq,
+      })),
+      [{ localSeq: c2.localSeq, basisSeq: confirmedBasis }],
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: divergent basis overrides survive pending-read compaction", async () => {
+  const harness = await createHarness();
+  try {
+    const c1 = beginSet(harness, DOCS.A, valueFor("c1"));
+    harness.model.setOutcome(c1.localSeq, { kind: "accept" });
+    await assertResultOk(c1.promise);
+    const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
+    harness.model.setOutcome(c2.localSeq, { kind: "accept" });
+
+    // Two read activities over the same stacked doc and path: one at the
+    // doc's confirmed basis, one pinned lower via meta.seq. Compaction must
+    // keep BOTH wire reads — merging them would let the surviving read's
+    // higher basis claim the pinned read's interval (0, confirmedBasis],
+    // hiding a foreign write there from the server's staleness scan.
+    const confirmedBasis = harness.model.applied.get(c1.localSeq)!.applied.seq;
+    const reads = harness.replica.buildReads(
+      sourceFromReads([
+        { id: DOCS.A },
+        { id: DOCS.A, seq: 0 },
+      ]),
+      3,
+    );
+    assertEquals(reads.confirmed, []);
+    assertEquals(
+      reads.pending
+        // `basisSeq` is optional on the wire type; the client always emits
+        // it, so absence would itself be a failure — surface it as -1.
+        .map((read) => ({
+          localSeq: read.localSeq,
+          basisSeq: read.basisSeq ?? -1,
+        }))
+        .toSorted((left, right) => left.basisSeq - right.basisSeq),
+      [
+        { localSeq: c2.localSeq, basisSeq: 0 },
+        { localSeq: c2.localSeq, basisSeq: confirmedBasis },
+      ],
+    );
+    await assertResultOk(c2.promise);
+  } finally {
+    await harness.close();
+  }
+});
+
+// ---- CT-1927 parked-accept promotion ----
+//
+// Verdicts return inline (the fan-out stays batched server-side), and the
+// client PARKS each accept's state application until a frame's
+// caughtUpLocalSeq marker covers it: promotion — pending overlay to
+// confirmed mirror — then runs over a base that reflects the foreign
+// novelty the accept was applied on top of. These tests use the base
+// ScriptedModelTransport (which advertises verdictCatchUpMarkers) and push
+// markers explicitly.
+
+const markerHarness = () =>
+  createHarness({ transport: (model) => new MarkerContractTransport(model) });
+
+Deno.test("memory v2 stacked commits: an accepted commit stays pending until the marker, then promotes and drops the local copy (CT-1927)", async () => {
+  const harness = await markerHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, { items: ["a"] });
+    // Establish the sync-consumption loop (frames dead-letter without a
+    // pull/watch view to feed them into the replica).
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    // Settle the parked seed: an empty frame carrying its marker.
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+
+    harness.model.setOutcome(2, { kind: "accept" });
+    const patch = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "add", path: "/value/items/-", value: "X" }],
+      { items: ["a", "X"] },
+    );
+    await assertResultOk(patch);
+
+    // The verdict resolved the push, but the STATE application is parked:
+    // the overlay is still the pending local copy, and the confirmed
+    // mirror does not hold the append yet.
+    assertEquals(hasPendingOverlay(harness, DOCS.A), true);
+    expectVisible(harness, { A: { items: ["a", "X"] } });
+
+    // The marker arrives (own accepted write echo-suppressed, so the frame
+    // is otherwise empty). The parked accept promotes: pending moves to
+    // confirmed and the pending local copy is removed.
+    harness.pushSync({ caughtUpLocalSeq: 2 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "parked promotion at the marker",
+    );
+    expectVisible(harness, { A: { items: ["a", "X"] } });
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a covered authoritative frame does not double-apply the parked non-idempotent patch (CT-1927)", async () => {
+  const harness = await markerHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, { items: ["a"] });
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+
+    // Non-idempotent pending patch (append), accepted and parked.
+    harness.model.setOutcome(2, { kind: "accept" });
+    const patch = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "add", path: "/value/items/-", value: "X" }],
+      { items: ["a", "X"] },
+    );
+    await assertResultOk(patch);
+    assertEquals(hasPendingOverlay(harness, DOCS.A), true);
+
+    // Mixed provenance delivers the doc AUTHORITATIVELY: the frame's base
+    // already CONTAINS the append. The parked application must remove the
+    // overlay against that base instead of replaying it — ["a","X","X"]
+    // would be a view no server state ever had.
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: 2, value: { items: ["a", "X"] } }],
+      caughtUpLocalSeq: 2,
+    });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "parked application at the covered marker",
+    );
+    expectVisible(harness, { A: { items: ["a", "X"] } });
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a marker applies parked accepts even when the frame covers other docs (CT-1927)", async () => {
+  const harness = await markerHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+    assertEquals(
+      await harness.replica.pull([
+        [{ id: DOCS.A, type: DOCUMENT_MIME }, undefined],
+        [{ id: DOCS.B, type: DOCUMENT_MIME }, undefined],
+      ]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+
+    harness.model.setOutcome(2, { kind: "accept" });
+    const b = beginSet(harness, DOCS.B, valueFor("optimistic"));
+    await assertResultOk(b.promise);
+    assertEquals(hasPendingOverlay(harness, DOCS.B), true);
+
+    // The frame carries foreign novelty on doc A plus the marker; doc B —
+    // the session's own accepted write — is echo-suppressed. Parking is
+    // MARKER-keyed, not coverage-keyed: B's parked accept promotes here,
+    // extrapolating over its (current) confirmed base.
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: 3, value: valueFor("foreign") }],
+      caughtUpLocalSeq: 2,
+    });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.B),
+      "parked promotion of the uncovered doc",
+    );
+    expectVisible(harness, {
+      A: valueFor("foreign"),
+      B: valueFor("optimistic"),
+    });
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: rejection round trip — verdict, repair frame, regenerate against the repaired base (CT-1927)", async () => {
+  const harness = await markerHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("v1"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+
+    // A foreign winner lands server-side; its fan-out is not delivered.
+    harness.model.injectRemote({
+      label: "winner",
+      operations: [{ op: "set", id: DOCS.A, value: valueFor("v2winner") }],
+    });
+    const winnerSeq = harness.model.confirmed.get(DOCS.A)!.seq;
+    assertEquals(winnerSeq, 2);
+
+    // The doomed optimistic commit: reads A at the stale confirmed basis,
+    // writes A. The rejection returns inline; the read-repair gate holds
+    // the drop until the repair frame's marker.
+    harness.model.setOutcome(2, {
+      kind: "rejectConflict",
+      retryAfterSeq: winnerSeq,
+    });
+    const doomed = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("v1mine"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(2),
+      "doomed commit to reach the wire",
+    );
+    expectVisible(harness, { A: valueFor("v1mine") });
+
+    // Repair frame: the winner plus the marker covering the rejected
+    // localSeq. The gate releases, the phantom drops against the repaired
+    // base, and the push resolves with the rejection.
+    harness.pushSync({
+      upserts: [{ id: DOCS.A, seq: winnerSeq, value: valueFor("v2winner") }],
+      caughtUpLocalSeq: doomed.localSeq,
+    });
+    const result = await doomed.promise;
+    assertExists(result.error);
+    expectVisible(harness, { A: valueFor("v2winner") });
+    const readyToRetry = (result.error as {
+      readyToRetry?: () => Promise<void>;
+    }).readyToRetry;
+    assertExists(readyToRetry);
+    // Event-driven: the marker already satisfied the gate, so this resolves
+    // without any further delivery (a hang fails the test's own timeout).
+    await readyToRetry();
+
+    // The regeneration: rebuild against the repaired confirmed base. The
+    // fresh commit gets a fresh localSeq and — because the mirror already
+    // holds the winner — an honest new basis, so it is built on the right
+    // premise on its first attempt.
+    harness.model.setOutcome(3, { kind: "accept" });
+    const regenerated = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("v3merged"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    assertEquals(regenerated.localSeq, 3);
+    await assertResultOk(regenerated.promise);
+    expectVisible(harness, { A: valueFor("v3merged") });
+
+    // The regenerated wire read declared the WINNER's basis, and its
+    // dependency stack does not name the dropped layer: the view stopped
+    // depending on it, so the array stopped naming it.
+    const sent = harness.model.applied.get(3);
+    assertExists(sent);
+    assertEquals(
+      sent.commit.reads.confirmed.map((read) => ({
+        id: read.id,
+        seq: read.seq,
+      })),
+      [{ id: DOCS.A, seq: winnerSeq }],
+    );
+    assertEquals(sent.commit.reads.pending, []);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: an undecided dependent above the marker survives the parked application (CT-1927)", async () => {
+  const harness = await markerHarness();
+  const gate3 = Promise.withResolvers<void>();
+  try {
+    await seedAccepted(harness, DOCS.A, { items: ["a"] });
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+
+    // Two stacked appends: L2 ("X") accepted; L3 ("Y") verdict held.
+    harness.model.setOutcome(2, { kind: "accept" });
+    const l2 = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "add", path: "/value/items/-", value: "X" }],
+      { items: ["a", "X"] },
+    );
+    harness.model.setOutcome(3, {
+      kind: "accept",
+      responseGate: gate3.promise,
+    });
+    const l3 = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "add", path: "/value/items/-", value: "Y" }],
+      { items: ["a", "X", "Y"] },
+    );
+    await assertResultOk(l2);
+
+    // The frame reflects L2's outcome only (marker 2); the `foreign` field
+    // distinguishes the delivered base from the local one. L2's parked
+    // application lands against it; the UNDECIDED L3 survives and replays
+    // on top: without the parked removal the view would double-apply X
+    // (["a","X","X","Y"]); without survivor replay it would lose Y.
+    harness.pushSync({
+      upserts: [{
+        id: DOCS.A,
+        seq: 2,
+        value: { items: ["a", "X"], foreign: true },
+      }],
+      caughtUpLocalSeq: 2,
+    });
+    await waitForCondition(
+      () => {
+        const value = visibleValue(harness.provider, DOCS.A) as {
+          foreign?: boolean;
+        };
+        return value?.foreign === true;
+      },
+      "frame to integrate",
+    );
+    expectVisible(harness, { A: { items: ["a", "X", "Y"], foreign: true } });
+
+    // A stale redelivery of the same marker changes nothing: L2 is already
+    // applied, L3 sits above the marker.
+    harness.pushSync({
+      upserts: [{
+        id: DOCS.A,
+        seq: 2,
+        value: { items: ["a", "X"], foreign: true },
+      }],
+      caughtUpLocalSeq: 2,
+    });
+    expectVisible(harness, { A: { items: ["a", "X", "Y"], foreign: true } });
+
+    // L3's verdict arrives and parks; its own marker promotes it on an
+    // otherwise-empty frame.
+    gate3.resolve();
+    await assertResultOk(l3);
+    assertEquals(hasPendingOverlay(harness, DOCS.A), true);
+    harness.pushSync({ caughtUpLocalSeq: 3 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "L3 promotion at its marker",
+    );
+    expectVisible(harness, { A: { items: ["a", "X", "Y"], foreign: true } });
+  } finally {
+    gate3.resolve();
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: session replacement applies parked accepts (CT-1927)", async () => {
+  const harness = await markerHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+
+    // A NON-idempotent parked accept: the risk under replacement is
+    // precisely a still-standing append layer double-applying over the
+    // authoritative reinstall base.
+    await seedAccepted(harness, DOCS.B, { items: ["a"] });
+    harness.pushSync({ caughtUpLocalSeq: 2 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.B),
+      "B seed promotion at its marker",
+    );
+    harness.model.setOutcome(3, { kind: "accept" });
+    const patch = beginPatch(
+      harness,
+      DOCS.B,
+      [{ op: "add", path: "/value/items/-", value: "X" }],
+      { items: ["a", "X"] },
+    );
+    await assertResultOk(patch);
+    assertEquals(hasPendingOverlay(harness, DOCS.B), true);
+
+    // A restore against the scripted server comes back NON-resumed: the
+    // session is replaced and the marker epoch resets. The old session's
+    // staged obligations are gone — no marker for the parked accept can
+    // ever arrive — so replacement must apply it immediately, consuming
+    // the pending overlay.
+    await harness.sessionFactory.session!.restore();
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.B),
+      "parked application at session replacement",
+    );
+    expectVisible(harness, { B: { items: ["a", "X"] } });
+
+    // The authoritative reinstall sync then delivers the server's document
+    // — which already CONTAINS the append. With the overlay consumed at
+    // replacement, the append lands exactly once; a surviving overlay
+    // would replay it over the delivered base (["a","X","X"]).
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.B, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({
+      upserts: [{ id: DOCS.B, seq: 3, value: { items: ["a", "X"] } }],
+    });
+    await waitForCondition(
+      () => {
+        const value = visibleValue(harness.provider, DOCS.B) as {
+          items?: string[];
+        };
+        return Array.isArray(value?.items);
+      },
+      "reinstall frame to integrate",
+    );
+    expectVisible(harness, { B: { items: ["a", "X"] } });
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: losing the sync consumer applies parked accepts immediately (CT-1927)", async () => {
+  const harness = await markerHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.A),
+      "seed promotion at its marker",
+    );
+
+    harness.model.setOutcome(2, { kind: "accept" });
+    const b = beginSet(harness, DOCS.B, valueFor("optimistic"));
+    await assertResultOk(b.promise);
+    assertEquals(hasPendingOverlay(harness, DOCS.B), true);
+
+    // The server revokes the session: the watch view closes and the marker
+    // channel dies with it — no marker can ever arrive for the parked
+    // accept. Teardown must apply it immediately (the legacy verdict-time
+    // semantics), never strand it waiting on frames that cannot come.
+    harness.transport.emitRevoked();
+    await waitForCondition(
+      () => !hasPendingOverlay(harness, DOCS.B),
+      "parked application at consumer teardown",
+    );
+    expectVisible(harness, { B: valueFor("optimistic") });
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a server without verdictCatchUpMarkers gets immediate verdict application (CT-1927)", async () => {
+  // The DEFAULT harness transport models exactly this old server, so the
+  // legacy path is what every other fixture in this file exercises; this
+  // test pins it explicitly: no parking, promotion at the verdict.
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+    assertEquals(hasPendingOverlay(harness, DOCS.A), false);
+    expectVisible(harness, { A: valueFor("base") });
+  } finally {
+    await harness.close();
+  }
+});
+
 // An "older server": advertises every current capability EXCEPT the array
 // dependency sets.
 class PreStackTransport extends ScriptedModelTransport {
   protected override helloFlags() {
-    return { ...getMemoryProtocolFlags(), pendingReadStacks: false };
+    return { ...super.helloFlags(), pendingReadStacks: false };
   }
 }
 
@@ -2750,59 +3575,87 @@ Deno.test("memory v2 stacked commits: a rejected scheduler-batch flush rejects t
   }
 });
 
+Deno.test("memory v2 stacked commits: a scheduler-batch conflict does not wait for an unsent write sequence", async () => {
+  setPersistentSchedulerStateConfig(true);
+  setConflictAdmissionMode("preempt");
+  const harness = await createHarness();
+  const batchStarted = Promise.withResolvers<void>();
+  const releaseBatch = Promise.withResolvers<void>();
+  try {
+    const observation = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:retryable-batch"),
+    });
+    harness.model.setOutcome(2, {
+      kind: "rejectConflict",
+      message: "retryable observation batch rejected",
+      retryAfterSeq: 0,
+      responseGate: releaseBatch.promise,
+      onReceipt: () => batchStarted.resolve(),
+    });
+    await batchStarted.promise;
+
+    const retryReplica = harness.replica as unknown as {
+      waitForCaughtUpLocalSeq(localSeq: number): Promise<void>;
+    };
+    const waitedLocalSeqs: number[] = [];
+    retryReplica.waitForCaughtUpLocalSeq = (localSeq) => {
+      waitedLocalSeqs.push(localSeq);
+      return localSeq <= 2 ? Promise.resolve() : Promise.reject(
+        new Error(`waited for unsent localSeq=${localSeq}`),
+      );
+    };
+
+    const write = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("write") },
+      }],
+    });
+    releaseBatch.resolve();
+    await harness.transport.drainVerdicts();
+    harness.pushSync({ caughtUpLocalSeq: 2 });
+
+    const [observationResult, writeResult] = await Promise.all([
+      observation,
+      write,
+    ]);
+    assertExists(observationResult.error);
+    assertExists(writeResult.error);
+    assertEquals(writeResult.error.message, observationResult.error.message);
+    const readyToRetry = (writeResult.error as {
+      readyToRetry?: () => Promise<void>;
+    }).readyToRetry;
+    assertExists(readyToRetry);
+    await readyToRetry();
+    assertEquals(waitedLocalSeqs.includes(3), false);
+
+    const nextWrite = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.B,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("next-write") },
+      }],
+    }, sourceFromReads([{ id: DOCS.A }]));
+    await assertResultOk(nextWrite);
+    assertEquals(harness.model.transactLocalSeqs, [2, 4]);
+  } finally {
+    releaseBatch.resolve();
+    setConflictAdmissionMode(undefined);
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
 // The admission-control override reaches into the replica the same way the
 // subscription tests do (recordStaleFloor/noteCaughtUpLocalSeq are private).
 type AdmissionReplica = {
   recordStaleFloor(commit: unknown, localSeq: number): void;
   noteCaughtUpLocalSeq(localSeq: number | undefined): void;
 };
-
-Deno.test("memory v2 stacked commits: hold-mode admission finalizes a dependency-dropped commit without sending", async () => {
-  setConflictAdmissionMode("hold");
-  const harness = await createHarness();
-  const g1 = Promise.withResolvers<void>();
-  try {
-    const t1 = beginSet(harness, DOCS.A, valueFor("t1"));
-    harness.model.setOutcome(t1.localSeq, {
-      kind: "rejectConflict",
-      responseGate: g1.promise,
-    });
-    await waitForCondition(
-      () => harness.model.transactLocalSeqs.includes(t1.localSeq),
-      "t1 to reach the wire",
-    );
-
-    // Floor A above the current caught-up seq: t2's read of A (a pending
-    // read through t1's optimistic layer) parks it in the hold.
-    const replica = harness.replica as unknown as AdmissionReplica;
-    replica.recordStaleFloor({
-      localSeq: 50,
-      reads: { confirmed: [{ id: DOCS.A, path: [], seq: 0 }], pending: [] },
-      operations: [],
-    }, 50);
-    const t2 = beginSet(
-      harness,
-      DOCS.D,
-      valueFor("t2-d"),
-      sourceFromReads([{ id: DOCS.A }]),
-    );
-
-    // The dependency drops while t2 is held; releasing the hold must land on
-    // the post-hold doom checkpoint — finalize without sending.
-    g1.resolve();
-    await assertConflict(t1.promise);
-    replica.noteCaughtUpLocalSeq(50);
-    await assertConflict(
-      t2.promise,
-      `pending dependency dropped locally: localSeq=${t1.localSeq}`,
-    );
-    assertEquals(harness.model.transactLocalSeqs.includes(t2.localSeq), false);
-  } finally {
-    setConflictAdmissionMode(undefined);
-    g1.resolve();
-    await harness.close();
-  }
-});
 
 Deno.test("memory v2 stacked commits: preempt-mode admission rejects a floored commit without sending", async () => {
   setConflictAdmissionMode("preempt");
@@ -3458,7 +4311,7 @@ Deno.test("memory v2 stacked commits: pending visibility preserves array move pa
   }
 });
 
-Deno.test("memory v2 stacked commits: pending visibility can replace a null branch with an object patch", async () => {
+Deno.test("memory v2 stacked commits: pending visibility skips a patch over a null branch its ops cannot apply to", async () => {
   const harness = await createHarness();
   try {
     await seedAccepted(harness, DOCS.A, null);
@@ -3482,12 +4335,13 @@ Deno.test("memory v2 stacked commits: pending visibility can replace a null bran
       },
     );
 
+    // Ops-replay (CT-1872 1a): the patch descends through a base that
+    // cannot hold it, so the layer renders SKIPPED — the base shows
+    // through — rather than branch-replacing the pending snapshot in (the
+    // old value-combining, which fabricated states the server would never
+    // produce and could resurrect dropped sibling data).
     expectVisible(harness, {
-      A: {
-        choice: {
-          name: "Sushi Place",
-        },
-      },
+      A: null,
     });
 
     await assertConflict(patch, "synthetic null-base conflict");
@@ -3499,7 +4353,7 @@ Deno.test("memory v2 stacked commits: pending visibility can replace a null bran
   }
 });
 
-Deno.test("memory v2 stacked commits: pending visibility can replace a scalar branch with an object patch", async () => {
+Deno.test("memory v2 stacked commits: pending visibility skips a patch over a scalar branch its ops cannot apply to", async () => {
   const harness = await createHarness();
   try {
     await seedAccepted(harness, DOCS.A, {
@@ -3525,11 +4379,14 @@ Deno.test("memory v2 stacked commits: pending visibility can replace a scalar br
       },
     );
 
+    // Ops-replay (CT-1872 1a): the patch descends through a base that
+    // cannot hold it, so the layer renders SKIPPED — the base shows
+    // through — rather than branch-replacing the pending snapshot in (the
+    // old value-combining, which fabricated states the server would never
+    // produce and could resurrect dropped sibling data).
     expectVisible(harness, {
       A: {
-        choice: {
-          name: "Sushi Place",
-        },
+        choice: 1,
       },
     });
 
@@ -3544,7 +4401,7 @@ Deno.test("memory v2 stacked commits: pending visibility can replace a scalar br
   }
 });
 
-Deno.test("memory v2 stacked commits: pending visibility can replace an array branch with an object patch", async () => {
+Deno.test("memory v2 stacked commits: pending visibility skips a patch over an array branch its ops cannot apply to", async () => {
   const harness = await createHarness();
   try {
     await seedAccepted(harness, DOCS.A, []);
@@ -3568,12 +4425,13 @@ Deno.test("memory v2 stacked commits: pending visibility can replace an array br
       },
     );
 
+    // Ops-replay (CT-1872 1a): the patch descends through a base that
+    // cannot hold it, so the layer renders SKIPPED — the base shows
+    // through — rather than branch-replacing the pending snapshot in (the
+    // old value-combining, which fabricated states the server would never
+    // produce and could resurrect dropped sibling data).
     expectVisible(harness, {
-      A: {
-        choice: {
-          name: "Sushi Place",
-        },
-      },
+      A: [],
     });
 
     await assertConflict(patch, "synthetic array-base conflict");
@@ -3753,6 +4611,252 @@ Deno.test("memory v2 stacked commits: a dependant stranded by a dropped optimist
   } finally {
     g1.resolve();
     g2.resolve();
+    await harness.close();
+  }
+});
+// CT-1872 Class 1a pins (ported from #4608, expectations rewritten for the
+// ops-replay contract): a pending patch layer renders by REPLAYING ITS OPS
+// over the current base — never by copying values out of its optimistic
+// snapshot — so a dropped sibling's data is unrepresentable in the result.
+// A layer whose ops cannot apply to the base (the spine died with a dropped
+// parent, or a winner replaced it with an incompatible shape) renders
+// SKIPPED: transiently honest, converging when a frame delivers server
+// truth. Under strict semantics (CT-1875) such commits become terminal
+// rejections at admission instead.
+
+Deno.test("memory v2 stacked commits: a surviving child whose ops cannot apply to the repaired base renders skipped, not crashed", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, null);
+
+    harness.model.setOutcome(2, { kind: "rejectConflict" });
+    const parent = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value",
+        value: { left: 1 },
+      }],
+      { left: 1 },
+    );
+
+    harness.model.setOutcome(3, { kind: "accept" });
+    const child = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/right",
+        value: 2,
+      }],
+      { left: 1, right: 2 },
+    );
+
+    const beforeDrop = harness.provider.get(DOCS.A);
+    assertExists(beforeDrop);
+    assertEquals(beforeDrop.value, { left: 1, right: 2 });
+
+    await assertConflict(parent);
+
+    // The child's replace targets a spine that existed only in the dropped
+    // parent. Its ops cannot apply to the repaired base (null), so the
+    // layer renders skipped — the parent's { left: 1 } must not resurrect,
+    // and nothing may crash.
+    const afterDrop = harness.provider.get(DOCS.A);
+    assertExists(afterDrop);
+    assertEquals(afterDrop.value, null);
+
+    await assertResultOk(child);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: replay over a primitive root skips the layer instead of clobbering the primitive", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, new FabricEpochNsec(1n));
+
+    harness.model.setOutcome(2, { kind: "rejectConflict" });
+    const parent = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value",
+        value: { left: 1 },
+      }],
+      { left: 1 },
+    );
+
+    harness.model.setOutcome(3, { kind: "accept" });
+    const child = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/right",
+        value: 2,
+      }],
+      { left: 1, right: 2 },
+    );
+
+    await assertConflict(parent);
+
+    // The repaired base holds a primitive at the root the child's ops
+    // descend through: the layer skips; the primitive is not clobbered
+    // into an object and the dropped parent's data does not resurrect.
+    const afterDrop = harness.provider.get(DOCS.A);
+    assertExists(afterDrop);
+    assertEquals(afterDrop.value, new FabricEpochNsec(1n));
+
+    await assertResultOk(child);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a dependent layer whose spine died with its parent renders the repaired base", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, null);
+
+    harness.model.setOutcome(2, { kind: "rejectConflict" });
+    const parent = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value",
+        value: { items: ["a"] },
+      }],
+      { items: ["a"] },
+    );
+
+    harness.model.setOutcome(3, { kind: "rejectConflict" });
+    const child = beginPatch(
+      harness,
+      DOCS.A,
+      [{
+        op: "replace",
+        path: "/value/items/0/name",
+        value: "b",
+      }],
+      { items: [{ name: "b" }] },
+    );
+
+    // Even before any drop, the child's replace-under-an-element cannot
+    // apply to its parent's base (items[0] is a scalar): the layer renders
+    // skipped from the start — the old value-combining fabricated the
+    // { items: [{ name: "b" }] } view here.
+    const beforeDrop = harness.provider.get(DOCS.A);
+    assertExists(beforeDrop);
+    assertEquals(beforeDrop.value, { items: ["a"] });
+
+    await assertConflict(parent);
+
+    // The child's array spine died with the parent: its layer skips and
+    // the repaired base shows through — no fabricated array, no
+    // resurrected "a".
+    const afterParentDrop = harness.provider.get(DOCS.A);
+    assertExists(afterParentDrop);
+    assertEquals(afterParentDrop.value, null);
+
+    await assertConflict(child);
+
+    const afterChildDrop = harness.provider.get(DOCS.A);
+    assertExists(afterChildDrop);
+    assertEquals(afterChildDrop.value, null);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: surviving independent patch does not resurrect a dropped materialization's data", async () => {
+  const harness = await createHarness();
+  try {
+    await seedAccepted(harness, DOCS.A, { items: null });
+    // Establish the sync-consumption loop (frames dead-letter without a
+    // pull/watch view to feed them into the replica).
+    assertEquals(
+      await harness.replica.pull([[
+        { id: DOCS.A, type: DOCUMENT_MIME },
+        undefined,
+      ]]),
+      { ok: {} },
+    );
+    harness.pushSync({ caughtUpLocalSeq: 1 });
+
+    // Another client materializes the container server-side and wins. The
+    // harness delivers no subscription updates, so this client's confirmed
+    // mirror stays at { items: null } — modeling the window (of any length)
+    // between a commit verdict and the corresponding catch-up novelty.
+    harness.model.injectRemote({
+      label: "client-2 wins the container",
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        value: { items: { theirs: "w" } },
+      }],
+    });
+
+    // C1: this client's own (losing) materialization of the same container,
+    // batched with a B write; it conflicts, so the WHOLE transaction rolls
+    // back — including its A materialization.
+    const c1 = beginBatch(harness, [
+      { op: "set", id: DOCS.A, value: { items: { seeded: "x" } } },
+      { op: "set", id: DOCS.B, value: valueFor("c1-b") },
+    ]);
+    harness.model.setOutcome(c1.localSeq, {
+      kind: "rejectConflict",
+      message: "stale materialization lost the race",
+    });
+
+    // C2: a blind leaf write through the container C1 materialized — no read
+    // dependencies (like a UI vote), so it is independent and survives C1's
+    // drop. The server accepts it: the authoritative state HAS the container
+    // (client 2's), so the server-side patch apply succeeds.
+    harness.model.setOutcome(c1.localSeq + 1, { kind: "accept" });
+    const c2 = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "add", path: "/value/items/mine", value: "hello" }],
+      { items: { seeded: "x", mine: "hello" } },
+    );
+
+    await assertConflict(c1.promise, "lost the race");
+    await assertResultOk(c2);
+
+    // The survivor replays its OPS over the stale { items: null } mirror:
+    // the add cannot descend through null, so the layer skips. The dropped
+    // C1's "seeded" must not resurrect out of the survivor's snapshot, and
+    // no fabricated container may appear — the stale mirror shows through
+    // until server truth arrives.
+    expectVisible(harness, { A: { items: null } });
+
+    // Server truth arrives on a frame (post-CT-1965, the accept's own echo):
+    // the winner's container with the survivor's write merged in. The view
+    // converges to it — the survivor's write lands via delivery, never via
+    // client-side fabrication, and "seeded" never existed.
+    harness.pushSync({
+      caughtUpLocalSeq: c1.localSeq + 1,
+      upserts: [{
+        id: DOCS.A,
+        seq: 100,
+        value: { items: { theirs: "w", mine: "hello" } },
+      }],
+    });
+    await waitForCondition(
+      () =>
+        (harness.provider.get(DOCS.A)?.value as
+          | { items?: { theirs?: string } }
+          | null
+          | undefined)?.items?.theirs === "w",
+      "server truth delivered and integrated",
+    );
+    expectVisible(harness, { A: { items: { theirs: "w", mine: "hello" } } });
+  } finally {
     await harness.close();
   }
 });

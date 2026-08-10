@@ -1,0 +1,61 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "content": {
+        "default": "",
+        "type": "string"
+      }
+    },
+    "required": [
+      "content"
+    ],
+    "type": "object"
+  },
+  "pattern": "examples/cf-code-editor-cell.tsx",
+  "resultSchema": {
+    "$defs": {
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "properties": {},
+            "type": "object"
+          }
+        ]
+      },
+      "UIRenderable": {
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "content": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI",
+      "content"
+    ],
+    "type": "object"
+  }
+}

@@ -9,7 +9,7 @@ import {
   defineFixtureSuite,
 } from "@commonfabric/test-support/fixture-runner";
 import {
-  JsonEncodingContext,
+  JsonCodec,
   jsonFromValue,
   valueFromJson,
 } from "@commonfabric/data-model/codec-json";
@@ -19,7 +19,7 @@ import {
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { createSchemaTransformerV2 } from "../src/plugin.ts";
+import { SchemaGenerator } from "../src/schema-generator.ts";
 import {
   batchTypeCheckFixtures,
   getTypeFromCode,
@@ -170,7 +170,7 @@ defineFixtureSuite<SchemaResult, string>({
 async function runSchemaTransform(inputPath: string): Promise<SchemaResult> {
   const code = await Deno.readTextFile(inputPath);
   const { type, checker, typeNode } = await getTypeFromCode(code, TYPE_NAME);
-  const transformer = createSchemaTransformerV2();
+  const transformer = new SchemaGenerator();
   const normalized = normalizeSchema(
     transformer.generateSchema(type, checker, typeNode),
   );
@@ -191,13 +191,13 @@ async function runSchemaTransform(inputPath: string): Promise<SchemaResult> {
  *
  * The encoding's prefix tag identifies it on the wire but is not part of the
  * JSON, so it cannot survive pretty-printing. Taking it off and putting it back
- * goes through `JsonEncodingContext`'s test-only helpers, which is what keeps
- * the tag defined in exactly one place. Key order needs no help: a conforming
- * encoder emits plain-object keys in canonical order.
+ * goes through `JsonCodec`'s test-only helpers, which is what keeps the tag
+ * defined in exactly one place. Key order needs no help: a conforming encoder
+ * emits plain-object keys in canonical order.
  */
 function encodeGolden(value: unknown): string {
   const body = JSON.parse(
-    JsonEncodingContext.unwrapEncodedValueForTesting(
+    JsonCodec.unwrapEncodedValueForTesting(
       jsonFromValue(value as FabricValue),
     ),
   );
@@ -207,7 +207,7 @@ function encodeGolden(value: unknown): string {
 /** Inverse of {@link encodeGolden}. */
 function decodeGolden(text: string): unknown {
   return valueFromJson(
-    JsonEncodingContext.wrapEncodedValueForTesting(text.trim()),
+    JsonCodec.wrapEncodedValueForTesting(text.trim()),
   );
 }
 

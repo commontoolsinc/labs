@@ -295,19 +295,6 @@ const cfcSubstrateStatusFor = (options: {
   return options.mode === "enforce-strict" ? "missing" : "not-attested";
 };
 
-const describeSandbox = (
-  sandbox: SandboxRuntime,
-  cwd: string,
-): SandboxRuntimeDescription =>
-  sandbox.describe?.() ?? {
-    kind: sandbox.kind,
-    defaultWorkingDirectory: sandbox.defaultWorkingDirectory(),
-    cfc: {
-      runtimeRequested: sandbox.kind === "docker-runsc-cfc",
-      workspaceMountPath: cwd,
-    },
-  };
-
 const findMountDescription = (
   mounts: readonly SandboxRuntimeMountDescription[] | undefined,
   kind: SandboxRuntimeMountKind,
@@ -459,11 +446,10 @@ const createFabricWriteGovernance = (options: {
 
 const createCfcCapabilitySnapshot = (
   sandbox: SandboxRuntime,
-  cwd: string,
   options: CollectHarnessCapabilitySnapshotOptions,
 ): HarnessCfcCapabilitySnapshot => {
   const mode = options.cfcEnforcementMode ?? "enforce-explicit";
-  const sandboxDescription = describeSandbox(sandbox, cwd);
+  const sandboxDescription = sandbox.describe();
   return {
     enforcementMode: mode,
     absenceBehavior: cfcAbsenceBehaviorForMode(mode),
@@ -503,7 +489,7 @@ export const collectHarnessCapabilitySnapshot = async (
   at = new Date().toISOString(),
   options: CollectHarnessCapabilitySnapshotOptions = {},
 ): Promise<HarnessCapabilitySnapshot> => {
-  const cfc = createCfcCapabilitySnapshot(sandbox, cwd, options);
+  const cfc = createCfcCapabilitySnapshot(sandbox, options);
   const result = await sandbox.runShell({
     command: CAPABILITY_PROBE_SCRIPT,
     cwd,
@@ -886,7 +872,11 @@ export const classifyHarnessRunError = (
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
   if (
-    normalized.includes("chat completion transport request failed") &&
+    // Operation-neutral: the gateway client prefixes this with the operation
+    // ("chat.completions" or "responses"), and runs recorded before that
+    // change say "chat completion". Matching the stable tail classifies all
+    // three.
+    normalized.includes("transport request failed") &&
     (normalized.includes("timed out") ||
       normalized.includes("timeout"))
   ) {

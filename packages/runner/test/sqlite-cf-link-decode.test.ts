@@ -17,7 +17,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { table } from "@commonfabric/memory/sqlite/schema";
-import type { SqliteDbRef } from "@commonfabric/memory/v2";
+import type { SqliteDbRef, SqliteParamsWire } from "@commonfabric/memory/v2";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
@@ -54,7 +54,7 @@ describe("sqlite query result _cf_link behavior", () => {
   const seedSqlite = async (
     db: SqliteDbRef,
     sql: string,
-    params?: readonly unknown[],
+    params?: SqliteParamsWire,
   ): Promise<void> => {
     const seedTx = runtime.edit();
     seedTx.recordSqliteWrite!(space, { op: "sqlite", db, sql, params });

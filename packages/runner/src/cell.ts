@@ -1,25 +1,31 @@
 import {
   type Immutable,
   isFunction,
-  isObject,
+  isPlainContainer,
   isRecord,
 } from "@commonfabric/utils/types";
 import {
   cloneIfNecessary,
+  fabricFromNativeValue,
   FabricInstance,
+  type FabricOrConvertibleNativeValue,
+  FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
+  type FabricValueLayer,
+  shallowCleanArray,
+  shallowCleanPlainObject,
   shallowFabricFromNativeValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import { codecOf } from "@commonfabric/data-model/codec-common";
 import {
   type EntityRef,
   entityRefFromString,
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
+import { refuseFabricInstance } from "./fabric-special-object.ts";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
@@ -27,12 +33,13 @@ import {
 } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { ReadonlyCell } from "@commonfabric/api";
-import type { SqliteParamsWire } from "@commonfabric/memory/v2";
+import type { SqliteDbRef, SqliteParamsWire } from "@commonfabric/memory/v2";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
 import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
 import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
 import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
+import { scopeCallerEventId } from "./scheduler/event-identity.ts";
 import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
 import { cfcLabelViewForCell } from "./cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
@@ -50,9 +57,6 @@ import {
   type Frame,
   type HKT,
   type ICell,
-  ID,
-  ID_FIELD,
-  type IDFields,
   isStreamValue,
   type IsThisObject,
   type IStreamable,
@@ -101,6 +105,7 @@ import {
 } from "./cfc/metadata.ts";
 import { toURI } from "./uri-utils.ts";
 import { createRef } from "./create-ref.ts";
+import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import {
   type SigilLink,
   type SigilWriteRedirectLink,
@@ -121,7 +126,7 @@ import {
   parseLink,
   toMemorySpaceAddress,
 } from "./link-utils.ts";
-import { isCellScope, normalizeCellScope } from "./scope.ts";
+import { isCellScope, narrowerScopeCap, normalizeCellScope } from "./scope.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -205,6 +210,7 @@ const recordSchemaWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
+  schemaRole?: "output",
 ): void => {
   const resolvedSchema = resolveSchema(schema) ??
     storedSchemaForWritePolicyInput(tx, link);
@@ -222,6 +228,7 @@ const recordSchemaWritePolicyInput = (
     },
     schemaHash: schemaAndHash.taggedHashString,
     schema: schemaAndHash.schema,
+    ...(schemaRole !== undefined && { schemaRole }),
   });
 };
 
@@ -244,7 +251,7 @@ const storedSchemaForWritePolicyInput = (
   if (!isRecord(stored) || stored.value === undefined) {
     return undefined;
   }
-  return new ContextualFlowControl().getSchemaAtPath(
+  return ContextualFlowControl.getSchemaAtPath(
     stored.value as JSONSchema,
     [...link.path],
   );
@@ -254,6 +261,7 @@ export const recordRelevantSchemaWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   schema: JSONSchema | undefined,
+  schemaRole?: "output",
 ): void => {
   const resolvedSchema = resolveSchema(schema);
   const cfcRelevant = schemaHasIfc(resolvedSchema) ||
@@ -266,8 +274,66 @@ export const recordRelevantSchemaWritePolicyInput = (
     tx,
     link,
     schemaHasIfc(resolvedSchema) ? resolvedSchema : undefined,
+    schemaRole,
   );
 };
+
+/**
+ * Internal-only stream-send options.
+ *
+ * `eventId` is a caller-supplied durable event id (verb contract WS-D): a
+ * same-id retry collides on the handling's create-only receipt.
+ *
+ * `runtimeInjectedEventKeys` names payload keys the RUNTIME itself merged
+ * into this send's event value (the LLM tool-call path injects a `result`
+ * cell: `builtins/llm-dialog.ts` sends `{ ...input, result }`). The
+ * dispatch-side closed-world gate exempts exactly these keys — and only
+ * these — from an `additionalProperties: false` event schema. The marker is
+ * PROVENANCE, not shape, and must stay unforgeable: it rides this
+ * in-process options argument, never the event value, so no remote or CLI
+ * caller can express it — payloads are plain data, and the CLI's invocation
+ * engine (`executeResolvedCallable`, packages/cli/lib/callable.ts) builds the
+ * send options itself and puts only `eventId` in them. In-process callers are
+ * gated too: the value must be an
+ * array MINTED by {@link markRuntimeInjectedEventKeys} — the stream-send
+ * path drops any other value — and the mint lives in runner internals no
+ * pattern compartment can import, so sandboxed pattern code holding a real
+ * stream cell still cannot smuggle an undeclared key past closed-world by
+ * passing a plain array here. Adding any data-expressible way to set it
+ * would reopen the accepted-and-ignored hole C5 closes.
+ */
+export type StreamSendOptions = {
+  eventId?: string;
+  runtimeInjectedEventKeys?: readonly string[];
+};
+
+// The mint registry backing `runtimeInjectedEventKeys` (see
+// StreamSendOptions): membership here is the capability. Only code that can
+// call `markRuntimeInjectedEventKeys` — runner-internal modules and
+// same-package tests; never a pattern compartment, whose module graph cannot
+// import runner internals — can produce an array the send path accepts.
+const mintedRuntimeInjectedKeys = new WeakSet<readonly string[]>();
+
+/**
+ * Mint an injection-provenance marker for {@link StreamSendOptions}. The
+ * returned (frozen) array is the capability: `Cell.set`'s stream branch
+ * forwards `runtimeInjectedEventKeys` to dispatch only when it was minted
+ * here, so an unminted array — anything a spoofing caller can construct —
+ * is ignored and the closed-world gate judges the key like any other
+ * undeclared field.
+ */
+export function markRuntimeInjectedEventKeys(
+  keys: readonly string[],
+): readonly string[] {
+  const minted = Object.freeze([...keys]);
+  mintedRuntimeInjectedKeys.add(minted);
+  return minted;
+}
+
+const mintedRuntimeInjectedEventKeys = (
+  keys: readonly string[] | undefined,
+): readonly string[] | undefined =>
+  keys !== undefined && mintedRuntimeInjectedKeys.has(keys) ? keys : undefined;
 
 /**
  * Module augmentation for runtime-specific cell methods.
@@ -282,22 +348,36 @@ declare module "@commonfabric/api" {
     set(
       value: AnyCellWrapping<T> | T,
       onCommit?: (tx: IExtendedStorageTransaction) => void,
+      sendOptions?: {
+        eventId?: string;
+        runtimeInjectedEventKeys?: readonly string[];
+      },
     ): C;
   }
 
   /**
-   * Augment Streamable to add onCommit callback support.
-   * Event is optional only when T is void (matching public API).
+   * Augment Streamable to add onCommit callback and internal send-options
+   * support (see `StreamSendOptions` — `eventId` and the runtime-injected
+   * key marker). Event is optional only when T is void (matching public
+   * API).
    */
   interface IStreamable<T> {
     send(
       ...args: T extends void ? [] | [AnyCellWrapping<T> | T] | [
           AnyCellWrapping<T> | T,
           (tx: IExtendedStorageTransaction) => void,
+        ] | [
+          AnyCellWrapping<T> | T,
+          ((tx: IExtendedStorageTransaction) => void) | undefined,
+          { eventId?: string; runtimeInjectedEventKeys?: readonly string[] },
         ]
         : [AnyCellWrapping<T> | T] | [
           AnyCellWrapping<T> | T,
           (tx: IExtendedStorageTransaction) => void,
+        ] | [
+          AnyCellWrapping<T> | T,
+          ((tx: IExtendedStorageTransaction) => void) | undefined,
+          { eventId?: string; runtimeInjectedEventKeys?: readonly string[] },
         ]
     ): void;
   }
@@ -324,7 +404,7 @@ declare module "@commonfabric/api" {
     ): Cancel;
     sinkMeta(
       metaField: MetaField,
-      callback: (value: Immutable<FabricValue>) => Cancel | undefined | void,
+      callback: (value: FabricValue) => Cancel | undefined | void,
       options?: SinkOptions,
     ): Cancel;
     sync(): Promise<Cell<T>>;
@@ -358,14 +438,14 @@ declare module "@commonfabric/api" {
      * conform to `T` (e.g., `SigilLink` references, stream markers).
      *
      * By default (or with `{ frozen: true }`), returns a deep-frozen
-     * `Immutable<FabricValue>`. Pass `{ frozen: false }` to get a mutable
+     * `FabricValue`. Pass `{ frozen: false }` to get a mutable
      * deep copy instead.
      *
      * Prefer `getRaw()` when the value is expected to match `T`.
      */
     getRawUntyped(
       options?: RawCellReadOptions & { frozen?: true },
-    ): Immutable<FabricValue>;
+    ): FabricValue;
     getRawUntyped(
       options: RawCellReadOptions & { frozen: false },
     ): FabricValue;
@@ -383,8 +463,16 @@ declare module "@commonfabric/api" {
      * the write is skipped entirely if it deep-equals the value that would be
      * written. The read is marked `ignoreReadForScheduling`, so it does not
      * register a dependency that could re-trigger the writing computation.
+     *
+     * `schemaRole` is runner-internal provenance. Result projection writes pass
+     * `"output"` so the schema record created by this write carries the role;
+     * ordinary callers must leave it absent.
      */
-    setRawUntyped(value: FabricValue, onlyIfDifferent?: boolean): void;
+    setRawUntyped(
+      value: FabricValue,
+      onlyIfDifferent?: boolean,
+      schemaRole?: "output",
+    ): void;
     setSchema(newSchema: JSONSchema): void;
     connect(node: NodeRef): void;
     export(): {
@@ -401,6 +489,32 @@ declare module "@commonfabric/api" {
     getAsReactiveProxy(
       boundTarget?: (...args: unknown[]) => unknown,
     ): Reactive<T>;
+
+    /**
+     * Returns the sigil link naming this cell, or `null` when the cell has no
+     * full link yet (one that has not been created). The link is what stands in
+     * for a cell wherever a cell itself has no representation, and this is how
+     * the storage boundary asks for it -- by name, off a value it has already
+     * recognized as a cell. The two members below return the same link.
+     */
+    toSigilLinkOrNull(): SigilLink | null;
+
+    /**
+     * Returns the same link, under the name `encodableFormOf()` reads by. That
+     * is how a cell survives a walk over an arbitrary graph -- deriving a
+     * content id, or a builder default -- where nothing has recognized it as a
+     * cell and there is no representation for one. The type is narrower than
+     * the `toEncodableForm` a builder artifact carries, and assignable to it.
+     */
+    toEncodableForm(): SigilLink | null;
+
+    /**
+     * Returns the same link under the JSON protocol's name, so a cell reads as
+     * what it names wherever a renderer honors that protocol.
+     * `toCompactDebugString()` does, and it is what pattern-test assertion
+     * diagnostics render their operands with. Nothing on the way to storage
+     * consults it.
+     */
     toJSON(): SigilLink | null;
     runtime: Runtime;
     tx: IExtendedStorageTransaction | undefined;
@@ -426,6 +540,9 @@ export type { AnyCell, Cell, Stream } from "@commonfabric/api";
 
 export type { MemorySpace } from "@commonfabric/memory/interface";
 
+// The names a `Reactive` forwards as METHODS of the cell it proxies. Every
+// other string reads as data navigation, so a name here shadows a data key
+// spelled the same way -- which is why `query` and `exec` are gated below.
 const cellMethods = new Set<
   | keyof ICell<unknown>
   | "findIndex"
@@ -459,6 +576,8 @@ const cellMethods = new Set<
   "filterWithPattern",
   "flatMap",
   "flatMapWithPattern",
+  "toSigilLinkOrNull",
+  "toEncodableForm",
   "toJSON",
   "for",
   "asSchema",
@@ -1047,7 +1166,21 @@ export class CellImpl<T extends FabricValue>
    *          dependencies have been computed.
    */
   pull(): Promise<Readonly<T>> {
-    if (!this.synced) this.sync(); // No await, just kicking this off
+    if (!this.synced) {
+      // Register the kicked first sync in the settled pool the convergence
+      // loop below drains. sync() resolves once the doc is confirmed —
+      // arrived or absent — and an UNREGISTERED kick is exactly the race
+      // sync()'s own doc comment warns about: over a low-latency link the
+      // doc lands before the scheduler goes idle, so the read sees it; over
+      // a real network it does not, and pull() resolved from held,
+      // not-yet-loaded state (measured: a same-id retry's receipt readback
+      // returned undefined against a remote host while identical calls
+      // passed against a local toolshed). Failures are swallowed like
+      // link-resolution's kicks: the read still resolves from the replica.
+      this.runtime.storageManager.trackUntilSettled(
+        this.sync().catch(() => {}),
+      );
+    }
 
     // Check if we need to traverse the result to register all dependencies.
     // This is needed when there's no schema or when the schema is TrueSchema ("any"),
@@ -1166,8 +1299,10 @@ export class CellImpl<T extends FabricValue>
       ? cloneIfNecessary(
         materialized.tables as Parameters<typeof cloneIfNecessary>[0],
         { frozen: false },
-      ) as Record<string, unknown>
-      : handle.tables as Record<string, unknown> | undefined;
+      ) as SqliteDbRef["tables"]
+      // `handle` is a raw, unvalidated read (see above), so this states the
+      // wire shape rather than proving it.
+      : handle.tables as SqliteDbRef["tables"];
     // CFC write-ceiling (Phase 2): a value bound to a labeled column must fit the
     // column's `ifc.maxConfidentiality`. The label rides the bound value (a Cell
     // or any carried-label value); fail closed when a labeled value's target
@@ -1209,6 +1344,9 @@ export class CellImpl<T extends FabricValue>
     if ("error" in rowGate) throw new TypeError(rowGate.error);
     if (rowGate.policies !== undefined && rowGate.policies.length > 0) {
       this.tx.markCfcRelevant(`sqlite-row-label:${handle.id}`);
+      // TODO(danfuzz): `JSON.stringify` renders a `FabricPrimitive` bind
+      // param (a `FabricBytes` blob, say) as `{}`, so two requests differing
+      // only in such a param collapse onto one policy-input identity here.
       recordSinkRequestPolicyInput(
         this.tx,
         `sqlite:${handle.id}`,
@@ -1248,7 +1386,7 @@ export class CellImpl<T extends FabricValue>
     //    `rev`, so two in-flight `db.exec` commits conflict on this cell's
     //    revision (optimistic-concurrency mutex) and one retries.
     // A LEAF write, not a whole-value set of `{...handle, rev}`: exec runs
-    // inside a handler frame, where a whole-value `.set()` [ID]-anchors every
+    // inside a handler frame, where a whole-value `.set()` anchors every
     // object-in-array and would split the handle's inline rule term lists
     // back into per-element linked docs — the split sqliteDatabase stores the
     // handle raw specifically to avoid (a second runtime can't load those).
@@ -1261,12 +1399,26 @@ export class CellImpl<T extends FabricValue>
   set(
     newValue: AnyCellWrapping<T> | T,
     /**
-     * Internal-only commit callback. This runs after this transaction's final
-     * commit result, including failure, so it must remain non-effectful. Use
-     * the post-commit outbox for external side effects that must happen only
-     * after success.
+     * Internal-only settle callback. This runs once this transaction reaches
+     * its final outcome, which includes a rejected commit and an abort, so it
+     * must remain non-effectful. Use the post-commit outbox for external side
+     * effects that must happen only after success.
      */
     onCommit?: (tx: IExtendedStorageTransaction) => void,
+    /**
+     * Internal-only stream-send options (see {@link StreamSendOptions}).
+     * `eventId` supplies the durable event id (spec §7.5) instead of minting
+     * one: an ingress caller that owns a delivery id passes it through so a
+     * retry of the same id collides on the handling's create-only receipt
+     * (verb contract WS-D,
+     * docs/history/plans/pattern-verb-contract-implementation.md). The receipt
+     * is a COMMIT witness, not an execution witness — the redelivered event
+     * still runs the handler body and then loses the race, so effects outside
+     * the transaction repeat. `runtimeInjectedEventKeys` carries the
+     * runtime-injection provenance the closed-world gate consumes. Ignored on
+     * the plain-cell write path.
+     */
+    sendOptions?: StreamSendOptions,
   ): Cell<T> {
     const resolvedToValueLink = resolveLink(
       this.runtime,
@@ -1289,7 +1441,14 @@ export class CellImpl<T extends FabricValue>
         );
       }
 
-      const event = convertCellsToLinks(newValue) as AnyCellWrapping<T>;
+      // `T` is unconstrained, so this says what the conversion requires rather
+      // than what the class guarantees, the same way `CellHandle<T>` does on
+      // the client side.
+      //
+      // TODO(danfuzz): constrain `T`, so that neither cast is needed.
+      const event = convertCellsToLinks(
+        newValue as CellLinkInput,
+      ) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 
       // Trigger on fully resolved link
@@ -1299,7 +1458,23 @@ export class CellImpl<T extends FabricValue>
         undefined,
         onCommit,
         false,
-        { originTx: this.tx ?? undefined },
+        {
+          // The caller's key is opaque and unscoped; queueEvent expects a
+          // durable delivery id. Binding it to this stream is what keeps two
+          // verbs that share input bindings from colliding on one receipt.
+          eventId: sendOptions?.eventId === undefined
+            ? undefined
+            : scopeCallerEventId(sendOptions.eventId, resolvedToValueLink),
+          originTx: this.tx ?? undefined,
+          // Forward injection provenance only when it carries the mint (see
+          // markRuntimeInjectedEventKeys): a plain array here — the shape any
+          // in-process or sandboxed caller could pass — is dropped, and the
+          // closed-world gate then judges the key like any other undeclared
+          // field.
+          runtimeInjectedEventKeys: mintedRuntimeInjectedEventKeys(
+            sendOptions?.runtimeInjectedEventKeys,
+          ),
+        },
       );
 
       this.cleanup?.();
@@ -1320,8 +1495,6 @@ export class CellImpl<T extends FabricValue>
       // retry on conflict.
       if (!this.synced) this.sync();
 
-      // Looks for arrays and makes sure each object gets its own doc.
-      const transformedValue = recursivelyAddIDIfNeeded(newValue, this._frame);
       recordRelevantSchemaWritePolicyInput(
         this.tx,
         resolvedToValueLink,
@@ -1336,23 +1509,31 @@ export class CellImpl<T extends FabricValue>
       );
 
       // TODO(@ubik2) investigate whether i need to check confidential as i walk down my own obj
+      // The anchor id source makes sure each object in an array gets its own
+      // doc; without a frame there is none, and such objects store inline.
       diffAndUpdate(
         this.runtime,
         this.tx,
         writeLink,
-        transformedValue,
+        newValue,
         this._frame?.cause,
+        undefined,
+        frameAnchorIds(this._frame),
       );
 
-      // A whole-value set over the path it writes reshapes what a mergeable op
-      // intent recorded there (an earlier push / addUnique / increment /
-      // removeByValue in this transaction) refers to. Poison that intent —
-      // keyed on `writeLink`, the exact path diffAndUpdate wrote — so the commit
-      // emits this set's whole-array diff rather than a stale tail op. Keying on
-      // the written path is what keeps this correct across aliases and child
-      // writes: a set that lands on a different slot than the op's target (a
-      // non-redirect alias) or on a child path (an element edit) finds no intent
-      // there, so poisonMergeableOp is a no-op and the append stays mergeable.
+      // A whole-value set reshapes what a mergeable op intent (an earlier push /
+      // addUnique / increment / removeByValue in this transaction) refers to,
+      // both at the path it writes and anywhere beneath it — writing an
+      // enclosing object rewrites the arrays inside it too. Poison those intents,
+      // keyed on `writeLink`, the path diffAndUpdate wrote, so the commit emits
+      // this set's whole-array diff rather than a stale tail op.
+      //
+      // Keying on the written path is what keeps this correct for the writes
+      // that should NOT disturb an op: a set on a CHILD path (an element edit)
+      // sits beneath the array, so the array's own intent is above the write and
+      // survives, and a set that lands on an unrelated slot (a non-redirect
+      // alias, a sibling field) covers no intent at all. Only a write at or
+      // above an op's array poisons it.
       this.tx.poisonMergeableOp?.(writeLink);
 
       // Register commit callback if provided.
@@ -1380,6 +1561,10 @@ export class CellImpl<T extends FabricValue>
          * after success.
          */
         (tx: IExtendedStorageTransaction) => void,
+      ] | [
+        AnyCellWrapping<T>,
+        ((tx: IExtendedStorageTransaction) => void) | undefined,
+        StreamSendOptions,
       ]
       : [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
@@ -1390,10 +1575,22 @@ export class CellImpl<T extends FabricValue>
          * after success.
          */
         (tx: IExtendedStorageTransaction) => void,
+      ] | [
+        AnyCellWrapping<T>,
+        ((tx: IExtendedStorageTransaction) => void) | undefined,
+        /**
+         * Internal-only stream-send options (see {@link StreamSendOptions}):
+         * `eventId` passes a caller-supplied durable event id through to the
+         * scheduler, so a same-id retry collides on the handling's
+         * create-only receipt and cannot commit twice — though the body does
+         * re-run (verb contract WS-D). `runtimeInjectedEventKeys` carries
+         * runtime-injection provenance for the closed-world gate.
+         */
+        StreamSendOptions,
       ]
   ): void {
-    const [event, onCommit] = args;
-    this.set(event as AnyCellWrapping<T>, onCommit);
+    const [event, onCommit, sendOptions] = args;
+    this.set(event as AnyCellWrapping<T>, onCommit, sendOptions);
   }
 
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
@@ -1486,23 +1683,22 @@ export class CellImpl<T extends FabricValue>
     );
     // Read marked as the op's own incidental read: dropped from the commit's
     // conflict set so the append merges, while a handler's explicit read is not.
-    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+    let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
     const cause = this._frame?.cause;
 
-    let array = currentValue as unknown[];
-    if (array !== undefined && !Array.isArray(array)) {
-      throw new Error(
-        "Cell.push() requires transaction and array value\n" +
-          "help: use in handlers only, ensure cell is typed as array",
-      );
-    }
+    if (!Array.isArray(currentValue)) {
+      if (currentValue !== undefined) {
+        throw new Error(
+          "Cell.push() requires transaction and array value\n" +
+            "help: use in handlers only, ensure cell is typed as array",
+        );
+      }
 
-    // If there is no array yet, create it first. We have to do this as a
-    // separate operation, so that in the next steps [ID] is properly anchored
-    // in the array.
-    if (array === undefined) {
+      // No array yet, so create it first. This has to be a separate operation,
+      // so that in the next steps each object element is properly anchored in
+      // the array.
       diffAndUpdate(
         this.runtime,
         this.tx,
@@ -1511,15 +1707,27 @@ export class CellImpl<T extends FabricValue>
         cause,
       );
       const resolvedSchema = resolveSchema(this.schema);
-      array = isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
-        ? processDefaultValue(
-          this.runtime,
-          this.tx,
-          this.link,
-          resolvedSchema.default,
-        )
-        : [];
+      // Annotated rather than inferred: `processDefaultValue()` answers `any`,
+      // and assigning that back to `currentValue` would discard the narrowing
+      // this block exists to establish.
+      const created: FabricValue[] =
+        isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+          ? processDefaultValue(
+            this.runtime,
+            this.tx,
+            this.link,
+            resolvedSchema.default,
+          )
+          : [];
+      // From here on `currentValue` is the array just created, not what the
+      // read returned.
+      currentValue = created;
     }
+
+    // Read-only: a value that came from storage is a `FabricArray`, which is a
+    // `ReadonlyArray`, and though a freshly created one is not, this method
+    // only ever reads what it finds -- the replacement is `combined`, below.
+    const array: readonly unknown[] = currentValue;
 
     // Append the new values to the array, preserving sparse holes in the original.
     const combined = new Array(array.length + value.length);
@@ -1529,12 +1737,16 @@ export class CellImpl<T extends FabricValue>
     for (let i = 0; i < value.length; i++) {
       combined[array.length + i] = value[i];
     }
+    // The anchor id source makes sure each pushed object gets its own doc;
+    // without a frame there is none, and such objects store inline.
     diffAndUpdate(
       this.runtime,
       this.tx,
       resolvedLink,
-      recursivelyAddIDIfNeeded(combined, this._frame),
+      combined,
       cause,
+      undefined,
+      frameAnchorIds(this._frame),
     );
 
     // Record the append intent so the commit emits a tail-relative, mergeable
@@ -1562,47 +1774,61 @@ export class CellImpl<T extends FabricValue>
       resolvedLink,
       resolvedLink.schema ?? this.schema,
     );
-    const currentValue = this.tx.readValueOrThrow(resolvedLink, {
+    let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
     const cause = this._frame?.cause;
 
-    let array = currentValue as FabricValue[];
-    if (array !== undefined && !Array.isArray(array)) {
-      throw new Error(
-        "Cell.addUnique() requires transaction and array value\n" +
-          "help: use in handlers only, ensure cell is typed as array",
-      );
-    }
-    if (array === undefined) {
+    if (!Array.isArray(currentValue)) {
+      if (currentValue !== undefined) {
+        throw new Error(
+          "Cell.addUnique() requires transaction and array value\n" +
+            "help: use in handlers only, ensure cell is typed as array",
+        );
+      }
+
       diffAndUpdate(this.runtime, this.tx, resolvedLink, [], cause);
       const resolvedSchema = resolveSchema(this.schema);
-      array = isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
-        ? processDefaultValue(
-          this.runtime,
-          this.tx,
-          this.link,
-          resolvedSchema.default,
-        )
-        : [];
+      // Annotated for the same reason as in `push()`: `processDefaultValue()`
+      // answers `any`, which would discard the narrowing on assignment.
+      const created: FabricValue[] =
+        isRecord(resolvedSchema) && Array.isArray(resolvedSchema.default)
+          ? processDefaultValue(
+            this.runtime,
+            this.tx,
+            this.link,
+            resolvedSchema.default,
+          )
+          : [];
+      // As in `push()`, `currentValue` is now the created array.
+      currentValue = created;
     }
 
-    // Anchor ids on the new values, then keep only those not already present
-    // (by stored-value equality, matching the server's add-unique dedup). The
-    // server re-dedups against durable state, catching elements the local
-    // replica had not loaded.
-    const anchored = recursivelyAddIDIfNeeded(
-      value as FabricValue[],
-      this._frame,
-    );
+    // Read-only for the same reason as in `push()`: the comparisons below only
+    // read, and the replacement is built separately.
+    const array: readonly FabricValue[] = currentValue;
+
+    // Keep only the values not already present (by stored-value equality,
+    // matching the server's add-unique dedup). The server re-dedups against
+    // durable state, catching elements the local replica had not loaded.
+    const candidates = value;
     const existing = array;
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
-    // by content, mirroring the server's keyless dedup.
-    const alreadyPresent = (candidate: FabricValue) =>
-      existing.some((element) =>
-        isCell(candidate)
-          ? areLinksSame(
+    // by content, mirroring the server's keyless dedup. Under a frame, the
+    // content comparison runs against a fabric-normalized COPY of the candidate
+    // (a native `Date` must match its stored `FabricEpochNsec` form); the
+    // original candidate -- not the copy -- is what an accepted add writes, so
+    // no identity the write path relies on is disturbed. A frameless
+    // `addUnique` compares the raw candidate: the write boundary that would
+    // normalize it runs only under a frame, and a raw comparison also tolerates
+    // annotation-carrying values (e.g. `get()` results) that the strict
+    // conversion rejects.
+    const normalizeForComparison = this._frame !== undefined;
+    const alreadyPresent = (candidate: FabricValue) => {
+      if (isCell(candidate)) {
+        return existing.some((element) =>
+          areLinksSame(
             element,
             candidate,
             this as unknown as Cell<any>,
@@ -1610,18 +1836,38 @@ export class CellImpl<T extends FabricValue>
             this.tx!,
             this.runtime,
           )
-          : valueEqual(element, candidate)
-      );
-    const toAdd = anchored.filter((candidate) => !alreadyPresent(candidate));
+        );
+      }
+      // A cyclic candidate can never equal a stored element -- stored fabric
+      // values are acyclic (cycles persist as links) -- so it is new by
+      // definition, and must skip the strict normalization a cycle would
+      // break; the write path anchors it with the cycle as a self-link.
+      if (containsCycle(candidate)) {
+        return false;
+      }
+      // Link-carrying candidates (query-result proxies, raw sigil links)
+      // compare as themselves -- the write boundary passes them through
+      // unconverted, and the strict conversion would reject their
+      // non-string-keyed internals.
+      const comparable = normalizeForComparison && !isCellLink(candidate)
+        ? fabricFromNativeValue(flattenBuilderArtifacts(candidate))
+        : candidate;
+      return existing.some((element) => valueEqual(element, comparable));
+    };
+    const toAdd = candidates.filter((candidate) => !alreadyPresent(candidate));
     if (toAdd.length === 0) {
       return;
     }
+    // The anchor id source makes sure each added object gets its own doc;
+    // without a frame there is none, and such objects store inline.
     diffAndUpdate(
       this.runtime,
       this.tx,
       resolvedLink,
       [...existing, ...toAdd],
       cause,
+      undefined,
+      frameAnchorIds(this._frame),
     );
     this.tx.recordMergeableOp?.(resolvedLink, {
       op: "add-unique",
@@ -1694,7 +1940,7 @@ export class CellImpl<T extends FabricValue>
     const currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
-    const array = currentValue as FabricValue[];
+    const array = currentValue;
     if (array === undefined) {
       return;
     }
@@ -1734,7 +1980,7 @@ export class CellImpl<T extends FabricValue>
     for (const element of removed) {
       this.tx.recordMergeableOp?.(resolvedLink, {
         op: "remove-by-value",
-        value: element as FabricValue,
+        value: element,
       });
     }
   }
@@ -1781,6 +2027,13 @@ export class CellImpl<T extends FabricValue>
       throw new Error("Can't remove from non-array value");
     }
     const array = got as ElemT[];
+    // TODO(danfuzz): `typeof ref === "object"` routes a `FabricPrimitive`
+    // (or `FabricInstance`) ref to `areLinksSame`, which parses both
+    // operands as links and answers `false` when either is not one — so a
+    // fabric-valued ref matches only by reference identity, never by value,
+    // and the call otherwise silently no-ops. The sibling `removeByValue`
+    // has the right shape: link comparison for cells, `valueEqual` (which
+    // has a fabric arm) for everything else.
     const index = typeof ref === "object"
       ? array.findIndex((item) =>
         areLinksSame(
@@ -1815,6 +2068,9 @@ export class CellImpl<T extends FabricValue>
       throw new Error("Can't remove from non-array value");
     }
     const array = got as ElemT[];
+    // TODO(danfuzz): same gap as `remove()` above — a fabric-valued `ref`
+    // reaches `areLinksSame` and matches only by reference identity, never
+    // by value, so the call otherwise silently no-ops.
     // Cast needed: TS can't prove ElemT[] reconstitutes to T
     const newArray = array.filter((item) =>
       typeof ref === "object"
@@ -1860,10 +2116,45 @@ export class CellImpl<T extends FabricValue>
     let childSchema: JSONSchema | undefined;
     const childPath = keys.map((key) => key.toString());
 
+    // Follow caps this walk narrows past, so resolveLink can still check a hop
+    // it later finds at an ancestor. `schema` only ever describes the leaf, so
+    // a cap on an `asCell` ancestor otherwise vanishes the moment the path
+    // continues past it (#5230). Costs nothing on the uncapped path.
+    let scopeCaps = currentLink.scopeCaps;
+    const recordCap = (depth: number, schema: JSONSchema | undefined) => {
+      // getSchemaScopeCap is the long-standing path-resolution precedence;
+      // the compound lookup adds anyOf/oneOf-wrapped asCell caps it cannot
+      // see. Taking the narrower is additive: it can only tighten.
+      const cap = narrowerScopeCap(
+        ContextualFlowControl.getSchemaScopeCap(schema),
+        ContextualFlowControl.getAsCellFollowScopeCap(schema),
+      );
+      if (cap === undefined) return;
+      // A repeated key() over the same prefix re-derives the same depth, and
+      // asSchema() can re-declare one with a DIFFERENT cap. Keep the narrower:
+      // skipping on depth alone would let a looser recorded cap shadow a
+      // tighter one the caller just asked for.
+      const existing = scopeCaps?.find((entry) => entry.depth === depth);
+      if (existing !== undefined) {
+        if (narrowerScopeCap(cap, existing.scope) === existing.scope) return;
+        scopeCaps = scopeCaps!.map((entry) =>
+          entry.depth === depth ? { depth, scope: cap } : entry
+        );
+        return;
+      }
+      scopeCaps = [...(scopeCaps ?? []), { depth, scope: cap }];
+    };
+    // Seed with the cap declared at the address we start from: it governs a
+    // link stored AT this address, which the first appended segment already
+    // puts beyond the reach of the leaf schema.
+    if (keys.length > 0) recordCap(currentLink.path.length, currentLink.schema);
+
     for (const key of keys) {
       // Get child schema if we have one
       childSchema = currentLink.schema
-        ? this.runtime.cfc.getSchemaAtPath(currentLink.schema, [key.toString()])
+        ? ContextualFlowControl.getSchemaAtPath(currentLink.schema, [
+          key.toString(),
+        ])
         : undefined;
 
       // Create a child link with an extended path. schemaAtPath retains the
@@ -1876,10 +2167,14 @@ export class CellImpl<T extends FabricValue>
       // scope during writes. Stamping schema scope onto this link here would
       // re-address the value to the wrong scoped instance of the container doc
       // (see CT-1623).
+      const path = [...currentLink.path, key.toString()] as string[];
+      recordCap(path.length, childSchema);
+
       currentLink = {
         ...currentLink,
-        path: [...currentLink.path, key.toString()] as string[],
+        path,
         schema: childSchema,
+        ...(scopeCaps !== undefined && { scopeCaps }),
       };
     }
 
@@ -2036,7 +2331,7 @@ export class CellImpl<T extends FabricValue>
 
   sinkMeta(
     metaField: MetaField,
-    callback: (value: Immutable<FabricValue>) => Cancel | undefined | void,
+    callback: (value: FabricValue) => Cancel | undefined | void,
     options: SinkOptions = {},
   ): Cancel {
     if (!this.synced) this.sync();
@@ -2156,7 +2451,7 @@ export class CellImpl<T extends FabricValue>
    */
   getRawUntyped(
     options?: RawCellReadOptions & { frozen?: true },
-  ): Immutable<FabricValue>;
+  ): FabricValue;
   getRawUntyped(
     options: RawCellReadOptions & { frozen: false },
   ): FabricValue;
@@ -2182,7 +2477,11 @@ export class CellImpl<T extends FabricValue>
     this.setRawUntyped(value);
   }
 
-  setRawUntyped(value: FabricValue, onlyIfDifferent = false): void {
+  setRawUntyped(
+    value: FabricValue,
+    onlyIfDifferent = false,
+    schemaRole?: "output",
+  ): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
 
     // No await for the sync, just kicking this off, so we have the data to
@@ -2213,8 +2512,16 @@ export class CellImpl<T extends FabricValue>
       this.tx,
       this.link,
       this.link.schema ?? this.schema,
+      schemaRole,
     );
     this.tx.writeValueOrThrow(this.link, inlined);
+
+    // Every whole-value write poisons the mergeable ops it covers — one rule,
+    // rather than a list of write paths that happen to remember. Today's callers
+    // are internal machinery writing links into result cells, where no op is
+    // ever recorded, so this is inert; it is here so the rule stays true if that
+    // changes.
+    this.tx.poisonMergeableOp?.(this.link);
   }
 
   getArgumentCell<U>(schema?: JSONSchema): Cell<U> | undefined {
@@ -2253,7 +2560,7 @@ export class CellImpl<T extends FabricValue>
       path: [metaField],
       ...(this.link.scope !== undefined && { scope: this.link.scope }),
     };
-    this.tx.writeOrThrow(metaAddr, value as FabricValue);
+    this.tx.writeOrThrow(metaAddr, value);
   }
 
   /**
@@ -2615,7 +2922,7 @@ export class CellImpl<T extends FabricValue>
     return result;
   }
 
-  toJSON(): SigilLink | null {
+  toSigilLinkOrNull(): SigilLink | null {
     // Return null when no link exists (cell hasn't been created yet)
     if (!this.hasFullLink()) {
       return null;
@@ -2623,6 +2930,29 @@ export class CellImpl<T extends FabricValue>
 
     // Use sigil link format which includes space for cross-space references
     return createSigilLinkFromParsedLink(this.link);
+  }
+
+  toEncodableForm(): SigilLink | null {
+    // The link that stands for a cell, under the name a walk over an arbitrary
+    // graph reads by -- one that has recognized nothing about the value it
+    // holds. A caller that already knows it has a cell asks the accessor above.
+    return this.toSigilLinkOrNull();
+  }
+
+  toJSON(): SigilLink | null {
+    // TODO(danfuzz): Remove this method once `value-debug.ts` can correctly
+    // render cells without it.
+    //
+    // The JSON protocol's name for the same link, honored by every renderer
+    // that walks a value through it -- notably `toCompactDebugString()`, which
+    // pattern-test assertion diagnostics render their operands with. Absent
+    // this, rendering a value holding a cell walks the cell's own members and
+    // reaches the whole runtime, so the rendering carries per-process detail
+    // (the runtime's id among it) and reports differently each run.
+    //
+    // It carries no weight on the way to storage: a value bound for storage is
+    // recognized as a cell first, and its link read off it directly.
+    return this.toSigilLinkOrNull();
   }
 
   get __debugValue(): T {
@@ -2779,6 +3109,14 @@ function sinkHelper(
  * This is used by pull() to ensure all nested values are read,
  * which registers them as dependencies for pull-based scheduling.
  * Works with query result proxies which trigger reads on property access.
+ *
+ * TODO(danfuzz): A `FabricInstance` passes the `typeof` gate but has no
+ * enumerable own properties, so the `for..in` walk ends at it without
+ * touching its codec contents: a link nested inside one (a `FabricError`
+ * `cause`, say — live traffic via the fetch builtins) is never read, so
+ * `pull()` neither registers it as a dependency nor syncs it, and a sink
+ * never re-fires on its change. A `FabricPrimitive` ends the walk too, which
+ * is correct — it is a leaf.
  */
 function deepTraverse(value: unknown, seen = new WeakSet<object>()): void {
   if (value === null || value === undefined) return;
@@ -2882,6 +3220,39 @@ function maybeConvertArrayPathToDataURILink(
 }
 
 /**
+ * Whether `value` contains a reference cycle through plain containers.
+ * Cells, links, and other non-plain objects are treated as leaves -- a cycle
+ * through those resolves at read time and is not a structural cycle of the
+ * value itself.
+ */
+function containsCycle(value: unknown): boolean {
+  const ancestors = new Set<object>();
+  // Nodes already walked to completion without finding a cycle. Without this
+  // memo the walk is exponential on shared acyclic references (a diamond per
+  // level doubles the work), and candidate values are user-controlled.
+  const completed = new Set<object>();
+  const walk = (node: unknown): boolean => {
+    if (
+      node === null || typeof node !== "object" || isCell(node) ||
+      isCellLink(node) || node instanceof FabricSpecialObject
+    ) {
+      return false;
+    }
+    if (completed.has(node)) return false;
+    if (ancestors.has(node)) return true;
+    ancestors.add(node);
+    const values = Array.isArray(node) ? node : Object.values(node);
+    for (const child of values) {
+      if (walk(child)) return true;
+    }
+    ancestors.delete(node);
+    completed.add(node);
+    return false;
+  };
+  return walk(value);
+}
+
+/**
  * Validates that a value contains only static data (no cells or cell-like objects)
  * and has no circular references. Used by Cell.of() to ensure only serializable
  * static data is passed.
@@ -2935,11 +3306,26 @@ function validateStaticData(value: unknown): void {
 
     ancestors.add(obj);
 
-    // TODO(danfuzz): This walk has no `FabricSpecialObject` guard, so a
-    // `FabricPrimitive`/`FabricInstance` in `Cell.of()` static data is walked by
-    // enumerable props instead of treated as a leaf / descended by codec
-    // contents.
+    // A `FabricPrimitive` reaches here and survives, correctly: it has zero
+    // enumerable own properties, so `Object.keys()` is empty and the descent
+    // ends -- and a leaf holds no cell for this validation to find.
     //
+    // A `FabricInstance` is refused instead. Its codec contents can hold a
+    // `Cell`, which is exactly what this validation exists to reject, and those
+    // contents are not reachable by property name -- so passing one through
+    // _smuggles_ a cell into static data past the check meant to stop it.
+    // That is not a completeness gap; it is the validation failing open.
+    //
+    // Nothing reaches this in production today, de facto rather than by
+    // construction: a `FabricError` is ungated and exposed to pattern authors,
+    // so what keeps this safe is that nothing yet puts one in `Cell.of()` data.
+    //
+    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
+    // at which point this becomes a walk rather than a refusal.
+    if (obj instanceof FabricInstance) {
+      refuseFabricInstance(obj, `in \`Cell.of()\` static data`);
+    }
+
     // Traverse arrays and objects
     if (Array.isArray(obj)) {
       for (let i = 0; i < obj.length; i++) {
@@ -2959,255 +3345,193 @@ function validateStaticData(value: unknown): void {
 }
 
 /**
- * Recursively adds IDs elements in arrays, unless they are already a link.
- *
- * This ensures that mutable arrays only consist of links to documents, at least
- * when written to only via .set, .update and .push above.
- *
- * **Frozenness contract:** This function sits at the write boundary into
- * runner/memory storage. The returned tree is always a valid deep-frozen
- * `FabricValue`: the shallow fabric conversion freezes the sub-trees it visits,
- * and the function freezes the freshly-built top-level container before
- * returning. If the input is already a deep-frozen valid `FabricValue`, the
- * shallow conversion returns it as-is and reference identity is preserved
- * end-to-end.
- *
- * TODO(seefeld): When an array has default entries and is rewritten as [...old,
- * new], this will still break, because the previous entries will point back to
- * the array itself instead of being new entries.
- *
- * @param value - The value to add IDs to.
- * @returns The value with IDs added.
+ * The per-frame id source for anchoring plain array-element objects into
+ * entity documents during a write (`DiffWalkState.nextAnchorId`). Without a
+ * frame there is no source, and such objects store inline.
  */
-export function recursivelyAddIDIfNeeded<T>(
-  value: T,
+export function frameAnchorIds(
   frame: Frame | undefined,
-  seen: Map<unknown, unknown> = new Map(),
-): T {
-  // Can't add IDs without frame.
-  if (!frame) return value;
-
-  // Already seen, return previously annotated result. Check this before
-  // shallowFabricFromNativeValue() to handle circular references properly.
-  if (seen.has(value)) return seen.get(value) as T;
-
-  // Cell links pass through unchanged.
-  if (isCellLink(value)) {
-    return value;
-  }
-
-  // `FabricInstance`s are opaque with respect to plain-object-like property
-  // access; they have class-defined identity. Iterating their own-enumerable
-  // properties via the generic walker would descend into wrapper internals
-  // meaninglessly. Instead, walk the observable internal structure via the
-  // class's `[CODEC]` `encode()` (the same mechanism the serialization system
-  // uses) for side effects only — tracking shared references in `seen` and
-  // populating `frame.generatedIdCounter` for any objects-in-arrays nested
-  // inside — then return the original instance unchanged.
-  if (value instanceof FabricInstance) {
-    seen.set(value, value);
-
-    const state = codecOf(value).encode(value);
-    if (isRecord(state) || Array.isArray(state)) {
-      recursivelyAddIDIfNeeded(state, frame, seen);
-    }
-    return value;
-  }
-
-  // Convert value to fabric form. This handles:
-  // - Primitives (e.g., pass -0/NaN/Infinity/bigint through, reject unique
-  //   symbols)
-  // - Instances (e.g., Error → FabricError, Date → FabricEpochNsec)
-  // - Objects/arrays with toJSON() methods
-  // - Sparse arrays (holes preserved)
-  const converted = shallowFabricFromNativeValue(value);
-
-  // A `FabricSpecialObject` returned by the conversion step (e.g. `FabricError`
-  // wrapping a native `Error`, or `FabricEpochNsec` wrapping a native `Date`).
-  // These are atomic fabric values and must be returned unchanged rather than
-  // walked as records (their state is private, so the record branch below would
-  // flatten them to `{}`). Only `FabricInstance`s carry nested `FabricValue`s
-  // that need `[ID]` assignment via the codec's `encode()`; `FabricPrimitive`s
-  // are leaves.
-  if (converted instanceof FabricSpecialObject) {
-    seen.set(value, converted);
-
-    if (converted instanceof FabricInstance) {
-      const state = codecOf(converted).encode(converted);
-      if (isRecord(state) || Array.isArray(state)) {
-        recursivelyAddIDIfNeeded(state, frame, seen);
-      }
-    }
-    return converted as T;
-  }
-
-  // Primitives need no further processing. Cache the conversion when it
-  // produced a different value (e.g. an object whose `toJSON()` returns a
-  // primitive) so callers see consistent results.
-  if (!isRecord(converted)) {
-    if (converted !== value) seen.set(value, converted);
-    return converted as T;
-  }
-
-  // From here `converted` is an array or record. The result container is
-  // pre-registered in `seen` against the original `value` BEFORE descending
-  // into entries, so circular back-references to `value` resolve correctly.
-  // Without this, a cycle would re-enter `shallowFabricFromNativeValue(value)`
-  // on every pass and recurse forever.
-  const convertedDiffers = converted !== value;
-
-  if (Array.isArray(converted)) {
-    // Typed as `any[]` (not `unknown[]`) to preserve the original code's
-    // looser inference inside the iteration body, where `{...v}` and
-    // `ID in v` operate post-narrowing without explicit casts.
-    const sourceArray = converted as any[];
-    const result = new Array<unknown>(sourceArray.length);
-    let changed = convertedDiffers;
-
-    seen.set(value, result);
-    if (convertedDiffers) seen.set(converted, result);
-
-    sourceArray.forEach((el, i) => {
-      const v = recursivelyAddIDIfNeeded(el, frame, seen);
-      // For objects on arrays only: Add ID if not already present. A
-      // `FabricSpecialObject` is an atomic fabric leaf, not a plain container —
-      // `{ [ID]: …, ...v }` would spread away its private state (flattening e.g.
-      // a `FabricEpochNsec` to `{[ID]: …}`), so it must be left intact.
-      if (
-        isObject(v) && !isCellLink(v) && !(ID in v) &&
-        !(v instanceof FabricSpecialObject)
-      ) {
-        changed = true;
-        const withId = { [ID]: frame.generatedIdCounter++, ...v };
-        // The ID-wrapped object is a freshly-built container that must also be
-        // deep-frozen.
-        Object.freeze(withId);
-        result[i] = withId;
-      } else {
-        if (!Object.is(v, el)) {
-          changed = true;
-        }
-        result[i] = v;
-      }
-    });
-
-    if (!changed) {
-      seen.set(value, value);
-      return value;
-    }
-
-    // The value enters a write-boundary that expects deep-frozen `FabricValue`
-    // trees. Children are already frozen by `shallowFabricFromNativeValue()`
-    // above; freeze the freshly-built top-level container so the returned tree
-    // is deep-frozen as a whole.
-    return Object.freeze(result) as T;
-  } else {
-    const sourceRecord = converted as Record<string, unknown>;
-    const result: Record<string, unknown> = {};
-    let changed = convertedDiffers;
-
-    seen.set(value, result);
-    if (convertedDiffers) seen.set(converted, result);
-
-    Object.entries(sourceRecord).forEach(([key, v]) => {
-      const next = recursivelyAddIDIfNeeded(v, frame, seen);
-      if (!Object.is(next, v)) {
-        changed = true;
-      }
-      result[key] = next;
-    });
-
-    // Copy supported symbols from the original value. Symbols are not
-    // enumerable via `Object.entries()` and are not preserved by the
-    // shallow fabric conversion.
-    if (isRecord(value)) {
-      const valueRecord = value as Record<string, unknown>;
-      [ID, ID_FIELD].forEach((symbol) => {
-        if (symbol in valueRecord) {
-          (result as IDFields)[symbol as keyof IDFields] =
-            (valueRecord as IDFields)[symbol as keyof IDFields];
-        }
-      });
-    }
-
-    if (!changed) {
-      seen.set(value, value);
-      return value;
-    }
-
-    return Object.freeze(result) as T;
-  }
+): (() => number) | undefined {
+  return frame === undefined ? undefined : () => frame.generatedIdCounter++;
 }
 
 /**
- * Converts cells and objects that can be turned to cells to links.
+ * What `convertCellsToLinks()` is handed: what a pattern produced. That is a
+ * fabric value or a native convertible to one, and on top of that the `Cell`s
+ * the conversion exists to replace. None of it is durable until it has been
+ * through there.
+ *
+ * `FabricOrConvertibleNativeValue` is an arm rather than something restated, so
+ * this stays true of whatever that comes to admit. The container arms are here
+ * as well, and they are not redundant with it: theirs hold only what is already
+ * fabric or convertible, where a cell may sit at any depth in what a pattern
+ * produced. Replacing a nested one is the whole of what this conversion is for.
+ */
+export type CellLinkInput =
+  | FabricOrConvertibleNativeValue
+  | readonly CellLinkInput[]
+  | { readonly [key: string]: CellLinkInput }
+  | Cell<any>;
+
+/** The options by which a cell becomes the link that reaches it. */
+type CellLinkOptions = {
+  includeSchema?: boolean;
+  doNotConvertCellResults?: boolean;
+  includeCfcLabelView?: boolean;
+  keepAsCell?: KeepAsCell;
+};
+
+/**
+ * Helper for `convertCellsToLinks()`, which returns the link that reaches a
+ * cell, carrying the cell's CFC label view onto it when asked.
+ */
+function linkToCell(cell: Cell<any>, options: CellLinkOptions): SigilLink {
+  const link = cell.getAsLink(options);
+
+  if (options.includeCfcLabelView) {
+    const cfcLabelView = getCarriedCfcLabelView(cell);
+    if (cfcLabelView) {
+      setLinkCfcLabelView(link, cfcLabelView);
+    }
+  }
+
+  return link;
+}
+
+/**
+ * Converts cells and objects that can be turned to cells to links. What comes
+ * back is a `FabricValue` with a link wherever a cell sat.
+ *
+ * `ancestors` holds the ancestors of the value being converted, so what it
+ * recognizes is a cycle. A value reachable twice by different paths is not one:
+ * it is shared, and each position gets its own conversion. Answering a shared
+ * reference with a back-link would rewrite one of its positions into a pointer
+ * at the other -- and a graph holds plenty of shared structure that is nobody's
+ * cycle, an empty `path: []` array reachable from every alias in it being the
+ * common case.
  *
  * @param value - The value to convert.
  * @returns The converted value.
  */
 export function convertCellsToLinks(
-  value: readonly any[] | Record<string, any> | any,
-  options: {
-    includeSchema?: boolean;
-    doNotConvertCellResults?: boolean;
-    includeCfcLabelView?: boolean;
-    keepAsCell?: KeepAsCell;
-  } = {},
-  path: string[] = [],
-  seen: Map<any, string[]> = new Map(),
-): any {
-  if (seen.has(value)) {
-    return linkRefFrom({ path: seen.get(value) });
+  value: CellLinkInput,
+  options: CellLinkOptions = {},
+  path: readonly string[] = [],
+  ancestors: Map<object, readonly string[]> = new Map(),
+): FabricValue {
+  if (isRecord(value) && ancestors.has(value)) {
+    return linkRefFrom({ path: ancestors.get(value) });
   }
 
   // Early-return cases
   if (!options.doNotConvertCellResults && isCellResultForDereferencing(value)) {
-    const cell = getCellOrThrow(value);
-    const link = cell.getAsLink(options);
-    if (options.includeCfcLabelView) {
-      const cfcLabelView = getCarriedCfcLabelView(cell);
-      if (cfcLabelView) {
-        setLinkCfcLabelView(link, cfcLabelView);
-      }
-    }
-    return link;
+    return linkToCell(getCellOrThrow(value), options);
   } else if (isCell(value)) {
-    const link = value.getAsLink(options);
-    if (options.includeCfcLabelView) {
-      const cfcLabelView = getCarriedCfcLabelView(value);
-      if (cfcLabelView) {
-        setLinkCfcLabelView(link, cfcLabelView);
-      }
-    }
-    return link;
+    return linkToCell(value, options);
   } else if (!(isRecord(value) || isFunction(value))) {
-    return value;
+    return value as FabricValue;
   }
 
   // At this point `value` is a non-`null` object(ish) thing.
 
-  seen.set(value, path); // ...which needs to be tracked for circularity.
+  // Held before the conversions below reassign `value`, since what `ancestors` is
+  // keyed on -- and cleared of on the way back out -- is the object as given.
+  const original = value as object;
+  let converted: FabricValueLayer;
+  ancestors.set(original, path); // ...which needs to be tracked for circularity.
 
-  // Convert the (top level of) the value to fabric form (a valid `FabricValue`)
-  // if it isn't already, or throw if it's neither already valid nor
-  // convertible.
-  value = shallowFabricFromNativeValue(value);
+  // Everything past the line above runs inside this `try`, so that EVERY way
+  // out clears the ancestor just recorded -- the exits that answer a value
+  // without descending into it as much as the ones that recur. An exit that
+  // skipped the clearing would leave the value an ancestor of all the rest of
+  // the walk, and the next position holding it would be answered as a cycle.
+  try {
+    // A schema-bearing read hangs a non-enumerable `toCell` symbol on the
+    // arrays it returns. That symbol is machinery, not content, and an array
+    // carrying it is not a `FabricValue`, so drop it before the conversion
+    // below would reject it. Only annotated arrays are cleaned: an array
+    // carrying anything else non-index is genuinely unrepresentable and must
+    // still be rejected.
+    if (isCellResultForDereferencing(value) && isPlainContainer(value)) {
+      // What these produce is a valid `FabricValueLayer` already, so it wants
+      // no further conversion. Objects need this as much as arrays do -- the
+      // annotation goes on either (see `schema.ts`).
+      converted = Array.isArray(value)
+        ? shallowCleanArray(value, false)
+        : shallowCleanPlainObject(value as object, false);
+    } else {
+      // Convert the (top level of) the value to fabric form (a valid
+      // `FabricValue`) if it isn't already, or throw if it's neither already
+      // valid nor convertible.
+      converted = shallowFabricFromNativeValue(value);
+    }
 
-  // Recursively process arrays and objects, if we ended up with one of those.
-  if (!isRecord(value)) {
-    // `shallowFabricFromNativeValue()` converted this into a primitive value of some sort.
-    return value;
-  } else if (Array.isArray(value)) {
-    return value.map((value, index) =>
-      convertCellsToLinks(value, options, [...path, String(index)], seen)
-    );
-  } else {
+    // Recursively process arrays and objects, if we ended up with one of those.
+    //
+    // TODO(danfuzz): Both container branches below build a fresh container,
+    // throwing away the copy just made above. One copy could serve both.
+    if (!isRecord(converted)) {
+      // `shallowFabricFromNativeValue()` converted this into a primitive value
+      // of some sort.
+      //
+      // `FabricValueLayer` is looser than `FabricValue` -- its containers hold
+      // `unknown`, being unconverted until the recursion reaches them -- and
+      // `isRecord()` does not narrow an array out of the union. The cast is
+      // that gap, not a claim about the value.
+      return converted as FabricValue;
+    } else if (converted instanceof FabricPrimitive) {
+      // An opaque scalar whose state lives in private fields, so it has zero
+      // enumerable own properties and the object branch below would rebuild it
+      // from its (empty) entries as a bare `{}`. It leaves whole instead.
+      //
+      // This catches both forms that arrive here: one the caller already built,
+      // and one `shallowFabricFromNativeValue()` just minted from a native (a
+      // `Uint8Array`, a `Date`) immediately above.
+      return converted;
+    } else if (converted instanceof FabricInstance) {
+      // A `FabricInstance` is NOT a leaf. It is a container reached by its
+      // codec contents rather than by property name, which this walk cannot do,
+      // so the object branch below would rebuild it from enumerable own
+      // properties it is not supposed to have -- and a cell nested in its state
+      // would go unconverted, which is the whole of what this walk is for. It
+      // refuses instead of doing that quietly.
+      //
+      // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at
+      // which point this becomes a walk rather than a refusal. See "Flag-gated
+      // tripwires" in `docs/development/EXPERIMENTAL_OPTIONS.md`.
+      throw new Error(
+        `Cannot yet handle \`${converted.constructor.name}\` (a ` +
+          "`FabricInstance`) when converting cells to links.",
+      );
+    }
+
+    // A member arrives here `unknown`: the shallow conversion above converted
+    // only the top level, so what a container holds is unconverted until the
+    // recursion reaches it. That makes each one a `CellLinkInput` -- the very
+    // domain this walk takes -- rather than anything narrower.
+    if (Array.isArray(converted)) {
+      return converted.map((element: unknown, index: number) =>
+        convertCellsToLinks(
+          element as CellLinkInput,
+          options,
+          [...path, String(index)],
+          ancestors,
+        )
+      );
+    }
     return Object.fromEntries(
-      Object.entries(value).map(([key, value]) => [
+      Object.entries(converted).map(([key, member]) => [
         key,
-        convertCellsToLinks(value, options, [...path, String(key)], seen),
+        convertCellsToLinks(
+          member as CellLinkInput,
+          options,
+          [...path, key],
+          ancestors,
+        ),
       ]),
     );
+  } finally {
+    ancestors.delete(original);
   }
 }
 
@@ -3379,7 +3703,7 @@ export function cellConstructorFactory<Wrap extends HKT>(kind: CellKind) {
       // TODO(danfuzz): native values in a `Cell.of(...)` initial value are NOT
       // normalized to their fabric form (e.g. a `Date` stays a raw `Date`
       // instead of becoming a `FabricEpochNsec`), unlike the `set()` write path
-      // (which runs `recursivelyAddIDIfNeeded`). The raw value flows both into
+      // (whose diff normalizes at the write boundary). The raw value flows into
       // `setInitialValue()` and into the schema `default` via
       // `schemaWithDefaultAndScope()` above, and reaches storage/encode from
       // there -- so a `Cell.of(new Date())` throws under the strict codec.

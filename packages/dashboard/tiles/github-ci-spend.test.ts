@@ -5,10 +5,8 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx, TileView } from "../types.ts";
 import { REPO } from "../config.ts";
 import { blacksmithRoutes } from "../blacksmith.ts";
-import {
-  githubCiSpend,
-  projectMonthly,
-} from "./github-ci-spend.ts";
+import { projectMonthly } from "../spend.ts";
+import { githubCiSpend } from "./github-ci-spend.ts";
 
 const ORG = "acme";
 const D = 86_400_000;
@@ -61,11 +59,6 @@ const blacksmithDay = (date: string, cost: unknown) => ({
 function blacksmithRouteSet(
   now: string,
   dailyMetrics: unknown[],
-  footprint: {
-    dockerfile: unknown[];
-    stickydisk: unknown[];
-  } = { dockerfile: [], stickydisk: [] },
-  storageByMonth: Record<string, number> = {},
   org = ORG,
   billing: { invoice?: unknown; threshold?: unknown } = {},
 ): Record<string, unknown> {
@@ -81,23 +74,7 @@ function blacksmithRouteSet(
     [`api/${blacksmithRoutes.daily(org, start, end)}`]: {
       daily_metrics: dailyMetrics,
     },
-    [`api/${blacksmithRoutes.stickyDaily(org, start, end)}`]: footprint,
   };
-  let cursor = new Date(start);
-  while (cursor <= end) {
-    const nextMonth = Date.UTC(
-      cursor.getUTCFullYear(),
-      cursor.getUTCMonth() + 1,
-      1,
-    );
-    const segmentEnd = new Date(Math.min(end.getTime(), nextMonth - 1));
-    const month = cursor.toISOString().slice(0, 7);
-    routes[`api/${blacksmithRoutes.stickyTotal(org, cursor, segmentEnd)}`] = {
-      total_cost: storageByMonth[month] ?? 0,
-      total_gb_hours: 0,
-    };
-    cursor = new Date(nextMonth);
-  }
   const month = observed.toISOString().slice(0, 7);
   const measuredMtd = dailyMetrics.reduce<number>((sum, entry) => {
     if (!entry || typeof entry !== "object") return sum;
@@ -106,7 +83,7 @@ function blacksmithRouteSet(
         Number.isFinite(Number(metric.cost))
       ? sum + Number(metric.cost)
       : sum;
-  }, storageByMonth[month] ?? 0);
+  }, 0);
   routes[`api/${blacksmithRoutes.invoiceAmount(org)}`] = "invoice" in billing
     ? billing.invoice
     : measuredMtd;
@@ -140,6 +117,7 @@ async function view(
   now: string,
   routes: Record<string, unknown>,
   env: Record<string, string> = { GH_TOKEN: "gh_pat_x", GH_BILLING_ORG: ORG },
+  requests: string[] = [],
 ): Promise<TileView> {
   const RealDate = Date;
   const realFetch = globalThis.fetch;
@@ -153,6 +131,7 @@ async function view(
   globalThis.fetch = (input: URL | Request | string) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     const key = url.pathname.slice(1) + url.search;
+    requests.push(key);
     if (!(key in routes)) {
       return Promise.resolve(new Response(null, { status: 404 }));
     }
@@ -223,10 +202,11 @@ Deno.test("ci spend: projects the month from the settled daily rate, against the
   );
   assertEquals(v.hint, "billing ↗");
   assertStringIncludes(v.extra ?? "", "<polyline");
-  // The line ends on the last day with a figure (the 10th), not on today: billing
-  // runs a day or two behind, and drawing to today would show a fake dip to zero.
-  // December 1st to January 10th inclusive is 41 days.
-  assertEquals(v.duration, 41 * D);
+  // The line runs to the newest settled day, the 18th: the quiet 11th-18th are
+  // real zeros and chart as such, while the unsettled 19th-20th have no figure
+  // yet and are left off rather than drawn as a dip to zero. The 45-day window
+  // then reaches back to December 5th.
+  assertEquals(v.duration, 45 * D);
 });
 
 Deno.test("ci spend: a 200 without a usageItems array grays out rather than reading as $0", async () => {
@@ -314,7 +294,7 @@ Deno.test("ci spend: a prior month we can't read shortens the chart, it doesn't 
   });
   assertEquals(v.status, "good");
   assertEquals(v.value, "~$310/mo");
-  assertEquals(v.duration, 10 * D); // January 1st to 10th only
+  assertEquals(v.duration, 18 * D); // January 1st to the settled 18th only
 });
 
 Deno.test("ci spend: an unavailable prior month is not zero-spend history", async () => {
@@ -418,7 +398,7 @@ Deno.test("ci spend: every failed provider retains the combined middle line", as
   );
 });
 
-Deno.test("ci spend: Blacksmith invoice, runner, storage, and threshold form one provider", async () => {
+Deno.test("ci spend: Blacksmith invoice, runner history, and threshold form one provider without storage requests", async () => {
   const now = "2026-01-20T09:00:00Z";
   const compute = Array.from(
     { length: 10 },
@@ -427,21 +407,14 @@ Deno.test("ci spend: Blacksmith invoice, runner, storage, and threshold form one
   const routes = blacksmithRouteSet(
     now,
     compute,
-    {
-      dockerfile: [
-        { date: "2026-01-01", value: 1 },
-        { date: "2026-01-02", value: 3 },
-      ],
-      stickydisk: [],
-    },
-    { "2026-01": 40 },
     ORG,
     {
       invoice: { amount: 150, currency: "USD" },
       threshold: 230,
     },
   );
-  const v = await view(now, routes, BLACKSMITH_ENV);
+  const requests: string[] = [];
+  const v = await view(now, routes, BLACKSMITH_ENV, requests);
 
   assertEquals(v.value, "~$245/mo");
   assertEquals(v.aside, '<span class="hmtd">$150 MTD</span>');
@@ -452,7 +425,17 @@ Deno.test("ci spend: Blacksmith invoice, runner, storage, and threshold form one
   assertStringIncludes(v.extra ?? "", "$150");
   assertStringIncludes(v.extra ?? "", "Budget $230");
   assertStringIncludes(v.extra ?? "", "<polyline");
-  assertEquals(v.duration, 10 * D);
+  // Blacksmith settles a day behind, so the line runs to the 19th, charting
+  // the quiet 11th-19th as the zeros they are.
+  assertEquals(v.duration, 19 * D);
+  const blacksmithRequests = requests.filter((path) =>
+    path.startsWith("api/user/github/orgs/")
+  );
+  assertEquals(blacksmithRequests.length, 3);
+  assertEquals(
+    blacksmithRequests.some((path) => path.includes("/metrics/docker/")),
+    false,
+  );
 });
 
 Deno.test("ci spend: a Blacksmith invoice without daily history still supplies MTD and forecast totals", async () => {
@@ -462,8 +445,6 @@ Deno.test("ci spend: a Blacksmith invoice without daily history still supplies M
       blacksmithRouteSet(
         now,
         [],
-        undefined,
-        undefined,
         ORG,
         {
           invoice: { amount: 150, currency: "USD" },
@@ -502,36 +483,15 @@ Deno.test("ci spend: malformed Blacksmith costs never read as a green zero", asy
   const negativeDaily = blacksmithRouteSet(now, [
     blacksmithDay("2026-01-01", -1),
   ]);
-  const malformedTotal = blacksmithRouteSet(now, [
-    blacksmithDay("2026-01-01", 1),
-  ]);
-  const totalPath = Object.keys(malformedTotal).find((path) =>
-    path.includes("/sticky-disk/total?")
-  )!;
-  malformedTotal[totalPath] = { total_cost: null };
-  const negativeTotal = blacksmithRouteSet(now, [
-    blacksmithDay("2026-01-01", 1),
-  ]);
-  const negativeTotalPath = Object.keys(negativeTotal).find((path) =>
-    path.includes("/sticky-disk/total?")
-  )!;
-  negativeTotal[negativeTotalPath] = { total_cost: -1 };
 
-  for (
-    const routes of [
-      malformedDaily,
-      negativeDaily,
-      malformedTotal,
-      negativeTotal,
-    ]
-  ) {
+  for (const routes of [malformedDaily, negativeDaily]) {
     const v = await view(now, routes, BLACKSMITH_ENV);
     assertEquals(v.status, "unknown");
     assertEquals(v.value, "—");
   }
 });
 
-Deno.test("ci spend: malformed Blacksmith daily and storage payloads are unavailable", async () => {
+Deno.test("ci spend: malformed Blacksmith daily payloads are unavailable", async () => {
   const now = "2026-01-20T09:00:00Z";
   const cases: Array<{
     name: string;
@@ -542,11 +502,6 @@ Deno.test("ci spend: malformed Blacksmith daily and storage payloads are unavail
       name: "daily metrics are not an array",
       routeFragment: "/metrics/daily?",
       response: { daily_metrics: null },
-    },
-    {
-      name: "storage collections are not arrays",
-      routeFragment: "/metrics/docker/daily-by-type?",
-      response: { dockerfile: {}, stickydisk: [] },
     },
     {
       name: "a daily date is not text",
@@ -560,14 +515,6 @@ Deno.test("ci spend: malformed Blacksmith daily and storage payloads are unavail
       routeFragment: "/metrics/daily?",
       response: {
         daily_metrics: [blacksmithDay("2026-99-99", 1)],
-      },
-    },
-    {
-      name: "a storage measurement is blank",
-      routeFragment: "/metrics/docker/daily-by-type?",
-      response: {
-        dockerfile: [{ date: "2026-01-01", value: " " }],
-        stickydisk: [],
       },
     },
   ];
@@ -617,8 +564,6 @@ Deno.test("ci spend: malformed Blacksmith invoice and threshold payloads are una
     const routes = blacksmithRouteSet(
       now,
       [blacksmithDay("2026-01-01", 10)],
-      undefined,
-      undefined,
       ORG,
       malformed.billing,
     );
@@ -634,8 +579,6 @@ Deno.test("ci spend: a null threshold field is an unknown provider budget", asyn
   const routes = blacksmithRouteSet(
     now,
     [blacksmithDay("2026-01-01", 10)],
-    undefined,
-    undefined,
     ORG,
     { threshold: { threshold: null } },
   );
@@ -786,8 +729,6 @@ Deno.test("ci spend: provider budgets combine when no explicit budget is set", a
       { length: 10 },
       (_, index) => blacksmithDay(`2026-01-${pad(index + 1)}`, 5),
     ),
-    undefined,
-    undefined,
     ORG,
     { threshold: 100 },
   );
@@ -818,8 +759,6 @@ Deno.test("ci spend: a partial provider budget is not treated as the combined bu
   const blacksmith = blacksmithRouteSet(
     now,
     [blacksmithDay("2026-01-01", 50)],
-    undefined,
-    undefined,
     ORG,
     { threshold: 1 },
   );

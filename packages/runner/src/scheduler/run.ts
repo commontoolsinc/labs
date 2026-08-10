@@ -14,6 +14,7 @@ import {
   isStorageTransactionInconsistent,
   isTerminalRejection,
 } from "../storage/rejection.ts";
+import { createDuplicateWorkTransaction } from "../storage/extended-storage-transaction.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import {
   MAX_ACTION_RUN_TRACE_HISTORY,
@@ -118,8 +119,8 @@ export function watchReactiveActionCommit(state: {
   readonly queueExecution: () => void;
   readonly restoreInvalidCauses: () => void;
   readonly getActionId: (action: Action) => string;
-}): void {
-  state.commitPromise.then(async ({ error }) => {
+}): Promise<void> {
+  const handleResult = async (error: unknown): Promise<void> => {
     if (!error) {
       // Clear retries after successful commit.
       state.retries.delete(state.action);
@@ -251,10 +252,17 @@ export function watchReactiveActionCommit(state: {
       // WATCH(scheduler-v2): exhausted retries can leave a piece registered
       // against rolled-back data (accepted zombie — spec §15 decision 9).
     }
-  }).catch((error) => {
+  };
+  return state.commitPromise.then(
+    ({ error }) => handleResult(error),
+    (reason) =>
+      handleResult(
+        reason || new Error("Storage commit promise rejected without a reason"),
+      ),
+  ).catch((error) => {
     logger.error(
       "schedule-error",
-      "Commit promise rejected in finalizeAction:",
+      "Commit result handling failed in finalizeAction:",
       error,
     );
   });
@@ -560,18 +568,22 @@ function finalizeReactiveActionCommit(
   if (!log) {
     throw new Error("scheduler action commit did not build a reactivity log");
   }
-  // Track the commit as in-flight async builtin work so `runtime.settled()`
-  // waits for its post-commit outbox flush (the sqlite query RPC + writeback;
-  // also the barrier that guarantees a fire-and-forget builtin's flush has
-  // registered its own network/LLM work). Registered before this run's running
-  // promise resolves, so a reader observes the settled result rather than racing
-  // the flush. `idle()` deliberately stays free of this. Commits with no
-  // post-commit effects keep the fire-and-forget fast path.
+  // Track the effect layer as in-flight async builtin work so
+  // `runtime.settled()` waits for the post-commit outbox flush (the sqlite
+  // query RPC + writeback; also the barrier that guarantees a
+  // fire-and-forget builtin's flush has registered its own network/LLM
+  // work). The effect layer, not the commit promise: effects run at the
+  // verdict, while the promise additionally waits for the subscribed view
+  // to cover the write — an incoming-frame wait quiescence must not depend
+  // on. Registered before this run's running promise resolves, so a reader
+  // observes the settled result rather than racing the flush. `idle()`
+  // deliberately stays free of this. Commits with no post-commit effects
+  // keep the fire-and-forget fast path.
   if (hasPostCommitEffects) {
-    state.runtime.trackAsyncWork(commitPromise);
+    state.runtime.trackAsyncWork(args.tx.postCommitEffectsSettled());
   }
   const committedLog = log;
-  watchReactiveActionCommit({
+  const handled = watchReactiveActionCommit({
     action: args.action,
     tx: args.tx,
     log: committedLog,
@@ -594,6 +606,13 @@ function finalizeReactiveActionCommit(
       }
     },
   });
+  // The barrier entry commit() registered settles with the commit promise,
+  // but the disposition above — a conflict's catch-up-then-requeue in
+  // particular — runs afterwards. Register the handled chain too, so
+  // idleWithPendingCommits cannot release in the window between a
+  // rejection settling and its retry being requeued (the event path in
+  // events.ts registers the same way).
+  state.runtime.storageManager.trackPendingCommit(handled);
 
   logger.debug("schedule-run-complete", () => [
     `[RUN] Action completed: ${args.actionId}`,
@@ -891,7 +910,9 @@ function recordOptionalActionRunDiagnostics(
       runIdempotencyRecheck(
         {
           idempotencyViolations: state.idempotencyViolations,
-          createTx: () => state.runtime.edit(),
+          // The recheck re-runs the action only to compare its writes with the
+          // run that already happened, then throws the transaction away.
+          createTx: () => createDuplicateWorkTransaction(state.runtime.edit()),
           invoke: (fn) => state.runtime.harness.invoke(fn),
           getActionId: state.getActionId,
           getActionTelemetryInfo: state.getActionTelemetryInfo,

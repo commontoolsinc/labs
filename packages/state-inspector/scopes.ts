@@ -333,11 +333,11 @@ export function scopeOverlay(
       value = doc === undefined ? undefined : annotate(doc.value);
       summary = doc === undefined ? "(absent)" : summarize(doc.value);
       // raw value drives the divergence key; "absent" is its own class.
-      key = doc === undefined ? " absent" : hashStringOf(doc.value);
+      key = doc === undefined ? "\x00absent" : hashStringOf(doc.value);
     } catch (e) {
       value = undefined;
       summary = `«decode-error: ${(e as Error).message}»`;
-      key = ` error:${(e as Error).message}`;
+      key = `\x00error:${(e as Error).message}`;
     }
     const variant: ScopeVariant = {
       scope: r.scope_key,

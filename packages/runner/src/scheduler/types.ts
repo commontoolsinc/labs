@@ -181,6 +181,15 @@ export type QueuedEvent = {
   /** Durable event id minted at send (spec §7.5). */
   readonly id: string;
   /**
+   * Monotonic stamp minted at first enqueue and carried unchanged across
+   * requeues (backoff, name-resolution). Commits are not awaited, so several
+   * dispatched events can fail together and requeue in whatever order their
+   * verdicts arrive; inserting by this stamp instead of at the front keeps
+   * same-stream events in send order — an event never overtakes one sent
+   * before it.
+   */
+  readonly enqueueSeq: number;
+  /**
    * The wall-clock instant (ms) bound to this event, captured at its causal
    * origin: carried forward unchanged from the emitting handler's frame, or a
    * fresh reading for a renderer/root event. The dispatching handler's ambient
@@ -196,6 +205,16 @@ export type QueuedEvent = {
   action: Action;
   handler: EventHandler;
   event: any;
+  /**
+   * Payload keys the RUNTIME itself injected into `event`'s value (send's
+   * internal `runtimeInjectedEventKeys` option — the LLM tool-call path's
+   * `result` cell). Dispatch stamps this onto the handling transaction
+   * (`tx.dispatchedRuntimeInjectedEventKeys`), where the closed-world gate
+   * exempts exactly these keys. Mutable for the same last-wins reason as
+   * `time`: the backlog-cap collapse rewrites the surviving entry with the
+   * newest event's payload, and the marker must describe THAT payload.
+   */
+  runtimeInjectedEventKeys?: readonly string[];
   /**
    * The FIFO slot was reserved before its handler's piece finished loading.
    * A loading head parks the whole event queue so later, already-registered

@@ -1,7 +1,10 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { CFCellLink } from "./index.ts";
 import type { CellRef } from "@commonfabric/runtime-client";
+import { installMockDocument } from "../../test-utils/mock-document.ts";
+import { createRenderableCellHandle } from "../../test-utils/mock-vdom-connection.ts";
+import { endDrag, getCurrentDrag, isDragging } from "../../core/drag-state.ts";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -332,5 +335,81 @@ describe("CFCellLink disposal handling", () => {
       spy.restore();
     }
     expect(spy.calls.length).toBe(0);
+  });
+});
+
+describe("CFCellLink drag preview", () => {
+  let mockDocument: ReturnType<typeof installMockDocument>;
+
+  beforeEach(() => {
+    mockDocument = installMockDocument();
+  });
+
+  afterEach(() => {
+    if (isDragging()) endDrag();
+    mockDocument.restore();
+  });
+
+  /** The subset of a PointerEvent the drag handlers read. */
+  function pointerEvent(x: number, y: number): PointerEvent {
+    return { clientX: x, clientY: y, pointerId: 1 } as unknown as PointerEvent;
+  }
+
+  /**
+   * An element built with `new` is never upgraded, so it has no `classList`.
+   * Give it one that records, so the drag's own class toggle is observable.
+   */
+  function withClassList(element: object): Set<string> {
+    const classes = new Set<string>();
+    Object.defineProperty(element, "classList", {
+      configurable: true,
+      value: {
+        add: (name: string) => classes.add(name),
+        remove: (name: string) => classes.delete(name),
+      },
+    });
+    return classes;
+  }
+
+  it("hands the preview's teardown to the drag state", () => {
+    const { cell } = createRenderableCellHandle({
+      $UI: { type: "vnode", name: "div", props: {}, children: [] },
+    });
+    const element = new CFCellLink() as any;
+    const classes = withClassList(element);
+    element._resolvedCell = cell;
+
+    element._beginDrag(pointerEvent(30, 40));
+
+    expect(classes.has("dragging")).toBe(true);
+    const drag = getCurrentDrag();
+    expect(drag).not.toBeNull();
+    expect(drag!.type).toBe("cell-link");
+    expect(drag!.cell).toBe(cell);
+    // Without this the preview's render stays mounted after the drag ends.
+    expect(typeof drag!.previewCleanup).toBe("function");
+    expect(mockDocument.document.body.children).toContain(drag!.preview);
+    expect(
+      (drag!.preview as unknown as { style: Record<string, string> }).style,
+    )
+      .toMatchObject({ left: "40px", top: "50px" });
+  });
+
+  it("carries no teardown when the preview is a static pill", () => {
+    const { cell } = createRenderableCellHandle(undefined);
+    const element = new CFCellLink() as any;
+    withClassList(element);
+    element._resolvedCell = cell;
+
+    element._beginDrag(pointerEvent(0, 0));
+
+    expect(getCurrentDrag()!.previewCleanup).toBeUndefined();
+  });
+
+  it("does not begin a drag before a cell resolves", () => {
+    const element = new CFCellLink() as any;
+    withClassList(element);
+    element._beginDrag(pointerEvent(0, 0));
+    expect(isDragging()).toBe(false);
   });
 });

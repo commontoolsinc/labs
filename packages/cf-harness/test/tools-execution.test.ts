@@ -15,7 +15,14 @@ import type { HarnessBrowserAccessLease } from "../src/contracts/browser-access.
 import { BROWSER_SUBAGENT_ALLOWED_SKILL_SCRIPTS } from "../src/contracts/subagent.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
 import { discoverHarnessSkills } from "../src/skills/registry.ts";
-import { bashTool } from "../src/tools/bash.ts";
+import {
+  BASH_CWD_OUTSIDE_SANDBOX_EXIT_CODE,
+  BASH_CWD_OUTSIDE_SANDBOX_PREFIX,
+  BASH_TIMEOUT_EXIT_CODE,
+  bashTool,
+} from "../src/tools/bash.ts";
+import { ProcessTimeoutError } from "../src/sandbox/process-runner.ts";
+import { SandboxPathEscapeError } from "../src/sandbox/errors.ts";
 import { bashNoSandboxTool } from "../src/tools/bash-no-sandbox.ts";
 import { editFileTool } from "../src/tools/edit-file.ts";
 import { readFileTool } from "../src/tools/read-file.ts";
@@ -38,6 +45,7 @@ import type {
   SandboxCommandRequest,
   SandboxCommandResult,
   SandboxRuntime,
+  SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
 
@@ -108,7 +116,6 @@ const installMockDenoConnect = (
 };
 
 class FakeSandboxRuntime implements SandboxRuntime {
-  readonly kind = "docker-runsc-cfc" as const;
   readonly calls: Array<
     | { type: "run"; request: SandboxCommandRequest }
     | { type: "runShell"; request: SandboxShellRequest }
@@ -122,12 +129,24 @@ class FakeSandboxRuntime implements SandboxRuntime {
     }],
   ) {}
 
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: this.defaultWorkingDirectory(),
+      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+    };
+  }
+
   resolvePath(path: string, cwd = this.defaultWorkingDirectory()): string {
     return normalize(path.startsWith("/") ? path : `${cwd}/${path}`);
   }
 
   isPathWithinWorkspace(path: string): boolean {
     return path === "/workspace" || path.startsWith("/workspace/");
+  }
+
+  isPathWithinAllowedRoots(path: string): boolean {
+    return this.isPathWithinWorkspace(path);
   }
 
   defaultWorkingDirectory(): string {
@@ -160,7 +179,7 @@ class StrictFakeSandboxRuntime extends FakeSandboxRuntime {
 }
 
 class MultiRootFakeSandboxRuntime extends FakeSandboxRuntime {
-  isPathWithinAllowedRoots(path: string): boolean {
+  override isPathWithinAllowedRoots(path: string): boolean {
     return this.isPathWithinWorkspace(path) ||
       path === "/fabric" ||
       path.startsWith("/fabric/");
@@ -393,6 +412,89 @@ Deno.test("bash tool executes the command through the sandbox shell runtime", as
     ].join("\n").length,
   );
   assertEquals(context.currentDir, "/workspace/repo");
+});
+
+// --- recoverable vs fatal tool-boundary narrowing (D9 / cf-review) ----------
+
+Deno.test("bash tool: a SandboxPathEscapeError on cwd is a recoverable result, not a throw", async () => {
+  class PathEscapeSandbox extends FakeSandboxRuntime {
+    override resolvePath(path: string, cwd = this.defaultWorkingDirectory()) {
+      if (!this.isPathWithinWorkspace(path)) {
+        throw new SandboxPathEscapeError(
+          path,
+          `path escapes workspace root: ${path}`,
+        );
+      }
+      return super.resolvePath(path, cwd);
+    }
+  }
+  const sandbox = new PathEscapeSandbox();
+  const context = createContext(sandbox);
+  const output = await bashTool.invoke(context, { command: "ls", cwd: "/etc" });
+
+  assertEquals(output.exitCode, BASH_CWD_OUTSIDE_SANDBOX_EXIT_CODE);
+  assertStringIncludes(
+    output.stderr,
+    `${BASH_CWD_OUTSIDE_SANDBOX_PREFIX}: /etc`,
+  );
+  // The raw escape message (carrying the sandbox root label) never leaks.
+  assertEquals(output.stderr.includes("path escapes"), false);
+  // The command never ran and the working directory is unchanged.
+  assertEquals(sandbox.calls.length, 0);
+  assertEquals(output.cwd, "/workspace");
+});
+
+Deno.test("bash tool: a non-escape resolvePath failure stays fatal (rethrows)", async () => {
+  class CorruptResolveSandbox extends FakeSandboxRuntime {
+    override resolvePath(): string {
+      // NOT a path escape — a corrupt-runtime/invariant failure that must not
+      // be laundered into a recoverable "cwd outside sandbox" result.
+      throw new Error("sandbox runtime invariant violated: /Users/ben/.secret");
+    }
+  }
+  const context = createContext(new CorruptResolveSandbox());
+  await assertRejects(
+    () => bashTool.invoke(context, { command: "ls", cwd: "repo" }),
+    Error,
+    "sandbox runtime invariant violated",
+  );
+});
+
+Deno.test("bash tool: a ProcessTimeoutError from runShell is a recoverable result", async () => {
+  class TimeoutRunShellSandbox extends FakeSandboxRuntime {
+    override runShell(): Promise<SandboxCommandResult> {
+      return Promise.reject(
+        new ProcessTimeoutError("bash -lc 'sleep 40'", 20_000),
+      );
+    }
+  }
+  const context = createContext(new TimeoutRunShellSandbox());
+  const output = await bashTool.invoke(context, {
+    command: "sleep 40",
+    timeoutMs: 20_000,
+  });
+
+  assertEquals(output.exitCode, BASH_TIMEOUT_EXIT_CODE);
+  assertStringIncludes(output.stderr, "command timed out after 20000ms");
+  // Never the raw exception text ("process timed out after ...: <command>").
+  assertEquals(output.stderr.includes("process timed out after"), false);
+});
+
+Deno.test("bash tool: a ProcessTimeoutError during CFC-context setup stays fatal", async () => {
+  const sandbox = new FakeSandboxRuntime();
+  const context = createContext(sandbox);
+  // The invocation context is built (and run state persisted) BEFORE runShell.
+  // A timeout raised there is a persistence failure, not a command timeout, and
+  // must stay run-fatal rather than be misreported as a recoverable timeout.
+  context.createCfcInvocationContext = () => {
+    throw new ProcessTimeoutError("persist-run-state", 5);
+  };
+  await assertRejects(
+    () => bashTool.invoke(context, { command: "ls" }),
+    ProcessTimeoutError,
+  );
+  // runShell was never reached.
+  assertEquals(sandbox.calls.length, 0);
 });
 
 Deno.test("bash tool preserves currentDir inside a configured Fabric mount", async () => {

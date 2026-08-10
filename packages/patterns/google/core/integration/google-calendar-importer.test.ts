@@ -39,7 +39,7 @@ describe("google calendar importer e2e", () => {
       "..",
       "google-auth.tsx",
     );
-    const googleAuthProgram = await cc.manager().runtime.harness
+    const googleAuthProgram = await cc.runtime.harness
       .resolve(
         new FileSystemProgramResolver(googleAuthPath),
       );
@@ -52,7 +52,7 @@ describe("google calendar importer e2e", () => {
       "..",
       "google-calendar-importer.tsx",
     );
-    const calendarProgram = await cc.manager().runtime.harness
+    const calendarProgram = await cc.runtime.harness
       .resolve(
         new FileSystemProgramResolver(calendarPath),
       );

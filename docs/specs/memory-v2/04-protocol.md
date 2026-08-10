@@ -28,7 +28,8 @@ rewrite. In particular:
 - route-level `Origin` enforcement remains deferred
 - session resume remains keyed by caller-supplied `(space, sessionId)` rather
   than a server-issued, principal-bound identifier
-- the public one-shot read surface is currently `graph.query`
+- the public one-shot read surfaces are `graph.query`, `entity-id.list`, and
+  `entity-id.exists`
 - watch-set mutations return inline `sync` payloads, and steady-state topology
   shrink does not yet guarantee automatic `removes`
 
@@ -51,7 +52,11 @@ The client MUST declare its protocol version in the first WebSocket message:
   "flags": {
     "modernCellRep": true,
     "persistentSchedulerState": true,
-    "syncSchemaTableV2": true
+    "syncSchemaTableV2": true,
+    "verdictCatchUpMarkers": true,
+    "entityIdListing": true,
+    "entityIdPagination": true,
+    "entityIdLookup": true
   }
 }
 ```
@@ -65,7 +70,11 @@ If the server accepts the protocol, it returns:
   "flags": {
     "modernCellRep": true,
     "persistentSchedulerState": true,
-    "syncSchemaTableV2": true
+    "syncSchemaTableV2": true,
+    "verdictCatchUpMarkers": true,
+    "entityIdListing": true,
+    "entityIdPagination": true,
+    "entityIdLookup": true
   },
   "sessionOpen": {
     "audience": "did:key:z6Mk...",
@@ -134,8 +143,24 @@ connection.
 in [Session Sync Payload](#423-session-sync-payload). It defaults to `false`
 when absent. The server sends compact sync payloads only when both peers
 advertise the capability; otherwise it sends the historical fully expanded
-shape. The older `syncSchemaTable` flag names an incompatible, index-keyed draft
-and does not enable the v2 encoding.
+shape.
+
+`entityIdListing` advertises support for `entity-id.list`. It defaults to
+`false` when absent. A client must not send the request unless the server
+advertises the capability.
+
+`entityIdPagination` advertises support for the pagination fields on
+`entity-id.list`. `entityIdLookup` advertises support for
+`entity-id.exists`. Both default to `false` when absent. A client connected to
+an older server may make the historical unpaginated list request, but must not
+send continuation fields or an existence request.
+
+`verdictCatchUpMarkers` advertises that the server stages a `caughtUpLocalSeq`
+catch-up obligation for accepts and conflict rejections, delivered on the
+batched fan-out (section 4.11.2). It is build-inherent (always advertised by
+this build) and defaults to `false` when absent: against an older server that
+stamps markers only for conflicts, the client applies verdicts immediately
+instead of parking them.
 
 ### 4.1.2 Logical Sessions and Resume
 
@@ -184,6 +209,11 @@ interface SessionOpenResult {
   sessionId: SessionId;
   sessionToken: string;
   serverSeq: number;
+  // Highest of the session's own localSeqs whose verdicts are decided and
+  // reflected in delivered/served state (SESSION localSeq space, not server
+  // seqs). Lets a resuming client re-anchor its catch-up point without
+  // waiting for a frame. See section 4.11.2 for the stamping contract.
+  caughtUpLocalSeq?: number;
   resumed?: boolean;
   sync?: SessionSync;
   sessionOpen: {
@@ -229,7 +259,7 @@ Rules:
   challenge; a stale signed `exp`) and every transport-level disconnect still
   retry, so a transient blip or a fresh-challenge race heals. A permanent
   protocol-flag mismatch at `hello` ends the whole connection the same way. See
-  [`../../development/authorization-failure-surfacing.md`](../../development/authorization-failure-surfacing.md)
+  [`../../features/authorization-failure-surfacing.md`](../../features/authorization-failure-surfacing.md)
   for how the client, the runner storage layer, and the CLI act on this
   classification end to end.
 
@@ -253,6 +283,9 @@ interface HelloMessage {
     modernCellRep: boolean;
     persistentSchedulerState?: boolean;
     syncSchemaTableV2?: boolean;
+    entityIdListing?: boolean;
+    entityIdPagination?: boolean;
+    entityIdLookup?: boolean;
   };
 }
 
@@ -261,6 +294,8 @@ interface RequestMessage {
     | "session.open"
     | "transact"
     | "graph.query"
+    | "entity-id.list"
+    | "entity-id.exists"
     | "session.watch.set"
     | "session.watch.add"
     | "session.ack";
@@ -325,6 +360,13 @@ interface SessionSync {
   type: "sync";
   fromSeq: number;
   toSeq: number;
+  // Outcome marker (SESSION localSeq space): every verdict of the receiving
+  // session's commits through this localSeq is decided, and this frame
+  // reflects those outcomes for the docs it covers (section 4.11.2).
+  // Releases the client's read-repair gate and applies parked accepts —
+  // the promotion of accepted-but-unpromoted commits from pending overlay
+  // to confirmed mirror.
+  caughtUpLocalSeq?: number;
   upserts: Array<{
     branch: BranchId;
     id: EntityId;
@@ -518,7 +560,71 @@ The selector path is relative to `document.value`, not the full stored document
 root. The server converts it to a document path by prepending `"value"` before
 running shared traversal.
 
-### 4.3.4 `session.watch.set` — Replace the Session Watch Set
+### 4.3.4 Entity Identifier Discovery and Lookup
+
+#### `entity-id.list` — List Live Entity Identifiers
+
+`entity-id.list` returns the identifiers of live entities in the default branch
+and space scope. The server reads the current entity index and does not select
+or return stored entity values. The result is sorted by identifier.
+
+```typescript
+// Shown at module scope.
+interface EntityIdListRequest {
+  type: "entity-id.list";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  after?: EntityId;
+  limit?: number;
+  expectedServerSeq?: number;
+}
+
+interface EntityIdListResult {
+  serverSeq: number;
+  ids: EntityId[];
+  nextAfter?: EntityId;
+}
+```
+
+The command requires `READ` access to the space. Deleted entities, user-scoped
+entities, and session-scoped entities do not appear in the result.
+
+The server caps `limit` at 1,000 identifiers. `nextAfter` is present when
+another page exists. The client sends that value as `after` and sends the first
+page's `serverSeq` as `expectedServerSeq` on every continuation. If the space
+changes between pages, the server returns `SnapshotChangedError`. It does not
+silently restart the enumeration or combine pages from different snapshots.
+
+A request without pagination fields retains the original protocol behavior and
+returns the complete list. This compatibility path is for clients connected to
+servers that advertise `entityIdListing` without `entityIdPagination`.
+
+#### `entity-id.exists` — Test One Live Entity Identifier
+
+`entity-id.exists` tests the same live, default-branch, space-scoped identifier
+index without selecting an entity value.
+
+```typescript
+// Shown at module scope.
+interface EntityIdLookupRequest {
+  type: "entity-id.exists";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  id: EntityId;
+}
+
+interface EntityIdLookupResult {
+  serverSeq: number;
+  exists: boolean;
+}
+```
+
+The command requires `READ` access to the space. It does not reveal user- or
+session-scoped instances of the same identifier.
+
+### 4.3.5 `session.watch.set` — Replace the Session Watch Set
 
 The watch set defines the union of queries whose results the session wants kept
 up to date.
@@ -553,7 +659,7 @@ Semantics:
   line with the new interest set
 - later committed changes continue to arrive via `session/effect`
 
-### 4.3.5 `session.watch.add` — Extend the Session Watch Set
+### 4.3.6 `session.watch.add` — Extend the Session Watch Set
 
 `session.watch.add` incrementally adds new watch specs into the existing
 session watch set by `id`.
@@ -593,7 +699,7 @@ Semantics:
 - watch mutations are applied in order per session; clients must serialize
   `session.watch.set` and `session.watch.add`
 
-### 4.3.6 Branch Lifecycle Commands
+### 4.3.7 Branch Lifecycle Commands
 
 Branch create / delete / merge lifecycle commands are not currently exposed on
 the v2 wire. The engine already carries branch state internally, but public wire
@@ -767,8 +873,8 @@ All errors are returned in `response`.
 // Shown at module scope.
 interface ConflictError extends Error {
   name: "ConflictError";
-  commit: ClientCommit;
-  conflicts: ConflictDetail[];
+  /** Server head seq at rejection time (§3.6.4). */
+  retryAfterSeq: number;
 }
 
 interface TransactionError extends Error {
@@ -875,15 +981,75 @@ Clients MUST:
 The server processes writes serially within a branch, or with equivalent
 serializable isolation.
 
-For live sync:
+For live sync, transact verdicts return INLINE before the independently batched
+fan-out: N commits can apply against one watch-union recompute, which is where
+the subscription pipeline's throughput comes from. A per-space publication lock
+orders transactions and fan-out: the server sends the verdict while holding the
+lock, completes the transaction's post-commit scheduler bookkeeping, and then
+releases the lock for fan-out. Locks for other spaces remain independent. The
+lock covers each complete turn, so a transaction arriving during fan-out for
+its space waits for that fan-out to finish. The remaining ordering contract is
+enforced through the catch-up marker and CLIENT-side verdict parking (CT-1927):
 
 - the server MAY coalesce multiple successful commits into one `SessionSync`
   frame
-- before returning `ConflictError`, the server MUST first flush any already
-  committed relevant changes that would otherwise leave the client's subscribed
-  view stale
-- the server SHOULD carry dirty-document information through this flush so it
-  only recomputes affected watch unions
+- on a live connection, the server MUST send a commit's transact response
+  before any `SessionSync` frame whose `caughtUpLocalSeq` covers that commit
+- for every accept and every `ConflictError` rejection, the server MUST
+  stage a catch-up obligation for the committing session, and the next
+  frame the batched fan-out sends that session MUST carry
+  `caughtUpLocalSeq` at or above the verdict's localSeq — an
+  otherwise-empty frame when nothing the session watches is dirty. Other
+  rejection kinds (protocol, authorization, apply errors) carry no marker
+  obligation; the client applies them immediately
+- the marker means "every verdict of yours through this localSeq is
+  decided, and this frame reflects those outcomes for the docs it covers."
+  The frame includes a doc unless the session provably holds it (CT-1965,
+  decided per doc by the LAST op the session's accepted commit applied):
+  own `set`- and `delete`-produced heads are elided — the writer supplied
+  the bytes (or the absence), and the verdict plus marker promote them —
+  while own `patch`-produced heads are delivered as full post-apply
+  documents, since merged state is truth the writer cannot extrapolate. A
+  head moved past the session's own write, and all foreign novelty, is
+  delivered in full. REJECTED commits' docs are staged origin-less, so
+  repair frames DO cover them, and a frame lost in flight re-stages its
+  docs origin-less, so the retry delivers full documents.
+- the CLIENT MUST NOT apply a verdict's state effects ahead of the marker
+  that covers it: an accept's promotion (pending overlay to confirmed
+  mirror, removing the pending local copy) is PARKED until
+  `caughtUpLocalSeq` reaches its localSeq. For an elided `set` head the
+  promotion installs the client's own value; for a `patch` head the
+  covering frame has already delivered the post-apply document, so
+  promotion retires the overlay against delivered truth. Extrapolating the
+  post-apply state from the client's own ops remains the fallback where no
+  frame channel exists — unwatched docs, servers that still suppress; a
+  conflict rejection's drop/revert is held by the read-repair gate
+  (`finalizeRejection`, with a timeout backstop for lost connections).
+  Visible state is unaffected by parking — the pending overlay already
+  shows the write.
+- parking splits what an accepted commit's client observers wait for. The
+  commit PROMISE the submitting caller awaits resolves at marker coverage:
+  a resolved commit means the caller's subscribed view reflects the
+  committed write and the foreign novelty it was applied on top of.
+  Post-commit effects gated on durability alone — verdict callbacks and
+  the outbox flush — run at the VERDICT instead: delaying them to
+  coverage buys nothing (they do not read the subscribed view) and costs
+  a fan-out window on every effect-bearing commit. Commit callbacks keep
+  the SETTLEMENT timeline — after coverage on accept, after the
+  read-repair gate on rejection — because their consumers act on the
+  post-commit view; a `resolveAt: "verdict"` caller's returned promise
+  settles early, but its commit callbacks still wait. The same split holds on rejection: the fate is sealed
+  at rejection receipt (verdict callbacks fire), while the promise and
+  commit callbacks wait out the read-repair gate a retry needs. A caller may opt a commit back to
+  verdict timing (`commit({ resolveAt: "verdict" })`) when it needs
+  "durably accepted" without forcing the fan-out through —
+  controlled-staleness test fixtures foremost.
+
+The server advertises this contract with the build-inherent
+`verdictCatchUpMarkers` protocol flag. A client that sees it absent (an
+older server that stamps markers only for conflicts) applies verdicts
+immediately, as before; a client with no active sync consumer (no watch
+view — so no frame stream to order against) also applies immediately.
 
 ## 4.12 Mapping from Current Implementation
 

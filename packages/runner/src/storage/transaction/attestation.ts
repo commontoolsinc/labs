@@ -25,8 +25,8 @@ import { LRUCache } from "@commonfabric/utils/cache";
 import { toTransactionDocumentValue } from "../v2-document.ts";
 import {
   extractDataUriPayloadText,
-  isDataUri,
   isDataUriMediaType,
+  isFabricDataUri,
   valueFromDataUriPayloadText,
 } from "@commonfabric/data-model/data-uri-codec";
 
@@ -194,6 +194,12 @@ export const resolve = (
 
   while (++at < path.length) {
     const key = path[at];
+    // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, so descending
+    // into one lands in this arm and reads `undefined` instead of reaching
+    // the `TypeMismatchError` arm below the way a scalar does. The caller
+    // then treats the slot as absent-but-writable, and a path into a
+    // `FabricInstance`'s codec contents reads as missing rather than being
+    // refused or resolved.
     if (isRecord(value)) {
       const record = value as FabricPlainObject;
       value = Object.hasOwn(record, key) ? record[key] : undefined;
@@ -244,7 +250,7 @@ export const load = (
   >;
 
   try {
-    if (!isDataUri(address.id)) {
+    if (!isFabricDataUri(address.id)) {
       result = {
         error: UnsupportedMediaTypeError(
           `Unsupported media type in data URI: ${address.id.slice(0, 64)}`,

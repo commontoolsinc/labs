@@ -24,6 +24,10 @@ export class ProblematicValue extends ExplicitTagValue {
   /** Value for {@link #error}. */
   readonly #error;
 
+  /**
+   * Constructs an instance for the given tag and state, with `error`
+   * describing what went wrong.
+   */
   constructor(
     wireTypeTag: string,
     state: FabricValue,
@@ -40,14 +44,12 @@ export class ProblematicValue extends ExplicitTagValue {
     return this.#error;
   }
 
-  /**
-   * Deep-freezes in place.
-   */
+  /** Deep-freezes in place. */
   [DEEP_FREEZE](
     subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
     subFreeze(this.state);
-    return Object.freeze(this) as unknown as FabricValue;
+    return Object.freeze(this);
   }
 
   /**
@@ -71,6 +73,7 @@ export class ProblematicValue extends ExplicitTagValue {
 
   static #codec = Object.freeze(
     new (class ProblematicValueCodec extends BaseFabricCodec {
+      /** Constructs an instance. */
       constructor() {
         // No preferred wire tag: a `ProblematicValue` round-trips to its
         // *preserved* tag, which varies per instance.

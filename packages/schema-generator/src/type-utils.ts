@@ -1,7 +1,7 @@
 import ts from "typescript";
 
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import type { JSONSchemaMutable } from "@commonfabric/api";
+import type { MutableJSONSchema } from "@commonfabric/api";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
 import { getPropertyNameText } from "./typescript/property-name.ts";
 import type { CellWrapperKind } from "./typescript/cell-brand.ts";
@@ -346,7 +346,7 @@ export function getPrimarySymbol(type: ts.Type): ts.Symbol | undefined {
   return undefined;
 }
 
-export function cloneSchemaDefinition<T extends JSONSchemaMutable>(
+export function cloneSchemaDefinition<T extends MutableJSONSchema>(
   schema: T,
 ): T {
   // TODO(danfuzz): `structuredClone()` mangles non-JSON `FabricValue`s —
@@ -361,12 +361,12 @@ export function cloneSchemaDefinition<T extends JSONSchemaMutable>(
 export function getNativeTypeSchema(
   type: ts.Type,
   checker: ts.TypeChecker,
-): JSONSchemaMutable | undefined {
+): MutableJSONSchema | undefined {
   const visited = new Set<ts.Type>();
 
   const resolve = (
     current: ts.Type,
-  ): JSONSchemaMutable | undefined => {
+  ): MutableJSONSchema | undefined => {
     if (visited.has(current)) return undefined;
     visited.add(current);
 
@@ -512,9 +512,17 @@ export function getNamedTypeKey(
   }
 
   // If we are overriding the type, don't return a named type key.
-  // This makes it so we include these inline instead of as $defs
+  // This makes it so we include these inline instead of as $defs. The
+  // fabric-primitive names are only claimed by NativeTypeFormatter when the
+  // type carries the FabricSpecialObject brand; hoisting classifies the same
+  // way, so an unbranded user type sharing a name hoists normally.
   if (NativeTypeFormatter.isNativeType(name)) {
-    return undefined;
+    if (
+      !NativeTypeFormatter.isFabricPrimitiveTypeName(name) ||
+      NativeTypeFormatter.declaresFabricSpecialObjectBrand(type)
+    ) {
+      return undefined;
+    }
   }
   // Don't hoist generic type instantiations (Record<K,V>, Partial<T>, Box<T>, etc.)
   // These have aliasTypeArguments, meaning they're a generic type applied to specific type arguments

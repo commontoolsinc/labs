@@ -8,13 +8,11 @@ import {
   updateDragPointer,
 } from "../../core/drag-state.ts";
 import type { CellHandle } from "@commonfabric/runtime-client";
-import "../cf-cell-context/index.ts";
 
 /**
  * CFDragSource - Wraps draggable content and initiates drag operations
  *
  * This component makes any content draggable and manages the drag lifecycle.
- * It automatically wraps content with cf-cell-context for debugging support.
  *
  * @element cf-drag-source
  *
@@ -45,11 +43,11 @@ export class CFDragSource extends BaseElement {
         cursor: not-allowed;
       }
 
-      :host(:not([disabled])) cf-cell-context {
+      :host(:not([disabled])) .drag-body {
         cursor: grab;
       }
 
-      :host(:not([disabled])) cf-cell-context.dragging {
+      :host(:not([disabled])) .drag-body.dragging {
         cursor: grabbing;
         opacity: 0.5;
       }
@@ -95,11 +93,6 @@ export class CFDragSource extends BaseElement {
   private _handlePointerDown(e: PointerEvent) {
     // Skip if disabled
     if (this.disabled || !this.cell) {
-      return;
-    }
-
-    // Skip if Alt is held - user is interacting with cf-cell-context debug UI
-    if (e.altKey) {
       return;
     }
 
@@ -186,18 +179,17 @@ export class CFDragSource extends BaseElement {
     }
 
     // Now that we're actually dragging, capture the pointer and add dragging class
-    const cellContext = this.shadowRoot?.querySelector(
-      "cf-cell-context",
-    ) as HTMLElement;
-    if (cellContext) {
+    const body = this.shadowRoot?.querySelector(".drag-body") as HTMLElement;
+    if (body) {
       if (this._pointerId !== undefined) {
-        cellContext.setPointerCapture(this._pointerId);
+        body.setPointerCapture(this._pointerId);
       }
-      cellContext.classList.add("dragging");
+      body.classList.add("dragging");
     }
 
     // Create preview element
-    this._preview = createDragPreview(cell);
+    const { preview, cleanup } = createDragPreview(cell);
+    this._preview = preview;
     document.body.appendChild(this._preview);
 
     // Position preview near cursor
@@ -210,6 +202,7 @@ export class CFDragSource extends BaseElement {
       type: this.type,
       sourceElement: this,
       preview: this._preview,
+      previewCleanup: cleanup,
       pointerX: e.clientX,
       pointerY: e.clientY,
     });
@@ -225,10 +218,7 @@ export class CFDragSource extends BaseElement {
     }
 
     // Remove dragging class
-    const cellContext = this.shadowRoot?.querySelector("cf-cell-context");
-    if (cellContext) {
-      cellContext.classList.remove("dragging");
-    }
+    this.shadowRoot?.querySelector(".drag-body")?.classList.remove("dragging");
 
     // End drag in drag state (this will clean up preview)
     // Drop zones handle their own detection and emit cf-drop events
@@ -242,12 +232,9 @@ export class CFDragSource extends BaseElement {
 
   override render() {
     return html`
-      <cf-cell-context
-        .cell="${this.cell}"
-        @pointerdown="${this._handlePointerDown}"
-      >
+      <div class="drag-body" @pointerdown="${this._handlePointerDown}">
         <slot></slot>
-      </cf-cell-context>
+      </div>
     `;
   }
 }

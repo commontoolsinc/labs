@@ -29,8 +29,9 @@ const logger = getLogger("cell-cache");
 /**
  * Content-addressed compilation cache — document model and key scheme.
  *
- * Phase 4 of docs/specs/module-loading.md. The persistent cache is a pair of
- * per-module document sets stored as regular cells in the target space:
+ * See docs/specs/module-loading.md §"Storage model: two content-addressed
+ * document sets, per space". The persistent cache is a pair of per-module
+ * document sets stored as regular cells in the target space:
  *
  *  - **Source set** `pattern:<identity>` — authored TypeScript, keyed by the
  *    per-module Merkle identity (`computeModuleHashes`). Runtime-version
@@ -441,8 +442,14 @@ export function buildSourceDocs(
   modules: readonly CacheableModule[],
   entryIdentity: string,
   moduleDelegations: ModuleDelegationMap = EMPTY_MODULE_DELEGATIONS,
+  extraRootsOverride?: readonly string[],
 ): Map<string, SourceDoc> {
-  const extraRoots = unreachedRoots(modules, entryIdentity);
+  // `extraRootsOverride` exists for chunked (incremental) write-backs: the
+  // synthetic root links on the ENTRY doc must be computed over the FULL
+  // emitted module set, while `modules` here may be just the chunk being
+  // written in this transaction (see planCompileCacheWriteChunks).
+  const extraRoots = extraRootsOverride ??
+    unreachedRoots(modules, entryIdentity);
   const out = new Map<string, SourceDoc>();
   for (const module of modules) {
     const delegatedModuleIdentities = validDelegatedModuleIdentities(
@@ -744,6 +751,7 @@ export function writeSourceDocs(
   entryIdentity: string,
   tx: IExtendedStorageTransaction,
   moduleDelegations: ModuleDelegationMap = EMPTY_MODULE_DELEGATIONS,
+  extraRootsOverride?: readonly string[],
 ): ModuleDelegationMap {
   assertNoUnpinnedFabricImports(modules);
   const effectiveModuleDelegations = effectiveModuleDelegationsForWrite(
@@ -758,6 +766,7 @@ export function writeSourceDocs(
     modules,
     entryIdentity,
     effectiveModuleDelegations,
+    extraRootsOverride,
   );
   withCompileCacheBuiltin(tx, () => {
     for (const [identity, doc] of docs) {
@@ -834,6 +843,27 @@ export async function loadSourceClosure(
   );
   // One sync pulls the entire link closure (recursive schema). No further syncs.
   await entry.sync();
+  return readLoadedSourceClosure(runtime, space, entryIdentity, tx);
+}
+
+/**
+ * Read a source closure that has already been synchronized into the replica.
+ *
+ * Reads remain attached to `tx`, so a later write commit conflicts if any
+ * source document changes between verification and commit.
+ */
+export function readLoadedSourceClosure(
+  runtime: Runtime,
+  space: MemorySpace,
+  entryIdentity: string,
+  tx: IExtendedStorageTransaction,
+): Map<string, SourceDoc> | undefined {
+  const entry = runtime.getCell(
+    space,
+    sourceDocKey(entryIdentity),
+    SOURCE_DOC_SCHEMA,
+    tx,
+  );
   const root = entry.get() as StoredSourceDoc | undefined;
   if (!root || typeof root.identity !== "string") return undefined;
 
@@ -892,29 +922,14 @@ export async function loadSourceClosure(
   return out;
 }
 
-/**
- * Load the source closure (see {@link loadSourceClosure}) and **graph-wiring
- * verify** it (step 4.3.6): recompute every module's Merkle identity from the
- * loaded source + import graph and require it to equal its document key. This is
- * the content-addressed analog of `verifyModuleGraph` — the source set is
- * self-verifying (content-addressing IS the integrity), so a tampered source, a
- * rewired link, or an incomplete closure is rejected here. Resolves to the
- * verified closure, or `undefined` if the entry is absent or verification fails.
- */
-export async function loadVerifiedSourceClosure(
+function verifyLoadedSourceClosure(
   runtime: Runtime,
   space: MemorySpace,
   entryIdentity: string,
-  tx: IExtendedStorageTransaction,
-  runtimeFingerprint = "",
-): Promise<Map<string, SourceDoc> | undefined> {
-  const closure = await loadSourceClosure(runtime, space, entryIdentity, tx);
+  closure: Map<string, SourceDoc> | undefined,
+  runtimeFingerprint: string,
+): Map<string, SourceDoc> | undefined {
   if (closure === undefined) return undefined;
-  // Identity verification parses source (module hashing scans imports), and
-  // every source-closure consumer parses further downstream (fabric-import
-  // scans, recompiles) — this is the shared entry those flows funnel through,
-  // so load the deferred compiler stack here, once.
-  await ensureCompilerStack();
   const verification = verifySourceDocs(
     entryIdentity,
     closure,
@@ -945,6 +960,67 @@ export async function loadVerifiedSourceClosure(
     moduleDelegationsFromDocs(closure),
   );
   return closure;
+}
+
+/**
+ * Load the deferred parser used by synchronous source-closure verification.
+ */
+export async function prepareSourceClosureVerification(): Promise<void> {
+  await ensureCompilerStack();
+}
+
+/**
+ * Verify a synchronized source closure while retaining its reads in `tx`.
+ *
+ * Callers first synchronize the recursive closure and await
+ * {@link prepareSourceClosureVerification}.
+ */
+export function readVerifiedSourceClosure(
+  runtime: Runtime,
+  space: MemorySpace,
+  entryIdentity: string,
+  tx: IExtendedStorageTransaction,
+  runtimeFingerprint = "",
+): Map<string, SourceDoc> | undefined {
+  return verifyLoadedSourceClosure(
+    runtime,
+    space,
+    entryIdentity,
+    readLoadedSourceClosure(runtime, space, entryIdentity, tx),
+    runtimeFingerprint,
+  );
+}
+
+/**
+ * Load the source closure (see {@link loadSourceClosure}) and **graph-wiring
+ * verify** it (step 4.3.6): recompute every module's Merkle identity from the
+ * loaded source + import graph and require it to equal its document key. This is
+ * the content-addressed analog of `verifyModuleGraph` — the source set is
+ * self-verifying (content-addressing IS the integrity), so a tampered source, a
+ * rewired link, or an incomplete closure is rejected here. Resolves to the
+ * verified closure, or `undefined` if the entry is absent or verification fails.
+ */
+export async function loadVerifiedSourceClosure(
+  runtime: Runtime,
+  space: MemorySpace,
+  entryIdentity: string,
+  tx: IExtendedStorageTransaction,
+  runtimeFingerprint = "",
+): Promise<Map<string, SourceDoc> | undefined> {
+  const closure = await loadSourceClosure(runtime, space, entryIdentity, tx);
+  if (closure === undefined) return undefined;
+  // Identity verification parses source (module hashing scans imports), and
+  // every source-closure consumer parses further downstream (fabric-import
+  // scans, recompiles) — this is the shared entry those flows funnel through,
+  // so load the deferred compiler stack here, once.
+  await prepareSourceClosureVerification();
+  return verifyLoadedSourceClosure(
+    runtime,
+    space,
+    entryIdentity,
+    closure,
+    runtimeFingerprint,
+  );
 }
 
 // --- Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC ------
@@ -1211,6 +1287,8 @@ export function writeCompiledDocs(
   opts: {
     runtimeVersion: string;
     moduleDelegations?: ModuleDelegationMap;
+    /** See {@link buildSourceDocs}: full-set root links for chunked writes. */
+    extraRoots?: readonly string[];
   },
   tx: IExtendedStorageTransaction,
 ): ModuleDelegationMap {
@@ -1223,7 +1301,8 @@ export function writeCompiledDocs(
     opts.moduleDelegations ?? EMPTY_MODULE_DELEGATIONS,
     { compiledRuntimeVersion: opts.runtimeVersion },
   );
-  const extraRoots = unreachedRoots(modules, entryIdentity);
+  const extraRoots = opts.extraRoots ??
+    unreachedRoots(modules, entryIdentity);
   const schema = compiledDocWriteSchema();
   withCompileCacheBuiltin(tx, () => {
     for (const module of modules) {
@@ -1304,6 +1383,8 @@ export function writeSourceAndCompiledDocs(
   opts: {
     runtimeVersion: string;
     moduleDelegations?: ModuleDelegationMap;
+    /** See {@link buildSourceDocs}: full-set root links for chunked writes. */
+    extraRoots?: readonly string[];
   },
   tx: IExtendedStorageTransaction,
 ): ModuleDelegationMap {
@@ -1326,6 +1407,7 @@ export function writeSourceAndCompiledDocs(
     entryIdentity,
     tx,
     effectiveModuleDelegations,
+    opts.extraRoots,
   );
   writeCompiledDocs(
     runtime,
@@ -1336,6 +1418,113 @@ export function writeSourceAndCompiledDocs(
     tx,
   );
   return effectiveModuleDelegations;
+}
+
+/**
+ * How many modules a single compile-cache write-back transaction covers.
+ *
+ * Why not one transaction for the whole closure: the first client session
+ * over a space whose compiled refs went stale (a compiler/transformer output
+ * change, e.g. #4980) re-writes the ENTIRE closure. As one all-or-nothing
+ * commit, a session interrupted mid-write persists nothing, the next session
+ * redoes everything, and under aggressive client timeouts no session ever
+ * lands the write — the space retries forever (the estuary first-open
+ * outage). Chunked commits make that recovery durable and incremental:
+ * every committed chunk survives an interruption, re-runs re-write already
+ * durable docs as empty diffs, and a few interrupted sessions converge to
+ * the settled closure.
+ *
+ * 4 modules ≈ 8 docs per commit keeps each commit well under typical
+ * ws-message/commit-validation budgets while bounding the commit count for
+ * large closures. A closure of ≤4 modules still commits exactly once,
+ * identical to the pre-chunking behavior.
+ */
+export const COMPILE_CACHE_WRITEBACK_CHUNK_MODULES = 4;
+
+/**
+ * Plan the transaction chunks for an incremental compile-cache write-back.
+ *
+ * Ordering makes every prefix of committed chunks a maximally useful partial
+ * state: dependencies first (DFS post-order over the import graph), the
+ * ENTRY module last.
+ *
+ * What the entry-last pin actually guarantees: an interrupted write-back
+ * never persists the entry doc of a namespace that did not already have one
+ * (a fresh compiled `compileCache:<version>/` namespace, or a fresh space's
+ * source set), and an ABSENT ENTRY is exactly the miss test of both load
+ * paths (`loadCompiledClosure` returns empty; `loadSourceClosure` resolves
+ * undefined). So every partial prefix this ordering can produce reads as a
+ * plain cache miss whose already-durable docs make the next session's
+ * re-write cheaper (equal-value re-writes diff to nothing).
+ *
+ * The loaders are deliberately NOT fail-closed on missing DESCENDANTS:
+ * `loadCompiledClosure` drops an absent/unstamped child along with the edge
+ * to it (pinned by "skips compiled import links without integrity"), and the
+ * by-identity hit test is entry presence. Chunk interruption cannot create
+ * an entry-present/descendant-missing state, but should one arise out of
+ * band, it degrades to a clean RECOMPILE rather than a corrupt load: the
+ * source path rejects the partial graph in `loadVerifiedSourceClosure`
+ * (verifySourceDocs' missing-import check) and the compiled path fails
+ * cached-module evaluation, both funneling into the cold recompile fallback
+ * — pinned by the descendant-missing tests in
+ * compile-cache-incremental-writeback.test.ts.
+ *
+ * `extraRoots` is computed over the FULL module set and must be passed to
+ * each chunk's write (the entry doc's synthetic root links enumerate every
+ * module unreachable through the natural import graph; computing it over a
+ * chunk would corrupt the entry doc's link set).
+ */
+export function planCompileCacheWriteChunks(
+  modules: readonly CacheableModule[],
+  entryIdentity: string,
+  chunkSize: number = COMPILE_CACHE_WRITEBACK_CHUNK_MODULES,
+): { chunks: CacheableModule[][]; extraRoots: readonly string[] } {
+  if (!Number.isInteger(chunkSize) || chunkSize < 1) {
+    throw new Error(`invalid compile-cache write chunk size: ${chunkSize}`);
+  }
+  const extraRoots = unreachedRoots(modules, entryIdentity);
+  const byId = new Map(modules.map((m) => [m.identity, m]));
+  const ordered: CacheableModule[] = [];
+  const visited = new Set<string>();
+  // Iterative DFS post-order (import cycles are legal in ES modules; the
+  // visited set breaks them — chunking is commit batching, not a semantic
+  // ordering requirement, so any cycle cut is fine).
+  const visit = (rootId: string): void => {
+    const stack: { id: string; expanded: boolean }[] = [
+      { id: rootId, expanded: false },
+    ];
+    while (stack.length > 0) {
+      const frame = stack.pop()!;
+      const module = byId.get(frame.id);
+      if (module === undefined) continue;
+      if (frame.expanded) {
+        ordered.push(module);
+        continue;
+      }
+      if (visited.has(frame.id)) continue;
+      visited.add(frame.id);
+      stack.push({ id: frame.id, expanded: true });
+      for (const imp of module.imports) {
+        if (!visited.has(imp.targetIdentity)) {
+          stack.push({ id: imp.targetIdentity, expanded: false });
+        }
+      }
+    }
+  };
+  // Every module is either reachable from the entry or listed in extraRoots
+  // (unreachedRoots returns ALL unreachable modules), so these walks cover
+  // the full set. The entry is pinned visited during the root walks (an
+  // unreachable module may import back INTO the entry) and walked last, so
+  // the entry doc is always in the final chunk.
+  visited.add(entryIdentity);
+  for (const rootIdentity of extraRoots) visit(rootIdentity);
+  visited.delete(entryIdentity);
+  visit(entryIdentity);
+  const chunks: CacheableModule[][] = [];
+  for (let i = 0; i < ordered.length; i += chunkSize) {
+    chunks.push(ordered.slice(i, i + chunkSize));
+  }
+  return { chunks, extraRoots };
 }
 
 /**

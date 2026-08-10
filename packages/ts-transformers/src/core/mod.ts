@@ -214,14 +214,12 @@ export type {
   SchemaHints,
   TransformationDiagnostic,
   TransformationOptions,
-  TransformMode,
   TypeRegistry,
   UnreadableCellArgument,
 } from "./transformers.ts";
 export {
   HelpersOnlyTransformer,
   PATTERN_COVERAGE_GLOBAL,
-  Pipeline,
   Transformer,
 } from "./transformers.ts";
 export * from "./common-fabric-symbols.ts";

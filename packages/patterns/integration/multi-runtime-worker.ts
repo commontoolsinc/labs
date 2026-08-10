@@ -64,13 +64,13 @@ function currentPiece(): PieceController {
 // Read through the pattern's declared result schema, like the UI does —
 // schema defaults and scope annotations only apply on schema-aware reads.
 function result(): Cell<any> {
-  const raw = controller().manager().getResult(currentPiece().getCell());
+  const raw = controller().getResult(currentPiece().getCell());
   return resultSchema !== undefined ? raw.asSchema(resultSchema as never) : raw;
 }
 
 async function idle(): Promise<void> {
-  await controller().manager().runtime.idle();
-  await controller().manager().synced();
+  await controller().runtime.idle();
+  await controller().synced();
 }
 
 async function attachPiece(next: PieceController): Promise<void> {
@@ -192,14 +192,14 @@ async function maybeAttachOtelBridge(identity: Identity): Promise<void> {
       import("@commonfabric/runner/telemetry-otel-bridge"),
       import("@opentelemetry/api"),
     ]);
-  const manager = controller().manager();
-  const runtime = manager.runtime;
+  const pieces = controller();
+  const runtime = pieces.runtime;
   attachRuntimeTelemetryOtelBridge(runtime.telemetry, {
     tracer: trace.getTracer("ct-runner-bridge"),
     meter: metrics.getMeter("ct-runner-bridge"),
     attributes: {
       "ct.runtime": "harness",
-      "space.did": manager.getSpace(),
+      "space.did": pieces.getSpace(),
       "user.did": identity.did(),
     },
   });
@@ -219,7 +219,7 @@ const handlers: Record<
       spaceName: spaceName as string,
     });
     if (diagnostics === true) {
-      const scheduler = controller().manager().runtime.scheduler;
+      const scheduler = controller().runtime.scheduler;
       scheduler.enableSettleStats();
       scheduler.setActionRunTraceEnabled(true);
     }
@@ -228,7 +228,7 @@ const handlers: Record<
   },
 
   async createPiece({ programPath, rootPath, input }) {
-    const program = await controller().manager().runtime.harness.resolve(
+    const program = await controller().runtime.harness.resolve(
       new FileSystemProgramResolver(
         programPath as string,
         rootPath as string,
@@ -272,7 +272,7 @@ const handlers: Record<
       markRendererTrustedEvent(eventValue);
     }
     const target = result();
-    const { error } = await controller().manager().runtime.editWithRetry(
+    const { error } = await controller().runtime.editWithRetry(
       (tx) => {
         target.key(handler as never).withTx(tx).send(eventValue as never);
       },
@@ -297,7 +297,7 @@ const handlers: Record<
   // Pass `idle: false` to leave this runtime un-settled, so its local replica
   // stays stale (own-write-race repro).
   async set({ path, value, idle: doIdle }) {
-    const runtime = controller().manager().runtime;
+    const runtime = controller().runtime;
     const tx = runtime.edit();
     let cell = result();
     for (const segment of (path ?? []) as (string | number)[]) {
@@ -335,7 +335,7 @@ const handlers: Record<
   // current value from the local replica (no pull), mirroring CellHandle.push
   // reading its cache.
   async push({ path, value, idle: doIdle }) {
-    const runtime = controller().manager().runtime;
+    const runtime = controller().runtime;
     let cell = result();
     for (const segment of (path ?? []) as (string | number)[]) {
       cell = cell.key(segment as never) as Cell<any>;
@@ -410,7 +410,7 @@ const handlers: Record<
   // test distinguish "this runtime's replica never received the doc" from
   // "the doc is in the replica but the schema-aware read fails to resolve it".
   async rawRead({ id, space, path, scope }) {
-    const runtime = controller().manager().runtime;
+    const runtime = controller().runtime;
     const tx = runtime.edit();
     const res = tx.read({
       space: space as never,
@@ -434,7 +434,7 @@ const handlers: Record<
 
   async diagnostics() {
     await idle();
-    const scheduler = controller().manager().runtime.scheduler;
+    const scheduler = controller().runtime.scheduler;
     return sanitizeForTransfer(
       {
         graph: scheduler.getGraphSnapshot(),

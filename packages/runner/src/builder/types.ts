@@ -24,6 +24,7 @@ import type {
   ComputedFunction,
   EntityRefToStringFunction,
   EqualsFunction,
+  FabricExecValue,
   FactoryInput,
   FetchBinaryFunction,
   FetchJsonFunction,
@@ -36,8 +37,6 @@ import type {
   GetPatternEnvironmentFunction,
   HandlerFunction,
   HFunction,
-  ID as IDSymbol,
-  ID_FIELD as IDFieldSymbol,
   IfElseFunction,
   InspectConfLabelFunction,
   JSONSchema,
@@ -78,10 +77,6 @@ import {
 import { type Runtime } from "../runtime.ts";
 
 // Define runtime constants here - actual runtime values
-export const ID: typeof IDSymbol = Symbol("ID, unique to the context") as any;
-export const ID_FIELD: typeof IDFieldSymbol = Symbol(
-  "ID_FIELD, name of sibling that contains id",
-) as any;
 
 // Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over patterns.
@@ -122,6 +117,10 @@ export type {
   CellKind,
   CellScope,
   CellTypeConstructor,
+  FabricExecArray,
+  FabricExecFunction,
+  FabricExecPlainObject,
+  FabricExecValue,
   FabricValue,
   FactoryInput,
   FsProjection,
@@ -130,7 +129,6 @@ export type {
   HKT,
   ICell,
   IDerivable,
-  IDFields,
   IKeyableOpaque,
   IOpaquable,
   IOpaqueCell,
@@ -139,15 +137,15 @@ export type {
   JSONArray,
   JSONObject,
   JSONSchema,
-  JSONSchemaMutable,
   JSONSchemaObj,
-  JSONSchemaObjMutable,
   JSONSchemaTypes,
   JSONValue,
   KeyResultType,
   LinkScope,
   Module,
   ModuleFactory,
+  MutableJSONSchema,
+  MutableJSONSchemaObj,
   NodeFactory,
   OpaqueCell,
   Pattern,
@@ -161,6 +159,7 @@ export type {
   Stream,
   StripCell,
   StripDefaultBrand,
+  toEncodableForm,
   toJSON,
   ToSchemaFunction,
   UiActionProps,
@@ -249,11 +248,18 @@ export function isModule(value: unknown): value is Module {
   );
 }
 
+/**
+ * A node in a pattern's execution graph.
+ *
+ * This shape is de facto compatible with {@link FabricExecPlainObject}, and is
+ * intended to remain so. It deliberately does not intersect with that type,
+ * because its string index signature would allow undeclared property names.
+ */
 export type Node = {
   description?: string;
   module: Module; // TODO(seefeld): Add `Alias` here once supported
-  inputs: JSONValue;
-  outputs: JSONValue;
+  inputs: FabricExecValue;
+  outputs: FabricExecValue;
 };
 
 export type DerivedInternalCellDescriptor = {
@@ -275,7 +281,7 @@ declare module "@commonfabric/api" {
     argumentSchema: JSONSchema;
     resultSchema: JSONSchema;
     derivedInternalCells?: DerivedInternalCellDescriptor[];
-    result: JSONValue;
+    result: FabricExecValue;
     nodes: Node[];
     // NOTE: `program` (rehydration source) and the derivation link to a
     // copy's original live in WeakMaps/WeakSets in ./pattern-metadata.ts (so
@@ -419,8 +425,6 @@ export interface BuilderFunctionsAndConstants {
   entityRefToString: EntityRefToStringFunction;
 
   // Constants
-  ID: typeof ID;
-  ID_FIELD: typeof ID_FIELD;
   SELF: typeof SELF;
   TYPE: typeof TYPE;
   NAME: typeof NAME;
@@ -442,7 +446,9 @@ export interface BuilderFunctionsAndConstants {
   UiPromptSlot: (props: UiPromptSlotProps) => JSXElement;
   UiDisclosure: (props: UiDisclosureProps) => JSXElement;
 
-  // Fabric value classes
+  // Fabric value classes, in the order they are declared in api/index.ts.
+  FabricSpecialObject:
+    typeof import("@commonfabric/data-model/fabric-value").FabricSpecialObject;
   FabricInstance:
     typeof import("@commonfabric/data-model/fabric-value").FabricInstance;
   FabricPrimitive:
@@ -453,6 +459,14 @@ export interface BuilderFunctionsAndConstants {
     typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochDays;
   FabricHash:
     typeof import("@commonfabric/data-model/fabric-primitives").FabricHash;
+  FabricLink:
+    typeof import("@commonfabric/data-model/fabric-instances").FabricLink;
+  FabricBytes:
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricBytes;
+  FabricRegExp:
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricRegExp;
+  FabricError:
+    typeof import("@commonfabric/data-model/fabric-instances").FabricError;
 
   // Debug stringifiers
   toCompactDebugString:

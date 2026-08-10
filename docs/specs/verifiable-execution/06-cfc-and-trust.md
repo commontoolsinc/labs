@@ -1,6 +1,6 @@
 # CF Protocol: CFC & Trust Profiles (Sections 10–12)
 
-See `docs/specs/verifiable-execution/README.md` for navigation.
+See the [verifiable-execution document map](README.md) for navigation.
 
 ## 10. Contextual Flow Control (CFC)
 
@@ -100,8 +100,8 @@ type CFCLabelMap = {
 
 #### 10.3.4 Label Map Commitments (Future)
 
-This spec uses content-addressed hashes (see `CauseString` in
-`packages/memory/interface.ts`) for commitments.
+This spec uses content-addressed hashes (see `FabricHash` in
+`packages/data-model/src/fabric-primitives/FabricHash.ts`) for commitments.
 
 A label map commitment MUST be domain-separated and deterministic. One simple
 construction is:

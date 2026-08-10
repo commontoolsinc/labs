@@ -12,6 +12,11 @@ import {
   validateSchemaDefinition,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
+import {
+  FABRIC_SPECIAL_OBJECT_BRAND,
+  type FabricPrimitiveSchemaType,
+  isFabricPrimitiveSchemaType,
+} from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   type FabricValue,
@@ -39,6 +44,20 @@ interface CompatibilityContext {
   allowTargetDefaults: boolean;
   /** Whether defaults describe a pattern migration or link materialization. */
   defaultComparison: "evolution" | "target";
+  /**
+   * True below a node both contracts mark `asCell: ["stream"]` — a verb, so
+   * everything beneath is the verb's EVENT schema. There, a boolean
+   * `additionalProperties` is an enforcement dial rather than a data
+   * contract: the runtime schema-strips undeclared event fields before any
+   * handler runs, so an open event's "acceptance" of extras was never
+   * observable behavior (accepted-and-STRIPPED was never contract — verb
+   * contract WS-C, decided 2026-08-03), and closing one surfaces the silent
+   * loss as the typed rejection rule 1 requires. The reverse transition is
+   * equally free: rejection of undeclared fields is not a capability a
+   * caller can depend on, and generator cleanup of `never`-derived closures
+   * must not read as a contract break.
+   */
+  verbEvent?: boolean;
 }
 
 export interface SchemaSubsetOptions {
@@ -118,9 +137,37 @@ const fabricAwareEqual = (left: unknown, right: unknown): boolean => {
  * contracts of the currently running pattern.
  *
  * Arguments are contravariant and results are covariant. Open argument objects
- * may still gain optional/defaulted named fields as the piece-evolution policy;
- * the runner validates the piece's merged durable arguments against the new
- * schema transactionally before committing such an update.
+ * may still gain optional/defaulted named fields as the piece-evolution policy.
+ * What keeps that allowance sound is a second check at update time rather than
+ * anything provable here: pattern setup re-stages the piece's stored argument
+ * against the incoming schema and validates it inside the setup transaction, so
+ * an update whose durable argument the new schema cannot read is refused
+ * instead of landing over unreadable state. Two sites do the checking, and the
+ * line between them is whether the caller will (re)instantiate the graph, not
+ * whether the piece happens to be running: `Runner.applySetupState` re-points
+ * and validates the argument for a cold root and for the watcher's hot-swap,
+ * both of which then instantiate; `Runner.validateStoredArgument` checks a
+ * piece that is being REUSED — its nodes stay as they are — and moves nothing
+ * (`packages/runner/test/pattern-update-argument-validation.test.ts`).
+ *
+ * That check defers two cases, and the waiver is only as strong as they allow:
+ *
+ * - A slot whose stored value is a link that cannot be dereferenced in the
+ *   transaction validates as opaque, because "the target has not synced" is
+ *   indistinguishable from "the value is invalid" at that moment (CT-1917). A
+ *   plain value of the wrong type is refused.
+ * - A root carrying no `patternSetupIdentity` marker gets one unvalidated
+ *   setup, because absence cannot be told from a pending update. The marker is
+ *   recent, so this currently exempts most stored roots rather than a rare
+ *   tail, and it is aged roots — the ones likeliest to hold a value a new
+ *   schema cannot read — that the exemption covers.
+ *
+ * So this waiver is not a proof; it is a decision to accept those two cases.
+ * Neither is covered elsewhere either — in particular Tier 2's vintage replay
+ * cannot reach the markerless one, since its captures run setup through the
+ * current runner and are therefore always marked. Both are pinned as decisions
+ * in `packages/runner/test/pattern-update-argument-validation.test.ts` rather
+ * than left to be rediscovered.
  */
 export function assertPatternSchemasBackwardCompatible(
   previous: Pattern,
@@ -248,10 +295,18 @@ function schemaSubsetIssue(
   }
   const source = sourceResolution.schema;
   const target = targetResolution.schema;
+  // The stream marker rides the REFERENCING node (`{$ref, asCell:["stream"]}`),
+  // so test the pre-resolution inputs as well as the resolved schemas. Both
+  // contracts must agree the node is a verb: a one-sided marker is a shape
+  // change the ordinary rules judge, not an exemption.
+  const entersVerbEvent = !context.verbEvent &&
+    (declaresVerbStream(sourceInput) || declaresVerbStream(source)) &&
+    (declaresVerbStream(targetInput) || declaresVerbStream(target));
   context = {
     ...context,
     sourceRoot: sourceResolution.root,
     targetRoot: targetResolution.root,
+    ...(entersVerbEvent ? { verbEvent: true } : {}),
   };
   if (
     context.defaultComparison === "target" &&
@@ -314,6 +369,13 @@ function schemaSubsetIssue(
           return `${path}: a schema alternative accepted previously is not accepted by the candidate`;
         }
       }
+      return undefined;
+    }
+
+    if (
+      context.allowEvolutionPolicy &&
+      fabricPrimitiveEvolutionAccepts(source, target)
+    ) {
       return undefined;
     }
 
@@ -504,17 +566,10 @@ function objectSubsetIssue(
         return `${path}.${property}: result field is no longer required`;
       }
     }
-    for (const property of sourceRequired) {
-      if (
-        !Object.hasOwn(targetProperties, property) &&
-        (!allowEvolutionDefaults || !schemaProvidesValidDefault(
-          sourceProperties[property],
-          context.sourceRoot,
-        ))
-      ) {
-        return `${path}.${property}: newly required result field has no default`;
-      }
-    }
+    // The candidate pattern produces its result. A newly required field does
+    // not need a migration default: the new graph materializes that output when
+    // it runs. Existing required-result guarantees above still cannot weaken,
+    // and existing field types remain checked covariantly below.
 
     const previousAdditional = target.additionalProperties ?? true;
     for (const property of Object.keys(candidateProperties)) {
@@ -649,6 +704,12 @@ function matchingPatternPropertySchemas(
   return matches;
 }
 
+function declaresVerbStream(schema: JSONSchema): boolean {
+  if (typeof schema !== "object" || schema === null) return false;
+  const asCell = (schema as SchemaObject).asCell;
+  return Array.isArray(asCell) && asCell.includes("stream");
+}
+
 function additionalPropertiesSubsetIssue(
   source: SchemaObject,
   target: SchemaObject,
@@ -657,6 +718,17 @@ function additionalPropertiesSubsetIssue(
 ): string | undefined {
   const sourceAdditional = source.additionalProperties ?? true;
   const targetAdditional = target.additionalProperties ?? true;
+  // Verb events: a boolean↔boolean additionalProperties transition is free
+  // in both directions (see CompatibilityContext.verbEvent). Schema-valued
+  // additionalProperties on either side still compares — a constraint on the
+  // extras' SHAPE is a data contract even on an event.
+  if (
+    context.verbEvent &&
+    typeof sourceAdditional === "boolean" &&
+    typeof targetAdditional === "boolean"
+  ) {
+    return undefined;
+  }
   if (sourceAdditional === false || targetAdditional === true) return undefined;
   if (sourceAdditional === true && targetAdditional === false) {
     return `${path}: additional properties accepted previously would now be rejected`;
@@ -721,6 +793,101 @@ function allowedLiteralValues(
   return schema.enum;
 }
 
+/**
+ * Structural data members of each fabric-primitive class, mirroring the
+ * declarations in `packages/api/index.ts`. Used only by
+ * {@link fabricPrimitiveEvolutionAccepts} to check that a structural schema
+ * (which was generated by enumerating those declarations) describes the class
+ * a candidate schema names by type.
+ */
+const FABRIC_PRIMITIVE_MEMBERS: Record<
+  FabricPrimitiveSchemaType,
+  ReadonlySet<string>
+> = {
+  FabricBytes: new Set(["length"]),
+  FabricEpochDays: new Set(["value"]),
+  FabricEpochNsec: new Set(["value"]),
+  FabricHash: new Set(["bytes", "hashString", "length", "tag"]),
+  FabricRegExp: new Set(["flags", "flavor", "source", "value"]),
+};
+
+const FABRIC_EVOLUTION_SOURCE_KEYS = new Set([
+  ...ANNOTATION_KEYS,
+  "type",
+  "properties",
+  "required",
+]);
+
+const FABRIC_EVOLUTION_TARGET_KEYS = new Set([
+  ...ANNOTATION_KEYS,
+  "type",
+]);
+
+/**
+ * Whether `source` is a structural emission for a fabric special object -- an
+ * object schema whose `required` carries the `FabricSpecialObject` nominal
+ * brand key -- that a fabric-primitive-typed `target` accepts.
+ *
+ * Schemas of that shape come from compilations that predate the
+ * fabric-primitive schema vocabulary: the generator enumerated the class's
+ * declared members, brand included. No runtime value has the brand key, and
+ * the runner's required-presence exemption confines such a schema's value
+ * population to fabric special objects carrying the other required members --
+ * which is what `{ type: "<FabricPrimitive class>" }`, the current emission
+ * for the same authored type, describes by prototype. So a pattern update
+ * whose recompiled contract makes exactly that transition is not a narrowing,
+ * and refusing it would strand every deployed piece holding such a field.
+ *
+ * The proof is only as strong as the shapes involved, so it is deliberately
+ * narrow: both sides must carry nothing beyond the generator emissions the
+ * transition is about (no `asCell`, no `ifc`, no nested combinators), every
+ * member the source requires must exist on the class the target names, and
+ * the caller gates it to pattern evolution (`allowEvolutionPolicy`) --
+ * durable-link subset proofs stay strict.
+ *
+ * The member check cannot distinguish every class pair (the legacy shapes do
+ * not either -- a required `length` is satisfied by `FabricHash` as well as
+ * `FabricBytes`, and the epoch types are structurally identical), so a
+ * cross-class transition can pass here. That acceptance is backstopped at the
+ * value level: pattern setup re-validates the piece's stored argument against
+ * the incoming schema (see {@link assertPatternSchemasBackwardCompatible}),
+ * and a stored primitive of the wrong class fails its prototype check there.
+ */
+function fabricPrimitiveEvolutionAccepts(
+  source: SchemaObject,
+  target: SchemaObject,
+): boolean {
+  if (
+    !Object.keys(source).every((key) => FABRIC_EVOLUTION_SOURCE_KEYS.has(key))
+  ) {
+    return false;
+  }
+  if (
+    !Object.keys(target).every((key) => FABRIC_EVOLUTION_TARGET_KEYS.has(key))
+  ) {
+    return false;
+  }
+
+  const sourceTypes = schemaTypes(source);
+  if (sourceTypes?.length !== 1 || sourceTypes[0] !== "object") return false;
+  const required = source.required;
+  if (
+    !Array.isArray(required) || !required.includes(FABRIC_SPECIAL_OBJECT_BRAND)
+  ) {
+    return false;
+  }
+
+  const targetTypes = schemaTypes(target);
+  if (targetTypes === undefined) return false;
+  return targetTypes.some((targetType) =>
+    isFabricPrimitiveSchemaType(targetType) &&
+    required.every((key) =>
+      key === FABRIC_SPECIAL_OBJECT_BRAND ||
+      FABRIC_PRIMITIVE_MEMBERS[targetType].has(key)
+    )
+  );
+}
+
 function typeSubsetIssue(
   source: SchemaObject,
   target: SchemaObject,
@@ -737,7 +904,10 @@ function typeSubsetIssue(
   const rejected = sourceTypes.find((sourceType) =>
     !targetTypes.some((targetType) =>
       sourceType === targetType ||
-      (sourceType === "integer" && targetType === "number")
+      (sourceType === "integer" && targetType === "number") ||
+      // Each fabric-primitive type is a subtype of "object" (mirrors
+      // schemaTypeMatchesValueType in the runner's traverse).
+      (isFabricPrimitiveSchemaType(sourceType) && targetType === "object")
     )
   );
   return rejected === undefined

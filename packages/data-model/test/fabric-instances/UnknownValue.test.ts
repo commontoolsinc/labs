@@ -1,7 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import type { FabricValue } from "@/interface.ts";
 import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
@@ -34,7 +33,7 @@ describe("UnknownValue", () => {
         const child = { y: 2 };
         const uv = new UnknownValue(
           "Fancy@3",
-          child as unknown as FabricValue,
+          child,
         );
         const result = deepFreeze(uv);
         expect(result).toBe(uv);
@@ -47,7 +46,7 @@ describe("UnknownValue", () => {
         const child = { y: 2 };
         const uv = new UnknownValue(
           "Fancy@3",
-          child as unknown as FabricValue,
+          child,
         );
         const result = uv[DEEP_FREEZE](subFreeze);
         expect(result).toBe(uv);

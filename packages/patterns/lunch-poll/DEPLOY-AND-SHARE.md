@@ -5,8 +5,9 @@ verify it actually worked, and recover it when it breaks. Written for someone
 (human or agent) operating the poll for the first time — read top to bottom
 once.
 
-> **Status (2026-07-17): live-deployable** (re-verified via a fresh local
-> deploy). The visit history + per-visit vote snapshots live in a plain
+> **Status (2026-08-03): live-deployable** (re-verified by a fresh deploy to
+> `rapids` plus the smoke test below — `joinAs`, `addOption`, `logVisit` all
+> land). The visit history + per-visit vote snapshots live in a plain
 > **`PerSpace<HistoryEntry[]>` array** (`visits`), each entry embedding its own
 > vote snapshot. (History was briefly on the SQLite builtin, #4144/#4145; that's
 > been reverted — see `LUNCH-COORDINATOR-TODO.md` for the history. There is no
@@ -20,29 +21,33 @@ So "share the state" = "everyone points at the same piece"; "copy the state" =
 "move that piece's values into a new piece." It all lives in **`PerSpace` input
 cells**, shared by everyone in the space: `question`, `options` (each option
 embeds its persisted generated-art thumbnail as a ~10 kB `imageUrl` data URL
-once the host's client has generated it), `votes`, `users`, `adminName`, and
-**`visits`** (the "Recently eaten" log + embedded vote snapshots that feed
-"Lunch stats"). Plus **`myName`**, which is **`PerUser`** (keyed by your DID).
+once the host's client has generated it), `votes`, `users`,
+`participantProfiles` (the object-wrapped directory of live canonical profile
+links for profile-backed joiners), `adminName`, and **`visits`** (the "Recently
+eaten" log + embedded vote snapshots that feed "Lunch stats"). Plus
+**`myName`**, which is **`PerUser`** (keyed by your DID).
 
 All of these survive an in-place `setsrc` (Option A) and — because `visits` is
 now an ordinary `PerSpace` cell — can all be copied to another piece via the CLI
 (Option B).
 
-## The canonical piece
+## The live pieces
 
-One shared instance everyone iterates on. **This is a deployment pointer, not a
-stable identifier — current as of 2026-07-26.** A piece is tied to one
-space/server and can be reset, wedged, or lost; if it 404s, `inspect` fails, or
+Two hosts run the poll, at different paces. **These are deployment pointers, not
+stable identifiers — current as of 2026-08-04.** A piece is tied to one
+space/server and can be reset, wedged, or lost; if one 404s, `inspect` fails, or
 it stops responding, re-establish it (see "Recovering" below) and update this
 block.
 
-The poll lives on **`rapids`** (`rapids.saga-castor.ts.net`), the intended
-successor to `toolshed`.
+### `rapids` — the fast-moving instance
+
+`rapids.saga-castor.ts.net` is redeployed often and tracks this checkout's
+pattern source. Iterate here.
 
 ```
 space:  team-lunch
-piece:  fid1:WzgHDaxbET9w9aenhhJrOFcXWfWVimHu0rOPREm9t5M
-url:    https://rapids.saga-castor.ts.net/team-lunch/fid1:WzgHDaxbET9w9aenhhJrOFcXWfWVimHu0rOPREm9t5M
+piece:  fid1:bRHO0S5yN6Zuyct8MWgmIJgYpKkj5d2yiCCjNW1QulQ
+url:    https://rapids.saga-castor.ts.net/team-lunch/fid1:bRHO0S5yN6Zuyct8MWgmIJgYpKkj5d2yiCCjNW1QulQ
 ```
 
 > **Build-compatibility note:** the generated-art auto-persist trigger attaches
@@ -58,19 +63,39 @@ url:    https://rapids.saga-castor.ts.net/team-lunch/fid1:WzgHDaxbET9w9aenhhJrOF
 > every deploy target carries it before switching the pattern to the typed
 > attribute.
 
-### Historical: the first `rapids` piece
+### `estuary` — the stately instance, holding the real poll
 
-The previous rapids piece (`fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0`,
-canonical 2026-06-22 → 2026-07-26) went stale two ways at once: its stored
-pattern source imported `safeDateNow`/`nonPrivateRandom` (removed from the
-framework API), which blocks `setsrc` — the swap loads the current pattern first
-and that compile now fails — and the space's root pattern predated a runtime
-format change, which blocked `piece new` from registering anything. It held no
-data (empty roster/options/votes, default question), so on 2026-07-26 the space
-root was repaired with `cf piece recreate-root` and a fresh piece minted rather
-than attempting surgery. If in-place `setsrc` ever hits the same
-uncompilable-stored-source error against a piece with data you care about,
-Option B (state copy) is the escape — it never loads the old source.
+`estuary.saga-castor.ts.net` moves at a slower pace and carries the team's
+**populated** poll — real participants, options and votes. Treat its state as
+production data.
+
+```
+space:  team-lunch
+piece:  fid1:S2MlU76VbKBRTtFt_hgPyi9MB04ti9yKN08G2IJJUW4
+url:    https://estuary.saga-castor.ts.net/team-lunch/fid1:S2MlU76VbKBRTtFt_hgPyi9MB04ti9yKN08G2IJJUW4
+```
+
+Its deployed source is the mainline pattern, but this host is redeployed rarely,
+so expect it to lag this checkout. `cf piece inspect` reports the source ref it
+is actually on. Two things still make this piece unlike the `rapids` one:
+
+- **Its space holds real data, so an update here is rehearsal-grade.** Rehearse
+  against a clone before any `setsrc` the compatibility checker rejects — see
+  [`docs/development/space-clone-rehearsal.md`](../../../docs/development/space-clone-rehearsal.md).
+  Estuary serves production, so its whole-space dump endpoint is off and the
+  snapshot has to be taken on the host itself. The space DID is
+  `did:key:z6MkhAKxuP8cXuDNjyUJ2xgmjjgENQGm7zzo5Tg3V7vyYnzr`, and reaching the
+  host needs a key in the infra repository's `ssh_authorized_keys`.
+
+  ```bash
+  sqlite3 <store>/engine-v3/engine-v3/<did>.sqlite "VACUUM INTO '<destination>'"
+  ```
+- **Its space cannot be enumerated from a current checkout.** The stored
+  home/registry pattern imports `safeDateNow`, which this API no longer exports,
+  so `cf piece ls -s team-lunch` fails to compile it and exits non-zero with an
+  empty listing. Address the piece by id instead — `piece inspect` and
+  `piece get` do not load the home pattern — or run the CLI from a checkout old
+  enough to still export that symbol.
 
 ### Historical: the `toolshed` piece
 
@@ -87,9 +112,9 @@ url:    https://toolshed.saga-castor.ts.net/team-lunch/fid1:zJT0lRy-Hd6p_ZsK_h6C
 ## Environment setup
 
 ```bash
-export CF_API_URL=https://rapids.saga-castor.ts.net/   # current prod; toolshed.saga-castor.ts.net is the predecessor; http://localhost:8000 for local dev
+export CF_API_URL=https://rapids.saga-castor.ts.net/   # fast-moving instance; estuary.saga-castor.ts.net holds the populated poll; http://localhost:8000 for local dev
 export CF_IDENTITY=./your-identity.key
-PIECE=fid1:WzgHDaxbET9w9aenhhJrOFcXWfWVimHu0rOPREm9t5M    # rapids; current as of 2026-07-26
+PIECE=fid1:bRHO0S5yN6Zuyct8MWgmIJgYpKkj5d2yiCCjNW1QulQ    # rapids; current as of 2026-08-03
 SPACE=team-lunch
 ```
 
@@ -109,7 +134,7 @@ SPACE=team-lunch
   one user. Do NOT derive the shared `"implicit trust"` passphrase for deploys —
   that fixed, publicly-derivable DID is reserved for acting as the local
   server's own operator identity, and it collapses you into the server
-  principal. See `docs/development/SHARED_IDENTITY.md`.
+  principal. See `docs/features/shared-identity.md`.
 - **Prod** — deploy with your own identity, or mint a fresh one
   (`deno run -A packages/cli/mod.ts id new > prod.key`) and share that key with
   whoever should be able to update the piece. Whoever deployed owns it; the
@@ -125,6 +150,15 @@ SPACE=team-lunch
 > If the server you're deploying to is on such a build, upgrade it or use
 > **Option B** (or a fresh `cf piece new`), neither of which routes through
 > `setsrc`.
+
+> **Precondition:** `setsrc` loads the piece's _currently deployed_ source
+> before it compares schemas, so a piece whose deployed generation no longer
+> compiles against today's API cannot be updated in place at all. It fails in
+> `#loadCurrentPattern` with whatever the stale source imports, e.g.
+> `Module '"./commonfabric.js"' has no exported member '<name>'`.
+> `--dangerously-allow-incompatible-schema` does **not** help: it only skips the
+> compatibility proof, which runs _after_ the load. Recover with `cf piece new`
+> (see "Recovering the piece").
 
 To push code changes **and keep all accumulated state**, update the source of
 the existing piece. Do **not** run `cf piece new` — that mints a fresh, empty
@@ -150,6 +184,17 @@ interface casually against a piece you care about.
 
 ## Option B — copy the state into your own piece
 
+> **Note:** the copy loop below writes with `cf piece set --input`, which
+> validates the whole input object on every write. Every field fails on this
+> pattern with
+> `updated input does not match its schema: myName: value does not
+> match type string`,
+> including a write to `myName` itself. The pattern's `myName` is `PerUser`, and
+> the read path materializes it as `""` while the write path's validation does
+> not see a string there. Joining first does not change this. Seed a piece
+> through the pattern's own handlers instead — `joinAs`, then `addOption` for
+> each option.
+
 To get your **own** instance seeded with the current data (e.g. to experiment
 without touching the shared poll):
 
@@ -158,9 +203,9 @@ without touching the shared poll):
 MINE=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
   -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
 
-# 2. Copy each PerSpace field from the canonical piece into yours.
+# 2. Copy each PerSpace field from the shared piece into yours.
 #    `--input` reads/writes the input cell where these live.
-for field in question users options votes adminName visits; do
+for field in question users options votes participantProfiles adminName visits; do
   deno task cf piece get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
     | deno task cf piece set --piece "$MINE" -s "$SPACE" "$field" --input -q
 done
@@ -223,7 +268,7 @@ the `users` directory are `PerSpace`. Consequences that bite:
    (a different DID), the browser's `myName` is empty and it won't treat you as
    host. To act as the same person in both, import your CLI key in the browser
    via **Import CLI Key**; see
-   [`docs/development/SHARED_IDENTITY.md`](../../../docs/development/SHARED_IDENTITY.md).
+   [`docs/features/shared-identity.md`](../../../docs/features/shared-identity.md).
    Verify with `cf id did "$CF_IDENTITY"`.
 
 3. **Names are unique.** `joinAs` rejects a name already in `users`. If a
@@ -265,7 +310,7 @@ everyone sees, and direct `set` races anyone's live browser session.**
 
 ```bash
 deno task cf piece new packages/patterns/lunch-poll/main.tsx -s "$SPACE"
-# → prints a new fid1:… — update the "canonical piece" block above.
+# → prints a new fid1:… — update the "live pieces" block above.
 ```
 
 You need `WRITE`/`OWNER` on the space (ACL-gated); a denied write changes
@@ -288,7 +333,7 @@ NEW=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
 #    since `visits` is now a PerSpace cell). Tip: leave users/adminName empty so
 #    the first joiner becomes host, or copy them and use Become host.
 
-# 3. Make the fresh piece canonical: update the "canonical piece" block above.
+# 3. Make the fresh piece the shared one: update the "live pieces" block above.
 ```
 
 ### Home space won't load (profile setup, `main`-style builds)
@@ -306,17 +351,19 @@ load — you just don't get your profile name and avatar pre-filled.
 
 ## Performance notes
 
-Per-option AI image generation is back, but host-gated and self-limiting. The
-generated cuisine-image feature (removed in #4325 on 2026-06-23, restored in
-#4920) fetches one 128px thumbnail per option from `/api/ai/img` — only on the
-**host's** client, and only for options with no stored image. The result
-auto-persists onto the option as a data URL, after which no client generates:
-every viewer (host included) renders the stored value. So non-host cold loads do
-no AI work at all, and the host pays one generation per not-yet-imaged option,
-once ever. The web-search homepage-enrichment (#4326) and its `generateText`
-call remain removed — that unbounded per-option work, not graph/runtime cost,
-was what made pre-#4325 cold loads of a many-option poll take **minutes**. The
-remaining graph/runtime cost measured ~linear at ~12ms/option.
+Cold-load cost is dominated by graph/runtime instantiation, which measures
+~linear at ~12ms/option. The poll does no web-search or homepage-verification
+work.
+
+Per-option cuisine art is generated in the browser, and only on the **host's**
+client: `generated-art.tsx` requests `/api/ai/img` via `fetchBinary` under a 30s
+mutex, and skips the request entirely for any option that already carries a
+stored image. The freshly generated thumbnail persists automatically: the card
+renders a hidden trigger img over the data URL, and the browser's `load` event
+sends the admin-gated, idempotent `setOptionImage` handler — no keep click —
+writing it onto that option's `imageUrl`. Every other viewer reads the stored
+value rather than generating its own, so art costs at most one request per
+option across the whole poll, not one per option per viewer.
 
 For the deeper aggregate + write-conflict findings that still apply to a poll
 with many options and voters, see willkelly's perf investigation in

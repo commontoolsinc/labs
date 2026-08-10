@@ -180,8 +180,9 @@ const id = `${now.toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 const timestamp = new Date(now).toISOString();
 ```
 
-For reactive time in a computed, read the live clock with the `#now` wish rather
-than calling `Date.now()`.
+For reactive time in a computed, read the live clock with the interval `#now/N`
+wish rather than calling `Date.now()` (bare `#now` is a frozen first-load
+capture, not a clock).
 
 If a handler fails with messages like:
 

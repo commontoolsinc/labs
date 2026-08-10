@@ -1,4 +1,5 @@
 {
+  // Dependency guide: ../../docs/development/DEPENDENCIES.md
   "name": "@commonfabric/utils",
   "compilerOptions": {
     "noUncheckedIndexedAccess": true
@@ -17,6 +18,8 @@
     "./async-local-store": "./src/async-local-store.ts",
     "./base64url": "./src/base64url.ts",
     "./bigint": "./src/bigint.ts",
+    "./buffers": "./src/buffers.ts",
+    "./build-info": "./src/build-info.ts",
     "./cache": "./src/cache.ts",
     "./deep-equal": "./src/deep-equal.ts",
     "./hashtags": "./src/hashtags.ts",
@@ -25,6 +28,7 @@
     "./env": "./src/env.ts",
     "./equal-ignoring-symbols": "./src/equal-ignoring-symbols.ts",
     "./logger": "./src/logger.ts",
+    "./objects": "./src/objects.ts",
     "./path-key-map": "./src/path-key-map.ts",
     "./sandbox-contract": "./src/sandbox-contract.ts",
     "./sleep": "./src/sleep.ts",

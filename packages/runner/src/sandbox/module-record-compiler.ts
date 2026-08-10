@@ -12,8 +12,9 @@ import { recordDefiningModule } from "../harness/verified-provenance.ts";
 import type { VirtualModuleRecord } from "./esm-module-loader.ts";
 
 /**
- * Adapter from authored TypeScript sources to SES virtual module records
- * (Phase 2 of docs/specs/module-loading.md).
+ * Adapter from authored TypeScript sources to SES virtual module records; see
+ * docs/specs/module-loading.md §"Loader: per-module records in SES
+ * compartments".
  *
  * Each module is compiled independently to CommonJS, content-addressed by its
  * module hash (`cf:module/<hash>`), and wrapped in a {@link VirtualModuleRecord}
@@ -42,13 +43,12 @@ const logger = getLogger("module-record-compiler");
  * one parse per distinct body per process.
  *
  * Keying on the body (not the module's source `identity`) is deliberate: a
- * content-hash identity is a hash of the *authored source*, and the same
- * identity can map to *different* compiled bytes across compilation modes /
- * runtime versions (cf. the `recordCache` note in `compileSourcesToRecords`,
- * where a precompiled body and a bare-transpiled body share a content-hash key).
- * An identity key could therefore serve one body's parse for another; the body
- * fully determines the parse, so a body key is exact and cross-contamination is
- * impossible.
+ * content-hash identity is a hash of the *authored source*, so one identity can
+ * map to different compiled bytes across compilation modes and runtime
+ * versions — the CF-transformed body and the bare-transpiled body of the same
+ * source share a content-hash key. An identity key could therefore serve one
+ * body's parse for another; the body fully determines the parse, so a body key
+ * is exact and cross-contamination is impossible.
  *
  * The two maps are process-global and unbounded by design: one small
  * record-surface entry (export names + import specifiers) per distinct compiled
@@ -351,27 +351,6 @@ export function createWriteOnceExports(): Record<string, unknown> {
   });
 }
 
-/** Per-module compiled artifact, cacheable by module hash (Phase 4). */
-export interface CompiledModuleArtifact {
-  exports: string[];
-  compiled: string;
-}
-
-/**
- * Cache of compiled module artifacts keyed by content-addressed module hash.
- * Because the hash already folds in the transitive import closure, a cached
- * artifact is valid as long as its key matches — editing one file invalidates
- * only that module (and its importers, whose hashes change).
- *
- * The cache assumes the fixed compiler options used by this adapter (CommonJS,
- * ES2023, esModuleInterop). A caller sharing one cache across differing
- * compiler options would need to fold an options tag into the key.
- */
-export interface ModuleRecordCache {
-  get(moduleHash: string): CompiledModuleArtifact | undefined;
-  set(moduleHash: string, artifact: CompiledModuleArtifact): void;
-}
-
 export interface CompileSourcesOptions {
   /**
    * Names exported by each bare runtime module specifier (e.g.
@@ -380,8 +359,6 @@ export interface CompileSourcesOptions {
    */
   runtimeModules?: Record<string, string[]>;
   runtimeFingerprint?: string;
-  /** Optional per-module compiled-artifact cache, keyed by module hash. */
-  recordCache?: ModuleRecordCache;
   /**
    * Pre-compiled CommonJS body per source name. When provided (e.g. from
    * `TypeScriptCompiler.compileToModules`, which runs the full CF transformer
@@ -393,16 +370,16 @@ export interface CompileSourcesOptions {
   /**
    * Per-source source map (from `compileToModules`), keyed by source name. Used
    * to compose a per-load bundle source map so `fn.src` / CFC verified-source
-   * coordinates resolve back to the original authored files under the ESM
-   * loader (the AMD path registers the bundle map via the isolate).
+   * coordinates resolve back to the original authored files.
    */
   precompiledSourceMaps?: Map<string, SourceMap>;
   /**
    * Whole-program path prefix (`/<id>`, no trailing slash) to strip from each
-   * module's path *for content-addressed identity only*. The ESM compile path
+   * module's path *for content-addressed identity only*. The compile path
    * resolves a program whose files are prefixed with `/<computeId>/...` (a
-   * whole-program hash) so source locations match the AMD bundle. Folding that
-   * prefix into the per-module identity would make `cf:module/<hash>`
+   * whole-program hash) to namespace per-load source-map and diagnostic
+   * coordinates. Folding that prefix into the per-module identity would make
+   * `cf:module/<hash>`
    * whole-program-dependent — defeating cross-program dedup and diverging from
    * the entry-point-independent identity the spec mandates
    * (docs/specs/module-loading.md). Stripping it here yields stable, dedupable
@@ -658,23 +635,12 @@ export function compileSourcesToRecords(
     const sourceMap = options.precompiledSourceMaps?.get(source.name);
     if (sourceMap) moduleSourceMaps.set(specifier, sourceMap);
     const precompiled = options.precompiledBodies?.get(source.name);
-    let exportNames: string[];
+    const exportNames = resolveFullExports(source.name);
     let compiled: string;
-    // A precompiled (CF-transformed) body is authoritative. Do NOT consult or
-    // populate the shared cache: it may hold a bare-transpiled body under the
-    // same content-hash key (different compilation mode), which must not mix.
-    const cached = precompiled === undefined
-      ? options.recordCache?.get(moduleHash)
-      : undefined;
     if (precompiled !== undefined) {
-      exportNames = resolveFullExports(source.name);
       compiled = precompiled;
-    } else if (cached) {
-      exportNames = cached.exports;
-      compiled = cached.compiled;
     } else {
       const { ts: tsc } = compilerStack();
-      exportNames = resolveFullExports(source.name);
       compiled = tsc.transpileModule(source.contents, {
         fileName: source.name,
         compilerOptions: {
@@ -683,7 +649,6 @@ export function compileSourcesToRecords(
           esModuleInterop: true,
         },
       }).outputText;
-      options.recordCache?.set(moduleHash, { exports: exportNames, compiled });
     }
 
     // Runtime imports are exactly the `require()` calls in the compiled output.
@@ -773,11 +738,20 @@ export function compileSourcesToRecords(
         // already-populated export throw, so the smuggle fails closed. A `void 0`
         // forward declaration is treated as a placeholder, so the canonical
         // `exports.x = void 0; … exports.x = real;` compiler shape is allowed.
+        // `Object.hasOwn`, not `?? specifier`: `resolvedImports` is a plain
+        // object literal, so a bare `resolvedImports["constructor"]` would read
+        // Object.prototype's member instead of falling through as absent. Either
+        // way the lookup fails closed (importNowHook throws on anything not in
+        // `records`), but only the own-property test makes "absent from the map
+        // resolves to itself" literally true — which is what the spec states.
         const requireShim = (specifier: string) =>
-          compartment.importNow(resolvedImports[specifier] ?? specifier);
+          compartment.importNow(
+            Object.hasOwn(resolvedImports, specifier)
+              ? resolvedImports[specifier]
+              : specifier,
+          );
         // A throw inside the factory is terminal for this module: SES caches the
-        // error and re-throws it on every subsequent importNow (the same
-        // contract as a failed AMD factory).
+        // error and re-throws it on every subsequent importNow.
         // Grant the real registrar ONLY if the verifier approved this module's
         // `__cfReg` call; otherwise a throwing one (fail closed).
         const { register, commit } = registrationApproved.has(specifier)
@@ -1013,8 +987,12 @@ export function buildRecordsFromCompiled(
           module: { exports: Record<string, unknown> },
           register: (entries: Record<string, unknown>) => void,
         ) => void;
+        // Own-property test, matching the cold path in
+        // `compileSourcesToRecords` — see the note there.
         const requireShim = (spec: string) =>
-          compartment.importNow(resolvedImports[spec] ?? spec);
+          compartment.importNow(
+            Object.hasOwn(resolvedImports, spec) ? resolvedImports[spec] : spec,
+          );
         const { register, commit } = registrationApproved.has(specifier)
           ? createHoistRegistrar(m.identity, registrationSink)
           : createRejectingRegistrar();

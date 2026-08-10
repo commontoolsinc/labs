@@ -1,4 +1,5 @@
 import {
+  applyPieceSourceTransition,
   Cell,
   type CellPath,
   cellWithScopedLinkRequiredsRelaxed,
@@ -10,6 +11,8 @@ import {
   getPatternIdentityRef,
   getPatternRepository,
   getPatternSource,
+  getPieceSourceRevisions,
+  getPieceSourceSnapshot,
   getValueAtPath,
   isCell,
   isLink,
@@ -20,6 +23,11 @@ import {
   NAME,
   parseLinkOrThrow,
   type Pattern,
+  type PieceSourceRevision,
+  type PieceSourceSnapshot,
+  type PieceSourceTransition,
+  type PieceSourceTransitionBaseline,
+  preparePieceSourceTransitionBaseline,
   resolveCellPath,
   resolveLink,
   type RuntimeProgram,
@@ -29,17 +37,23 @@ import {
 import type { CellKind, LinkScope } from "@commonfabric/api";
 import {
   cfcSchemaChildRoot,
+  cfcSchemaMergeIssue,
+  loadStoredCfcEnvelope,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
+  storedSchemaCoversCandidateEnvelope,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
-import { pieceId, PieceManager } from "../manager.ts";
+import { pieceId } from "../piece-id.ts";
+import type { PiecesController } from "./pieces-controller.ts";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { compileProgram } from "./utils.ts";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
 } from "../schema-compatibility.ts";
+import { resolvePieceOriginSource } from "./piece-origin.ts";
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
@@ -49,7 +63,15 @@ interface PieceCellIo {
 
 type PiecePropIoType = "result" | "input";
 
-/** Copy only a materialized value's path spine and replace its leaf. */
+/**
+ * Copy only a materialized value's path spine and replace its leaf.
+ *
+ * TODO(danfuzz): a spine node that is neither an array nor plain-prototyped
+ * — a `FabricInstance`, whose contents live behind its codec — is rebuilt
+ * here as a bare `{}`/`[]` carrying only the addressed child, and everything
+ * else it held is discarded; the result reaches durable writes. (The same
+ * clone selector appears in `replaceMaterializedCellValueAtPath` below.)
+ */
 function replaceMaterializedValueAtPath(
   current: unknown,
   path: readonly (string | number)[],
@@ -197,6 +219,77 @@ export interface PiecePatternRef {
   symbol: string;
   source: PiecePatternSourceRef;
 }
+
+export type PieceSourceAction =
+  | { kind: "detach" }
+  | { kind: "restore"; revisionId: string }
+  | { kind: "follow"; revisionId: string };
+
+export interface PreparedPieceSourceChange {
+  action: PieceSourceAction;
+  expected: PieceSourceSnapshot;
+  candidate: { identity: string; symbol: string };
+  origin: string | null;
+  operation: PieceSourceTransition["operation"];
+  baseline: PieceSourceTransitionBaseline;
+  selectedRevisionId?: string;
+  review?: {
+    argumentEvidence: string;
+    issues: PieceSourceCompatibilityIssues;
+  };
+}
+
+export interface PieceSourceCompatibilityIssues {
+  schema?: string;
+  argument?: string;
+  retainedLinks?: string;
+  /**
+   * The CFC schema envelope stored on the piece's argument document cannot
+   * merge with the candidate's argument schema — or cannot be read at all.
+   * Distinct from `schema` and `argument`, which reason about DECLARED types:
+   * this one reasons about what is physically at rest.
+   */
+  cfc?: string;
+}
+
+/**
+ * The verdict `checkPattern()` returns: can this source replace the piece's
+ * current one, and if not, every reason at once.
+ *
+ * "Every reason at once" is the point. Applying a source that cannot migrate
+ * the piece's documents surfaces whichever low-level rejection happens to fire
+ * first — a schema-subset assertion, a retained-link proof, an argument
+ * validation failure, or a CFC schema-envelope rejection at the setup-commit
+ * boundary — so a caller fixes one and meets the next.
+ *
+ * Every verdict here comes from driving the REAL rule in dry-run, never a
+ * restatement of it: a preflight that reimplements the rules drifts from
+ * enforcement and starts lying. It agrees with the apply path on the VERDICT
+ * and the CAUSE. Not on identical prose — `setPattern` reports in
+ * enforcement's own words, and making the strings match would mean running
+ * this review ahead of the swap, which changes what `setPattern` accepts
+ * (see the comment there, and `test/setsrc-cold-argument.test.ts`).
+ *
+ * It is a point-in-time answer. The piece's argument, its current source, or
+ * the candidate file can all move between the check and a later apply, so a
+ * clear verdict is not a promise about a future `setPattern` — the apply path
+ * revalidates independently, which is what keeps that fail-safe.
+ */
+export interface PatternCompatibilityReport {
+  compatible: boolean;
+  issues: PieceSourceCompatibilityIssues;
+  /** Every issue joined, or `undefined` when compatible. */
+  message?: string;
+  candidate: { identity: string; symbol: string };
+}
+
+export type PieceSourceActionResult =
+  | { status: "applied"; executionWarning?: string }
+  | {
+    status: "incompatible";
+    message: string;
+    prepared: PreparedPieceSourceChange;
+  };
 
 function storedCellTopology(
   value: unknown,
@@ -986,9 +1079,8 @@ export function assertWritablePiecePath(
       // ordinary write validator below still handles parent correlations, so
       // use CFC's conservative path projection when exact link localization
       // deliberately fails closed for a correlated schema.
-      const cfc = new ContextualFlowControl();
       contracts = localizedContracts.map((contract) => {
-        const child = cfc.schemaAtPath(contract.schema, [
+        const child = ContextualFlowControl.schemaAtPath(contract.schema, [
           String(path[index]!),
         ]);
         return {
@@ -1148,7 +1240,7 @@ function canFollowSourceScope(
 /** @internal Exported for focused producer-topology contract tests. */
 export function durableSourceContract(
   linkedCell: Cell<unknown>,
-  manager: PieceManager,
+  pieces: PiecesController,
 ): DurableSourceContract | undefined {
   const rawSourceLink = linkedCell.getAsNormalizedFullLink();
   // Producer-owned metadata (`schema`, and the `result` backlink) is
@@ -1163,7 +1255,7 @@ export function durableSourceContract(
   // result cell of its legitimate contract.
   const metaScope = ((): LinkScope | undefined => {
     if (rawSourceLink.scope === "space") return rawSourceLink.scope;
-    const scopedRoot = manager.runtime.getCellFromLink(
+    const scopedRoot = pieces.runtime.getCellFromLink(
       { ...rawSourceLink, path: [], schema: undefined },
       undefined,
       linkedCell.tx,
@@ -1173,7 +1265,7 @@ export function durableSourceContract(
     return hasScopedMeta ? rawSourceLink.scope : undefined;
   })();
   const sourceLink = { ...rawSourceLink, scope: metaScope };
-  const sourceRoot = manager.runtime.getCellFromLink(
+  const sourceRoot = pieces.runtime.getCellFromLink(
     { ...sourceLink, path: [], schema: undefined },
     undefined,
     linkedCell.tx,
@@ -1201,7 +1293,7 @@ export function durableSourceContract(
   // asSchema().
   const resultLink = getMetaLink(sourceRoot, "result");
   if (resultLink === undefined) return undefined;
-  const ownerResult = manager.runtime.getCellFromLink(
+  const ownerResult = pieces.runtime.getCellFromLink(
     { ...resultLink, schema: undefined },
     undefined,
     linkedCell.tx,
@@ -1233,7 +1325,7 @@ export function durableSourceContract(
         path,
         rawBasePath: [...argumentLink.path],
         schemaBaseDepth: 0,
-        validationCell: manager.runtime.getCellFromLink(
+        validationCell: pieces.runtime.getCellFromLink(
           { ...argumentLink, schema: undefined },
           undefined,
           linkedCell.tx,
@@ -1256,7 +1348,7 @@ export function durableSourceContract(
           (descriptor as { link: unknown }).link,
           ownerResult,
         );
-        const internalLink = manager.runtime.getCellFromLink(
+        const internalLink = pieces.runtime.getCellFromLink(
           parsedInternalLink,
           parsedInternalLink.schema,
           linkedCell.tx,
@@ -1270,7 +1362,7 @@ export function durableSourceContract(
             path,
             rawBasePath: [...internalLink.path],
             schemaBaseDepth: 0,
-            validationCell: manager.runtime.getCellFromLink(
+            validationCell: pieces.runtime.getCellFromLink(
               { ...internalLink, schema: undefined },
               undefined,
               linkedCell.tx,
@@ -1305,7 +1397,7 @@ export function durableSourceContract(
       if (isLink(value)) {
         try {
           const parsed = parseLinkOrThrow(value, projectionCell);
-          const target = manager.runtime.getCellFromLink(
+          const target = pieces.runtime.getCellFromLink(
             parsed,
             parsed.schema,
             linkedCell.tx,
@@ -1330,6 +1422,9 @@ export function durableSourceContract(
         return;
       }
       seen.add(value);
+      // TODO(danfuzz): a `FabricInstance` passes the `typeof` gate with zero
+      // `Object.keys`, so an alias nested in its codec contents is never
+      // projected and the durable-source contract silently omits it.
       for (const key of Object.keys(value)) {
         const segment = Array.isArray(value) ? Number(key) : key;
         visit(
@@ -1365,6 +1460,10 @@ function suppliedLinks(
   if (value === null || typeof value !== "object" || seen.has(value)) return [];
 
   const prototype = Object.getPrototypeOf(value);
+  // TODO(danfuzz): the prototype gate treats a `FabricInstance` as a leaf,
+  // so a link envelope inside one is never recorded here — it then skips
+  // `assertSuppliedLinkSchemasCompatible` entirely and flows to the durable
+  // write as an unchecked raw envelope.
   if (
     !Array.isArray(value) && prototype !== Object.prototype &&
     prototype !== null
@@ -1464,6 +1563,11 @@ function linkMatchesCommittedState(
     ...basePath,
     ...suppliedLink.path,
   ]);
+  // TODO(danfuzz): `deepEqual` compares class instances by enumerable
+  // own-props, of which a `FabricLink` has none — under the modern cell rep
+  // any two `FabricLink`s compare equal, so a link pointing somewhere else
+  // entirely passes as "restoring committed bytes" and skips the rebuild
+  // rules. Fails open; `valueEqual` is the fabric-aware comparison.
   return deepEqual(committed, suppliedLink.value);
 }
 
@@ -1472,7 +1576,7 @@ export function assertSuppliedLinkSchemasCompatible(
   links: readonly SuppliedLink[],
   destinationSchema: JSONSchema,
   baseCell: Cell<unknown>,
-  manager: PieceManager,
+  pieces: PiecesController,
   options: {
     basePath?: readonly (string | number)[];
     destinationIsStream?: boolean;
@@ -1553,7 +1657,7 @@ export function assertSuppliedLinkSchemasCompatible(
       );
     }
     const link = parseLinkOrThrow(suppliedLink.value, linkBase);
-    const linkedCell = manager.runtime.getCellFromLink(
+    const linkedCell = pieces.runtime.getCellFromLink(
       { ...link, schema: undefined },
       undefined,
       linkBase.tx,
@@ -1561,7 +1665,7 @@ export function assertSuppliedLinkSchemasCompatible(
     // A direct Cell view can be narrowed with asSchema() just as easily as a
     // serialized alias can carry a narrowed schema. Neither is a future-value
     // invariant, so every durable link needs producer-owned Piece metadata.
-    let durableSource = durableSourceContract(linkedCell, manager);
+    let durableSource = durableSourceContract(linkedCell, pieces);
     if (
       durableSource === undefined && options.priorArgumentSchema !== undefined
     ) {
@@ -1738,12 +1842,12 @@ export function assertSuppliedLinkSchemasCompatible(
       // skip it because `isCell` was the only way in, and a live Cell has no
       // separate envelope to forge. A serialized link only reaches here when
       // it is identical to already-committed state, but committed does not
-      // mean vetted — raw write paths (`PieceManager.link`) commit links
+      // mean vetted — raw write paths (`PiecesController.link`) commit links
       // without ever running this validator — so re-assert it: a carried
       // wrapper's `asCell` STACK (kind and scope, per `asCellShapesMatch`;
       // payload schemas are proved separately against the durable contracts)
       // has to match every durable contract of the source. (Loom's injected
-      // links carry no envelope — `PieceManager.link` serializes with
+      // links carry no envelope — `PiecesController.link` serializes with
       // `KeepAsCell.OnlyStream` — so the real restore case is unaffected.)
       if (!isCell(suppliedLink.value)) {
         const carried = ContextualFlowControl.getAsCellValues(link.schema);
@@ -2004,7 +2108,7 @@ export function omitMissingProjectionAliases(
   raw: unknown,
   schemaView: unknown,
   cell: Cell<unknown>,
-  manager: PieceManager,
+  pieces: PiecesController,
   schemaViewPresent = true,
   changedPaths: readonly (readonly (string | number)[])[] = [],
   resolving = new Set<string>(),
@@ -2031,13 +2135,13 @@ export function omitMissingProjectionAliases(
       throw new Error("projection alias reconciliation requires a transaction");
     }
     const parsed = parseLinkOrThrow(raw, cell);
-    const fullLink = manager.runtime.getCellFromLink(
+    const fullLink = pieces.runtime.getCellFromLink(
       parsed,
       undefined,
       tx,
     ).getAsNormalizedFullLink();
     const resolved = resolveLink(
-      manager.runtime,
+      pieces.runtime,
       tx,
       fullLink,
       "value",
@@ -2057,7 +2161,7 @@ export function omitMissingProjectionAliases(
       ) {
         return MISSING_PROJECTION_ALIAS;
       }
-      const resolvedCell = manager.runtime.getCellFromLink(
+      const resolvedCell = pieces.runtime.getCellFromLink(
         { ...resolved, schema: undefined },
         undefined,
         tx,
@@ -2067,7 +2171,7 @@ export function omitMissingProjectionAliases(
         state.value,
         resolvedSchemaView,
         resolvedCell,
-        manager,
+        pieces,
         schemaViewPresent,
         changedPaths,
         resolving,
@@ -2081,6 +2185,12 @@ export function omitMissingProjectionAliases(
     raw === null || typeof raw !== "object"
   ) return materialized;
 
+  // TODO(danfuzz): the `typeof` gate admits a `FabricSpecialObject` on
+  // either side, and the spread copies zero properties from one — a fabric
+  // `materialized` becomes `{}` in the validation root built for a
+  // non-stream result write that redirects through a terminal, and a fabric
+  // `raw`'s contents are never reconciled. Wants a `FabricSpecialObject`
+  // test returning `materialized` whole.
   const result =
     (Array.isArray(materialized)
       ? materialized.slice()
@@ -2103,7 +2213,7 @@ export function omitMissingProjectionAliases(
       rawChild,
       childViewPresent ? viewRecord[key] : undefined,
       cell.key(key as keyof unknown) as Cell<unknown>,
-      manager,
+      pieces,
       childViewPresent,
       childChangedPaths,
       resolving,
@@ -2120,7 +2230,7 @@ export function omitMissingProjectionAliases(
 function validateDurableSourceRoots(
   destination: DurableSourceContract,
   nextValue: unknown,
-  manager: PieceManager,
+  pieces: PiecesController,
   acceptOpaqueValue: (value: unknown, schema: JSONSchema) => boolean,
 ): string | undefined {
   const groups: Array<{
@@ -2165,7 +2275,7 @@ function validateDurableSourceRoots(
       group.cell.getRawUntyped(),
       schemaView,
       group.cell,
-      manager,
+      pieces,
       true,
       group.paths,
     );
@@ -2210,6 +2320,46 @@ class PiecePropIo implements PieceCellIo {
 
   async get(path?: CellPath) {
     const targetCell = await this.#getTargetCell();
+    if (!path?.length) {
+      return await this.#getFromRoot(targetCell, []);
+    }
+    // Pull the requested cell, not the whole input/result root. The sync
+    // started by pull() sends its path plus narrowed schema to Memory v2, so
+    // this avoids traversing unrelated linked fields (an input can contain a
+    // broad authoring graph even when the caller asks for one small durable
+    // field). No per-segment asCell handling is needed on the way down: key()
+    // walks the schema (so an asCell ancestor's `properties` keep narrowing the
+    // query) and link resolution follows the stored link at that segment during
+    // the read. A TERMINAL asCell is simply unwrapped: since #5231 the
+    // projection applies the asCell scope cap itself, so a capped handle stays
+    // capped without routing through resolveAsCell().
+    const selectedCell = targetCell.key(...path);
+    await selectedCell.pull();
+    // Relax `required` for scoped links that this session cannot materialize,
+    // at the selected subtree rather than the root — same boundary as
+    // #getFromRoot, see schemaWithScopedLinkRequiredsRelaxed.
+    const selected = cellWithScopedLinkRequiredsRelaxed(selectedCell).get();
+    if (isCell(selected)) {
+      // An asCell projection materializes even an absent or explicitly
+      // undefined slot as a Cell, so inspect the stored slot before reading
+      // through the handle. Falling back preserves the root read's
+      // absent-vs-undefined rules and its missing-path diagnostics.
+      if (selectedCell.getRaw() === undefined) {
+        return await this.#getFromRoot(targetCell, path);
+      }
+      const handle = cellWithScopedLinkRequiredsRelaxed(selected);
+      await handle.pull();
+      return handle.get();
+    }
+    if (selected === undefined) {
+      return await this.#getFromRoot(targetCell, path);
+    }
+    return selected;
+  }
+
+  async #getFromRoot(targetCell: Cell<unknown>, path: CellPath) {
+    // Preserve the existing missing-path diagnostics and the distinction
+    // between an absent field and a schema-valid undefined value.
     await targetCell.pull();
     // Terminal read boundary: relax `required` for properties whose stored
     // value links into a scope this session may not be able to materialize
@@ -2219,7 +2369,7 @@ class PiecePropIo implements PieceCellIo {
     // #4746-compatible rationale.
     return resolveCellPath(
       cellWithScopedLinkRequiredsRelaxed(targetCell),
-      path ?? [],
+      path,
     );
   }
 
@@ -2228,10 +2378,10 @@ class PiecePropIo implements PieceCellIo {
   }
 
   async set(value: unknown, path?: CellPath) {
-    const manager = this.#cc.manager();
+    const pieces = this.#cc.pieces();
     let committedTargetCell: Cell<unknown> | undefined;
 
-    const { error } = await manager.runtime.editWithRetry((tx) => {
+    const { error } = await pieces.runtime.editWithRetry((tx) => {
       // Resolve the target from the piece metadata inside every retry. A
       // concurrent setsrc may replace the argument link/schema after this
       // write starts; reusing a cell captured before the retry would then
@@ -2239,9 +2389,9 @@ class PiecePropIo implements PieceCellIo {
       const piece = this.#cc.getCell().withTx(tx);
       let targetCell: Cell<unknown>;
       if (this.#type === "input") {
-        targetCell = manager.getArgument(piece);
+        targetCell = pieces.getArgument(piece);
       } else {
-        const resultCell = manager.getResult(piece);
+        const resultCell = pieces.getResult(piece);
         const durableSchema = resultCell.getMetaRaw("schema") as
           | JSONSchema
           | undefined;
@@ -2252,10 +2402,7 @@ class PiecePropIo implements PieceCellIo {
       committedTargetCell = targetCell;
 
       // Build the path with transaction context
-      let txCell = targetCell.withTx(tx);
-      for (const segment of (path ?? [])) {
-        txCell = txCell.key(segment as keyof unknown) as Cell<unknown>;
-      }
+      const txCell = targetCell.withTx(tx).key(...(path ?? []));
 
       const writePath = path ?? [];
       const writeTargetDiffers = (
@@ -2267,7 +2414,7 @@ class PiecePropIo implements PieceCellIo {
         left.path.some((segment, index) => segment !== right.path[index]);
       const originalWriteTarget = txCell.getAsNormalizedFullLink();
       const resolvedWriteTarget = resolveLink(
-        manager.runtime,
+        pieces.runtime,
         tx,
         originalWriteTarget,
         "writeRedirect",
@@ -2279,14 +2426,14 @@ class PiecePropIo implements PieceCellIo {
       const validateWriteDestination = (nextValue: unknown): void => {
         if (!writesThroughTerminal) return;
         const resolved = resolvedWriteTarget;
-        const resolvedCell = manager.runtime.getCellFromLink(
+        const resolvedCell = pieces.runtime.getCellFromLink(
           resolved,
           resolved.schema,
           tx,
         );
         const durableDestination = durableSourceContract(
           resolvedCell,
-          manager,
+          pieces,
         );
         if (durableDestination === undefined) {
           throw new Error(
@@ -2299,7 +2446,7 @@ class PiecePropIo implements PieceCellIo {
           isStream: boolean;
         };
         try {
-          const destinationRootCell = manager.runtime.getCellFromLink(
+          const destinationRootCell = pieces.runtime.getCellFromLink(
             { ...resolved, path: [], schema: undefined },
             undefined,
             tx,
@@ -2332,7 +2479,7 @@ class PiecePropIo implements PieceCellIo {
               links,
               contract.schema,
               resolvedCell,
-              manager,
+              pieces,
               { destinationRoot: contract.root },
             );
           }
@@ -2363,7 +2510,7 @@ class PiecePropIo implements PieceCellIo {
           issue = validateDurableSourceRoots(
             destination,
             nextValue,
-            manager,
+            pieces,
             acceptsProvedLink,
           );
         }
@@ -2385,12 +2532,12 @@ class PiecePropIo implements PieceCellIo {
           // payload and must go through Cell.set(). Inspect the actual Cell so
           // compound and referenced stream schemas behave identically.
           const rawTarget = resolveLink(
-            manager.runtime,
+            pieces.runtime,
             tx,
             txCell.getAsNormalizedFullLink(),
             "writeRedirect",
           );
-          manager.runtime.getCellFromLink(rawTarget, undefined, tx)
+          pieces.runtime.getCellFromLink(rawTarget, undefined, tx)
             .setRawUntyped(undefined);
         } else {
           txCell.set(nextValue);
@@ -2401,7 +2548,7 @@ class PiecePropIo implements PieceCellIo {
         const schema = targetCell.getAsNormalizedFullLink().schema ?? true;
         const writeSchema = writePath.length === 0
           ? schema
-          : manager.runtime.cfc.schemaAtPath(
+          : ContextualFlowControl.schemaAtPath(
             schema,
             writePath.map((segment) => String(segment)),
           );
@@ -2417,7 +2564,7 @@ class PiecePropIo implements PieceCellIo {
           linksToRestore,
           schema,
           targetCell,
-          manager,
+          pieces,
           {
             basePath: writePath,
             destinationIsStream: isStream(txCell),
@@ -2432,7 +2579,7 @@ class PiecePropIo implements PieceCellIo {
           const link = parseLinkOrThrow(suppliedLink.value, linkBase);
           const linkValue = preservedDirectHandles.has(suppliedLink)
             ? suppliedLink.value
-            : manager.runtime.getCellFromLink(
+            : pieces.runtime.getCellFromLink(
               link,
               sanitizeSchemaForLinks(link.schema, KeepAsCell.OnlyStream),
               tx,
@@ -2522,7 +2669,7 @@ class PiecePropIo implements PieceCellIo {
           linksToRestore,
           schema,
           targetCell,
-          manager,
+          pieces,
           {
             basePath: writePath,
             destinationIsStream: isStream(txCell),
@@ -2537,7 +2684,7 @@ class PiecePropIo implements PieceCellIo {
           const link = parseLinkOrThrow(suppliedLink.value, linkBase);
           const linkValue = preservedDirectHandles.has(suppliedLink)
             ? suppliedLink.value
-            : manager.runtime.getCellFromLink(
+            : pieces.runtime.getCellFromLink(
               link,
               sanitizeSchemaForLinks(link.schema, KeepAsCell.OnlyStream),
               tx,
@@ -2586,7 +2733,7 @@ class PiecePropIo implements PieceCellIo {
               targetCell.withTx(tx).getRawUntyped(),
               targetCell.withTx(tx).get(),
               targetCell.withTx(tx),
-              manager,
+              pieces,
               true,
               [writePath],
             ),
@@ -2618,20 +2765,20 @@ class PiecePropIo implements PieceCellIo {
     const targetCell = committedTargetCell ?? await this.#getTargetCell();
 
     if (this.#type === "input") {
-      await manager.getResult(this.#cc.getCell()).pull();
+      await pieces.getResult(this.#cc.getCell()).pull();
     } else {
       await targetCell.pull();
     }
-    await manager.synced();
+    await pieces.synced();
   }
 
   #getTargetCell(): Promise<Cell<unknown>> {
     if (this.#type === "input") {
       return Promise.resolve(
-        this.#cc.manager().getArgument(this.#cc.getCell()),
+        this.#cc.pieces().getArgument(this.#cc.getCell()),
       );
     } else if (this.#type === "result") {
-      return Promise.resolve(this.#cc.manager().getResult(this.#cc.getCell()));
+      return Promise.resolve(this.#cc.pieces().getResult(this.#cc.getCell()));
     }
     throw new Error(`Unknown property type "${this.#type}"`);
   }
@@ -2639,7 +2786,7 @@ class PiecePropIo implements PieceCellIo {
 
 export class PieceController<T = unknown> {
   #cell: Cell<T>;
-  #manager: PieceManager;
+  #pieces: PiecesController;
   #mutationVersion = 0;
   #latestSuccessfulMutationVersion = 0;
   readonly id: string;
@@ -2647,13 +2794,13 @@ export class PieceController<T = unknown> {
   input: PieceCellIo;
   result: PieceCellIo;
 
-  constructor(manager: PieceManager, cell: Cell<T>) {
+  constructor(pieces: PiecesController, cell: Cell<T>) {
     const id = pieceId(cell);
     if (!id) {
       throw new Error("Could not get an ID from a Cell<Piece>");
     }
     this.id = id;
-    this.#manager = manager;
+    this.#pieces = pieces;
     this.#cell = cell;
     this.input = new PiecePropIo(this, "input");
     this.result = new PiecePropIo(this, "result");
@@ -2683,10 +2830,10 @@ export class PieceController<T = unknown> {
     if (trackedSource !== undefined) source.origin = trackedSource;
 
     try {
-      const program = await this.#manager.runtime.patternManager
+      const program = await this.#pieces.runtime.patternManager
         .getPatternSourceProgramByIdentity(
           ref.identity,
-          this.#manager.getSpace(),
+          this.#pieces.getSpace(),
         );
       return program?.main === undefined
         ? { ...ref, source }
@@ -2708,8 +2855,8 @@ export class PieceController<T = unknown> {
           assertSuppliedLinkSchemasCompatible(
             links,
             pattern.argumentSchema,
-            this.#manager.getArgument(this.#cell),
-            this.#manager,
+            this.#pieces.getArgument(this.#cell),
+            this.#pieces,
           );
           // Validate the exact caller value before Runner serializes Cell
           // handles into argument links. Every accepted link below has already
@@ -2742,7 +2889,7 @@ export class PieceController<T = unknown> {
           // The identity guard prevents a concurrent setsrc from being
           // overwritten by this already-loaded pattern.
           return await execute(
-            this.#manager,
+            this.#pieces,
             this.id,
             pattern,
             input,
@@ -2788,11 +2935,11 @@ export class PieceController<T = unknown> {
     await this.#cell.sync();
     const ref = getPatternIdentityRef(this.#cell);
     if (!ref) throw new Error("piece missing pattern identity");
-    const runtime = this.#manager.runtime;
+    const runtime = this.#pieces.runtime;
     const pattern = await runtime.patternManager.loadPatternByIdentity(
       ref.identity,
       ref.symbol,
-      this.#manager.getSpace(),
+      this.#pieces.getSpace(),
     );
     if (!pattern) {
       throw new Error(
@@ -2820,10 +2967,10 @@ export class PieceController<T = unknown> {
   > {
     const ref = getPatternIdentityRef(this.#cell);
     if (!ref) throw new Error("piece missing pattern identity");
-    const program = await this.#manager.runtime.patternManager
+    const program = await this.#pieces.runtime.patternManager
       .getPatternSourceProgramByIdentity(
         ref.identity,
-        this.#manager.getSpace(),
+        this.#pieces.getSpace(),
       );
     if (!program) return undefined;
     return { ...program, mainExport: ref.symbol };
@@ -2839,6 +2986,333 @@ export class PieceController<T = unknown> {
     return (await this.getPatternSourceProgram())?.files;
   }
 
+  /**
+   * Detach from the current origin, restore an exact retained source revision,
+   * or follow an origin recorded by an earlier revision.
+   */
+  async changeSource(
+    action: PieceSourceAction,
+    options: { confirmedChange?: PreparedPieceSourceChange } = {},
+  ): Promise<PieceSourceActionResult> {
+    if (!isPieceSourceAction(action)) {
+      throw new Error("unsupported piece source action");
+    }
+    const { pattern: previousPattern, ref: previousRef } = await this
+      .#loadCurrentPattern();
+    const expected = getPieceSourceSnapshot(this.#cell);
+    if (expected === undefined) {
+      throw new Error("piece missing source state");
+    }
+
+    const confirmed = options.confirmedChange;
+    if (
+      confirmed !== undefined &&
+      (!samePieceSourceAction(confirmed.action, action) ||
+        !samePieceSourceSnapshot(confirmed.expected, expected))
+    ) {
+      throw new Error(
+        "the piece source changed after compatibility was checked",
+      );
+    }
+
+    const revisions = getPieceSourceRevisions(this.#cell);
+
+    if (action.kind === "detach") {
+      if (confirmed !== undefined) {
+        throw new Error("detach does not use compatibility confirmation");
+      }
+      if (expected.origin === null) {
+        throw new Error("piece is not following a source");
+      }
+      const baseline = await preparePieceSourceTransitionBaseline(
+        this.#pieces.runtime,
+        this.#cell,
+        expected,
+      );
+      const transition = pieceSourceTransition(
+        expected,
+        "detach",
+        null,
+        baseline,
+      );
+      const mutationVersion = ++this.#mutationVersion;
+      try {
+        await this.#runMutation(mutationVersion, async () => {
+          const result = await this.#pieces.runtime.editWithRetry((tx) => {
+            applyPieceSourceTransition(
+              this.#pieces.runtime,
+              this.#cell,
+              tx,
+              previousRef,
+              transition,
+            );
+            return true;
+          });
+          if (result.error !== undefined) throw result.error;
+          return this.#cell;
+        });
+        return { status: "applied" };
+      } catch (error) {
+        if (await this.#sourceTransitionCommitted(transition.revisionId)) {
+          return {
+            status: "applied",
+            executionWarning: pieceSourceErrorMessage(error),
+          };
+        }
+        throw error;
+      }
+    }
+
+    let candidate: Pattern;
+    let prepared: PreparedPieceSourceChange;
+    let acceptedReview: PreparedPieceSourceChange["review"];
+    if (confirmed !== undefined) {
+      if (confirmed.review === undefined) {
+        throw new Error(
+          "the piece source compatibility confirmation is incomplete",
+        );
+      }
+      assertPieceSourceArgumentUsable(confirmed.review);
+      const loaded = await this.#pieces.runtime.patternManager
+        .loadPatternByIdentity(
+          confirmed.candidate.identity,
+          confirmed.candidate.symbol,
+          this.#pieces.getSpace(),
+        );
+      if (loaded === undefined) {
+        throw new Error("the confirmed source version is not available");
+      }
+      candidate = loaded;
+      prepared = confirmed;
+      const currentReview = await pieceSourceCompatibilityReview(
+        previousPattern,
+        candidate,
+        this.#cell,
+        this.#pieces,
+      );
+      assertPieceSourceArgumentUsable(currentReview);
+      if (
+        currentReview.argumentEvidence !==
+          confirmed.review.argumentEvidence ||
+        !deepEqual(currentReview.issues, confirmed.review.issues)
+      ) {
+        if (hasPieceSourceCompatibilityIssues(currentReview.issues)) {
+          prepared = { ...confirmed, review: currentReview };
+          return {
+            status: "incompatible",
+            message: pieceSourceCompatibilityMessage(currentReview.issues),
+            prepared,
+          };
+        }
+        throw new Error(
+          "the retained piece input changed after compatibility was checked",
+        );
+      } else {
+        acceptedReview = confirmed.review;
+      }
+    } else {
+      const baseline = await preparePieceSourceTransitionBaseline(
+        this.#pieces.runtime,
+        this.#cell,
+        expected,
+      );
+      let program: RuntimeProgram;
+      let origin: string | null;
+      let operation: PieceSourceTransition["operation"];
+      let selectedRevisionId: string | undefined;
+      const selected = sourceRevision(revisions, action.revisionId);
+      if (action.kind === "restore") {
+        const retained = await this.#pieces.runtime.patternManager
+          .getPatternSourceProgramByIdentity(
+            selected.pattern.identity,
+            this.#pieces.getSpace(),
+          );
+        if (retained === undefined) {
+          throw new Error(
+            `source revision ${selected.revisionId} is not available`,
+          );
+        }
+        program = { ...retained, mainExport: selected.pattern.symbol };
+        origin = null;
+        operation = "revert";
+        selectedRevisionId = selected.revisionId;
+      } else {
+        if (selected.origin === undefined) {
+          throw new Error(
+            `source revision ${selected.revisionId} has no origin to follow`,
+          );
+        }
+        const resolved = await resolvePieceOriginSource(
+          this.#pieces.runtime,
+          this.#pieces.getSpace(),
+          selected.origin,
+          selected.pattern.symbol,
+        );
+        program = resolved.program;
+        origin = selected.origin;
+        operation = "repoint";
+        selectedRevisionId = selected.revisionId;
+      }
+
+      candidate = await compileProgram(this.#pieces, program, {
+        previousEntryIdentity: previousRef.identity,
+      });
+      const candidateRef = this.#pieces.runtime.patternManager
+        .getArtifactEntryRef(candidate);
+      if (candidateRef === undefined) {
+        throw new Error("the candidate source has no pattern identity");
+      }
+      prepared = {
+        action,
+        expected,
+        candidate: candidateRef,
+        origin,
+        operation,
+        baseline,
+        ...(selectedRevisionId === undefined ? {} : { selectedRevisionId }),
+      };
+      const review = await pieceSourceCompatibilityReview(
+        previousPattern,
+        candidate,
+        this.#cell,
+        this.#pieces,
+      );
+      assertPieceSourceArgumentUsable(review);
+      if (hasPieceSourceCompatibilityIssues(review.issues)) {
+        prepared.review = review;
+        return {
+          status: "incompatible",
+          message: pieceSourceCompatibilityMessage(review.issues),
+          prepared,
+        };
+      }
+    }
+
+    const transition = pieceSourceTransition(
+      expected,
+      prepared.operation,
+      prepared.origin,
+      prepared.baseline,
+      { selectedRevisionId: prepared.selectedRevisionId },
+    );
+    const mutationVersion = ++this.#mutationVersion;
+    try {
+      await this.#runMutation(mutationVersion, async () => {
+        return await execute(
+          this.#pieces,
+          this.id,
+          candidate,
+          undefined,
+          {
+            start: true,
+            expectedPatternIdentity: previousRef,
+            validateCurrentArgument: acceptedReview === undefined
+              ? undefined
+              : (argumentCell) => {
+                const evidence = pieceSourceArgumentEvidence(
+                  argumentCell,
+                  this.#pieces,
+                );
+                if (evidence !== acceptedReview.argumentEvidence) {
+                  throw new Error(
+                    "the retained piece input changed after compatibility was checked",
+                  );
+                }
+              },
+            validateArgumentLinks: (argumentCell, argumentSchema) => {
+              try {
+                assertPieceSourceRetainedLinksCompatible(
+                  argumentCell,
+                  argumentSchema,
+                  this.#pieces,
+                  previousPattern.argumentSchema,
+                );
+              } catch (error) {
+                const message = error instanceof Error
+                  ? error.message
+                  : String(error);
+                if (acceptedReview?.issues.retainedLinks === message) return;
+                throw error;
+              }
+            },
+            sourceTransition: transition,
+          },
+        ) as Cell<T>;
+      });
+      return { status: "applied" };
+    } catch (error) {
+      if (await this.#sourceTransitionCommitted(transition.revisionId)) {
+        return {
+          status: "applied",
+          executionWarning: pieceSourceErrorMessage(error),
+        };
+      }
+      if (isOverridableArgumentCompatibilityError(error)) {
+        const review = await pieceSourceCompatibilityReview(
+          previousPattern,
+          candidate,
+          this.#cell,
+          this.#pieces,
+        );
+        assertPieceSourceArgumentUsable(review);
+        if (hasPieceSourceCompatibilityIssues(review.issues)) {
+          prepared.review = review;
+          return {
+            status: "incompatible",
+            message: pieceSourceCompatibilityMessage(review.issues),
+            prepared,
+          };
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Would `setPattern(program)` be accepted? Answers without changing the piece.
+   *
+   * Drives the SAME review the apply path runs — no second copy of the rules,
+   * because a preflight that reimplements them drifts and starts lying.
+   *
+   * It is not, however, a pure read. Compiling the candidate goes through
+   * `compileAndSavePattern`, which writes the compiled module set and its
+   * source docs into the space's content-addressed store (CT-1623) — the same
+   * write the apply would do, idempotent, and attached to nothing. What it
+   * does NOT do is touch the piece: no pointer move, no argument re-stage, no
+   * source transition, no revision. So a refused check leaves the piece
+   * running exactly what it was running, which is the guarantee a caller
+   * actually needs; it does not leave the space byte-identical.
+   */
+  async checkPattern(
+    program: RuntimeProgram,
+  ): Promise<PatternCompatibilityReport> {
+    const { pattern: previousPattern, ref: previousRef } = await this
+      .#loadCurrentPattern();
+    const candidate = await compileProgram(this.#pieces, program, {
+      previousEntryIdentity: previousRef.identity,
+    });
+    const candidateRef = this.#pieces.runtime.patternManager
+      .getArtifactEntryRef(candidate);
+    if (candidateRef === undefined) {
+      throw new Error("the candidate source has no pattern identity");
+    }
+    const review = await pieceSourceCompatibilityReview(
+      previousPattern,
+      candidate,
+      this.#cell,
+      this.#pieces,
+    );
+    const compatible = !hasPieceSourceCompatibilityIssues(review.issues);
+    return {
+      compatible,
+      issues: review.issues,
+      candidate: candidateRef,
+      ...(compatible
+        ? {}
+        : { message: pieceSourceCompatibilityMessage(review.issues) }),
+    };
+  }
+
   async setPattern(
     program: RuntimeProgram,
     options?: {
@@ -2847,42 +3321,96 @@ export class PieceController<T = unknown> {
     },
   ): Promise<void> {
     const mutationVersion = ++this.#mutationVersion;
-    await this.#runMutation(mutationVersion, async () => {
-      const { pattern: previousPattern, ref: previousRef } = await this
-        .#loadCurrentPattern();
-      const pattern = await compileProgram(this.#manager, program, {
-        previousEntryIdentity: previousRef.identity,
+    let transition: PieceSourceTransition | undefined;
+    try {
+      await this.#runMutation(mutationVersion, async () => {
+        const { pattern: previousPattern, ref: previousRef } = await this
+          .#loadCurrentPattern();
+        const expected = getPieceSourceSnapshot(this.#cell);
+        if (expected === undefined) {
+          throw new Error("piece missing source state");
+        }
+        const baseline = await preparePieceSourceTransitionBaseline(
+          this.#pieces.runtime,
+          this.#cell,
+          expected,
+          expected.revisionId === null && expected.origin === null
+            ? { allowUnavailable: true }
+            : {},
+        );
+        const pattern = await compileProgram(
+          this.#pieces,
+          program,
+          baseline.kind === "retain"
+            ? { previousEntryIdentity: previousRef.identity }
+            : {},
+        );
+        // Enforcement is this assertion plus the execute-time validators
+        // below, and it must stay that way. Do not move the aggregate
+        // compatibility review (`pieceSourceCompatibilityReview`, what
+        // `checkPattern` runs) in front of it.
+        //
+        // An earlier revision of this PR did, to name every refusal reason at
+        // once, and it silently changed what `setPattern` ACCEPTS: the review
+        // materializes and validates the stored argument, so when the whole
+        // argument document is cold — a nested piece whose host has not synced
+        // yet — it validates `undefined` and refuses, where Runner
+        // deliberately defers and preserves the bytes (CT-1917).
+        // `test/setsrc-cold-argument.test.ts` pins that; it fails with
+        // "value does not match type object" if the review moves here.
+        //
+        // Callers who want every reason at once run `checkPattern()`, which is
+        // exactly what `--check` is for.
+        if (!options?.dangerouslyAllowIncompatibleSchema) {
+          assertPatternSchemasBackwardCompatible(previousPattern, pattern);
+        }
+        transition = pieceSourceTransition(
+          expected,
+          "edit",
+          null,
+          baseline,
+        );
+        return await execute(this.#pieces, this.id, pattern, undefined, {
+          start: true,
+          expectedPatternIdentity: previousRef,
+          validateArgumentLinks: options?.dangerouslyAllowIncompatibleSchema
+            ? undefined
+            : (argumentCell, argumentSchema) =>
+              assertSuppliedLinkSchemasCompatible(
+                suppliedLinks(argumentCell.getRaw()),
+                argumentSchema,
+                argumentCell,
+                this.#pieces,
+                {
+                  priorArgumentSchema: previousPattern.argumentSchema,
+                  // `applySetupState` rewrites the argument from `getRaw()`, so
+                  // every retained link's envelope is written back unchanged and
+                  // nothing here is rebuilt as an alias. The validator verifies
+                  // that per link against committed state rather than taking
+                  // this declaration on trust — anything the setup staged that
+                  // is NOT already committed (e.g. a link-shaped schema
+                  // default from the incoming pattern) still faces the full
+                  // rebuild rules.
+                  linksPreservedVerbatim: true,
+                },
+              ),
+          repository: options?.repository,
+          sourceTransition: transition,
+        }) as Cell<T>;
       });
-      if (!options?.dangerouslyAllowIncompatibleSchema) {
-        assertPatternSchemasBackwardCompatible(previousPattern, pattern);
+    } catch (error) {
+      if (
+        transition !== undefined &&
+        await this.#sourceTransitionCommitted(transition.revisionId)
+      ) {
+        console.warn(
+          "Piece source was saved, but refreshing the running piece failed:",
+          error,
+        );
+        return;
       }
-      return await execute(this.#manager, this.id, pattern, undefined, {
-        start: true,
-        expectedPatternIdentity: previousRef,
-        validateArgumentLinks: options?.dangerouslyAllowIncompatibleSchema
-          ? undefined
-          : (argumentCell, argumentSchema) =>
-            assertSuppliedLinkSchemasCompatible(
-              suppliedLinks(argumentCell.getRaw()),
-              argumentSchema,
-              argumentCell,
-              this.#manager,
-              {
-                priorArgumentSchema: previousPattern.argumentSchema,
-                // `applySetupState` rewrites the argument from `getRaw()`, so
-                // every retained link's envelope is written back unchanged and
-                // nothing here is rebuilt as an alias. The validator verifies
-                // that per link against committed state rather than taking
-                // this declaration on trust — anything the setup staged that
-                // is NOT already committed (e.g. a link-shaped schema
-                // default from the incoming pattern) still faces the full
-                // rebuild rules.
-                linksPreservedVerbatim: true,
-              },
-            ),
-        repository: options?.repository,
-      }) as Cell<T>;
-    });
+      throw error;
+    }
   }
 
   async #runMutation(
@@ -2924,11 +3452,11 @@ export class PieceController<T = unknown> {
       await cell.sync();
       const refBeforeLoad = getPatternIdentityRef(cell);
       if (!refBeforeLoad) return;
-      const pattern = await this.#manager.runtime.patternManager
+      const pattern = await this.#pieces.runtime.patternManager
         .loadPatternByIdentity(
           refBeforeLoad.identity,
           refBeforeLoad.symbol,
-          this.#manager.getSpace(),
+          this.#pieces.getSpace(),
         );
       if (!pattern) return;
       await cell.sync();
@@ -2949,35 +3477,365 @@ export class PieceController<T = unknown> {
     }
   }
 
+  async #sourceTransitionCommitted(revisionId: string): Promise<boolean> {
+    try {
+      if (
+        getPieceSourceRevisions(this.#cell).some((revision) =>
+          revision.revisionId === revisionId
+        )
+      ) {
+        return true;
+      }
+      await this.#cell.sync();
+      return getPieceSourceRevisions(this.#cell).some((revision) =>
+        revision.revisionId === revisionId
+      );
+    } catch {
+      return false;
+    }
+  }
+
   async readingFrom(): Promise<PieceController[]> {
-    const cells = await this.#manager.getReadingFrom(this.#cell);
-    return cells.map((cell) => new PieceController(this.#manager, cell));
+    const cells = await this.#pieces.getReadingFrom(this.#cell);
+    return cells.map((cell) => new PieceController(this.#pieces, cell));
   }
 
   async readBy(): Promise<PieceController[]> {
-    const cells = await this.#manager.getReadByPieces(this.#cell);
-    return cells.map((cell) => new PieceController(this.#manager, cell));
+    const cells = await this.#pieces.getReadByPieces(this.#cell);
+    return cells.map((cell) => new PieceController(this.#pieces, cell));
   }
 
-  manager(): PieceManager {
-    return this.#manager;
+  pieces(): PiecesController {
+    return this.#pieces;
   }
 }
 
+function sourceRevision(
+  revisions: readonly PieceSourceRevision[],
+  revisionId: string,
+): PieceSourceRevision {
+  const revision = revisions.find((candidate) =>
+    candidate.revisionId === revisionId
+  );
+  if (revision === undefined) {
+    throw new Error(`source revision ${revisionId} does not exist`);
+  }
+  return revision;
+}
+
+function isPieceSourceAction(action: unknown): action is PieceSourceAction {
+  if (typeof action !== "object" || action === null || !("kind" in action)) {
+    return false;
+  }
+  if (action.kind === "detach") return true;
+  return (action.kind === "restore" || action.kind === "follow") &&
+    "revisionId" in action &&
+    typeof action.revisionId === "string" &&
+    action.revisionId.length > 0;
+}
+
+function samePieceSourceAction(
+  left: PieceSourceAction,
+  right: PieceSourceAction,
+): boolean {
+  return left.kind === right.kind &&
+    (left.kind === "detach" ||
+      right.kind !== "detach" && left.revisionId === right.revisionId);
+}
+
+function samePieceSourceSnapshot(
+  left: PieceSourceSnapshot,
+  right: PieceSourceSnapshot,
+): boolean {
+  return left.pattern.identity === right.pattern.identity &&
+    left.pattern.symbol === right.pattern.symbol &&
+    left.origin === right.origin &&
+    left.revisionId === right.revisionId;
+}
+
+const RETAINED_INPUT_COMPATIBILITY_PREFIX =
+  "piece source is incompatible with retained input: ";
+
+function assertPieceSourceRetainedLinksCompatible(
+  argumentCell: Cell<unknown>,
+  candidateSchema: JSONSchema,
+  pieces: PiecesController,
+  priorArgumentSchema: JSONSchema,
+): void {
+  try {
+    assertSuppliedLinkSchemasCompatible(
+      suppliedLinks(argumentCell.getRaw()),
+      candidateSchema,
+      argumentCell,
+      pieces,
+      {
+        priorArgumentSchema,
+        linksPreservedVerbatim: true,
+      },
+    );
+  } catch (error) {
+    throw new Error(
+      RETAINED_INPUT_COMPATIBILITY_PREFIX +
+        (error instanceof Error ? error.message : String(error)),
+      { cause: error },
+    );
+  }
+}
+
+function pieceSourceArgumentEvidence(
+  argumentCell: Cell<unknown>,
+  pieces: PiecesController,
+): string {
+  const raw = argumentCell.getRaw();
+  const links = suppliedLinks(raw).map((suppliedLink) => {
+    let linkBase = argumentCell;
+    for (const segment of suppliedLink.path) {
+      linkBase = linkBase.key(segment as keyof unknown) as Cell<unknown>;
+    }
+    try {
+      const link = parseLinkOrThrow(suppliedLink.value, linkBase);
+      const linkedCell = pieces.runtime.getCellFromLink(
+        { ...link, schema: undefined },
+        undefined,
+        linkBase.tx,
+      );
+      const contract = durableSourceContract(linkedCell, pieces);
+      return {
+        path: suppliedLink.path,
+        target: {
+          space: linkedCell.space,
+          id: linkedCell.getAsNormalizedFullLink().id,
+          scope: linkedCell.getAsNormalizedFullLink().scope,
+          path: linkedCell.getAsNormalizedFullLink().path,
+        },
+        contract: contract?.schemas.map((schema) => ({
+          root: schema.root,
+          path: schema.path,
+          rawBasePath: schema.rawBasePath,
+          schemaBaseDepth: schema.schemaBaseDepth,
+          validationTarget: (() => {
+            const target = schema.validationCell.getAsNormalizedFullLink();
+            return {
+              space: target.space,
+              id: target.id,
+              scope: target.scope,
+              path: target.path,
+            };
+          })(),
+          validationPath: schema.validationPath,
+        })) ?? null,
+      };
+    } catch (error) {
+      return { path: suppliedLink.path, error: pieceSourceErrorMessage(error) };
+    }
+  });
+  return taggedHashStringOf({ raw, links });
+}
+
+async function pieceSourceCompatibilityReview(
+  previousPattern: Pattern,
+  candidate: Pattern,
+  piece: Cell<unknown>,
+  pieces: PiecesController,
+): Promise<NonNullable<PreparedPieceSourceChange["review"]>> {
+  const issues: PieceSourceCompatibilityIssues = {};
+  try {
+    assertPatternSchemasBackwardCompatible(previousPattern, candidate);
+  } catch (error) {
+    issues.schema = error instanceof Error ? error.message : String(error);
+  }
+
+  const argumentCell = pieces.getArgument(piece);
+  await argumentCell.sync();
+  const materializedArgument = argumentCell.asSchema(undefined).get();
+  const validationArgument = mergeSchemaDefaults(
+    materializedArgument,
+    extractDefaultValues(candidate.argumentSchema),
+    candidate.argumentSchema,
+    { mergeMaterializedLinks: true },
+  );
+  const validationFailure = validateSchemaValue(
+    candidate.argumentSchema,
+    validationArgument,
+    candidate.argumentSchema,
+    { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+  );
+  if (validationFailure !== undefined) {
+    issues.argument =
+      `updated arguments do not match the candidate schema: ${validationFailure}`;
+  }
+
+  try {
+    assertPieceSourceRetainedLinksCompatible(
+      argumentCell,
+      candidate.argumentSchema,
+      pieces,
+      previousPattern.argumentSchema,
+    );
+  } catch (error) {
+    issues.retainedLinks = error instanceof Error
+      ? error.message
+      : String(error);
+  }
+
+  const cfc = pieceSourceCfcEnvelopeIssue(argumentCell, candidate, pieces);
+  if (cfc !== undefined) issues.cfc = cfc;
+
+  return {
+    argumentEvidence: pieceSourceArgumentEvidence(argumentCell, pieces),
+    issues,
+  };
+}
+
+/**
+ * Would the setup commit's CFC schema-envelope merge accept this candidate
+ * over what the piece's argument document already stores?
+ *
+ * Why this is its own rule rather than a case of the three above: those all
+ * reason about DECLARED types — the previous and candidate patterns' argument
+ * and result schemas, and the stored argument VALUE against them. The CFC
+ * envelope is neither. It is the schema the document was last committed under,
+ * accumulated across every write that ever touched it, and it can carry claims
+ * no pattern declares (a later write that strengthened a confidentiality label
+ * widens it in place). So a piece whose pattern pointer has run ahead of its
+ * stored envelope — the partially-migrated case this command exists to catch —
+ * passes all three type-level checks and still takes `CFC enforcement rejected
+ * commit` at the setup boundary. Reporting `compatible: true` there is worse
+ * than having no preflight at all, because the verdict is what gates a deploy.
+ *
+ * The merge is driven for real, in dry-run, through the same
+ * `mergeCfcSchemaEnvelopes` (and the same stored-covers-candidate fast path)
+ * the commit runs, so the two cannot disagree about what merges.
+ *
+ * Scope, deliberately: the ARGUMENT document only. The piece's own document —
+ * the result — merges at commit time under `generatedOutputPaths`, the set of
+ * paths the running module materializes in that same transaction, which
+ * exempts them from the additive-required rule. Those paths are a property of
+ * the module's actual output bindings and are not knowable without executing
+ * it, so a preflight that merged the result envelope without them would refuse
+ * the ordinary, accepted case of a candidate that adds a generated result field
+ * (see `packages/piece/test/state-continuity.test.ts`). An argument is an
+ * input: nothing generates it, so its merge is faithful here.
+ */
+function pieceSourceCfcEnvelopeIssue(
+  argumentCell: Cell<unknown>,
+  candidate: Pattern,
+  pieces: PiecesController,
+): string | undefined {
+  const link = argumentCell.getAsNormalizedFullLink();
+  // `readTx()` cannot write, so the dry run stays a dry run.
+  const stored = loadStoredCfcEnvelope(pieces.runtime.readTx(), {
+    space: link.space,
+    id: link.id,
+    scope: link.scope,
+  });
+  if (stored.status === "none") {
+    // No stored envelope means the merge never runs for this document at
+    // commit time, so there is genuinely nothing for it to reject. (Documents
+    // only acquire one once a write carries an IFC claim.)
+    return undefined;
+  }
+  if (stored.status === "unreadable") {
+    // The commit path records this same load failure as a rejection reason and
+    // refuses the write. Skipping it here — the tempting reading, since we
+    // cannot evaluate the merge — is precisely how a check green-lights an
+    // update the deploy then refuses, so it is a blocker instead.
+    return `the CFC schema envelope stored for this piece's argument ` +
+      `document could not be read (${stored.reason}); applying a source ` +
+      `would be rejected over the same failure`;
+  }
+  // The commit takes the stored envelope unchanged when it already covers the
+  // candidate's, so a preflight that skipped this fast path would manufacture
+  // rejections the real update does not make.
+  if (
+    storedSchemaCoversCandidateEnvelope(stored.schema, candidate.argumentSchema)
+  ) {
+    return undefined;
+  }
+  const issue = cfcSchemaMergeIssue(stored.schema, candidate.argumentSchema);
+  if (issue === undefined) return undefined;
+  return issue.migration
+    ? `the argument document stored for this piece predates the candidate's ` +
+      `schema and cannot migrate to it: ${issue.message}`
+    : `the candidate's argument schema does not merge with the CFC schema ` +
+      `envelope stored for this piece: ${issue.message}`;
+}
+
+function hasPieceSourceCompatibilityIssues(
+  issues: PieceSourceCompatibilityIssues,
+): boolean {
+  return issues.schema !== undefined ||
+    issues.argument !== undefined ||
+    issues.retainedLinks !== undefined ||
+    issues.cfc !== undefined;
+}
+
+function assertPieceSourceArgumentUsable(
+  review: NonNullable<PreparedPieceSourceChange["review"]>,
+): void {
+  if (review.issues.argument !== undefined) {
+    throw new Error(review.issues.argument);
+  }
+}
+
+function pieceSourceCompatibilityMessage(
+  issues: PieceSourceCompatibilityIssues,
+): string {
+  return [issues.schema, issues.argument, issues.retainedLinks, issues.cfc]
+    .filter((message): message is string => message !== undefined)
+    .join("\n");
+}
+
+function isOverridableArgumentCompatibilityError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message.includes(
+    "updated arguments do not match the candidate schema:",
+  ) || error.message.includes(RETAINED_INPUT_COMPATIBILITY_PREFIX);
+}
+
+function pieceSourceErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function pieceSourceTransition(
+  expected: PieceSourceSnapshot,
+  operation: PieceSourceTransition["operation"],
+  origin: string | null,
+  baseline: PieceSourceTransitionBaseline,
+  options: { selectedRevisionId?: string } = {},
+): PieceSourceTransition {
+  const timestamp = Date.now();
+  return {
+    revisionId: crypto.randomUUID(),
+    baseline,
+    timestamp,
+    operation,
+    origin,
+    expected,
+    ...(options.selectedRevisionId === undefined
+      ? {}
+      : { selectedRevisionId: options.selectedRevisionId }),
+  };
+}
+
 async function execute(
-  manager: PieceManager,
+  pieces: PiecesController,
   pieceId: string,
   pattern: Pattern,
   input?: object,
   options?: {
     start?: boolean;
     expectedPatternIdentity?: { identity: string; symbol: string };
+    validateCurrentArgument?: (
+      argumentCell: Cell<unknown>,
+    ) => void;
     validateArgumentLinks?: (
       argumentCell: Cell<unknown>,
       argumentSchema: JSONSchema,
     ) => void;
     repository?: string;
+    sourceTransition?: PieceSourceTransition;
   },
 ): Promise<Cell<unknown>> {
-  return await manager.runWithPattern(pattern, pieceId, input, options);
+  return await pieces.runWithPattern(pattern, pieceId, input, options);
 }

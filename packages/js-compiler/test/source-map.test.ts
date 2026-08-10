@@ -9,10 +9,10 @@ import {
   SourceMapParser,
   TypeScriptCompiler,
 } from "../mod.ts";
-import { StaticCacheFS } from "@commonfabric/static";
+import { StaticCache } from "@commonfabric/static";
 import { SourceMapConsumer, SourceMapGenerator } from "source-map-js";
 
-const staticCache = new StaticCacheFS();
+const staticCache = StaticCache.fromFileSystem();
 const types = await getTypeScriptEnvironmentTypes(staticCache);
 types["commonfabric.d.ts"] = await staticCache.getText(
   "types/commonfabric.d.ts",
@@ -227,9 +227,9 @@ export default errorOnLine6;
       "    at ba4jcaraqictevfcqama4n7ugtfosjasodvm43iojcw4ss6m4y54d3uvn/main.tsx:3:19 (file.js, <anonymous>:20:10)",
       // eval
       "    at eval (recipe-abc.js, <anonymous>:17:10)",
-      // AMDLoader methods
-      "    at AMDLoader.resolveModule (recipe-abc.js, <anonymous>:1:1764)",
-      "    at AMDLoader.require (recipe-abc.js, <anonymous>:1:923)",
+      // Namespaced methods on a column-1 frame
+      "    at Loader.resolveModule (recipe-abc.js, <anonymous>:1:1764)",
+      "    at Loader.require (recipe-abc.js, <anonymous>:1:923)",
     ];
 
     for (const pattern of patterns) {

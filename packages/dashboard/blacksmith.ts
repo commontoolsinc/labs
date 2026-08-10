@@ -66,12 +66,6 @@ function rangeQuery(start: Date, end: Date): string {
 export const blacksmithRoutes = {
   daily: (org: string, start: Date, end: Date) =>
     `${orgPath(org)}/metrics/daily?${rangeQuery(start, end)}`,
-  stickyDaily: (org: string, start: Date, end: Date) =>
-    `${orgPath(org)}/metrics/docker/daily-by-type?${rangeQuery(start, end)}`,
-  stickyTotal: (org: string, start: Date, end: Date) =>
-    `${orgPath(org)}/metrics/docker/sticky-disk/total?${
-      rangeQuery(start, end)
-    }`,
   invoiceAmount: (org: string) => `${orgPath(org)}/metrics/invoice-amount`,
   spendingThreshold: (org: string) => `${orgPath(org)}/email-alert-threshold`,
 };

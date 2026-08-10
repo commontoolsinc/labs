@@ -71,6 +71,7 @@
   // worker to hand the runtime→OTel bridge the ambient tracer/meter when the
   // process runs under Deno's native OpenTelemetry.
   "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1"
   }
 }

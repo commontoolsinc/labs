@@ -14,11 +14,11 @@ export type SchedulerObservationTransactionKind =
   | "action-run"
   | "event-preflight";
 
-export interface SchedulerActionOptions {
+export type SchedulerActionOptions = {
   debounceMs?: number;
   noDebounce?: boolean;
   throttleMs?: number;
-}
+};
 
 /**
  * Trusted, exhaustive structural surface for one source-backed action.

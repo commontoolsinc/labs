@@ -60,6 +60,7 @@ export interface Run {
   event: string;
   head_sha: string;
   display_title: string;
+  created_at: string;
   run_started_at: string;
   updated_at: string;
   html_url: string;
