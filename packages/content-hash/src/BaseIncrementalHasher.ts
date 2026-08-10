@@ -35,7 +35,7 @@ export abstract class BaseIncrementalHasher implements IncrementalHasher {
         return result;
       }
       default: {
-        throw new Error(`Unknown encoding: ${encoding}`);
+        throw new Error(`Unknown encoding: \`${encoding}\``);
       }
     }
   }
