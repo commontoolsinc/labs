@@ -106,6 +106,15 @@ describe("commit-telemetry", () => {
       schedulerObservationCount: 1,
       sqliteOperationCount: 1,
     });
+
+    expect(classifyCommitTelemetry(
+      commit([sqliteOperation], { schedulerObservation }),
+    )).toEqual({
+      kind: "mixed",
+      entityCount: 0,
+      schedulerObservationCount: 1,
+      sqliteOperationCount: 1,
+    });
   });
 
   it("returns `precondition` for precondition-only requests", () => {
