@@ -164,10 +164,10 @@ deno task cf piece get --url "$TOPIC_URL" commentCount --step
 
 Each of these three returns the record it wrote — the appended comment or link,
 or the persisted body plus its attribution — which spares the verification read
-above. That result rides `plainResultReceipts`
-(`EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true` until the flag's default flips); the
-write happens either way, so treat an absent result as "not enabled here", never
-as "the mutation did not land".
+above. That result rides `plainResultReceipts`, on by default; only an explicit
+`EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false` discards it. The write happens either
+way, so treat an absent result as "not enabled here", never as "the mutation did
+not land".
 
 The body is the living big-picture document. Replace it in place with the full
 revised body so a reader sees the current state without replaying the thread,

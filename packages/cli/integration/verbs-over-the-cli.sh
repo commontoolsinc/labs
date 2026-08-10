@@ -53,9 +53,10 @@ ARGS="--api-url=$API_URL --identity=$CF_IDENTITY --space=$SPACE"
 echo "API_URL=$API_URL"
 echo "SPACE=$SPACE"
 
-# A plain-JSON result rides the plainResultReceipts option, off by default
-# today, so enable it for this process. A result carrying a piece does NOT
-# need it — step 7 proves the difference.
+# A plain-JSON result rides the plainResultReceipts option, on by default.
+# Set it explicitly anyway so the walkthrough asserts the same thing whatever a
+# host's environment carries; step 7 sets it false to show the difference
+# against a result carrying a piece, which survives either way.
 export EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true
 
 START=$(date +%s)
@@ -152,7 +153,7 @@ check "true" "$(echo "$D" | jq -r '.deduplicated // false')" \
 check "$BEFORE" "$($CF piece get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)" \
   "the replay created no note (count unchanged at $BEFORE)"
 
-step "8. A piece result needs no option; a plain record does"
+step "8. A piece result survives the option being off; a plain record does not"
 P=$(EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false $CF piece call --quiet \
   --piece "$BOARD" $ARGS --invocation create-flagoff \
   createNote '{"title":"Flag-off note"}' 2>/dev/null)

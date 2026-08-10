@@ -152,11 +152,12 @@ appends are mergeable ops, so a length observed inside one handling is not a
 fact about the resulting list — read `commentCount` when you want the count.
 
 A returned value reaches the caller through the handling's receipt. A result
-carrying a piece (`addTopic`) arrives on any runtime; the plain records
-(`addComment`, `addLink`, `setBody`) additionally need `plainResultReceipts`,
-which is `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true` until that flag's default
-flips (`docs/development/EXPERIMENTAL_OPTIONS.md`). Without it those three verbs
-still perform their write and simply report no result.
+carrying a piece (`addTopic`) travels the result-pattern projection path; the
+plain records (`addComment`, `addLink`, `setBody`) project into the receipt
+under `plainResultReceipts`, which is on by default
+(`docs/development/EXPERIMENTAL_OPTIONS.md`). Setting
+`EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false` restores the discard, and those three
+verbs then still perform their write and simply report no result.
 
 `addTopic` takes the body at create (optional): a topic born with a body appears
 with it atomically — no reader observes a title-only halfway state, and no
