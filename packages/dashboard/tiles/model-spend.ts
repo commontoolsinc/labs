@@ -166,11 +166,13 @@ export const modelSpend: Tile = {
           spend: oaMap ? { byDay: oaMap } : null,
           color: OPENAI_COLOR,
           label: oa ? usd(oa.mtd) : undefined,
+          lagDays: PROVIDER_LAG_DAYS,
         },
         {
           spend: anMap ? { byDay: anMap } : null,
           color: ANTHROPIC_COLOR,
           label: an ? usd(an.mtd) : undefined,
+          lagDays: PROVIDER_LAG_DAYS,
         },
       ],
       now,

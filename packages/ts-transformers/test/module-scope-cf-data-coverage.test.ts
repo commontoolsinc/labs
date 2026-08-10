@@ -85,7 +85,7 @@ function createProgram(source: string): {
 // import, except where the filter invariant itself is under test).
 function transformDirect(source: string): string {
   const { program, sourceFile } = createProgram(source);
-  const transformer = new ModuleScopeCfDataTransformer({ mode: "transform" });
+  const transformer = new ModuleScopeCfDataTransformer({});
   const result = ts.transform(sourceFile, [
     (tsContext) => (sf) =>
       transformer.transform(

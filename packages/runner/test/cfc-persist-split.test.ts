@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/interface";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { StorageManager } from "../src/storage/cache.deno.ts";

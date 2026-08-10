@@ -16,9 +16,7 @@
  */
 const sortedKeyCache = new WeakMap<object, readonly string[]>();
 
-/**
- * Helper for `utf8Compare()`: Is the given character code a surrogate?
- */
+/** Helper for `utf8Compare()`: Is the given character code a surrogate? */
 function isSurrogateCharCode(c: number) {
   return (c >= 0xd800) && (c <= 0xdfff);
 }
@@ -31,9 +29,7 @@ function hasSurrogateCharCode(value: string) {
   return /[\ud800-\udfff]/.test(value);
 }
 
-/**
- * Compares strings by UTF-8 sort order.
- */
+/** Compares strings by UTF-8 sort order. */
 export function utf8Compare(a: string, b: string): number {
   // Credit where due: Though this started out as an independent implementation
   // of the key insight for fast sorting, this incorporates ideas from

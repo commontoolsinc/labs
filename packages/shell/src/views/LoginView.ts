@@ -18,7 +18,8 @@ import {
   saveCredential,
   type StoredCredential,
 } from "../lib/credentials.ts";
-import { ROOT_KEY } from "../../shared/mod.ts";
+import { ROOT_KEY } from "../lib/root-key.ts";
+import "../components/VBox.ts";
 
 type AuthFlow = "register" | "login";
 

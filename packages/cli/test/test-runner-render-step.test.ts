@@ -5,7 +5,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join, resolve } from "@std/path";
 import { runTests } from "../lib/test-runner.ts";
-import { cf, checkStderr, withEnv } from "./utils.ts";
+import { cf, checkStderr } from "./utils.ts";
 
 const FIXTURES = resolve(import.meta.dirname!, "fixtures/render-step");
 const SUBJECT = join(FIXTURES, "subject.tsx").replaceAll("\\", "/");
@@ -184,15 +184,22 @@ describe(
     it("enables continuous $UI demand through CF_TEST_CONTINUOUS_UI", async () => {
       const coverageDir = await Deno.makeTempDir();
       try {
-        await withEnv("CF_TEST_CONTINUOUS_UI", "1", async () => {
-          const { code, stderr } = await cf(
-            `test "${
-              fixture("continuous-ui.test.tsx")
-            }" --root "${FIXTURES}" --pattern-coverage-dir "${coverageDir}"`,
-          );
-          expect(code).toBe(0);
-          checkStderr(stderr);
-        });
+        const { code, stderr } = await cf(
+          `test "${
+            fixture("continuous-ui.test.tsx")
+          }" --root "${FIXTURES}" --pattern-coverage-dir "${coverageDir}"`,
+          {
+            env: {
+              CF_TEST_CONTINUOUS_UI: "1",
+              // Wall-clock performance diagnostics can fire under CI
+              // contention; keep this environment-contract test strict about
+              // errors instead.
+              CF_LOG_LEVEL: "error",
+            },
+          },
+        );
+        expect(code).toBe(0);
+        checkStderr(stderr);
 
         const files: string[] = [];
         for await (const entry of Deno.readDir(coverageDir)) {

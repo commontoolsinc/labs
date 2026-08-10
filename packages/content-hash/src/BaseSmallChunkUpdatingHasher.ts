@@ -1,8 +1,6 @@
 import { BaseIncrementalHasher } from "@/BaseIncrementalHasher.ts";
 
-/**
- * Size of the small-data buffer.
- */
+/** Size of the small-data buffer. */
 const SMALLS_SIZE = 256;
 
 /**

@@ -3,7 +3,15 @@ import type { Async, Expected } from "@std/expect";
 import { isRecord } from "@commonfabric/utils/types";
 
 /**
- * Strips all symbol properties from an object recursively
+ * Strips all symbol properties from an object, recursively.
+ *
+ * TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, and the
+ * `Object.keys` rebuild renders one as `{}` — on BOTH sides of the matchers
+ * below, so a test asserting on cell-read values judges any two same-shaped
+ * values with differing fabric contents equal, and its failure diff prints
+ * `{}`. The matchers fail open on exactly the fabric-content differences.
+ * Wants a `FabricSpecialObject` test returning the value whole (fabric
+ * classes hold no own symbol properties to strip).
  */
 export function stripSymbols(obj: unknown): unknown {
   if (!isRecord(obj)) return obj;
@@ -21,9 +29,7 @@ export function stripSymbols(obj: unknown): unknown {
   return result;
 }
 
-/**
- * Custom matchers that compare objects while ignoring symbol properties
- */
+/** Custom matchers that compare objects while ignoring symbol properties */
 expect.extend({
   toEqualIgnoringSymbols(
     context,
@@ -129,19 +135,34 @@ expect.extend({
 
 declare module "@std/expect" {
   interface Expected<IsAsync = false> {
+    /**
+     * Like `toEqual()`, except that symbol-keyed properties are stripped from
+     * both sides first.
+     */
     toEqualIgnoringSymbols(expected: unknown): void;
+
+    /**
+     * Like `toMatchObject()`, except that symbol-keyed properties are
+     * stripped from both sides first.
+     */
     toMatchObjectIgnoringSymbols(expected: unknown): void;
   }
 }
 
-// Extend the Expected interface to include our custom matchers
+/** The `expect()` surface, extended with the matchers defined here. */
 export interface ExtendedExpected<IsAsync = false> extends Expected<IsAsync> {
+  /** @inheritDoc */
   toEqualIgnoringSymbols(expected: unknown): void;
+
+  /** @inheritDoc */
   toMatchObjectIgnoringSymbols(expected: unknown): void;
 
-  // Override modifiers to maintain proper typing
+  // The modifiers are restated so that they carry the extended type through.
   not: IsAsync extends true ? Async<ExtendedExpected<true>>
     : ExtendedExpected<false>;
+  /** @inheritDoc */
   resolves: Async<ExtendedExpected<true>>;
+
+  /** @inheritDoc */
   rejects: Async<ExtendedExpected<true>>;
 }

@@ -68,7 +68,7 @@ async function waitForContent(
       .key("content");
     await contentCell.pull();
     await waitForCellValue<string>(
-      pieces.manager().runtime,
+      pieces.runtime,
       contentCell,
       (value) => value === expected,
     );

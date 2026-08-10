@@ -791,7 +791,7 @@ describe("pattern update validates the stored argument", () => {
     ).toEqual(pattern.resultSchema);
 
     // The same repair on the OTHER reuse branch. A caller may re-run a running
-    // piece WITH an argument (`PieceManager.runWithPattern` does), and that
+    // piece WITH an argument (`PiecesController.runWithPattern` does), and that
     // branch returns from a different place — so a fix applied to only one of
     // them leaves half the callers unrepaired.
     const { error: stripAgain } = await rt.editWithRetry((tx) => {

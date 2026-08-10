@@ -186,6 +186,15 @@ export interface VintageOutcome {
  * which is right: its identity is not reproducible from the repo, so no
  * capture could ever move it off zero and a staleness rule that counted it
  * would capture a new generation on every single run, forever.
+ *
+ * An ADOPTED old-toolchain fixture (`tasks/vintage-adopt.ts`) is the same
+ * hazard from the opposite side: it IS identity-compared, so it reports
+ * `changed > 0` for as long as its recorded identity differs from today's —
+ * which for a committed old-toolchain capture is every run in practice. It
+ * reads as stale here by design — the rule holds because the key's NATIVE
+ * fixtures are what satisfy currency. A test key whose only fixtures were
+ * adopted would trigger a capture on every `--capture-changed` run; today
+ * every adopted fixture shares its key with a native one.
  */
 export function staleTestKeys(
   outcomes: readonly VintageOutcome[],
@@ -468,8 +477,9 @@ export async function replayVintage(
         ...where,
         detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
           (carried.has(entry.space)
-            ? `has no pattern setup marker at ${entry.cellId} in ` +
-              `${entry.space}, so this fixture does not hold that root`
+            ? `carries neither a pattern identity nor a setup marker at ` +
+              `${entry.cellId} in ${entry.space}, so this fixture does not ` +
+              `hold that root`
             : `was materialized in ${entry.space}, which this fixture does ` +
               `not carry (it holds ${[...carried].sort().join(", ")})`) +
           ` — it was recorded but NOT validated. If the space is one the ` +
@@ -713,19 +723,23 @@ export async function replayVintage(
         // root now would see the schema the replay just wrote.
         //
         // UNTESTED, deliberately and with the reason recorded. The no-schema
-        // half needs a root the presence control ACCEPTS — it demands a
-        // `patternSetupIdentity` marker — that carries no result schema, and a
-        // capture cannot make one: `runner.ts` stamps the marker and the schema
-        // in the same setup. An attempt to construct it by hand did not reach
-        // this branch at all, so the case is defensive (a hand-edited or
-        // corrupted fixture) rather than observed. What the pre-materialize
-        // read buys is that the OTHER half, which IS reachable, cannot be
-        // misreported as this one.
+        // half needs a root the presence control ACCEPTS that carries no
+        // result schema. A NATIVE capture cannot make one — `runner.ts` stamps
+        // `patternSetupIdentity` and the schema in the same setup — and an
+        // attempt to construct one by hand did not reach this branch at all.
+        // Since the presence control also accepts the older `patternIdentity`
+        // marker (an adopted fixture's roots carry only that), the shape is
+        // REACHABLE in principle from an old store whose setup never wrote a
+        // schema; none observed — every runner back to the oldest adopted
+        // vintage stamps the schema in the same transaction as the identity —
+        // so the case stays defensive. What the pre-materialize read buys is
+        // that the OTHER half, which IS reachable, cannot be misreported as
+        // this one.
         report.failures.push({
           ...where,
           detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
             (hadSchemaByCell.get(`${entry.space}/${entry.cellId}`) === false
-              ? `carries a setup marker but no readable stored schema, so `
+              ? `carries a presence marker but no readable stored schema, so `
               : `stores a result schema that reads back nothing, so `) +
             `applying ${entry.main} over it could not be checked for stranded ` +
             `state. The fixture does not hold what it claims: ${remedy}`,

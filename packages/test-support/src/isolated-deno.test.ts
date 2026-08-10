@@ -12,6 +12,57 @@ function decode(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
 }
 
+// Three test tasks build their own run allowlist with
+// `--allow-run=$(deno eval "console.log(Deno.execPath())")`, which names the
+// binary the tests start only while a task's `deno` is the Deno running the
+// task. A `deno` found on `PATH` instead would name a different binary whenever
+// the shell's Deno is not the pinned one, which is the case those tasks exist
+// to handle. The decoy below is the only `deno` on the child's `PATH`, so it
+// runs if the resolution ever goes through `PATH`.
+Deno.test({
+  name: "a task's `deno` is the Deno running the task, not one on PATH",
+  ignore: Deno.build.os === "windows",
+  async fn() {
+    const directory = await Deno.makeTempDir({
+      prefix: "commonfabric-task-deno-",
+    });
+    try {
+      const binDirectory = join(directory, "bin");
+      await Deno.mkdir(binDirectory);
+      const decoy = join(binDirectory, "deno");
+      await Deno.writeTextFile(decoy, "#!/bin/sh\necho DECOY\n");
+      await Deno.chmod(decoy, 0o755);
+      await Deno.writeTextFile(
+        join(directory, "deno.json"),
+        JSON.stringify({
+          tasks: { probe: 'deno eval "console.log(Deno.execPath())"' },
+        }),
+      );
+
+      const output = await new Deno.Command(Deno.execPath(), {
+        args: ["task", "probe"],
+        cwd: directory,
+        env: { PATH: binDirectory },
+        stdout: "piped",
+        stderr: "piped",
+      }).output();
+
+      const stdout = decode(output.stdout);
+      assert(
+        output.success,
+        `task failed:\n${stdout}\n${decode(output.stderr)}`,
+      );
+      assert(
+        !stdout.includes("DECOY"),
+        `the task ran the \`deno\` on PATH:\n${stdout}`,
+      );
+      assertEquals(stdout.trim(), Deno.execPath());
+    } finally {
+      await Deno.remove(directory, { recursive: true });
+    }
+  },
+});
+
 Deno.test("nested checks use the checked-in dependency graph", async () => {
   const lockPath = join(ROOT, "deno.lock");
   const lockBefore = await Deno.readTextFile(lockPath);

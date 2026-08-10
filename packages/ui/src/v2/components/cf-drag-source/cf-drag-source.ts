@@ -188,7 +188,8 @@ export class CFDragSource extends BaseElement {
     }
 
     // Create preview element
-    this._preview = createDragPreview(cell);
+    const { preview, cleanup } = createDragPreview(cell);
+    this._preview = preview;
     document.body.appendChild(this._preview);
 
     // Position preview near cursor
@@ -201,6 +202,7 @@ export class CFDragSource extends BaseElement {
       type: this.type,
       sourceElement: this,
       preview: this._preview,
+      previewCleanup: cleanup,
       pointerX: e.clientX,
       pointerY: e.clientY,
     });

@@ -3,6 +3,8 @@ import { expect } from "@std/expect";
 import env from "@/env.ts";
 import createApp from "@/lib/create-app.ts";
 import router from "@/routes/static/static.index.ts";
+import { getMimeType } from "@/lib/mime-type.ts";
+import { TEST_ASSET, TEST_ASSET_CONTENT } from "@commonfabric/static/utils";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
@@ -10,18 +12,22 @@ if (env.ENV !== "test") {
 
 const app = createApp().route("/", router);
 
+// The route serves whatever asset it is named, so which one these tests name
+// does not matter.
+const TEST_ASSET_PATH = `/static/${TEST_ASSET}`;
+
 describe("Static Routes", () => {
   it("serves static files with correct content", async () => {
-    const response = await app.request("/static/prompts/system.md");
+    const response = await app.request(TEST_ASSET_PATH);
     expect(response.status).toBe(200);
     const text = await response.text();
-    expect(/# React Component Builder/.test(text)).toBe(true);
+    expect(text.includes(TEST_ASSET_CONTENT)).toBe(true);
   });
 });
 
 describe("ETag HTTP Responses", () => {
   it("returns 200 with ETag header", async () => {
-    const response = await app.request("/static/prompts/system.md");
+    const response = await app.request(TEST_ASSET_PATH);
     expect(response.status).toBe(200);
 
     const etag = response.headers.get("ETag");
@@ -31,12 +37,12 @@ describe("ETag HTTP Responses", () => {
 
   it("returns 304 with matching If-None-Match", async () => {
     // First request to get the ETag
-    const response1 = await app.request("/static/prompts/system.md");
+    const response1 = await app.request(TEST_ASSET_PATH);
     const etag = response1.headers.get("ETag");
     expect(etag).toBeTruthy();
 
     // Second request with If-None-Match
-    const response2 = await app.request("/static/prompts/system.md", {
+    const response2 = await app.request(TEST_ASSET_PATH, {
       headers: {
         "If-None-Match": etag!,
       },
@@ -45,7 +51,7 @@ describe("ETag HTTP Responses", () => {
   });
 
   it("returns 200 with non-matching If-None-Match", async () => {
-    const response = await app.request("/static/prompts/system.md", {
+    const response = await app.request(TEST_ASSET_PATH, {
       headers: {
         "If-None-Match": '"non-matching-etag"',
       },
@@ -56,30 +62,23 @@ describe("ETag HTTP Responses", () => {
   });
 
   it("includes Cache-Control: public, no-cache header", async () => {
-    const response = await app.request("/static/prompts/system.md");
+    const response = await app.request(TEST_ASSET_PATH);
     const cacheControl = response.headers.get("Cache-Control");
     expect(cacheControl).toBe("public, no-cache");
   });
 
-  it("serves files with correct MIME types", async () => {
-    // Test TypeScript file
-    const tsResponse = await app.request("/static/types/es2023.d.ts");
-    const tsContentType = tsResponse.headers.get("Content-Type");
-    expect(tsContentType).toBeTruthy();
-
-    // Test Markdown file
-    const mdResponse = await app.request("/static/prompts/system.md");
-    const mdContentType = mdResponse.headers.get("Content-Type");
-    expect(mdContentType).toBeTruthy();
+  it("serves files with the MIME type their extension maps to", async () => {
+    const response = await app.request(TEST_ASSET_PATH);
+    expect(response.headers.get("Content-Type")).toBe(getMimeType(TEST_ASSET));
   });
 });
 
 describe("Caching Behavior", () => {
   it("returns same ETag for multiple requests", async () => {
-    const response1 = await app.request("/static/prompts/system.md");
+    const response1 = await app.request(TEST_ASSET_PATH);
     const etag1 = response1.headers.get("ETag");
 
-    const response2 = await app.request("/static/prompts/system.md");
+    const response2 = await app.request(TEST_ASSET_PATH);
     const etag2 = response2.headers.get("ETag");
 
     expect(etag1).toBe(etag2);
@@ -87,12 +86,12 @@ describe("Caching Behavior", () => {
 
   it("returns empty body for 304 response", async () => {
     // First request to get the ETag
-    const response1 = await app.request("/static/prompts/system.md");
+    const response1 = await app.request(TEST_ASSET_PATH);
     const etag = response1.headers.get("ETag");
     expect(etag).toBeTruthy();
 
     // Second request with If-None-Match
-    const response2 = await app.request("/static/prompts/system.md", {
+    const response2 = await app.request(TEST_ASSET_PATH, {
       headers: {
         "If-None-Match": etag!,
       },
@@ -105,12 +104,12 @@ describe("Caching Behavior", () => {
 
   it("includes ETag header in 304 response", async () => {
     // First request to get the ETag
-    const response1 = await app.request("/static/prompts/system.md");
+    const response1 = await app.request(TEST_ASSET_PATH);
     const etag = response1.headers.get("ETag");
     expect(etag).toBeTruthy();
 
     // Second request with If-None-Match
-    const response2 = await app.request("/static/prompts/system.md", {
+    const response2 = await app.request(TEST_ASSET_PATH, {
       headers: {
         "If-None-Match": etag!,
       },
@@ -122,7 +121,7 @@ describe("Caching Behavior", () => {
   });
 
   it("returns 304 for wildcard If-None-Match", async () => {
-    const response = await app.request("/static/prompts/system.md", {
+    const response = await app.request(TEST_ASSET_PATH, {
       headers: {
         "If-None-Match": "*",
       },
@@ -132,12 +131,12 @@ describe("Caching Behavior", () => {
 
   it("returns 304 for comma-separated If-None-Match with matching ETag", async () => {
     // First request to get the ETag
-    const response1 = await app.request("/static/prompts/system.md");
+    const response1 = await app.request(TEST_ASSET_PATH);
     const etag = response1.headers.get("ETag");
     expect(etag).toBeTruthy();
 
     // Second request with comma-separated list including the matching ETag
-    const response2 = await app.request("/static/prompts/system.md", {
+    const response2 = await app.request(TEST_ASSET_PATH, {
       headers: {
         "If-None-Match": `"fake-etag-1", ${etag}, "fake-etag-2"`,
       },
@@ -147,12 +146,12 @@ describe("Caching Behavior", () => {
 
   it("returns 304 for weak ETag match", async () => {
     // First request to get the ETag
-    const response1 = await app.request("/static/prompts/system.md");
+    const response1 = await app.request(TEST_ASSET_PATH);
     const etag = response1.headers.get("ETag");
     expect(etag).toBeTruthy();
 
     // Second request with weak ETag (W/ prefix)
-    const response2 = await app.request("/static/prompts/system.md", {
+    const response2 = await app.request(TEST_ASSET_PATH, {
       headers: {
         "If-None-Match": `W/${etag}`,
       },

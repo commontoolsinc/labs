@@ -36,7 +36,16 @@ function parseCliTestShard(): { index: number; count: number } {
   return { index, count };
 }
 
+// Test files that cannot run beside another file. `deno test --parallel` runs
+// each file on its own thread of one process, so a file belongs here when it
+// changes state the whole process shares: a test that reads an environment
+// variable in the test process itself is the common case, since another file
+// setting the same name decides what it reads. A test that only configures a
+// CLI it spawns does not belong here; `cf` in test/utils.ts gives the spawned
+// command its environment directly.
 const SERIAL_TESTS = [
+  "test/completion-output.test.ts",
+  "test/completion-providers.test.ts",
   "test/fuse.test.ts",
   "test/inspect-remote.test.ts",
   "test/json-command.test.ts",
@@ -48,6 +57,7 @@ const SERIAL_TESTS = [
   "test/view-commitmsg.test.ts",
   "test/view-mod-gate.test.ts",
   "test/view-pager-pty.test.ts",
+  "test/wish-command.test.ts",
 ];
 
 // Tests that need a live toolshed named by API_URL. This runner excludes

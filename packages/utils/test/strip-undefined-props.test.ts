@@ -2,26 +2,26 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { stripUndefinedProps } from "@commonfabric/utils/strip-undefined-props";
 
-describe("stripUndefinedProps", () => {
+describe("stripUndefinedProps()", () => {
   it("returns an empty object given an empty object", () => {
     expect(stripUndefinedProps({})).toEqual({});
   });
 
-  it("returns a shallow copy when no properties are undefined", () => {
+  it("returns a shallow copy when no properties are `undefined`", () => {
     const input = { a: 1, b: "two", c: true, d: null };
     const out = stripUndefinedProps(input);
     expect(out).toEqual(input);
     expect(out).not.toBe(input);
   });
 
-  it("drops undefined-valued top-level properties", () => {
+  it("drops `undefined`-valued top-level properties", () => {
     expect(stripUndefinedProps({ a: 1, b: undefined, c: 3 })).toEqual({
       a: 1,
       c: 3,
     });
   });
 
-  it("drops undefined-valued properties at nested depths", () => {
+  it("drops `undefined`-valued properties at nested depths", () => {
     expect(stripUndefinedProps({
       a: 1,
       b: { c: undefined, d: 4, e: { f: undefined, g: 7 } },

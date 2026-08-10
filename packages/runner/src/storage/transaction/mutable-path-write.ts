@@ -201,17 +201,27 @@ export const applyMutablePathWrite = (
     return { ok: { root: newRoot, previousValue, changed: true } };
   }
 
-  // Object branch.
+  // Object branch. Mirrors the array branch's presence-aware no-op detection
+  // above, but presence on an object is an OWN-property question:
+  // `Object.hasOwn`, not `in`. With `in`, a key named after an
+  // `Object.prototype` member — `toString`, `valueOf`, `hasOwnProperty` — read
+  // as present on every record, `previousValue` came back as the inherited
+  // FUNCTION, and `valueEqual` then threw "Cannot compare a function value".
+  // Writing a property with one of those perfectly legal names failed outright.
+  // (`__proto__`/`constructor` are refused upstream by #5264; these are not,
+  // and are ordinary data keys.)
   const obj = parent as Record<string, FabricValue>;
-  const previousValue = obj[leafKey];
+  const hasOwnLeaf = Object.hasOwn(obj, leafKey);
+  // Absent means absent: without the guard this is the prototype's member.
+  const previousValue = hasOwnLeaf ? obj[leafKey] : undefined;
   if (isDelete) {
-    if (!(leafKey in obj)) {
+    if (!hasOwnLeaf) {
       return { ok: { root: newRoot, previousValue, changed: false } };
     }
     delete obj[leafKey];
     return { ok: { root: newRoot, previousValue, changed: true } };
   }
-  if (leafKey in obj && valueEqual(previousValue, value)) {
+  if (hasOwnLeaf && valueEqual(previousValue, value)) {
     return { ok: { root: newRoot, previousValue, changed: false } };
   }
   obj[leafKey] = value;

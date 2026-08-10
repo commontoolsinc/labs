@@ -1364,8 +1364,16 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
       const button = document.createElement("button");
       button.id = "click-target";
       button.textContent = "click";
-      button.style.width = "100px";
-      button.style.height = "30px";
+      // Pinned so the click point is arithmetic on a known rect rather than
+      // on wherever the default layout put the control.
+      Object.assign(button.style, {
+        position: "fixed",
+        left: "60px",
+        top: "60px",
+        width: "100px",
+        height: "30px",
+        margin: "0",
+      });
       button.addEventListener("click", () => {
         document.body.dataset.clicked = "yes";
       });
@@ -1383,30 +1391,9 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
       "yes",
     );
 
-    const content = [
-      { x: 160, y: 60 },
-      { x: 200, y: 100 },
-      { x: 130, y: 160 },
-      { x: 70, y: 100 },
-    ];
-    const boxModel = {
-      border: content,
-      content,
-      height: 40,
-      margin: content,
-      padding: content,
-      width: 80,
-    };
-    Object.defineProperties(clickTarget, {
-      boxModel: {
-        configurable: true,
-        value: () => Promise.resolve(boxModel),
-      },
-      scrollIntoView: {
-        configurable: true,
-        value: () => Promise.resolve(),
-      },
-    });
+    // The click aims at the centre of the control's own rect, and an offset
+    // aims from the rect's top-left corner. Both are measured in the page, so
+    // the numbers come from the pinned control above.
     let mousePoint: { x: number; y: number } | undefined;
     Object.defineProperty(astralPage.mouse, "click", {
       configurable: true,
@@ -1416,12 +1403,12 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
       },
     });
     await clickTarget.click();
-    assertEquals(mousePoint, { x: 140, y: 105 });
-    assertEquals(clickPoints[1], { x: 140, y: 105 });
+    assertEquals(mousePoint, { x: 110, y: 75 });
+    assertEquals(clickPoints[1], { x: 110, y: 75 });
 
-    await clickTarget.click({ offset: { x: 0, y: 0 } });
-    assertEquals(mousePoint, { x: 160, y: 60 });
-    assertEquals(clickPoints[2], { x: 160, y: 60 });
+    await clickTarget.click({ offset: { x: 4, y: 6 } });
+    assertEquals(mousePoint, { x: 64, y: 66 });
+    assertEquals(clickPoints[2], { x: 64, y: 66 });
 
     const typeTarget = await page.waitForSelector("#type-target");
     await typeTarget.type("text");

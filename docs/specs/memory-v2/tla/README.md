@@ -99,7 +99,7 @@ or missed contributor directly.
   model therefore under-approximates the matcher and is a sound bug-finder
   for admission logic, but it does NOT check the matcher's own
   refinements — that is the differential harness's job
-  (`packages/memory/test/v2-differential-consistency-test.ts`).
+  (`packages/memory/test/v2-differential-consistency.test.ts`).
 - **Appends-only values.** The value of a path is the set of accepted writes
   to it. This makes observations mergeable (a reader through a stack observes
   base + every contributing layer, exactly the mergeable-collection-writes
@@ -131,4 +131,4 @@ the table above. Keep the existing modes — the violated configs are
 regression witnesses (they document *why* the current shape is what it is),
 not dead code. If TLC finds a violation in a mode expected to pass, the trace
 is the ticket: minimal, complete, and replayable against the real engine as a
-unit test (compare `packages/memory/test/v2-engine-test.ts` harness).
+unit test (compare `packages/memory/test/v2-engine.test.ts` harness).

@@ -7,24 +7,29 @@ to it. That script does the rest: it deploys the binaries that CI already built
 and uploaded for that commit. The shell is a static site rather than a server,
 and reaches its bucket another way; "The staging shell" below covers it.
 
-Three jobs do this:
+Two jobs do this:
 
 | Job | Workflow | Environment passed | Trigger |
 | --- | --- | --- | --- |
-| `deploy-toolshed` | `.github/workflows/deno.yml` | `DEPLOYMENT_ENVIRONMENT` variable | every push to `main` |
 | `deploy-rapids` | `.github/workflows/deno.yml` | `rapids`, written out in the step | every push to `main` |
 | `deploy-estuary` | `.github/workflows/deploy-production.yml` | `DEPLOYMENT_ENVIRONMENT` variable | manual dispatch, naming the ref to deploy |
 
-Two of those read the environment name from a repository variable rather than
-naming it. The value differs between them, because each job declares a
-different GitHub environment, and a variable of the same name is defined in
-each.
+The production job reads the environment name from a repository variable rather
+than naming it, because the variable is defined on the GitHub environment the
+job declares.
 
-Each of the two staging jobs waits on `attest-binaries`, because the script
-deploys binaries rather than building them. There is nothing for it to deploy
-until that job has uploaded the artifacts for the commit. The production job
-downloads those same artifacts itself, and fails with a message naming the
-commit if they are not there.
+The staging job waits on `attest-binaries`, because the script deploys binaries
+rather than building them. There is nothing for it to deploy until that job has
+uploaded the artifacts for the commit. The production job downloads those same
+artifacts itself, and fails with a message naming the commit if they are not
+there.
+
+Staging used to deploy to toolshed as well, from a `deploy-toolshed` job in
+`.github/workflows/deno.yml`. Toolshed has been decommissioned and rapids
+replaces it, so that job is gone and `deploy-rapids` is the only staging
+deploy. The `deploy-rapids` job still declares GitHub's `toolshed` environment,
+which is where its bastion credentials live; renaming that environment is a
+repository-settings change, and the job has to be updated in the same change.
 
 ## The wrapper is owned by another repository
 
@@ -62,7 +67,7 @@ bucket, which is served at <https://staging.commontools.dev/>. Each build also
 lands under `builds/<commit>/` so a page that is already open keeps the exact
 module graph it started with.
 
-The shell has to be told which toolshed to talk to, because it is served from a
+The shell has to be told which API host to talk to, because it is served from a
 different origin than the API it calls. The `STAGING_SHELL_API_URL` variable
 carries that host, and the build substitutes it into the bundle. It is a
 variable rather than a secret: the value ends up in a bundle that anyone can

@@ -392,7 +392,10 @@ const PARSE_ABORT =
   /SyntaxError|Expression expected|Declaration or statement expected|cannot be used outside of modules/;
 
 async function denoCheck(paths: string[]): Promise<{ code: number; out: string }> {
-  const { code, stdout, stderr } = await new Deno.Command("deno", {
+  // The Deno running this gate is the Deno that checks the blocks. Starting the
+  // program named `deno` would start whichever copy comes first on `PATH`, so
+  // the gate would type-check against a compiler that is not the pinned one.
+  const { code, stdout, stderr } = await new Deno.Command(Deno.execPath(), {
     args: ["check", "--frozen", ...paths],
     cwd: dirname(DOCS_DIR),
     stdout: "piped",

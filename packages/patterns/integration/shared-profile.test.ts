@@ -37,7 +37,7 @@ describe("shared profile integration test", () => {
       apiUrl: new URL(API_URL),
       identity,
     });
-    sharedSpaceDid = cc.manager().getSpace();
+    sharedSpaceDid = cc.getSpace();
 
     // Pre-create the space-root (default) pattern so each browser boot's
     // `pattern:getSpaceRoot` storage-RESUMEs it instead of taking the create
@@ -57,12 +57,12 @@ describe("shared profile integration test", () => {
       "main.tsx",
     );
     const rootPath = join(import.meta.dirname!, "..");
-    const program = await cc.manager().runtime.harness.resolve(
+    const program = await cc.runtime.harness.resolve(
       new FileSystemProgramResolver(sourcePath, rootPath),
     );
     const piece = await cc.create(program, { start: true });
     pieceId = piece.id;
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink(() => {});
   });
 

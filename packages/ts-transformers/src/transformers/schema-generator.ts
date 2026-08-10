@@ -22,7 +22,6 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
     const schemaGenerator = new SchemaGenerator();
     const { sourceFile, tsContext: transformation, checker } = context;
-    const { logger } = context.options;
     const { typeRegistry, schemaHints } = context.state;
     const writerIdentityForSourceFile = (fileName: string) => {
       const moduleIdentities = context.options.moduleIdentities;
@@ -85,11 +84,6 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
             checker,
             typeRegistry,
           );
-        }
-
-        if (logger) {
-          const typeText = getNodeText(schemaTypeArg);
-          logger(`[SchemaTransformer] Found toSchema<${typeText}>() call`);
         }
 
         const arg0 = node.arguments[0];

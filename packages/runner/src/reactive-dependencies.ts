@@ -141,6 +141,14 @@ export function determineTriggeredActions(
   const afterValues: FabricValue[] = [after];
 
   // *LastObject: Last key-able object along currentPath
+  //
+  // TODO(danfuzz): `isRecord` counts a `FabricSpecialObject` as key-able, so
+  // the descent below indexes into one: every key reads `undefined` (or, via
+  // the prototype chain, an accessor result) on both the before and after
+  // side, so a subscriber path continuing below a `FabricInstance` compares
+  // equal-by-vacancy and its action never triggers, however the instance's
+  // contents changed. The `shallowEqual` marker at the bottom of this file
+  // covers the leaf comparison; this is the descent's half of the same gap.
   let beforeLastObject = isRecord(before) ? 0 : -1;
   let afterLastObject = isRecord(after) ? 0 : -1;
 
