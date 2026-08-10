@@ -960,10 +960,20 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   #hasWrites = false;
 
-  private invalidateReadResultCache(): void {
-    // Every write funnels through here, which makes it the one place that can
-    // answer "has this transaction written anything yet".
+  /**
+   * Record that this transaction has written.
+   *
+   * Called from every write path rather than inferred from one of their side
+   * effects: a mergeable op and a folded SQLite write are both writes, and
+   * neither drops the read-result cache — the value write a mergeable op
+   * annotates has already done that, and a SQLite op changes no cell value
+   * locally. Deriving "has written" from cache invalidation would miss both.
+   */
+  private noteWrite(): void {
     this.#hasWrites = true;
+  }
+
+  private invalidateReadResultCache(): void {
     // A write may have changed any value a cached read depends on. Drop the
     // whole cache by replacing the map; this enforces
     // the "no writes between the last read and this one" invariant the cache
@@ -1557,6 +1567,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
     this.assertWritable("recordMergeableOp");
+    this.noteWrite();
     const address = toMemorySpaceAddress(link);
     // Same S18 chokepoint as write()/writeOrThrow(): a mergeable op IS a
     // write. The ["cfc"]-path arm is structurally unreachable here (a
@@ -1583,6 +1594,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // A folded SQLite write is a write — honor the wrapper's read-only mode the
     // same way cell writes do, instead of silently recording it.
     this.assertWritable("recordSqliteWrite");
+    this.noteWrite();
     if (!this.tx.recordSqliteWrite) {
       throw new Error(
         "storage transaction does not support recordSqliteWrite()",
@@ -1681,6 +1693,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): Result<IAttestation, WriteError | WriterError> {
     this.assertWritable("write()");
+    this.noteWrite();
     this.noteSystemWrite(address);
     this.noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
@@ -1696,6 +1709,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): void {
     this.assertWritable("writeOrThrow()");
+    this.noteWrite();
     this.noteSystemWrite(address);
     this.noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
@@ -1790,6 +1804,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     >,
   ): void {
     this.assertWritable("writeValuesOrThrow()");
+    this.noteWrite();
     this.invalidateReadResultCache();
     if (this.tx.writeBatch) {
       // Keep the batch path on the same noteSystemWrite chokepoint as single

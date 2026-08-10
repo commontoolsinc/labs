@@ -326,19 +326,25 @@ export function materializeSchemaView(
     return mismatch("no branch of the schema matches this value");
   }
 
-  const asCellValues = ContextualFlowControl.getAsCellValues(schema);
-  if (asCellValues.length > 0) {
+  if (ContextualFlowControl.getAsCellValues(schema).length > 0) {
     // `validateAndTransform` dispatches `asCell` before handing over, but only
     // on what it can see at the top of the schema. Narrowing a union against
     // the value can surface a branch that declares one, and the reader is owed
     // the same handle either route would have produced.
-    return createCell(
+    //
+    // Hand it back rather than minting one here. Minting a handle is where the
+    // consumed `asCell` marker is unwrapped off the handle's own schema and
+    // where the follow-scope cap is applied — a read THROUGH the handle is
+    // exactly the hop that cap bounds — and that belongs in one place. Passing
+    // the narrowed schema back means the dispatch sees the marker it could not
+    // see before and takes that path; it returns the handle without arriving
+    // here again, so this does not recur.
+    return validateAndTransform(
       runtime,
-      { ...link, schema },
       tx,
-      synced,
-      ContextualFlowControl.getAsCellKind(asCellValues.at(0)),
-      cfcLabelView,
+      { link: { ...link, schema }, cfcLabelView },
+      [],
+      { synced, mismatchThrows: !isRoot, viewChild: true },
     );
   }
 
