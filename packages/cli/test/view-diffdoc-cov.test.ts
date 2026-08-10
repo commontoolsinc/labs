@@ -1,8 +1,9 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import type { DiffLine, DiffModel } from "../lib/view/diff.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import {
+  _internal,
   buildDiffDocument,
   type DiffWorkspace,
   realWorkspace,
@@ -97,6 +98,83 @@ Deno.test("realWorkspace: text writes retain the encoding observed on read", () 
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
+});
+
+Deno.test("realWorkspace: an uncached write preserves the file's UTF-8 BOM", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.mkdirSync(join(root, ".git"));
+    const path = join(root, "value.json");
+    Deno.writeFileSync(
+      path,
+      new Uint8Array([
+        0xef,
+        0xbb,
+        0xbf,
+        ...new TextEncoder().encode('{"value": 1}\n'),
+      ]),
+    );
+
+    realWorkspace(root).write!(path, '{"value": 2}\n');
+
+    assertEquals(
+      Deno.readFileSync(path),
+      new Uint8Array([
+        0xef,
+        0xbb,
+        0xbf,
+        ...new TextEncoder().encode('{"value": 2}\n'),
+      ]),
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("realWorkspace: writes reject paths outside the workspace", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.mkdirSync(join(root, ".git"));
+    assertThrows(
+      () => realWorkspace(root).write!(join(root, "..", "outside.ts"), "x"),
+      Error,
+      "Cannot write outside the workspace",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("realWorkspace: writes reject named and detected binary files", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.mkdirSync(join(root, ".git"));
+    const named = join(root, "asset.png");
+    Deno.writeTextFileSync(named, "printable bytes\n");
+    const detected = join(root, "asset.data");
+    Deno.writeFileSync(detected, new Uint8Array([0x41, 0x00, 0x42]));
+    const ws = realWorkspace(root);
+
+    assertThrows(
+      () => ws.write!(named, "replacement"),
+      Error,
+      "Binary data is shown as a hex dump",
+    );
+    assertThrows(
+      () => ws.write!(detected, "replacement"),
+      Error,
+      "Binary data is shown as a hex dump",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("Git batch parsing skips objects that are not blobs", () => {
+  const object = "a".repeat(40);
+  const output = new TextEncoder().encode(`${object} tree 3\nabc\n`);
+
+  assertEquals(_internal.parseGitBatchOutput([object], output), new Map());
 });
 
 Deno.test("realWorkspace: resolve of a bounded directory falls through to null", () => {

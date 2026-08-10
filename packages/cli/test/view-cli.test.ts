@@ -65,6 +65,41 @@ Deno.test("cf view --plain --line-numbers prefixes lines with numbers", async ()
   );
 });
 
+Deno.test("cf view preserves a UTF-8 BOM when formatting redirected text", async () => {
+  const dir = Deno.makeTempDirSync();
+  try {
+    const path = join(dir, "value.txt");
+    const bom = new Uint8Array([0xef, 0xbb, 0xbf]);
+    Deno.writeFileSync(
+      path,
+      new Uint8Array([...bom, ...new TextEncoder().encode("value\n")]),
+    );
+    const result = await new Deno.Command(Deno.execPath(), {
+      cwd: join(import.meta.dirname!, ".."),
+      args: [
+        "task",
+        "cli-no-pwd-override",
+        "view",
+        "--plain",
+        "--line-numbers",
+        "--color",
+        "never",
+        path,
+      ],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+
+    assertEquals(result.code, 0, new TextDecoder().decode(result.stderr));
+    assertEquals(result.stdout.subarray(0, 3), bom);
+    assert(
+      new TextDecoder().decode(result.stdout.subarray(3)).includes("1 value"),
+    );
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
+  }
+});
+
 Deno.test("cf view --plain without --line-numbers has no number gutter", async () => {
   const { code, stdout } = await cf("view --plain --color never", {
     stdin: SRC,

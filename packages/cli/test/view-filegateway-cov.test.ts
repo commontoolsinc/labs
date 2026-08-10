@@ -4,9 +4,9 @@
  * the actual disk so every branch — successful reads, the catch arms when a
  * path does not exist, and the symlink-resolving directory check — runs.
  */
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
-import { realFileGateway } from "../lib/view/filegateway.ts";
+import { _internal, realFileGateway } from "../lib/view/filegateway.ts";
 import { MAX_BINARY_VIEW_BYTES } from "../lib/view/languages/binary/binary.ts";
 
 /** Make a fresh temp directory and ensure it is removed after `fn` runs. */
@@ -18,6 +18,14 @@ async function withTempDir(
     await fn(dir);
   } finally {
     await Deno.remove(dir, { recursive: true });
+  }
+}
+
+function removeIfPresent(path: string): void {
+  try {
+    Deno.removeSync(path);
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
   }
 }
 
@@ -180,6 +188,90 @@ Deno.test("realFileGateway.open: bounds a large binary preview", async () => {
     assert(rendered?.lines.at(-2)?.text.includes("16 bytes omitted"));
     assertEquals(rendered?.lines.at(-1)?.text, "00040010");
   });
+});
+
+Deno.test("realFileGateway.open: spools and restores large text files", async () => {
+  await withTempDir((dir) => {
+    const path = join(dir, "large.data");
+    const bytes = new Uint8Array(
+      MAX_BINARY_VIEW_BYTES + 2 * 64 * 1024,
+    ).fill(0x41);
+    Deno.writeFileSync(path, bytes);
+
+    const opened = realFileGateway().open(path);
+
+    assert(opened !== null);
+    assertEquals(opened.text.length, bytes.length);
+    assertEquals(opened.text, "A".repeat(bytes.length));
+    assertEquals(opened.source.editable, true);
+  });
+});
+
+Deno.test("realFileGateway.open: detects truncated UTF-8 at EOF", async () => {
+  await withTempDir((dir) => {
+    const path = join(dir, "truncated.data");
+    const bytes = new Uint8Array([0x41, 0xe2]);
+    Deno.writeFileSync(path, bytes);
+
+    const opened = realFileGateway().open(path);
+
+    assert(opened !== null);
+    assertEquals(opened.source.editable, false);
+    assertEquals(
+      [...opened.text].map((value) => value.charCodeAt(0)),
+      [...bytes],
+    );
+  });
+});
+
+Deno.test("realFileGateway.open: removes a spool whose open fails", async () => {
+  await withTempDir((dir) => {
+    const path = join(dir, "large.data");
+    Deno.writeFileSync(
+      path,
+      new Uint8Array(MAX_BINARY_VIEW_BYTES + 1).fill(0x41),
+    );
+    const makeTempFileSync = Deno.makeTempFileSync;
+    const openSync = Deno.openSync;
+    let spoolPath: string | undefined;
+    try {
+      (Deno as { makeTempFileSync: typeof Deno.makeTempFileSync })
+        .makeTempFileSync = (options) => {
+          spoolPath = makeTempFileSync(options);
+          return spoolPath;
+        };
+      (Deno as { openSync: typeof Deno.openSync }).openSync = (
+        candidate,
+        options,
+      ) => {
+        if (candidate === spoolPath) throw new Error("spool open failed");
+        return openSync(candidate, options);
+      };
+
+      assertEquals(realFileGateway().open(path), null);
+      assert(spoolPath !== undefined);
+      assertThrows(() => Deno.statSync(spoolPath!), Deno.errors.NotFound);
+    } finally {
+      (Deno as { makeTempFileSync: typeof Deno.makeTempFileSync })
+        .makeTempFileSync = makeTempFileSync;
+      (Deno as { openSync: typeof Deno.openSync }).openSync = openSync;
+      if (spoolPath !== undefined) {
+        removeIfPresent(spoolPath);
+      }
+    }
+  });
+});
+
+Deno.test("file gateway spool writes reject a writer that makes no progress", () => {
+  assertThrows(
+    () =>
+      _internal.writeAllSync(
+        { writeSync: () => 0 } as unknown as Deno.FsFile,
+        new Uint8Array([1]),
+      ),
+    Error,
+    "temporary file accepted no bytes",
+  );
 });
 
 Deno.test({

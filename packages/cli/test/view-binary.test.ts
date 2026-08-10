@@ -6,7 +6,11 @@ import {
   MAX_BINARY_VIEW_BYTES,
   renderBinaryLines,
 } from "../lib/view/languages/binary/binary.ts";
-import { rawBytesDecoder, utf8Decoder } from "../lib/view/languages/decoder.ts";
+import {
+  rawBytesDecoder,
+  Utf8BinaryProbe,
+  utf8Decoder,
+} from "../lib/view/languages/decoder.ts";
 import {
   canRenderDiffLines,
   renderedLinesFor,
@@ -35,6 +39,17 @@ Deno.test("language decoders: UTF-8 and raw bytes round-trip their input", () =>
   assertEquals(decodedBom.text, "A");
   assertEquals(decodedBom.hasUtf8Bom, true);
   assertEquals(decodedBom.encode(decodedBom.text), bom);
+});
+
+Deno.test("binary detection remains decided and rejects truncated UTF-8 at EOF", () => {
+  const nul = new Utf8BinaryProbe();
+  assertEquals(nul.write(new Uint8Array([0])), true);
+  assertEquals(nul.write(new TextEncoder().encode("later text")), true);
+  assertEquals(nul.finish(), true);
+
+  const truncated = new Utf8BinaryProbe();
+  assertEquals(truncated.write(new Uint8Array([0xe2])), false);
+  assertEquals(truncated.finish(), true);
 });
 
 Deno.test("binary language: renders canonical hex rows with control pictures", () => {
@@ -134,6 +149,28 @@ Deno.test("binary language: bounds rendered previews and reports omitted bytes",
   assertEquals(lines.at(-1)?.text, "00040010");
 });
 
+Deno.test("binary language: marks an incomplete preview without inventing a size", () => {
+  const lines = renderBinaryLines("ABC", {
+    byteLength: 3,
+    complete: false,
+  });
+
+  assertEquals(lines.length, 2);
+  assert(lines[0].text.endsWith("|ABC|"));
+  assertEquals(
+    lines[1].text,
+    "00000003  … preview stopped; total byte count unavailable …",
+  );
+});
+
+Deno.test("binary language: rejects strings that cannot represent raw bytes", () => {
+  assertThrows(
+    () => renderBinaryLines("Aλ"),
+    TypeError,
+    "non-byte code unit at offset 1",
+  );
+});
+
 Deno.test("binary language: its independent layout cannot toggle to source", () => {
   const view = buildView(new Uint8Array(512).fill(0), "payload.data");
   const session = new Session(
@@ -231,4 +268,16 @@ Deno.test("redirected output completes short writes", () => {
   }, new Uint8Array([1, 2, 3, 4, 5]));
 
   assertEquals(written, [1, 2, 3, 4, 5]);
+});
+
+Deno.test("redirected output rejects a writer that makes no progress", () => {
+  assertThrows(
+    () =>
+      viewInternals.writeAllSync(
+        { writeSync: () => 0 },
+        new Uint8Array([1]),
+      ),
+    Error,
+    "stdout accepted no bytes",
+  );
 });

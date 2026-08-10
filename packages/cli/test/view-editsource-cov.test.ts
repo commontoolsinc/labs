@@ -10,6 +10,7 @@ import {
   readonlySource,
   shortName,
 } from "../lib/view/editsource.ts";
+import { binaryLanguage } from "../lib/view/languages/binary/language.ts";
 
 Deno.test("fileSource.dirtyLabels: empty when unchanged, the filename when changed", () => {
   const src = fileSource("/tmp/some/dir/example.ts");
@@ -78,6 +79,25 @@ Deno.test("fileSource.revert: keeps an in-range cursor unchanged", () => {
   const current = "one\ntwo\nCHANGED\nfour\n";
   const reverted = src.revert(original, current, 1, "chunk");
   assertEquals(reverted, { text: original, cursorLine: 1 });
+});
+
+Deno.test("fileSource.save: a read-only language leaves the file unchanged", () => {
+  const dir = Deno.makeTempDirSync();
+  const path = `${dir}/payload.data`;
+  const bytes = new Uint8Array([0x41, 0x00, 0xff]);
+  try {
+    Deno.writeFileSync(path, bytes);
+    const source = fileSource(path, binaryLanguage);
+
+    assertEquals(source.editable, false);
+    assertEquals(
+      source.save("replacement"),
+      "Binary data is shown as a hex dump and cannot be edited.",
+    );
+    assertEquals(Deno.readFileSync(path), bytes);
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
+  }
 });
 
 Deno.test("readonlySource.parse: parses text into a Document without a path", () => {

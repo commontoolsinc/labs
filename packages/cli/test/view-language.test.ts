@@ -8,9 +8,11 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import {
+  decodeLanguageInput,
   diffSemanticsFor,
   distinctLanguages,
   indexLanguagesByName,
+  type Language,
   languageForFile,
   languageForInput,
   languageForName,
@@ -22,6 +24,10 @@ import {
   metadataMatchesFilename,
   renderedLinesFor,
 } from "../lib/view/languages/language.ts";
+import {
+  type LanguageDecoder,
+  rawBytesDecoder,
+} from "../lib/view/languages/decoder.ts";
 import { typeScriptLanguage } from "../lib/view/languages/typescript/language.ts";
 import { markdownLanguage } from "../lib/view/languages/markdown/language.ts";
 import { jsonLanguage } from "../lib/view/languages/json/language.ts";
@@ -154,6 +160,41 @@ Deno.test("languageForInput: binary bytes precede implicit text selection", () =
     ),
     pythonLanguage,
   );
+});
+
+Deno.test("decodeLanguageInput: decoder failures use the byte-language fallback", () => {
+  const textInput = plainTextLanguage.input;
+  assertEquals(textInput.kind, "text");
+  const mutableTextInput = textInput as { decoder: LanguageDecoder };
+  const textDecoder = mutableTextInput.decoder;
+  const mutableBinaryLanguage = binaryLanguage as { input: Language["input"] };
+  const binaryInput = mutableBinaryLanguage.input;
+  const bytes = new TextEncoder().encode("valid UTF-8");
+  mutableTextInput.decoder = {
+    ...textDecoder,
+    decode: () => {
+      throw new TypeError("selected decoder rejected input");
+    },
+  };
+
+  try {
+    const fallback = decodeLanguageInput("notes.txt", bytes);
+    assertEquals(fallback.language, binaryLanguage);
+    assertEquals(fallback.source.encode(fallback.source.text), bytes);
+
+    mutableBinaryLanguage.input = {
+      kind: "text",
+      decoder: rawBytesDecoder,
+    };
+    assertThrows(
+      () => decodeLanguageInput("notes.txt", bytes),
+      TypeError,
+      "No byte language available",
+    );
+  } finally {
+    mutableBinaryLanguage.input = binaryInput;
+    mutableTextInput.decoder = textDecoder;
+  }
 });
 
 Deno.test("language names reject ambiguous identifiers and aliases", () => {

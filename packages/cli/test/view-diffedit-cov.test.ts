@@ -695,6 +695,47 @@ Deno.test("diffedit cov: deferred parsing preserves optional blob readers", () =
   }
 });
 
+Deno.test("diffedit cov: deferred parsing preserves blob BOM metadata", () => {
+  const file = ["const value = `", "before", "`;", ""].join("\n");
+  const oldFile = ["const value = `", "old", "`;", ""].join("\n");
+  const diff = [
+    "diff --git a/template.ts b/template.ts",
+    "index 1111111..2222222 100644",
+    "--- a/template.ts",
+    "+++ b/template.ts",
+    "@@ -2 +2 @@",
+    "-old",
+    "+before",
+    "",
+  ].join("\n");
+  const { root, done } = tempWs({ "template.ts": file });
+  let bomCalls = 0;
+  try {
+    const ws: DiffWorkspace = {
+      resolve: (path) => join(root, path),
+      read: (path) => Deno.readTextFileSync(path),
+      readBlob: () => oldFile,
+      blobHasUtf8Bom: () => {
+        bomCalls++;
+        return true;
+      },
+    };
+    const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+    const source = diffSource(ws, built.edit);
+    bomCalls = 0;
+
+    const reparsed = source.parse(diff.replace("+before", "+after"));
+
+    assert(bomCalls > 0, "the deferred parse reads the old blob's BOM state");
+    assert(
+      reparsed.lines.some((line) => line.text === "+after"),
+      "the edited diff remains parseable",
+    );
+  } finally {
+    done();
+  }
+});
+
 Deno.test("diffedit cov: the highlighter recolours a Markdown body line via the +++ header scan", () => {
   // Seed-less so the highlighter renders every line itself, then edit a body
   // line whose nearest preceding header is `+++ b/doc.md` — exercising the

@@ -539,3 +539,10 @@ async function* readOpenFileChunks(
     yield buffer.subarray(0, read);
   }
 }
+
+export const _internal = {
+  captureInput,
+  fileChunkSource,
+  openFileChunkSource,
+  writeAll,
+};

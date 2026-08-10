@@ -293,3 +293,5 @@ function isDir(dir: string, e: Deno.DirEntry): boolean {
     return false;
   }
 }
+
+export const _internal = { writeAllSync };
