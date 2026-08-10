@@ -125,11 +125,13 @@ describe("space-host", () => {
           }).protocol,
         ).toBe("http:");
       }
-      expect(
-        spaceHostFromFabricAuthority("route.example:8787", {
-          useLoopbackHttp: true,
-        }).protocol,
-      ).toBe("https:");
+      for (const authority of ["route.example:8787", "route.example.:8787"]) {
+        expect(
+          spaceHostFromFabricAuthority(authority, {
+            useLoopbackHttp: true,
+          }).protocol,
+        ).toBe("https:");
+      }
       expect(
         spaceHostFromFabricAuthority("localhost:443", {
           useLoopbackHttp: true,
