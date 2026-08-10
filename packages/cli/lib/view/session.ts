@@ -66,7 +66,7 @@ import {
   type FoldPlan,
   identityFold,
 } from "./fold.ts";
-import { parseDiff } from "./diff.ts";
+import { type DiffHunk, type DiffModel, parseDiff } from "./diff.ts";
 import {
   commitSubjects,
   findCommitHeaders,
@@ -2522,19 +2522,19 @@ export class Session {
     if (!this.canResurrectRemovedLine()) return false;
     const b = this.buffer!;
     const targetRow = b.row;
-    const hunkHeader = this.hunkHeaderAt(b.row);
+    const parsed = this.parsedHunkAt(b.row);
+    const hunkHeader = parsed?.hunk.headerLine ?? null;
     const line = b.lines[b.row];
-    const model = parseDiff(b.text());
-    const oldHasUtf8Bom = model?.lines[b.row]?.oldLine === 0 &&
+    const oldHasUtf8Bom = parsed?.model.lines[b.row]?.oldLine === 0 &&
       line[1] === "\uFEFF";
     const newHasUtf8Bom = this.source?.policy?.hasUtf8Bom?.(
       b.lines,
       b.row,
     ) === true;
-    const carriesNewUtf8Bom = newHasUtf8Bom &&
-      !this.hasNewSideBefore(b.row, hunkHeader);
-    const newSideBom = carriesNewUtf8Bom
-      ? this.newSideBomCarrier(hunkHeader)
+    const carriesNewUtf8Bom = newHasUtf8Bom && parsed !== null &&
+      this.newSideInsertionLine(parsed.model, parsed.hunk, b.row) === 0;
+    const newSideBom = carriesNewUtf8Bom && parsed
+      ? this.newSideBomCarrier(parsed.model, parsed.hunk)
       : null;
     if (!this.adjustHunkCounts(0, 1, hunkHeader)) {
       this.message = "This hunk could not be updated.";
@@ -2600,12 +2600,20 @@ export class Session {
   /** The parsed hunk containing a body row. Structural lookup keeps body text
    * such as `--- prior` and `+++ next` from being mistaken for file headers. */
   private hunkHeaderAt(row: number): number | null {
+    return this.parsedHunkAt(row)?.hunk.headerLine ?? null;
+  }
+
+  /** The parsed hunk containing a body row. */
+  private parsedHunkAt(
+    row: number,
+  ): { model: DiffModel; hunk: DiffHunk } | null {
     if (!this.buffer) return null;
     const model = parseDiff(this.buffer.text());
-    for (const file of model?.files ?? []) {
+    if (!model) return null;
+    for (const file of model.files) {
       for (const hunk of file.hunks) {
         if (row > hunk.headerLine && row <= hunk.endLine) {
-          return hunk.headerLine;
+          return { model, hunk };
         }
       }
     }
@@ -2613,44 +2621,32 @@ export class Session {
   }
 
   /** The first new-side line carrying the file's decoded UTF-8 BOM. */
-  private newSideBomCarrier(hunkHeader: number | null): number | null {
-    if (!this.buffer || hunkHeader === null) return null;
-    const lines = this.buffer.lines;
-    const model = parseDiff(this.buffer.text());
-    for (const file of model?.files ?? []) {
-      const hunk = file.hunks.find((candidate) =>
-        candidate.headerLine === hunkHeader
-      );
-      if (!hunk) continue;
-      for (let row = hunk.headerLine + 1; row <= hunk.endLine; row++) {
-        const kind = model!.lines[row]?.kind;
-        if (
-          (kind === "ctx" || kind === "add") &&
-          model!.lines[row]?.newLine === 0 &&
-          this.source?.policy?.editStart(lines, row) === 2
-        ) {
-          return row;
-        }
+  private newSideBomCarrier(model: DiffModel, hunk: DiffHunk): number | null {
+    for (let row = hunk.headerLine + 1; row <= hunk.endLine; row++) {
+      const kind = model.lines[row]?.kind;
+      if (
+        (kind === "ctx" || kind === "add") &&
+        model.lines[row]?.newLine === 0 &&
+        this.buffer?.lines[row]?.[1] === "\uFEFF"
+      ) {
+        return row;
       }
     }
     return null;
   }
 
-  /** Whether a hunk has a new-side line before `row`. */
-  private hasNewSideBefore(row: number, hunkHeader: number | null): boolean {
-    if (!this.buffer || hunkHeader === null) return false;
-    const model = parseDiff(this.buffer.text());
-    for (const file of model?.files ?? []) {
-      const hunk = file.hunks.find((candidate) =>
-        candidate.headerLine === hunkHeader
-      );
-      if (!hunk) continue;
-      for (let candidate = hunk.headerLine + 1; candidate < row; candidate++) {
-        const kind = model!.lines[candidate]?.kind;
-        if (kind === "ctx" || kind === "add") return true;
-      }
+  /** The new-file line where a removed row would be inserted. */
+  private newSideInsertionLine(
+    model: DiffModel,
+    hunk: DiffHunk,
+    row: number,
+  ): number {
+    let line = hunk.newCount === 0 ? hunk.newStart : hunk.newStart - 1;
+    for (let candidate = hunk.headerLine + 1; candidate < row; candidate++) {
+      const kind = model.lines[candidate]?.kind;
+      if (kind === "ctx" || kind === "add") line++;
     }
-    return false;
+    return line;
   }
 
   /** Grow or shrink a parsed hunk header after its body changes. A zero-count
@@ -2789,7 +2785,8 @@ export class Session {
       b.deleteBackward();
       return this.afterEdit();
     }
-    if (b.currentLineLength() <= start && b.row > 0) {
+    const transportWidth = b.lines[b.row].endsWith("\r") ? 1 : 0;
+    if (b.currentLineLength() - transportWidth <= start && b.row > 0) {
       this.removeDiffLine(start);
       return this.afterEdit();
     }
@@ -2802,11 +2799,12 @@ export class Session {
   private removeDiffLine(markerLen: number): void {
     const b = this.buffer!;
     const marker = b.lines[b.row][0] ?? "";
+    const transportWidth = b.lines[b.row].endsWith("\r") ? 1 : 0;
     const hunkHeader = this.hunkHeaderAt(b.row);
     this.transferProtectedPrefix(markerLen, hunkHeader);
     b.place(b.row, 0);
     b.deleteBackward(); // join into the previous line
-    for (let i = 0; i < markerLen; i++) b.deleteForward(); // drop the marker
+    for (let i = 0; i < markerLen + transportWidth; i++) b.deleteForward();
     this.adjustHunkCounts(
       marker === " " || marker === "-" ? -1 : 0,
       marker === " " || marker === "+" ? -1 : 0,

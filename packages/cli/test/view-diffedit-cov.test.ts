@@ -1187,6 +1187,57 @@ describe("binary and BOM diff edits", () => {
     }
   });
 
+  it("does not add a BOM when resurrecting a later file line", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(
+        path,
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...encoder.encode("first\nreplacement\nthird\n"),
+        ]),
+      );
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -2 +2 @@
+-second
++replacement
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 4;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "r", char: "r" });
+
+      expect(session.doc.lines[4].text).toBe(" second");
+      session.handleKey({ name: "f3" });
+      expect(session.view().message).toBe("Saved 1 file");
+      expect(Deno.readFileSync(path)).toEqual(
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...encoder.encode("first\nsecond\nreplacement\nthird\n"),
+        ]),
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
   it("splits a shared BOM carrier when resurrecting the first line", () => {
     const root = Deno.makeTempDirSync();
     try {
@@ -1380,6 +1431,19 @@ ${body}
             0xbb,
             0xbf,
             ...encoder.encode(testCase.expected),
+          ]),
+        );
+
+        session.handleKey({ name: "up" });
+        session.handleKey({ name: "home" });
+        session.handleKey({ name: "backspace" });
+        session.handleKey({ name: "f3" });
+        expect(Deno.readFileSync(path)).toEqual(
+          new Uint8Array([
+            0xef,
+            0xbb,
+            0xbf,
+            ...encoder.encode(testCase.fileText),
           ]),
         );
       } finally {
@@ -1624,6 +1688,61 @@ ${body}
           0xbb,
           0xbf,
           ...encoder.encode(`${bom}first\nsecond\nthird-edited\n`),
+        ]),
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("keeps a literal BOM when expansion moves it to file line zero", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const bom = "\uFEFF";
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(
+        path,
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...encoder.encode(`first\n${bom}second\n`),
+        ]),
+      );
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1 +1 @@
+-${bom}old
++${bom}first
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 5;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "home" });
+      session.handleKey({ name: "ctrl-k" });
+      session.handleKey({ name: "backspace" });
+      session.handleKey({ name: "ctrl-l" });
+
+      expect(session.doc.text).toContain(`-${bom}second\n+${bom}${bom}second`);
+      session.handleKey({ name: "f3" });
+      expect(session.view().message).toBe("Saved 1 file");
+      expect(Deno.readFileSync(path)).toEqual(
+        new Uint8Array([
+          0xef,
+          0xbb,
+          0xbf,
+          ...encoder.encode(`${bom}second\n`),
         ]),
       );
     } finally {

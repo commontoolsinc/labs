@@ -791,12 +791,8 @@ function expandContext(
   if (k <= 0) return null;
 
   const contextStart = up ? spliceStart(range) - k : downFrom;
-  const ctx = fileLines.slice(contextStart, contextStart + k).map(
-    (line, offset) =>
-      ` ${
-        contextStart + offset === 0 && range.newFileHasUtf8Bom ? "\uFEFF" : ""
-      }${line}`,
-  );
+  const revealedLines = fileLines.slice(contextStart, contextStart + k);
+  const ctx = expansionBodyLines(revealedLines, target, range, up);
   // Which file lines those are, counting from one, while `range` still holds
   // where the hunk started — growing it upwards moves that.
   const revealed = up
@@ -808,12 +804,13 @@ function expandContext(
   const baseHunks = parseDiff(baseline)?.files.flatMap((f) => f.hunks) ?? [];
   const baseHunk = baseHunks[index];
   if (!baseHunk) return null;
+  const baseCtx = expansionBodyLines(revealedLines, baseHunk, range, up);
   const text = applyExpansion(current, index, up, ctx, k, target.endLine + 1);
   const newBaseline = applyExpansion(
     baseline,
     index,
     up,
-    ctx,
+    baseCtx,
     k,
     baseHunk.endLine + 1,
   );
@@ -828,6 +825,7 @@ function expandContext(
   // The revealed lines land just after the hunk header (up) or just after its
   // last body line (down), both in current-text coordinates.
   const insertedAt = up ? target.headerLine + 1 : target.endLine + 1;
+  const insertedRows = ctx.length;
   // Those lines may have been the last between this hunk and its neighbour, in
   // which case the two now touch and the header between them describes nothing.
   // The header that goes is the one at the join: this hunk's own when the lines
@@ -837,7 +835,7 @@ function expandContext(
   // Where a line of the old text ends up: down by the lines that went in above
   // it, and back up over a header that is no longer between them.
   const moved = (n: number) =>
-    n + (n >= insertedAt ? k : 0) -
+    n + (n >= insertedAt ? insertedRows : 0) -
     (removedAt !== null && n > removedAt ? 1 : 0);
   // A cursor can rest on a hunk's header. When an upward reveal met the hunk
   // above and the two joined, that header is the one the join removed, so
@@ -858,11 +856,41 @@ function expandContext(
     // one in the body rides down ahead of them.
     cursorLine: cursorAfter,
     insertedAt,
-    inserted: k,
+    inserted: insertedRows,
     up,
     removedAt,
     revealed,
   };
+}
+
+/** Render revealed file lines at one hunk boundary. Encoding BOMs are visible
+ * markers on file line zero. When the old and new sides place that boundary at
+ * different file lines, a removed/added pair carries their separate markers. */
+function expansionBodyLines(
+  lines: readonly string[],
+  hunk: DiffHunk,
+  range: MutableHunk,
+  up: boolean,
+): string[] {
+  const oldStart = sideStart(hunk.oldStart, hunk.oldCount);
+  const newStart = sideStart(hunk.newStart, hunk.newCount);
+  const insertedOldStart = up
+    ? oldStart - lines.length
+    : oldStart + hunk.oldCount;
+  const insertedNewStart = up
+    ? newStart - lines.length
+    : newStart + hunk.newCount;
+  return lines.flatMap((line, offset) => {
+    const oldLine = `${
+      insertedOldStart + offset === 0 && range.oldFileHasUtf8Bom ? "\uFEFF" : ""
+    }${line}`;
+    const newLine = `${
+      insertedNewStart + offset === 0 && range.newFileHasUtf8Bom ? "\uFEFF" : ""
+    }${line}`;
+    return oldLine === newLine
+      ? [` ${newLine}`]
+      : [`-${oldLine}`, `+${newLine}`];
+  });
 }
 
 /** Take the `@@` header off the second of two hunks and give its counts to the
@@ -1721,6 +1749,7 @@ interface MutableHunk {
   newStart: number;
   newCount: number;
   verified: boolean;
+  oldFileHasUtf8Bom?: boolean;
   newFileHasUtf8Bom?: boolean;
   oldNoTrailingNewline?: boolean;
   newNoTrailingNewline?: boolean;
@@ -1744,7 +1773,12 @@ function canResurrect(hunk: MutableHunk): boolean {
 /** The zero-based workspace coordinate of a unified-diff new-side range. A
  * zero-count range names the line before its insertion point. */
 function spliceStart(hunk: Pick<MutableHunk, "newStart" | "newCount">): number {
-  return hunk.newCount === 0 ? hunk.newStart : hunk.newStart - 1;
+  return sideStart(hunk.newStart, hunk.newCount);
+}
+
+/** The zero-based file coordinate of either side of a unified-diff range. */
+function sideStart(start: number, count: number): number {
+  return count === 0 ? start : start - 1;
 }
 
 function rangesOverlap(a: MutableHunk, b: MutableHunk): boolean {
