@@ -65,8 +65,8 @@ describe("FabricMap", () => {
       });
     });
 
-    // FabricMap deliberately keeps throwing stubs for the protocol methods
-    // (per Dan's PR #3612 review: not yet used, reworked separately).
+    // The protocol methods are unimplemented stubs that throw, which these
+    // cases pin at both entry points: dispatch and direct invocation.
     describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
       it("via dispatch: `[DEEP_FREEZE]` throws not-yet-implemented", () => {
         const fm = new FabricMap(

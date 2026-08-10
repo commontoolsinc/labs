@@ -936,8 +936,10 @@ describe("schema-utils", () => {
   });
 
   describe("internPathSelector()", () => {
-    // Content-unique markers guarantee no prior interning has seen these
-    // schemas — avoids the flake shape Dan flagged on PR #3335.
+    // Interning is keyed by content and outlives any one case, so a schema
+    // another case already interned comes back as a hit, and these cases stop
+    // exercising the fresh-intern path they mean to. The unique `title`
+    // guarantees a miss.
     const uniqueSchema = (): JSONSchemaObj => ({
       type: "object",
       title: `internPathSelectorTestAt${Date.now()}-${Math.random()}`,

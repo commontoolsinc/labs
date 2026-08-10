@@ -78,8 +78,9 @@ describe("structural predicate narrowing", () => {
     });
 
     it("narrows `unknown` for `isPlainContainer()`", () => {
-      // This one narrowed before it was overloaded, so it is the only predicate
-      // here whose existing narrowing could have been *lost* rather than gained.
+      // `isPlainContainer()` is an overload pair, and an overload set can fail
+      // to narrow where a lone predicate does. This pins that `unknown` still
+      // narrows through it.
       const value: unknown = { a: 1 };
 
       if (isPlainContainer(value)) {

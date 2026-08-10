@@ -57,9 +57,9 @@ describe("value-clone", () => {
     });
 
     it("throws rather than overwrite a present non-container leaf with spine structure", () => {
-      // Apparently-unintentional inconsistency now surfaced: descending a write
-      // path *through* a present primitive used to silently clobber it with a
-      // fresh container.
+      // Descending a write path *through* a present non-container leaf would
+      // have to replace that leaf with a fresh container, discarding whatever
+      // it held. Refusing is what keeps the write from destroying it silently.
       expect(() =>
         cloneWithValueAtPath(deepFreeze({ a: "string" }), ["a", "b"], 1)
       )

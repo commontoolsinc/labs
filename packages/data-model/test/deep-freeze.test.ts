@@ -259,9 +259,9 @@ describe("deep-freeze", () => {
       });
 
       it("returns `false` for a partially-frozen `FabricInstance` (wrapper frozen but cause not)", () => {
-        // FabricError no longer has a wrapped-native-Error slot; the only
-        // recursing slot is `cause` (and any extras). Construct one whose
-        // `cause` is a mutable plain object, freeze only the wrapper.
+        // The recursing slots on a `FabricError` are `cause` and any extras.
+        // Construct one whose `cause` is a mutable plain object, and freeze
+        // only the wrapper.
         const err = new Error("partial", { cause: { mutable: true } });
         const fe = FabricError.fromNativeError(err);
         Object.freeze(fe);
@@ -324,12 +324,12 @@ describe("deep-freeze", () => {
 
         const result = deepFreeze(fe);
 
-        // Freeze-in-place: same identity, now deep-frozen (wrapper + wrapped
-        // Error + recursed cause).
+        // Freeze-in-place: same identity, deep-frozen across the wrapper and
+        // the recursed `cause`.
         expect(result).toBe(fe);
         expect(Object.isFrozen(fe)).toBe(true);
-        // (FabricError no longer has a wrapped Error slot to check directly;
-        // the native projection is lazy, and any built projection is frozen.)
+        // There is no wrapped-`Error` slot to check directly: the native
+        // projection is lazy, and any projection that gets built is frozen.
         expect(Object.isFrozen(inner)).toBe(true);
       });
 
@@ -339,17 +339,17 @@ describe("deep-freeze", () => {
         deepFreeze(container);
         expect(Object.isFrozen(container)).toBe(true);
         expect(Object.isFrozen(fe)).toBe(true);
-        // (FabricError no longer has a wrapped Error slot to check directly;
-        // the native projection is lazy, and any built projection is frozen.)
+        // There is no wrapped-`Error` slot to check directly: the native
+        // projection is lazy, and any projection that gets built is frozen.
       });
     });
   });
 
   describe("`isDeepFrozenFabricValue()` with `FabricInstance` (R6)", () => {
-    it("no longer throws on a `FabricInstance`; classifies via protocol", () => {
+    it("returns `false` without throwing for an unfrozen `FabricInstance`", () => {
       const fe = FabricError.fromNativeError(new Error("test"));
-      // Pre-freeze: not deep-frozen, but must NOT throw (the #3604
-      // `FabricInstance`-arm throw is retired).
+      // Two separate guarantees, hence two assertions: an unfrozen instance is
+      // classified rather than refused, and the classification is `false`.
       expect(() => isDeepFrozenFabricValue(fe)).not.toThrow();
       expect(isDeepFrozenFabricValue(fe)).toBe(false);
     });

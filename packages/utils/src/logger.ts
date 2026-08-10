@@ -797,9 +797,9 @@ export class Logger {
     }
   }
 
-  // ============================================================
-  // Timing Methods
-  // ============================================================
+  //
+  // Timing methods
+  //
 
   /**
    * Starts a timer for the given key path. Multiple segments name one path,
@@ -924,9 +924,9 @@ export class Logger {
     this._timingBaselineActive = false;
   }
 
-  // ============================================================
-  // Baseline Methods
-  // ============================================================
+  //
+  // Baseline methods
+  //
 
   /**
    * Resets the count baseline to the current counts, so that
@@ -973,9 +973,9 @@ export class Logger {
     };
   }
 
-  // ============================================================
-  // Flag Methods
-  // ============================================================
+  //
+  // Flag methods
+  //
 
   /**
    * Sets or clears the flag `name` for `id`. A flag is named boolean state
