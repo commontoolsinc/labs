@@ -1472,8 +1472,11 @@ function applyFragmentSpans(
   for (let i = 0; i < fragment.length; i++) {
     if (fragment[i].render === false) continue;
     const { diffLine } = fragment[i];
+    const decodedBom = fragment[i].omitsUtf8Bom === true ? "\uFEFF" : "";
     const lineText = rendered
-      ? `${rawLines[diffLine].slice(0, 1)}${displayed[i]?.text ?? ""}`
+      ? `${rawLines[diffLine].slice(0, 1)}${decodedBom}${
+        displayed[i]?.text ?? ""
+      }`
       : rawLines[diffLine];
     lines[diffLine].text = lineText;
     if (rendered && displayed[i]?.renderedSourceHidden) {
