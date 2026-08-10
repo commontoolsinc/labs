@@ -64,7 +64,8 @@ describe("findJsonUnfaithfulValues", () => {
   });
 
   it("catches a sparse array hole (becomes null)", () => {
-    // deno-lint-ignore no-sparse-arrays -- a hole is exactly what is under test.
+    // A hole is exactly what is under test.
+    // deno-lint-ignore no-sparse-arrays
     const holed = [1, , 3];
     const found = findJsonUnfaithfulValues({ default: holed });
     expect(found).toHaveLength(1);

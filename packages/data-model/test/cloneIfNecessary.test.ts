@@ -478,15 +478,16 @@ describe("cloneIfNecessary", () => {
   // Per-subclass coverage matrix.
   //
   // Systematically exercises every concrete `FabricInstance` and
-  // `FabricPrimitive` subclass in this package across the full `cloneIfNecessary`
-  // option matrix, and validates the result -- frozenness, identity preservation,
-  // observable state -- or that the call throws when a subclass's protocol
-  // implementation is a documented stub.
+  // `FabricPrimitive` subclass in this package across the full
+  // `cloneIfNecessary` option matrix, and validates the result -- frozenness,
+  // identity preservation, observable state -- or that the call throws when a
+  // subclass's protocol implementation is a documented stub.
   //
   // The point is twofold: (a) make sure existing subclasses behave consistently
   // under every option combination callers in production are likely to use, and
-  // (b) make sure any future subclass added to the package without full protocol
-  // coverage trips this matrix instead of silently breaking call sites.
+  // (b) make sure any future subclass added to the package without full
+  // protocol coverage trips this matrix instead of silently breaking call
+  // sites.
 
   /**
    * Describes what `cloneIfNecessary` is expected to do for a given subclass on

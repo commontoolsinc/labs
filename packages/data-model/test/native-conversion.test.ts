@@ -1348,7 +1348,8 @@ describe("native-conversion", () => {
         const outer = new Error("outer", { cause: inner });
         fabricFromNativeValue(outer);
 
-        // Original Error's cause should still be the raw Error, not FabricError.
+        // The original `Error`'s cause is still the raw `Error`, not a
+        // `FabricError`.
         expect(outer.cause).toBe(inner);
         expect(outer.cause).not.toBeInstanceOf(FabricError);
       });

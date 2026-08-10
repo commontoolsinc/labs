@@ -246,9 +246,10 @@ describe("JsonCodec", () => {
 
   describe("tagged-type round-trips through the full stack", () => {
     // Representative coverage that the encode→tag-wrap→decode mechanism works
-    // for the standalone-codec and primitive Fabric types, including nesting in
-    // arrays and objects. Per-codec encode/decode detail lives in each type's
-    // own unit test (e.g. `BigIntCodec.test.ts`, `FabricEpochNsec.test.ts`).
+    // for the standalone-codec and primitive Fabric types, including nesting
+    // in arrays and objects. Per-codec encode/decode detail lives in each
+    // type's own unit test (e.g. `BigIntCodec.test.ts`,
+    // `FabricEpochNsec.test.ts`).
 
     it("round-trips `undefined` at top level, in arrays, and as object values", () => {
       expect(roundTrip(undefined)).toBe(undefined);
@@ -723,7 +724,8 @@ describe("JsonCodec", () => {
       it("emits `/quote` for doubly-nested `/`-prefixed literal object (whole subtree is literal)", () => {
         const obj = { "/x": { "/y": 123 } };
         const wire = toWireFormat(obj);
-        // Whole subtree is deep-literal → single /quote wrap of original structure.
+        // Whole subtree is deep-literal, so it takes a single `/quote` wrap of
+        // the original structure.
         expect(wire).toEqual({
           "/quote": { "/x": { "/y": 123 } },
         });
@@ -741,7 +743,8 @@ describe("JsonCodec", () => {
           "/quote": { "/x": { "/y": 123 } },
         });
 
-        // Fabric type as value: /object with the epoch encoded as its tagged form.
+        // Fabric type as value: `/object` with the epoch encoded as its tagged
+        // form.
         const withEpoch = {
           "/x": new FabricEpochDays(42n),
         };
@@ -797,17 +800,18 @@ describe("JsonCodec", () => {
 
     describe("general", () => {
       it("malformed wire: multi-key object with `/`-prefixed key produces `ProblematicValue`", () => {
-        // Wire data without /quote or /object wrapper — decoder must not silently
-        // round-trip it as a plain object.
+        // Wire data without a `/quote` or `/object` wrapper: the decoder must
+        // not silently round-trip it as a plain object.
         const data = { a: 1, "/b": 2 } as JsonCodecValue;
         const result = fromWireFormat(data);
         expect(result).toBeInstanceOf(ProblematicValue);
       });
 
       it("malformed wire: bare `/`-keyed object produces `ProblematicValue`", () => {
-        // Per spec §9, a single-key object whose key is bare "/" (empty tag
-        // after stripping the leading slash) is an encoding error. Decoding must
-        // produce a ProblematicValue, not an UnknownValue with an empty tag.
+        // Per spec §9, a single-key object whose key is bare `/` (empty tag
+        // after stripping the leading slash) is an encoding error. Decoding
+        // must produce a `ProblematicValue`, not an `UnknownValue` with an
+        // empty tag.
         const data = { "/": "x" } as JsonCodecValue;
         const result = fromWireFormat(data);
         expect(result).toBeInstanceOf(ProblematicValue);
@@ -835,9 +839,10 @@ describe("JsonCodec", () => {
       });
 
       it("single-key `/`-prefixed object still routes through `unwrapTag()` (no regression)", () => {
-        // Single-key /Tag@N objects are handled by unwrapTag, not the plain-object
-        // path — confirm they still produce UnknownValue (unrecognized tag), not
-        // ProblematicValue from the new multi-key guard.
+        // Single-key `/Tag@N` objects are handled by `unwrapTag()` rather than
+        // the plain-object path, so they produce an `UnknownValue` for the
+        // unrecognized tag and never reach the multi-key guard's
+        // `ProblematicValue`.
         const data = { "/Future@7": { id: "x" } } as JsonCodecValue;
         const result = fromWireFormat(data);
         expect(result).toBeInstanceOf(UnknownValue);
@@ -847,18 +852,19 @@ describe("JsonCodec", () => {
       });
 
       it("decoder strips exactly one `/quote` layer — inner `/quote` is preserved literally", () => {
-        // Wire form { "/quote": { "/quote": "x" } } is a /quote-wrapped literal
-        // whose content happens to be { "/quote": "x" }. Decoding must return
-        // { "/quote": "x" } as a frozen plain object — NOT recurse into it and
-        // return just "x".
+        // The wire form `{"/quote": {"/quote": "x"}}` is a `/quote`-wrapped
+        // literal whose content happens to be `{"/quote": "x"}`. Decoding must
+        // return that inner object as a frozen plain object, and must _not_
+        // recurse into it and return just `x`.
         const wire = { "/quote": { "/quote": "x" } } as JsonCodecValue;
         const result = fromWireFormat(wire) as Record<string, FabricValue>;
         expect(result["/quote"]).toBe("x");
       });
 
       it("round-trips object whose value is a `/quote`-keyed literal", () => {
-        // { "/x": { "/quote": "inner" } } — the value at "/x" is user data that
-        // happens to have a /quote key. Must survive encode→decode intact.
+        // In `{"/x": {"/quote": "inner"}}`, the value at `/x` is user data
+        // that happens to have a `/quote` key. It must survive encode and
+        // decode intact.
         const obj = { "/x": { "/quote": "inner" } };
         const result = roundTrip(obj) as Record<
           string,
@@ -1081,7 +1087,8 @@ describe("JsonCodec", () => {
     it("allows shared references (same object at multiple positions)", () => {
       const shared = { val: 42 };
       const obj = { a: shared, b: shared };
-      // Should not throw -- shared references are fine, only cycles are rejected.
+      // Should not throw -- shared references are fine, and only cycles are
+      // rejected.
       const result = toWireFormat(obj);
       expect(result).toEqual({ a: { val: 42 }, b: { val: 42 } });
     });
@@ -1236,14 +1243,12 @@ describe("JsonCodec", () => {
     // results: `decode()` (string path) and `decodeFromBytes()` (bytes path
     // via `fromBytes()`).
     //
-    // Regression guard: the `/quote` arm does `return state`, handing back a
-    // node lifted straight out of the parsed codec-value tree (see `unwrapTag`'s
-    // contract). That shortcut is only sound because the parsed tree is
-    // deep-frozen at construction. `fromBytes()` has always done this;
-    // `decode()` once did NOT (it parsed inline without `deepFreeze()`), so a
-    // tweak that removed the `/quote` arm's own `deepFreeze()` made
-    // string-path `/quote` results come back mutable. These tests pin the
-    // symmetry so neither construction site can silently drop the guarantee.
+    // The `/quote` arm does `return state`, handing back a node lifted straight
+    // out of the parsed codec-value tree (see `unwrapTag()`'s contract). That
+    // shortcut is sound only because the parsed tree is deep-frozen at
+    // construction, which both construction sites must therefore do. These
+    // cases pin the symmetry, so that dropping the guarantee at either one
+    // cannot pass unnoticed.
 
     /**
      * Decodes the same codec-value tree both ways. The string path needs the
@@ -1456,8 +1461,10 @@ describe("JsonCodec", () => {
       expect(result.code).toBe(500);
     });
 
-    it("wire format is unchanged (backward compatible)", () => {
-      // FabricError should produce the same wire format as the old ErrorHandler.
+    it("encodes a `FabricError` as `/Error@1` carrying `type` and `message`", () => {
+      // The `@1` in the tag makes this a versioned wire surface, so the exact
+      // shape asserted below is the contract rather than an implementation
+      // detail.
       const se = FabricError.fromNativeError(new TypeError("compat test"));
       const serialized = toWireFormat(
         se,

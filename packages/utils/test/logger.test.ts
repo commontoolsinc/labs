@@ -1714,10 +1714,10 @@ describe("logger", () => {
         expect(stats?.min).toBe(1);
         expect(stats?.max).toBe(2000);
 
-        // Percentiles should still be approximately correct due to reservoir sampling
-        // With 2000 samples uniformly distributed 1-2000:
-        // p50 should be around 1000, p95 should be around 1900
-        // Allow wider margin due to random sampling
+        // Reservoir sampling keeps the percentiles approximately correct. With
+        // 2000 samples distributed uniformly over 1-2000, p50 lands around
+        // 1000 and p95 around 1900; the margins below are wide enough to
+        // absorb the sampling randomness.
         expect(stats?.p50).toBeGreaterThan(500);
         expect(stats?.p50).toBeLessThan(1500);
         expect(stats?.p95).toBeGreaterThan(1500);

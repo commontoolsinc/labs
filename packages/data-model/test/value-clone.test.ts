@@ -77,8 +77,8 @@ describe("value-clone", () => {
         cloneWithValueAtPath(root, ["value", "target", "count"], 2),
       );
 
-      // `value` is shallow-cloned (on the spine); its `keep` sibling rides along
-      // by identity rather than being reconstructed/demoted.
+      // `value` is shallow-cloned, being on the spine. Its `keep` sibling
+      // rides along by identity rather than being reconstructed or demoted.
       expect(result.value.keep).toBe(hash);
       expect(result.value.keep).toBeInstanceOf(FabricHash);
       expect(result.value.keep.tag).toBe("sha256");
@@ -155,8 +155,8 @@ describe("value-clone", () => {
       const hash = FabricHash.fromString("sha256:abcd");
       const root = deepFreeze({ value: { wrapper: hash } });
 
-      // There is nothing path-addressable under an opaque wrapper, so removal is
-      // a no-op rather than an attempt to clone/mutate the wrapper.
+      // There is nothing path-addressable under an opaque wrapper, so removal
+      // is a no-op rather than an attempt to clone or mutate the wrapper.
       expect(cloneWithoutValueAtPath(root, ["value", "wrapper", "x"])).toBe(
         root,
       );

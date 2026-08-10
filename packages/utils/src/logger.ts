@@ -493,7 +493,8 @@ function getTimeStamp(): string {
 function resolveMessages(messages: LogMessage[]): unknown[] {
   return messages.flatMap((msg) => {
     const resolved = typeof msg === "function" ? msg() : msg;
-    // flatMap expects arrays - it will flatten array results and wrap non-arrays
+    // `flatMap()` flattens an array result and wraps a non-array one, so hand
+    // it an array either way.
     return Array.isArray(resolved) ? resolved : [resolved];
   });
 }
@@ -1173,7 +1174,8 @@ export function getLoggerCountsBreakdown(): Record<string, LoggerBreakdown> & {
     for (const [name, logger] of Object.entries(global.commonfabric.logger)) {
       const loggerBreakdown = { total: 0 } as LoggerBreakdown;
 
-      // Add counts by key (skip "total" to avoid overwriting the reserved property)
+      // Add counts by key, skipping `total` so that the reserved property is
+      // not overwritten.
       for (const [key, counts] of Object.entries(logger.countsByKey)) {
         if (key === "total") {
           continue; // Skip reserved property name

@@ -94,7 +94,7 @@ export class FabricEpochDays extends BaseFabricPrimitive
   }
 }
 
-// Compile-time check that the exported `FabricEpochDays` constructor matches the
-// `FabricEpochDaysConstructor` declared in `@commonfabric/api`. This catches
-// drift between the public type contract and this implementation.
+// Compile-time check that the exported `FabricEpochDays` constructor matches
+// the `FabricEpochDaysConstructor` declared in `@commonfabric/api`. This
+// catches drift between the public type contract and this implementation.
 FabricEpochDays satisfies ApiFabricEpochDaysConstructor;

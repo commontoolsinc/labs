@@ -44,9 +44,9 @@ describe("deep-freeze", () => {
     describe("functions (opaque immutable leaves)", () => {
       // `deepFreeze()`/`isDeepFrozen()` treat a function as an opaque immutable
       // leaf -- a code reference, not fabric data -- so general-purpose callers
-      // that freeze objects-with-methods (e.g. `api/cfc.ts`'s `cfcPattern`) keep
-      // working. Its internal `prototype`/closure mutability is a known
-      // limitation, closed by the strict `FabricValue`-only migration follow-up.
+      // that freeze objects-with-methods keep working. A function's internal
+      // `prototype` and closure state stays mutable, which the opacity does not
+      // and cannot cover.
       it("returns `true` for a function", () => {
         expect(isDeepFrozen(() => {})).toBe(true);
         expect(isDeepFrozen(function () {})).toBe(true);
@@ -231,10 +231,11 @@ describe("deep-freeze", () => {
 
     // Coverage for `isDeepFrozen` on `FabricInstance` and `FabricPrimitive`
     // inputs, including a `FabricInstance` participating in a circular
-    // reference. `isDeepFrozen`'s recursion threads an `inProgress: Set<object>`
-    // for cycle-safety and answers a `FabricInstance` via its `[IS_DEEP_FROZEN]`
-    // protocol member -- inspecting its logical contents, not its enumerable
-    // own-props -- so values held in non-enumerable slots (such as
+    // reference. `isDeepFrozen`'s recursion threads an
+    // `inProgress: Set<object>` for cycle-safety and answers a
+    // `FabricInstance` via its `[IS_DEEP_FROZEN]` protocol member --
+    // inspecting its logical contents, not its enumerable own-props -- so
+    // values held in non-enumerable slots (such as
     // `FabricError`'s private extras `Map`) are checked too.
     // (`isDeepFrozenFabricValue` uses the same protocol dispatch but
     // additionally type-guards the value as a `FabricValue`; it has its own

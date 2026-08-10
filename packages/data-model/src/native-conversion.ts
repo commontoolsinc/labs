@@ -245,7 +245,8 @@ export function shallowFabricFromNativeValue(
 
     case NATIVE_TAGS.Uint8Array: {
       // Native `Uint8Array` instances are wrapped in `FabricBytes`.
-      // `FabricBytes` self-freezes in its constructor (`FabricPrimitive` contract).
+      // `FabricBytes` self-freezes in its constructor (`FabricPrimitive`
+      // contract).
       return new FabricBytes(value as Uint8Array);
     }
 
@@ -614,7 +615,8 @@ function isFabricCompatibleInternal(
       // `FabricSpecialObject` -- already a valid `FabricValue`.
       if (value instanceof FabricSpecialObject) return true;
 
-      // `FabricNativeObject` types would be wrapped by `fabricFromNativeValue()`.
+      // `FabricNativeObject` types would be wrapped by
+      // `fabricFromNativeValue()`.
       if (isConvertibleNativeInstance(value)) {
         return true;
       }

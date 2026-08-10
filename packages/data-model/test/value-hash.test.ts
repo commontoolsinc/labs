@@ -137,7 +137,8 @@ describe("value-hash", () => {
 
       it("hashes non-canonical `NaN` bit patterns to the canonical `NaN`", () => {
         // Construct a NaN with a non-zero payload (still a valid quiet NaN) and
-        // confirm it canonicalizes. The hashed bytes must match the literal `NaN`.
+        // confirm it canonicalizes. The hashed bytes must match those of the
+        // literal `NaN`.
         const view = new DataView(new ArrayBuffer(8));
         view.setBigUint64(0, 0x7ff8000000000001n, false);
         const nonCanonicalNaN = view.getFloat64(0, false);
@@ -475,7 +476,8 @@ describe("value-hash", () => {
       it("matches a byte stream built from `[CODEC]` `encode()` output for `FabricError`", () => {
         // Build the expected byte stream programmatically because the encoded
         // state includes `stack` which is environment-dependent.
-        // We construct the stream the same way `hashOf()` does, then SHA-256 it.
+        // We construct the stream the same way `hashOf()` does, then SHA-256
+        // it.
         const error = FabricError.fromNativeError(new Error("test"));
         const enc = new TextEncoder();
 
@@ -905,9 +907,9 @@ describe("value-hash", () => {
       });
 
       it("takes the TAG_STRING_HASH path for a long object key", () => {
-        // utf8Length(100) > MAX_DIRECT_STRING_LENGTH(64). Object keys go through
-        // the same `getStringRep()` codepath as bare string values, so a long
-        // key is fed as `[TAG_STRING_HASH][sha256(utf8)]`.
+        // `utf8Length(100)` exceeds `MAX_DIRECT_STRING_LENGTH` (64). Object
+        // keys go through the same `getStringRep()` codepath as bare string
+        // values, so a long key is fed as `[TAG_STRING_HASH][sha256(utf8)]`.
         const longKey = "x".repeat(100);
         const obj = { [longKey]: 1 };
         const keyHash = sha256(new TextEncoder().encode(longKey));
@@ -985,8 +987,8 @@ describe("value-hash", () => {
       });
 
       it("works for a `FabricHash` inside a plain object (does not throw)", () => {
-        // This is meant to capture the essence of using `FabricHash` instances as
-        // things like content IDs inside `Fact` objects.
+        // This captures the essence of using `FabricHash` instances as things
+        // like content IDs inside `Fact` objects.
         const fact = {
           cause: new FabricHash(new Uint8Array([0x05, 0x06]), "fid1"),
           the: "text/plain",

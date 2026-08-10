@@ -281,11 +281,12 @@ describe("schema-utils", () => {
 
         const result = toDeepFrozenSchema(schema, true);
 
-        // Same reference — `canShare=true` lets us complete the deep-freeze in
-        // place rather than cloning.
+        // Same reference: `canShare=true` lets us complete the deep-freeze
+        // in place rather than cloning.
         expect(result).toBe(schema);
 
-        // Result (and the previously-unfrozen `inner`) must now be deeply frozen.
+        // The result, and the `inner` that went in unfrozen, must both come
+        // out deeply frozen.
         expect(Object.isFrozen(result)).toBe(true);
         const obj = result as JSONSchemaObj;
         expect(Object.isFrozen(obj.properties)).toBe(true);
@@ -310,8 +311,8 @@ describe("schema-utils", () => {
         // The already-deep-frozen "properties" subtree is reused by reference.
         expect(result.properties).toBe(frozenProperties);
 
-        // The unfrozen "required" is frozen in place (same reference, now frozen)
-        // rather than cloned, since `canShare=true`.
+        // The unfrozen `required` is frozen in place -- same reference, and
+        // frozen on the way out -- rather than cloned, since `canShare=true`.
         expect(result.required).toBe(unfrozenRequired);
 
         // Both are deeply frozen in the result.
@@ -596,7 +597,8 @@ describe("schema-utils", () => {
       const schema: JSONSchemaObj = { type: "string" };
       expect("description" in schema).toBe(false);
 
-      // Setting description to undefined: key is present but value is undefined.
+      // Setting `description` to `undefined`: the key is present, and its
+      // value is `undefined`.
       const withUndefined = schemaWithProperties(schema, {
         description: undefined,
       }) as JSONSchemaObj;
@@ -1129,7 +1131,7 @@ describe("schema-utils", () => {
       const a = internPathSelector({ path: ["x"], schema });
       // A *distinct* selector object carrying a structurally-equal (but
       // separate) schema object must resolve to the very same canonical
-      // instance — not merely the same-object idempotency the test above checks.
+      // instance -- not merely the same-object idempotency checked above.
       const b = internPathSelector({ path: ["x"], schema: { ...schema } });
       expect(b).toBe(a);
     });
@@ -1179,9 +1181,10 @@ describe("schema-utils", () => {
       const schema = uniqueSchema();
       const canonical = internPathSelector({ path: ["x"], schema });
       // A distinct, still-mutable selector with equal content. The canonical
-      // already exists, so the return value is that canonical (not this input) —
-      // but per the pre-cache contract, the input is nonetheless frozen and its
-      // schema canonicalized in place, for callers that keep using their object.
+      // already exists, so the return value is that canonical one rather than
+      // this input. Per the pre-cache contract the input is nonetheless frozen
+      // and its schema canonicalized in place, for callers that keep using
+      // their own object.
       const dup: SchemaPathSelector = { path: ["x"], schema: { ...schema } };
       expect(Object.isFrozen(dup)).toBe(false);
       const result = internPathSelector(dup);

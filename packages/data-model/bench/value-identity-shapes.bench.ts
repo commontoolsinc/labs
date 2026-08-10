@@ -23,10 +23,10 @@
 import { hashOf } from "../src/value-hash.ts";
 import { deepFreeze, isDeepFrozen } from "../src/deep-freeze.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Doc-shaped test data, mirroring the default-app integration:
 // a note doc (~30 nodes) and a home-list doc holding N note entries.
-// ---------------------------------------------------------------------------
+//
 
 function makeNoteDoc(i: number): Record<string, unknown> {
   return {
@@ -70,9 +70,9 @@ function makeCopies<T>(make: () => T, freeze: "none" | "plain" | "deep"): T[] {
   return copies;
 }
 
-// ---------------------------------------------------------------------------
-// hashOf
-// ---------------------------------------------------------------------------
+//
+// `hashOf()`
+//
 
 const frozenNote = deepFreeze(makeNoteDoc(1));
 const frozenHome128 = deepFreeze(makeHomeDoc(128));
@@ -125,9 +125,9 @@ Deno.bench({
   b.end();
 });
 
-// ---------------------------------------------------------------------------
-// deep-freeze
-// ---------------------------------------------------------------------------
+//
+// `deepFreeze()`
+//
 
 Deno.bench({
   name: "isDeepFrozen: cached home doc @128 (cache hit)",

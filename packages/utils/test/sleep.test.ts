@@ -11,12 +11,12 @@ import {
 // `sleep` and `timeout` are delay utilities, so their tests want controlled
 // time rather than a padded real-time bound. Each opens a `FakeTime` (from
 // `@std/testing/time`) with `using`, which freezes the real timer `sleep` and
-// `timeout` arm and restores the clock when the block ends. `time.tickAsync(ms)`
-// advances the fake clock and settles the promises the fired timers resolve, and
-// `Date.now()` reports the faked time, so the timing assertions are exact and
-// cannot flake. The suites below that measure real elapsed time or touch real
-// Deno timers — `yieldToEventLoop` and `unrefTimer` — open no `FakeTime` and run
-// on the real clock.
+// `timeout` arm and restores the clock when the block ends.
+// `time.tickAsync(ms)` advances the fake clock and settles the promises the
+// fired timers resolve, and `Date.now()` reports the faked time, so the timing
+// assertions are exact and cannot flake. The suites below that measure real
+// elapsed time or touch real Deno timers -- `yieldToEventLoop` and
+// `unrefTimer` -- open no `FakeTime` and run on the real clock.
 
 /** Hold the event loop synchronously for ~ms, like a CPU-bound compile step. */
 const busySpin = (ms: number) => {

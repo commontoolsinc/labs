@@ -100,7 +100,7 @@ export class FabricEpochNsec extends BaseFabricPrimitive
   }
 }
 
-// Compile-time check that the exported `FabricEpochNsec` constructor matches the
-// `FabricEpochNsecConstructor` declared in `@commonfabric/api`. This catches
-// drift between the public type contract and this implementation.
+// Compile-time check that the exported `FabricEpochNsec` constructor matches
+// the `FabricEpochNsecConstructor` declared in `@commonfabric/api`. This
+// catches drift between the public type contract and this implementation.
 FabricEpochNsec satisfies ApiFabricEpochNsecConstructor;

@@ -53,7 +53,8 @@ describe("TwoLevelWeakCache", () => {
       const key = {};
 
       expect(cache.memoize(outerA, key, () => "a")).toBe("a");
-      // Same inner key, different outer key: a distinct entry, not the cached "a".
+      // Same inner key, different outer key: a distinct entry rather than the
+      // cached `a`.
       expect(cache.memoize(outerB, key, () => "b")).toBe("b");
       expect(cache.memoize(outerA, key, () => "ignored")).toBe("a");
     });
