@@ -262,7 +262,7 @@ for (
     const sliceLabel = `fixtures ${at}..${at + slice.length - 1}`;
 
     describe(`${biToMtc.name}()`, () => {
-      it(`correctly encodes ${sliceLabel}`, () => {
+      it(`encodes ${sliceLabel}`, () => {
         for (let i = 0; i < slice.length; i++) {
           const { value, encoded, label } = slice[i]!;
           try {
@@ -275,7 +275,7 @@ for (
     });
 
     describe(`${biFromMtc.name}()`, () => {
-      it(`correctly decodes ${sliceLabel}`, () => {
+      it(`decodes ${sliceLabel}`, () => {
         for (let i = 0; i < slice.length; i++) {
           const { value, encoded, label } = slice[i]!;
           try {
@@ -287,21 +287,25 @@ for (
       });
     });
 
-    describe(`${biToMtc.name}()->${biFromMtc.name}() round trip through base64url`, () => {
-      it(`correctly round-trips ${sliceLabel}`, () => {
-        for (let i = 0; i < slice.length; i++) {
-          const { value, label } = slice[i]!;
-          const bytes = biToMtc(value);
-          const b64 = toUnpaddedBase64url(bytes);
-          const decodedBytes = fromBase64url(b64);
-          try {
-            expect(biFromMtc(decodedBytes)).toBe(value);
-          } catch (e) {
-            throw new Error(`Failed on ${label}.`, { cause: e });
+    describe(
+      `\`${biToMtc.name}()\` -> \`${biFromMtc.name}()\` round trip ` +
+        `through base64url`,
+      () => {
+        it(`round-trips ${sliceLabel}`, () => {
+          for (let i = 0; i < slice.length; i++) {
+            const { value, label } = slice[i]!;
+            const bytes = biToMtc(value);
+            const b64 = toUnpaddedBase64url(bytes);
+            const decodedBytes = fromBase64url(b64);
+            try {
+              expect(biFromMtc(decodedBytes)).toBe(value);
+            } catch (e) {
+              throw new Error(`Failed on ${label}.`, { cause: e });
+            }
           }
-        }
-      });
-    });
+        });
+      },
+    );
   }
 
   //

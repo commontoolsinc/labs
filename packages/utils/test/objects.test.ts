@@ -157,7 +157,7 @@ describe("objects", () => {
         expect(isInertPlainObject(fake)).toBe(false);
       });
 
-      it("rejects a null-prototype object", () => {
+      it("rejects a `null`-prototype object", () => {
         // A record has one shape here, the one the natural syntax produces. A
         // prototype has no representation in any encoding, so accepting this
         // would mean carrying a distinction that stops existing at the first
