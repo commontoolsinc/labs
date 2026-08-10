@@ -1766,6 +1766,48 @@ describe("data-updating", () => {
       expect(long.reads).toBeLessThan(50);
     });
 
+    it("stores a value answering `toCell` as the link it names", () => {
+      // What the walk stops at, the diff replaces with a link -- which is
+      // what makes an unchanged element of a read-back list cost nothing to
+      // write, and is the property the walk stopping must not disturb. Both
+      // kinds of value answer `toCell` and both land the same way: the live
+      // view a schemaless read hands out, and the frozen result a read
+      // through a schema annotates.
+      const source = runtime.getCell<{ inner: { deep: number } }>(
+        space,
+        "toCell source",
+        undefined,
+        tx,
+      );
+      source.set({ inner: { deep: 1 } });
+      const innerLink = source.key("inner").getAsNormalizedFullLink();
+
+      const live = (source.get() as { inner: unknown }).inner;
+      const frozen = (runtime.getCell(
+        space,
+        "toCell source",
+        {
+          type: "object",
+          properties: { inner: { type: "object" } },
+        } as JSONSchema,
+        tx,
+      ).get() as { inner: unknown }).inner;
+
+      const storedFor = (name: string, held: unknown) => {
+        const holder = runtime.getCell(space, name, undefined, tx);
+        holder.set({ held });
+        return (holder.getRaw() as { held: unknown }).held;
+      };
+      const fromLive = storedFor("toCell holder live", live);
+      const fromFrozen = storedFor("toCell holder frozen", frozen);
+
+      expect(isSigilLink(fromLive)).toBe(true);
+      expect(areNormalizedLinksSame(parseLink(fromLive)!, innerLink)).toBe(
+        true,
+      );
+      expect(fromFrozen).toEqual(fromLive);
+    });
+
     it("writes the changed element and leaves its neighbor", () => {
       const { value } = rewriteOneElement(50);
 
