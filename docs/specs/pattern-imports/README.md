@@ -185,6 +185,22 @@ preserves the existing locator when the flag is omitted. `set-home --reset`
 rejects the flag because the system pattern was not deployed from the caller's
 repository. No Git remote or revision is inferred automatically.
 
+The same three local deployment commands accept a repeatable
+`--test <path>` flag. Each test entry is resolved under the deployment's
+`--root`, and its reachable imports are merged into the authored `Program` as
+source-only roots. Compilation type-checks and verifies those modules, while
+execution still begins exclusively at `Program.main`. The source-document
+cache retains the test roots through its synthetic retention links. Source
+recovery and `cf piece getsrc` therefore return the executable source and its
+attached tests together. `set-home --reset` rejects `--test` because a reset
+deploys no local source package.
+
+Attached test entry points participate in the deployed source revision's
+identity without becoming runtime imports. Changing, adding, or removing a test
+therefore creates a distinct revision even when the executable source is
+unchanged. Test dependencies remain ordinary source files in that revision, but
+only paths supplied with `--test` are recovered as test entry points.
+
 ## Specifier syntax
 
 ### One grammar, no type tag

@@ -78,6 +78,22 @@ The most common workflow mistake is rerunning `piece new` after each edit —
 that creates a new piece every time, and your space fills with stale
 duplicates. `new` once, `setsrc` forever after.
 
+Use repeatable `--test` flags when the deployed piece should retain its tests
+with its source:
+
+```bash
+deno task cf piece new pattern.tsx --test pattern.test.tsx -s myspace
+deno task cf piece setsrc pattern.tsx --test pattern.test.tsx \
+  --piece fid1:abc... -s myspace
+```
+
+Deployment resolves and type-checks each test and its imports, but does not run
+the tests. Run them locally with `cf test`. The attached files are included by
+`cf piece getsrc`, so another checkout of the piece receives the source and its
+tests together. Test paths use the same `--root` as the main entry. A test-only
+change creates a new source revision, so history and recovery keep each test
+package separate.
+
 ## Drive a deployed piece from the CLI
 
 Everything a pattern exports (Chapter 3) is drivable without a browser:

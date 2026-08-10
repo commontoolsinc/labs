@@ -24,7 +24,10 @@ import type {
   TypeScriptHarnessProcessOptions,
 } from "./harness/types.ts";
 import { RuntimeProgram } from "./harness/types.ts";
-import type { CachedCompiledModule } from "./sandbox/module-record-compiler.ts";
+import {
+  type CachedCompiledModule,
+  SOURCE_ROOT_SPECIFIER,
+} from "./sandbox/module-record-compiler.ts";
 import type {
   CommitError,
   IExtendedStorageTransaction,
@@ -528,8 +531,8 @@ export class PatternManager {
         ...(compiled?.policyManifests !== undefined
           ? { policyManifests: compiled.policyManifests }
           : {}),
-        // The write functions re-derive the entry's root links; keep only the
-        // real import edges.
+        // The write functions re-derive cache-retention links. Authored and
+        // source-package identity edges remain attached to the module.
         imports: uniqueCacheableImports([
           ...doc.imports
             .filter((imp) => !imp.specifier.startsWith(ROOT_LINK_SPECIFIER))
@@ -1062,10 +1065,12 @@ export class PatternManager {
         ...(doc.patternCoverageSpans !== undefined
           ? { patternCoverageSpans: doc.patternCoverageSpans }
           : {}),
-        // Drop the synthetic entry→root links (cfc.ts etc.); only real
-        // require/export-* edges resolve module records.
+        // Identity and cache-retention edges do not resolve module records.
         imports: doc.imports
-          .filter((i) => !i.specifier.startsWith(ROOT_LINK_SPECIFIER))
+          .filter((i) =>
+            !i.specifier.startsWith(ROOT_LINK_SPECIFIER) &&
+            !i.specifier.startsWith(SOURCE_ROOT_SPECIFIER)
+          )
           .map((i) => ({ specifier: i.specifier, targetIdentity: i.identity })),
       }),
     );
@@ -1246,7 +1251,10 @@ export class PatternManager {
           ? { patternCoverageSpans: doc.patternCoverageSpans }
           : {}),
         imports: doc.imports
-          .filter((i) => !i.specifier.startsWith(ROOT_LINK_SPECIFIER))
+          .filter((i) =>
+            !i.specifier.startsWith(ROOT_LINK_SPECIFIER) &&
+            !i.specifier.startsWith(SOURCE_ROOT_SPECIFIER)
+          )
           .map((i) => ({ specifier: i.specifier, targetIdentity: i.identity })),
       }),
     );
@@ -1313,6 +1321,10 @@ export class PatternManager {
     const entry = sourceDocs.get(entryIdentity);
     if (entry === undefined) return undefined;
     const moduleDelegations = moduleDelegationsFromDocs(sourceDocs);
+    const sourceRoots = entry.imports
+      .filter((edge) => edge.specifier.startsWith(SOURCE_ROOT_SPECIFIER))
+      .map((edge) => sourceDocs.get(edge.identity)?.filename)
+      .filter((filename): filename is string => filename !== undefined);
 
     const sourceFiles: Source[] = [...sourceDocs.values()].map((doc) => ({
       name: doc.filename,
@@ -1327,6 +1339,7 @@ export class PatternManager {
         {
           fabricImports: { space },
           ...(patternCoverage ? { patternCoverage } : {}),
+          ...(sourceRoots.length === 0 ? {} : { sourceRoots }),
         },
       );
       if (compiled.entryIdentity !== entryIdentity) {
@@ -2082,14 +2095,19 @@ export class PatternManager {
    * closure in `space`. The single-source replacement for the deleted meta
    * cell's `program`: the source docs are written (awaited) by every cold
    * compile, so this returns the same bytes that produced the identity. `main`
-   * is the entry document's authored filename. Returns `undefined` when no
-   * verified source closure exists in the space.
+   * is the executable entry document's authored filename. `sourceRoots` names
+   * retained source entry points such as attached tests. Returns `undefined`
+   * when no verified source closure exists in the space.
    */
   async getPatternSourceProgramByIdentity(
     entryIdentity: string,
     space: MemorySpace,
   ): Promise<
-    { main: string; files: { name: string; contents: string }[] } | undefined
+    {
+      main: string;
+      files: { name: string; contents: string }[];
+      sourceRoots?: string[];
+    } | undefined
   > {
     const readTx = this.runtime.edit();
     let sourceDocs;
@@ -2106,6 +2124,12 @@ export class PatternManager {
     if (sourceDocs === undefined) return undefined;
     const entry = sourceDocs.get(entryIdentity);
     if (entry === undefined) return undefined;
+    const sourceRoots = entry.imports
+      .filter((edge) => edge.specifier.startsWith(SOURCE_ROOT_SPECIFIER))
+      .map((edge) => sourceDocs.get(edge.identity)?.filename)
+      .filter((filename): filename is string =>
+        filename?.startsWith("/") === true
+      );
     // Return only the AUTHORED files — the faithful replacement for the old
     // meta-cell `program`. The verified source closure also contains
     // runtime-INJECTED helper modules (e.g. `cfc.ts`), which the compiler
@@ -2120,6 +2144,7 @@ export class PatternManager {
           name: doc.filename,
           contents: doc.code,
         })),
+      ...(sourceRoots.length === 0 ? {} : { sourceRoots }),
     };
   }
 

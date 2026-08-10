@@ -182,6 +182,7 @@ describe("fabric import specifiers", () => {
       "cf:data:abc",
       `cf:module/${HASH}`,
       "cf:cache-root/x",
+      "cf:source-root/tests/main.test.tsx",
       "cf:Has_Upper",
       "cf:",
       "cf:/",

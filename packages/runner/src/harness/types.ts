@@ -9,6 +9,8 @@ export type RuntimeProgram = Program & {
   // The named export from the program's entry file to run.
   // Defaults to "default".
   mainExport?: string;
+  /** Source entry points retained and compiled without being executed. */
+  sourceRoots?: string[];
 };
 
 export interface TypeScriptHarnessProcessOptions {

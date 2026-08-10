@@ -31,9 +31,12 @@ export function parseFabricRef(specifier: string): FabricRef | undefined {
   if (!specifier.startsWith("cf:")) return undefined;
 
   let rest = specifier.slice("cf:".length);
-  if (rest.startsWith("module/") || rest.startsWith("cache-root/")) {
+  if (
+    rest.startsWith("module/") || rest.startsWith("cache-root/") ||
+    rest.startsWith("source-root/")
+  ) {
     throw new FabricRefError(
-      "'cf:module/...' / 'cf:cache-root/...' are compiler-internal namespaces and cannot be imported",
+      "'cf:module/...', 'cf:cache-root/...', and 'cf:source-root/...' are compiler-internal namespaces and cannot be imported",
       specifier,
     );
   }

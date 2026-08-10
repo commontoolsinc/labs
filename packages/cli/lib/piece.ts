@@ -85,6 +85,8 @@ export interface EntryConfig {
   mainExport?: string;
   repository?: string;
   rootPath?: string;
+  /** Test entry paths whose resolved source closures travel with the piece. */
+  testPaths?: string[];
 }
 
 export interface SpaceConfig {
@@ -435,9 +437,34 @@ export async function getProgramFromFile(
   pieces: PiecesController,
   entry: EntryConfig,
 ): Promise<RuntimeProgram> {
-  const program: RuntimeProgram = await pieces.runtime.harness.resolve(
-    new FileSystemProgramResolver(entry.mainPath, entry.rootPath),
+  const rootPath = entry.rootPath ?? dirname(entry.mainPath);
+  const programs: RuntimeProgram[] = await Promise.all(
+    [entry.mainPath, ...(entry.testPaths ?? [])].map((path) =>
+      pieces.runtime.harness.resolve(
+        new FileSystemProgramResolver(path, rootPath),
+      )
+    ),
   );
+  const [mainProgram, ...testPrograms] = programs;
+  const files = new Map<string, RuntimeProgram["files"][number]>();
+  for (const program of [mainProgram, ...testPrograms]) {
+    for (const file of program.files) {
+      const existing = files.get(file.name);
+      if (existing !== undefined && existing.contents !== file.contents) {
+        throw new Error(
+          `Source package contains conflicting files named "${file.name}".`,
+        );
+      }
+      files.set(file.name, file);
+    }
+  }
+  const program: RuntimeProgram = {
+    main: mainProgram.main,
+    files: [...files.values()],
+    ...(testPrograms.length === 0
+      ? {}
+      : { sourceRoots: testPrograms.map((test) => test.main) }),
+  };
   if (entry.mainExport) {
     program.mainExport = entry.mainExport;
   }

@@ -30,6 +30,13 @@ import type { VirtualModuleRecord } from "./esm-module-loader.ts";
 
 const logger = getLogger("module-record-compiler");
 
+/** Identity-only import edge for an attached source entry point. */
+export const SOURCE_ROOT_SPECIFIER = "cf:source-root/";
+
+export function sourceRootSpecifier(path: string): string {
+  return `${SOURCE_ROOT_SPECIFIER}${path.replace(/^\/+/, "")}`;
+}
+
 /**
  * Memo of the two pure derivations {@link buildRecordsFromCompiled} extracts
  * from a module's compiled body: its direct export surface (names + `export *`
@@ -445,19 +452,48 @@ function stripIdentityPrefix(name: string, idPrefix?: string): string {
  */
 export function computeModuleIdentities(
   sources: Source[],
-  options: { idPrefix?: string; runtimeFingerprint?: string } = {},
+  options: {
+    idPrefix?: string;
+    runtimeFingerprint?: string;
+    sourcePackage?: { entryPath: string; rootPaths: readonly string[] };
+  } = {},
 ): Map<string, string> {
+  const stripPath = (path: string) =>
+    stripIdentityPrefix(path, options.idPrefix);
+  const additionalInternalDeps = new Map<
+    string,
+    { specifier: string; target: string }[]
+  >();
+  if (options.sourcePackage !== undefined) {
+    const entryPath = stripPath(options.sourcePackage.entryPath);
+    const rootPaths = [
+      ...new Set(options.sourcePackage.rootPaths.map(stripPath)),
+    ]
+      .filter((rootPath) => rootPath !== entryPath);
+    if (rootPaths.length > 0) {
+      additionalInternalDeps.set(
+        entryPath,
+        rootPaths.map((rootPath) => ({
+          specifier: sourceRootSpecifier(rootPath),
+          target: rootPath,
+        })),
+      );
+    }
+  }
   const hashes = computeModuleHashes(
     {
       main: "",
       files: sources.map((s) => ({
         ...s,
-        name: stripIdentityPrefix(s.name, options.idPrefix),
+        name: stripPath(s.name),
       })),
     },
-    options.runtimeFingerprint !== undefined
-      ? { runtimeFingerprint: options.runtimeFingerprint }
-      : {},
+    {
+      ...(options.runtimeFingerprint !== undefined
+        ? { runtimeFingerprint: options.runtimeFingerprint }
+        : {}),
+      ...(additionalInternalDeps.size === 0 ? {} : { additionalInternalDeps }),
+    },
   );
   const identityByPath = new Map<string, string>();
   for (const source of sources) {
@@ -488,7 +524,11 @@ export interface FabricMount {
 export function computeFabricModuleIdentities(
   sources: Source[],
   mounts: readonly FabricMount[],
-  options: { idPrefix?: string; runtimeFingerprint?: string } = {},
+  options: {
+    idPrefix?: string;
+    runtimeFingerprint?: string;
+    sourcePackage?: { entryPath: string; rootPaths: readonly string[] };
+  } = {},
 ): Map<string, string> {
   const authored: Source[] = [];
   const mountFiles = new Map<FabricMount, Source[]>();

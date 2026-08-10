@@ -536,12 +536,14 @@ describe("cli piece parsing", () => {
     expect(newFlags).toContain("--slug");
     expect(newFlags).toContain("--root");
     expect(newFlags).toContain("--repository");
+    expect(newFlags).toContain("--test");
     expect(newFlags).toContain("--dangerously-allow-incompatible-schema");
 
     for (const command of ["setsrc", "set-home"]) {
       const flags = optionFlags(command);
       expect(flags).toContain("--root");
       expect(flags).toContain("--repository");
+      expect(flags).toContain("--test");
     }
     expect(optionFlags("setsrc")).toContain(
       "--dangerously-allow-incompatible-schema",
@@ -1468,16 +1470,31 @@ describe("cli piece parsing", () => {
     ])).rejects.toThrow("Cannot use --repository with --reset");
   });
 
+  it("rejects attached tests when resetting the home pattern", async () => {
+    const { piece: command } = await import(
+      "../commands/piece.ts?test-reset-test"
+    );
+    command.throwErrors();
+    await expect(command.parse([
+      "set-home",
+      "--reset",
+      "--test",
+      "/repo/home.test.tsx",
+    ])).rejects.toThrow("Cannot use --test with --reset");
+  });
+
   it("builds repository-aware entries from deployment flags", () => {
     expect(localPatternEntry("/repo/pattern.tsx", {
       mainExport: "named",
       repository: "https://github.com/commontoolsinc/labs",
       root: "/repo",
+      test: ["/repo/pattern.test.tsx", "/repo/other.test.tsx"],
     })).toEqual({
       mainPath: "/repo/pattern.tsx",
       mainExport: "named",
       repository: "https://github.com/commontoolsinc/labs",
       rootPath: "/repo",
+      testPaths: ["/repo/pattern.test.tsx", "/repo/other.test.tsx"],
     });
   });
 
@@ -1492,6 +1509,7 @@ describe("cli piece parsing", () => {
         mainExport: "named",
         repository: "https://github.com/commontoolsinc/labs",
         root: "/repo",
+        test: ["/repo/pattern.test.tsx"],
         dangerouslyAllowIncompatibleSchema: true,
       },
       "/repo/pattern.tsx",
@@ -1516,6 +1534,7 @@ describe("cli piece parsing", () => {
         mainExport: "named",
         repository: "https://github.com/commontoolsinc/labs",
         rootPath: "/repo",
+        testPaths: ["/repo/pattern.test.tsx"],
       },
       options: { dangerouslyAllowIncompatibleSchema: true },
     });
@@ -1535,6 +1554,7 @@ describe("cli piece parsing", () => {
         mainExport: "named",
         repository: "https://github.com/commontoolsinc/labs",
         root: "/repo",
+        test: ["/repo/pattern.test.tsx"],
       },
       "/repo/pattern.tsx",
       {
@@ -1558,6 +1578,7 @@ describe("cli piece parsing", () => {
         mainExport: "named",
         repository: "https://github.com/commontoolsinc/labs",
         rootPath: "/repo",
+        testPaths: ["/repo/pattern.test.tsx"],
       },
     });
   });
