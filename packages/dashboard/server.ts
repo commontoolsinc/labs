@@ -160,9 +160,10 @@ const STALE_UPDATE_MS = 60_000;
 const STALE_UPDATE_SUB = "refresh still pending";
 
 function activeTileView(tile: Tile, view: TileView): TileView {
-  return activeTileUpdates.get(tile.id)?.stale
-    ? { ...view, status: "unknown", sub: STALE_UPDATE_SUB }
-    : view;
+  if (!activeTileUpdates.get(tile.id)?.stale) return view;
+  return tile.showOnlyCompletedViews
+    ? { ...view, sub: STALE_UPDATE_SUB }
+    : { ...view, status: "unknown", sub: STALE_UPDATE_SUB };
 }
 
 function grayStaleTileUpdates(now: number): void {
@@ -240,7 +241,7 @@ async function collectView(
     try {
       return await tile.collect(
         collectionCtx,
-        publish
+        publish && !tile.showOnlyCompletedViews
           ? (intermediate) => {
             if (acceptingIntermediate) publish(intermediate);
           }

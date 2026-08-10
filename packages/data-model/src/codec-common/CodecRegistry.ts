@@ -1,5 +1,9 @@
 import type { FabricValue } from "@/interface.ts";
-import type { FabricCodec } from "./interface.ts";
+import {
+  CODEC,
+  type FabricClassWithCodec,
+  type FabricCodec,
+} from "./interface.ts";
 import type { Constructor } from "@commonfabric/utils/types";
 
 /**
@@ -54,6 +58,12 @@ function constructorOf(
 /**
  * Registry of `FabricCodec`s. Provides tag-based lookup for decoding, and
  * primitive-type and class matching for encoding.
+ *
+ * An instance is mutable while it is being built and immutable once
+ * `Object.freeze()`d: every mutator refuses on a frozen instance. Freezing is
+ * how a registry becomes safe to hand out, since a codec holds the registry it
+ * was constructed with and would otherwise see a later registration. Use
+ * {@link #extend} to build on one that is already frozen.
  */
 export class CodecRegistry {
   /** Tag -> codec map for O(1) decode dispatch. */
@@ -75,6 +85,8 @@ export class CodecRegistry {
    * note that a codec with no `uniqueHandledClass` is unreachable for encoding.
    */
   register(codec: FabricCodec): void {
+    this.#assertNotFrozen();
+
     const uniqueClass = codec.uniqueHandledClass;
     if (uniqueClass !== undefined) {
       this.#classMap.set(uniqueClass, codec);
@@ -92,6 +104,8 @@ export class CodecRegistry {
    * (for O(1) encode dispatch on primitives).
    */
   registerPrimitive(type: PrimitiveTypeName, codec: FabricCodec): void {
+    this.#assertNotFrozen();
+
     this.#primitiveCodecs.set(type, codec);
 
     const tag = codec.recognizedTypeTag;
@@ -109,7 +123,53 @@ export class CodecRegistry {
    * codec); the codec is tried first.
    */
   registerSelfRep(type: PrimitiveTypeName): void {
+    this.#assertNotFrozen();
+
     this.#selfRepTypes.add(type);
+  }
+
+  /**
+   * Creates a frozen copy of this instance with the given classes' codecs
+   * additionally registered. This instance is left untouched, so a shared
+   * registry can be built on without being altered, and the result is frozen
+   * so that it in turn can be shared.
+   *
+   * This is the intended way to add classes to a registry someone else
+   * assembled: extending what a factory returns is what keeps a caller from
+   * omitting, by accident, everything that factory put there.
+   *
+   * @param classes Classes whose static `[CODEC]` is to be registered.
+   */
+  extend(classes: readonly FabricClassWithCodec[]): CodecRegistry {
+    const result = new CodecRegistry();
+
+    for (const [key, value] of this.#tagMap) result.#tagMap.set(key, value);
+    for (const [key, value] of this.#classMap) result.#classMap.set(key, value);
+    for (const [key, value] of this.#primitiveCodecs) {
+      result.#primitiveCodecs.set(key, value);
+    }
+    for (const type of this.#selfRepTypes) result.#selfRepTypes.add(type);
+
+    for (const cls of classes) {
+      result.register(cls[CODEC]);
+    }
+
+    // Frozen as a statement rather than by returning `Object.freeze()`'s
+    // result, whose `Readonly<CodecRegistry>` type drops the private-field
+    // brand and so is not assignable back to `CodecRegistry`.
+    Object.freeze(result);
+    return result;
+  }
+
+  /**
+   * Guards a mutator against a frozen instance.
+   *
+   * @throws If this instance is frozen.
+   */
+  #assertNotFrozen(): void {
+    if (Object.isFrozen(this)) {
+      throw new Error("Cannot modify frozen CodecRegistry");
+    }
   }
 
   /**

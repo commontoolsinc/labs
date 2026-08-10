@@ -34,6 +34,8 @@ export interface Tile {
   id: string; // unique, stable key for this tile's scheduling + latest-view state
   intervalMs: number; // how often collect() runs, per source when runSources is set
   wide?: boolean; // render full-width below the grid, including before collection
+  // Keep the last completed status and values while ignoring intermediate views.
+  showOnlyCompletedViews?: boolean;
   // GitHub workflow snapshots that drive this tile. The scheduler refreshes
   // each source independently and publishes its due dependent tiles together.
   runSources?: readonly RunSource[];

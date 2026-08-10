@@ -21,9 +21,9 @@
 // BENCH_TREND_MIN_RUNS, whichever is larger. The full line spans about 45 days.
 // The failed state reads the workflow-run list and the latest run's cached
 // result. It therefore works when artifacts cannot be read. Without usable
-// data, the tile reads "collecting…" during a fetch. It reads "benchmark data
-// unavailable" after an empty fetch. A failed fetch keeps the last-known
-// processor lines gray and names the reason.
+// data, the dashboard keeps the last completed color and values while a fetch
+// runs. It reads "benchmark data unavailable" after an empty fetch. A failed
+// fetch keeps the last-known processor lines gray and names the reason.
 //
 // Every collection pages the run list, once a minute, which is the cadence the
 // run state needs. The artifact history behind the tile moves with the runs
@@ -945,7 +945,6 @@ const RUNNING_BADGE =
 function benchmarkIndexView(
   runs: Run[],
   now: number,
-  collecting = false,
   offline?: string,
 ): TileView {
   const cutoff = now - SPARK_DAYS * 86_400_000;
@@ -988,10 +987,8 @@ function benchmarkIndexView(
         aside,
       };
     }
-    // No data yet: "collecting…" while a fetch is still in progress (the early paints,
-    // including the one before the run list is fetched), "benchmark data unavailable"
-    // once a fetch has finished empty, "no benchmark runs" when it found none at all.
-    if (collecting) return benchmarkUnavailable("collecting…", aside);
+    // A completed fetch with runs but no readable artifacts reports the missing
+    // data. A completed fetch with no runs reports the missing run history.
     return benchmarkUnavailable(
       runs.length ? "benchmark data unavailable" : "no benchmark runs",
       aside,
@@ -1220,13 +1217,6 @@ function startBenchmarkRefresh(
   });
   const collection = async (): Promise<BenchmarkCollectionOutcome> => {
     await previousCollection;
-    if (
-      queuedBehindOtherScope && benchmarkRefreshedAt &&
-      Date.now() - benchmarkRefreshedAt >= 0 &&
-      Date.now() - benchmarkRefreshedAt < BENCHMARK_REFRESH_MS
-    ) {
-      return {};
-    }
     let known: Run[] | undefined;
     if (knownRuns) {
       known = await knownRuns;
@@ -1240,6 +1230,10 @@ function startBenchmarkRefresh(
       ) {
         return {};
       }
+    } else if (queuedBehindOtherScope && benchmarkSnapshotIsFresh()) {
+      // A queued refresh with no run list reuses the fresh shared artifact
+      // history.
+      return {};
     }
     return await collectBenchmark(token, progress, github, known);
   };
@@ -1334,6 +1328,7 @@ export const benchmark: Tile = {
   // hour, so an hourly collection can miss one from start to finish. The
   // artifact reads behind the tile keep their own, slower gate.
   intervalMs: 60_000,
+  showOnlyCompletedViews: true,
   routes: [
     {
       path: "/bench",
@@ -1373,26 +1368,10 @@ export const benchmark: Tile = {
       handler: (_req, url) => benchmarkHistoryProgressResponse(url),
     },
   ] satisfies Route[],
-  async collect(ctx, publish): Promise<TileView> {
+  async collect(ctx): Promise<TileView> {
     const token = ctx.env("GH_TOKEN") ?? ctx.env("GITHUB_TOKEN");
     if (!token) return benchmarkUnavailable("set GH_TOKEN");
     await loadCachedBenchmarkSnapshot();
-    // A painted frame is not what the collection returns, so one that throws is
-    // one bad frame rather than a failed collection.
-    const paint = (view: TileView) => {
-      if (!publish) return;
-      try {
-        publish(view);
-      } catch {
-        // The next paint, or the return value, carries the tile instead.
-      }
-    };
-    // Paint at once, before the run list is even fetched, so a freshly loaded
-    // dashboard shows the cached headline immediately (warm) or "collecting…" (cold)
-    // rather than a blank tile while the first collection gets under way. The empty
-    // run list carries no failed state yet; the paint below and the final return
-    // supply it.
-    paint(benchmarkIndexView([], Date.now(), true));
     // The run list is the tile's own read, made by every collection. This is the
     // part that keeps up with a run starting: the artifact history behind it moves
     // far more slowly than the tile's cadence.
@@ -1422,14 +1401,10 @@ export const benchmark: Tile = {
       return benchmarkIndexView(
         [],
         Date.now(),
-        false,
         friendlyError(errorMessage(listError)),
       );
     }
     latestBenchmarkRuns = runs;
-    // The headline stands on the run list alone, so paint it before waiting on the
-    // artifact work behind it.
-    paint(benchmarkIndexView(runs, Date.now(), true));
     await refresh;
     return benchmarkIndexView(runs, Date.now());
   },

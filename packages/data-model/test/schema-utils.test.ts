@@ -214,7 +214,7 @@ describe("schema-utils", () => {
     });
 
     describe("immutability enforcement", () => {
-      it("rejects mutation of a frozen schema", () => {
+      it("throws on mutation of a frozen schema", () => {
         const schema: JSONSchemaObj = { type: "string" };
         toDeepFrozenSchema(schema, true);
 
@@ -242,7 +242,7 @@ describe("schema-utils", () => {
     });
 
     describe("already-frozen input handling", () => {
-      it("handles an already-frozen schema", () => {
+      it("returns an already-frozen schema by identity", () => {
         const schema: JSONSchemaObj = Object.freeze({
           type: "string" as const,
         });
@@ -501,7 +501,7 @@ describe("schema-utils", () => {
       expect(Object.isFrozen(result.properties)).toBe(false);
     });
 
-    it("handles schema with arrays (`anyOf`) when `deep=true`", () => {
+    it("copies an `anyOf` array when `deep=true`", () => {
       const schema: JSONSchemaObj = {
         anyOf: [{ type: "string" }, { type: "number" }],
       };
@@ -513,7 +513,7 @@ describe("schema-utils", () => {
       expect(result.anyOf).not.toBe(schema.anyOf);
     });
 
-    it("handles empty object schema", () => {
+    it("returns a fresh empty object for an empty object schema", () => {
       const schema: JSONSchemaObj = {};
       const result = cloneSchemaMutable(schema) as JSONSchemaObj;
 
@@ -541,7 +541,7 @@ describe("schema-utils", () => {
       expect(schema.type).toBe("string");
     });
 
-    it("can set properties to undefined (key remains present)", () => {
+    it("can set properties to `undefined`, leaving the key present", () => {
       const schema = { type: "object", asCell: ["stream"] } as JSONSchemaObj;
       const result = schemaWithProperties(schema, {
         default: undefined,
@@ -847,13 +847,13 @@ describe("schema-utils", () => {
     });
 
     describe("symbol", () => {
-      it("returns undefined", () => {
+      it("returns `undefined`", () => {
         expect(schemaForValueType(Symbol("test"))).toBe(undefined);
       });
     });
   });
 
-  describe("emptySchemaObject", () => {
+  describe("emptySchemaObject()", () => {
     it("returns {}", () => {
       expect(emptySchemaObject()).toEqual({});
     });
@@ -880,7 +880,7 @@ describe("schema-utils", () => {
       expect(internSchemaPairAsKey(a, b)).toBe(`${aHash}|${bHash}`);
     });
 
-    it("handles boolean schemas on either side", () => {
+    it("builds the pair key from either side's boolean schema", () => {
       const obj: JSONSchema = { type: "number" };
       const objHash = internSchema(obj, true).taggedHashString;
       const trueHash = internSchema(true, true).taggedHashString;
@@ -1086,7 +1086,7 @@ describe("schema-utils", () => {
       expect(internPathSelector({ path: ["p2048"], schema })).toBe(held[2048]);
     });
 
-    it("handles selectors whose `schema` is undefined", () => {
+    it("freezes a selector whose `schema` is `undefined`", () => {
       const selector: SchemaPathSelector = { path: ["p"] };
       // Must not throw — `internSchema(undefined)` would, and the guard
       // `if (selector.schema !== undefined)` prevents it.
@@ -1095,7 +1095,7 @@ describe("schema-utils", () => {
       expect(Object.isFrozen(selector.path)).toBe(true);
     });
 
-    it("handles boolean `selector.schema` (true and false)", () => {
+    it("freezes and interns a selector whose `schema` is `true` or `false`", () => {
       const trueSelector: SchemaPathSelector = { path: ["t"], schema: true };
       const falseSelector: SchemaPathSelector = { path: ["f"], schema: false };
       internPathSelector(trueSelector);
