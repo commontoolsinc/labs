@@ -295,7 +295,8 @@ export function buildView(
     doc,
     semantics: () =>
       language.createSemantics?.(text, { cwd: safeCwd(), fileName }),
-    // A real file is editable; a pipe (transformed output, etc.) is not.
+    // A real file gets a file-backed source. Its language may keep it read-only.
+    // A pipe (transformed output, etc.) has no file to edit.
     editSource: file
       ? fileSource(file, language, {
         encode: decoded.source.encode,

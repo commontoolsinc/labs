@@ -1,12 +1,13 @@
 /**
- * Where the editor's changes come from and go back to. A view is editable only
- * when it has an underlying file (or set of files, for a diff); a pipe of
- * transformed output, or a diff that does not match any file on disk, is not.
+ * Where the editor's changes come from and go back to. A view needs an
+ * underlying file, or set of files for a diff, before it can be editable. A
+ * language can keep a file-backed view read-only. Pipes and diffs that match no
+ * workspace files are also read-only.
  *
- * For a plain file the editable text is the document's retained source text, so
- * re-highlighting is a re-parse and saving is a write. Its displayed lines may
- * be a rendered projection. The diff source (in `diffedit.ts`) maps the single
- * editable text back onto the files it touches.
+ * For an editable plain file the editable text is the document's retained
+ * source text, so re-highlighting is a re-parse and saving is a write. Its
+ * displayed lines may be a rendered projection. The diff source (in
+ * `diffedit.ts`) maps the single editable text back onto the files it touches.
  */
 import type { Document, Line, ViewMode } from "./model.ts";
 import type {
@@ -115,8 +116,9 @@ export interface EditableSource {
     text: string,
     seedLines?: readonly Line[],
   ): Highlighter;
-  /** Persist the edited text. `baseline` is the text at the last successful
-   * save. Returns a status message. Throws on failure. */
+  /** Attempt to persist the edited text. `baseline` is the text at the last
+   * successful save. A read-only source returns its refusal reason without
+   * writing. Returns a status message and throws on write failure. */
   save(text: string, baseline?: string, options?: SaveOptions): string;
   /** The clean baseline after a successful save. Most sources persist the
    * whole buffer and omit this method. A commit view that saves files without
