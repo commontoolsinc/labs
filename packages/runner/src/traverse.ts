@@ -4769,7 +4769,7 @@ function schemaTypeIncludesObject(type: JSONSchemaObj["type"]): boolean {
  * would only ever act on hand-written schemas; until that is worth the
  * accessor walk, shape errors of this kind pass validation.
  */
-function opaqueLeafMissesRequired(
+export function opaqueLeafMissesRequired(
   schema: JSONSchemaObj,
   value: FabricPrimitive,
 ): boolean {

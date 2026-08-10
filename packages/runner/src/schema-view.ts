@@ -51,10 +51,14 @@ import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   canBranchMatch,
   mergeAnyOfBranchSchemas,
+  opaqueLeafMissesRequired,
   schemaTypeMatchesValueType,
 } from "./traverse.ts";
 import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import { processDefaultValue, validateAndTransform } from "./schema.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+
+const logger = getLogger("schema-view", { enabled: false, level: "warn" });
 
 /**
  * Thrown when a reader touches data the schema does not describe.
@@ -184,9 +188,16 @@ const resolveBranch = (
       { $defs: parent.$defs } as JSONSchemaObj,
     );
     return isRecord(resolved) ? resolved : branch;
-  } catch {
-    // An unresolvable ref stays as it was; matching then keeps the branch,
-    // which is the same answer as before and never narrows away real data.
+  } catch (error) {
+    // An unresolvable ref stays as it was, so matching keeps the branch: a
+    // schema this runtime cannot read is not evidence that the data fails it,
+    // and narrowing the branch away would refuse a read the eager path serves.
+    // It is worth saying out loud, though — an unresolvable ref means a schema
+    // document that did not replicate.
+    logger.warn(
+      "schema-view",
+      () => ["unresolvable $ref in a union branch", branch, error],
+    );
     return branch;
   }
 };
@@ -337,6 +348,17 @@ export function materializeSchemaView(
       return mismatch(
         `expected ${JSON.stringify(schema.type)}, found ${actualType}`,
       );
+    }
+  }
+
+  // An opaque leaf still owes the schema's `required` keys. A `FabricPrimitive`
+  // answers them through class accessors — `FabricBytes.length` satisfies
+  // `required: ["length"]` — so the check is prototype-chain membership with
+  // the brand exemption, which is what an eager read applies before letting one
+  // through.
+  if (value instanceof FabricPrimitive && isRecord(schema)) {
+    if (opaqueLeafMissesRequired(schema, value)) {
+      return mismatch("opaque leaf is missing a required property");
     }
   }
 
