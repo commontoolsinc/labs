@@ -43,6 +43,7 @@ import Topic, {
   topicAuthorLabel,
   type TopicComment,
   topicCorpus,
+  type TopicCrossrefs,
   type TopicLink,
   type TopicLinkKind,
   whenLabel,
@@ -163,6 +164,9 @@ export default pattern(() => {
   // resolved snapshot values directly here rather than inventing a production
   // fallback identity.
   const profileTopics = new Writable<TopicPiece[] | Default<[]>>([]);
+  const profileBoardCrossrefs = new Writable<TopicCrossrefs[] | Default<[]>>(
+    [],
+  );
   const profileTitleDraft = new Writable("Profile topic");
   const profileLegacyName = new Writable<string | Default<"">>("");
   const profileComments = new Writable<TopicComment[] | Default<[]>>([]);
@@ -193,6 +197,11 @@ export default pattern(() => {
   const profileSubmitTopic = submitProfileTopic({
     topics: profileTopics,
     mentionable: profileTopics,
+    // Standalone: no board built this, so there is no computed table to read
+    // and the topic it creates falls back to deriving its inbound edges
+    // locally. Required rather than optional so a real composer cannot forget
+    // it and silently take that fallback.
+    boardCrossrefs: profileBoardCrossrefs,
     newTitle: profileTitleDraft,
     myName: profileLegacyName,
     profileName: " Ada ",
@@ -707,7 +716,11 @@ export default pattern(() => {
   });
   const assert_self_unknown_ignored = assert(() =>
     (board.crossrefs?.[0]?.refsOut ?? []).length === 0 &&
-    (board.crossrefs?.[0]?.referencedBy ?? []).length === 2
+    (board.crossrefs?.[0]?.referencedBy ?? []).length === 2 &&
+    // The topic's own Connections card derives its outbound edges from its
+    // prose, not from the board's join, so the two can disagree about a
+    // self-mention. Assert the topic-side view drops it as well.
+    (board.topics?.[0]?.crossrefs?.refsOut ?? []).length === 0
   );
 
   // Nothing is persisted: retract the prose and the edge is simply gone.
