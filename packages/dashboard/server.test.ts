@@ -440,7 +440,7 @@ Deno.test("an update still running after one minute stays gray until it complete
   }
 });
 
-Deno.test("a completed-views-only tile keeps its settled color while collection is stale", async () => {
+Deno.test("a completed-views-only tile suppresses intermediate views and keeps its settled color", async () => {
   const realNow = Date.now;
   const startedAt = realNow() - 61_000;
   let now = startedAt;

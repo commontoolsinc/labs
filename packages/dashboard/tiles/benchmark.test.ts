@@ -1055,7 +1055,7 @@ Deno.test("benchmark: the trend reads the recent window only, not the whole hist
   });
 });
 
-Deno.test("benchmark: returns a failed rising view without publishing intermediate data", async () => {
+Deno.test("benchmark: returns a failed rising view after the run list settles", async () => {
   const directory = await Deno.makeTempDir({
     prefix: "benchmark-settled-view-",
   });
@@ -1111,14 +1111,11 @@ Deno.test("benchmark: returns a failed rising view without publishing intermedia
       `./benchmark.ts?settled-view=${crypto.randomUUID()}`
     );
     expect(isolated.benchmark.showOnlyCompletedViews).toBe(true);
-    const published: TileView[] = [];
     const active: Promise<TileView> = isolated.benchmark.collect(
       ctx({ GH_TOKEN: token }),
-      (view: TileView) => published.push(view),
     );
     collection = active;
     await runsRequested;
-    expect(published).toEqual([]);
 
     releaseRuns(Response.json({
       workflow_runs: [
@@ -1127,7 +1124,6 @@ Deno.test("benchmark: returns a failed rising view without publishing intermedia
       ],
     }));
     const final = await active;
-    expect(published).toEqual([]);
     expect(final.status).toBe("bad");
     expect(final.value).toContain("▲");
   } finally {
