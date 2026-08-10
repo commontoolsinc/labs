@@ -4,7 +4,6 @@ import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 import { FabricSpecialObject, type FabricValue } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import {
-  CODEC,
   type ReconstructionContext,
   type SerializationContext,
 } from "@/codec-common/interface.ts";
@@ -459,12 +458,8 @@ export class JsonCodec implements SerializationContext<string> {
    * A helper drawing on a fuller registry would instead accept or reject text
    * according to a roster its caller never chose.
    */
-  static readonly #testingRegistry: CodecRegistry = (() => {
-    const registry = createBaseJsonRegistry();
-    registry.register(UnknownValue[CODEC]);
-    registry.register(ProblematicValue[CODEC]);
-    return registry;
-  })();
+  static readonly #testingRegistry: CodecRegistry = createBaseJsonRegistry()
+    .extend([UnknownValue, ProblematicValue]);
 
   /**
    * Reconstruction context for the throwaway checks in the testing helpers
