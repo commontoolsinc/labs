@@ -1322,6 +1322,45 @@ function alignConciseProjectionMask(
   };
 }
 
+/**
+ * Aligns the markers a concise field list wrote against the shape the source
+ * declares, the way {@link alignConciseProjectionMask} aligns the mask beside
+ * them. A field list names a field wherever the value holds one rather than at
+ * a fixed depth, so a name that crosses an array marks each of its elements:
+ * the aligned markers say that with `items`, which is what a JSON Schema
+ * states for itself. Where the source declares nothing the markers stay as
+ * written, and the value the walk holds decides.
+ */
+function alignConciseMarkers(
+  source: JSONSchema | undefined,
+  markers: LinkMarkers,
+  flag: ProjectionFlag,
+): LinkMarkers {
+  if (source === undefined || source === true) return markers;
+  if (schemaMayBeArray(source, flag)) {
+    return {
+      items: alignConciseMarkers(schemaAtArrayItem(source), markers, flag),
+    };
+  }
+  if (markers.properties === undefined) return markers;
+  return {
+    ...markers,
+    properties: Object.fromEntries(
+      Object.entries(markers.properties).map(([key, child]) => {
+        const childSchema = ContextualFlowControl.schemaAtPath(source, [key]);
+        return [
+          key,
+          alignConciseMarkers(
+            childSchema === false ? undefined : childSchema,
+            child,
+            flag,
+          ),
+        ];
+      }),
+    ),
+  };
+}
+
 function projectValue(
   value: unknown,
   schema: JSONSchema,
@@ -1549,6 +1588,8 @@ interface ResolvedProjection {
   itemProjectionSchema?: JSONSchema;
   itemMask?: ProjectionMask;
   implicitArrayTraversal: boolean;
+  /** The projection's markers, at the depth the source puts them. */
+  markers?: LinkMarkers;
 }
 
 function resolveProjection(
@@ -1576,6 +1617,9 @@ function resolveProjection(
       ),
       KeepAsCell.OnlyStream,
     );
+    const markers = projection.markers === undefined
+      ? undefined
+      : alignConciseMarkers(source, projection.markers, projection.flag);
     return projectsArrayItems
       ? {
         outputSchema: filteredOutputSchema(sourceSchema, outputSchema),
@@ -1589,6 +1633,9 @@ function resolveProjection(
         itemProjectionSchema: projectionSchema,
         itemMask: mask,
         implicitArrayTraversal: true,
+        // An array source is read element-wise, and a field list marks what it
+        // reads, so every marker below the root belongs to an element.
+        ...(markers === undefined ? {} : { markers: { items: markers } }),
       }
       : {
         outputSchema,
@@ -1596,6 +1643,7 @@ function resolveProjection(
         mask,
         projectsArrayItems: false,
         implicitArrayTraversal: true,
+        markers,
       };
   }
   const projectsArrayItems = schemaIsArray(projection.schema);
@@ -1620,6 +1668,8 @@ function resolveProjection(
     mask,
     projectsArrayItems,
     implicitArrayTraversal: false,
+    // A JSON Schema states its own depth, so its markers sit where it put them.
+    markers: projection.markers,
     ...(projectsArrayItems
       ? {
         itemOutputSchema: itemSchema,
@@ -1764,11 +1814,14 @@ async function composeElementAddresses(
  *
  * `implicitArrayTraversal` states that the markers came from a concise field
  * list, which names a field wherever the value holds one rather than at a
- * fixed depth. A position holding an array is therefore asked of each of its
- * elements — the same way {@link projectValue} applies one field mask across
- * them, and the address included, so `notes@` answers with the note documents
- * rather than with the slots they sit in. A JSON Schema states its own depth,
- * and marks elements with `items`.
+ * fixed depth. Where the source declares that depth,
+ * {@link alignConciseMarkers} has already written it out as `items`, so
+ * `notes@` answers with the note documents rather than with the slots they sit
+ * in. Where the source declares nothing, the value decides instead: a position
+ * the walk holds an array at is asked of each of its elements, the same way
+ * {@link projectValue} applies one field mask across them, and the address
+ * included. A JSON Schema states its own depth, and marks elements with
+ * `items`.
  */
 async function composeLinkAddresses(
   position: WalkedPosition,
@@ -1869,9 +1922,11 @@ export async function deriveSelectedValue(
   selection: CellSelection,
   deps: DeriveSelectedValueDependencies = {},
 ): Promise<unknown> {
-  const markers = selection.projection?.markers;
   const implicitArrayTraversal = selection.projection?.kind === "concise";
-  if (selection.filter !== undefined && markers !== undefined) {
+  if (
+    selection.filter !== undefined &&
+    selection.projection?.markers !== undefined
+  ) {
     const asked = implicitArrayTraversal
       ? `an \`${CONCISE_ADDRESS_SUFFIX}\` suffix in ` +
         selection.projection!.flag
@@ -1908,6 +1963,9 @@ export async function deriveSelectedValue(
     sourceSchema,
     sourceIsArray,
   );
+  // The markers at the depth the source puts them, which is where the walk
+  // below meets the positions they name.
+  const markers = projection?.markers;
   if (markers !== undefined && projection?.mask === false) {
     // The whole selection was addresses. There is no value to compute, so the
     // pattern graph would run over the rejecting selector and produce nothing
