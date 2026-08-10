@@ -2052,9 +2052,17 @@ Deno.test("benchmark: CPU lines split across large gaps and use distinct colors"
       assertEquals(legendColors.length, 18);
       assertEquals(new Set(legendColors).size, 18);
       for (const color of legendColors) {
+        const pair = color.match(
+          /^light-dark\((#[0-9a-f]{6}),(#[0-9a-f]{6})\)$/i,
+        );
+        assert(pair, `${color} is not a light and dark chart color`);
         assert(
-          contrastRatio(color, "#16181d") >= 3,
-          `${color} does not contrast with the CPU legend background`,
+          contrastRatio(pair[1], "#f5f7fa") >= 4.5,
+          `${pair[1]} does not contrast with the light CPU legend background`,
+        );
+        assert(
+          contrastRatio(pair[2], "#16181d") >= 3,
+          `${pair[2]} does not contrast with the dark CPU legend background`,
         );
       }
       const rowCpuIds = [

@@ -93,6 +93,12 @@ import {
   trendStatus,
 } from "../trend.ts";
 import { ciGanttPage } from "./ci-duration.ts";
+import {
+  DASHBOARD_THEME_CLIENT,
+  DASHBOARD_THEME_HEAD,
+  dashboardThemeToggle,
+  themedChartSeries,
+} from "../theme.ts";
 
 export { trendPct, trendStatus } from "../trend.ts";
 
@@ -1026,7 +1032,7 @@ function benchmarkIndexView(
   // the same style, and names the failure there.
   const countLine = failed
     ? ""
-    : `<div style="font-size:13px;color:#9aa0ab;margin:5px 0 0">${count} benchmark${
+    : `<div style="font-size:13px;color:var(--text-muted);margin:5px 0 0">${count} benchmark${
       count === 1 ? "" : "s"
     }${windowLabel}</div>`;
   const allPoints = indices.flatMap((series) => series.points);
@@ -1037,7 +1043,7 @@ function benchmarkIndexView(
   const chart = multiSparkline(
     indices.map((series) => ({
       vals: series.points.map((point) => point.index),
-      color: series.color,
+      ...themedChartSeries(series.color),
       xs: series.points.map((point) => (point.at - chartStart) / chartAxis),
       highlightCount: series.windowCount,
       maxXGap: CPU_LINE_MAX_X_GAP,
@@ -1742,7 +1748,7 @@ export function benchPage(
       const spark = multiSparkline(
         cpus.map((series) => ({
           vals: series.values,
-          color: series.color,
+          ...themedChartSeries(series.color),
           xs: series.points.map((point) => (point.at - axisStart) / axisSpan),
           maxXGap: CPU_LINE_MAX_X_GAP,
           showSinglePoint: true,
@@ -1801,6 +1807,7 @@ export function benchPage(
           [...cpuDetails]
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([cpu, detail]) => {
+              const displayColor = themedChartSeries(detail.color).color;
               const benchmarks = `${detail.benchmarks} benchmark${
                 detail.benchmarks === 1 ? "" : "s"
               }`;
@@ -1814,9 +1821,9 @@ export function benchPage(
                 }`;
               const { label: cpuId, anchor } = cpuKeys.get(cpu)!;
               return `<div class="cpu-key" id="${anchor}" data-cpu-id="${cpuId}"><span class="swatch" style="background:${
-                escapeHtml(detail.color)
+                escapeHtml(displayColor)
               }"></span><span class="cpu-id" style="--cpu-color:${
-                escapeHtml(detail.color)
+                escapeHtml(displayColor)
               }">${cpuId}</span><span class="cpu-description"><span class="cpu-name">${
                 escapeHtml(cpu)
               }</span><span class="cpu-detail">${benchmarks} · ${runs} · ${observed}</span></span></div>`;
@@ -1825,6 +1832,7 @@ export function benchPage(
     }
     const rowHtml = (r: (typeof rows)[number], label: string) => {
       const series = r.representative;
+      const displayColor = themedChartSeries(series.color).color;
       const { label: cpuId, anchor } = cpuKeys.get(series.cpu)!;
       const latest = formatNs(series.latest);
       const sampleCount = series.sampleCount;
@@ -1834,7 +1842,7 @@ export function benchPage(
       return `<div class="brow ${r.st}"><div class="bspark">${r.spark}${r.dur}</div><div class="bmeta">` +
         `<span class="bname">${escapeHtml(label)}</span>` +
         `<span class="bval" data-cpu-id="${cpuId}" data-sample-count="${sampleCount}" style="--cpu-color:${
-          escapeHtml(series.color)
+          escapeHtml(displayColor)
         }" title="${
           escapeHtml(`${series.cpu} · ${samples}`)
         }" aria-label="${
@@ -1902,28 +1910,29 @@ export function benchPage(
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Benchmarks — ${
     escapeHtml(stat.label)
   }</title>
+${DASHBOARD_THEME_HEAD}
 <style>
   ${PERFORMANCE_VIEW_STYLES}
   .bval{display:flex;align-items:baseline;min-width:0}
   .bval .cpu-id{margin-right:7px;align-self:center}
   .bval a.cpu-id{text-decoration:none}
-  .bval a.cpu-id:hover{border-color:#6ea8fe;color:#fff}
-  .bval a.cpu-id:focus-visible{outline:2px solid #6ea8fe;outline-offset:2px}
+  .bval a.cpu-id:hover{border-color:var(--accent);color:var(--text-strong)}
+  .bval a.cpu-id:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .btrend{margin-left:8px}
-  .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.42)}
-  .cpu-id{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--cpu-color,#454b56);border-radius:4px;padding:1px 4px;font-size:9px;line-height:1.2;font-weight:500;color:#c7ccd4;white-space:nowrap}
+  .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;flex:none;box-shadow:0 0 0 1px var(--icon-subtle)}
+  .cpu-id{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--cpu-color,var(--border-hover));border-radius:4px;padding:1px 4px;font-size:9px;line-height:1.2;font-weight:500;color:var(--text-secondary);white-space:nowrap}
   .cpu-legend{margin-top:22px}.cpu-legend-title{margin:0 0 8px}
   .handoff{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:10px}
-  .handoff a{font-size:13px;color:#c7ccd4;text-decoration:none;border:1px solid #2f333c;border-radius:6px;padding:4px 10px}
-  .handoff a:hover{border-color:#6ea8fe;color:#fff}
-  .handoff a:focus-visible{outline:2px solid #6ea8fe;outline-offset:2px}
-  .handoff span{font-size:11px;color:#666c76}
+  .handoff a{font-size:13px;color:var(--text-secondary);text-decoration:none;border:1px solid var(--border-strong);border-radius:6px;padding:4px 10px}
+  .handoff a:hover{border-color:var(--accent);color:var(--text-strong)}
+  .handoff a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .handoff span{font-size:11px;color:var(--text-faint)}
   .cpu-keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:7px}
-  .cpu-key{display:flex;align-items:flex-start;gap:8px;background:#16181d;border:1px solid #23262d;border-radius:8px;padding:8px 10px}
-  .cpu-key:target{border-color:#6ea8fe;box-shadow:0 0 0 1px rgba(110,168,254,.24);scroll-margin-top:16px}
+  .cpu-key{display:flex;align-items:flex-start;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 10px}
+  .cpu-key:target{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 24%,transparent);scroll-margin-top:16px}
   .cpu-key>.swatch,.cpu-key>.cpu-id{margin-top:3px}.cpu-description{min-width:0}
-  .cpu-name{display:block;font-size:12px;color:#c7ccd4;overflow-wrap:anywhere}
-  .cpu-detail{display:block;font-size:10px;color:#878d97;margin-top:2px}
+  .cpu-name{display:block;font-size:12px;color:var(--text-secondary);overflow-wrap:anywhere}
+  .cpu-detail{display:block;font-size:10px;color:var(--text-subtle);margin-top:2px}
   body.hide-green .brow.good{display:none}
   body.hide-green .benchmark-group:not(:has(.brow:not(.good))){display:none}
 </style></head><body data-snapshot-version="${escapeHtml(version)}">
@@ -1937,6 +1946,8 @@ export function benchPage(
     days === 1 ? "" : "s"
   }</output><input type="range" id="days" name="days" min="${CI_HISTORY_MIN_DAYS}" max="${CI_HISTORY_DAYS}" step="1" value="${days}"></label><nav class="choice-group" aria-label="Benchmark metric"><span class="lbl">metric</span>${statSel}</nav><nav class="choice-group" aria-label="Sort benchmarks"><span class="lbl">sort</span>${sortSel}</nav><label class="check trailing"><input type="checkbox" id="hg"> hide green</label></form>
   ${rangeContent}
+${dashboardThemeToggle()}
+${DASHBOARD_THEME_CLIENT}
 <script>
   const hg = document.getElementById("hg"), days = document.getElementById("days"), daysv = document.getElementById("daysv"), controls = days.form, KEY = "benchHideGreen", DEFAULT_DAYS = days.value;
   let rangeContent = document.getElementById("range-content"), fetchProgress = document.getElementById("fetch-progress"), title = document.getElementById("fetch-title"), total = document.getElementById("fetch-total"), detail = document.getElementById("fetch-detail"), bar = document.getElementById("fetch-bar"), pageVersion = fetchProgress.dataset.snapshotVersion, appliedDays = days.value;

@@ -20,6 +20,7 @@
 // actually-high error rate.
 import type { Status, Tile, TileView } from "../types.ts";
 import { serviceName, SPARK_FADE, sparkline } from "../lib.ts";
+import { CHART_HIGHLIGHT, CHART_LINE } from "../theme.ts";
 
 const RECENT_MS = 12 * 60 * 60 * 1000; // headline number: last 12 hours
 const TREND_MS = 14 * 24 * 60 * 60 * 1000; // sparkline reach (capped by ~15-day trace retention)
@@ -140,7 +141,7 @@ export const prodErrors: Tile = {
     // Brighten the trailing last-12h hours, but keep the whole retained range in
     // view (scaleAll) — the recent window can sit near zero while history spikes.
     const highlight = recent.length >= 2
-      ? { count: recent.length, color: "#c7ccd4", scaleAll: true }
+      ? { count: recent.length, color: CHART_HIGHLIGHT, scaleAll: true }
       : undefined;
     return {
       ...drill,
@@ -148,7 +149,7 @@ export const prodErrors: Tile = {
       status,
       value: rate === undefined ? "—" : `${rate.toFixed(2)}%`,
       sub: rate === undefined ? "no traces · last 12h" : `${recentErr} err / ${recentTotal} spans · last 12h`,
-      extra: sparkline(series, "#727882", highlight, SPARK_FADE[status]),
+      extra: sparkline(series, CHART_LINE, highlight, SPARK_FADE[status]),
       duration: span,
     };
   },

@@ -1,6 +1,6 @@
 # Fabric wall — modular dev/company dashboard
 
-A small Deno server that renders a dark, glanceable wall of status tiles and
+A small Deno server that renders a glanceable wall of status tiles and
 updates their markup in place over Server-Sent Events. Every tile is one file
 with a fixed interface; a single file registers them.
 
@@ -25,6 +25,11 @@ deno task watch
 deno task test
 ```
 
+The dashboard uses dark mode on its first visit. The switch at the bottom right
+of each page cycles through dark, light, and the operating-system preference.
+It saves that choice for the dashboard and all of its drill-down pages. Inline
+charts and generated CI Gantt images use the active theme as well.
+
 ## Architecture
 
 ```
@@ -32,6 +37,7 @@ dashboard/
   types.ts      the interface: Tile, TileView, Status, Ctx, Route
   config.ts     port, repo, tunable status thresholds
   palette.ts    THE ONE PLACE status colors, washes and dot shapes are chosen
+  theme.ts      light/dark surface colors, theme switch markup and browser behavior
   lib.ts        shared helpers (github, memo, escapeHtml, sparkline, strip, …)
   blacksmith.ts authenticated read client for Blacksmith billing data
   ctx.ts        shared, memoized data sources handed to every tile (ctx.runs)
