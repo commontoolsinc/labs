@@ -33,6 +33,7 @@ import {
 } from "./commitmsg.ts";
 import type { Highlighter, Language } from "./languages/language.ts";
 import { languageForFile } from "./languages/language.ts";
+import type { LineEndingProvenance } from "./editbuffer.ts";
 import type {
   EditableSource,
   EditPolicy,
@@ -103,7 +104,6 @@ export function diffSource(
   const completeFiles: DiffHighlightFiles = {
     fileText: expectedFiles,
     hunks: saveHunks,
-    sourceText: edit.sourceText,
   };
 
   // No file on disk backs this diff (nothing resolved or verified): read-only.
@@ -252,15 +252,23 @@ export function diffSource(
           expectedFiles,
           saveHunks,
           changedHunkIndices(original, current),
-          original,
         ).keys(),
       ].map(shortName),
-    revert: (original, current, cursorLine, scope) =>
-      revert(original, current, cursorLine, scope),
+    revert: (original, current, cursorLine, scope, lineEndings) =>
+      revert(
+        original,
+        current,
+        cursorLine,
+        scope,
+        lineEndings,
+        diffLineEndingProvenance(original, expectedFiles, saveHunks),
+      ),
     expandContext: (current, baseline, cursorLine, up) =>
       expandContext(ws, cache, saveHunks, current, baseline, cursorLine, up),
     expandRoom: (current) => expandRoom(ws, cache, saveHunks, current),
-    save: (text, baseline, options) => {
+    lineEndingProvenance: (text) =>
+      diffLineEndingProvenance(text, expectedFiles, saveHunks),
+    save: (text, baseline, options, lineEndings) => {
       const changedHunks = baseline === undefined
         ? undefined
         : changedHunkIndices(baseline, text);
@@ -275,7 +283,7 @@ export function diffSource(
         expectedFiles,
         saveHunks,
         changedHunks,
-        baseline ?? completeFiles.sourceText,
+        lineEndings,
       );
       const advancedHunks = changes.size === 0
         ? []
@@ -345,7 +353,7 @@ export function diffSource(
           expectedFiles,
           saveHunks,
           amendedHunks,
-          baseline ?? completeFiles.sourceText,
+          lineEndings,
         );
         for (const path of amendedPaths) {
           const committed = commitBase.get(path);
@@ -409,9 +417,6 @@ export function diffSource(
           hunk.newStart = newStart;
           hunk.newCount = newCount;
         }
-        completeFiles.sourceText = options?.amendCommit === false && baseline
-          ? baselineWithCurrentHunks(baseline, text)
-          : text;
         return saveStatus(writes.length, amended);
       } catch (error) {
         const rollbackErrors: string[] = [];
@@ -563,17 +568,30 @@ function revert(
   current: string,
   cursorLine: number,
   scope: RevertScope,
-): { text: string; cursorLine: number } | null {
+  currentLineEndings: readonly (LineEndingProvenance | undefined)[] = [],
+  baselineLineEndings: readonly (LineEndingProvenance | undefined)[] = [],
+): {
+  text: string;
+  cursorLine: number;
+  lineEndings: readonly (LineEndingProvenance | undefined)[];
+} | null {
   if (original === current) return null;
   const baseLines = original.split("\n");
   if (scope === "all") {
     return {
       text: original,
       cursorLine: Math.min(cursorLine, baseLines.length - 1),
+      lineEndings: baselineLineEndings,
     };
   }
   if (scope === "message") {
-    return revertMessage(baseLines, current.split("\n"), cursorLine);
+    return revertMessage(
+      baseLines,
+      current.split("\n"),
+      cursorLine,
+      baselineLineEndings,
+      currentLineEndings,
+    );
   }
   const cur = parseDiff(current);
   const base = parseDiff(original);
@@ -593,14 +611,21 @@ function revert(
     return null;
   }
 
-  const splice = (cs: number, ce: number, bs: number, be: number) => ({
-    text: [
-      ...curLines.slice(0, cs),
-      ...baseLines.slice(bs, be + 1),
-      ...curLines.slice(ce + 1),
-    ].join("\n"),
-    cursorLine: cs,
-  });
+  const splice = (cs: number, ce: number, bs: number, be: number) => {
+    return {
+      text: [
+        ...curLines.slice(0, cs),
+        ...baseLines.slice(bs, be + 1),
+        ...curLines.slice(ce + 1),
+      ].join("\n"),
+      cursorLine: cs,
+      lineEndings: [
+        ...currentLineEndings.slice(0, cs),
+        ...baselineLineEndings.slice(bs, be + 1),
+        ...currentLineEndings.slice(ce + 1),
+      ],
+    };
+  };
 
   // Reverting a whole file, or a cursor that sits on the file headers.
   const hunkIdx = scope === "chunk"
@@ -634,7 +659,13 @@ function revertMessage(
   baseLines: readonly string[],
   curLines: readonly string[],
   cursorLine: number,
-): { text: string; cursorLine: number } | null {
+  baselineLineEndings: readonly (LineEndingProvenance | undefined)[] = [],
+  currentLineEndings: readonly (LineEndingProvenance | undefined)[] = [],
+): {
+  text: string;
+  cursorLine: number;
+  lineEndings: readonly (LineEndingProvenance | undefined)[];
+} | null {
   const curMsgs = findCommitMessages(curLines);
   const idx = curMsgs.findIndex((m) =>
     cursorLine >= m.start && cursorLine <= m.end
@@ -650,6 +681,11 @@ function revertMessage(
       ...curLines.slice(cur.end + 1),
     ].join("\n"),
     cursorLine: cur.start,
+    lineEndings: [
+      ...currentLineEndings.slice(0, cur.start),
+      ...baselineLineEndings.slice(base.start, base.end + 1),
+      ...currentLineEndings.slice(cur.end + 1),
+    ],
   };
 }
 
@@ -1155,7 +1191,6 @@ export function createDiffHighlighter(
 interface DiffHighlightFiles {
   readonly fileText: ReadonlyMap<string, string>;
   readonly hunks: readonly MutableHunk[];
-  sourceText?: string;
 }
 
 interface TouchedHunk {
@@ -1355,8 +1390,6 @@ function rehighlightTouchedHunks(
           rawLines.join("\n"),
           completeFiles.fileText,
           completeFiles.hunks,
-          undefined,
-          completeFiles.sourceText,
         )).get(path)
         : undefined;
       if (completeText !== undefined && path && completeFiles) {
@@ -1718,8 +1751,6 @@ function reparse(
     text,
     completeFiles.fileText,
     completeFiles.hunks,
-    undefined,
-    completeFiles.sourceText,
   );
   const statefulPaths = new Set<string>();
   let hunkIndex = 0;
@@ -1805,7 +1836,7 @@ interface FileSplice {
   startIndex: number;
   newCount: number;
   newSide: string[];
-  baselineSide: string[];
+  lineEndings: Array<LineEndingProvenance | undefined>;
   noTrailingNewline?: boolean;
   fallbackEnding: "\n" | "\r\n";
 }
@@ -1815,11 +1846,6 @@ type FileLineEnding = "" | "\n" | "\r\n";
 interface FileContentLine {
   text: string;
   ending: FileLineEnding;
-}
-
-interface FileLineProvenance {
-  ending: FileLineEnding;
-  bodyCarriesCrlfEnding: boolean;
 }
 
 /** Split file contents while keeping each line's exact newline separate. */
@@ -1835,73 +1861,6 @@ function fileContentLines(text: string): FileContentLine[] {
     }
     return { text: line, ending: hasNewline ? "\n" : "" };
   });
-}
-
-function linePositions(lines: readonly string[]): Map<string, number[]> {
-  const positions = new Map<string, number[]>();
-  for (const [index, line] of lines.entries()) {
-    const entries = positions.get(line) ?? [];
-    entries.push(index);
-    positions.set(line, entries);
-  }
-  return positions;
-}
-
-function nextLinePosition(
-  positions: ReadonlyMap<string, readonly number[]>,
-  line: string,
-  from: number,
-): number {
-  const entries = positions.get(line) ?? [];
-  let low = 0;
-  let high = entries.length;
-  while (low < high) {
-    const middle = (low + high) >>> 1;
-    if (entries[middle] < from) low = middle + 1;
-    else high = middle;
-  }
-  return entries[low] ?? -1;
-}
-
-/** Match surviving rows to the baseline while leaving inserted rows unmapped. */
-function alignBaselineLines(
-  baseline: readonly string[],
-  current: readonly string[],
-): Array<number | undefined> {
-  const aligned = new Array<number | undefined>(current.length);
-  const baselinePositions = linePositions(baseline);
-  const currentPositions = linePositions(current);
-  let baselineIndex = 0;
-  let currentIndex = 0;
-  while (baselineIndex < baseline.length && currentIndex < current.length) {
-    if (baseline[baselineIndex] === current[currentIndex]) {
-      aligned[currentIndex++] = baselineIndex++;
-      continue;
-    }
-    const sameBaselineLater = nextLinePosition(
-      currentPositions,
-      baseline[baselineIndex],
-      currentIndex + 1,
-    );
-    const sameCurrentLater = nextLinePosition(
-      baselinePositions,
-      current[currentIndex],
-      baselineIndex + 1,
-    );
-    if (
-      sameBaselineLater >= 0 &&
-      (sameCurrentLater < 0 ||
-        sameBaselineLater - currentIndex <=
-          sameCurrentLater - baselineIndex)
-    ) {
-      currentIndex++;
-    } else if (sameCurrentLater >= 0) {
-      baselineIndex++;
-    } else {
-      aligned[currentIndex++] = baselineIndex++;
-    }
-  }
-  return aligned;
 }
 
 /** Choose the closest newline style to a replaced file range. */
@@ -1925,24 +1884,17 @@ function nearbyLineEnding(
   return fallback;
 }
 
-function nearbyAlignedEnding(
+function nearbyProvenanceEnding(
   index: number,
-  alignment: readonly (number | undefined)[],
-  provenance: readonly (FileLineProvenance | undefined)[],
+  provenance: readonly (LineEndingProvenance | undefined)[],
   fallback: Exclude<FileLineEnding, "">,
 ): Exclude<FileLineEnding, ""> {
   for (let current = index - 1; current >= 0; current--) {
-    const baseline = alignment[current];
-    const ending = baseline === undefined
-      ? undefined
-      : provenance[baseline]?.ending;
+    const ending = provenance[current]?.ending;
     if (ending) return ending;
   }
-  for (let current = index + 1; current < alignment.length; current++) {
-    const baseline = alignment[current];
-    const ending = baseline === undefined
-      ? undefined
-      : provenance[baseline]?.ending;
+  for (let current = index + 1; current < provenance.length; current++) {
+    const ending = provenance[current]?.ending;
     if (ending) return ending;
   }
   return fallback;
@@ -1951,7 +1903,7 @@ function nearbyAlignedEnding(
 function baselineLineProvenance(
   body: string,
   original: FileContentLine | undefined,
-): FileLineProvenance | undefined {
+): LineEndingProvenance | undefined {
   if (!original) return undefined;
   return {
     ending: original.ending,
@@ -1963,7 +1915,7 @@ function baselineLineProvenance(
 /** Give an edited diff row the newline carried by its baseline row. */
 function reconstructedFileLine(
   body: string,
-  provenance: FileLineProvenance | undefined,
+  provenance: LineEndingProvenance | undefined,
   needsEnding: boolean,
   nearbyEnding: Exclude<FileLineEnding, "">,
 ): FileContentLine {
@@ -2118,10 +2070,12 @@ function hunkNewSide(
   info: MutableHunk,
 ): {
   lines: string[];
+  sourceRows: number[];
   noTrailingNewline?: boolean;
   fallbackEnding: "\n" | "\r\n";
 } {
   const lines: string[] = [];
+  const sourceRows: number[] = [];
   let noTrailingNewline: boolean | undefined;
   const crlfTransport = rawLines[hunk.headerLine]?.endsWith("\r") === true;
   let finalNewSideLine = -1;
@@ -2142,6 +2096,7 @@ function hunkNewSide(
           ? body.replace(/^\uFEFF/, "")
           : body,
       );
+      sourceRows.push(line);
     }
     if (
       kind === "meta" && line - 1 === finalNewSideLine &&
@@ -2153,9 +2108,47 @@ function hunkNewSide(
   }
   return {
     lines,
+    sourceRows,
     noTrailingNewline,
     fallbackEnding: crlfTransport ? "\r\n" : "\n",
   };
+}
+
+/** Map editable diff rows to the exact endings of their workspace rows. */
+function diffLineEndingProvenance(
+  text: string,
+  fileText: ReadonlyMap<string, string>,
+  hunks: readonly MutableHunk[],
+): Array<LineEndingProvenance | undefined> {
+  const rawLines = text.split("\n");
+  const provenance = rawLines.map(() => undefined) as Array<
+    LineEndingProvenance | undefined
+  >;
+  const model = parseDiff(text);
+  let hunkIndex = 0;
+  for (const file of model?.files ?? []) {
+    for (const hunk of file.hunks) {
+      const info = hunks[hunkIndex++];
+      if (!info?.absPath) continue;
+      const base = fileText.get(info.absPath);
+      if (base === undefined) continue;
+      const fileLines = fileContentLines(base);
+      if (
+        spliceStart(info) + info.newCount === fileLines.length + 1 &&
+        (base === "" || base.endsWith("\n"))
+      ) {
+        fileLines.push({ text: "", ending: "" });
+      }
+      const side = hunkNewSide(rawLines, model!, hunk, info);
+      for (const [index, sourceRow] of side.sourceRows.entries()) {
+        provenance[sourceRow] = baselineLineProvenance(
+          side.lines[index],
+          fileLines[spliceStart(info) + index],
+        );
+      }
+    }
+  }
+  return provenance;
 }
 
 /**
@@ -2182,16 +2175,12 @@ function collectFileOutputs(
   fileText: ReadonlyMap<string, string>,
   hunks: readonly MutableHunk[],
   changedHunks?: ReadonlySet<number>,
-  baselineText?: string,
+  lineEndings?: readonly (LineEndingProvenance | undefined)[],
 ): Map<string, string> {
   const model = parseDiff(text);
   const rawLines = text.split("\n");
-  const baselineModel = baselineText === undefined
-    ? null
-    : parseDiff(baselineText);
-  const baselineRawLines = baselineText?.split("\n") ?? [];
-  const baselineHunks = baselineModel?.files.flatMap((file) => file.hunks) ??
-    [];
+  const currentLineEndings = lineEndings ??
+    diffLineEndingProvenance(text, fileText, hunks);
   const byFile = new Map<string, FileSplice[]>();
   let hunkIndex = 0;
   for (const file of model?.files ?? []) {
@@ -2201,21 +2190,12 @@ function collectFileOutputs(
       const include = changedHunks === undefined || changedHunks.has(index);
       if (!include || !info || !isWritable(info) || !info.absPath) continue;
       const current = hunkNewSide(rawLines, model!, hunk, info);
-      const baselineHunk = baselineHunks[index];
-      const baselineSide = baselineModel && baselineHunk
-        ? hunkNewSide(
-          baselineRawLines,
-          baselineModel,
-          baselineHunk,
-          info,
-        ).lines
-        : current.lines;
       const list = byFile.get(info.absPath) ?? [];
       list.push({
         startIndex: spliceStart(info),
         newCount: info.newCount,
         newSide: current.lines,
-        baselineSide,
+        lineEndings: current.sourceRows.map((row) => currentLineEndings[row]),
         noTrailingNewline: current.noTrailingNewline,
         fallbackEnding: current.fallbackEnding,
       });
@@ -2240,40 +2220,30 @@ function collectFileOutputs(
     }
     const baseLineCount = fileLines.length;
     for (const h of [...splices].sort((a, b) => b.startIndex - a.startIndex)) {
-      const original = fileLines.slice(
-        h.startIndex,
-        h.startIndex + h.newCount,
-      );
       const ending = nearbyLineEnding(
         fileLines,
         h.startIndex,
         h.newCount,
         h.fallbackEnding,
       );
-      const provenance = h.baselineSide.map((body, index) =>
-        baselineLineProvenance(body, original[index])
-      );
-      const alignment = alignBaselineLines(h.baselineSide, h.newSide);
       const reachesEof = h.startIndex + h.newCount === baseLineCount;
-      const hasTrailingNewline = reachesEof
-        ? h.noTrailingNewline === true
+      const replacement = h.newSide.map((body, index) => {
+        const inherited = h.lineEndings[index];
+        const finalFileLine = reachesEof && index === h.newSide.length - 1;
+        const needsEnding = !finalFileLine
+          ? true
+          : h.noTrailingNewline === true
           ? false
+          : inherited !== undefined
+          ? inherited.ending !== ""
           : h.newCount > 0
           ? base.endsWith("\n")
-          : true
-        : true;
-      const replacement = h.newSide.map((body, index) => {
-        const needsEnding = !reachesEof || index < h.newSide.length - 1 ||
-          hasTrailingNewline;
-        const baselineIndex = alignment[index];
-        const inherited = baselineIndex === undefined
-          ? undefined
-          : provenance[baselineIndex];
+          : true;
         return reconstructedFileLine(
           body,
           inherited,
           needsEnding,
-          nearbyAlignedEnding(index, alignment, provenance, ending),
+          nearbyProvenanceEnding(index, h.lineEndings, ending),
         );
       });
       fileLines.splice(h.startIndex, h.newCount, ...replacement);

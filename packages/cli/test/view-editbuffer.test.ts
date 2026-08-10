@@ -101,6 +101,27 @@ Deno.test("editbuffer: structural edits preserve source-owned CRLF transport", (
   assertEquals(terminal.text(), "ab\r\n\r\n");
 });
 
+Deno.test("editbuffer: structural edits carry exact line-ending provenance", () => {
+  const crlf = { ending: "\r\n", bodyCarriesCrlfEnding: true } as const;
+  const lf = { ending: "\n", bodyCarriesCrlfEnding: false } as const;
+  const split = new EditBuffer("a\nb", [crlf, lf]);
+  split.col = 1;
+  split.insertNewline();
+  assertEquals(split.lineEndingProvenance(), [crlf, crlf, lf]);
+  split.deleteBackward();
+  assertEquals(split.lineEndingProvenance(), [crlf, lf]);
+
+  const replaced = new EditBuffer("a\nb", [crlf, lf]);
+  replaced.spliceLines(0, 1, ["head", "tail"], 0, 0);
+  assertEquals(replaced.lineEndingProvenance(), [crlf, crlf, lf]);
+  replaced.spliceLines(0, 2, ["joined"], 0, 0);
+  assertEquals(replaced.lineEndingProvenance(), [crlf, lf]);
+  replaced.spliceLines(1, 0, ["inserted"], 0, 0);
+  assertEquals(replaced.lineEndingProvenance(), [crlf, undefined, lf]);
+  replaced.setLineEndingProvenance([lf]);
+  assertEquals(replaced.lineEndingProvenance(), [lf, undefined, undefined]);
+});
+
 Deno.test("editbuffer: dirty tracks against the original", () => {
   const b = new EditBuffer("x");
   assert(!b.dirty());

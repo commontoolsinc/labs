@@ -1795,6 +1795,155 @@ ${testCase.row}
     }
   });
 
+  it("keeps duplicate rows attached to their own ending provenance", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(path, encoder.encode("x\r\nx\r"));
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1,2 +1,2 @@
+ x\r
+-old
++x\r
+\\ No newline at end of file
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 4;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "home" });
+      session.handleKey({ name: "ctrl-k" });
+      session.handleKey({ name: "backspace" });
+      session.handleKey({ name: "f3" });
+
+      expect(Deno.readFileSync(path)).toEqual(encoder.encode("x\r"));
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("keeps the preceding ending when a later added row is deleted", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(path, encoder.encode("A\r\nA\n"));
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1,2 +1,2 @@
+-old1
+-old2
++A\r
++A
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 7;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "home" });
+      session.handleKey({ name: "ctrl-k" });
+      session.handleKey({ name: "backspace" });
+      session.handleKey({ name: "f3" });
+
+      expect(Deno.readFileSync(path)).toEqual(encoder.encode("A\r\n"));
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("keeps a surviving newline after deleting an unterminated EOF row", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      Deno.writeTextFileSync(path, "first\nlast");
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1,2 +1,2 @@
+ first
+-old
++last
+\\ No newline at end of file
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const session = new Session(
+        built.doc,
+        { color: false, showLineNumbers: false },
+        { width: 80, height: 10 },
+        undefined,
+        diffSource(ws, built.edit),
+      );
+      session.top = 6;
+      session.handleKey({ name: "e" });
+      session.handleKey({ name: "home" });
+      session.handleKey({ name: "ctrl-k" });
+      session.handleKey({ name: "backspace" });
+      session.handleKey({ name: "f3" });
+
+      expect(Deno.readTextFileSync(path)).toBe("first\n");
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
+  it("rebuilds mixed endings after context expansion joins hunks", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.mkdirSync(join(root, ".git"));
+      const path = join(root, "value.ts");
+      const encoder = new TextEncoder();
+      Deno.writeFileSync(path, encoder.encode("a\r\nB\r\nc\nD\nE\n"));
+      const diff = `diff --git a/value.ts b/value.ts
+--- a/value.ts
++++ b/value.ts
+@@ -1,2 +1,2 @@
+ a\r
+-oldB\r
++B\r
+@@ -4,2 +4,2 @@
+ D
+-oldE
++E
+`;
+      const ws = realWorkspace(root);
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const source = diffSource(ws, built.edit);
+      const expanded = source.expandContext!(diff, diff, 6, false)!;
+
+      expect(parseDiff(expanded.text)!.files[0].hunks).toHaveLength(1);
+      expect(source.save(expanded.text.replace("+E", "+EE"))).toBe(
+        "Saved 1 file",
+      );
+      expect(Deno.readFileSync(path)).toEqual(
+        encoder.encode("a\r\nB\r\nc\nD\nEE\n"),
+      );
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+
   it("separates literal CR content from CRLF diff transport", () => {
     const root = Deno.makeTempDirSync();
     try {

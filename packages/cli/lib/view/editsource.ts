@@ -11,6 +11,7 @@
  */
 import type { Document, Line, ViewMode } from "./model.ts";
 import type { DiffHunk, DiffModel } from "./diff.ts";
+import type { LineEndingProvenance } from "./editbuffer.ts";
 import type {
   Highlighter,
   Language,
@@ -117,10 +118,19 @@ export interface EditableSource {
     text: string,
     seedLines?: readonly Line[],
   ): Highlighter;
+  /** Exact file-ending information for transformed editable rows. */
+  lineEndingProvenance?(
+    text: string,
+  ): readonly (LineEndingProvenance | undefined)[];
   /** Attempt to persist the edited text. `baseline` is the text at the last
    * successful save. A read-only source returns its refusal reason without
    * writing. Returns a status message and throws on write failure. */
-  save(text: string, baseline?: string, options?: SaveOptions): string;
+  save(
+    text: string,
+    baseline?: string,
+    options?: SaveOptions,
+    lineEndings?: readonly (LineEndingProvenance | undefined)[],
+  ): string;
   /** The clean baseline after a successful save. Most sources persist the
    * whole buffer and omit this method. A commit view that saves files without
    * amending keeps commit-message edits outside the returned baseline, so they
@@ -145,7 +155,12 @@ export interface EditableSource {
     current: string,
     cursorLine: number,
     scope: RevertScope,
-  ): { text: string; cursorLine: number } | null;
+    lineEndings?: readonly (LineEndingProvenance | undefined)[],
+  ): {
+    text: string;
+    cursorLine: number;
+    lineEndings?: readonly (LineEndingProvenance | undefined)[];
+  } | null;
   /** Reveal more of the underlying file around the hunk `cursorLine` sits in (a
    * diff only). Returns the grown diff text, the matching grown baseline (so
    * revealing context is not itself an edit), and where the cursor moves — or

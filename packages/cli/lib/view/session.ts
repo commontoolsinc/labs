@@ -363,7 +363,12 @@ export class Session {
     this.files = files;
     // The edit buffer mirrors the document text; for an editable file the two
     // stay in lock-step (the document is a re-parse of the buffer).
-    if (source) this.buffer = new EditBuffer(doc.text);
+    if (source) {
+      this.buffer = new EditBuffer(
+        doc.text,
+        source.lineEndingProvenance?.(doc.text),
+      );
+    }
     const initialViewMode = options.viewMode ?? source?.defaultViewMode;
     if (initialViewMode === "rendered" && source?.render) {
       this.viewMode = "rendered";
@@ -2866,9 +2871,13 @@ export class Session {
       this.adjustHunkCounts(0, -1, hunkHeader);
       return;
     }
+    const previousEnding = b.lineEndingProvenance()[b.row - 1];
     b.place(b.row, 0);
     b.deleteBackward(); // join into the previous line
     for (let i = 0; i < markerLen + transportWidth; i++) b.deleteForward();
+    const lineEndings = [...b.lineEndingProvenance()];
+    lineEndings[b.row] = previousEnding;
+    b.setLineEndingProvenance(lineEndings);
     this.adjustHunkCounts(
       marker === " " || marker === "-" ? -1 : 0,
       marker === " " || marker === "+" ? -1 : 0,
@@ -3284,13 +3293,21 @@ export class Session {
       ? { amendCommit: false }
       : undefined;
     try {
-      this.message = this.source.save(current, baseline, options);
+      this.message = this.source.save(
+        current,
+        baseline,
+        options,
+        this.buffer.lineEndingProvenance(),
+      );
       const savedBaseline = this.source.baselineAfterSave?.(
         baseline,
         current,
         options,
       ) ?? current;
       this.buffer.setBaseline(savedBaseline);
+      this.buffer.setLineEndingProvenance(
+        this.source.lineEndingProvenance?.(current),
+      );
       if (target === "workspace" && this.buffer.dirty()) {
         this.message += "; commit message remains unsaved";
       }
@@ -3529,12 +3546,18 @@ export class Session {
       this.buffer.text(),
       this.buffer.row,
       scope,
+      this.buffer.lineEndingProvenance(),
     );
     if (!result) {
       this.message = "Nothing to revert there.";
       return;
     }
-    this.buffer.setText(result.text, result.cursorLine, 0);
+    this.buffer.setText(
+      result.text,
+      result.cursorLine,
+      0,
+      result.lineEndings ?? this.source.lineEndingProvenance?.(result.text),
+    );
     this.splitRow = null;
     this.snapCursorToEditable();
     this.setSourceDocument(this.source.parse(result.text));
@@ -3618,6 +3641,18 @@ export class Session {
     const moved = (n: number) =>
       n + (n >= r.insertedAt ? r.inserted : 0) -
       (r.removedAt !== null && n > r.removedAt ? 1 : 0);
+    const lineEndings = [
+      ...(this.source.lineEndingProvenance?.(r.text) ?? []),
+    ];
+    for (
+      let row = 0;
+      row < this.buffer.lineEndingProvenance().length;
+      row++
+    ) {
+      if (row === r.removedAt) continue;
+      const ending = this.buffer.lineEndingProvenance()[row];
+      if (ending !== undefined) lineEndings[moved(row)] = ending;
+    }
     // The line held still on screen: the one just outside the edge the revealed
     // lines go in at, so they open a gap on the hunk's side of it. Expanding
     // upwards holds the hunk's header and pushes the body down; expanding
@@ -3630,7 +3665,12 @@ export class Session {
     const pinRow = this.toDisplay(pinDoc) - this.top;
     const col = this.cursorOn ? this.buffer.col : 0;
     this.buffer.setBaseline(r.baseline);
-    this.buffer.setText(r.text, r.cursorLine, col);
+    this.buffer.setText(
+      r.text,
+      r.cursorLine,
+      col,
+      lineEndings,
+    );
     this.splitRow = null;
     this.setSourceDocument(this.source.parse(r.text));
     this.needsReparse = false;
@@ -4278,7 +4318,10 @@ export class Session {
     if (opened.source.defaultViewMode === "rendered") {
       this.viewMode = "rendered";
     }
-    this.buffer = new EditBuffer(opened.text);
+    this.buffer = new EditBuffer(
+      opened.text,
+      opened.source.lineEndingProvenance?.(opened.text),
+    );
     this.splitRow = null;
     this.highlighter = undefined; // the old highlighter was for the previous file
     this.clearFolds(); // the previous file's fold indices do not carry over
