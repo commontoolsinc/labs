@@ -92,7 +92,7 @@ export interface CallableExecutionDeps {
    * fetching the outcome back, because a caller-supplied id keeps that
    * fetch available forever: a later same-id call deduplicates against the
    * create-only receipt and returns the original outcome (verb contract
-   * D1/D3). Requires an `invocationId` — without one there is no receipt to
+   * D1/D3). Requires an `invocation` — without one there is no receipt to
    * come back for — and only the handler send path supports it (a tool's
    * result is delivered by this process, not read back from a receipt). */
   skipReadback?: boolean;

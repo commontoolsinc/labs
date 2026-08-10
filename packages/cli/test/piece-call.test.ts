@@ -3188,7 +3188,7 @@ describe("piece call selection", () => {
       {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-select",
+        invocation: { id: "inv-select", session: callerSession },
         selection,
         deriveSelectedValue: selector.derive,
       },
@@ -3219,7 +3219,7 @@ describe("piece call selection", () => {
       {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-plain",
+        invocation: { id: "inv-plain", session: callerSession },
         deriveSelectedValue: selector.derive,
       },
     );
@@ -3248,7 +3248,7 @@ describe("piece call selection", () => {
       loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
       isStdinTerminal: () => true,
-      invocationId: "inv-void-select",
+      invocation: { id: "inv-void-select", session: callerSession },
       selection: await parseCellSelectionOptions({ select: "anything" }),
       deriveSelectedValue: selector.derive,
     });
@@ -3274,7 +3274,7 @@ describe("piece call selection", () => {
       executePieceCallable(config, "addTopic", ["--title", "Ship it"], {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-empty-select",
+        invocation: { id: "inv-empty-select", session: callerSession },
         selection: await parseCellSelectionOptions({
           schema: '{"type":"string"}',
         }),
@@ -3354,7 +3354,7 @@ describe("piece call selection", () => {
       {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-select-links",
+        invocation: { id: "inv-select-links", session: callerSession },
         showLinks: true,
         selection: await parseCellSelectionOptions({ select: "count" }),
         deriveSelectedValue: selector.derive,
@@ -3538,7 +3538,7 @@ describe("piece call selection over a live runtime", () => {
       resolved,
       { title: "Ship it" },
       {
-        invocationId: "inv-live",
+        invocation: { id: "inv-live", session: callerSession },
         selection: await parseCellSelectionOptions({ select: "topics.title" }),
       },
     );
@@ -3561,7 +3561,7 @@ describe("piece call selection over a live runtime", () => {
       resolved,
       { title: "Ship it" },
       {
-        invocationId: "inv-live-filter",
+        invocation: { id: "inv-live-filter", session: callerSession },
         selection: await parseCellSelectionOptions({
           filter: '.status == "open"',
           select: "id,title",
@@ -3591,7 +3591,7 @@ describe("piece call selection over a live runtime", () => {
       resolved,
       { title: "Ship it" },
       {
-        invocationId: "inv-live-link",
+        invocation: { id: "inv-live-link", session: callerSession },
         selection: await parseCellSelectionOptions({
           schema: '{"properties":{"topic":{"$link":true}}}',
         }),
@@ -3616,7 +3616,7 @@ describe("piece call selection over a live runtime", () => {
 
     await expect(
       executeResolvedCallable(resolved, { title: "Ship it" }, {
-        invocationId: "inv-live-nothing",
+        invocation: { id: "inv-live-nothing", session: callerSession },
         selection: await parseCellSelectionOptions({
           schema: '{"type":"string"}',
         }),
