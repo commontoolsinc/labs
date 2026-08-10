@@ -165,7 +165,7 @@ function assertValidPayload(
   }
   for (const key of Object.keys(payload)) {
     if (isUnsafeObjectKey(key)) {
-      throw new Error(`Link payload has a forbidden key: "${key}".`);
+      throw new Error(`Link payload has a forbidden key: \`${key}\`.`);
     }
   }
 }

@@ -33,7 +33,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   [DEEP_FREEZE](
     _subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
-    throw new Error("FabricSet: not yet implemented");
+    throw new Error("`FabricSet`: not yet implemented");
   }
 
   /**
@@ -43,7 +43,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   [IS_DEEP_FROZEN](
     _subIsDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
-    throw new Error("FabricSet: not yet implemented");
+    throw new Error("`FabricSet`: not yet implemented");
   }
 
   /** @inheritDoc */
@@ -79,7 +79,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
        * Stub -- throws until `Set` support is implemented.
        */
       encode(_value: FabricSet): FabricValue {
-        throw new Error("FabricSet: not yet implemented");
+        throw new Error("`FabricSet`: not yet implemented");
       }
 
       /**
@@ -92,7 +92,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
         _state: FabricValue,
         _context: ReconstructionContext,
       ): FabricValue {
-        throw new Error("FabricSet: not yet implemented");
+        throw new Error("`FabricSet`: not yet implemented");
       }
     })(),
   );

@@ -34,7 +34,7 @@ export class FabricMap
   [DEEP_FREEZE](
     _subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
-    throw new Error("FabricMap: not yet implemented");
+    throw new Error("`FabricMap`: not yet implemented");
   }
 
   /**
@@ -44,7 +44,7 @@ export class FabricMap
   [IS_DEEP_FROZEN](
     _subIsDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
-    throw new Error("FabricMap: not yet implemented");
+    throw new Error("`FabricMap`: not yet implemented");
   }
 
   /** @inheritDoc */
@@ -80,7 +80,7 @@ export class FabricMap
        * Stub -- throws until `Map` support is implemented.
        */
       encode(_value: FabricMap): FabricValue {
-        throw new Error("FabricMap: not yet implemented");
+        throw new Error("`FabricMap`: not yet implemented");
       }
 
       /**
@@ -93,7 +93,7 @@ export class FabricMap
         _state: FabricValue,
         _context: ReconstructionContext,
       ): FabricValue {
-        throw new Error("FabricMap: not yet implemented");
+        throw new Error("`FabricMap`: not yet implemented");
       }
     })(),
   );

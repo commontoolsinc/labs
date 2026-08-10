@@ -72,7 +72,9 @@ describe("FabricMap", () => {
         const fm = new FabricMap(
           new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
         );
-        expect(() => deepFreeze(fm)).toThrow("FabricMap: not yet implemented");
+        expect(() => deepFreeze(fm)).toThrow(
+          "`FabricMap`: not yet implemented",
+        );
       });
 
       it("via dispatch: `[IS_DEEP_FROZEN]` throws not-yet-implemented (via type guard)", () => {
@@ -81,7 +83,7 @@ describe("FabricMap", () => {
         );
         Object.freeze(fm);
         expect(() => isDeepFrozenFabricValue(fm)).toThrow(
-          "FabricMap: not yet implemented",
+          "`FabricMap`: not yet implemented",
         );
       });
 
@@ -90,7 +92,7 @@ describe("FabricMap", () => {
           new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
         );
         expect(() => fm[DEEP_FREEZE](subFreeze)).toThrow(
-          "FabricMap: not yet implemented",
+          "`FabricMap`: not yet implemented",
         );
       });
 
@@ -100,7 +102,7 @@ describe("FabricMap", () => {
         );
         Object.freeze(fm);
         expect(() => fm[IS_DEEP_FROZEN](subIsDeepFrozen)).toThrow(
-          "FabricMap: not yet implemented",
+          "`FabricMap`: not yet implemented",
         );
       });
     });

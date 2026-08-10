@@ -31,7 +31,7 @@ export class SchemaAndHash {
    */
   constructor(schema: JSONSchema | undefined, hash: FabricHash) {
     if (!isDeepFrozen(schema)) {
-      throw new Error("SchemaAndHash: schema must be deep-frozen");
+      throw new Error("`SchemaAndHash`: schema must be deep-frozen");
     }
     this.#schema = schema;
     this.#hash = hash;
