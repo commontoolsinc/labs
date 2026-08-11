@@ -154,6 +154,8 @@ authenticate, and bring test servers and devices up before the real work:
 | --- | --- |
 | 🔎 | checks (format, type, patterns, attestations) |
 | 🚧 | guard that fails the build on a banned pattern |
+| 🩹 | check for unresolved merge-conflict markers |
+| ✅ | validate an artifact a previous step produced |
 | 🧪 | run tests |
 | 🧩 | run integration tests |
 | 🔁 | replay captured fixtures under today's source |

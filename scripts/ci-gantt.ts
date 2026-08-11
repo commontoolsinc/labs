@@ -297,6 +297,8 @@ const PHASE_MARKERS: [string, Phase][] = [
   // work: the job's actual purpose.
   ["🔎", "work"], // checks (format, type, patterns, attestations)
   ["🚧", "work"], // guard that fails the build on a banned pattern
+  ["🩹", "work"], // check for unresolved merge-conflict markers
+  ["✅", "work"], // validate an artifact a previous step produced
   ["🧪", "work"], // run tests
   ["🧩", "work"], // run integration tests
   ["🔁", "work"], // replay captured fixtures under today's source

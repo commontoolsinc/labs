@@ -1,0 +1,344 @@
+/**
+ * Builds a topic board carrying enough synthetic material that opening it
+ * exercises the parts of the runtime only large boards reach: a long card list,
+ * a prose corpus wide enough for the crossref join to cost something, and one
+ * child piece per topic for storage to load.
+ *
+ * Every topic's title and body are derived from its index, so two runs of the
+ * same size produce the same board and their timings are comparable.
+ *
+ * Seeding holds the whole board live while it writes, and the board recomputes
+ * its crossref join on each write, so peak memory rises with the topic count.
+ * {@link seedTopicBoardOutOfProcess} runs the seed in a child Deno with a heap
+ * of its own, which is how a benchmark gets a large board without carrying that
+ * peak for the rest of its run.
+ */
+
+import { Identity } from "@commonfabric/identity";
+import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
+import { join } from "@std/path";
+import {
+  initializePiecesController,
+  PieceController,
+} from "./pieces-controller.ts";
+
+/** One seeded topic, addressed the way the board's links address it. */
+export interface SeededTopic {
+  /** The topic piece's tagged hash (`fid1:…`), as pasted into prose. */
+  fid: string;
+  title: string;
+}
+
+export interface TopicBoardFixture {
+  /** The space the board lives in. */
+  spaceName: string;
+  /** The board piece, for the shell's `/spaceName/pieceId` route. */
+  boardId: string;
+  /** Seeded topics in creation order. */
+  topics: SeededTopic[];
+}
+
+export interface SeedTopicBoardOptions {
+  apiUrl: URL;
+  spaceName: string;
+  identity: Identity;
+  /** How many topics the board carries. */
+  topicCount: number;
+  /**
+   * How many earlier topics a citing body cites. Every citation is an edge the
+   * board's crossref join has to find, and a link its cards render.
+   */
+  crossrefsPerTopic?: number;
+  /**
+   * How many of the topics cite anything, counted back from the newest. See
+   * {@link DEFAULT_CITING_TOPICS} for why this is not every topic.
+   */
+  citingTopics?: number;
+  /** Words of prose in each topic body. */
+  bodyWords?: number;
+  /** Called after each topic lands, with its index. */
+  onTopic?: (index: number) => void;
+}
+
+export const DEFAULT_CROSSREFS_PER_TOPIC = 2;
+export const DEFAULT_BODY_WORDS = 120;
+
+/**
+ * How many topics carry citations, counted back from the newest.
+ *
+ * Citations are what a board can least afford. The board recomputes its whole
+ * crossref join on every write and the rows it builds carry cited siblings as
+ * pieces, so each edge costs the seeding runtime far more than each topic does.
+ * A thirty-topic board whose newest three topics cite two earlier ones each
+ * seeds in about half a minute and peaks near two and a half gigabytes; six
+ * citing topics doubles that peak, and citing from every topic exhausts an
+ * eight-gigabyte heap around the twentieth topic. Keeping the citations few
+ * leaves the prose corpus — the part that grows with the board — as large as
+ * the board is.
+ *
+ * The newest topics are the ones that cite, because the board orders its cards
+ * by last activity, so those are the cards a reader reaches first.
+ */
+export const DEFAULT_CITING_TOPICS = 3;
+
+const AGENT_NAME = "Topic board benchmark";
+
+/**
+ * Vocabulary the generated prose draws from. Any list of words does; these
+ * ones keep a generated body readable when a run is inspected by hand.
+ */
+const WORDS = [
+  "attention",
+  "boundary",
+  "capture",
+  "durable",
+  "envelope",
+  "fabric",
+  "gather",
+  "handoff",
+  "interval",
+  "journal",
+  "kernel",
+  "ledger",
+  "moment",
+  "notice",
+  "outline",
+  "pattern",
+  "quorum",
+  "record",
+  "surface",
+  "thread",
+  "update",
+  "vantage",
+  "witness",
+  "yield",
+];
+
+/**
+ * Distance back to the topics a given one cites. The strides are coprime with
+ * each other and with the vocabulary length, so citations spread across the
+ * board instead of collecting into a few chains.
+ */
+const CROSSREF_STRIDES = [1, 5, 11, 23, 47];
+
+/** Title of the topic at `index`, the same for a board of any size. */
+export function topicTitle(index: number): string {
+  return `Topic ${String(index).padStart(4, "0")} ${
+    WORDS[index % WORDS.length]
+  }`;
+}
+
+/**
+ * Indices of the topics the topic at `index` cites on a board of `topicCount`
+ * topics. Only earlier topics can be cited: a body is written at creation, when
+ * no later topic has a fid yet. Only the newest {@link DEFAULT_CITING_TOPICS}
+ * cite at all.
+ */
+export function crossrefTargets(
+  index: number,
+  {
+    topicCount,
+    crossrefsPerTopic = DEFAULT_CROSSREFS_PER_TOPIC,
+    citingTopics = DEFAULT_CITING_TOPICS,
+  }: {
+    topicCount: number;
+    crossrefsPerTopic?: number;
+    citingTopics?: number;
+  },
+): number[] {
+  if (index < topicCount - citingTopics) return [];
+  const targets: number[] = [];
+  for (const stride of CROSSREF_STRIDES.slice(0, crossrefsPerTopic)) {
+    const target = index - stride;
+    if (target >= 0) targets.push(target);
+  }
+  return targets;
+}
+
+/**
+ * `wordCount` words of prose derived from `index`. The stride varies with the
+ * index so successive topics do not share a prefix, and a body is not folded
+ * away by a layer that stores repeated text once.
+ */
+function topicProse(index: number, wordCount: number): string {
+  const stride = 1 + (index % (WORDS.length - 1));
+  const words: string[] = [];
+  for (let i = 0; i < wordCount; i++) {
+    words.push(WORDS[(index + i * stride) % WORDS.length]);
+  }
+  return words.join(" ");
+}
+
+/**
+ * The body of the topic at `index`, citing the fids of the earlier topics it
+ * references. `fids` holds the topics created so far, in creation order.
+ */
+function topicBody(
+  index: number,
+  fids: readonly string[],
+  shape: {
+    topicCount: number;
+    crossrefsPerTopic: number;
+    citingTopics: number;
+    bodyWords: number;
+  },
+): string {
+  const citations = crossrefTargets(index, shape)
+    .map((target) => `See also ${fids[target]}.`);
+  return [topicProse(index, shape.bodyWords), ...citations].join(" ");
+}
+
+/**
+ * The topic piece at `index` in the board's list.
+ *
+ * Only the `topics` key is pulled. The board's result also carries `crossrefs`,
+ * whose rows are piece-valued and expand through each topic's view of every
+ * sibling; pulling the whole result grows without bound as the board fills.
+ */
+async function topicAt(
+  board: PieceController,
+  index: number,
+): Promise<PieceController> {
+  const topics = (await board.result.getCell()).key("topics");
+  await topics.pull();
+  return new PieceController(
+    board.pieces(),
+    topics.key(index).resolveAsCell(),
+  );
+}
+
+/**
+ * Create a board in `spaceName` and fill it with `topicCount` topics. The
+ * controller that authors the board is disposed before this returns, so the
+ * seeded space is left to whatever reads it next with no connection of ours
+ * still open.
+ */
+export async function seedTopicBoard(
+  options: SeedTopicBoardOptions,
+): Promise<TopicBoardFixture> {
+  const shape = {
+    topicCount: options.topicCount,
+    crossrefsPerTopic: options.crossrefsPerTopic ?? DEFAULT_CROSSREFS_PER_TOPIC,
+    citingTopics: options.citingTopics ?? DEFAULT_CITING_TOPICS,
+    bodyWords: options.bodyWords ?? DEFAULT_BODY_WORDS,
+  };
+
+  const cc = await initializePiecesController({
+    spaceName: options.spaceName,
+    apiUrl: options.apiUrl,
+    identity: options.identity,
+  });
+  let releaseBoard: (() => void) | undefined;
+  try {
+    await cc.ensureDefaultPattern();
+
+    const sourcePath = join(import.meta.dirname!, "..", "topics", "main.tsx");
+    const rootPath = join(import.meta.dirname!, "..");
+    const program = await cc.runtime.harness.resolve(
+      new FileSystemProgramResolver(sourcePath, rootPath),
+    );
+    const board = await cc.create(program, { start: true });
+
+    // Hold the board's result live for the duration of the seed, so each
+    // `addTopic` lands against an up-to-date list.
+    releaseBoard = cc.getResult(board.getCell()).sink(() => {});
+
+    const topics: SeededTopic[] = [];
+    const fids: string[] = [];
+    for (let index = 0; index < options.topicCount; index++) {
+      const title = topicTitle(index);
+      await board.result.set({
+        title,
+        body: topicBody(index, fids, shape),
+        agentName: AGENT_NAME,
+      }, ["addTopic"]);
+      const created = await topicAt(board, index);
+      topics.push({ fid: created.id, title });
+      fids.push(created.id);
+      options.onTopic?.(index);
+    }
+
+    return { spaceName: options.spaceName, boardId: board.id, topics };
+  } finally {
+    releaseBoard?.();
+    await cc.dispose();
+  }
+}
+
+export interface SeedTopicBoardOutOfProcessOptions {
+  apiUrl: URL;
+  spaceName: string;
+  /** Passphrase the child derives the seeding identity from. */
+  passphrase: string;
+  topicCount: number;
+  crossrefsPerTopic?: number;
+  citingTopics?: number;
+  bodyWords?: number;
+  /** Heap ceiling for the child, in megabytes. */
+  heapMegabytes?: number;
+}
+
+/**
+ * Peak heap while seeding rises with the topic count, so a board large enough
+ * to be worth measuring is seeded well above the heap a benchmark process
+ * otherwise needs. Raising the ceiling for one child costs the parent nothing.
+ */
+export const DEFAULT_SEED_HEAP_MEGABYTES = 8192;
+
+const REPO_ROOT = join(import.meta.dirname!, "..", "..", "..");
+
+/**
+ * Seed a board in a child Deno and return what it wrote. The child exits when
+ * the board is complete, so its peak heap is gone before the caller reads the
+ * fixture.
+ */
+export async function seedTopicBoardOutOfProcess(
+  options: SeedTopicBoardOutOfProcessOptions,
+): Promise<TopicBoardFixture> {
+  const script = join(import.meta.dirname!, "topic-board-seed.ts");
+  const outputDirectory = await Deno.makeTempDir({
+    prefix: "commonfabric-topic-board-",
+  });
+  const output = join(outputDirectory, "fixture.json");
+  try {
+    const heap = options.heapMegabytes ?? DEFAULT_SEED_HEAP_MEGABYTES;
+    const result = await runDenoCommandWithTemporaryLock({
+      root: REPO_ROOT,
+      args: (lockPath) => [
+        "run",
+        "--lock",
+        lockPath,
+        "--no-check",
+        `--v8-flags=--max-old-space-size=${heap}`,
+        "-A",
+        script,
+        `--api-url=${options.apiUrl.href}`,
+        `--space=${options.spaceName}`,
+        `--passphrase=${options.passphrase}`,
+        `--topics=${options.topicCount}`,
+        `--crossrefs=${
+          options.crossrefsPerTopic ?? DEFAULT_CROSSREFS_PER_TOPIC
+        }`,
+        `--citing-topics=${options.citingTopics ?? DEFAULT_CITING_TOPICS}`,
+        `--body-words=${options.bodyWords ?? DEFAULT_BODY_WORDS}`,
+        `--out=${output}`,
+      ],
+    });
+    if (!result.success) {
+      throw new Error(
+        `Seeding a ${options.topicCount}-topic board failed (exit ${result.code}):\n${
+          new TextDecoder().decode(result.stderr)
+        }`,
+      );
+    }
+    return JSON.parse(await Deno.readTextFile(output)) as TopicBoardFixture;
+  } finally {
+    await Deno.remove(outputDirectory, { recursive: true });
+  }
+}
+
+/** The identity a seeded board is authored by, and read back with. */
+export function seedIdentity(passphrase: string): Promise<Identity> {
+  return Identity.fromPassphrase(passphrase, { implementation: "noble" });
+}

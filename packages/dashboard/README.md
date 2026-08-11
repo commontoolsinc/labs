@@ -613,7 +613,10 @@ Notes:
   configured.
 - **`benchmarks`** trends one **scale-invariant index per CPU** on the
   `benchmarks.yml` runs on main over ~45 days. The job runs `deno bench --json`
-  over the runner, cache, and deep-equal benchmarks. It uploads the report as a
+  over the bench files that workflow lists — micro-benchmarks across the runner,
+  utils, fuse, and memory packages, plus the topic-board navigation and scaling
+  benchmarks, which drive a browser end to end and so report in seconds where
+  the others report in nanoseconds. It uploads the report as a
   `bench-results` artifact with 90-day retention. There is no committed
   history. Each CPU's index compares a run with the previous run on the same
   CPU. It multiplies the previous index by the **geometric mean of the
@@ -648,9 +651,10 @@ Notes:
   whichever set is larger. This matches the window rule used for the CI
   duration median. The corresponding line still spans the full ~45 days. Its
   trend window is brighter. Green means every established CPU is flat or
-  falling. `deno bench` samples each benchmark to a fixed time budget. The
-  run's wall clock therefore barely moves with performance. The per-operation
-  times do move, so the tile trends those values instead. Because the index
+  falling. A benchmark runs either to a fixed time budget or for a fixed number
+  of iterations, and neither is a measurement. The run's wall clock therefore
+  barely moves with performance. The per-operation times do move, so the tile
+  trends those values instead. Because the index
   comes from artifacts, the tile turns gray when no in-window run has readable
   data and the latest run is neither failed nor empty. A collection leaves its
   last completed color and values in place until the workflow status and
