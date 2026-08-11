@@ -5324,6 +5324,7 @@ export class Runner {
 
   private handleJavaScriptHandlerResult(
     tx: IExtendedStorageTransaction,
+    resultSchema: JSONSchema | undefined,
     result: any,
     resultHasReactives: boolean,
     frame: Frame,
@@ -5409,7 +5410,18 @@ export class Runner {
       return result;
     }
 
-    const resultPattern = patternFromFrame(() => result);
+    // The verb's DECLARED result type (`module.resultSchema`, lowered from
+    // `action<E, R>` / `handler<E, T, R>`) becomes this synthesized pattern's
+    // result schema, which `setupInternal` records as the receipt cell's
+    // durable `schema` meta. A launched result is a link, so its settled value
+    // describes nothing; the declaration is the only description there is. An
+    // undeclared verb passes `undefined` and keeps the unconstrained schema a
+    // frame-synthesized pattern has always carried.
+    const resultPattern = patternFromFrame(
+      () => result,
+      undefined,
+      resultSchema,
+    );
     // navigateTo result patterns must start after the handler's transaction
     // commits so the navigation target is durable. Every other handler result
     // pattern runs into the canonical result/receipt cell in the handler's
@@ -5903,6 +5915,7 @@ export class Runner {
             const normalized = normalizeSandboxResult(result, name);
             return this.handleJavaScriptHandlerResult(
               tx,
+              module.resultSchema,
               normalized.value,
               normalized.hasReactive,
               frame,

@@ -35,16 +35,12 @@
  */
 import ts from "typescript";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
-import { detectCallKind } from "../ast/call-kind.ts";
+import {
+  declaredVerbResultTypeNode,
+  detectCallKind,
+  type VerbBuilderName,
+} from "../ast/call-kind.ts";
 import { visitEachChildWithJsx } from "../ast/utils.ts";
-
-type VerbBuilderName = "action" | "handler";
-
-/** Result slot: `action`'s 2nd type argument, `handler`'s 3rd. */
-const RESULT_TYPE_ARG_SLOT: Record<VerbBuilderName, number> = {
-  action: 1,
-  handler: 2,
-};
 
 const DECLARE_HINT: Record<VerbBuilderName, string> = {
   action: "action<Event, Result>(...)",
@@ -79,7 +75,7 @@ export class VerbReturnValidationTransformer extends HelpersOnlyTransformer {
     builderName: VerbBuilderName,
     context: TransformationContext,
   ): void {
-    if (declaresResult(call, builderName)) return;
+    if (declaredVerbResultTypeNode(call, builderName)) return;
 
     const callback = verbCallback(call);
     // Concise (expression) bodies never error: absorbing their completion
@@ -102,19 +98,6 @@ export class VerbReturnValidationTransformer extends HelpersOnlyTransformer {
       });
     }
   }
-}
-
-/**
- * Whether the call names a non-void result type argument. An absent argument
- * list, a short one, and an explicit `void` all mean the value-less shape.
- */
-function declaresResult(
-  call: ts.CallExpression,
-  builderName: VerbBuilderName,
-): boolean {
-  const typeArg = call.typeArguments?.[RESULT_TYPE_ARG_SLOT[builderName]];
-  if (!typeArg) return false;
-  return typeArg.kind !== ts.SyntaxKind.VoidKeyword;
 }
 
 /**
