@@ -1067,9 +1067,7 @@ export const EXPECTED_COVERAGE_ARTIFACT_NAMES = [
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((shard) =>
     `coverage-profile-runner-${shard}`
   ),
-  ...[1, 2, 3, 4].map((shard) =>
-    `coverage-profile-generated-patterns-${shard}`
-  ),
+  ...[1, 2, 3].map((shard) => `coverage-profile-generated-patterns-${shard}`),
   "coverage-profile-package-runner",
   "coverage-profile-package-runtime-client",
   "coverage-profile-package-shell",

@@ -141,6 +141,10 @@ Deno.test("coverage requirements follow sharded test matrices", async () => {
   const jobs = [
     ["test", "coverage-profile-workspace-"],
     ["runner-test", "coverage-profile-runner-"],
+    [
+      "generated-patterns-integration-test",
+      "coverage-profile-generated-patterns-",
+    ],
     ["pattern-integration-test", "coverage-profile-pattern-integration-"],
   ] as const;
 
@@ -181,16 +185,30 @@ Deno.test("coverage requirements follow sharded test matrices", async () => {
   }
 });
 
-Deno.test("pattern integration cache follows its shard topology", async () => {
+Deno.test("sharded pattern caches follow their shard topology", async () => {
   const contents = await workflow("deno.yml");
-  const job = jobBlock(contents, "pattern-integration-test");
   const topology = "-${{ matrix.total }}-${{ matrix.shard }}-";
-
-  assertEquals(job.split(topology).length - 1, 2);
-  assertStringIncludes(job, "'tasks/select-pattern-integration-files.ts'");
-  const restoreKeys = job.match(/restore-keys: \|\n((?: {12}.+\n)+)/);
-  assert(restoreKeys, "pattern integration restore prefixes not found");
-  assertEquals(restoreKeys[1].trim().split("\n").length, 1);
+  for (
+    const [jobId, selector] of [
+      [
+        "generated-patterns-integration-test",
+        "'tasks/select-generated-pattern-files.ts'",
+      ],
+      [
+        "pattern-integration-test",
+        "'tasks/select-pattern-integration-files.ts'",
+      ],
+    ] as const
+  ) {
+    const job = jobBlock(contents, jobId);
+    assertEquals(job.split(topology).length - 1, 2);
+    const key = job.match(/^ {10}key: (.+)$/m);
+    assert(key, `${jobId} cache key not found`);
+    assertStringIncludes(key[1], selector);
+    const restoreKeys = job.match(/restore-keys: \|\n((?: {12}.+\n)+)/);
+    assert(restoreKeys, `${jobId} restore prefixes not found`);
+    assertEquals(restoreKeys[1].trim().split("\n").length, 1);
+  }
 });
 
 Deno.test("Dashboard publishes only from main, never from a pull request", async () => {

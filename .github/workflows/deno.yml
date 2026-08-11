@@ -83,8 +83,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
-        total: [4]
+        shard: [1, 2, 3]
+        total: [3]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -400,8 +400,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
-        total: [4]
+        shard: [1, 2, 3]
+        total: [3]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -417,9 +417,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
-          key: cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-${{ hashFiles('packages/generated-patterns/**/*.ts') }}
+          key: cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.shard }}-${{ hashFiles('packages/generated-patterns/**/*.ts', 'tasks/select-generated-pattern-files.ts') }}
           restore-keys: |
-            cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
+            cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.shard }}-
 
       - name: 🧾 Record compile cache state for the Coverage Check
         uses: ./.github/actions/record-compile-cache-state

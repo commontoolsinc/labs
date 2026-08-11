@@ -9,9 +9,7 @@ function formatError(error: unknown): string {
 
 // Optional sharding for CI fan-out: CFCHECK_SHARD="i/n" (1-based) checks only
 // the files where (index % n) == (i - 1). Pattern compiles are single-threaded
-// CPU work that doesn't parallelize within one process, so the way to use more
-// cores is more PROCESSES — run n shards as n parallel CI jobs (mirrors the
-// existing "Pattern Tests (1/4..4/4)" fan-out).
+// CPU work, so n shards run as n parallel CI jobs.
 function parseShard(): { index: number; count: number } {
   const raw = Deno.env.get("CFCHECK_SHARD");
   if (!raw) return { index: 0, count: 1 };
