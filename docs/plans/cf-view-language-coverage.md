@@ -106,7 +106,9 @@ relative value. Record the reason in this plan.
   decoding.
 - [x] Build a fixture corpus with direct-file, diff, incomplete-edit, and
   selection cases from the survey.
-- [ ] Run a parser-adapter spike on Python, Go, shell, and HTML.
+- [x] Run a parser-adapter spike on Python, Go, shell, and HTML. The
+  [August 2026 report](../history/packages/cli/cf-view-parser-adapter-spike-2026-08.md)
+  records the measurements and leaves the decision to the next item.
 - [ ] Record the parser decision before implementing Stage 2.
 
 The parser spike must compare available Deno-compatible parsers with focused

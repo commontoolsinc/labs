@@ -87,6 +87,11 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [cf-view-parser-adapter-spike-2026-08.md](packages/cli/cf-view-parser-adapter-spike-2026-08.md)
+  — Python, Go, shell, and HTML parser-adapter measurements, August 2026.
+- [cf-view-parser-adapter-spike-2026-08-methodology.md](packages/cli/cf-view-parser-adapter-spike-2026-08-methodology.md)
+  — retained fixtures and procedure for the parser-adapter measurements,
+  August 2026.
 - [estuary-source-migration-2026-08-04.md](packages/patterns/lunch-poll/estuary-source-migration-2026-08-04.md)
   — rehearsal and live `setsrc` moving the Estuary lunch poll onto the mainline
   pattern, August 2026.
