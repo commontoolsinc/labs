@@ -318,6 +318,36 @@ open or close marker is _not_ on its own line, e.g. don't do this:
  */
 ```
 
+### Where one goes
+
+A doc comment binds to whatever follows it. Nothing comes between one and the
+declaration it documents: no blank line, no `//` comment, no second doc
+comment, and above all no other declaration. Tooling associates the two by
+adjacency, and so does a reader.
+
+Three shapes break this, each of which looks harmless while being written:
+
+- **A `//` note about the whole declaration, written above it.** The doc
+  comment now reads as a description of the note, and the contract is visually
+  detached from the thing it is a contract for. Open the declaration's body
+  with the note instead. When the declaration has no body — a type, an
+  interface property — fold what the note says into the doc comment.
+- **A new definition placed directly under an existing doc comment.** The doc
+  comment now documents the new definition, and the declaration it was written
+  for is left with none. Adding a definition means placing it after the whole
+  of the declaration above it, doc comment included.
+- **Two doc comments in a row.** TypeScript keeps only the one nearest the
+  declaration, so the other is invisible wherever documentation is rendered.
+  Merge them if both say something worth keeping.
+
+The one exception is a tool directive — `// deno-lint-ignore`,
+`// deno-fmt-ignore`, `// @ts-types` — which has to sit on the line
+immediately before the code it governs, and so has nowhere else to go.
+
+A doc comment with no declaration under it at all is the same defect from the
+other direction. To title a region of a file or a class, use a section marker,
+which is a `//` block; see [Section markers](#section-markers) above.
+
 ### What gets one
 
 - Every exported symbol: variable, function, class, type.

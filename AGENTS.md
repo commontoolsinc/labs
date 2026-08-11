@@ -99,9 +99,11 @@ If you are developing runtime code, start with:
 - `docs/development/DEVELOPMENT.md` - Coding style, design principles, and best
   practices
 - `docs/development/code-comment-style.md` - How a comment is written, both the
-  `//` kind and the JSDoc kind. The rule that catches people out is that a
-  comment describes the system as it stands: not its own past, not the road not
-  taken, not the plan that got it here
+  `//` kind and the JSDoc kind. Two rules catch people out. A comment describes
+  the system as it stands: not its own past, not the road not taken, not the
+  plan that got it here. And nothing comes between a doc comment and the
+  declaration it documents — adding a definition means placing it after the
+  whole of the declaration above it, doc comment included
 - `docs/development/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
   servers correctly (use `dev-local` for shell, not `dev`)
 - `docs/development/TESTING.md` - Running the test suites and the general unit
