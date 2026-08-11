@@ -239,7 +239,11 @@ const resolveBranch = (
         branch as JSONSchemaObj,
         root,
       );
-      if (isRecord(resolved)) return resolved;
+      // A boolean target is a resolution, not a failure to resolve: `true`
+      // matches everything and `false` matches nothing, which is what the
+      // definition said. Only exhausting the roots is a failure, and the
+      // resolver throws rather than returning a boolean for that.
+      if (isRecord(resolved) || typeof resolved === "boolean") return resolved;
     } catch {
       // Try the next root; the warning below covers exhausting them.
     }

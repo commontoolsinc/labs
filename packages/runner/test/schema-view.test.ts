@@ -705,6 +705,36 @@ describe("schema-view", () => {
       }
     });
 
+    it("matches everything where the definition it names is `true`", async () => {
+      // A boolean target is a resolution, not a failure to resolve.
+      const read = await seeded(
+        "permissive-ref",
+        { inner: { a: 1 } },
+        {
+          type: "object",
+          properties: {
+            inner: {
+              anyOf: [
+                { $ref: "#/$defs/Anything" },
+                { type: "object", required: ["never"] },
+              ],
+            },
+          },
+          $defs: { Anything: true },
+        } as const,
+      );
+
+      const eager = read(false);
+      const lazy = read(true);
+      try {
+        expect((eager.get() as { inner?: { a?: number } }).inner?.a).toBe(1);
+        expect((lazy.get() as { inner?: { a?: number } }).inner?.a).toBe(1);
+      } finally {
+        await eager.tx.commit();
+        await lazy.tx.commit();
+      }
+    });
+
     it("matches nothing where it is the whole schema", async () => {
       const read = await seeded(
         "unresolvable-root",
