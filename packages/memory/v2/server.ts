@@ -308,7 +308,6 @@ function missingTableName(error: unknown): string | undefined {
  *  full-Unicode `toLowerCase()` would over-match — SQLite treats e.g. `Ü` and
  *  `ü` as distinct tables, so folding them together here would mask a genuine
  *  "no such table" error as an empty result. */
-
 function isDeclaredTable(
   tables: Record<string, unknown> | undefined,
   name: string,
@@ -1285,16 +1284,6 @@ export class Server {
     return null;
   }
 
-  /** After an ACL change, drop live sessions whose principal no longer
-   *  holds READ (enforce mode only): per-message gating alone would still
-   *  let their already-registered subscriptions receive pushes. The owning
-   *  connection gets a session/revoked("unauthorized"), which the client
-   *  treats as a terminal session close (no reopen loop — a reopen attempt
-   *  is denied at session.open). The session that made the triggering ACL
-   *  write (`writerSessionId`) is still dropped from the registry — so it
-   *  receives no further pushes — but is NOT sent the terminal revocation, so
-   *  it gets this transact's response first (a self-removal otherwise reads as
-   *  a failure). Its next message fails closed as an unknown session. */
   // Writer sessions that de-authorized themselves in a commit: their
   // session/revoked is held until after the transact verdict goes out.
   #deferredSelfRevocations = new Map<string, string | null>();
@@ -1315,6 +1304,18 @@ export class Server {
     }
   }
 
+  /**
+   * After an ACL change, drop live sessions whose principal no longer holds
+   * READ (enforce mode only): per-message gating alone would still let their
+   * already-registered subscriptions receive pushes. The owning connection
+   * gets a session/revoked("unauthorized"), which the client treats as a
+   * terminal session close (no reopen loop — a reopen attempt is denied at
+   * session.open). The session that made the triggering ACL write
+   * (`writerSessionId`) is still dropped from the registry — so it receives no
+   * further pushes — but is NOT sent the terminal revocation, so it gets this
+   * transact's response first (a self-removal otherwise reads as a failure).
+   * Its next message fails closed as an unknown session.
+   */
   #revokeDeauthorizedSessions(
     engine: Engine.Engine,
     space: string,

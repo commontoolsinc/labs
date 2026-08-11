@@ -36,26 +36,6 @@ const MAX_ARRAY_INDEX = 2 ** 32 - 2;
 const cloneValue = (value: FabricValue): FabricValue => cloneIfNecessary(value);
 
 /**
- * Applies a sequence of RFC 6902 JSON Patch operations (`replace`, `add`,
- * `remove`, `move`, `splice`) to a document tree, returning a new document
- * tree with the patches applied in order. JSON Pointer paths in the ops are
- * parsed via `parsePointer()` from `./path.ts`.
- *
- * Used during document materialization: `engine.ts` walks the stored patch
- * sequence for a branch and rebuilds the current document by replaying each
- * patch on top of the previous state (`applyPatchDocument` → `applyPatch`).
- * The function is therefore on the hot path for any read that reconstructs
- * a document from its stored patch list.
- *
- * Mutation discipline: each op is applied via a copy-on-write descent. The
- * spine of containers from the root down to the mutated container is thawed to
- * fresh mutable copies (via `cloneForMutation()`), the leaf operation is applied
- * to that mutable container, and subtrees off the spine stay frozen-by-reference
- * (structural sharing). The assembled tree is then fully deep-frozen at the
- * `applyPatch` boundary, so callers can rely on the return value being deeply
- * frozen.
- */
-/**
  * A patch that cannot apply to the given base: a path descending through a
  * non-container, a kind mismatch (append onto a non-array), an invalid
  * pointer or index, or a root op producing a non-envelope result. Callers
@@ -96,6 +76,26 @@ export const applyPatchToDocument = (
   return patched;
 };
 
+/**
+ * Applies a sequence of RFC 6902 JSON Patch operations (`replace`, `add`,
+ * `remove`, `move`, `splice`) to a document tree, returning a new document
+ * tree with the patches applied in order. JSON Pointer paths in the ops are
+ * parsed via `parsePointer()` from `./path.ts`.
+ *
+ * Used during document materialization: `engine.ts` walks the stored patch
+ * sequence for a branch and rebuilds the current document by replaying each
+ * patch on top of the previous state (`applyPatchDocument` → `applyPatch`).
+ * The function is therefore on the hot path for any read that reconstructs
+ * a document from its stored patch list.
+ *
+ * Mutation discipline: each op is applied via a copy-on-write descent. The
+ * spine of containers from the root down to the mutated container is thawed to
+ * fresh mutable copies (via `cloneForMutation()`), the leaf operation is applied
+ * to that mutable container, and subtrees off the spine stay frozen-by-reference
+ * (structural sharing). The assembled tree is then fully deep-frozen at the
+ * `applyPatch` boundary, so callers can rely on the return value being deeply
+ * frozen.
+ */
 export const applyPatch = (
   state: FabricValue,
   ops: PatchOp[],
