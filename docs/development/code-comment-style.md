@@ -340,9 +340,38 @@ Three shapes break this, each of which looks harmless while being written:
   declaration, so the other is invisible wherever documentation is rendered.
   Merge them if both say something worth keeping.
 
-The one exception is a tool directive — `// deno-lint-ignore`,
-`// deno-fmt-ignore`, `// @ts-types` — which has to sit on the line
-immediately before the code it governs, and so has nowhere else to go.
+Two things are exceptions. A tool directive — `// deno-lint-ignore`,
+`// deno-fmt-ignore`, `// @ts-types` — has to sit on the line immediately
+before the code it governs, and so has nowhere else to go.
+
+The other is a label on one member of a set that a single doc comment covers
+as a whole. An overload list is the case that comes up: the doc comment
+describes the function, and a `//` label picks out which signature is which,
+including the first one. That label is part of the list's own structure rather
+than a note wedged in front of the contract, and it stays:
+
+```ts
+// Shown at module scope.
+
+/**
+ * Fry a donut, in whichever of the shapes the fryer accepts.
+ *
+ * Spelled out per shape rather than over a union, so each call site gets back
+ * exactly the shape it handed in.
+ */
+// The common case.
+export function fry(donut: string): string;
+// A tray, lowered into the oil as one batch.
+export function fry(donuts: string[]): string[];
+export function fry(donuts: string | string[]): string | string[] {
+  return donuts;
+}
+```
+
+A label earns that place by saying which member this is, in a list where the
+signatures are hard to tell apart at a glance. One that only restates the
+signature beneath it is not doing that work, and goes — even if it leaves the
+rest of a numbered series behind, because the numbering was never the point.
 
 A doc comment with no declaration under it at all is the same defect from the
 other direction. To title a region of a file or a class, use a section marker,
