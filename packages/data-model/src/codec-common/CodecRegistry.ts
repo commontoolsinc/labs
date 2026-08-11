@@ -1,7 +1,7 @@
 import type { FabricValue } from "@/interface.ts";
 import type {
-  DecomposingCodec,
   MatchedCodec,
+  NonterminalCodec,
   RegistrableCodec,
   TerminalCodec,
 } from "./interface.ts";
@@ -285,13 +285,13 @@ export class CodecRegistry<Encoded> {
   ): MatchedCodec<Encoded> {
     return (codec instanceof BaseTerminalCodec)
       ? { terminal: codec as TerminalCodec<Encoded> }
-      : { decomposing: codec as DecomposingCodec };
+      : { nonterminal: codec as NonterminalCodec };
   }
 
   /** Gets the codec out of a match, for the parts that need only dispatch. */
   static #codecOfMatch<Encoded>(
     matched: MatchedCodec<Encoded>,
   ): RegistrableCodec<Encoded> {
-    return ("terminal" in matched) ? matched.terminal : matched.decomposing;
+    return ("terminal" in matched) ? matched.terminal : matched.nonterminal;
   }
 }

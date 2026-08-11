@@ -2,7 +2,7 @@ import type { Constructor } from "@commonfabric/utils/types";
 
 import type { FabricInstance, FabricValue } from "@/interface.ts";
 
-/** Well-known symbol for binding the getter `FabricClassWithCodec[CODEC]`. */
+/** Well-known symbol for binding the getter `FabricClassWithNonterminalCodec[CODEC]`. */
 export const CODEC: unique symbol = Symbol("data-model.codec");
 
 /**
@@ -14,7 +14,7 @@ export const CODEC: unique symbol = Symbol("data-model.codec");
  * `Encoded` is the domain that essential state lives in. Every codec has the
  * same shape whatever that domain is -- the same matching members, the same
  * pair of transformations -- and the domain is the only thing that varies.
- * {@link DecomposingCodec} and {@link TerminalCodec} name the two ways it is
+ * {@link NonterminalCodec} and {@link TerminalCodec} name the two ways it is
  * instantiated in practice, and are where the consequences are written down.
  *
  * The domain does not by itself say what the codec system should do with a
@@ -86,8 +86,10 @@ export interface FabricCodec<Encoded> {
 }
 
 /**
- * A codec that **decomposes**: its essential state is itself made of fabric
- * values, which the walker goes on to encode in turn.
+ * A codec whose essential state is **nonterminal**: it is itself made of
+ * fabric values, which the walker goes on to expand in turn. The sense is the
+ * one formal grammars give the word -- a state that arrives here is not an
+ * answer but something that must be rewritten further before it is one.
  *
  * Instantiating {@link FabricCodec} at `FabricValue` is what says so, because
  * that is the walker's own input domain: handing the walker a state of that
@@ -99,11 +101,12 @@ export interface FabricCodec<Encoded> {
  * `extraEntries()` pair, so it can hold arbitrary nested values -- including
  * other instances -- and only the walker can know what to do with them.
  */
-export type DecomposingCodec = FabricCodec<FabricValue>;
+export type NonterminalCodec = FabricCodec<FabricValue>;
 
 /**
- * A codec that **terminates**: its essential state is already in the domain of
- * one particular wire format, and the walker passes it through untouched.
+ * A codec whose essential state is **terminal**: it is already in the domain
+ * of one particular wire format, and the walker passes it through rather than
+ * expanding it further.
  *
  * Instantiating {@link FabricCodec} at a format's own value type is what says
  * so. Such a codec is bound to that one format, and a class needing one
@@ -127,11 +130,11 @@ export type TerminalCodec<Encoded> = FabricCodec<Encoded>;
  *
  * The union is needed because {@link FabricCodec} is invariant in `Encoded` --
  * the parameter appears in both an argument and a return position -- so a
- * `DecomposingCodec` is not assignable to `FabricCodec<Encoded>` for any
+ * `NonterminalCodec` is not assignable to `FabricCodec<Encoded>` for any
  * format's `Encoded`, and the two arms have to be named separately.
  */
 export type RegistrableCodec<Encoded> =
-  | DecomposingCodec
+  | NonterminalCodec
   | TerminalCodec<Encoded>;
 
 /**
@@ -141,24 +144,24 @@ export type RegistrableCodec<Encoded> =
  *
  * This is what lets a walker keep a state and the codec it belongs to in
  * agreement. The two are correlated -- wire-form state goes to a terminal
- * codec, decoded state to a decomposing one -- and a correlation spread across
+ * codec, decoded state to a nonterminal one -- and a correlation spread across
  * two separate values is not something TypeScript can check. Narrowing one
  * object settles both at once.
  */
 export type MatchedCodec<Encoded> =
   | { readonly terminal: TerminalCodec<Encoded> }
-  | { readonly decomposing: DecomposingCodec };
+  | { readonly nonterminal: NonterminalCodec };
 
 /**
- * Interface for classes that provide a `DecomposingCodec` which is guaranteed
+ * Interface for classes that provide a `NonterminalCodec` which is guaranteed
  * to operate on instances of the class. Binding here is the claim that one
  * codec serves every wire format. A class the formats want to treat
  * differently -- in the state produced, in the kind of codec, or both -- binds
  * one per format under that format's own symbol instead.
  */
-export interface FabricClassWithCodec {
+export interface FabricClassWithNonterminalCodec {
   /** The codec instance to use for instances of this class. */
-  get [CODEC](): DecomposingCodec;
+  get [CODEC](): NonterminalCodec;
 }
 
 /**

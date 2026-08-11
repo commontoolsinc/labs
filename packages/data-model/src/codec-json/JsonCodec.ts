@@ -171,16 +171,16 @@ export class JsonCodec implements SerializationContext<string> {
       // used for it, and it is up to the _codec_ not the value per se to
       // determine the correct tag.
       // A terminal codec's state is already in this format's domain, so it is
-      // final; a decomposing codec's is made of fabric values, which this
-      // walker has yet to encode.
+      // final; a nonterminal codec's is made of fabric values, which this
+      // walker has yet to expand.
       let tag: string;
       let finalState: JsonCodecValue;
       if ("terminal" in matched) {
         tag = matched.terminal.tagForValue(value);
         finalState = matched.terminal.encode(value);
       } else {
-        tag = matched.decomposing.tagForValue(value);
-        finalState = this.#encodeValue(matched.decomposing.encode(value), seen);
+        tag = matched.nonterminal.tagForValue(value);
+        finalState = this.#encodeValue(matched.nonterminal.encode(value), seen);
       }
       const result: JsonCodecValue = { [`/${tag}`]: finalState };
 
@@ -362,7 +362,7 @@ export class JsonCodec implements SerializationContext<string> {
       return this.#decodeChecked(
         tag,
         state,
-        () => matched.decomposing.decode(tag, state, context),
+        () => matched.nonterminal.decode(tag, state, context),
       );
     }
 

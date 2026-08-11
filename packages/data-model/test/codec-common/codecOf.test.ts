@@ -5,7 +5,7 @@ import { FabricSpecialObject, JSON_CODEC } from "@/interface.ts";
 import {
   CODEC,
   codecOf,
-  type DecomposingCodec,
+  type NonterminalCodec,
   type TerminalCodec,
 } from "@/codec-common/index.ts";
 import type { JsonCodecValue } from "@/codec-json/interface.ts";
@@ -43,7 +43,7 @@ describe("codecOf()", () => {
       // real class the two symbols cannot disagree, and the case would pass
       // whichever one the implementation preferred.
       class BothCodecs extends FabricSpecialObject {
-        static get [CODEC](): DecomposingCodec {
+        static get [CODEC](): NonterminalCodec {
           return FabricError[CODEC];
         }
 

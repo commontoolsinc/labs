@@ -5,7 +5,7 @@ import type { Constructor } from "@commonfabric/utils/types";
 
 import { toCompactDebugString } from "@/value-debug.ts";
 import { CodecRegistry, SELF_REP } from "@/codec-common/CodecRegistry.ts";
-import { BaseDecomposingCodec } from "@/codec-common/BaseDecomposingCodec.ts";
+import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
 import type { ReconstructionContext } from "@/codec-common/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
@@ -17,7 +17,7 @@ import { type FabricValue } from "@/interface.ts";
  * fast path from the linear-scan slow path. `encode`/`decode` are never
  * exercised by the registry, so they throw.
  */
-class TestCodec extends BaseDecomposingCodec {
+class TestCodec extends BaseNonterminalCodec {
   canEncodeCalled = false;
   readonly #accept: FabricValue | undefined;
 
@@ -102,7 +102,7 @@ describe("CodecRegistry", () => {
           example,
         );
         expect(registry.codecFromValue(example)).toEqual({
-          decomposing: handler,
+          nonterminal: handler,
         });
         // Only the class-matched codec is consulted -- there is no linear scan.
         expect(first.canEncodeCalled).toBe(false);
@@ -140,8 +140,8 @@ describe("CodecRegistry", () => {
       const registry = new CodecRegistry();
       const codec = new TestCodec("Big@1", undefined, 42n);
       registry.registerPrimitive("bigint", codec);
-      expect(registry.codecFromValue(42n)).toEqual({ decomposing: codec });
-      expect(registry.codecFromTag("Big@1")).toEqual({ decomposing: codec });
+      expect(registry.codecFromValue(42n)).toEqual({ nonterminal: codec });
+      expect(registry.codecFromTag("Big@1")).toEqual({ nonterminal: codec });
     });
 
     it("returns `undefined` when the codec's `canEncode()` says no", () => {
@@ -166,7 +166,7 @@ describe("CodecRegistry", () => {
       const codec = new TestCodec("Num@1", undefined, 42);
       registry.registerPrimitive("number", codec);
       registry.registerSelfRep("number");
-      expect(registry.codecFromValue(42)).toEqual({ decomposing: codec }); // codec match
+      expect(registry.codecFromValue(42)).toEqual({ nonterminal: codec }); // codec match
       expect(registry.codecFromValue(99)).toBe(SELF_REP); // self-rep fallback
     });
   });
@@ -192,10 +192,10 @@ describe("CodecRegistry", () => {
       const extended = base.extend();
 
       expect(extended.codecFromTag("carried@1")).toEqual({
-        decomposing: codec,
+        nonterminal: codec,
       });
       expect(extended.codecFromTag("prim@1")).toEqual({
-        decomposing: primitive,
+        nonterminal: primitive,
       });
       expect(extended.codecFromValue("florp")).toBe(SELF_REP);
     });
@@ -204,7 +204,7 @@ describe("CodecRegistry", () => {
       const added = new TestCodec("added@1", undefined);
       const extended = new CodecRegistry().extend(added);
 
-      expect(extended.codecFromTag("added@1")).toEqual({ decomposing: added });
+      expect(extended.codecFromTag("added@1")).toEqual({ nonterminal: added });
     });
 
     it("registers codecs given individually and in lists, in any mix", () => {
@@ -215,12 +215,12 @@ describe("CodecRegistry", () => {
       const extended = new CodecRegistry()
         .extend(loose, [listed, alsoListed]);
 
-      expect(extended.codecFromTag("loose@1")).toEqual({ decomposing: loose });
+      expect(extended.codecFromTag("loose@1")).toEqual({ nonterminal: loose });
       expect(extended.codecFromTag("listed@1")).toEqual({
-        decomposing: listed,
+        nonterminal: listed,
       });
       expect(extended.codecFromTag("alsoListed@1")).toEqual({
-        decomposing: alsoListed,
+        nonterminal: alsoListed,
       });
     });
 
@@ -260,7 +260,7 @@ describe("CodecRegistry", () => {
       base.register(codec);
       Object.freeze(base);
 
-      expect(base.codecFromTag("readable@1")).toEqual({ decomposing: codec });
+      expect(base.codecFromTag("readable@1")).toEqual({ nonterminal: codec });
     });
   });
 
@@ -269,7 +269,7 @@ describe("CodecRegistry", () => {
       const registry = new CodecRegistry();
       const codec = new TestCodec("Foo@1", undefined);
       registry.register(codec);
-      expect(registry.codecFromTag("Foo@1")).toEqual({ decomposing: codec });
+      expect(registry.codecFromTag("Foo@1")).toEqual({ nonterminal: codec });
     });
 
     it("returns `undefined` for an unregistered tag", () => {
@@ -284,7 +284,7 @@ describe("CodecRegistry", () => {
       const second = new TestCodec("Dup@1", undefined);
       registry.register(first);
       registry.register(second);
-      expect(registry.codecFromTag("Dup@1")).toEqual({ decomposing: second });
+      expect(registry.codecFromTag("Dup@1")).toEqual({ nonterminal: second });
     });
   });
 });

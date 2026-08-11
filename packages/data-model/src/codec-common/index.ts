@@ -10,10 +10,10 @@
 
 export {
   CODEC,
-  type DecomposingCodec,
-  type FabricClassWithCodec,
+  type FabricClassWithNonterminalCodec,
   type FabricCodec,
   type MatchedCodec,
+  type NonterminalCodec,
   type ReconstructionContext,
   type RegistrableCodec,
   type SerializationContext,
@@ -23,8 +23,8 @@ export {
 export { codecOf } from "./codecOf.ts";
 export { CODEC_META_TAGS } from "./codec-meta-tags.ts";
 export { CODEC_TYPE_TAGS } from "./codec-type-tags.ts";
-export { BaseCodec } from "./BaseCodec.ts";
-export { BaseDecomposingCodec } from "./BaseDecomposingCodec.ts";
+export { BaseFabricCodec } from "./BaseFabricCodec.ts";
+export { BaseNonterminalCodec } from "./BaseNonterminalCodec.ts";
 export { BaseTerminalCodec } from "./BaseTerminalCodec.ts";
 export { BaseReconstructionContext } from "./BaseReconstructionContext.ts";
 export {

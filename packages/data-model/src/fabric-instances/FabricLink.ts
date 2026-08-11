@@ -14,11 +14,11 @@ import {
 } from "./BaseFabricInstance.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
 import { deepFreeze } from "@/deep-freeze.ts";
-import { BaseDecomposingCodec } from "@/codec-common/BaseDecomposingCodec.ts";
+import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import {
   CODEC,
-  type DecomposingCodec,
+  type NonterminalCodec,
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";
@@ -111,7 +111,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   //
 
   static #codec = Object.freeze(
-    new (class LinkCodec extends BaseDecomposingCodec {
+    new (class LinkCodec extends BaseNonterminalCodec {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Link, FabricLink);
@@ -147,7 +147,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): DecomposingCodec {
+  static get [CODEC](): NonterminalCodec {
     return this.#codec;
   }
 }

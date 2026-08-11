@@ -21,7 +21,7 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
-import { BaseDecomposingCodec } from "@/codec-common/BaseDecomposingCodec.ts";
+import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 
@@ -145,7 +145,7 @@ describe("JsonCodec", () => {
     });
   });
 
-  describe("terminal vs. decomposing codecs", () => {
+  describe("terminal vs. nonterminal codecs", () => {
     // The two kinds differ in exactly one respect: whether the walker
     // processes the state a codec produces. Every codec this package registers
     // for JSON hides that difference, because each of their states is a
@@ -209,7 +209,7 @@ describe("JsonCodec", () => {
       }
     }
 
-    class ProbeDecomposingCodec extends BaseDecomposingCodec {
+    class ProbeNonterminalCodec extends BaseNonterminalCodec {
       /** State most recently handed to `decode()`. */
       received: FabricValue = null;
 
@@ -229,7 +229,7 @@ describe("JsonCodec", () => {
 
     /** Builds a codec over the default registry plus the given probe. */
     function codecWith(
-      probe: ProbeTerminalCodec | ProbeDecomposingCodec,
+      probe: ProbeTerminalCodec | ProbeNonterminalCodec,
     ): JsonCodec {
       return new JsonCodec({
         registry: createDefaultJsonRegistry().extend(probe),
@@ -238,7 +238,7 @@ describe("JsonCodec", () => {
 
     /** The wire tree a probe produces for a `ProbeInstance`. */
     function wireFormatFrom(
-      probe: ProbeTerminalCodec | ProbeDecomposingCodec,
+      probe: ProbeTerminalCodec | ProbeNonterminalCodec,
     ): JsonCodecValue {
       const encoded = codecWith(probe).encode(new ProbeInstance());
       return JSON.parse(
@@ -252,10 +252,10 @@ describe("JsonCodec", () => {
       });
     });
 
-    it("walks a decomposing codec's state on the way to the wire", () => {
+    it("expands a nonterminal codec's state on the way to the wire", () => {
       // The `/quote` wrapper is the walker's mark: it saw a plain object with
       // a reserved key and escaped it.
-      expect(wireFormatFrom(new ProbeDecomposingCodec())).toEqual({
+      expect(wireFormatFrom(new ProbeNonterminalCodec())).toEqual({
         [`/${PROBE_TAG}`]: { "/quote": { "/Bytes@1": "AQID" } },
       });
     });
@@ -274,8 +274,8 @@ describe("JsonCodec", () => {
       expect(probe.received).toEqual({ "/Bytes@1": "AQID" });
     });
 
-    it("hands a decomposing codec state that has been decoded", () => {
-      const probe = new ProbeDecomposingCodec();
+    it("hands a nonterminal codec state that has been expanded", () => {
+      const probe = new ProbeNonterminalCodec();
 
       codecWith(probe).decode(
         JsonCodec.wrapEncodedValueForTesting(

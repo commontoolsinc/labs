@@ -1,7 +1,7 @@
 import {
   CODEC,
-  type DecomposingCodec,
-  type FabricClassWithCodec,
+  type FabricClassWithNonterminalCodec,
+  type NonterminalCodec,
 } from "@/codec-common/interface.ts";
 import { FabricError } from "./FabricError.ts";
 import { FabricLink } from "./FabricLink.ts";
@@ -33,7 +33,7 @@ export { FabricSet } from "./FabricSet.ts";
  *
  * Returned frozen so callers cannot mutate the shared list.
  */
-export function codecClasses(): readonly FabricClassWithCodec[] {
+export function codecClasses(): readonly FabricClassWithNonterminalCodec[] {
   return CODEC_CLASSES;
 }
 
@@ -44,19 +44,21 @@ export function codecClasses(): readonly FabricClassWithCodec[] {
  *
  * Returned frozen so callers cannot mutate the shared list.
  */
-export function codecs(): readonly DecomposingCodec[] {
+export function codecs(): readonly NonterminalCodec[] {
   return CODECS;
 }
 
-const CODEC_CLASSES: readonly FabricClassWithCodec[] = Object.freeze([
-  FabricError,
-  FabricLink,
-  FabricMap,
-  FabricSet,
-  ProblematicValue,
-  UnknownValue,
-]);
+const CODEC_CLASSES: readonly FabricClassWithNonterminalCodec[] = Object.freeze(
+  [
+    FabricError,
+    FabricLink,
+    FabricMap,
+    FabricSet,
+    ProblematicValue,
+    UnknownValue,
+  ],
+);
 
-const CODECS: readonly DecomposingCodec[] = Object.freeze(
+const CODECS: readonly NonterminalCodec[] = Object.freeze(
   CODEC_CLASSES.map((cls) => cls[CODEC]),
 );

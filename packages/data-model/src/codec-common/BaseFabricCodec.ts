@@ -8,13 +8,13 @@ import type { FabricCodec, ReconstructionContext } from "./interface.ts";
  * one recognized tag.
  *
  * It is abstract in `encode()` and `decode()` and, deliberately, in identity:
- * extend {@link BaseDecomposingCodec} or {@link BaseTerminalCodec} rather than this
+ * extend {@link BaseNonterminalCodec} or {@link BaseTerminalCodec} rather than this
  * directly. Those two are what tell the codec system whether a state is more
  * work for the walker or the walker's final answer, a difference no signature
  * can carry -- and extending one of them fixes the `Encoded` domain in the
  * same stroke, so the declaration and its consequence cannot drift apart.
  */
-export abstract class BaseCodec<Encoded> implements FabricCodec<Encoded> {
+export abstract class BaseFabricCodec<Encoded> implements FabricCodec<Encoded> {
   #recognizedTypeTag: string | undefined;
   #uniqueHandledClass: Constructor | undefined;
 

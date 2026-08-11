@@ -1,19 +1,19 @@
 import type { FabricSpecialObject } from "@/interface.ts";
 import {
   CODEC,
-  type DecomposingCodec,
-  type FabricClassWithCodec,
+  type FabricClassWithNonterminalCodec,
+  type NonterminalCodec,
   type RegistrableCodec,
 } from "./interface.ts";
 
 /**
  * Gets the `[CODEC]` for the given value's class, which is a
- * `DecomposingCodec` and so usable whatever the caller's wire format. Throws a
+ * `NonterminalCodec` and so usable whatever the caller's wire format. Throws a
  * "shouldn't happen" error if the value's class has no `[CODEC]`.
  *
  * @param value The value whose class's codec is wanted.
  */
-export function codecOf(value: FabricSpecialObject): DecomposingCodec;
+export function codecOf(value: FabricSpecialObject): NonterminalCodec;
 
 /**
  * Gets the `[CODEC]` for the given value's class, falling back to the codec
@@ -45,7 +45,7 @@ export function codecOf<Encoded>(
   altCodec?: symbol,
 ): RegistrableCodec<Encoded> {
   const cls = value.constructor as unknown as
-    & Partial<FabricClassWithCodec>
+    & Partial<FabricClassWithNonterminalCodec>
     & Partial<Record<symbol, RegistrableCodec<Encoded>>>;
   const codec = cls[CODEC] ??
     ((altCodec === undefined) ? undefined : cls[altCodec]);

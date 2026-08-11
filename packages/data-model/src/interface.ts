@@ -27,13 +27,13 @@
  *
  * What differs can be the _kind_ of codec and not merely the state it
  * produces, which is why the binding is per format rather than a property of
- * the class. `FabricRegExp` decomposes into a record of strings under JSON,
+ * the class. `FabricRegExp` expands into a record of strings under JSON,
  * which has no pattern type of its own to terminate into.
  *
  * That is what separates these from a `FabricInstance`'s codec, bound to the
- * generic `[CODEC]`: an instance's codec only decomposes an instance into
- * other `FabricValue`s and leaves every terminal decision to whatever walks
- * the result, so one binding serves every format.
+ * generic `[CODEC]`: an instance's codec only expands an instance into other
+ * `FabricValue`s and leaves every terminal decision to whatever walks the
+ * result, so one binding serves every format.
  *
  * It lives here, with the type universe, rather than beside either the classes
  * that bind it or the format that reads it. Both of those have importers in
