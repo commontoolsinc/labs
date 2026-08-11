@@ -1,5 +1,5 @@
 import { encodeBase64 } from "@std/encoding/base64";
-import { extname, isAbsolute, relative, resolve } from "@std/path";
+import { extname, isAbsolute, join, relative, resolve } from "@std/path";
 import {
   HARNESS_IMAGE_ATTACHMENT_TYPE,
   type HarnessImageAttachment,
@@ -145,11 +145,60 @@ export const parseImageAttachmentPaths = (
   return paths;
 };
 
+const extensionForMediaType = (
+  mediaType: HarnessImageMediaType,
+): string => {
+  switch (mediaType) {
+    case "image/gif":
+      return ".gif";
+    case "image/jpeg":
+      return ".jpg";
+    case "image/png":
+      return ".png";
+    case "image/webp":
+      return ".webp";
+  }
+};
+
+// Content-addressed by digest, so a re-view of identical bytes reuses the
+// same snapshot file and differing bytes can never collide.
+const writeImageAttachmentSnapshot = async (
+  snapshotDir: string,
+  bytes: Uint8Array,
+  digest: string,
+  mediaType: HarnessImageMediaType,
+): Promise<string> => {
+  const snapshotPath = join(
+    snapshotDir,
+    `${digest.replace(/^sha256:/, "")}${extensionForMediaType(mediaType)}`,
+  );
+  try {
+    const stat = await Deno.stat(snapshotPath);
+    if (stat.isFile && stat.size === bytes.byteLength) {
+      return snapshotPath;
+    }
+  } catch {
+    // Missing snapshot — write it below.
+  }
+  await Deno.mkdir(snapshotDir, { recursive: true });
+  const tempPath = `${snapshotPath}.tmp-${crypto.randomUUID()}`;
+  await Deno.writeFile(tempPath, bytes);
+  await Deno.rename(tempPath, snapshotPath);
+  return snapshotPath;
+};
+
 export const createHarnessImageAttachment = async (
   options: {
     workspaceHostPath: string;
     cwd: string;
     path: string;
+    /**
+     * Directory to snapshot the image bytes into. When provided, the
+     * attachment materializes from the snapshot for the rest of the run and
+     * the source file may change freely afterwards. When absent, the
+     * attachment stays locked to the source file's bytes and digest.
+     */
+    snapshotDir?: string;
   },
 ): Promise<HarnessImageAttachment> => {
   const workspaceHostPath = await Deno.realPath(options.workspaceHostPath);
@@ -174,28 +223,55 @@ export const createHarnessImageAttachment = async (
       `--image path is not a supported image type: ${options.path}`,
     );
   }
+  const digest = await sha256Digest(bytes);
+  const snapshotPath = options.snapshotDir === undefined
+    ? undefined
+    : await writeImageAttachmentSnapshot(
+      options.snapshotDir,
+      bytes,
+      digest,
+      mediaType,
+    );
   return {
     type: HARNESS_IMAGE_ATTACHMENT_TYPE,
     hostPath,
     mediaType,
     bytes: bytes.byteLength,
-    digest: await sha256Digest(bytes),
+    digest,
+    ...(snapshotPath === undefined ? {} : { snapshotPath }),
   };
 };
 
 export const materializeImageAttachmentContentPart = async (
   attachment: HarnessImageAttachment,
 ): Promise<OpenAIChatMessageContentPart> => {
-  const bytes = await Deno.readFile(attachment.hostPath);
+  const sourceLabel = attachment.snapshotPath === undefined
+    ? "image attachment"
+    : "image attachment snapshot";
+  const sourcePath = attachment.snapshotPath ?? attachment.hostPath;
+  let bytes: Uint8Array;
+  try {
+    bytes = await Deno.readFile(sourcePath);
+  } catch (error) {
+    if (
+      attachment.snapshotPath !== undefined &&
+      error instanceof Deno.errors.NotFound
+    ) {
+      throw new Error(
+        `image attachment snapshot missing: ${attachment.snapshotPath}`,
+      );
+    }
+    throw error;
+  }
   if (bytes.byteLength !== attachment.bytes) {
     throw new Error(
-      `image attachment changed after run start: ${attachment.hostPath}`,
+      `${sourceLabel} changed after run start: ${sourcePath}`,
     );
   }
   const digest = await sha256Digest(bytes);
   if (digest !== attachment.digest) {
     throw new Error(
-      `image attachment digest changed after run start: ${attachment.hostPath}`,
+      `${sourceLabel} digest changed after run start: ${sourcePath}`,
     );
   }
   return {
