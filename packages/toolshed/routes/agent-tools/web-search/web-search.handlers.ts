@@ -235,7 +235,7 @@ async function resolveGroundingUrl(
 
 /**
  * Best-effort plain-text extraction of a page, for `include_content` requests.
- * Not a full reader (that's the webreader route's job) — crude tag-strip with a
+ * Not a full reader (that's the web-read route's job) — crude tag-strip with a
  * length cap; returns "" on any error or non-text response.
  */
 async function fetchPageText(url: string): Promise<string> {

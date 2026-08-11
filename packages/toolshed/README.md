@@ -34,7 +34,6 @@ toolshed/
 │   ├── ai/       # AI-related services
 │   │   └── llm/   # LLM services
 │   │   └── img/   # Image generation services
-│   │   └── webreader/ # Web reader services
 │   │   └── spell/ # Spell casting and other spell related things.
 │   │   └── voice/ # Voice transcription services
 │   └── health/   # Health checks

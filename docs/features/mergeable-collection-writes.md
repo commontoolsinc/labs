@@ -82,10 +82,10 @@ of a clobbering `set`.
 
 A dedicated op kind (rather than a flag on `splice`) cannot represent an invalid
 state: it has no vestigial index or remove count that must be ignored or
-constrained. It also forces every `switch (op.op)` site — op application, the
-conflict-touched-path and scheduler-dirty-path maps, and the client's optimistic
-replay — to handle `append` explicitly rather than silently inheriting `splice`'s
-behavior, which the type checker enforces. Its touched path is exactly the array
+constrained. It also forces every `switch (op.op)` site — op application and the
+conflict-touched-path and scheduler-dirty-path maps — to handle `append`
+explicitly rather than silently inheriting `splice`'s behavior, which the type
+checker enforces. Its touched path is exactly the array
 path, the same as `splice`, so reader-invalidation and scheduler-dirty semantics
 are unchanged. The set-add and counter-increment ops noted under Scope will be
 new op kinds in the same family.
@@ -117,9 +117,9 @@ The same machinery carries three mergeable ops. `append` is described below;
 
 - **`appendAtPath` (`packages/memory/v2/patch.ts`)** — thaws (and creates, if
   missing) the array at `path` and pushes `values` at the tail; `applyPatch`'s
-  `append` case calls it. This one place covers both the server's commit-time
-  materialization and a peer client replaying the revision. The two engine
-  touched-path maps and the client's optimistic-replay path each gain an
+  `append` case calls it. This one place covers the server's commit-time
+  materialization, a peer client replaying the revision, and the writer's own
+  optimistic pending replay. The two engine touched-path maps each gain an
   `append` case that returns the array path, the same as `splice`.
 
 - **Transaction (`packages/runner/src/storage/v2-transaction.ts`)** —
@@ -206,9 +206,8 @@ The same machinery carries three mergeable ops. `append` is described below;
 ### The op family
 
 `add-unique`, `increment`, and `remove-by-value` reuse every part of the above —
-the intent record, the op-builder, the read-set drop, the engine and
-optimistic-replay switch cases — differing only in the op they emit and how it
-applies:
+the intent record, the op-builder, the read-set drop, the engine touched-path
+switch cases — differing only in the op they emit and how it applies:
 
 - **`add-unique`** (`{ op: "add-unique"; path; values }`, `addUniqueAtPath`) —
   appends each value only if no existing element equals it by stored-value

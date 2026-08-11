@@ -202,10 +202,11 @@ Deno.test("ci spend: projects the month from the settled daily rate, against the
   );
   assertEquals(v.hint, "billing ↗");
   assertStringIncludes(v.extra ?? "", "<polyline");
-  // The line ends on the last day with a figure (the 10th), not on today: billing
-  // runs a day or two behind, and drawing to today would show a fake dip to zero.
-  // December 1st to January 10th inclusive is 41 days.
-  assertEquals(v.duration, 41 * D);
+  // The line runs to the newest settled day, the 18th: the quiet 11th-18th are
+  // real zeros and chart as such, while the unsettled 19th-20th have no figure
+  // yet and are left off rather than drawn as a dip to zero. The 45-day window
+  // then reaches back to December 5th.
+  assertEquals(v.duration, 45 * D);
 });
 
 Deno.test("ci spend: a 200 without a usageItems array grays out rather than reading as $0", async () => {
@@ -293,7 +294,7 @@ Deno.test("ci spend: a prior month we can't read shortens the chart, it doesn't 
   });
   assertEquals(v.status, "good");
   assertEquals(v.value, "~$310/mo");
-  assertEquals(v.duration, 10 * D); // January 1st to 10th only
+  assertEquals(v.duration, 18 * D); // January 1st to the settled 18th only
 });
 
 Deno.test("ci spend: an unavailable prior month is not zero-spend history", async () => {
@@ -424,7 +425,9 @@ Deno.test("ci spend: Blacksmith invoice, runner history, and threshold form one 
   assertStringIncludes(v.extra ?? "", "$150");
   assertStringIncludes(v.extra ?? "", "Budget $230");
   assertStringIncludes(v.extra ?? "", "<polyline");
-  assertEquals(v.duration, 10 * D);
+  // Blacksmith settles a day behind, so the line runs to the 19th, charting
+  // the quiet 11th-19th as the zeros they are.
+  assertEquals(v.duration, 19 * D);
   const blacksmithRequests = requests.filter((path) =>
     path.startsWith("api/user/github/orgs/")
   );

@@ -47,19 +47,15 @@ import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { getArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
 
 class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
+  // Delegate to the base connectTo (shared-harness extraction, CT-1962):
+  // `new this` gives back this subclass, and the base clears server
+  // ownership so closing this manager never closes the shared server.
+  static override connectTo(
     server: MemoryV2Server.Server,
     options: Omit<Options, "memoryHost" | "spaceHostMap">,
   ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager._sharedServer = server;
-    return manager;
+    return super.connectTo(server, options) as SharedServerStorageManager;
   }
-
-  private _sharedServer!: MemoryV2Server.Server;
 
   /** Test seam for the renew-blip interleave: when set, the serving
    * loop's settle hangs at its `inputSynced` barrier until the gate
@@ -70,10 +66,6 @@ class SharedServerStorageManager extends EmulatedStorageManager {
   override async inputSynced(): Promise<void> {
     await super.inputSynced();
     if (this.settleGate !== undefined) await this.settleGate;
-  }
-
-  protected override server(): MemoryV2Server.Server {
-    return this._sharedServer;
   }
 }
 

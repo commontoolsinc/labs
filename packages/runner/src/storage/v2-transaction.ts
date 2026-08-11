@@ -48,6 +48,7 @@ import type {
   StorageTransactionFailed,
   StorageTransactionRejected,
   StorageTransactionStatus,
+  TransactionCommitOptions,
   TransactionReactivityLog,
   TransactionReadDetail,
   TransactionWriteDetail,
@@ -80,6 +81,8 @@ import {
   isReadIgnoredForScheduling,
   isReadMarkedAsAttemptedWrite,
   isUiInputBlindWriteTx,
+  registerCommitRejectionListener,
+  takeCoverageWaits,
 } from "./reactivity-log.ts";
 import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import { toTransactionDocumentValue } from "./v2-document.ts";
@@ -691,6 +694,12 @@ const isSubsumedByTailSplice = (
     Number(childSegment) >= spliceCandidate.tailSpliceStartIndex;
 };
 
+// TODO(danfuzz): `isRecord` admits a `FabricSpecialObject` on both sides, so
+// two special objects — or one against a plain `{}` — compare by their empty
+// key sets and report "unchanged" without ever reaching the fabric-aware
+// `valueEqual` fallback. An in-place fabric change at an ancestor prefix then
+// emits no reactivity path. `differential.ts` guards its sibling walk with an
+// explicit `FabricSpecialObject` test for exactly this reason.
 const shallowStructureChanged = (
   before: FabricValue | undefined,
   after: FabricValue | undefined,
@@ -814,6 +823,12 @@ export class V2StorageTransaction implements IStorageTransaction {
   readonly journal = new V2TransactionJournal(this);
 
   #state: TxState = { status: "ready" };
+  // The commit's fate — server verdict or local rejection — which commit()
+  // itself may resolve later than: commit() additionally waits for the
+  // subscribed view to reflect the committed write (CT-1950 coverage).
+  // Post-commit effects gated on durability alone hook this via
+  // commitVerdict(). Resolved with the same result commit() returns.
+  readonly #verdict = Promise.withResolvers<Result<Unit, CommitError>>();
   #branches = new Map<MemorySpace, SpaceBranch>();
   #readActivities: IReadActivity[] = [];
   // Per-transaction monotonic activity clock, shared between read activities
@@ -1915,17 +1930,49 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { ok: {} };
   }
 
-  commit(): Promise<Result<Unit, CommitError>> {
-    const promise = this.#commitImpl();
+  commit(
+    options?: TransactionCommitOptions,
+  ): Promise<Result<Unit, CommitError>> {
+    // A rejection seals the commit's fate before the promise resolves — the
+    // promise additionally waits out the read-repair gate so a retry runs
+    // against the repaired base. The verdict must not: finalizeRejection
+    // notifies this listener at rejection receipt, ahead of the gate.
+    registerCommitRejectionListener(
+      this,
+      (rejection) => this.#verdict.resolve({ error: rejection }),
+    );
+    const promise = this.#commitImpl(options);
+    // Backstop for the verdict signal: paths that never reach a push (zero
+    // writes, pre-storage rejections) determine their fate exactly when the
+    // commit promise resolves. The push path resolves #verdict earlier —
+    // at the verdict — and this second resolve is then a no-op. An
+    // internally REJECTED commit promise resolves the verdict with the
+    // error: the verdict never rejects, and a waiter must not hang on a
+    // commit whose fate is known.
+    promise.then(
+      (result) => this.#verdict.resolve(result),
+      (reason) => this.#verdict.resolve({ error: toStoreError(reason) }),
+    );
     // Synchronous registration with the manager's durability barrier: by the
     // time commit() returns, the in-flight commit is visible to
     // hasPendingCommits(), so a quiescence check started in the same turn
-    // cannot miss it.
+    // cannot miss it. The entry spans the full commit promise — coverage
+    // included — so the barrier also covers follow-on commits issued from a
+    // continuation chained on the promise. (The scheduler's event path
+    // registers its own entry spanning its disposition handling, which
+    // chains on the WRAPPER's promise and trails this one by the
+    // verdict-time effect run.)
     this.storage.trackPendingCommit(promise);
     return promise;
   }
 
-  async #commitImpl(): Promise<Result<Unit, CommitError>> {
+  commitVerdict(): Promise<Result<Unit, CommitError>> {
+    return this.#verdict.promise;
+  }
+
+  async #commitImpl(
+    options?: TransactionCommitOptions,
+  ): Promise<Result<Unit, CommitError>> {
     this.assertWritable("commit()");
     const ready = this.editable();
     if (ready.error) {
@@ -1936,7 +1983,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     // single-space transaction (the common case, even with the opt-in set) stays
     // on the proven path below.
     if (this.#multiSpaceWrites && this.#writtenSpaces.length > 1) {
-      return this.commitMultiSpace();
+      return this.commitMultiSpace(options);
     }
 
     const writeSpace = this.#writeSpace;
@@ -1983,12 +2030,26 @@ export class V2StorageTransaction implements IStorageTransaction {
     const commitNative = replica.commitNative.bind(replica);
     const promise = withCommitTiming(
       ["commit", "commitNative"],
-      () => commitNative(native!, this),
+      () => commitNative(native!, this, options),
     );
     this.#state = { status: "pending", promise };
     try {
       const result = await promise;
       this.#finish(result);
+      this.#verdict.resolve(result);
+      // CT-1950: the caller's commit promise resolves at coverage — the
+      // subscribed view reflects the committed write — while the verdict
+      // above already released durability-gated effects. Drained on EVERY
+      // settlement, not only success: waits are recorded per accepted
+      // space, so a multi-space commit rejected on a later space still
+      // holds its settlement (and commit callbacks) until the earlier
+      // accepted spaces' parked writes reach the view.
+      {
+        const waits = takeCoverageWaits(this);
+        if (waits.length > 0) {
+          await Promise.all(waits);
+        }
+      }
       return result;
     } catch (error) {
       const result: Result<Unit, StorageTransactionRejected> = {
@@ -2005,7 +2066,9 @@ export class V2StorageTransaction implements IStorageTransaction {
    * cross-space atomicity: a later failure does not roll back earlier spaces; it
    * is logged and surfaced as the overall result.
    */
-  private async commitMultiSpace(): Promise<Result<Unit, CommitError>> {
+  private async commitMultiSpace(
+    options?: TransactionCommitOptions,
+  ): Promise<Result<Unit, CommitError>> {
     const commits: { space: MemorySpace; native: NativeStorageCommit }[] = [];
     for (const space of this.orderedCommitSpaces()) {
       const native = this.getNativeCommit(space);
@@ -2039,11 +2102,22 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { error: validation.error };
     }
 
-    const promise = this.runSplitCommits(commits);
+    const promise = this.runSplitCommits(commits, options);
     this.#state = { status: "pending", promise };
     try {
       const result = await promise;
       this.#finish(result);
+      this.#verdict.resolve(result);
+      // Same split as the single-space path: verdicts (all spaces) release
+      // effects; the commit promise waits for every space's coverage —
+      // including on a partial failure, where the waits recorded by the
+      // earlier ACCEPTED spaces still gate settlement.
+      {
+        const waits = takeCoverageWaits(this);
+        if (waits.length > 0) {
+          await Promise.all(waits);
+        }
+      }
       return result;
     } catch (error) {
       // Mirror the single-space path: a rejected commit must still transition
@@ -2084,6 +2158,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   private async runSplitCommits(
     commits: { space: MemorySpace; native: NativeStorageCommit }[],
+    options?: TransactionCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     for (let i = 0; i < commits.length; i++) {
       const { space, native } = commits[i];
@@ -2100,7 +2175,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       // committed before the failure are not rolled back (logged); the failing
       // space and everything after it are left uncommitted.
       try {
-        const result = await commitNative(native, this);
+        const result = await commitNative(native, this, options);
         if (result.error) {
           multiSpaceCommitLogger.error(
             "multi-space-commit-failed",

@@ -54,10 +54,7 @@ export async function login(page: Page, identity: Identity): Promise<void> {
     async (rawId, nextDID) => {
       const currentIdentity = globalThis.app.state().identity;
       if (currentIdentity && currentIdentity.did() !== nextDID) {
-        await globalThis.app.apply({
-          type: "set-identity",
-          identity: undefined,
-        });
+        await globalThis.app.setIdentity(undefined);
         await new Promise<void>((resolve, reject) => {
           const startedAt = performance.now();
           const check = () => {

@@ -2,7 +2,7 @@
 //
 // Auth note: The list and create endpoints are intentionally unauthed,
 // consistent with all other toolshed admin endpoints (google-oauth, plaid,
-// discord, patterns, etc.). When the platform adds HTTP-level auth
+// patterns, etc.). When the platform adds HTTP-level auth
 // infrastructure, these endpoints should adopt it.
 import env from "@/env.ts";
 import type { AppRouteHandler } from "@/lib/types.ts";

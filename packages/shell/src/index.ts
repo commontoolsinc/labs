@@ -6,16 +6,19 @@ import { setupHostToggles } from "./lib/host-toggles.ts";
 import { consumeDeviceLinkFragment } from "./lib/device-link.ts";
 // Statically imported, deliberately. A dynamic `await import()` here pushes
 // `shared/app/*` into esbuild's lazy `__esm` wrappers, and esbuild then emits
-// the wrapper for `shared/app/controller.ts` as a NON-async function containing
-// a top-level await — a bundle that is a SyntaxError, so the whole shell fails
-// to load. (`node --check dist/scripts/index.js` catches it; the type checker
-// and the unit tests do not.) There was nothing to gain either way: the shell's
+// one of those wrappers as a NON-async function containing a top-level await —
+// a bundle that is a SyntaxError, so the whole shell fails to load.
+// (`node --check dist/scripts/index.js` catches it; the type checker and the
+// unit tests do not.) There was nothing to gain either way: the shell's
 // `index` entry sets `splitting: false`, so esbuild inlines dynamic imports
 // rather than emitting a chunk.
 import { handleDeviceLink } from "./lib/device-link-login.ts";
 import "./components/index.ts";
 import "./views/index.ts";
-import { App, AppElement, AppUpdateEvent, Navigation } from "../shared/mod.ts";
+import { Navigation } from "../shared/mod.ts";
+import type { XRootView } from "./views/RootView.ts";
+import { ROOT_KEY } from "./lib/root-key.ts";
+import { KeyStore } from "@commonfabric/identity";
 import "./globals.ts";
 
 // Device-link login: /#k=<base64url 32-byte BIP39 entropy>.
@@ -47,25 +50,29 @@ console.log(`API_URL=${API_URL}`);
 console.log(`COMMIT_SHA=${COMMIT_SHA}`);
 setupHostToggles();
 
-const root = document.querySelector("x-root-view");
+const root = document.querySelector<XRootView>("x-root-view");
 if (!root) throw new Error("No root view found.");
-const app = new App(root as unknown as AppElement);
-globalThis.app = app;
-if (ENVIRONMENT !== "production") {
-  app.addEventListener("appupdate", (e) => {
-    (e as AppUpdateEvent).prettyPrint();
-  });
+globalThis.app = root;
+
+// Opens the browser key store, hands it to the root element, and restores a
+// logged-in session from the stored root identity when there is one.
+async function initializeKeys(app: XRootView): Promise<void> {
+  const keyStore = await KeyStore.open();
+  app.keyStore = keyStore;
+  const identity = await keyStore.get(ROOT_KEY);
+  if (identity) await app.setIdentity(identity);
 }
+
 // Runs BEFORE initializeKeys: handleDeviceLink writes ROOT_KEY straight into
 // the KeyStore so the normal boot below picks the new identity up. Routing it
-// through App.setIdentity instead would throw whenever a DIFFERENT identity is
-// already active — precisely the re-pair case this exists for. It never throws,
-// so a failed pairing degrades to a normal boot rather than skipping
-// initializeKeys and Navigation entirely.
+// through XRootView.setIdentity instead would throw whenever a DIFFERENT
+// identity is already active — precisely the re-pair case this exists for. It
+// never throws, so a failed pairing degrades to a normal boot rather than
+// skipping initializeKeys and Navigation entirely.
 if (deviceLink.kind !== "absent") {
   await handleDeviceLink(deviceLink);
 }
 
-await app.initializeKeys();
+await initializeKeys(root);
 
-const _navigation = new Navigation(app);
+const _navigation = new Navigation(root);

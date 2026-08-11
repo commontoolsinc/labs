@@ -751,7 +751,11 @@ export function processDefaultValue(
               resolvedSchema,
             )
             : rawPropSchema;
-        if (key in defaultValue) {
+        // `Object.hasOwn`, not `in`: `key` is a schema-declared property NAME,
+        // and `defaultValue` is data. `in` walks the prototype chain, so a
+        // schema property called `toString` or `valueOf` matched every object
+        // and read back `Object.prototype`'s function instead of the default.
+        if (Object.hasOwn(defaultValue, key)) {
           result[key] = processDefaultValue(
             runtime,
             tx,
@@ -917,6 +921,15 @@ export function mergeDefaults(
   const base = isNontrivialSchema(schema) ? schema : {};
 
   // TODO(seefeld): What's the right thing to do for arrays?
+  //
+  // TODO(danfuzz): `isReadonlyRecord` admits a `FabricSpecialObject` on
+  // either side, and the spread copies zero properties from one, so a
+  // fabric-valued default here merges to `{}` (or silently drops the other
+  // side's contribution). Reachable: the schema generator emits
+  // `{ type: "object" }` for the fabric-backed natives (`Date`, `RegExp`,
+  // `Uint8Array`), so a `Cell` of one of those with an object default in its
+  // schema takes the spread arm. Wants a `FabricSpecialObject` test choosing
+  // the `defaultValue` arm.
   const mergedDefault = base.type === "object" &&
       isReadonlyRecord(base.default) && isReadonlyRecord(defaultValue)
     ? { ...base.default, ...defaultValue } as JSONValue

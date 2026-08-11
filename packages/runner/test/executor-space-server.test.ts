@@ -26,45 +26,13 @@ import {
   selectPendingExecutionOutboxRows,
 } from "@commonfabric/memory/v2/execution-outbox";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
 import { SpaceServer } from "../src/executor/space-server.ts";
 import { stampWaveRunContext } from "../src/executor/wave.ts";
 import { emptyServingLoopStats } from "../src/executor/stats.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
-
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager._sharedServer = server;
-    return manager;
-  }
-
-  private _sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this._sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    subscriptionRefreshDelayMs: 0,
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const spaceSigner = await Identity.fromPassphrase("space-server test space");
 const space = spaceSigner.did() as MemorySpace;
@@ -105,7 +73,7 @@ describe("stage G SpaceServer recovery seams", () => {
   let spaceServer: SpaceServer | undefined;
 
   beforeEach(async () => {
-    server = newSharedServer();
+    server = newSharedServer({ subscriptionRefreshDelayMs: 0 });
     engine = await server.engineForSpace(space);
     servingRuntime = undefined;
     spaceServer = undefined;
@@ -126,7 +94,7 @@ describe("stage G SpaceServer recovery seams", () => {
       engine,
       serviceIdentity: serviceSigner.did(),
       createRuntime: () => {
-        const manager = SharedServerStorageManager.connectTo(server, {
+        const manager = EmulatedStorageManager.connectTo(server, {
           as: serviceSigner,
         });
         const runtime = new Runtime({

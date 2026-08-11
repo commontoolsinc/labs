@@ -22,11 +22,8 @@
 import { type JSONSchema, type Pattern } from "@commonfabric/runner";
 import { validateSchemaDefinition } from "@commonfabric/runner/cfc";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
-import {
-  JsonEncodingContext,
-  jsonFromValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
+import { JsonCodec } from "@commonfabric/data-model/codec-json";
+import { jsonFromValue, valueFromJson } from "@commonfabric/data-model/codecs";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { assertPatternSchemasBackwardCompatible } from "../packages/piece/src/schema-compatibility.ts";
 
@@ -158,7 +155,7 @@ export interface StoredBaseline extends PatternContract {
  */
 export function encodeBaseline(stored: StoredBaseline): string {
   const body = JSON.parse(
-    JsonEncodingContext.unwrapEncodedValueForTesting(
+    JsonCodec.unwrapEncodedValueForTesting(
       jsonFromValue(stored as unknown as FabricValue),
     ),
   );
@@ -168,7 +165,7 @@ export function encodeBaseline(stored: StoredBaseline): string {
 /** Inverse of {@link encodeBaseline}. */
 export function decodeBaseline(text: string): StoredBaseline {
   return valueFromJson(
-    JsonEncodingContext.wrapEncodedValueForTesting(text.trim()),
+    JsonCodec.wrapEncodedValueForTesting(text.trim()),
   ) as unknown as StoredBaseline;
 }
 

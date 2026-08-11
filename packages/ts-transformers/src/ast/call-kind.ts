@@ -157,7 +157,6 @@ export interface ReactiveCollectionProvenanceOptions {
   readonly sameScope?: ts.FunctionLikeDeclaration;
   readonly typeRegistry?: WeakMap<ts.Node, ts.Type>;
   readonly syntheticReactiveCollectionRegistry?: WeakSet<ts.Symbol>;
-  readonly logger?: (message: string) => void;
   /**
    * True once the walk has descended into a variable declaration's initializer
    * (CT-1778). The derived-reactive-collection-call recognition is gated on this
@@ -240,7 +239,6 @@ function usesDefaultReactiveCollectionProvenanceOptions(
     options.sameScope === undefined &&
     options.typeRegistry === undefined &&
     options.syntheticReactiveCollectionRegistry === undefined &&
-    options.logger === undefined &&
     options.viaVariableInitializer === undefined;
 }
 
@@ -1044,7 +1042,6 @@ function hasReactiveCollectionProvenanceInternal(
       target,
       checker,
       options.typeRegistry,
-      options.logger,
     );
     if (type && isBrandedCellType(type, checker)) {
       return true;
@@ -1154,7 +1151,6 @@ function hasReactiveCollectionProvenanceInternal(
         target,
         checker,
         options.typeRegistry,
-        options.logger,
       );
       if (isCollectionType(resultType, checker)) {
         return true;

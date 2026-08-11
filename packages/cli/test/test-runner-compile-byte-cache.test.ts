@@ -184,28 +184,25 @@ describe(
       const command = `test "${TEST_FILE}" --root "${FIXTURES}"`;
 
       try {
-        await withEnv("CF_COMPILE_CACHE_FILE", cacheFile, async () => {
-          await withEnv("CF_LOG_LEVEL", "info", async () => {
-            const first = await cf(command);
-            expect(first.code).toBe(0);
-            checkStderr(first.stderr);
-            const entries = JSON.parse(await Deno.readTextFile(cacheFile));
-            expect(Array.isArray(entries)).toBe(true);
-            expect(entries.length).toBeGreaterThan(0);
+        const env = { CF_COMPILE_CACHE_FILE: cacheFile, CF_LOG_LEVEL: "info" };
+        const first = await cf(command, { env });
+        expect(first.code).toBe(0);
+        checkStderr(first.stderr);
+        const entries = JSON.parse(await Deno.readTextFile(cacheFile));
+        expect(Array.isArray(entries)).toBe(true);
+        expect(entries.length).toBeGreaterThan(0);
 
-            const second = await cf(command);
-            expect(second.code).toBe(0);
-            checkStderr(second.stderr);
-            expect(
-              second.stdout.some((line) =>
-                line.includes("[compile-byte-cache] restored")
-              ),
-            ).toBe(true);
-            expect(
-              second.stdout.some((line) => line.includes("compile-cache-hit")),
-            ).toBe(true);
-          });
-        });
+        const second = await cf(command, { env });
+        expect(second.code).toBe(0);
+        checkStderr(second.stderr);
+        expect(
+          second.stdout.some((line) =>
+            line.includes("[compile-byte-cache] restored")
+          ),
+        ).toBe(true);
+        expect(
+          second.stdout.some((line) => line.includes("compile-cache-hit")),
+        ).toBe(true);
       } finally {
         await Deno.remove(dir, { recursive: true });
       }
@@ -220,47 +217,44 @@ describe(
       const command = `test "${TEST_FILE}" --root "${FIXTURES}"`;
 
       try {
-        await withEnv("CF_COMPILE_CACHE_FILE", cacheFile, async () => {
-          await withEnv("CF_PATTERN_COVERAGE_DIR", coverageDir, async () => {
-            await withEnv("CF_LOG_LEVEL", "info", async () => {
-              const first = await cf(command);
-              expect(first.code).toBe(0);
-              checkStderr(first.stderr);
+        const env = {
+          CF_COMPILE_CACHE_FILE: cacheFile,
+          CF_PATTERN_COVERAGE_DIR: coverageDir,
+          CF_LOG_LEVEL: "info",
+        };
+        const first = await cf(command, { env });
+        expect(first.code).toBe(0);
+        checkStderr(first.stderr);
 
-              const entries = JSON.parse(await Deno.readTextFile(cacheFile));
-              expect(Array.isArray(entries)).toBe(true);
-              expect(
-                entries.some((entry: { key?: unknown }) =>
-                  typeof entry.key === "string" &&
-                  entry.key.includes("/pattern-coverage\0")
-                ),
-              ).toBe(true);
-              expect(
-                entries.some((
-                  entry: { patternCoverageSpans?: unknown },
-                ) => Array.isArray(entry.patternCoverageSpans)),
-              ).toBe(true);
+        const entries = JSON.parse(await Deno.readTextFile(cacheFile));
+        expect(Array.isArray(entries)).toBe(true);
+        expect(
+          entries.some((entry: { key?: unknown }) =>
+            typeof entry.key === "string" &&
+            entry.key.includes("/pattern-coverage\0")
+          ),
+        ).toBe(true);
+        expect(
+          entries.some((
+            entry: { patternCoverageSpans?: unknown },
+          ) => Array.isArray(entry.patternCoverageSpans)),
+        ).toBe(true);
 
-              const second = await cf(command);
-              expect(second.code).toBe(0);
-              checkStderr(second.stderr);
-              expect(
-                second.stdout.some((line) =>
-                  line.includes("[compile-byte-cache] restored")
-                ),
-              ).toBe(true);
-              expect(
-                second.stdout.some((line) =>
-                  line.includes("compile-cache-hit")
-                ),
-              ).toBe(true);
+        const second = await cf(command, { env });
+        expect(second.code).toBe(0);
+        checkStderr(second.stderr);
+        expect(
+          second.stdout.some((line) =>
+            line.includes("[compile-byte-cache] restored")
+          ),
+        ).toBe(true);
+        expect(
+          second.stdout.some((line) => line.includes("compile-cache-hit")),
+        ).toBe(true);
 
-              const coverage = await readCoverageText(coverageDir);
-              expect(coverage).toContain("SF:");
-              expect(coverage).toMatch(/LH:[1-9]/);
-            });
-          });
-        });
+        const coverage = await readCoverageText(coverageDir);
+        expect(coverage).toContain("SF:");
+        expect(coverage).toMatch(/LH:[1-9]/);
       } finally {
         await Deno.remove(dir, { recursive: true });
       }

@@ -20,8 +20,8 @@ import type { FactoryInput } from "../src/builder/types.ts";
 
 /**
  * Identity E4 (docs/specs/content-addressed-action-identity.md §7): the JSON
- * BOUNDARY (`Pattern.toJSON()`, fired by JSON.stringify and by cell writes via
- * native-conversion's HasToJSON) is REFS-ONLY — `{ $patternRef, argumentSchema,
+ * BOUNDARY (`Pattern.toEncodableForm()`, reached by the runtime's artifact
+ * walk on the way into a cell write) is REFS-ONLY — `{ $patternRef, argumentSchema,
  * resultSchema }`, no graph. Rehydration of a stored ref goes by identity: the
  * session-lifetime artifact index (sync) or the storage-backed
  * `loadPatternByIdentity` (async; compiled artifacts persist in-space as part

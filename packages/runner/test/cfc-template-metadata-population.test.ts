@@ -3,7 +3,7 @@ import type { IFCLabel } from "../src/cfc/mod.ts";
 import type { CfcConfClause } from "../src/cfc/clause.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { expect } from "@std/expect";
-import type { FabricValue } from "@commonfabric/data-model/interface";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
