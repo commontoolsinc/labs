@@ -36,6 +36,9 @@ Add a line for each new document to the index below.
 - [`authorization-failure-surfacing.md`](authorization-failure-surfacing.md) —
   how an authorization failure during storage sync reaches the caller as a
   typed error instead of a silent absent read or an endless wait
+- [`lazy-cell-materialization.md`](lazy-cell-materialization.md) — the
+  schema-observing view a marked transaction hands back from a read, what it
+  checks and when, and the rules that keep it answering as an eager read does
 - [`data-uri-identifiers.md`](data-uri-identifiers.md) — the cell identifiers
   that carry their own frozen value rather than naming a document in a space,
   why the runtime keeps both a broad and a narrow test for one, and what
