@@ -37,6 +37,12 @@ import {
   PERFORMANCE_VIEW_STYLES,
   performanceViewNav,
 } from "./performance-views.ts";
+import {
+  CHART_LINE,
+  DASHBOARD_THEME_CLIENT,
+  DASHBOARD_THEME_HEAD,
+  dashboardThemeToggle,
+} from "./theme.ts";
 
 export const CI_HISTORY_DAYS = 45;
 export const CI_HISTORY_MIN_DAYS = 1;
@@ -2822,7 +2828,7 @@ function renderSeries(
   const xs = times.map((at) => (at - axisStart) / axisSpan);
   const spark = sparkline(
     values,
-    "#727882",
+    CHART_LINE,
     undefined,
     SPARK_FADE[status],
     xs,
@@ -3170,13 +3176,14 @@ export function ciJobHistoryPage(
   </div>`;
   if (options.fragment) return rangeContent;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CI job history</title>
+${DASHBOARD_THEME_HEAD}
 <style>
   ${PERFORMANCE_VIEW_STYLES}
-  .coverage{font-size:11px;color:#c7ccd4;font-variant-numeric:tabular-nums;margin:0 0 12px}
-  h2 span{font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-weight:400;color:#666c76;margin-left:6px}
+  .coverage{font-size:11px;color:var(--text-secondary);font-variant-numeric:tabular-nums;margin:0 0 12px}
+  h2 span{font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-weight:400;color:var(--text-faint);margin-left:6px}
   .crow.aggregate{border-left-width:4px}
-  .crow.overall{border-left:4px solid #6ea8fe}.overall-section{margin-bottom:20px}
-  .cdetail{font-size:11px;color:#777d87}
+  .crow.overall{border-left:4px solid var(--accent)}.overall-section{margin-bottom:20px}
+  .cdetail{font-size:11px;color:var(--text-subtle)}
   .cval{flex:none;display:flex;flex-direction:column;align-items:flex-end;text-decoration:none}
   body.hide-green .crow.good{display:none}body.hide-green section:has(.clist):not(:has(.crow:not(.good))){display:none}
   .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
@@ -3210,6 +3217,8 @@ export function ciJobHistoryPage(
     sort === "trend" ? ' aria-current="true"' : ""
   }>trend</a></nav><label class="check trailing"><input type="checkbox" id="hg"> hide green</label></form>
   ${rangeContent}
+${dashboardThemeToggle()}
+${DASHBOARD_THEME_CLIENT}
 <script>
   const hg = document.getElementById("hg"), days = document.getElementById("days"), daysv = document.getElementById("daysv"), repo = document.getElementById("repo"), controls = days.form, KEY = "ciJobsHideGreen", DEFAULT_DAYS = days.value;
   let rangeContent = document.getElementById("range-content"), fetchProgress = document.getElementById("fetch-progress"), title = document.getElementById("fetch-title"), total = document.getElementById("fetch-total"), detail = document.getElementById("fetch-detail"), bar = document.getElementById("fetch-bar"), pageVersion = fetchProgress.dataset.snapshotVersion, appliedDays = days.value;

@@ -3,7 +3,7 @@ import type { Constructor } from "@commonfabric/utils/types";
 import type { FabricInstance, FabricValue } from "@/interface.ts";
 
 /** Well-known symbol for binding the getter `FabricClassWithCodec[CODEC]`. */
-export const CODEC: unique symbol = Symbol.for("data-model.codec");
+export const CODEC: unique symbol = Symbol("data-model.codec");
 
 /**
  * Interface for codecs (encoder-decoder objects). These are object which can

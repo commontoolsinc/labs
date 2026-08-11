@@ -9,7 +9,6 @@ import {
   hasInvalidUpstream,
   isLive,
   notifyNodeLivenessChange,
-  recomputeLiveRefs,
   setNodeProvisionalDemand,
   unregisterDependentEdge,
 } from "./dependency-graph.ts";
@@ -478,31 +477,27 @@ function removeReverseDependencyEdges(
   state: SchedulerUnsubscribeActionState,
   action: Action,
 ): void {
-  let changed = false;
   const dependencies = state.reverseDependencies.get(action);
   if (dependencies) {
     for (const dependency of [...dependencies]) {
-      changed = unregisterDependentEdge(
+      unregisterDependentEdge(
         state.dependencyGraphState,
         dependency,
         action,
-        { recompute: false },
-      ) || changed;
+      );
     }
   }
 
   const dependents = state.dependents.get(action);
   if (dependents) {
     for (const dependent of [...dependents]) {
-      changed = unregisterDependentEdge(
+      unregisterDependentEdge(
         state.dependencyGraphState,
         action,
         dependent,
-        { recompute: false },
-      ) || changed;
+      );
     }
   }
-  if (changed) recomputeLiveRefs(state.dependencyGraphState);
 }
 
 function clearActionTypeTracking(

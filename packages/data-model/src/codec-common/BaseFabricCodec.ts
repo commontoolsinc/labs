@@ -52,7 +52,8 @@ export abstract class BaseFabricCodec implements FabricCodec {
   tagForValue(_value: FabricValue): string {
     if (this.#recognizedTypeTag === undefined) {
       throw new Error(
-        "Shouldn't happen: codec has no recognized tag; `tagForValue()` must be overridden.",
+        "Shouldn't happen: codec has no recognized tag; `tagForValue()` must " +
+          "be overridden.",
       );
     }
     return this.#recognizedTypeTag;

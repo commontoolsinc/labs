@@ -1,10 +1,10 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import { FabricSpecialObject, type FabricValue } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import {
-  CODEC,
   type ReconstructionContext,
   type SerializationContext,
 } from "@/codec-common/interface.ts";
@@ -71,7 +71,7 @@ export class JsonCodec implements SerializationContext<string> {
     if (!JsonCodec.seemsLikeEncoded(data)) {
       const excerpt = (data.length <= 50) ? data : `${data.slice(0, 50)}...`;
       throw new Error(
-        `Not a JSON-encoded \`FabricValue\` string: \`${excerpt}\``,
+        `Not a JSON-encoded \`FabricValue\` string: ${backtickQuote(excerpt)}`,
       );
     }
 
@@ -184,7 +184,9 @@ export class JsonCodec implements SerializationContext<string> {
       // recognized by a registered codec. Complain here since we didn't find a
       // `codec` above.
       throw new Error(
-        `No codec registered for fabric object class: ${value.constructor.name}`,
+        `No codec registered for fabric object class: ${
+          backtickQuote(value.constructor.name)
+        }`,
       );
     }
 
@@ -229,7 +231,7 @@ export class JsonCodec implements SerializationContext<string> {
     if (!isPlainObject(value)) {
       throw new Error(
         `Cannot encode ${
-          toCompactDebugString(value, 50)
+          backtickQuote(toCompactDebugString(value, 50))
         }: no applicable codec.`,
       );
     }
@@ -459,12 +461,8 @@ export class JsonCodec implements SerializationContext<string> {
    * A helper drawing on a fuller registry would instead accept or reject text
    * according to a roster its caller never chose.
    */
-  static readonly #testingRegistry: CodecRegistry = (() => {
-    const registry = createBaseJsonRegistry();
-    registry.register(UnknownValue[CODEC]);
-    registry.register(ProblematicValue[CODEC]);
-    return registry;
-  })();
+  static readonly #testingRegistry: CodecRegistry = createBaseJsonRegistry()
+    .extend([UnknownValue, ProblematicValue]);
 
   /**
    * Reconstruction context for the throwaway checks in the testing helpers
@@ -583,7 +581,9 @@ export class JsonCodec implements SerializationContext<string> {
     if (isMalformed) {
       if (!JsonCodec.seemsLikeEncoded(encoded)) {
         throw new Error(
-          `Not a JSON-encoded \`FabricValue\` string: \`${encoded}\``,
+          `Not a JSON-encoded \`FabricValue\` string: ${
+            backtickQuote(encoded)
+          }`,
         );
       }
     } else {

@@ -3029,6 +3029,17 @@ describe("RuntimeProcessor per-space piece contexts", () => {
       { did: "did:key:z6Mk-table-c", host: "http://host-c.test/" },
       { did: "did:key:z6Mk-table-a", host: "http://host-a-new.test/" },
       { did: "did:key:z6Mk-table-a", host: "not a url" },
+      {
+        did: "did:key:z6Mk-table-credentials",
+        host: "http://user@credentials.test/",
+      },
+      { did: "did:key:z6Mk-table-path", host: "http://path.test/api" },
+      {
+        did: "did:key:z6Mk-table-dot-path",
+        host: "http://dot-path.test/api/..",
+      },
+      { did: "did:key:z6Mk-table-query", host: "http://query.test/?x=1" },
+      { did: "did:key:z6Mk-table-fragment", host: "http://hash.test/#x" },
     ]);
     await tx.commit();
 

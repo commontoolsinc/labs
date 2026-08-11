@@ -154,8 +154,8 @@ export interface InitializationData {
   // URL of backend server. Also the default host for spaces absent from
   // `spaceHostMap`.
   apiUrl: string;
-  // Optional space DID → host base URL map. A space listed here has its
-  // storage resolved against that host instead of `apiUrl`. Absent map or
+  // Optional map from space DIDs to HTTP or HTTPS origins. A listed space has
+  // its storage resolved against that host instead of `apiUrl`. Absent map or
   // absent entry ⇒ `apiUrl`, byte-identical to the single-host behavior.
   // Plain record: structured-clone-safe — no functions cross the worker
   // IPC boundary. Fixed for the connection's lifetime.
