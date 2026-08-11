@@ -144,6 +144,54 @@ const logger = getLogger("worker-reconciler", {
 });
 
 /**
+ * Positions holding a longest strictly increasing run of `previousPositions`,
+ * skipping the negative entries that stand for a child the document does not
+ * hold yet.
+ *
+ * Children at those positions already sit in the order the new list wants them
+ * in, relative to one another, so they are the ones that can stay where they
+ * are while everything else is placed around them. Taking a *longest* such run
+ * is what keeps the number of moves near the number of children that actually
+ * changed place.
+ *
+ * @param previousPositions One entry per child of the new list, holding the
+ *   position that child had in the old list, or a negative number for a child
+ *   the document cannot move because it is not in it.
+ */
+function stationaryPositions(
+  previousPositions: readonly number[],
+): ReadonlySet<number> {
+  // `runEnds[l]` is the position ending the smallest run of length `l + 1`
+  // found so far, and `predecessor[p]` the position before `p` in the run that
+  // ends there -- together enough to walk one longest run back out.
+  const runEnds: number[] = [];
+  const predecessor = new Array<number>(previousPositions.length).fill(-1);
+
+  for (let position = 0; position < previousPositions.length; position++) {
+    const previous = previousPositions[position];
+    if (previous < 0) continue;
+
+    let low = 0;
+    let high = runEnds.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (previousPositions[runEnds[middle]] < previous) low = middle + 1;
+      else high = middle;
+    }
+    if (low > 0) predecessor[position] = runEnds[low - 1];
+    runEnds[low] = position;
+  }
+
+  const stationary = new Set<number>();
+  let position = runEnds.length > 0 ? runEnds[runEnds.length - 1] : -1;
+  while (position >= 0) {
+    stationary.add(position);
+    position = predecessor[position];
+  }
+  return stationary;
+}
+
+/**
  * Main reconciler class for worker-side VDOM rendering.
  */
 export class WorkerReconciler {
@@ -2715,6 +2763,9 @@ export class WorkerReconciler {
       childrenBlockedByPolicy: policyChildren.blocked,
       sourceChildren: sanitized.children,
       sourceProps: sanitized.props,
+      // `ctx` carries the stamp this node just emitted, if it emitted one, so
+      // this is what its descendants inherit.
+      childEmittedSpace: ctx.emittedSpace,
     };
     addCancel(() => this.cleanupNodeHandlers(state));
     this.initializeTextIntegrityBoundary(childPolicy, nodeId);
@@ -3277,6 +3328,14 @@ export class WorkerReconciler {
     const newMapping = new Map<string, ChildNodeState>();
     const newKeyOrder: string[] = [];
 
+    // Where each key sat in the old order, to tell a child that merely stayed
+    // put from one that has to move.
+    const previousPosition = new Map<string, number>();
+    for (let i = 0; i < state.childOrder.length; i++) {
+      previousPosition.set(state.childOrder[i], i);
+    }
+    const keptInPlace = new Set<string>();
+
     // Process each new child
     let hasNewChildren = false;
     for (let i = 0; i < newChildren.length; i++) {
@@ -3297,6 +3356,7 @@ export class WorkerReconciler {
         state.children.delete(key);
         if (canReuse) {
           newMapping.set(key, existingState);
+          keptInPlace.add(key);
         } else {
           existingState.cancel();
           this.cleanupNodeHandlers(existingState);
@@ -3353,29 +3413,41 @@ export class WorkerReconciler {
 
     state.childOrder = newKeyOrder;
 
-    // Update children order by inserting from END to BEGINNING.
-    // This ensures each insertBefore has a valid reference node.
-    // Processing in reverse means each child is inserted before the
-    // previously processed child (which is already in the DOM).
-    // Skip children with nodeId === -1 (pending Cell children that haven't
-    // resolved yet). Using -1 as a beforeId would break the ordering chain
-    // because the applicator can't find the node and falls back to appendChild.
-    // Pending children will self-insert via renderCellChild when they resolve.
+    // The document holds exactly the children that were kept, in the order they
+    // had before. A child whose position among those is unchanged is already
+    // where it belongs, so the ones forming a longest such run need no op at
+    // all; every other child is placed against them below.
+    //
+    // A child with nodeId === -1 is a Cell child that has not resolved, so the
+    // document does not hold it and it cannot anchor anything. It self-inserts
+    // through renderCellChild once it resolves.
+    const previousPositions = newKeyOrder.map((key) => {
+      const childState = newMapping.get(key);
+      if (!childState || childState.nodeId === -1) return -1;
+      return keptInPlace.has(key) ? previousPosition.get(key) ?? -1 : -1;
+    });
+    const stationary = stationaryPositions(previousPositions);
+
+    // Walk from END to BEGINNING so each insert names a child already in its
+    // final place. A stationary child emits nothing but still anchors the
+    // children before it, because it is their next sibling either way.
     let nextNodeId: number | null = null;
     for (let i = newKeyOrder.length - 1; i >= 0; i--) {
       const key = newKeyOrder[i];
       const childState = newMapping.get(key);
       if (!childState || childState.nodeId === -1) continue;
 
-      // Insert this child before the next one (or append if it's the last)
-      this.queueOps([
-        {
-          op: "insert-child",
-          parentId: state.nodeId,
-          childId: childState.nodeId,
-          beforeId: nextNodeId,
-        },
-      ]);
+      if (!stationary.has(i)) {
+        // Insert this child before the next one (or append if it's the last)
+        this.queueOps([
+          {
+            op: "insert-child",
+            parentId: state.nodeId,
+            childId: childState.nodeId,
+            beforeId: nextNodeId,
+          },
+        ]);
+      }
 
       nextNodeId = childState.nodeId;
     }
@@ -3407,15 +3479,10 @@ export class WorkerReconciler {
       (typeof child === "string" || typeof child === "number" ||
         typeof child === "boolean" || child === null || child === undefined)
     ) {
-      const text = this.stringifyText(child);
-      if (text !== childState.currentValue) {
-        childState.currentValue = text;
-        this.queueOps([{
-          op: "update-text",
-          nodeId: childState.nodeId,
-          text,
-        }]);
-      }
+      // Nothing to update. A text child is keyed by a hash of the very value
+      // it renders, so one that was reused under its old key holds the text it
+      // was built with; a child whose text differs keys differently and is
+      // built rather than reused.
       return true;
     }
 
@@ -3448,6 +3515,11 @@ export class WorkerReconciler {
     childState.elementState.renderPolicy = policy;
     childState.elementState.childRenderPolicy = childPolicy;
     childState.elementState.childrenBlockedByPolicy = policyChildren.blocked;
+    // Same reasoning as the keyed path above: an authored node holding this
+    // element is not a wrapper, whatever it was before. A key derived from
+    // content cannot match an array against a VNode today, so this only holds
+    // the invariant for a keying that one day could.
+    childState.elementState.isArrayWrapper = false;
     childState.elementState.sourceChildren = sanitized.children;
     childState.elementState.sourceProps = sanitized.props;
 
@@ -3780,7 +3852,10 @@ export class WorkerReconciler {
           const children = resolvedChild as WorkerRenderNode[];
           wrapper.sourceChildren = children;
           this.updateChildrenInPlace(
-            ctx,
+            // Rows render below the wrapper, so they inherit the space it
+            // stamped; handing them the surrounding ctx would have each row
+            // re-stamp a space the wrapper already carries.
+            { ...ctx, emittedSpace: wrapper.childEmittedSpace },
             wrapper,
             children,
             new Set(visited),
@@ -3970,12 +4045,13 @@ export class WorkerReconciler {
     // Handle primitive values (text nodes)
     const text = this.stringifyText(child);
     const state = this.createTextNode(ctx, text, policy);
+    const isText = state.tagName === "#text";
 
     return {
       nodeId: state.nodeId,
-      isText: state.tagName === "#text",
+      isText,
       cancel: state.cancel,
-      elementState: state.tagName === "#text" ? undefined : state,
+      elementState: isText ? undefined : state,
     };
   }
 
