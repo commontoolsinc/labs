@@ -33,6 +33,28 @@ belongs in one document even when the reasoning belongs in two.
 
 ## State
 
+Where every item stands. The sections below carry the detail and are what to
+read before picking one up; this is the roll-up, so a driver can see the shape
+without reconstructing it.
+
+| Item | Status |
+| --- | --- |
+| 1. a verb's declared result reaches the runtime | on main (#5501) |
+| 6. the read layer | on main, in full |
+| 7. session-scoped invocation ids | on main (#5610) |
+| 8. descriptive receipt schemas | on main |
+| 9a. listing marks | on main (#5309) |
+| 10. listing rows carry a handler's declared result | in review (#5629) |
+| 9b. closed-world event emission | built, parked on #5589 (#5307) |
+| 4. `receipt` as a top-level envelope field | not started — and its precondition now holds |
+| 2. an unrecognized projection key is refused | not started |
+| 3. a rejection propagates up through what holds it | not started |
+| 5. `cf wish` and `cf exec` take the read options | not started |
+
+Item 9 is split because its two halves have different fates: the marks landed,
+the emission is parked. A further item 11 arrives with #5617, which is not yet
+on main.
+
 These pull requests remain open against this work. They are listed here because
 a driver needs to know what is already moving before scheduling anything new.
 
@@ -76,14 +98,14 @@ was open when that one was not.
 yet.** It was given as: if it is easy to add now, go for it; but if it creates
 more things to chase down, revisit rather than push through.
 
-The producer half satisfies that already — #5501 is built and green. **The
-unknown is the consumer half, item 10.** A tool's pattern rides in the callable
-cell's own value, so its branch just reads it; a handler's module lives in the
-compiled graph, so the handler branch needs the verb's node looked up there.
-That lookup is new code rather than a field already sitting in reach. If it
-turns awkward, that is exactly the case the condition names, and the instruction
-is to raise it rather than absorb it. Raising it early costs nothing; absorbing
-it quietly spends the goodwill this decision was made on.
+Both halves satisfy it. The producer is on main (#5501). The consumer, item 10,
+is the lookup the condition was aimed at — a handler's module lives in the
+compiled graph rather than sitting in reach the way a tool's pattern does — and
+it cost one structural match and no change to `callableCommandSpec`'s
+signature. What it did not reach is the command surface: `cf piece call <verb>
+--help --json` still shows a handler no output, because serving it there needs
+the graph at `resolvePieceCallable` too. That is raised rather than absorbed,
+which is what the condition asks for.
 
 *What this unblocks.* Items 8 and 10 stop being provisional, and verb discovery
 closes — `cf piece verbs` can answer both halves of its question.
@@ -258,9 +280,11 @@ this; nothing else does.
 **8. Descriptive receipt schemas.** On main. Plain results only — a verb
 returning anything reactive gets none, which is what item 1 decides.
 
-**9. Closed-world event schemas and listing marks.** #5307 and #5309, from the
-verb contract arc. Both unblocked; both wanted a courtesy review rather than a
-gate.
+**9. Closed-world event schemas and listing marks.** Half landed: the listing
+marks are on main (#5309). Closed-world emission (#5307) is built but parked on
+#5589 — closing a verb's `$event` closes it against the browser too, and
+whether a renderer's DOM-event envelope is governed by the verb's schema is a
+semantics ruling rather than an implementation gap.
 
 **10. Listing rows carry a handler's declared result.** *(S)* `cf piece verbs`
 reports an `outputSchema` per row for a handler as well as for a tool, so verb
