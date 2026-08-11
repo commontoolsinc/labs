@@ -2238,9 +2238,13 @@ describe("piece call wait control", () => {
     expect(error).toBeInstanceOf(WaitBoundExpired);
     // The wording is pinned: the handler runs in THIS process, so an expiry
     // must not claim the invocation "continues settling" — it may never have
-    // executed or committed, and the same-id re-invoke is the recovery.
+    // executed or committed, and re-invoking the same pair is the recovery.
+    // The pair is anchored to the end of the string: an id on its own names
+    // no address, and `resolveInvocationIdentity` refuses one offered without
+    // its session, so guidance that stopped at the id would send a caller
+    // into a rejected retry.
     expect((error as WaitBoundExpired).message).toMatch(
-      /--wait bound of 0\.01s expired: the invocation may not have executed or committed — re-invoke with the same invocation id/,
+      /--wait bound of 0\.01s expired: the invocation may not have executed or committed — re-invoke with the same invocation id and session to finish it or read the outcome back$/,
     );
     expect((error as WaitBoundExpired).seconds).toBe(0.01);
   });
