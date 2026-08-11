@@ -10,8 +10,9 @@ import {
  * error if the value's class has no `[CODEC]`.
  *
  * A `FabricPrimitive` binds its codec per wire format, under that format's own
- * symbol, so it has no `[CODEC]` and throws here. Reach for `jsonCodecOf()`
- * when the JSON codec is what is wanted, whichever symbol carries it.
+ * symbol, so it has no `[CODEC]` and throws here. Read the symbol the format
+ * uses -- `[JSON_CODEC]` for JSON -- when a primitive's codec is what is
+ * wanted.
  */
 export function codecOf(value: FabricSpecialObject): FabricCodec {
   const codec =

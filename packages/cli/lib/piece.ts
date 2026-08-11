@@ -42,8 +42,11 @@ import {
 import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { setLLMUrl } from "@commonfabric/llm";
-import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
-import { jsonCodecOf } from "@commonfabric/data-model/codec-json";
+import {
+  FabricPrimitive,
+  FabricSpecialObject,
+} from "@commonfabric/data-model/fabric-value";
+import { codecOf } from "@commonfabric/data-model/codec-common";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { getCarriedCfcLabelView } from "@commonfabric/runner/cfc";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
@@ -905,6 +908,16 @@ async function searchTextMatches(
     }
 
     if (current instanceof FabricSpecialObject) {
+      // These representations exist to be searched as TEXT, and what a codec
+      // produces is largely not that: a `FabricEpochNsec` encodes to a
+      // base64url string, which matches nothing anyone would type. Nor are a
+      // `FabricInstance`'s contents reached -- this stops at the object rather
+      // than descending it, so a searchable value nested inside one is
+      // invisible. `String(current)` is the only part here doing honest work.
+      //
+      // TODO(danfuzz): vet this branch for correctness once `data-model`
+      // supports walking a `FabricInstance`, at which point its contents can
+      // be searched as the values they are rather than as an encoded blob.
       const representations: SearchEntry[] = [];
       if (current.toString !== Object.prototype.toString) {
         try {
@@ -914,11 +927,13 @@ async function searchTextMatches(
         }
       }
       try {
-        // The JSON codec, because these representations exist to be searched
-        // as text: a `FabricPrimitive` yields its encoded form only under
-        // `[JSON_CODEC]`. Throws for a value that binds neither symbol, which
-        // the surrounding `catch` reports as unreadable.
-        representations.push({ value: jsonCodecOf(current).encode(current) });
+        // A `FabricPrimitive` binds no `[CODEC]`, and its per-format codec
+        // would only yield the unsearchable text described above, so it
+        // contributes nothing here. For anything else, a missing codec is a
+        // real fault and `codecOf()` throws, which the `catch` reports.
+        if (!(current instanceof FabricPrimitive)) {
+          representations.push({ value: codecOf(current).encode(current) });
+        }
       } catch (error) {
         reportReadError?.(error);
       }
