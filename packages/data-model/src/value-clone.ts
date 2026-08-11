@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
@@ -242,9 +243,9 @@ export function cloneHelper(
     default:
       // All valid `FabricValue` types are handled above.
       throw new Error(
-        `Cannot clone: \`${
-          (value as object).constructor?.name ?? typeof value
-        }\``,
+        `Cannot clone: ${
+          backtickQuote((value as object).constructor?.name ?? typeof value)
+        }`,
       );
   }
 }
@@ -454,7 +455,7 @@ export function cloneForMutation<T extends FabricValue>(
         -1,
         toDebugKindString(value),
         `\`cloneForMutation()\`: cannot mutate ${
-          toDebugKindString(value)
+          backtickQuote(toDebugKindString(value))
         } at root ` +
           `(empty path)`,
       );
@@ -472,7 +473,7 @@ export function cloneForMutation<T extends FabricValue>(
       -1,
       toDebugKindString(value),
       `\`cloneForMutation()\`: cannot descend into ${
-        toDebugKindString(value)
+        backtickQuote(toDebugKindString(value))
       } at ` +
         `root (path has ${path.length} segment${path.length === 1 ? "" : "s"})`,
     );
@@ -510,7 +511,9 @@ export function cloneForMutation<T extends FabricValue>(
         "missing-segment",
         i,
         "undefined",
-        `\`cloneForMutation()\`: missing path segment \`${key}\` at ` +
+        `\`cloneForMutation()\`: missing path segment ${
+          backtickQuote(key)
+        } at ` +
           `index \`${i}\``,
       );
     }
@@ -521,10 +524,10 @@ export function cloneForMutation<T extends FabricValue>(
           "non-mutable-leaf",
           i,
           toDebugKindString(next),
-          `cloneForMutation: cannot mutate ${
-            toDebugKindString(next)
+          `\`cloneForMutation()\`: cannot mutate ${
+            backtickQuote(toDebugKindString(next))
           } at path ` +
-            `index ${i} (final segment)`,
+            `index \`${i}\` (final segment)`,
         );
       }
     } else {
@@ -533,10 +536,10 @@ export function cloneForMutation<T extends FabricValue>(
           "non-container-descent",
           i,
           toDebugKindString(next),
-          `cloneForMutation: cannot descend into ${
-            toDebugKindString(next)
+          `\`cloneForMutation()\`: cannot descend into ${
+            backtickQuote(toDebugKindString(next))
           } at ` +
-            `path index ${i}`,
+            `path index \`${i}\``,
         );
       }
     }

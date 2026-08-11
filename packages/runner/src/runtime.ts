@@ -133,7 +133,7 @@ import {
   type UnsafeHostTrust,
   type UnsafeHostTrustOptions,
 } from "./unsafe-host-trust.ts";
-import { normalizeSpaceHost } from "./space-host.ts";
+import { normalizeSpaceHost, SpaceHostValidationError } from "./space-host.ts";
 
 const isFullNormalizedLinkShape = (
   value: unknown,
@@ -348,8 +348,8 @@ export type ServerRunInfo = {
 export interface RuntimeOptions {
   apiUrl: URL;
   /**
-   * Optional space DID → host base URL map (federation). Space-bound
-   * work (LLM calls, fetches, blob uploads) for a mapped space targets
+   * Optional map from space DIDs to HTTP or HTTPS origins. Space-bound work
+   * (LLM calls, fetches, blob uploads) for a mapped space targets
    * that host; absent map or entry ⇒ `apiUrl`. Mirrors the storage
    * layer's map (StorageManager Options.spaceHostMap) — pass the same
    * one. Fixed for the runtime's lifetime.
@@ -1098,14 +1098,17 @@ export class Runtime {
     // space, not mid-builtin as a bare Invalid URL.
     const normalizedSpaceHostMap: Record<string, string> = {};
     for (const [space, host] of Object.entries(options.spaceHostMap ?? {})) {
+      let route: URL;
       try {
-        normalizedSpaceHostMap[space] = normalizeSpaceHost(host).toString();
+        route = normalizeSpaceHost(host);
       } catch (cause) {
+        if (!(cause instanceof SpaceHostValidationError)) throw cause;
         throw new Error(
-          `Invalid spaceHostMap entry for ${space}: "${host}"`,
+          `Invalid spaceHostMap entry for ${space}`,
           { cause },
         );
       }
+      normalizedSpaceHostMap[space] = route.toString();
     }
     // Snapshot + freeze: the map is fixed for the runtime's lifetime
     // (the per-space provider cache and routing decisions assume
@@ -2379,7 +2382,7 @@ export class Runtime {
   }
 
   /**
-   * Record a runtime-learned HTTP or HTTPS host hint for a space (the v0
+   * Records a runtime-learned HTTP or HTTPS origin for a space (the v0
    * site-table flow). Storage decides first. A seed or an accepted late hint
    * fixes the route for the session. A default-host provider stays provisional
    * while it is read-only. The first hint can replace it and replay its reads.
@@ -2387,15 +2390,17 @@ export class Runtime {
    * storage accepted or confirmed the hint.
    */
   registerSpaceHost(space: MemorySpace, host: string): boolean {
-    let normalized: string;
+    let route: URL;
     try {
-      normalized = normalizeSpaceHost(host).toString();
+      route = normalizeSpaceHost(host);
     } catch (cause) {
+      if (!(cause instanceof SpaceHostValidationError)) throw cause;
       throw new Error(
-        `Invalid host for space ${space}: "${host}"`,
+        `Invalid host for space ${space}`,
         { cause },
       );
     }
+    const normalized = route.toString();
     const accept = this.storageManager.registerSpaceHost?.(space, normalized);
     if (accept === undefined) return false; // manager has no remote resolution
     if (accept) this.#dynamicHosts.set(space, normalized);

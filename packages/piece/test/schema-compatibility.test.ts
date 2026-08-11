@@ -1875,12 +1875,18 @@ describe("piece schema compatibility", () => {
     }
   });
 
-  describe("fabric-primitive schema vocabulary evolution", () => {
+  describe("fabric-primitive schema vocabulary transitions", () => {
     // The schema generator used to describe a fabric special object
     // structurally: an object schema whose `required` carries the
     // `FabricSpecialObject` nominal brand key. It now emits the
-    // fabric-primitive type name instead. Pattern evolution accepts exactly
-    // that transition; anything looser stays refused.
+    // fabric-primitive type name instead. That transition is refused, for
+    // pattern evolution too: the structural schema admits values by shape
+    // (a plain record carrying the brand key as an own property, or a
+    // primitive of another class whose members cover `required`), the
+    // fabric-primitive-typed schema matches by prototype, and a pattern
+    // update rewrites stored data verbatim -- so any such value would
+    // survive the update only to be rejected by every subsequent read.
+    // See the note in `schemaSubsetIssue`.
     const brand = "@commonfabric/FabricSpecialObject";
     const oldBytes: JSONSchema = {
       type: "object",
@@ -1894,16 +1900,22 @@ describe("piece schema compatibility", () => {
       required: ["blob"],
     });
 
-    it("accepts an argument field moving from the brand-marked structural emission to its fabric-primitive type", () => {
+    it("refuses an argument field moving from the brand-marked structural emission to its fabric-primitive type", () => {
       expect(() =>
         assertPatternSchemasBackwardCompatible(
           pattern(withField(oldBytes), true),
           pattern(withField(newBytes), true),
         )
-      ).not.toThrow();
+      ).toThrow(/type object is not accepted/);
     });
 
     it("accepts a result field moving from the brand-marked structural emission to its fabric-primitive type", () => {
+      // The result direction proves candidate-within-previous: the new
+      // schema's population is prototype-matched primitives, and every one
+      // satisfies the old structural contract (fabric-primitive types are
+      // subtypes of "object", members are present via `in`, and the brand
+      // is exempt for instances). Nothing is stranded, so no allowance is
+      // involved -- this holds through the ordinary subset machinery.
       expect(() =>
         assertPatternSchemasBackwardCompatible(
           pattern(true, withField(oldBytes)),
@@ -1912,33 +1924,20 @@ describe("piece schema compatibility", () => {
       ).not.toThrow();
     });
 
-    it("accepts a member-free brand-marked emission against any fabric-primitive type", () => {
-      // `FabricHash`- and epoch-typed fields compiled to the same
-      // `{ type: "object", required: [brand] }` shape, so the old contracts
-      // carry nothing that could distinguish the classes.
-      expect(() =>
-        assertPatternSchemasBackwardCompatible(
-          pattern(
-            withField({ type: "object", properties: {}, required: [brand] }),
-            true,
-          ),
-          pattern(withField({ type: "FabricEpochNsec" }), true),
-        )
-      ).not.toThrow();
-    });
-
-    it("refuses the transition when a required member is not on the named class", () => {
-      const oldRegExp: JSONSchema = {
+    it("refuses the epoch-shaped structural emission against either epoch class", () => {
+      const oldEpoch: JSONSchema = {
         type: "object",
-        properties: {},
-        required: ["source", "flags", "flavor", brand],
+        properties: { value: { type: "integer" } },
+        required: ["value", brand],
       };
-      expect(() =>
-        assertPatternSchemasBackwardCompatible(
-          pattern(withField(oldRegExp), true),
-          pattern(withField(newBytes), true),
-        )
-      ).toThrow(/type object is not accepted/);
+      for (const epochType of ["FabricEpochNsec", "FabricEpochDays"]) {
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(withField(oldEpoch), true),
+            pattern(withField({ type: epochType } as JSONSchema), true),
+          )
+        ).toThrow(/type object is not accepted/);
+      }
     });
 
     it("refuses a plain object schema without the brand against a fabric-primitive type", () => {
@@ -1950,19 +1949,6 @@ describe("piece schema compatibility", () => {
       expect(() =>
         assertPatternSchemasBackwardCompatible(
           pattern(withField(plainObject), true),
-          pattern(withField(newBytes), true),
-        )
-      ).toThrow(/type object is not accepted/);
-    });
-
-    it("refuses the transition when the source carries keys beyond the structural emission", () => {
-      const cellWrapped: JSONSchema = {
-        ...(oldBytes as Exclude<JSONSchema, boolean>),
-        asCell: ["cell"],
-      };
-      expect(() =>
-        assertPatternSchemasBackwardCompatible(
-          pattern(withField(cellWrapped), true),
           pattern(withField(newBytes), true),
         )
       ).toThrow(/type object is not accepted/);

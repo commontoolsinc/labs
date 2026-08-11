@@ -31,6 +31,17 @@ function type(s: Session, text: string): void {
   for (const ch of text) s.handleKey({ name: ch, char: ch });
 }
 
+function saveSource(
+  source: ReturnType<typeof diffSource>,
+  text: string,
+  baseline?: string,
+  options?: Parameters<ReturnType<typeof diffSource>["save"]>[3],
+): string {
+  const lineEndings = source.lineEndingProvenance?.(text) ??
+    text.split("\n").map(() => undefined);
+  return source.save(text, lineEndings, baseline, options);
+}
+
 /** Enter edit mode if needed and move the cursor to the given diff line. */
 function toLine(s: Session, line: number): void {
   if (!s.view().cursor) press(s, "e"); // enter edit mode at the top
@@ -966,7 +977,7 @@ Deno.test("diffedit: a save writes and reports only files whose contents changed
     const edited = TWO_FILE_DIFF.replace("+const y = 3;", "+const y = 30;");
     assertEquals(src.dirtyLabels!(TWO_FILE_DIFF, edited), ["x.ts"]);
     assertEquals(src.dirtyLabels!(TWO_FILE_DIFF, TWO_FILE_DIFF), []);
-    assertEquals(src.save(edited), "Saved 1 file");
+    assertEquals(saveSource(src, edited), "Saved 1 file");
     assertEquals(Deno.readTextFileSync(xPath), "const x = 1;\nconst y = 30;\n");
     assertEquals(Deno.readTextFileSync(zPath), "const z = 1;\nconst w = 3;\n");
     assertEquals(
@@ -985,11 +996,11 @@ Deno.test("diffedit: save reports exact zero- and two-file counts", () => {
     const model = parseDiff(TWO_FILE_DIFF)!;
     const { edit } = buildDiffDocument(TWO_FILE_DIFF, model, ws);
     const src = diffSource(ws, edit);
-    assertEquals(src.save(TWO_FILE_DIFF), "Saved 0 files");
+    assertEquals(saveSource(src, TWO_FILE_DIFF), "Saved 0 files");
     const edited = TWO_FILE_DIFF
       .replace("+const y = 3;", "+const y = 30;")
       .replace("+const w = 3;", "+const w = 30;");
-    assertEquals(src.save(edited), "Saved 2 files");
+    assertEquals(saveSource(src, edited), "Saved 2 files");
   } finally {
     done();
   }
@@ -1013,7 +1024,7 @@ Deno.test("diffedit: save reports zero when the edited contents are already on d
     Deno.utimeSync(xPath, oldTime, oldTime);
     const mtime = Deno.statSync(xPath).mtime?.getTime();
 
-    assertEquals(src.save(edited, TWO_FILE_DIFF), "Saved 0 files");
+    assertEquals(saveSource(src, edited, TWO_FILE_DIFF), "Saved 0 files");
     assertEquals(
       Deno.statSync(xPath).mtime?.getTime(),
       mtime,
@@ -1034,8 +1045,8 @@ Deno.test("diffedit: a later save can restore the contents captured at open", ()
       "+const y = 3;",
       "+const y = 30;",
     );
-    assertEquals(src.save(first, TWO_FILE_DIFF), "Saved 1 file");
-    assertEquals(src.save(TWO_FILE_DIFF, first), "Saved 1 file");
+    assertEquals(saveSource(src, first, TWO_FILE_DIFF), "Saved 1 file");
+    assertEquals(saveSource(src, TWO_FILE_DIFF, first), "Saved 1 file");
     assertEquals(
       ws.read([...edit.fileText.keys()][0]),
       "const x = 1;\nconst y = 3;\n",
@@ -1088,7 +1099,7 @@ Deno.test("diffedit: save refuses to overwrite a file changed after opening", ()
     Deno.writeTextFileSync(xPath, external);
 
     assertThrows(
-      () => src.save(edited, TWO_FILE_DIFF),
+      () => saveSource(src, edited, TWO_FILE_DIFF),
       Error,
       "changed after this view opened",
     );
@@ -3155,7 +3166,7 @@ Deno.test("diffedit: a failed amend restores files written by the save", () => {
     );
     let error = "";
     try {
-      src.save(edited, GIT_SHOW);
+      saveSource(src, edited, GIT_SHOW);
     } catch (caught) {
       error = caught instanceof Error ? caught.message : String(caught);
     }
@@ -3186,7 +3197,7 @@ Deno.test("diffedit: save refuses a selected workspace file that disappeared", (
     );
 
     assertThrows(
-      () => source.save(edited, DIFF),
+      () => saveSource(source, edited, DIFF),
       Error,
       "Could not read",
     );
@@ -3217,7 +3228,7 @@ Deno.test("diffedit: failed amend accepts a file already restored by the Git run
     );
 
     const error = assertThrows(
-      () => source.save(edited, GIT_SHOW),
+      () => saveSource(source, edited, GIT_SHOW),
       Error,
       "commit hook rejected",
     );
@@ -3259,7 +3270,7 @@ Deno.test("diffedit: reports an error while reading a file for rollback", () => 
     );
 
     const error = assertThrows(
-      () => source.save(edited, GIT_SHOW),
+      () => saveSource(source, edited, GIT_SHOW),
       Error,
       "restoring files failed",
     );
@@ -3296,7 +3307,7 @@ Deno.test("diffedit: a failed amend preserves a file changed during the amend", 
     );
 
     assertThrows(
-      () => src.save(edited, GIT_SHOW),
+      () => saveSource(src, edited, GIT_SHOW),
       Error,
       "changed again and was not restored",
     );
@@ -3385,7 +3396,7 @@ Deno.test("diffedit: refuses to amend after the represented commit header is rem
     );
 
     assertThrows(
-      () => source.save(edited, GIT_SHOW),
+      () => saveSource(source, edited, GIT_SHOW),
       Error,
       "No commit to amend",
     );
@@ -3419,7 +3430,7 @@ Deno.test("diffedit: refuses to amend after HEAD switches branches", () => {
     currentRef = "refs/heads/topic";
 
     assertThrows(
-      () => source.save(edited, GIT_SHOW),
+      () => saveSource(source, edited, GIT_SHOW),
       Error,
       "different branch",
     );
@@ -3449,7 +3460,7 @@ Deno.test("diffedit: refuses to amend a selected path missing from the shown com
     );
 
     assertThrows(
-      () => source.save(edited, GIT_SHOW),
+      () => saveSource(source, edited, GIT_SHOW),
       Error,
       "shown commit does not contain",
     );
@@ -3592,7 +3603,7 @@ Deno.test("diffedit: a hunk-only amend preserves the raw commit message", () => 
     const edited = shown.replace("+after\n", "+after edited\n");
 
     assertEquals(
-      source.save(edited, shown),
+      saveSource(source, edited, shown),
       "Saved 1 file; Amended the commit",
     );
 
@@ -3668,7 +3679,7 @@ Subject: [PATCH] Embedded envelope`,
       const edited = shown.replace(`+${current}\n`, `+${next}\n`);
 
       assertEquals(
-        source.save(edited, shown),
+        saveSource(source, edited, shown),
         "Saved 1 file; Amended the commit",
         format.name,
       );
@@ -3739,7 +3750,11 @@ Deno.test("diffedit: consecutive compact commits keep historical hunk ownership"
     const source = diffSource(ws, edit, undefined, realGit(root));
 
     assertEquals(
-      source.save(shown.replace("+after\n", "+workspace edit\n"), shown),
+      saveSource(
+        source,
+        shown.replace("+after\n", "+workspace edit\n"),
+        shown,
+      ),
       "Saved 1 file",
     );
     assertEquals(runGit(root, ["rev-parse", "HEAD"]), head);
@@ -3777,7 +3792,11 @@ Deno.test("diffedit: consecutive email commits keep historical hunk ownership", 
     const source = diffSource(ws, edit, undefined, realGit(root));
 
     assertEquals(
-      source.save(shown.replace("+after\n", "+workspace edit\n"), shown),
+      saveSource(
+        source,
+        shown.replace("+after\n", "+workspace edit\n"),
+        shown,
+      ),
       "Saved 1 file",
     );
     assertEquals(runGit(root, ["rev-parse", "HEAD"]), head);
@@ -3817,7 +3836,7 @@ Deno.test("diffedit: a CRLF commit preamble keeps an LF-normalized message", () 
     const edited = shown.replace("+after\n", "+after edited\n");
 
     assertEquals(
-      source.save(edited, shown),
+      saveSource(source, edited, shown),
       "Saved 1 file; Amended the commit",
     );
     const rawCommit = runGit(root, ["cat-file", "commit", "HEAD"]);

@@ -15,7 +15,7 @@
 import { isInstance } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "./fabric-value.ts";
-import { CODEC, type ReconstructionContext } from "./codec-common/interface.ts";
+import type { ReconstructionContext } from "./codec-common/interface.ts";
 import { EmptyReconstructionContext } from "./codec-common/EmptyReconstructionContext.ts";
 import type { CodecRegistry } from "./codec-common/CodecRegistry.ts";
 import { JsonCodec } from "./codec-json/JsonCodec.ts";
@@ -40,16 +40,10 @@ import { codecClasses as instanceCodecClasses } from "./fabric-instances/index.t
  * `UnknownValue` by the encoding context rather than tag-routed.
  */
 export function createDefaultJsonRegistry(): CodecRegistry {
-  const registry = createBaseJsonRegistry();
-
-  for (const cls of primitiveCodecClasses()) {
-    registry.register(cls[CODEC]);
-  }
-  for (const cls of instanceCodecClasses()) {
-    registry.register(cls[CODEC]);
-  }
-
-  return registry;
+  return createBaseJsonRegistry().extend([
+    ...primitiveCodecClasses(),
+    ...instanceCodecClasses(),
+  ]);
 }
 
 /**
@@ -108,15 +102,15 @@ export function plainObjectFromJson<T extends object = object>(
 
   if ((result === null) || (typeof result !== "object")) {
     throw new Error(
-      "plainObjectFromJson: Decoded to primitive (not a plain object)",
+      "`plainObjectFromJson()`: decoded to a primitive, not a plain object",
     );
   } else if (Array.isArray(result)) {
     throw new Error(
-      "plainObjectFromJson: Decoded to array (not a plain object)",
+      "`plainObjectFromJson()`: decoded to an array, not a plain object",
     );
   } else if (isInstance(result)) {
     throw new Error(
-      "plainObjectFromJson: Decoded to instance (not a plain object)",
+      "`plainObjectFromJson()`: decoded to an instance, not a plain object",
     );
   }
 

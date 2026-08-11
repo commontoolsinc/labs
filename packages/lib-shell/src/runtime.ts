@@ -117,8 +117,8 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   identity: Identity;
   apiUrl: URL;
   /**
-   * Optional space DID → host base URL map forwarded to the worker.
-   * Spaces absent from the map resolve to `apiUrl` (the default host).
+   * Optional map from space DIDs to HTTP or HTTPS origins, forwarded to the
+   * worker. Spaces absent from the map resolve to `apiUrl`, the default host.
    */
   spaceHostMap?: Record<string, string>;
   experimental?: ExperimentalRuntimeFlags;

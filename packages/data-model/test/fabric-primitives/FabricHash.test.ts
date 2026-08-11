@@ -131,7 +131,7 @@ describe("FabricHash", () => {
 
   describe("static members", () => {
     describe("fromString()", () => {
-      it("works on the result of the instance method `toString()`", () => {
+      it("round-trips through the instance method `toString()`", () => {
         // Use a non-fid1 tag to verify the parser doesn't hardcode it.
         const original = new FabricHash(SAMPLE_HASH, "sha3");
         const str = original.toString();
