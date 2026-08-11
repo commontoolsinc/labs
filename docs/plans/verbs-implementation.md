@@ -357,13 +357,25 @@ CLI:
 | the event interface itself | **absent** |
 
 So only the third is an emission gap. The first two are emitted and lost
-between the pattern and the caller, and the shape of the first is the reason to
-suspect where: a `description` beside a `$ref` is ignored under JSON Schema's
-own semantics, so any consumer that resolves the reference and substitutes its
-target drops the sibling. That is a hypothesis about the loss point rather than
-a located defect — what is established is that the emitter is not where two of
-the three go missing, so a patch aimed there would close one symptom and leave
-two.
+between the pattern and the caller: the schema a caller is served is the
+resolved form — no `$defs`, no `$ref`, the target inlined — and both
+descriptions are absent from it.
+
+*The obvious explanation is not the explanation.* A `description` beside a
+`$ref` is ignored under JSON Schema's own semantics, so a resolver that
+substitutes the target would drop it. This one does not:
+`resolveCfcSchemaRefsUncached` (`packages/runner/src/cfc/schema-refs.ts`)
+collects ref-site siblings and merges them over the resolved target on purpose.
+That rules out the tidy answer for the verb, and it never explained the event
+field, whose description sits inside the `$def` rather than beside the ref.
+
+*A lead, unverified.* `resolveSchema` (`packages/runner/src/schema.ts`) calls
+`resolveSchemaRefs(schema)` with one argument, so the document consulted for
+`#/$defs/...` defaults to the property schema itself — and a verb property
+carries the `$ref` while the `$defs` live at the pattern's result-schema root.
+Whoever takes this should confirm or discard that before assuming a single
+cause: what is established is only that the emitter is not where two of the
+three go missing, so a patch aimed there would close one symptom and leave two.
 
 **Carried alongside, not sequenced.** A capability probe that covers nothing
 (#5534) is a test asserting something it cannot observe, so it reports green
