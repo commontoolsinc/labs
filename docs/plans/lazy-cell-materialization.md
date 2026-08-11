@@ -401,64 +401,35 @@ diffing and the scheduler's own reads keep eager semantics.
 
 - [x] `lazyMaterialization` registered in
       [`../development/EXPERIMENTAL_OPTIONS.md`](../development/EXPERIMENTAL_OPTIONS.md),
-      off by default, reachable by `EXPERIMENTAL_LAZY_MATERIALIZATION` or
+      reachable by `EXPERIMENTAL_LAZY_MATERIALIZATION` or
       `RuntimeOptions.experimental`.
-- [x] A view answers a `then` probe rather than refusing it once its transaction
-      has finished. Promise adoption probes `then` on every value it receives
-      and a lift's result crosses a promise boundary by construction, so a view
-      that refuses the probe cannot be returned at all.
-- [x] The execution-context floor divergence is fixed. A view re-enters
-      `validateAndTransform` per property, which repeated two pieces of
-      entry-point-only work: the stored CFC metadata probe, and the label-view
-      derivation for the dereferences made on the way. Both read `<doc>/cfc`. An
-      eager read makes those reads once, for the document it was handed, never
-      for the documents its traversal reaches through links — so a view
-      registered reads outside the action's declared scope envelope, which
-      dropped its execution-context floor to `session` and stopped its
-      observations being adopted across users. The probe is now gated to the
-      entry point, and the label derivation still runs for children but with its
-      runtime-internal reads kept out of the scheduler's view of what the ACTION
-      read. This fixed `incremental observation adoption (live)`,
-      `Pattern Runner - Dynamic Patterns` and `scheduler cold-replica startup`.
-- [x] Carry `asCell` through a `$ref` union. Two facts hid the marker, and each
-      was enough on its own.
+- [x] Landed default-off with both suites green.
+- [ ] Default-on. The runner unit suite passes with the flag on, and the whole
+      integration suite passes with it off. With it on by default,
+      `deno task integration` is 3 of 7: `patterns`, `cli`, `generated-patterns`
+      and `pattern-tests` fail, 22 of 120 pattern tests among them. Two error
+      shapes account for nearly all of it:
 
-      A branch written as a bare `$ref` declares nothing — no `type`, no
-      `required`, no `asCell` — and `canBranchMatch` resolves a ref on its own
-      but has no `$defs` to resolve it against. Every branch matched, so the
-      union never narrowed and the narrowed schema came back identical to its
-      input. Branches now resolve against the union's own `$defs` first.
+      - `Cannot destructure property '<x>' of 'undefined'` — a HANDLER receives
+        an undefined event. Handlers were deliberately left eager, so the route
+        by which one sees an undefined payload under this flag is not yet
+        understood and is the first thing to chase.
+      - `Cannot read properties of undefined (reading 'length')` — the string
+        `.length` case below.
 
-      And an optional handle, `Cell<T> | undefined`, generates as a union whose
-      one branch carries the marker and whose other is the absent case.
-      `hasAsCell` answers for a union only when EVERY branch declares one, so
-      that shape read as "not a cell". A union with any `asCell` branch now
-      collapses onto it, which is the same answer an eager read reaches by
-      evaluating each branch and picking the cell among the results
-      (`mergeMatches`).
+      What is NOT the cause, having been tested: an argument being refused for a
+      missing field. A refusal routes into the same disposition as an argument
+      that did not resolve, and that works. The failing readers are not refused
+      — they read a field the schema does not require, which is simply absent
+      because its computed has not produced yet.
 
-      `$ref` resolution was NOT dropping the marker — an earlier note said so
-      and was wrong; resolution preserves it, and a direct test says so.
-- [x] The forwarding case is settled: a lift that forwards its argument without
-      reading through it SHOULD take no dependency on the values inside. Fewer
-      unnecessary reactive runs is the point of the mode.
-
-      It is safe because forwarding passes a link rather than a snapshot —
-      `normalizeAndDiff` converts any view written back into a sigil link — so
-      whatever the value is written into re-reads through it and re-runs. And a
-      change to the REFERENCE still re-triggers the forwarding lift, because
-      link resolution registers its own probe reads even when no value is read
-      through the view. Value changes stop at the forwarder; reference changes
-      do not.
-
-      `Pattern Runner - Lift` pins both halves, with a mode-aware count: the
-      forwarding lift runs once rather than twice under the flag, and the inner
-      lift still runs and still produces the new result (9, from the changed
-      input).
-- [ ] Measure against the Stage 0 baseline on real patterns.
-- [ ] Turn on in development, soak, then default on.
-- [ ] Graduate: remove the flag, remove the eager path for lift arguments,
-      archive this plan.
+- [ ] Read `.length` off a string through the synthesized
+      `{properties:{length}}` shape a pattern's `.length` access generates. The
+      value is a redirect link to `<doc>/label/length`, and a string's `length`
+      is not a stored path, so the view hands back `{}`.
+      `gideon-tests/proxy-length-repro` pins it and is 12 of 14 with the fix
+      above.
+- [ ] Soak on default-on before removing the flag.
 
 ## Testing
 

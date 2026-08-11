@@ -476,6 +476,13 @@ function createObjectView(
     const narrowed = childSchema(schema, key);
     if (isExcluded(narrowed)) return undefined;
     if (!Object.hasOwn(value, key)) {
+      // Register the read even though there is nothing there. An absent key is
+      // usually a computed that has not produced yet, and the reader has to run
+      // again when it does — a container read alone does not carry that, since
+      // the value arrives at the child's own path. This is the same obligation
+      // a refusal carries, for the case that is not a refusal: the schema does
+      // not require this key, so reading it is an ordinary miss, not a mismatch.
+      tx.readValueOrThrow({ ...link, path: [...link.path, key] });
       const fallback = declaredDefault(narrowed);
       if (fallback === undefined) return undefined;
       return processDefaultValue(
