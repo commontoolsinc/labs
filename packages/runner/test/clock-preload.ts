@@ -52,5 +52,11 @@ installFakeClock({
     // The Phase-3 serving-side events-down suite drives a live
     // ExecutorHost under the same wall-clock policies.
     "executor-events-down",
+    // The Phase-4 client-effect-channel suite drives a live
+    // ExecutorHost (the served navigateTo → intent → enact/ack →
+    // retirement journeys) under the same wall-clock policies — the
+    // renew interval and flush deadline; auto-advance turns the renew
+    // cadence into a runaway.
+    "executor-effect-channel",
   ],
 });

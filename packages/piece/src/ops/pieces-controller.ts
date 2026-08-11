@@ -238,7 +238,14 @@ export class PiecesController<T = unknown> {
   }
 
   static async initialize(
-    { apiUrl, identity, spaceName, moduleByteCache, patternCoverage }: {
+    {
+      apiUrl,
+      identity,
+      spaceName,
+      moduleByteCache,
+      patternCoverage,
+      navigateCallback,
+    }: {
       apiUrl: URL;
       identity: Identity;
       spaceName: string;
@@ -252,6 +259,14 @@ export class PiecesController<T = unknown> {
       // coverage against the same space warm-loads them instead of recompiling
       // every pattern for itself.
       patternCoverage?: PatternCoverageCollector;
+      // Optional navigation enactment surface (the remoteClient preset's
+      // existing delta): test code passes one to observe navigateTo
+      // enactments — under EXPERIMENTAL_SERVER_EXECUTION the
+      // client-effect channel enacts served intents through it
+      // (server-execution v2 Phase 4, protocol.md §5).
+      navigateCallback?: Parameters<
+        typeof runtimePresets.remoteClient
+      >[0]["navigateCallback"];
     },
   ): Promise<PiecesController> {
     const session = await createSession({ identity, spaceName });
@@ -260,6 +275,7 @@ export class PiecesController<T = unknown> {
     // preset core. Trust provenance stays a visible delta of this controller.
     const runtime = new Runtime(runtimePresets.remoteClient({
       apiUrl: new URL(apiUrl),
+      ...(navigateCallback !== undefined ? { navigateCallback } : {}),
       storageManager: StorageManager.open({
         as: session.as,
         memoryHost: new URL(apiUrl),

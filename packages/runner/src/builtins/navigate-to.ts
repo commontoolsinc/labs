@@ -125,7 +125,7 @@ export function navigateTo(
    * actor — and set the (session-scoped) result cell in the same
    * transaction. No local enactment: the session's client enacts. */
   function servedNavigate(
-    tx: IExtendedStorageTransaction,
+    _tx: IExtendedStorageTransaction,
     resolvedTarget: Cell<any>,
   ): void {
     const context = navigateEventContextOf(action);
@@ -156,7 +156,7 @@ export function navigateTo(
       // (builtins.md §4; events.md §2; scopes.md §5).
       throw new Error(
         "navigateTo requires an acting SESSION: the event chain is " +
-          "sessionless (firedAt.session = \"server\"), so no client " +
+          'sessionless (firedAt.session = "server"), so no client ' +
           "exists to enact the navigation (builtins.md §4)",
       );
     }

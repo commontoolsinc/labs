@@ -3216,6 +3216,7 @@ export class Runner {
     givenPattern?: Pattern,
     options: RunnerRunOptions = {},
     pullOnceAfterStart: boolean = false,
+    speculativeConsequence?: { eventId: string },
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const ownership = this.createDeferredStartOwnership(resultCell);
@@ -3233,10 +3234,23 @@ export class Runner {
       const startTx = this.runtime.edit();
       // Minted inside a commit callback — by definition outside any
       // scheduler run; the deferred start's node wiring is piece
-      // machinery, stamped bookkeeping per serving-loop.md §3d.
+      // machinery, stamped bookkeeping per serving-loop.md §3d. The
+      // Phase-4 exception: a flag-ON CLIENT's navigate-deferred start
+      // is a handler CONSEQUENCE (the receipt + result wrapper of a
+      // speculative echo), so it stamps event-handler-kind and the
+      // overlay diverts it — committing it authored would race the
+      // SERVING side's own deferred start for the create-only receipt,
+      // and a client win would suppress the served navigateTo (no
+      // intent would ever be computed). The serving side and the OFF
+      // arm keep bookkeeping.
       this.runtime.stampServerRun(startTx, {
         actionId: `piece-start/${resultLink.id}`,
-        kind: "bookkeeping",
+        ...(speculativeConsequence !== undefined
+          ? {
+            kind: "event-handler" as const,
+            eventId: speculativeConsequence.eventId,
+          }
+          : { kind: "bookkeeping" as const }),
       });
       // Phase 4 (builtins.md §4): a deferred start minted from an
       // EVENT-HANDLER run carries that run's event context across to
@@ -3306,6 +3320,7 @@ export class Runner {
     inputs: FabricValue,
     pullOnceAfterStart = false,
     markCreateOnlyResult = false,
+    speculativeConsequence?: { eventId: string },
   ): Cancel {
     const resultLink = resultCell.getAsNormalizedFullLink();
     const ownership = this.createDeferredStartOwnership(resultCell);
@@ -3322,10 +3337,18 @@ export class Runner {
       const startTx = this.runtime.edit();
       // Minted inside a commit callback — outside any scheduler run;
       // bookkeeping per serving-loop.md §3d, like the deferred start
-      // above.
+      // above (and with the same Phase-4 exception: a flag-ON client's
+      // navigate-deferred start is a speculative handler CONSEQUENCE
+      // and diverts to the overlay instead of racing the serving
+      // side's receipt create).
       this.runtime.stampServerRun(startTx, {
         actionId: `piece-start/${resultLink.id}`,
-        kind: "bookkeeping",
+        ...(speculativeConsequence !== undefined
+          ? {
+            kind: "event-handler" as const,
+            eventId: speculativeConsequence.eventId,
+          }
+          : { kind: "bookkeeping" as const }),
       });
       // Phase 4 (builtins.md §4): carry the instantiating event-handler
       // run's event context to the start tx — capture point 1, as in
@@ -5281,6 +5304,21 @@ export class Runner {
     const deferForNavigate = this.handlerResultPatternHasNavigateTo(
       resultPattern,
     );
+    // Phase 4 (protocol.md §5): on a flag-ON CLIENT, a navigate-bearing
+    // result's deferred start is a SPECULATIVE handler consequence — it
+    // must divert to the overlay with its event's id, never commit the
+    // receipt authored (the serving side owns the durable create; see
+    // startAfterSuccessfulCommit's stamp comment). Wave-stamped
+    // (serving) and unstamped (OFF-arm) handler runs pass nothing.
+    const speculativeConsequence = deferForNavigate &&
+        waveRunContextOf(tx) === undefined
+      ? (() => {
+        const info = navigateEventContextFromRunInfo(
+          speculationRunContextOf(tx),
+        );
+        return info !== undefined ? { eventId: info.eventId } : undefined;
+      })()
+      : undefined;
 
     if (deferForNavigate && result === undefined) {
       // navigateTo results are commit-gated (startAfterSuccessfulCommit);
@@ -5292,6 +5330,7 @@ export class Runner {
         undefined,
         true,
         true,
+        speculativeConsequence,
       );
       addCancel(cancelDeferredStart);
       this.runtime.scheduler.lineage.recordPieceStop(
@@ -5311,6 +5350,7 @@ export class Runner {
           patternResultCell.space,
           cause,
           true,
+          speculativeConsequence,
         );
         cancelDeferredStart = setup.cancelDeferredStart;
         return setup.resultCell;
@@ -5411,6 +5451,7 @@ export class Runner {
     resultSpace: MemorySpace,
     cause: Record<string, any>,
     markCreateOnlyResult = false,
+    speculativeConsequence?: { eventId: string },
   ): DeferredStartResult<any> {
     const resultCell = this.runtime.getCell(
       resultSpace,
@@ -5439,6 +5480,7 @@ export class Runner {
         resultSetup.pattern,
         {},
         this.patternNeedsOneShotPull(resultSetup.pattern),
+        speculativeConsequence,
       )
       : undefined;
     return { resultCell, cancelDeferredStart };

@@ -1202,6 +1202,76 @@ red-first-evidenced where the batch required it):
   inverted F10 pins now carry their Phase-3 supersession inline (the
   named suite asserts the diverted posture since events-down).
 
+Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
+
+- protocol §5's channel rows now COVERED by the Phase-4 suites: the
+  effects-doc engine surface (`memory/test/v2-effects-doc.test.ts`:
+  `issuedIn` stamping derived-only, append nonce-dedupe against the
+  stored instance with the whole-value-set exemption, per-instance
+  addressing at cardinality 2, the retirement scan's
+  acked/unacked/stale-mark/malformed arms), and the end-to-end
+  channel (`runner/test/executor-effect-channel.test.ts`: the T2
+  hops-1–4 served intent with addressing+acting annotations, the
+  cardinality-2 multi-hop inheritance pin (a cascade-hop navigateTo
+  addresses the CLICKING session; the second session's instance stays
+  empty), the T2 hops-5–6 optimistic-enact convergence at ONE
+  navigation with the authored ack counted in `effectAcks` and the
+  retirement write's addressing-only annotations (T2.Q4), the LT8
+  reload journey (re-enact across the reload-wiped record, ack once,
+  retire once, nothing resurrects), the sessionless refusal, and the
+  LT3 not-connected refusal). T2's Q2/Q3 reference cells carry the
+  Phase-4 refreshes (scenario-traces §4).
+- NEW implementation surfaces below spec granularity, FLAGGED in the
+  Phase-4 PR rather than silently normative:
+  (i) the ACK MARK SHAPE — protocol §5's "`{ ackedNonce }`" is
+  implemented as per-nonce marks (`acks[nonce] = true`) because a
+  scalar last-ack field LOSES an earlier unretired ack whenever two
+  intents ack within one retirement interval; PENDING OWNER
+  RATIFICATION (the T2.Q3 refresh carries the same flag);
+  (ii) the DETERMINISTIC NONCE constructor
+  (`effectIntentNonce(eventId, instanceId)`, wire-shape module) —
+  "minted server-side" implemented as a deterministic function both
+  sides compute, which is what makes T2.Q7's optimistic enactment
+  converge by nonce (the cause-derived-identity convergence
+  speculation §2 sanctions); a re-run of either side is idempotent by
+  the engine's stored-nonce dedupe;
+  (iii) the served half's NO-CONTEXT arm refuses with a WARN instead
+  of builtins §4's runtime ERROR: a re-instantiated builtin from a
+  past fire (a restart/re-demand replay, whose navigation already
+  happened) is indistinguishable from a fresh
+  outside-any-event-context computation at the action — the
+  ctx-PRESENT error arms (sessionless chain, LT3) still throw;
+  flagged, not silently normative;
+  (iv) LT3's "connected session of the computing space" is probed as
+  a LIVE-SESSION-NOW check (`Server.hasLiveSessionFor` via
+  `Runtime.connectedSessionProbe`, installed at activation) — a
+  session inside the registry's TTL window counts as connected, which
+  is what lets the reload race (fire, reload, intent computes)
+  deliver rather than refuse;
+  (v) the LT8 reload journey's COLD-PROCESS half (the same sessionId
+  re-OPENED from a fresh process) additionally rides protocol §5's
+  owed client-side session persistence: the registry refuses a
+  token-less re-open by design (anti-hijack), so the persistence
+  adapter must carry the resume token with the sessionId — recorded
+  on OW20's trigger; the landed test pins the runtime-reload half
+  (overlay + enacted record wiped, session persisted);
+  (vi) the effects doc joins the never-a-piece id classes
+  (space-server.ts): every flag-ON client subscribes to it, and
+  piece demand for a value doc that can never carry `patternIdentity`
+  meta is the OW19 churn class;
+  (vii) the serving replica's scope-NAME-keyed local view (the OW17
+  residual) is bypassed, never consulted: the intent write is a
+  tail-relative MERGEABLE append (only the appended tail crosses;
+  the store applies it per instance via the annotation key) with the
+  ENGINE as idempotency authority, and the retirement write's pruned
+  value is computed from `selectRetirableEffectsInstances`' engine
+  reads — the local collapsed view has no remaining consumer on the
+  effects doc.
+- serving-loop §7's `effectAcks` counter is LIVE (the feed drain
+  counts authored commits touching the effects doc), so testing §4's
+  amplification metric is computable from counters alone — the
+  Phase-2 gate's formula gains its subtrahend.
+
 ## 4. Standing rule
 
 A ruling batch that adds a BINDING sentence adds its coverage row

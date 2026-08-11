@@ -480,9 +480,25 @@ these.
   consumed from stamped `firedAt`. [protocol §5; builtins §4]
 - Q2: `{nonce, kind:"navigate", args:{target}, issuedIn}`; nonce
   minted server-side; exactly-once-per-nonce is the CLIENT's duty.
-  [protocol §5]
+  [protocol §5] (Phase-4 refresh, 2026-08-11: the mint is the
+  DETERMINISTIC constructor `effectIntentNonce(eventId, instanceId)`
+  over the firing event's durable id and the navigateTo instance's
+  cause-derived result doc id — which is what lets the client's
+  speculative run PREDICT the same nonce for Q7's optimistic
+  enactment, converging by cause-derived identity exactly as
+  result-as-pattern children do [speculation §2; builtins §4]; and
+  `issuedIn` is ENGINE-stamped at apply with the issuing commit's
+  seq — the stream-entry `seq` precedent [events §1].)
 - Q3: `authored`; envelope S1; the ack's instance RESOLVES from the
   authenticated session — the client names no key. [protocol §5, §1]
+  (Phase-4 refresh, 2026-08-11: the ack WRITE is a per-nonce mark —
+  `acks[nonce] = true` on the instance — implementing §5's
+  "`{ ackedNonce }`" as one mark per nonce rather than a scalar
+  last-ack field, which would LOSE an earlier unretired ack whenever
+  two intents ack within one retirement interval; retirement prunes
+  acked entries and their marks together. Flagged for owner
+  ratification in the Phase-4 PR — verification-coverage.md's
+  Phase-4 delta.)
 - Q4: SpaceServer's OWN write in the next wave's derived commit:
   addressing (`session:U1:S1`) but NO acting principal. [protocol §1, §5]
 - Q5: no — logical write = authored commit EXCLUDING effect-channel

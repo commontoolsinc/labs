@@ -32,9 +32,9 @@ import {
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
   type DerivedWriteAnnotation,
+  type EffectIntentEntry,
   encodeMemoryBoundary,
   type EntityDocument,
-  type EffectIntentEntry,
   type EntityId,
   type EventAppendDecl,
   EventAppendDuplicateError,
@@ -3231,14 +3231,13 @@ const applyCommitTransaction = (
     // entries' `issuedIn` sentinels stamped with this commit's seq and
     // its APPENDS deduped by stored nonce — see
     // transformEffectsDocOperation.
-    const effectiveOperation =
-      commitClass === "derived" &&
+    const effectiveOperation = commitClass === "derived" &&
         appendStamped.id === SERVER_EXECUTION_EFFECTS_DOC_ID
-        ? transformEffectsDocOperation(engine, appendStamped, seq, {
-          branch,
-          scopeKey: scopeKeyByOpIndex.get(opIndex),
-        })
-        : appendStamped;
+      ? transformEffectsDocOperation(engine, appendStamped, seq, {
+        branch,
+        scopeKey: scopeKeyByOpIndex.get(opIndex),
+      })
+      : appendStamped;
     const revision = writeOperation(engine, {
       branch,
       seq,

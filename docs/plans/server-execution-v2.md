@@ -570,15 +570,57 @@ Success criteria:
 
 Tasks:
 
-- [ ] Session-scoped effect cells with ack/nonce retirement (spec §3.7).
-- [ ] `navigateTo` served: computes the target, writes navigation intent;
-      client enacts and acks; optimistic enactment allowed.
+- [x] Session-scoped effect cells with ack/nonce retirement (spec §3.7).
+      LANDED 2026-08-11: the effects doc is ONE well-known id
+      (`SERVER_EXECUTION_EFFECTS_DOC_ID`, wire-shape module) whose
+      per-session instances are keyed by `scope_key` (protocol.md §5,
+      T9); intents append via tail-relative mergeable appends with
+      ENGINE-side nonce dedupe against the stored instance (the
+      serving replica's scope-name-keyed local view collapses
+      instances at cardinality > 1 — the OW17 residual — so the store
+      is the idempotency authority) and engine-stamped `issuedIn` (the
+      stream-entry `seq` precedent); the ack is the session's own
+      authored `acks[nonce] = true` mark (per-nonce marks — a scalar
+      last-ack field would lose an earlier unretired ack under two
+      quick intents); the next wave retires acked entries via a
+      bookkeeping-stamped SpaceServer write per instance (addressing,
+      no acting principal — protocol.md §1; serving-loop.md §3d),
+      armed at activation and on ack admission, self-healing across
+      bookkeeping drops; `effectAcks` counts ack commits at the feed
+      drain (testing.md §4's amplification exclusion).
+- [x] `navigateTo` served: computes the target, writes navigation intent;
+      client enacts and acks; optimistic enactment allowed. LANDED
+      2026-08-11 as the split contract (builtins.md §4): the acting
+      event context travels from the handler tx to the builtin's
+      action via the deferred-start capture
+      (`builtins/navigate-context.ts`), the served half writes the
+      intent in its own event-handler-stamped tx (the event's actor as
+      `scopeKeyIdentity` — seal-time annotations address the acting
+      session's instance), sessionless chains and LT3-disconnected
+      sessions refuse loudly, and the deterministic nonce
+      (`effectIntentNonce(eventId, instance)`) is what the flag-ON
+      client's OPTIMISTIC enactment records so the authoritative
+      intent converges without re-enacting; the client half
+      (`speculation/effects-channel.ts`) subscribes per space, enacts
+      unacked intents, re-reads on resubscribe (the LT8 reload
+      journey), and acks by nonce.
 
 Success criteria:
 
 - [ ] `topics-navigation` and the navigateTo paths green in the ON arm.
-- [ ] An intent is enacted exactly once per nonce, including across a
-      client reload between intent and ack.
+      (The runner-level navigateTo paths are green —
+      `executor-effect-channel.test.ts`, both arms of the unit suite;
+      the `sx2-effect-channel` browser-facing gate is authored and the
+      ON-arm CI jobs carry it with `topics-navigation` — tick on the
+      first green ON-arm CI run.)
+- [x] An intent is enacted exactly once per nonce, including across a
+      client reload between intent and ack (2026-08-11:
+      `executor-effect-channel.test.ts` pins the optimistic/
+      authoritative convergence at one navigation, and the LT8 reload
+      journey — re-enact across the reload-wiped record, ack once,
+      retire once, nothing resurrects; the full cold-process reload
+      additionally rides protocol §5's owed client-side session
+      persistence, OW20's trigger).
 
 ## Phase 5 — Cross-space and clearance by construction
 

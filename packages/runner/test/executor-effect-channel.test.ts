@@ -398,8 +398,7 @@ describe("Phase 4 client-effect channel", () => {
     const aliceSession = clientManager.id;
     const bobSession = bob.manager.id;
     await waitUntil(
-      () =>
-        intentsOf(engine, aliceSigner.did(), aliceSession).length === 1,
+      () => intentsOf(engine, aliceSigner.did(), aliceSession).length === 1,
       "alice's multi-hop intent to land in HER instance",
     );
     expect(intentsOf(engine, bobSigner.did(), bobSession).length).toBe(0);
