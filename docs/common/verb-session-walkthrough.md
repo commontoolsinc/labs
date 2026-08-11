@@ -42,7 +42,8 @@ interface BoardInput {
  *  item's `children`. */
 interface BoardOutput {
   items: ItemOutput[];
-  /** File a new root item. Returns the item it created. */
+  /** File a new root item. Takes its title; returns the item it created as a
+   *  reference, which is the address every later command in a session uses. */
   addItem: Stream<{ title: string }, { item: ItemOutput }>;
 }
 
@@ -69,15 +70,27 @@ interface ItemOutput {
    *  descendant — which is what makes one item reachable by two paths. */
   blockedOn: ItemOutput[];
 
-  /** File a new item beneath this one. Returns the item it created. */
+  /** File a new item beneath this one. Takes the child's title; returns the
+   *  child it created as a reference, so the caller can call verbs on it
+   *  without looking it up. */
   addChild: Stream<{ title: string }, { item: ItemOutput }>;
-  /** Append a progress note. Returns it with the time the pattern stamped. */
+  /** Append a progress note. Takes the note's body; returns the note as
+   *  persisted — carrying a time the caller did not supply and could not —
+   *  and the number of notes this item holds after the append. */
   recordNote: Stream<{ body: string }, { note: Note; noteCount: number }>;
-  /** Mark this done. Returns how many descendants are still open. */
+  /** Mark this item done. Takes an optional closing note, stamped with the
+   *  same time as the finish; returns that time and how many descendants are
+   *  still open, which takes a walk of the whole subtree to answer. */
   finish: Stream<{ body?: string }, { at: number; openBelow: number }>;
-  /** Record that this item waits on another. Returns both endpoints. */
-  blockOn: Stream<{ on: ItemOutput }, { blocked: ItemOutput; on: ItemOutput }>;
-  /** Mark archived. Returns nothing — the value-less shape. */
+  /** Record that this item waits on another. Takes the blocker as a
+   *  reference, not a copy of it; returns both endpoints of the edge and how
+   *  many blockers this item now has. */
+  blockOn: Stream<
+    { on: Writable<ItemOutput> },
+    { blocked: ItemOutput; on: Writable<ItemOutput>; blockedOnCount: number }
+  >;
+  /** Mark this item archived. Takes nothing and returns nothing — the
+   *  value-less shape, for contrast with every verb above. */
   archive: Stream<void>;
 }
 ```
