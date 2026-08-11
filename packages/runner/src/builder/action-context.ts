@@ -1,10 +1,3 @@
-import { isDeno } from "@commonfabric/utils/env";
-import {
-  type AsyncLocalStore,
-  FallbackAsyncLocalStore,
-} from "@commonfabric/utils/async-local-store";
-import { getTopFrame } from "./pattern.ts";
-
 /**
  * Ambient marker for "a runner Action (lift/handler invocation) is currently
  * executing user code" — the window in which minting NEW builder artifacts is
@@ -29,6 +22,14 @@ import { getTopFrame } from "./pattern.ts";
  * mints — including under the non-Deno fallback store, whose window
  * conservatively spans the whole pending action promise.
  */
+
+import { isDeno } from "@commonfabric/utils/env";
+import {
+  type AsyncLocalStore,
+  FallbackAsyncLocalStore,
+} from "@commonfabric/utils/async-local-store";
+import { getTopFrame } from "./pattern.ts";
+
 // Deno/Node `AsyncLocalStorage` when available, the promise-aware fallback
 // otherwise. The `await import` stays here (not in the shared utils module): a
 // top-level await in widely-imported utils stalls Deno module evaluation.

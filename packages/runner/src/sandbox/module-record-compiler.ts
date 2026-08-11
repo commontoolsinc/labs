@@ -120,15 +120,6 @@ export function deriveModuleRecordFields(code: string): {
 }
 
 /**
- * Create a write-once exports target for a module body. Re-assigning,
- * redefining, or deleting a property that already holds a real (non-`undefined`)
- * value throws. A `void 0` placeholder — the TS `exports.x = void 0;` forward
- * declaration — leaves the property unlocked so the subsequent real assignment
- * is permitted, and the real assignment then locks it. This blocks export
- * corruption smuggled into the evaluation of an otherwise-accepted expression,
- * which the (deliberately AST-free) verifier cannot detect.
- */
-/**
  * Run a compiled module factory against a write-once exports object and snapshot
  * the declared exports onto `moduleExports` (the SES namespace target).
  *
@@ -225,23 +216,6 @@ function stampDefiningModule(
 export type HoistRegistrationSink = Map<string, Map<string, unknown>>;
 
 /**
- * Build the per-module `__cfReg` registrar (the module factory's 4th parameter)
- * plus a `commit` hook. The registrar enforces the integrity invariants that let
- * the verifier stay simple:
- *
- * - **Run-once**: a second `__cfReg(...)` call throws — an injected/duplicate
- *   registration aborts the import (which is terminal for the module).
- * - **Closed window**: calls after the module body returns throw, so a closure
- *   that captured `__cfReg` cannot register late (e.g. from a handler callback).
- * - **Transactional**: entries are staged locally and only flushed into `sink`
- *   by `commit()`, which the caller invokes ONLY after the factory returns
- *   normally. A throw (including the run-once trap) therefore leaves nothing
- *   behind.
- *
- * Security (trust of the registered values) is enforced separately, per value,
- * by the PatternManager — not here.
- */
-/**
  * The registrar handed to a module the verifier did NOT approve for hoist
  * registration (no valid top-level `__cfReg({ … })` call). Any invocation throws
  * — so a `__cfReg` reference the verifier's static check failed to reject still
@@ -262,6 +236,23 @@ export function createRejectingRegistrar(): {
   };
 }
 
+/**
+ * Build the per-module `__cfReg` registrar (the module factory's 4th parameter)
+ * plus a `commit` hook. The registrar enforces the integrity invariants that let
+ * the verifier stay simple:
+ *
+ * - **Run-once**: a second `__cfReg(...)` call throws — an injected/duplicate
+ *   registration aborts the import (which is terminal for the module).
+ * - **Closed window**: calls after the module body returns throw, so a closure
+ *   that captured `__cfReg` cannot register late (e.g. from a handler callback).
+ * - **Transactional**: entries are staged locally and only flushed into `sink`
+ *   by `commit()`, which the caller invokes ONLY after the factory returns
+ *   normally. A throw (including the run-once trap) therefore leaves nothing
+ *   behind.
+ *
+ * Security (trust of the registered values) is enforced separately, per value,
+ * by the PatternManager — not here.
+ */
 export function createHoistRegistrar(
   identity: string,
   sink: HoistRegistrationSink,
@@ -327,6 +318,15 @@ function hardenExportedValue<T>(value: T): T {
   }
 }
 
+/**
+ * Create a write-once exports target for a module body. Re-assigning,
+ * redefining, or deleting a property that already holds a real (non-`undefined`)
+ * value throws. A `void 0` placeholder — the TS `exports.x = void 0;` forward
+ * declaration — leaves the property unlocked so the subsequent real assignment
+ * is permitted, and the real assignment then locks it. This blocks export
+ * corruption smuggled into the evaluation of an otherwise-accepted expression,
+ * which the (deliberately AST-free) verifier cannot detect.
+ */
 export function createWriteOnceExports(): Record<string, unknown> {
   const target: Record<string, unknown> = {};
   const locked = new Set<string | symbol>();
@@ -1192,17 +1192,17 @@ function collectBindingNames(name: ts.BindingName, out: Set<string>): void {
   }
 }
 
-/**
- * Statically collect the names a module exports (named, default, enum,
- * namespace, destructured). Throws loudly on forms this adapter does not yet
- * support, rather than producing a silently-incomplete namespace.
- */
 /** Direct export names of a module plus the specifiers it `export *`s from. */
 interface ModuleExports {
   names: string[];
   starTargets: string[];
 }
 
+/**
+ * Statically collect the names a module exports (named, default, enum,
+ * namespace, destructured). Throws loudly on forms this adapter does not yet
+ * support, rather than producing a silently-incomplete namespace.
+ */
 function collectModuleExports(source: Source): ModuleExports {
   const { ts: tsc } = compilerStack();
   const sourceFile = tsc.createSourceFile(

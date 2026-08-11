@@ -1496,11 +1496,11 @@ class TransformObjectCreator
  * This assumes that there will not be a conflict in definitions between the
  * eventSchema and the stateSchema.
  */
-// TODO(@ubik2): We also need to re-write any relative refs
 export function generateHandlerSchema(
   eventSchema?: JSONSchema,
   stateSchema?: JSONSchema,
 ): JSONSchema | undefined {
+  // TODO(@ubik2): We also need to re-write any relative refs
   if (eventSchema === undefined && stateSchema === undefined) {
     return undefined;
   }
