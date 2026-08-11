@@ -212,6 +212,10 @@ One line per archived document; each document's header carries the fuller
 
 - [action-id-per-instance-decision.md](specs/action-id-per-instance-decision.md)
   — per-instance action identity.
+- [declared-verb-results-case.md](plans/declared-verb-results-case.md) — the
+  case for carrying a verb's declared result on `module.resultSchema` in the
+  interim rather than waiting for the Fabric-types stream; decided yes,
+  conditionally, August 2026.
 - [cfc-render-membership-lookup.md](specs/cfc-render-membership-lookup.md) —
   render-time space-membership lookup.
 - [cfc-s16-default-transition-design.md](specs/cfc-s16-default-transition-design.md)
