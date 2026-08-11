@@ -56,6 +56,7 @@ import {
   spaceParticipants,
   type SpaceRef,
   spaceTimeline,
+  stringifyInspectorJson,
   subgraphAround,
   summarize,
   summarizeSpace,
@@ -72,8 +73,17 @@ function humanSize(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)}G`;
 }
 
-function out(json: boolean, data: unknown, render: () => void): void {
-  if (json) console.log(JSON.stringify(data, null, 2));
+type OutputStringifier = (value: unknown) => string | undefined;
+
+const prettyJson: OutputStringifier = (value) => JSON.stringify(value, null, 2);
+
+function out(
+  json: boolean,
+  data: unknown,
+  render: () => void,
+  stringify: OutputStringifier = prettyJson,
+): void {
+  if (json) console.log(stringify(data));
   else render();
 }
 
@@ -1245,6 +1255,10 @@ export const inspect = new Command()
   .option("--session <sid:string>", "With --as: a specific session id.")
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--doc", "Show the whole document, not just value.")
+  .option(
+    "--full-depth",
+    "Do not truncate nested values while producing annotated output.",
+  )
   .action(async (options, space, entity) => {
     const path = parsePathOptions(options);
     if (options.as !== undefined && options.as.length === 0) {
@@ -1263,6 +1277,9 @@ export const inspect = new Command()
     }
     const s = await openByToken(space, options);
     try {
+      const fullDepth = options.fullDepth === true;
+      const annotationDepth = fullDepth ? Number.POSITIVE_INFINITY : 8;
+      const stringify = fullDepth ? stringifyInspectorJson : prettyJson;
       // --as composes the per-identity overlay; otherwise a single raw scope.
       if (options.as !== undefined) {
         const r = valueAsIdentity(s, {
@@ -1273,6 +1290,7 @@ export const inspect = new Command()
           atSeq: options.seq,
           path: options.doc ? undefined : path,
           doc: !!options.doc,
+          annotationDepth,
         });
         out(!!options.json, r, () => {
           if (!r.exists) {
@@ -1288,8 +1306,8 @@ export const inspect = new Command()
               `(most-specific stored; NOT a runtime read — see \`overlay\`)` +
               (r.overrides ? "  (overrides a more-general scope)" : ""),
           );
-          console.log(JSON.stringify(r.value, null, 2));
-        });
+          console.log(stringify(r.value));
+        }, stringify);
         return;
       }
       const res = getValueAt(
@@ -1304,15 +1322,17 @@ export const inspect = new Command()
       );
       const shown = options.doc ? res.document : res.value;
       const pathExists = options.doc ? res.exists : res.pathExists;
+      const annotated = annotate(shown, annotationDepth);
       out(
         !!options.json,
-        { exists: res.exists, pathExists, value: annotate(shown) },
+        { exists: res.exists, pathExists, value: annotated },
         () => {
           if (!res.exists) console.log("(absent at this seq)");
           else if (!pathExists) {
             console.log("(entity present, but nothing at that path)");
-          } else console.log(JSON.stringify(annotate(shown), null, 2));
+          } else console.log(stringify(annotated));
         },
+        stringify,
       );
     } finally {
       s.close();
