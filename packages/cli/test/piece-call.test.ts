@@ -1,11 +1,19 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
-import type { Cell, NormalizedFullLink } from "@commonfabric/runner";
+import { Identity } from "@commonfabric/identity";
 import {
+  type Cell,
+  type NormalizedFullLink,
+  Runtime,
+} from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  type CallableResolution,
   CF_RUNTIME_ERROR_LOG,
   collectInvocationResultLinks,
+  executeResolvedCallable,
   normalizeAbsentVerbPayload,
   runtimeErrorLog,
   schemaIsObjectShaped,
@@ -26,6 +34,7 @@ import {
   invocationJson,
   invocationPhaseReporter,
   isPieceGetDataError,
+  parsePieceCallSelection,
   pieceCallInvocation,
   pieceCallPhaseObserver,
   pieceCallRawArgs,
@@ -33,13 +42,23 @@ import {
   pieceLinkDataErrorReport,
   renderPieceCallOutcome,
   reportVerbInputErrorOrRethrow,
-  resolveInvocationId,
+  resolveInvocationIdentity,
   resolveWaitControl,
   verbInputErrorReport,
   WaitBoundExpired,
 } from "../commands/piece.ts";
 import { LinkValidationError } from "../lib/piece.ts";
-import { CellSelectionError } from "../lib/cell-selection.ts";
+import {
+  type CellSelection,
+  CellSelectionError,
+  type deriveSelectedValue,
+  parseCellSelectionOptions,
+} from "../lib/cell-selection.ts";
+import { cf, stripAnsi } from "./utils.ts";
+
+// The session an invocation id is chosen within, for the calls whose subject
+// is something else: a call names the pair or it names no invocation.
+const callerSession = "ses:piece-call-test";
 
 describe("executePieceCallable", () => {
   it("reports not-found when the piece cell has no schema-cast surface", async () => {
@@ -249,7 +268,7 @@ describe("executePieceCallable", () => {
           loadPiece: () => Promise.resolve(harness.piece),
           isStdinTerminal: () => false,
           readTextInput: () => Promise.resolve('{"mesage":"milk"}'),
-          invocationId: "inv-typo-retry",
+          invocation: { id: "inv-typo-retry", session: callerSession },
         },
       ),
     ).rejects.toThrow(/Invalid input for "recordMessage"/);
@@ -301,7 +320,7 @@ describe("executePieceCallable", () => {
           loadPieces: () => Promise.resolve(harness.pieces),
           loadPiece: () => Promise.resolve(harness.piece),
           isStdinTerminal: () => true,
-          invocationId: "inv-absent-retry",
+          invocation: { id: "inv-absent-retry", session: callerSession },
         },
       ),
     ).rejects.toThrow(
@@ -348,7 +367,7 @@ describe("executePieceCallable", () => {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => true,
-        invocationId: "inv-defaulted",
+        invocation: { id: "inv-defaulted", session: callerSession },
       },
     );
 
@@ -932,12 +951,14 @@ describe("executePieceCallable", () => {
       {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-123",
+        invocation: { id: "inv-123", session: callerSession },
         onPhase: (phase) => phases.push(phase),
       },
     );
 
-    expect(harness.tracker.sendOptions).toEqual([{ eventId: "inv-123" }]);
+    expect(harness.tracker.sendOptions).toEqual([
+      { eventId: "inv-123", session: callerSession },
+    ]);
     expect(result.invocation).toEqual({
       id: "inv-123",
       status: "settled",
@@ -949,6 +970,86 @@ describe("executePieceCallable", () => {
     // off this handling's commit — never from draining the whole graph.
     expect(harness.tracker.idleCalls).toBe(0);
     expect(harness.tracker.syncedCalls).toBe(0);
+  });
+
+  it("carries the caller's session beside the invocation id to send", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptValue: { commentId: "c-1" },
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocation: { id: "inv-123", session: "ses-abc" },
+      },
+    );
+
+    // An invocation id is the caller's own word, so the session that chose it
+    // travels with it: they reach the send together or the id says nothing
+    // about whose invocation it is.
+    expect(harness.tracker.sendOptions).toEqual([
+      { eventId: "inv-123", session: "ses-abc" },
+    ]);
+    // The outcome a caller reads is its own invocation's, and reports the id
+    // the caller named rather than anything derived from the pair.
+    expect(result.invocation).toEqual({
+      id: "inv-123",
+      status: "settled",
+      result: { commentId: "c-1" },
+    });
+  });
+
+  it("sends no options at all for a call that names no invocation", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptValue: { commentId: "c-1" },
+    });
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+      },
+    );
+
+    // Absent, not substituted: the runtime mints the delivery id for such a
+    // call, and nothing downstream is handed a stand-in id or session it
+    // would have to tell apart from a caller's own.
+    expect(harness.tracker.sendOptions).toEqual([undefined]);
   });
 
   it("reclassifies a receipt-exists collision as the original settled outcome", async () => {
@@ -978,7 +1079,7 @@ describe("executePieceCallable", () => {
       {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-dup",
+        invocation: { id: "inv-dup", session: callerSession },
       },
     );
 
@@ -1011,7 +1112,7 @@ describe("executePieceCallable", () => {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
         isStdinTerminal: () => true,
-        invocationId: "inv-empty",
+        invocation: { id: "inv-empty", session: callerSession },
       },
     );
 
@@ -1082,7 +1183,9 @@ function createPieceCallableHarness(options: {
       path: (string | number)[] | undefined;
       value: unknown;
     }>,
-    sendOptions: [] as Array<{ eventId?: string } | undefined>,
+    sendOptions: [] as Array<
+      { eventId?: string; session?: string } | undefined
+    >,
     receiptLinkRequested: undefined as { id?: string } | undefined,
     idleCalls: 0,
     syncedCalls: 0,
@@ -1128,7 +1231,7 @@ function createPieceCallableHarness(options: {
                 handlingReceiptLink?: NormalizedFullLink;
               },
             ) => void,
-            sendOptions?: { eventId?: string },
+            sendOptions?: { eventId?: string; session?: string },
           ) => {
             tracker.handlerWrites.push({
               cellProp: "result",
@@ -1524,21 +1627,65 @@ describe("piece call stdin payloads", () => {
     });
   });
 
-  it("mints an invocation id when none is given and rejects a blank one", () => {
-    expect(resolveInvocationId(undefined, () => "minted-1")).toBe("minted-1");
-    expect(resolveInvocationId("caller-supplied")).toBe("caller-supplied");
-    // A blank id would claim caller-supplied idempotency while carrying
-    // nothing that distinguishes deliveries — the retry it promises would
-    // not be safe.
-    expect(() => resolveInvocationId("")).toThrow(/non-blank id/);
-    expect(() => resolveInvocationId("   ")).toThrow(/non-blank id/);
+  it("carries an id named within a named session", () => {
+    expect(
+      resolveInvocationIdentity("add-comment-1", "ses-7"),
+    ).toEqual({ id: "add-comment-1", session: "ses-7" });
   });
 
-  it("announces the invocation id once, at dispatch", () => {
+  it("mints an id for a caller that names only a session", () => {
+    expect(
+      resolveInvocationIdentity(undefined, "ses-7", () => "minted-1"),
+    ).toEqual({ id: "minted-1", session: "ses-7" });
+  });
+
+  it("mints both for a caller that names neither", () => {
+    // A minted id is random, so it addresses an outcome nothing else will
+    // ask for, and minting the session it belongs to alongside it costs such
+    // a call nothing: every call then derives its address the one way.
+    expect(
+      resolveInvocationIdentity(
+        undefined,
+        undefined,
+        () => "minted-1",
+        () => "minted-session-1",
+      ),
+    ).toEqual({ id: "minted-1", session: "minted-session-1" });
+  });
+
+  it("refuses an id named without a session, naming the remedy", () => {
+    // Naming an id asks for an outcome to be replayable, and a session
+    // minted per request would move that outcome each time — so the request
+    // cannot be honored as it was made, and the refusal says what to do.
+    expect(() => resolveInvocationIdentity("add-comment-1", undefined))
+      .toThrow(ValidationError);
+    expect(() => resolveInvocationIdentity("add-comment-1", undefined))
+      .toThrow(/`cf invocation-session new` and set `CF_INVOCATION_SESSION`/);
+  });
+
+  it("rejects a blank id or a blank session", () => {
+    // Either would read as "the caller named one" while carrying nothing
+    // that tells two deliveries apart, so the retry an id promises to make
+    // safe would not be.
+    expect(() => resolveInvocationIdentity("", "ses-7")).toThrow(
+      /--invocation requires a non-blank id/,
+    );
+    expect(() => resolveInvocationIdentity("   ", "ses-7")).toThrow(
+      /--invocation requires a non-blank id/,
+    );
+    expect(() => resolveInvocationIdentity("inv-1", "")).toThrow(
+      /--invocation-session requires a non-blank id/,
+    );
+    expect(() => resolveInvocationIdentity("inv-1", "   ")).toThrow(
+      /--invocation-session requires a non-blank id/,
+    );
+  });
+
+  it("announces the invocation id and its session once, at dispatch", () => {
     const announced: string[] = [];
     const seen: string[] = [];
     const report = invocationPhaseReporter(
-      "inv-9",
+      { id: "inv-9", session: "ses-9" },
       (p) => seen.push(p),
       (m) => announced.push(m),
     );
@@ -1547,13 +1694,15 @@ describe("piece call stdin payloads", () => {
     report("initial_sync");
     expect(announced).toEqual([]);
     report("dispatched");
-    expect(announced).toEqual(["invocation: inv-9"]);
+    // Both halves, because an id deduplicates only under its session: a caller
+    // holding one without the other holds nothing it can retry with.
+    expect(announced).toEqual(["invocation: inv-9", "session: ses-9"]);
     // Later phases, and a second dispatch, must not re-announce — a caller
     // scraping stderr should not have to pick among several ids.
     report("committed");
     report("dispatched");
     report("readback");
-    expect(announced).toEqual(["invocation: inv-9"]);
+    expect(announced).toEqual(["invocation: inv-9", "session: ses-9"]);
     expect(seen).toEqual([
       "initial_sync",
       "dispatched",
@@ -1782,17 +1931,17 @@ describe("piece call stdin payloads", () => {
 
   it("announces per-phase lines only under the test hook", () => {
     // Disabled (the default): no phase lines — normal output stays exactly
-    // the single dispatch announcement.
+    // the dispatch announcement and its session.
     const silent: string[] = [];
     const off = invocationPhaseReporter(
-      "inv-10",
+      { id: "inv-10", session: "ses-10" },
       () => {},
       (m) => silent.push(m),
     );
     off("initial_sync");
     off("dispatched");
     off("committed");
-    expect(silent).toEqual(["invocation: inv-10"]);
+    expect(silent).toEqual(["invocation: inv-10", "session: ses-10"]);
 
     // Enabled: every advance also carries `invocation: <id> phase: <phase>`,
     // the shape failure exits already print. The `committed` line is the one
@@ -1801,7 +1950,7 @@ describe("piece call stdin payloads", () => {
     const announced: string[] = [];
     const seen: string[] = [];
     const on = invocationPhaseReporter(
-      "inv-11",
+      { id: "inv-11", session: "ses-11" },
       (p) => seen.push(p),
       (m) => announced.push(m),
       true,
@@ -1814,6 +1963,7 @@ describe("piece call stdin payloads", () => {
     expect(announced).toEqual([
       "invocation: inv-11 phase: initial_sync",
       "invocation: inv-11",
+      "session: ses-11",
       "invocation: inv-11 phase: dispatched",
       "invocation: inv-11 phase: committed",
       "invocation: inv-11 phase: readback",
@@ -2117,7 +2267,7 @@ describe("piece call wait control", () => {
       {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-no-readback",
+        invocation: { id: "inv-no-readback", session: callerSession },
         skipReadback: true,
         onPhase: (phase) => phases.push(phase),
       },
@@ -2132,7 +2282,7 @@ describe("piece call wait control", () => {
     });
     expect(phases).toEqual(["dispatched", "committed"]);
     expect(harness.tracker.sendOptions).toEqual([
-      { eventId: "inv-no-readback" },
+      { eventId: "inv-no-readback", session: callerSession },
     ]);
     // The receipt was never opened — the readback (sync + read) is the whole
     // saving — and no quiescence drain crept in either.
@@ -2163,7 +2313,7 @@ describe("piece call wait control", () => {
       executePieceCallable(config, "addComment", ["--message", "milk"], {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-held-commit",
+        invocation: { id: "inv-held-commit", session: callerSession },
         skipReadback: true,
         onPhase: (phase) => phases.push(phase),
       }),
@@ -2199,7 +2349,7 @@ describe("piece call wait control", () => {
       {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-dup-no-readback",
+        invocation: { id: "inv-dup-no-readback", session: callerSession },
         skipReadback: true,
       },
     );
@@ -2235,7 +2385,7 @@ describe("piece call wait control", () => {
       executePieceCallable(config, "recordMessage", ["--message", "milk"], {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-failed-commit",
+        invocation: { id: "inv-failed-commit", session: callerSession },
         skipReadback: true,
       }),
     ).rejects.toThrow(/Handler "recordMessage" failed: Bad message payload/);
@@ -2283,7 +2433,7 @@ describe("piece call wait control", () => {
         {
           loadPieces: () => Promise.resolve(harness.pieces),
           loadPiece: () => Promise.resolve(harness.piece),
-          invocationId: "inv-no-wait-typo",
+          invocation: { id: "inv-no-wait-typo", session: callerSession },
           skipReadback: true,
         },
       ),
@@ -2324,7 +2474,7 @@ describe("piece call wait control", () => {
       executePieceCallable(config, "search", ["--query", "tea"], {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-tool-no-wait",
+        invocation: { id: "inv-tool-no-wait", session: callerSession },
         skipReadback: true,
       }),
     ).rejects.toThrow(/--no-wait is not available for tool "search"/);
@@ -2830,7 +2980,7 @@ describe("piece call --show-links", () => {
       {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-links",
+        invocation: { id: "inv-links", session: callerSession },
         showLinks: true,
       },
     );
@@ -2872,7 +3022,7 @@ describe("piece call --show-links", () => {
       {
         loadPieces: () => Promise.resolve(harness.pieces),
         loadPiece: () => Promise.resolve(harness.piece),
-        invocationId: "inv-no-links",
+        invocation: { id: "inv-no-links", session: callerSession },
       },
     );
 
@@ -2899,7 +3049,7 @@ describe("piece call --show-links", () => {
       loadPieces: () => Promise.resolve(harness.pieces),
       loadPiece: () => Promise.resolve(harness.piece),
       isStdinTerminal: () => true,
-      invocationId: "inv-void-links",
+      invocation: { id: "inv-void-links", session: callerSession },
       showLinks: true,
     });
 
@@ -2971,6 +3121,509 @@ describe("piece call --show-links", () => {
       mode: "settle",
       boundSeconds: 5,
     });
+  });
+});
+
+/** What the shared selection step was handed, and the answer it gives back.
+ * Standing in for `deriveSelectedValue` is what makes "which cell did the
+ * call point the step at" observable — the answer itself is the step's own
+ * business, and `piece-get-transform.test.ts` is where it is pinned. */
+function recordingSelector(answer: unknown) {
+  const calls: Array<{
+    space: unknown;
+    cell: unknown;
+    selection: CellSelection;
+  }> = [];
+  const derive = ((
+    _runtime: unknown,
+    space: unknown,
+    cell: unknown,
+    selection: CellSelection,
+  ) => {
+    calls.push({ space, cell, selection });
+    return Promise.resolve(answer);
+  }) as unknown as typeof deriveSelectedValue;
+  return { calls, derive };
+}
+
+describe("piece call selection", () => {
+  const config = {
+    apiUrl: "http://localhost:8000",
+    identity: "/tmp/test-identity.pem",
+    piece: "fid1:piece-123",
+    space: "home",
+  };
+  const addTopic = {
+    callableKind: "handler" as const,
+    cellKey: "addTopic",
+    inputSchema: {
+      type: "object",
+      properties: { title: { type: "string" } },
+      required: ["title"],
+    } as JSONSchema,
+  };
+  const topicResult = {
+    topic: { title: "Ship it", body: "the initial document" },
+  };
+
+  it("points the shared selection step at the receipt the result came from", async () => {
+    // The whole of C2: a call reaches the same step `cf piece get` reads
+    // through, pointed at the cell the value was read from — so the shaped
+    // answer carries the source's own links rather than a copy of a copy.
+    const receiptCell = {
+      get: () => topicResult,
+      pull: () => Promise.resolve(topicResult),
+      key: () => receiptCell,
+    } as unknown as Cell<any>;
+    const harness = createPieceCallableHarness({ ...addTopic, receiptCell });
+    const selector = recordingSelector({ topic: { title: "Ship it" } });
+    const selection = await parseCellSelectionOptions({
+      select: "topic.title",
+    });
+
+    const result = await executePieceCallable(
+      config,
+      "addTopic",
+      ["--title", "Ship it"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocation: { id: "inv-select", session: callerSession },
+        selection,
+        deriveSelectedValue: selector.derive,
+      },
+    );
+
+    expect(result.invocation).toEqual({
+      id: "inv-select",
+      status: "settled",
+      result: { topic: { title: "Ship it" } },
+    });
+    expect(selector.calls).toHaveLength(1);
+    expect(selector.calls[0].cell).toBe(receiptCell);
+    expect(selector.calls[0].selection).toBe(selection);
+    expect(selector.calls[0].space).toBe("home");
+  });
+
+  it("leaves the Invocation JSON unshaped when no selection was asked for", async () => {
+    const harness = createPieceCallableHarness({
+      ...addTopic,
+      receiptValue: topicResult,
+    });
+    const selector = recordingSelector("never");
+
+    const result = await executePieceCallable(
+      config,
+      "addTopic",
+      ["--title", "Ship it"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocation: { id: "inv-plain", session: callerSession },
+        deriveSelectedValue: selector.derive,
+      },
+    );
+
+    expect(result.invocation).toEqual({
+      id: "inv-plain",
+      status: "settled",
+      result: topicResult,
+    });
+    expect(selector.calls).toEqual([]);
+  });
+
+  it("keeps a value-less verb reporting no result at all", async () => {
+    // The empty witness means "this verb returns nothing". A selection is
+    // about a value, and there is none, so the step never runs — reporting
+    // `{}` here would erase the distinction the empty receipt draws.
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: { type: "object", properties: {} },
+      receiptValue: {},
+    });
+    const selector = recordingSelector({ never: true });
+
+    const result = await executePieceCallable(config, "refresh", [], {
+      loadPieces: () => Promise.resolve(harness.pieces),
+      loadPiece: () => Promise.resolve(harness.piece),
+      isStdinTerminal: () => true,
+      invocation: { id: "inv-void-select", session: callerSession },
+      selection: await parseCellSelectionOptions({ select: "anything" }),
+      deriveSelectedValue: selector.derive,
+    });
+
+    expect(result.invocation).toEqual({
+      id: "inv-void-select",
+      status: "settled",
+    });
+    expect(invocationJson(result.invocation!)).not.toHaveProperty("result");
+    expect(selector.calls).toEqual([]);
+  });
+
+  it("refuses a selection that materializes nothing over a result that exists", async () => {
+    // Reporting no result here would say "the verb returned nothing", which
+    // is a different fact from "your projection kept nothing".
+    const harness = createPieceCallableHarness({
+      ...addTopic,
+      receiptValue: topicResult,
+    });
+    const selector = recordingSelector(undefined);
+
+    await expect(
+      executePieceCallable(config, "addTopic", ["--title", "Ship it"], {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocation: { id: "inv-empty-select", session: callerSession },
+        selection: await parseCellSelectionOptions({
+          schema: '{"type":"string"}',
+        }),
+        deriveSelectedValue: selector.derive,
+      }),
+    ).rejects.toThrow(CellSelectionError);
+    expect(selector.calls).toHaveLength(1);
+  });
+
+  it("shapes a tool's stdout through the same step", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "tool",
+      cellKey: "search",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        },
+        resultSchema: { type: "object" },
+      },
+      toolResult: { hits: [{ id: 1, title: "Tea" }], cursor: "abc" },
+    });
+    const selector = recordingSelector({ hits: [{ title: "Tea" }] });
+
+    const result = await executePieceCallable(
+      config,
+      "search",
+      ["--query", "tea"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        uuid: () => "tool-result-id",
+        selection: await parseCellSelectionOptions({ select: "hits.title" }),
+        deriveSelectedValue: selector.derive,
+      },
+    );
+
+    // One grammar covers both callable kinds; the tool's own address surface
+    // is untouched by the shaping.
+    expect(JSON.parse(result.outputText!)).toEqual({
+      hits: [{ title: "Tea" }],
+    });
+    expect(result.resultRef).toEqual({
+      id: "of:tool-result-cell",
+      space: "did:key:test-home",
+      scope: "space",
+    });
+    expect(selector.calls).toHaveLength(1);
+  });
+
+  it("collects --show-links against the shaped result, not the whole receipt", async () => {
+    // Links annotate the value the caller is holding. With a projection that
+    // drops `comment`, an entry for `/comment` would name provenance for
+    // something the caller was not given.
+    const receiptDoc = { id: "of:receipt-1", space: "did:key:test-home" };
+    const stored = { comment: { body: "hi" }, count: 1 };
+    const harness = createPieceCallableHarness({
+      ...addTopic,
+      receiptCell: linkedReceiptCell(receiptDoc, stored, {
+        children: {
+          comment: { doc: { id: "of:comment-1", space: "did:key:test-home" } },
+        },
+      }),
+    });
+    const selector = recordingSelector({ count: 1 });
+
+    const result = await executePieceCallable(
+      config,
+      "addTopic",
+      ["--title", "Ship it"],
+      {
+        loadPieces: () => Promise.resolve(harness.pieces),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocation: { id: "inv-select-links", session: callerSession },
+        showLinks: true,
+        selection: await parseCellSelectionOptions({ select: "count" }),
+        deriveSelectedValue: selector.derive,
+      },
+    );
+
+    expect(result.invocation).toEqual({
+      id: "inv-select-links",
+      status: "settled",
+      result: { count: 1 },
+      links: {
+        "/": { space: "did:key:test-home", id: "of:receipt-1", scope: "space" },
+      },
+    });
+  });
+
+  describe("flag combinations", () => {
+    it("refuses each selection flag with --no-wait, naming the ones passed", () => {
+      expect(() => resolveWaitControl({ wait: false, filter: ".a" })).toThrow(
+        /^--filter needs the receipt readback that --no-wait skips/,
+      );
+      expect(() => resolveWaitControl({ wait: false, select: "a" })).toThrow(
+        /^--select needs the receipt readback/,
+      );
+      expect(() => resolveWaitControl({ wait: false, schema: "{}" })).toThrow(
+        /^--schema needs the receipt readback/,
+      );
+      expect(() =>
+        resolveWaitControl({
+          wait: false,
+          showLinks: true,
+          filter: ".a",
+          select: "a",
+        })
+      ).toThrow(
+        /^--show-links, --filter and --select need the receipt readback/,
+      );
+    });
+
+    it("allows every selection flag with the default and bounded waits", () => {
+      expect(resolveWaitControl({ filter: ".a", select: "a" })).toEqual({
+        mode: "settle",
+      });
+      expect(resolveWaitControl({ wait: 5, schema: "{}" })).toEqual({
+        mode: "settle",
+        boundSeconds: 5,
+      });
+    });
+
+    it("refuses --filter with --show-links: a predicate moves the positions a link names", async () => {
+      await expect(
+        parsePieceCallSelection({
+          filter: '.status == "open"',
+          showLinks: true,
+        }),
+      ).rejects.toThrow(ValidationError);
+      await expect(
+        parsePieceCallSelection({
+          filter: '.status == "open"',
+          showLinks: true,
+        }),
+      ).rejects.toThrow(/--show-links cannot be combined with --filter/);
+      // A projection keeps every surviving path where it was, so it composes.
+      expect(
+        await parsePieceCallSelection({ select: "title", showLinks: true }),
+      ).toBeDefined();
+    });
+
+    it("parses through the same grammar `cf piece get` reads", async () => {
+      expect(await parsePieceCallSelection({})).toBeUndefined();
+      const selection = await parsePieceCallSelection({
+        filter: ".done == false",
+        select: "id,title",
+      });
+      expect(selection?.filter?.source).toBe(".done == false");
+      expect(selection?.projection?.flag).toBe("--select");
+      // The parser's own refusals arrive unchanged, so a caller reads one
+      // set of messages whichever command produced them.
+      await expect(parsePieceCallSelection({ filter: ".a ==" })).rejects
+        .toThrow(CellSelectionError);
+    });
+
+    it("reports a malformed selection without naming an invocation to retry", async () => {
+      const { code, stderr } = await cf(
+        "piece call " +
+          "--identity ./definitely-missing-piece-call-review.key " +
+          "--api-url https://cf.dev --space common-knowledge " +
+          "--piece fid1:piece-123 --select a..b addTopic",
+      );
+      const errors = stripAnsi(stderr.join("\n"));
+      expect(code).toBe(1);
+      expect(errors).toContain('Invalid --select field path "a..b"');
+      // The selection is read before a callable is resolved and before
+      // anything is sent, so no id has been spent and no phase has been
+      // reached. An `invocation: <id> phase: <phase>` line here would send
+      // the caller to recover a call that was never made.
+      expect(errors).not.toContain("invocation:");
+      expect(errors).not.toContain("phase:");
+    });
+  });
+});
+
+const selectionSigner = await Identity.fromPassphrase(
+  "cf-piece-call-selection",
+);
+
+describe("piece call selection over a live runtime", () => {
+  const signer = selectionSigner;
+  const space = signer.did();
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    const runtimeErrors: Array<{ message: string }> = [];
+    runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "observe",
+      cfcFlowLabels: "persist",
+      errorHandlers: [
+        (error) => runtimeErrors.push({ message: error.message }),
+      ],
+    });
+    (runtime as unknown as Record<symbol, unknown>)[CF_RUNTIME_ERROR_LOG] =
+      runtimeErrors;
+  });
+
+  afterEach(async () => {
+    await runtime.dispose();
+    await storageManager.close();
+  });
+
+  /**
+   * A verb whose handling commits a receipt holding `value`, dispatched
+   * against the real runtime the selection then runs in. The receipt is
+   * written with NO declared schema, which is what a handling's receipt
+   * carries today — so this also pins that a schema-less source still
+   * projects.
+   */
+  async function settleWith(value: unknown): Promise<CallableResolution> {
+    const tx = runtime.edit();
+    const receipt = runtime.getCell(space, "handling-receipt", undefined, tx);
+    receipt.set(value);
+    expect((await tx.commit()).ok).toBeDefined();
+    const handlingReceiptLink = runtime
+      .getCell(space, "handling-receipt")
+      .getAsNormalizedFullLink();
+    return {
+      callableCell: {
+        schema: {
+          type: "object",
+          properties: { title: { type: "string" } },
+          required: ["title"],
+        },
+        send: (
+          _payload: unknown,
+          onCommit?: (tx: unknown) => void,
+        ) =>
+          onCommit?.({
+            status: () => ({ status: "done" }),
+            handlingReceiptLink,
+          }),
+      } as unknown as Cell<any>,
+      callableKind: "handler",
+      cellKey: "addTopic",
+      pieces: { runtime, getSpace: () => space } as never,
+      space,
+    };
+  }
+
+  it("projects a settled result through the real selection step", async () => {
+    const resolved = await settleWith({
+      topics: [
+        { id: 1, title: "First", status: "open" },
+        { id: 2, title: "Second", status: "closed" },
+      ],
+    });
+
+    const executed = await executeResolvedCallable(
+      resolved,
+      { title: "Ship it" },
+      {
+        invocation: { id: "inv-live", session: callerSession },
+        selection: await parseCellSelectionOptions({ select: "topics.title" }),
+      },
+    );
+
+    expect(executed.invocation).toEqual({
+      id: "inv-live",
+      status: "settled",
+      result: { topics: [{ title: "First" }, { title: "Second" }] },
+    });
+  });
+
+  it("filters a settled array result", async () => {
+    const resolved = await settleWith([
+      { id: 1, title: "First", status: "open" },
+      { id: 2, title: "Second", status: "closed" },
+      { id: 3, title: "Third", status: "open" },
+    ]);
+
+    const executed = await executeResolvedCallable(
+      resolved,
+      { title: "Ship it" },
+      {
+        invocation: { id: "inv-live-filter", session: callerSession },
+        selection: await parseCellSelectionOptions({
+          filter: '.status == "open"',
+          select: "id,title",
+        }),
+      },
+    );
+
+    expect(executed.invocation?.result).toEqual([
+      { id: 1, title: "First" },
+      { id: 3, title: "Third" },
+    ]);
+  });
+
+  it("returns the address of what a verb returned, in place of its contents", async () => {
+    // The `$link` marker reaches a call through the same step, which is what
+    // makes `cf piece call --schema '{"properties":{"topic":{"$link":true}}}'`
+    // — the command's own example — an address a later call can use.
+    const tx = runtime.edit();
+    const topic = runtime.getCell(space, "created-topic", undefined, tx);
+    topic.set({ title: "Ship it", body: "the initial document" });
+    expect((await tx.commit()).ok).toBeDefined();
+    const resolved = await settleWith({
+      topic: runtime.getCell(space, "created-topic"),
+    });
+
+    const executed = await executeResolvedCallable(
+      resolved,
+      { title: "Ship it" },
+      {
+        invocation: { id: "inv-live-link", session: callerSession },
+        selection: await parseCellSelectionOptions({
+          schema: '{"properties":{"topic":{"$link":true}}}',
+        }),
+      },
+    );
+
+    expect(executed.invocation?.result).toEqual({
+      topic: {
+        $link: {
+          id: runtime.getCell(space, "created-topic")
+            .getAsNormalizedFullLink().id,
+          space,
+          scope: "space",
+          path: [],
+        },
+      },
+    });
+  });
+
+  it("refuses a selection that materializes nothing over a real result", async () => {
+    const resolved = await settleWith({ topic: { title: "Ship it" } });
+
+    await expect(
+      executeResolvedCallable(resolved, { title: "Ship it" }, {
+        invocation: { id: "inv-live-nothing", session: callerSession },
+        selection: await parseCellSelectionOptions({
+          schema: '{"type":"string"}',
+        }),
+      }),
+    ).rejects.toThrow(
+      /Cannot shape the result of "addTopic".*did not materialize/s,
+    );
   });
 });
 
@@ -3571,6 +4224,32 @@ describe("renderPieceCallOutcome", () => {
     assertEquals(finishes, [undefined]);
     assertEquals(JSON.parse(rendered[0]).invocation, "inv-1");
     assertStringIncludes(hinted[0], "NEXT STEPS");
+  });
+
+  it("names the session as well as the id in the detached next step", () => {
+    const { observer } = observerRecorder();
+    const { deps, hinted } = sinkRecorder();
+    renderPieceCallOutcome(
+      observer,
+      {
+        ...base,
+        invocation: { id: "inv-1", status: "committed" },
+      } as unknown as ExecutedPieceCallable,
+      "addTopic",
+      "fid1:piece",
+      deps,
+      { detached: true, invocation: { id: "inv-1", session: "ses-7" } },
+    );
+    // The hint is a command the caller runs to collect the outcome it chose
+    // not to wait for, and an id reaches that outcome only within the
+    // session it was chosen in — so the hint has to carry both. The session
+    // travels in the environment because it is what makes that outcome's
+    // address unguessable, and an argument is readable in a process listing.
+    assertStringIncludes(
+      hinted[0],
+      "CF_INVOCATION_SESSION=ses-7 cf piece call",
+    );
+    assertStringIncludes(hinted[0], "--invocation inv-1");
   });
 
   it("confirmations route to stderr under JSON input, stdout otherwise", () => {
