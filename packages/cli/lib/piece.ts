@@ -4,6 +4,7 @@ import { caseFold } from "unicode-case-folding";
 import { loadIdentity } from "./identity.ts";
 import {
   Cell,
+  deepEqual,
   entityIdFrom,
   experimentalOptionsFromEnv,
   formatFabricRef,
@@ -1659,7 +1660,9 @@ export interface PieceCallableListing {
   /** The verb's input schema — the same schema `call <verb> --help --json`
    * serves. `true` means unconstrained. */
   inputSchema: JSONSchema | true;
-  /** Tools only, until handlers gain declared results (verb contract WS-C). */
+  /** What the verb hands back: a tool's pattern result schema, a handler's
+   * declared result. Absent when the verb declares none — the value-less
+   * shape, which is the common one. */
   outputSchema?: JSONSchema;
   /** Listing mark: a UI affordance outside the headless contract (inferred
    * from session-scoped handler bindings at compile time). Hidden from the
@@ -1701,6 +1704,63 @@ function listingMarks(
   };
 }
 
+/** Whether two links written in a compiled pattern's own terms address the
+ * same cell. An alias's identity is its cause, path and scope; the schema it
+ * carries is fidelity for whoever reads through it, and one cell reached from
+ * two positions can carry a different one at each. Anything that is not a pair
+ * of aliases falls back to whole-link equality, which can only miss — and a
+ * miss costs a row its `outputSchema`, never gives it the wrong one. */
+function samePatternLink(left: unknown, right: unknown): boolean {
+  if (!isRecord(left) || !isRecord(right)) return false;
+  const leftAlias = left.$alias;
+  const rightAlias = right.$alias;
+  if (!isRecord(leftAlias) || !isRecord(rightAlias)) {
+    return deepEqual(left, right);
+  }
+  return deepEqual(leftAlias.partialCause, rightAlias.partialCause) &&
+    deepEqual(leftAlias.path ?? [], rightAlias.path ?? []) &&
+    leftAlias.scope === rightAlias.scope;
+}
+
+/** A compiled pattern's declared verb results, keyed by the result property
+ * each verb is exposed under.
+ *
+ * A handler node's `$event` input and the result property exposing that
+ * handler's stream are one cell written twice in the pattern's own terms, so
+ * the property matching a node's `$event` names the verb that node implements
+ * — a structural comparison inside one compiled object, with no live cell to
+ * resolve. The declared result rides on that node's module, which is where
+ * `Stream<E, R>`'s `R` is lowered (verb contract WS-C). A stream two handler
+ * nodes share names no single result and so contributes none.
+ *
+ * A compiled pattern is CALLABLE, so it is not a record and must not be tested
+ * as one; only its `result` and `nodes` are read here. */
+function declaredVerbResults(
+  pattern: { result?: unknown; nodes?: unknown } | null | undefined,
+): Map<string, JSONSchema> {
+  const declared = new Map<string, JSONSchema>();
+  const result = pattern?.result;
+  if (!isRecord(result)) return declared;
+  const nodes = Array.isArray(pattern?.nodes) ? pattern.nodes : [];
+  for (const [name, link] of Object.entries(result)) {
+    let resultSchema: JSONSchema | undefined;
+    let matched = 0;
+    for (const node of nodes) {
+      if (!isRecord(node) || !isRecord(node.inputs)) continue;
+      if (!samePatternLink(link, node.inputs.$event)) continue;
+      matched++;
+      const module = node.module;
+      if (isRecord(module) && module.resultSchema !== undefined) {
+        resultSchema = module.resultSchema as JSONSchema;
+      }
+    }
+    if (matched === 1 && resultSchema !== undefined) {
+      declared.set(name, resultSchema);
+    }
+  }
+  return declared;
+}
+
 /**
  * Enumerate every callable a piece exposes (verb contract: Verb discovery,
  * docs/plans/pattern-verb-contract.md). Everything in the durable schema is
@@ -1722,6 +1782,20 @@ export async function listPieceCallables(
       pattern = (await piece.getPatternRef()) ?? null;
     } catch {
       pattern = null; // Identity is advisory; the listing itself still holds.
+    }
+  }
+
+  // A tool's result schema rides its callable cell, but a handler's declared
+  // result lives on its node in the compiled graph — so the listing resolves
+  // the pattern once and matches nodes to result properties. Resolution is
+  // cached by identity, so this costs one load per listing, not one per row.
+  let declaredResults = new Map<string, JSONSchema>();
+  if (typeof piece.getPattern === "function") {
+    try {
+      declaredResults = declaredVerbResults(await piece.getPattern());
+    } catch {
+      // Advisory in the same way the identity above is: a piece with no
+      // reachable pattern still lists every verb it exposes.
     }
   }
 
@@ -1753,14 +1827,17 @@ export async function listPieceCallables(
       rejected.delete(name);
       const spec = callableCommandSpec(callableCell, kind);
       const marks = listingMarks(schema, name);
+      // The declared results are keyed by the PATTERN's result properties, so
+      // only a result-cell row can claim one: a same-named verb reached on the
+      // input cell is a different stream that merely shares its name.
+      const outputSchema = spec.outputSchemaSummary ??
+        (cellProp === "result" ? declaredResults.get(name) : undefined);
       listings.set(name, {
         name,
         kind,
         on: cellProp,
         inputSchema: spec.inputSchema,
-        ...(spec.outputSchemaSummary !== undefined
-          ? { outputSchema: spec.outputSchemaSummary }
-          : {}),
+        ...(outputSchema !== undefined ? { outputSchema } : {}),
         ...marks,
       });
     }
@@ -1785,11 +1862,13 @@ export async function listPieceCallables(
       if (!probeForcedStreamCell(pieceCell, name)) continue;
       const callableCell = resultRoot.key(name).asSchemaFromLinks();
       const spec = callableCommandSpec(callableCell, "handler");
+      const outputSchema = declaredResults.get(name);
       listings.set(name, {
         name,
         kind: "handler",
         on: "result",
         inputSchema: spec.inputSchema,
+        ...(outputSchema !== undefined ? { outputSchema } : {}),
       });
     }
   }

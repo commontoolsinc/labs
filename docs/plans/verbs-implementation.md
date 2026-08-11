@@ -33,14 +33,34 @@ belongs in one document even when the reasoning belongs in two.
 
 ## State
 
-Four pull requests remain open against this work. They are listed here because
+Where every item stands. The sections below carry the detail and are what to
+read before picking one up; this is the roll-up, so a driver can see the shape
+without reconstructing it.
+
+| Item | Status |
+| --- | --- |
+| 1. a verb's declared result reaches the runtime | on main (#5501) |
+| 6. the read layer | on main, in full |
+| 7. session-scoped invocation ids | on main (#5610) |
+| 8. descriptive receipt schemas | on main |
+| 9a. listing marks | on main (#5309) |
+| 10. listing rows carry a handler's declared result | in review (#5629) |
+| 9b. closed-world event emission | built, parked on #5589 (#5307) |
+| 4. `receipt` as a top-level envelope field | not started — and its precondition now holds |
+| 2. an unrecognized projection key is refused | not started |
+| 3. a rejection propagates up through what holds it | not started |
+| 5. `cf wish` and `cf exec` take the read options | not started |
+| 11. a caller may name a reference | not started; sequenced, gated on one measurement |
+
+Item 9 is split because its two halves have different fates: the marks landed,
+the emission is parked.
+
+These pull requests remain open against this work. They are listed here because
 a driver needs to know what is already moving before scheduling anything new.
 
 | PR | What | State |
 | --- | --- | --- |
-| #5501 | a verb's declared result reaches its module | ready; the decision below is made, and the producer half is green |
-| #5504 | `@` marks a position in a field list | green, walkthrough 38/38 against a live toolshed. The two `notes@` assertions that failed there were the feature, not the test: a pattern result stores each field as a redirect link into the argument document, so the compose walk never saw the array. Markers now align against the source schema, as the mask already did |
-| #5609 | a rejected position is not a required one | split out of #5504, because the defect it fixes is on main. A `$link` marker beside any other projection key returns nothing: the rejected position stays in the source's `required`, so the projected schema is unsatisfiable and the whole selection reads as absent |
+| #5629 | a verb listing row carries the handler's declared result | item 10, the consumer half of the declared result |
 | #5307 | closed-world verb event schemas | parked on #5589; the minting is built, and what stays red is a renderer-semantics ruling rather than an implementation gap |
 
 **Most of the read layer has landed.** #5309, #5459, #5468, #5470, #5497 and
@@ -49,24 +69,16 @@ folded into #5470's squash; the shared read step it factored out is on main as
 `packages/cli/lib/cell-selection.ts`. A reader who goes looking for #5458 should
 not conclude the step was dropped.
 
-**Two are back out: #5469 and #5505 were reverted by #5582.** They merged
-twenty-six seconds apart, each green on a base that did not contain the other,
-and the tree they made together type-failed — #5469 replaced `invocationId`
-with an `invocation: {id, session}` pair, and #5505 added nine `piece call`
-selection tests written against the old name. The revert restored the 22 files
-they touched byte-for-byte.
+**The invocation pair and call selection are both on main**, re-landed together
+by #5610. `scopeCallerEventId` takes the `{id, session}` pair rather than the id
+alone, so two callers choosing the same word — `add-comment-1` is the word two
+agents both pick — no longer compute one address and read one receipt. `piece
+call` takes `--select` / `--schema` / `--filter` beside it.
 
-Two consequences a driver has to carry:
-
-- **`piece call` has no `--select` / `--schema` / `--filter` again.** That is a
-  landed piece of item 6 going back out, not just a test fix.
-- **The address change is no longer underneath anything.** `scopeCallerEventId`
-  derives from `{caller, id, path, space}` with no identity in the address, so
-  two callers choosing the same word — `add-comment-1` is the word two agents
-  both pick — compute one address and read one receipt, and the second is told
-  its call settled when it never ran. Item 4 was sequenced after item 7
-  precisely so that a published address had stopped moving. **That precondition
-  is gone, and item 4 must not start until it returns.**
+**So item 4's precondition holds: a published receipt address has stopped
+moving.** That is what item 4 was sequenced after item 7 to wait for, and the
+wait is over. What it cost to get there is the merge-race hazard recorded under
+"How this is driven" below, which is the part worth carrying forward.
 
 ## The decision that was waiting, and the condition it carries
 
@@ -86,14 +98,14 @@ was open when that one was not.
 yet.** It was given as: if it is easy to add now, go for it; but if it creates
 more things to chase down, revisit rather than push through.
 
-The producer half satisfies that already — #5501 is built and green. **The
-unknown is the consumer half, item 10.** A tool's pattern rides in the callable
-cell's own value, so its branch just reads it; a handler's module lives in the
-compiled graph, so the handler branch needs the verb's node looked up there.
-That lookup is new code rather than a field already sitting in reach. If it
-turns awkward, that is exactly the case the condition names, and the instruction
-is to raise it rather than absorb it. Raising it early costs nothing; absorbing
-it quietly spends the goodwill this decision was made on.
+Both halves satisfy it. The producer is on main (#5501). The consumer, item 10,
+is the lookup the condition was aimed at — a handler's module lives in the
+compiled graph rather than sitting in reach the way a tool's pattern does — and
+it cost one structural match and no change to `callableCommandSpec`'s
+signature. What it did not reach is the command surface: `cf piece call <verb>
+--help --json` still shows a handler no output, because serving it there needs
+the graph at `resolvePieceCallable` too. That is raised rather than absorbed,
+which is what the condition asks for.
 
 *What this unblocks.* Items 8 and 10 stop being provisional, and verb discovery
 closes — `cf piece verbs` can answer both halves of its question.
@@ -255,30 +267,35 @@ caller.
 
 ## Landed, and what consumes it
 
-**6. The read layer.** The shared read step, address markers with the
-deepest-link rule, container inference, the flag split, and entity-URI intake
-are on main. Two pieces are not: the `@` suffix (#5504) is still open, and call
-selection went back out with #5505's revert.
+**6. The read layer.** On main in full: the shared read step, address markers
+with the deepest-link rule, container inference, the flag split, entity-URI
+intake, the `@` suffix, and call selection.
 
-**7. Session-scoped invocation ids.** **Reverted** — #5469 is out of main
-again. It is the one address-changing commit, and the whole plan is ordered
-around landing it before anything publishes a receipt address. Until it is
-back, a receipt address is derived without identity in it, so it is not yet
-something a caller can safely be handed. Item 4 depends on this; nothing else
-does.
+**7. Session-scoped invocation ids.** On main (#5610). It is the one
+address-changing commit, and the whole plan is ordered around landing it before
+anything publishes a receipt address — so a receipt address now carries
+identity and is something a caller can safely be handed. Item 4 depends on
+this; nothing else does.
 
 **8. Descriptive receipt schemas.** On main. Plain results only — a verb
 returning anything reactive gets none, which is what item 1 decides.
 
-**9. Closed-world event schemas and listing marks.** #5307 and #5309, from the
-verb contract arc. Both unblocked; both wanted a courtesy review rather than a
-gate.
+**9. Closed-world event schemas and listing marks.** Half landed: the listing
+marks are on main (#5309). Closed-world emission (#5307) is built but parked on
+#5589 — closing a verb's `$event` closes it against the browser too, and
+whether a renderer's DOM-event envelope is governed by the verb's schema is a
+semantics ruling rather than an implementation gap.
 
 **10. Listing rows carry a handler's declared result.** *(S)* `cf piece verbs`
-already reports an `outputSchema` per row, and the type says why it is empty for
-handlers: *"Tools only, until handlers gain declared results."* Item 1 is what
-supplies them. This is the deferred half of verb discovery finally closing, and
-it is a consumer change — the plumbing is built.
+reports an `outputSchema` per row for a handler as well as for a tool, so verb
+discovery answers both halves of its question: what a caller may send, and what
+it gets back. A tool's result schema rides its callable cell and its branch
+just reads it. A handler's rides the node it compiled to, so the listing
+resolves the piece's pattern once and matches each handler node's `$event`
+input against the result property exposing the same stream — one structural
+comparison inside one compiled object. A stream two handler nodes share names
+no single result, and a piece whose pattern will not resolve keeps every row
+and loses only the schema.
 
 *A terminology collision made this look like more than it is.* A pattern's
 **result-schema literal** is where its stream properties live, and the listing
@@ -289,21 +306,81 @@ joins them.
 
 ## Ordering
 
-| Item | After | Why |
-| --- | --- | --- |
-| 6 | — | landed but for #5504, and for call selection, which #5582 reverted |
-| 7 | — | **reverted; must land again before 4 can start** |
-| 8, 9 | — | independent |
-| 2 | 6 | changes what the flags accept |
-| 3 | 6 | completes the suppression property |
-| 4 | 7 | publishes an address, so the address must have stopped moving |
-| 5 | 4 | the fourth and fifth arrivals inherit whatever a read costs |
-| 10 | 1 | listing rows carry a handler's `outputSchema`; the plumbing exists for tools already |
-| 1 | — | decided; 8 and 10 are no longer provisional, and item 10 carries the revisit condition |
-| 11 | — | independent of 1 in what it decides — declared results make an *output* self-describing, this is what an *input* accepts — but shares `schema-injection.ts` with item 1's emission (#5501), so one holder suits both |
+**A defect this plan's own items caused is not a separate queue.** The items
+build a verb surface; the issues below are that surface failing where it is
+already built. Sequencing them apart would mean shipping items 4 and 5 onto a
+read path known to break after a handler runs, so they are interleaved here and
+each step names what it delivers.
 
-Items 2, 3 and 5 touch one file heavily and want to land one at a time rather
-than in parallel. Item 4 is the only one that touches the call envelope.
+Two rules set the order. **One file at a time** — two branches open on one file
+is the merge race under "How this is driven", so steps sharing a file are
+strictly sequential while separate files run in parallel. **A blocked step never
+gates an unblocked one**, which is why everything waiting on a ruling sits in
+its own track.
+
+| # | Step | Delivers | After | Why here |
+| --- | --- | --- | --- | --- |
+| 1 | The doubly-linked tracker fixture and its walkthrough | **on main** (#5639, #5631) — repro for #5577, #5632, #5633, #5637; item 11's subject | — | Five things verify against a piece that holds a back-reference, and none could be demonstrated until one existed. `verb-session-gaps.sh` is where they are asserted, and four of its assertions expect a gap and fail loudly the day it closes — so a capability arriving announces itself instead of quietly turning a check green |
+| 2 | A projected read survives a handler | #5633 | 1 | Breaks call-then-read-shaped, which is the loop items 4, 5, 10 and #5577 all demonstrate against. Diagnose before estimating: if it sits in runner materialization rather than the read path, it moves after step 7 rather than holding the line |
+| 3 | Listing rows carry a handler's declared result | item 10, #5619 | — | The consumer half of item 1 |
+| 4 | The forced-stream fallback stops inventing verbs | #5576 | 3 | Same file as step 3. It narrows the listing, so sweep the open branches for writers first |
+| 5 | The help page stops claiming a verb returns nothing | #5558 (the false claim) | — | `Output: No output on success.` is wrong for a declared verb. Asserting there is no output is worse than saying nothing, and stopping it needs no schema and no decision, which is why it precedes the half that does |
+| 5a | An author's prose reaches the caller | #5637 | 1 | Separate lane — what is missing is not in the CLI. See the measurement below: two of the three symptoms are emitted correctly and lost afterwards, so a fix aimed at the emitter would miss them |
+| 6 | Help enumerates what a verb returns | #5558 (the missing fields) | 3, 5 | Step 3 builds the declared-result lookup; this is its second consumer, at the call path rather than the listing |
+| 7 | A returned piece reads back through its own cycle | #5577 | 6 | The derived default selection bounds the readback, which is what turns the crash into a result |
+| 8 | `receipt` as a top-level envelope field | item 4 | — | Its precondition is met, it touches the call envelope alone, and it is what gives items 8 and 9 a consumer. Runs beside steps 5-7 |
+| 9 | A rejection propagates up through what holds it | item 3 | — | First of the projection work; the mask's asymmetry is what makes a marked field below a link load every element |
+| 10 | Two identical projections stop colliding | #5523 | 9 | Same file. Reachable the moment anything long-lived reads twice, which the command surface invites |
+| 11 | One piece, one address | #5632, #5498 | — | Trace where each id is minted; the outcome is a fix or a statement that they are aliases. Must precede step 13, which spreads the address vocabulary to two more commands |
+| 12 | An unrecognized projection key is refused | item 2 | 9 | The largest remaining step and the only one with design surface, since it couples the projection reader to the compatibility checker's annotation keys |
+| 13 | `cf wish` and `cf exec` take the read options | item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving |
+
+**Waiting on a ruling, and running beside all of the above.** Closed-world event
+emission (item 9b) is built and parked on #5589. When that answers, the branch
+merges as-is, amends `closedWorldEventRejection`, or retreats — all three are
+costed on #5307 — and it owes an item renumber, then a baseline re-record as its
+final step. A caller naming a reference (item 11, #5560) waits on confirming
+that a sigil resolves through a *declared* event field rather than an untyped
+one; it decides nothing item 1 decides — a declared result makes an *output*
+self-describing, this is what an *input* accepts — but it shares
+`schema-injection.ts` with that emission, so the one-file rule applies to the
+pair and one holder suits both.
+
+**Where a doc comment actually goes, measured against the compile pipeline.**
+Step 5a rests on this, and it is not what either symptom looked like from the
+CLI:
+
+| An author writes it on | In the compiled pattern |
+| --- | --- |
+| a verb (`Stream` property) | **present** — `resultSchema.properties.<verb>.description`, as a sibling of the `$ref` to the event's definition |
+| an event field | **present** — `$defs.<Event>.properties.<field>.description` |
+| the event interface itself | **absent** |
+
+So only the third is an emission gap. The first two are emitted and lost
+between the pattern and the caller: the schema a caller is served is the
+resolved form — no `$defs`, no `$ref`, the target inlined — and both
+descriptions are absent from it.
+
+*The obvious explanation is not the explanation.* A `description` beside a
+`$ref` is ignored under JSON Schema's own semantics, so a resolver that
+substitutes the target would drop it. This one does not:
+`resolveCfcSchemaRefsUncached` (`packages/runner/src/cfc/schema-refs.ts`)
+collects ref-site siblings and merges them over the resolved target on purpose.
+That rules out the tidy answer for the verb, and it never explained the event
+field, whose description sits inside the `$def` rather than beside the ref.
+
+*A lead, unverified.* `resolveSchema` (`packages/runner/src/schema.ts`) calls
+`resolveSchemaRefs(schema)` with one argument, so the document consulted for
+`#/$defs/...` defaults to the property schema itself — and a verb property
+carries the `$ref` while the `$defs` live at the pattern's result-schema root.
+Whoever takes this should confirm or discard that before assuming a single
+cause: what is established is only that the emitter is not where two of the
+three go missing, so a patch aimed there would close one symptom and leave two.
+
+**Carried alongside, not sequenced.** A capability probe that covers nothing
+(#5534) is a test asserting something it cannot observe, so it reports green
+continuously until fixed; it belongs to whoever next touches that suite rather
+than to a step here.
 
 ## How this is driven
 
@@ -321,13 +398,13 @@ plan as their PRs land — is the collision the per-agent split exists to avoid.
 Two rules earn their place, both from what went wrong when this was three
 plans:
 
-**#5307 and #5501 reconcile rather than order.** They touch no common source
-file and neither depends on the other — a declared result rides a trailing
-options argument, while event stamping keys on the first. But #5501's
-handler-schema fixtures were compiled before event schemas closed, so once
-#5307 lands they gain `additionalProperties: false` on their event literals.
-Whichever merges second owes a golden regeneration. That is a note on the pair,
-not an edge in the table above.
+**#5307 owes a golden regeneration, and it is the only thing it owes #5501.**
+The two touch no common source file — a declared result rides a trailing
+options argument, while event stamping keys on the first — so this is a note on
+the pair rather than an edge in the sequence. But #5501's handler-schema
+fixtures were compiled while event schemas were still open, so closing them
+gives those fixtures `additionalProperties: false` on their event literals. The
+second to land regenerates, and #5501 landed first.
 
 **Two PRs can each be green and still break main together.** CI judges a PR
 against a base, so when one branch narrows a type and another still writes to
@@ -357,8 +434,17 @@ read *returns*, wants a live-server case before it is believed.
 This is the same shape as the rejected-position defect split out as #5609: the
 `boardSchema` fixture declares no `required` while a generated pattern schema
 does, so every fixture in that file agreed with the bug and the suite could
-only confirm it. Twice now the fixture has been the thing that was wrong. When
-a test cannot fail, the fixture is the first place to look.
+only confirm it. It is also the shape that hides in a double: a compiled
+pattern is callable, so a double written as a plain object passes a guard that
+rejects what the runtime actually hands over, and the suite stays green while
+every real listing comes back empty.
+
+Three instances make it a mechanism rather than a run of bad luck, and the
+general form is worth more than any of them: **when a double stands in for
+something the runtime constructs, check what the runtime constructs.** A
+fixture is a claim about the world, and an unchecked one is the cheapest way to
+build a test that cannot fail. When a test cannot fail, look at the fixture
+first.
 
 **A squash merge invalidates the fork point of everything stacked on it.**
 Rebasing a child with `git rebase <new-base>` then replays commits the base
@@ -392,10 +478,11 @@ July result-schema work, and what #5309 got right by hand.
 
 ## What comes after
 
-This plan is exhausted when items 1-5 are decided or built and the open pull
-requests have landed. Two arcs are queued behind it, and naming their
-triggers here is what keeps them from being dropped when this document stops
-being read.
+This plan is exhausted when the sequence above is walked and the issue tail is
+empty — the items build the surface, and the tail is that surface failing where
+it is already built, so neither alone finishes it. Two arcs are queued behind
+it, and naming their triggers here is what keeps them from being dropped when
+this document stops being read.
 
 **The command surface** —
 [The CLI surface](cli-surface-implementation.md), already sequenced. Its first
@@ -412,6 +499,33 @@ happened. Nothing in this plan advances it, and nothing in it blocks this plan.
 Whoever drives this document owns that queue, not just this list. A plan that
 finishes without naming its successor is how an arc goes quiet with work left
 in it.
+
+## The issue tail
+
+Every open defect against this surface, and where it attaches. A defect absent
+from a plan is one nobody schedules, which is the whole reason for this table.
+
+| Issue | What | Attaches at |
+| --- | --- | --- |
+| #5633 | a projected read fails after an unrelated handler runs, while the same path unshaped succeeds | step 2 |
+| #5619 | listing rows carry a handler's declared result | step 3 |
+| #5576 | `cf piece verbs` lists data fields as handlers, so discovery reports what cannot be called | step 4 |
+| #5558 | `piece call --help` claims every handler returns nothing, including one that declares a result | steps 5 and 6 — the false claim needs nothing, enumerating the fields needs the lookup |
+| #5637 | an author's prose does not reach a caller: on a verb, on an event field, and on the event interface | step 5a — it absorbed #5559, which described one symptom and had its cause backwards |
+| #5577 | a verb returning a child piece in a doubly-linked tree crashes readback on a cycle | step 7 |
+| #5523 | two identical `piece get` projections in one runtime collide on the transform result cell | step 10 |
+| #5632 | `--show-links` and a `$link` read return different entity ids for the same piece | step 11 |
+| #5498 | `getEntityId()` strips the entity URI scheme, collapsing two kinds to one identity | step 11, if it proves to be the same root |
+| #5589 | ruling: does a closed verb schema govern the renderer's DOM-event envelope? | the parked track — it is what unparks item 9b |
+| #5560 | an address a call returns cannot be passed back as a verb argument | item 11 |
+| #5534 | a capability probe passes while covering nothing: a dispatch rejection is not a synchronous throw | carried alongside |
+
+**Filed against neighbouring subsystems, and not sequenced here.** `{ proxy:
+true }` never reaching `module.writableProxy` for a transformed pattern
+(#5502), an unnormalized external piece id upserting twice (#5499), and a
+create that drops its navigation (#5530). Each is real and none is about the
+verb surface; they are recorded so that reading this plan does not imply they
+were triaged away.
 
 ## Out of scope
 
