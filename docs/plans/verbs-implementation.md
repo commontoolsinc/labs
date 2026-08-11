@@ -320,11 +320,12 @@ its own track.
 
 | # | Step | Delivers | After | Why here |
 | --- | --- | --- | --- | --- |
-| 1 | The doubly-linked tracker fixture | repro for #5577, #5632, #5633; item 11's subject | — | Four things verify against a piece that holds a back-reference, and none of them can be demonstrated until one exists |
+| 1 | The doubly-linked tracker fixture and its walkthrough | #5639 with #5631; repro for #5577, #5632, #5633, #5637; item 11's subject | — | Five things verify against a piece that holds a back-reference, and none of them can be demonstrated until one exists. The two land together or the doc first: the walkthrough names the verbs, so a fixture arriving alone leaves main describing verbs it does not have |
 | 2 | A projected read survives a handler | #5633 | 1 | Breaks call-then-read-shaped, which is the loop items 4, 5, 10 and #5577 all demonstrate against. Diagnose before estimating: if it sits in runner materialization rather than the read path, it moves after step 7 rather than holding the line |
 | 3 | Listing rows carry a handler's declared result | item 10, #5619 | — | The consumer half of item 1 |
 | 4 | The forced-stream fallback stops inventing verbs | #5576 | 3 | Same file as step 3. It narrows the listing, so sweep the open branches for writers first |
-| 5 | The help page stops lying and starts describing | #5558 (the false claim), #5559 | — | `Output: No output on success.` is wrong for a declared verb, and the author's JSDoc is already on the wire. Neither half needs a schema or a decision, which is why they precede the half that does |
+| 5 | The help page stops claiming a verb returns nothing | #5558 (the false claim) | — | `Output: No output on success.` is wrong for a declared verb. Asserting there is no output is worse than saying nothing, and stopping it needs no schema and no decision, which is why it precedes the half that does |
+| 5a | An author's prose reaches the caller | #5637 | 1 | Separate lane — what is missing is not in the CLI. See the measurement below: two of the three symptoms are emitted correctly and lost afterwards, so a fix aimed at the emitter would miss them |
 | 6 | Help enumerates what a verb returns | #5558 (the missing fields) | 3, 5 | Step 3 builds the declared-result lookup; this is its second consumer, at the call path rather than the listing |
 | 7 | A returned piece reads back through its own cycle | #5577 | 6 | The derived default selection bounds the readback, which is what turns the crash into a result |
 | 8 | `receipt` as a top-level envelope field | item 4 | — | Its precondition is met, it touches the call envelope alone, and it is what gives items 8 and 9 a consumer. Runs beside steps 5-7 |
@@ -344,6 +345,25 @@ one; it decides nothing item 1 decides — a declared result makes an *output*
 self-describing, this is what an *input* accepts — but it shares
 `schema-injection.ts` with that emission, so the one-file rule applies to the
 pair and one holder suits both.
+
+**Where a doc comment actually goes, measured against the compile pipeline.**
+Step 5a rests on this, and it is not what either symptom looked like from the
+CLI:
+
+| An author writes it on | In the compiled pattern |
+| --- | --- |
+| a verb (`Stream` property) | **present** — `resultSchema.properties.<verb>.description`, as a sibling of the `$ref` to the event's definition |
+| an event field | **present** — `$defs.<Event>.properties.<field>.description` |
+| the event interface itself | **absent** |
+
+So only the third is an emission gap. The first two are emitted and lost
+between the pattern and the caller, and the shape of the first is the reason to
+suspect where: a `description` beside a `$ref` is ignored under JSON Schema's
+own semantics, so any consumer that resolves the reference and substitutes its
+target drops the sibling. That is a hypothesis about the loss point rather than
+a located defect — what is established is that the emitter is not where two of
+the three go missing, so a patch aimed there would close one symptom and leave
+two.
 
 **Carried alongside, not sequenced.** A capability probe that covers nothing
 (#5534) is a test asserting something it cannot observe, so it reports green
@@ -479,7 +499,7 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5619 | listing rows carry a handler's declared result | step 3 |
 | #5576 | `cf piece verbs` lists data fields as handlers, so discovery reports what cannot be called | step 4 |
 | #5558 | `piece call --help` claims every handler returns nothing, including one that declares a result | steps 5 and 6 — the false claim needs nothing, enumerating the fields needs the lookup |
-| #5559 | a verb's purpose never reaches its help page, though the description is already in the schema | step 5 |
+| #5637 | an author's prose does not reach a caller: on a verb, on an event field, and on the event interface | step 5a — it absorbed #5559, which described one symptom and had its cause backwards |
 | #5577 | a verb returning a child piece in a doubly-linked tree crashes readback on a cycle | step 7 |
 | #5523 | two identical `piece get` projections in one runtime collide on the transform result cell | step 10 |
 | #5632 | `--show-links` and a `$link` read return different entity ids for the same piece | step 11 |
