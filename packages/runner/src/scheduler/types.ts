@@ -174,6 +174,16 @@ export interface TriggerTraceEntry {
 export type ServedEventDispatch = {
   firedAt?: { user?: string; session?: string };
   streamEntry?: { sidecarId: string; index: number; seq: number };
+  /** The EMITTING run's durable event id for a same-wave cascade
+   * (C8d; review 2026-08-11 M2): cell.ts's LT1 same-space emission
+   * queues the emitted event in-process with the emitter's own
+   * `eventId` here, and the dispatch stamp threads it into the wave
+   * run context as `parentEventId` — the fold key that rolls a
+   * cascade child back with its requeued parent. Absent for root
+   * (drain-dispatched) events and for derivation emitters (no
+   * eventId to fold on; a requeued derivation withdraws the entry
+   * with its own contribution). */
+  parentEventId?: string;
   onFailure?: (
     outcome: {
       /** `error`: the handler THREW — the error is the consequence

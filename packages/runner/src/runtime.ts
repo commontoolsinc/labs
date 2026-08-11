@@ -348,6 +348,13 @@ export type ServerRunInfo = {
   kind: "derivation" | "event-handler" | "bookkeeping";
   /** The dispatched event's durable id (event-handler runs). */
   eventId?: string;
+  /** The emitting run's durable event id for a same-wave cascade
+   * (C8d; review 2026-08-11 M2): threaded from the emission's
+   * dispatch carriage (ServedEventDispatch.parentEventId) through
+   * the SpaceServer's stamper into the wave run context, where the
+   * requeue closure folds a cascade child into its requeued
+   * parent's rollback. */
+  parentEventId?: string;
   /**
    * The run's PER-RUN DEMANDED identity (M1, scopes.md §5: a derivation
    * runs per demanded instance and the DEMAND supplies the identity).

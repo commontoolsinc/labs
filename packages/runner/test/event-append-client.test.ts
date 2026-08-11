@@ -220,6 +220,77 @@ describe("event-append queue (events.md §5, LT9)", () => {
     expect(queue.pending.length).toBe(1);
   });
 
+  it("an enqueue AFTER close settles its outcome and keeps the intent persisted for a successor (review 2026-08-11 n2)", async () => {
+    // close() sweeps the outcome map; without the enqueue-side belt a
+    // post-close enqueue's promise hung forever — wedging any
+    // pending-commit barrier it joined. The INTENT still persists
+    // (closed is not refused): the next queue instance discharges it.
+    const store = memoryEventAppendQueueStore();
+    const queue = new EventAppendQueue({
+      space,
+      transact: () => Promise.reject(namedError("ConnectionError", "offline")),
+      nextLocalSeq: () => 1,
+      store,
+    });
+    queue.close();
+    const outcome = await queue.enqueue(appendOf("evt-late"));
+    expect(outcome.delivered).toBe(false);
+    expect(queue.pending.length).toBe(1);
+    await queue.persisted;
+    expect((await store.load(space)).map((entry) => entry.eventId)).toEqual([
+      "evt-late",
+    ]);
+  });
+
+  it("saves serialize behind the PREVIOUS save (review 2026-08-11 m6/LT9): an async adapter can never complete snapshots out of order", async () => {
+    // Pre-fix, #persist chained each save on the LOAD only: two rapid
+    // enqueues issued two store.save calls back to back, and an
+    // adapter resolving them out of order left the OLDER snapshot
+    // durable. The pin: a save never STARTS while the previous one is
+    // in flight.
+    let manual = true;
+    const parked: Array<{ snapshot: string[]; resolve: () => void }> = [];
+    let saveCalls = 0;
+    const store: EventAppendQueueStore = {
+      load: () => Promise.resolve([]),
+      save: (_space, entries) => {
+        saveCalls += 1;
+        if (!manual) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+          parked.push({
+            snapshot: entries.map((entry) => entry.eventId),
+            resolve,
+          });
+        });
+      },
+    };
+    const queue = new EventAppendQueue({
+      space,
+      transact: () => Promise.reject(namedError("ConnectionError", "offline")),
+      nextLocalSeq: (() => {
+        let seq = 1;
+        return () => seq++;
+      })(),
+      store,
+    });
+    void queue.enqueue(appendOf("evt-a"));
+    void queue.enqueue(appendOf("evt-b"));
+    // Two persists are owed. Only the FIRST save may start while it is
+    // unresolved.
+    await waitUntil(() => saveCalls === 1, "the first save to start");
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(saveCalls).toBe(1);
+    // Resolving the first releases the second — strictly after, with
+    // the final queue state.
+    parked[0].resolve();
+    await waitUntil(() => saveCalls === 2, "the second save to start");
+    expect(parked[1].snapshot).toEqual(["evt-a", "evt-b"]);
+    manual = false;
+    parked[1].resolve();
+    await queue.persisted;
+    queue.close();
+  });
+
   it("LT9: intents persisted by a dead predecessor discharge FIRST, in fired order, from the shared store", async () => {
     const store: EventAppendQueueStore = memoryEventAppendQueueStore();
     // Predecessor: everything fails transient — the intents stay queued

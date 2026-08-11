@@ -938,6 +938,321 @@ Deno.test("OW15: the sessionless space-scope floor carve-out, both negatives and
   }
 });
 
+Deno.test("event-append admission: the non-array /value/entries shape guard — both admission arms, both flag postures (M1+m4, review 2026-08-11)", async (t) => {
+  const { engine, path } = await createEngine();
+  setServerExecutionConfig(true);
+  const authoredOps = (
+    localSeq: number,
+    operations: ClientCommit["operations"],
+  ) =>
+    applyCommit(engine, {
+      sessionId: SESSION,
+      space: SPACE,
+      principal: ALICE,
+      commit: {
+        localSeq,
+        reads: { confirmed: [], pending: [] },
+        operations,
+      },
+    });
+  try {
+    await t.step(
+      "flag ON: an authored `add` patch writing a NON-ARRAY at /value/entries is refused (the reviewer's repro: pre-fix it ADMITTED with zero located entries, then the pending scan TypeErrored)",
+      () => {
+        assertThrows(
+          () =>
+            authoredOps(1, [{
+              op: "patch",
+              id: SIDECAR,
+              patches: [{
+                op: "add",
+                path: "/value/entries",
+                value: "garbage-not-an-array" as never,
+              }],
+            }]),
+          ProtocolError,
+          "non-array",
+        );
+        // The scan stays callable — nothing admitted, nothing wedges
+        // (pre-fix this line threw TypeError: .filter is not a function).
+        assertEquals(selectPendingStreamEventDocs(engine).length, 0);
+      },
+    );
+
+    await t.step(
+      "flag ON: an authored `replace` patch writing a NON-ARRAY at /value/entries is refused",
+      () => {
+        assertThrows(
+          () =>
+            authoredOps(2, [{
+              op: "patch",
+              id: SIDECAR,
+              patches: [{
+                op: "replace",
+                path: "/value/entries",
+                value: { eventId: "evt-not-in-an-array" } as never,
+              }],
+            }]),
+          ProtocolError,
+          "non-array",
+        );
+      },
+    );
+
+    await t.step(
+      "flag ON: an authored whole-doc `set` whose entries field is a NON-ARRAY is refused (the set arm coerced it to [] pre-fix)",
+      () => {
+        assertThrows(
+          () =>
+            authoredOps(3, [{
+              op: "set",
+              id: SIDECAR as never,
+              value: { value: { entries: "garbage-string" } } as never,
+            }]),
+          ProtocolError,
+          "non-array",
+        );
+        assertEquals(selectPendingStreamEventDocs(engine).length, 0);
+      },
+    );
+
+    await t.step(
+      "the honest declared append is unaffected by the guard",
+      () => {
+        applyCommit(engine, {
+          sessionId: SESSION,
+          space: SPACE,
+          principal: ALICE,
+          commit: appendCommit(4, [entryOf("evt-honest")]),
+        });
+        const pending = selectPendingStreamEventDocs(engine);
+        assertEquals(pending.length, 1);
+        assertEquals(pending[0].entries[0].eventId, "evt-honest");
+      },
+    );
+
+    await t.step(
+      "m4, the OFF-arm refusal pin: an authored write into a sidecar-prefixed doc is refused with the flag OFF — OFF-written garbage (a non-array log, a forged firedAt actor) would otherwise poison the first ON activation",
+      () => {
+        resetServerExecutionConfig();
+        try {
+          const offSidecar = streamEntriesDocId({
+            id: "of:off-arm-stream",
+            path: [],
+          });
+          // The reviewer's m4 shapes, all refused prefix-keyed: the
+          // non-array garbage AND the well-formed entry carrying a
+          // forged firedAt (which no OFF-arm admission would validate).
+          assertThrows(
+            () =>
+              authoredOps(5, [{
+                op: "patch",
+                id: offSidecar,
+                patches: [{
+                  op: "add",
+                  path: "/value/entries",
+                  value: "garbage" as never,
+                }],
+              }]),
+            ProtocolError,
+            "EXPERIMENTAL_SERVER_EXECUTION",
+          );
+          assertThrows(
+            () =>
+              authoredOps(6, [{
+                op: "patch",
+                id: offSidecar,
+                patches: [{
+                  op: "append",
+                  path: "/value/entries",
+                  values: [
+                    entryOf("evt-forged", {
+                      firedAt: { user: "user:mallory", session: "forged" },
+                    }),
+                  ] as never[],
+                }],
+              }]),
+            ProtocolError,
+            "EXPERIMENTAL_SERVER_EXECUTION",
+          );
+        } finally {
+          setServerExecutionConfig(true);
+        }
+      },
+    );
+
+    await t.step(
+      "the defensive scans: DERIVED-written garbage (trusted class, exempt from the authored shape guard) commits without wedging the recompute, and the pending scan skips it",
+      () => {
+        const holder = withLiveLease(engine);
+        const garbageSidecar = streamEntriesDocId({
+          id: "of:derived-garbage-stream",
+          path: [],
+        });
+        // Pre-fix this THREW TypeError inside the apply transaction:
+        // maintainStreamEventWatermarks ran `.filter` on the non-array.
+        applyWaveCommit(engine, {
+          sessionId: holder,
+          space: SPACE,
+          commitClass: "derived",
+          holder,
+          commit: {
+            localSeq: 7,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: garbageSidecar as never,
+              value: { value: { entries: "derived-garbage" } } as never,
+            }],
+          },
+          waveBasis: { basisSeq: headSeqOf(engine), rebasedHeads: [] },
+        });
+        // And the pending scan skips the malformed doc instead of
+        // TypeErroring over it (the activate/park/drain/wave-close wedge).
+        const pending = selectPendingStreamEventDocs(engine);
+        assertEquals(pending.length, 1);
+        assertEquals(pending[0].entries[0].eventId, "evt-honest");
+      },
+    );
+  } finally {
+    resetServerExecutionConfig();
+    await Deno.remove(path).catch(() => {});
+  }
+});
+
+Deno.test("maintainStreamEventWatermarks: the frontier holds below a pending entry and advances only over fully-consequenced seqs (C1 pin, review 2026-08-11)", async (t) => {
+  const { engine, path } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = withLiveLease(engine);
+
+    await t.step(
+      "distinct seqs: an unconsequenced earlier entry holds the frontier at its floor — a later consequenced entry never advances past it",
+      () => {
+        // Two authored appends in separate commits: distinct stream seqs.
+        applyCommit(engine, {
+          sessionId: SESSION,
+          space: SPACE,
+          principal: ALICE,
+          commit: appendCommit(1, [entryOf("evt-1")]),
+        });
+        applyCommit(engine, {
+          sessionId: SESSION,
+          space: SPACE,
+          principal: ALICE,
+          commit: appendCommit(2, [entryOf("evt-2")]),
+        });
+        const [e1, e2] = sidecarValue(engine).entries!;
+        assert(typeof e1.seq === "number" && typeof e2.seq === "number");
+        assert(e1.seq! < e2.seq!);
+
+        // The derived rewrite marks ONLY the LATER entry consequenced.
+        waveSetSidecar(engine, holder, 3, {
+          entries: [e1, { ...e2, consequenced: true }],
+        });
+        // The hold: evt-1 (earlier seq, pending) blocks the frontier —
+        // the watermark must NOT jump to evt-2's seq. (The reviewer's
+        // probe — deleting the every(consequenced) hold — advances it
+        // and turns this red.)
+        const afterPartial = sidecarValue(engine);
+        assert(
+          (afterPartial.eventWatermark ?? 0) < e1.seq!,
+          `frontier must hold below the pending entry, got ${afterPartial.eventWatermark}`,
+        );
+
+        // Mark evt-1 too: the frontier advances THROUGH it, and holds at
+        // the contiguous consequenced top (evt-2's seq).
+        waveSetSidecar(engine, holder, 4, {
+          entries: [
+            { ...e1, consequenced: true },
+            { ...e2, consequenced: true },
+          ],
+        });
+        assertEquals(sidecarValue(engine).eventWatermark, e2.seq);
+      },
+    );
+
+    await t.step(
+      "one commit seq, two entries: the seq's group advances only together (the every() clause verbatim)",
+      () => {
+        const groupStream = { id: "of:group-stream", path: [] as string[] };
+        const groupSidecar = streamEntriesDocId(groupStream);
+        const groupEntry = (eventId: string): StreamEventEntry => ({
+          eventId,
+          stream: groupStream,
+          payload: { vote: "green" },
+        });
+        // ONE commit appends BOTH entries: they share the commit seq.
+        applyCommit(engine, {
+          sessionId: SESSION,
+          space: SPACE,
+          principal: ALICE,
+          commit: {
+            localSeq: 5,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "patch",
+              id: groupSidecar,
+              patches: [{
+                op: "append",
+                path: "/value/entries",
+                values: [groupEntry("evt-a"), groupEntry("evt-b")] as never[],
+              }],
+            }],
+            eventAppends: [
+              { id: groupSidecar, eventId: "evt-a" },
+              { id: groupSidecar, eventId: "evt-b" },
+            ],
+          },
+        });
+        const readGroup = (): StreamEventsDocValue =>
+          (read(engine, { id: groupSidecar })?.value ??
+            {}) as StreamEventsDocValue;
+        const [a, b] = readGroup().entries!;
+        assertEquals(a.seq, b.seq);
+
+        const groupRewrite = (
+          localSeq: number,
+          entries: StreamEventEntry[],
+        ) =>
+          applyWaveCommit(engine, {
+            sessionId: holder,
+            space: SPACE,
+            commitClass: "derived",
+            holder,
+            commit: {
+              localSeq,
+              reads: { confirmed: [], pending: [] },
+              operations: [{
+                op: "set",
+                id: groupSidecar as never,
+                value: { value: { entries } } as never,
+              }],
+            },
+            waveBasis: { basisSeq: headSeqOf(engine), rebasedHeads: [] },
+          });
+
+        // Half the group consequenced: the seq must NOT advance.
+        groupRewrite(6, [{ ...a, consequenced: true }, b]);
+        assert(
+          (readGroup().eventWatermark ?? 0) < a.seq!,
+          "a half-consequenced seq group must not advance the frontier",
+        );
+
+        // The whole group: the frontier takes the seq.
+        groupRewrite(7, [
+          { ...a, consequenced: true },
+          { ...b, consequenced: true },
+        ]);
+        assertEquals(readGroup().eventWatermark, a.seq);
+      },
+    );
+  } finally {
+    resetServerExecutionConfig();
+    await Deno.remove(path).catch(() => {});
+  }
+});
+
 Deno.test("selectPendingStreamEventDocs: the undelivered-events discovery input (serving-loop §1, §6 step 4)", async () => {
   const { engine, path } = await createEngine();
   setServerExecutionConfig(true);

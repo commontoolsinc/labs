@@ -2517,6 +2517,13 @@ async function handlePin(
   // The lifecycle subkey is deliberately NOT the turn's own effect key:
   // retiring `llmDialog:<requestId>` mid-turn would tear the turn's
   // in-flight dedupe entry.
+  // NOTE (review 2026-08-11): the completion path's identity
+  // annotations fall back to the WAVE-LEVEL identity when no outbox
+  // carriage is live (space-server.ts's effect-completion comment). If
+  // `pinnedCells` is ever SCOPED (per-user/per-session), this commit
+  // would resolve against the serving session's identity, not the
+  // acting user's instance — revisit the completion key's identity
+  // sourcing then. Applies to unpin below identically.
   const committed = await runtime.editWithRetry((tx) => {
     markEffectCompletion(tx, "llmDialog:lifecycle:pin");
     const currentInTx = pinnedCells.withTx(tx).get() || [];

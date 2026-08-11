@@ -1045,6 +1045,13 @@ export async function dispatchQueuedEvent(state: {
     actionId: state.getActionId(action),
     kind: "event-handler",
     eventId: queuedEvent.id,
+    // The same-wave cascade's fold key (C8d; review 2026-08-11 M2):
+    // the emitter's own eventId, threaded from the emission's
+    // dispatch carriage so the wave can roll a cascade child back
+    // with its requeued parent.
+    ...(served?.parentEventId !== undefined
+      ? { parentEventId: served.parentEventId }
+      : {}),
     ...(served?.firedAt !== undefined
       ? {
         // LD1 (protocol.md §2, scopes.md §5): the handler runs AS the

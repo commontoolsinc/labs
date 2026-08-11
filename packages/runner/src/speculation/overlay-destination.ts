@@ -214,6 +214,27 @@ export class SpeculationOverlayDestination
       return { ok: {} };
     }
     const context = speculationRunContextOf(tx);
+    // An event-handler-kind seal WITHOUT an eventId is refused LOUDLY
+    // (review 2026-08-11 m5): such an entry has no intent to retire
+    // against — no consequence signal will ever arrive for it — so the
+    // divert would report ok while the write lands nowhere and no
+    // server run reproduces it (silent loss). The one producer today
+    // is llm-dialog's updateArgument (OW16's handler-class stamp with
+    // no event); its full event-routing is owed — see
+    // verification-coverage.md's owed register.
+    if (context?.kind === "event-handler" && context.eventId === undefined) {
+      return {
+        error: {
+          name: "StorageTransactionAborted",
+          message: "speculative event-handler seal refused: the run " +
+            "carries no eventId, so the overlay entry could never " +
+            "intent-retire and the write would be silently lost — an " +
+            "event-handler-class client commit needs event routing " +
+            "(events.md §5; speculation.md §5)",
+          reason: new Error("speculation-event-handler-without-event"),
+        },
+      };
+    }
     const inner = tx.tx;
     if (inner.sealInto === undefined) {
       // Fail CLOSED: a transport without seal support must not fall

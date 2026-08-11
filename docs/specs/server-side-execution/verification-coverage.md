@@ -514,7 +514,10 @@ client does not; this PR):
   non-serving runtime (`packages/runner/src/speculation/
   overlay-destination.ts`): stamped derivation-kind runs redirect into
   the replica's pending layer (`sealNative` speculative — outside the
-  `synced()` barrier), handler runs keep committing authored (F10),
+  `synced()` barrier), handler runs kept committing authored (F10 —
+  Phase 2's interim posture; ENDED with Phase 3's events-down, which
+  INVERTED these pins: a handler fire commits only the event and the
+  handler run diverts — the same suite now asserts that posture),
   unstamped/binding writes untouched, egress effect kinds dropped
   with `navigateTo` enacting (the egress rule), `compile-and-run`
   gated at the builtin — the gate's true interim scope is wider than
@@ -631,8 +634,10 @@ ruling 2026-08-07; this PR):
   the landed boundary rather than changing it, and the boundary is
   already witnessed end to end in
   `packages/runner/test/speculation-overlay.test.ts` (stamped
-  derivation-kind runs divert; handler runs commit authored — F10;
-  UNSTAMPED setup/binding transactions commit as today; the
+  derivation-kind runs divert; handler runs committed authored — F10,
+  the interim Phase 3 INVERTED: those pins now assert a handler fire
+  commits only the event and the handler run diverts; UNSTAMPED
+  setup/binding transactions commit as today; the
   store-attribution query — zero derived-class commits from any
   client session) and live in
   `packages/patterns/integration/sx2-speculation.test.ts`. The
@@ -882,6 +887,37 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   the §3e watcher surface in `sx2-serving-loop`. Trigger: a Phase-2
   follow-on PR, no later than Phase 3.
 
+**Phase 3 follow-ups (the independent review's owed rows,
+2026-08-11):**
+
+- OW20 — the LT9 BROWSER ADAPTER (the durable
+  `EventAppendQueueStore`, landing with protocol §5's sessionId
+  persistence it depends on) carries two queue debts alongside the
+  store itself: (i) queue SELF-START on reconnect — discharge today
+  begins only when the next fire calls `#kick`, so a persisted
+  backlog waits for fresh user intent instead of draining on
+  reconnect/construction with a live transport; (ii) the
+  save-ordering contract — `#persist` serializes saves behind the
+  previous save (review m6, pinned in `event-append-client.test.ts`),
+  and an async adapter MUST keep resolving `save()` per call (never
+  coalescing behind a debounce that drops intermediate snapshots)
+  or re-derive its own ordering guarantee. Trigger: the sessionId
+  persistence work.
+- OW21 — updateArgument's FULL EVENT-ROUTING (per OW16's
+  classification): the tool mutation stamps HANDLER-class with NO
+  eventId, so on a flag-ON client the overlay REFUSES the seal
+  loudly (review m5 — surfacing what was silent loss: the divert
+  reported ok, nothing landed, no server run reproduced it, the
+  entry could never intent-retire). The refusal is the honest
+  interim, not the design: routing the mutation as a real event
+  (minted id, appended intent, server-authoritative run) is owed.
+  Interim mitigation, now ASSERTED (`speculation-overlay.test.ts`):
+  the llm-dialog tool loop's egress is dropped under speculation, so
+  a speculative turn cannot reach the tool call client-side.
+  Trigger: the first flag-ON client surface that drives llm-dialog
+  turns (the dialog moves server-side with the loop, which may
+  retire this row instead).
+
 **Phase 6 (the contract is fixed now, the check lands with
 hardening):**
 
@@ -989,6 +1025,125 @@ re-homed pins from train-deleted test surfaces):
   enter it"), instrumenting the publication turn directly (green;
   discriminates — deferring the in-lock verdict publication fails
   it).
+
+Delta 2026-08-11 — the Phase-3 INDEPENDENT review's fix batch (this
+PR; every finding probe- or repro-verified by the reviewer, all
+red-first-evidenced where the batch required it):
+
+- M1+m4 — the fail-open sidecar admission CLOSED, both arms, both
+  flag postures. Pre-fix, `appendedEntriesOfPatch` and the `set` arm
+  coerced a non-array `/value/entries` write to `[]` for validation
+  while the write applied VERBATIM: authored garbage ADMITTED with
+  zero located entries, then `selectPendingStreamEventDocs`
+  TypeErrored in activate/park/drain/wave-close (wedging the space)
+  while every honest append hit the garbage in its dedupe read.
+  Fixed: `refuseMalformedAuthoredStreamWrites` (engine.ts) refuses
+  authored non-array `/value/entries` writes flag-ON, and refuses
+  authored sidecar-prefixed writes OUTRIGHT flag-OFF; the pending
+  scan, the watermark recompute, and the admission's dedupe read all
+  carry defensive `Array.isArray` (derived stays trusted — malformed
+  derived state skips instead of wedging). Red-first pinned in
+  `memory/test/v2-event-append.test.ts` (the reviewer's repro shapes:
+  admit-then-TypeError, the set-arm coercion, the OFF-arm refusal,
+  the derived-garbage recompute wedge).
+- A THIRD RECORDED OFF-arm acceptance rides the m4 half (PENDING
+  OWNER RATIFICATION — coordinator-adjudicated 2026-08-11: the
+  defect-flavored freedom removed; the OFF-written garbage poisons
+  the ON flip): authored writes into `of:stream-events:`-prefixed
+  docs under the OFF flag, which formerly SUCCEEDED unvalidated (no
+  admission exists OFF — including forged `firedAt` actors that the
+  first ON activation would deliver as-stamped), now REFUSE
+  prefix-keyed. No legitimate OFF-arm producer writes the reserved
+  prefix; the ratification lands separately, and testing §2's gate
+  clause already names this register's recorded-acceptance rows.
+- M2 — the C8d parent fold WIRED FOR REAL. The fold keyed on
+  `context.parentEventId`, which nothing in production set: cell.ts's
+  same-wave cascade queued `{eventId, served:{firedAt}}` only, so a
+  raced parent's requeue left its cascade child COMMITTED (the
+  orphan) and the retry re-applied the consequence under a fresh-id
+  re-emission (the double). The emitter's eventId now threads
+  end-to-end: `ServedEventDispatch.parentEventId` → the dispatch
+  stamp (scheduler/events.ts) → `ServerRunInfo.parentEventId` →
+  `#stampRun` → the wave run context. Red-first e2e through the
+  WHOLE production chain in `executor-events-down.test.ts` (the
+  raced-cascade test: a predicate-scoped settle gate holds the
+  sealed wave open, a rival races the parent's consequence — child
+  lands exactly once, never doubled).
+- M3 (coordinator-adjudicated 2026-08-11, VETOABLE) — the emit-path
+  tail-read excluded from the dependency log and basis rows: a
+  sender does not re-send because someone else sent. cell.ts's LT1
+  emission read `/entries` unmarked, putting the target sidecar in
+  the EMITTING run's logged reads and basis rows — a demanded
+  derivation emitter re-ran (and re-emitted, fresh eventId) on any
+  neighbor's append to the same stream. Classified with the existing
+  machinery-read boundary: `ignoreReadForScheduling` +
+  `mergeableOpRead` (the Cell.push precedent, paired with the
+  already-recorded mergeable append). Red-first pinned in
+  `executor-wave.test.ts` (the derivation-emitter test: dependency
+  log and §3b basis rows both exclude the sidecar; the write and the
+  stamped entry still land).
+- C1 — the watermark requeue-hold PINNED at the engine
+  (`v2-event-append.test.ts`): mixed consequenced/unconsequenced
+  entries at distinct seqs hold the frontier below the pending entry
+  and advance through consequenced ones; a same-commit seq group
+  advances only together (the `every(consequenced)` clause verbatim
+  — the reviewer's delete-the-hold probe now goes red; it previously
+  left all 481 memory tests green).
+- C2 — the mark-failure ABORT pinned at the SpaceServer
+  (`executor-space-server.test.ts`): fault-injected consequence-mark
+  failure aborts the handler tx — no unmarked consequence ever
+  commits (events.md §4's double-consequence hatch; the reviewer's
+  replace-abort-with-continue probe now goes red).
+- m5 — the overlay REFUSES an event-handler seal lacking an eventId
+  (loud error instead of the silent no-retire divert), the llm-dialog
+  tool loop's egress-drop posture is now asserted (both in
+  `speculation-overlay.test.ts`), updateArgument's full event-routing
+  is owed as OW21, and the pin/unpin completion key carries the
+  scopeKeyIdentity caveat comment (llm-dialog.ts) for the day
+  `pinnedCells` is scoped.
+- m6/n2 — the event-append queue's `#persist` serializes behind the
+  PREVIOUS save (an async adapter could complete saves out of order,
+  leaving an OLDER snapshot durable) and an enqueue AFTER close
+  settles its outcome instead of hanging its barrier (both pinned in
+  `event-append-client.test.ts`); the browser-adapter follow-up
+  carries the remaining debts as OW20.
+- m7 — worker/host flag-posture AGREEMENT
+  (`runtime-client/backends/runtime-processor.ts`):
+  `InitializationData.experimental` now types `serverExecution` (it
+  rode as an untyped excess property), and the worker asserts the
+  constructed runtime's resolved posture matches the host's
+  declaration — refusing initialization loudly on divergence in
+  either direction (pre-fix `data.experimental ?? {}` silently
+  reverted an undeclared worker to OFF while the host diverted: F10
+  alive and dead across realms). OFF-arm-neutral (nothing-declared +
+  resolved-OFF agree); pinned in `runtime-processor.test.ts`.
+- n3 (recorded note, no mechanism moved): a send from a
+  BOOKKEEPING-stamped run on a flag-ON client is silent loss — the
+  stamp suppresses the client append (the fire fork keys on "outside
+  the scheduler") and no wave carries it; the only CLIENT-side
+  bookkeeping producer today is the pattern-swap setupTx (runner.ts),
+  which does not send (the serving loop's watermark write is the
+  other bookkeeping stamp, wave-carried server-side). The row becomes
+  load-bearing the day a client bookkeeping path sends; route it as
+  an event then.
+- n4 — the Phase-3 flagged-surfaces list above omitted one NEW
+  below-spec-granularity surface, recorded here: the
+  `execution_outbox` EVENT-CARRIAGE MIGRATION
+  (`migrateExecutionOutboxEventCarriage`, engine.ts) — three
+  additive nullable columns (`target_stream_link`,
+  `sessionless_space_scope`, `source_event`) added in place;
+  stage-G-era rows predate them, and their NULLs read fail-closed
+  (path-less stream fallback at the sidecar id; "not declared" for
+  the OW15 carve-out) — the engine.ts migration comment carries the
+  same reading.
+- n1 — `selectPendingStreamEventDocs`' cost comment corrected: the
+  head query is a branch-wide scan filtered by the sidecar prefix
+  (LIKE under default collation does not use the PK), run at
+  activation, per drain, at park evaluation, and at wave-close — not
+  "activation-time, never per-wave".
+- n5 — the two Phase-2 ledger lines above that still described the
+  inverted F10 pins now carry their Phase-3 supersession inline (the
+  named suite asserts the diverted posture since events-down).
 
 ## 4. Standing rule
 

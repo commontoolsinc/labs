@@ -468,6 +468,75 @@ describe("Phase 2 speculation overlay", () => {
     ).toBe(false);
   });
 
+  it("the llm-dialog tool loop's egress is dropped under speculation (review 2026-08-11 m5): the claimed updateArgument mitigation, asserted", async () => {
+    // llm-dialog's turn starts as a `llmDialog-start` sink-request
+    // post-commit effect (llm-dialog.ts's
+    // enqueueSinkRequestPostCommitEffect). Under speculation that
+    // egress must DROP — the tool loop (and with it every tool
+    // mutation, updateArgument included) runs only in the server's
+    // authoritative run. This was the claimed m5 mitigation; nothing
+    // asserted it before this pin.
+    const runtime = {
+      storageManager: { open: () => ({ replica: {} }) },
+    } as unknown as Runtime;
+    const destination = new SpeculationOverlayDestination(runtime);
+    const flushed: string[] = [];
+    const dialogStart: PostCommitSideEffect = {
+      id: "llmDialog:req-1",
+      kind: "llmDialog-start",
+      flush: () => {
+        flushed.push("llmDialog-start");
+      },
+    };
+    const handlerTx = {} as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(handlerTx, {
+      actionId: "spec-llm-dialog",
+      kind: "event-handler",
+      eventId: "evt-llm-turn",
+    });
+    // Owned by the overlay (a speculative run), and NEVER flushed.
+    expect(destination.deferSealedEffects(handlerTx, [dialogStart])).toBe(
+      true,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(flushed).toEqual([]);
+  });
+
+  it("the overlay REFUSES an event-handler seal lacking an eventId (review 2026-08-11 m5): silent loss surfaces as a loud commit error", async () => {
+    // Pre-fix, llm-dialog's updateArgument (kind event-handler, no
+    // eventId — OW16's classification) diverted on a flag-ON client
+    // into an overlay entry with NO intent to retire against: the tool
+    // reported ok, nothing landed, no server run reproduced it. The
+    // overlay now refuses the seal loudly instead.
+    const runtime = {
+      storageManager: { open: () => ({ replica: {} }) },
+    } as unknown as Runtime;
+    const destination = new SpeculationOverlayDestination(runtime);
+
+    const noEventTx = { tx: {} } as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(noEventTx, {
+      actionId: "llm-dialog/update-argument",
+      kind: "event-handler",
+    });
+    const refused = await destination.seal(noEventTx);
+    expect(refused.error).toBeDefined();
+    expect(refused.error?.message).toContain("no eventId");
+    expect(refused.error?.message).toContain("silently lost");
+
+    // The SAME seal WITH an eventId passes the refusal and proceeds to
+    // the next gate (this bare fake tx has no seal support, so it hits
+    // the fail-closed sealing arm — a DIFFERENT error).
+    const withEventTx = { tx: {} } as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(withEventTx, {
+      actionId: "spec-handler-with-event",
+      kind: "event-handler",
+      eventId: "evt-has-id",
+    });
+    const sealed = await destination.seal(withEventTx);
+    expect(sealed.error).toBeDefined();
+    expect(sealed.error?.message).toContain("does not support sealing");
+  });
+
   it("an effectful builtin reached by client speculation never fires egress: pending renders, zero client fetch calls (README §3.5's never-execute rule)", async () => {
     // Client-only bring-up posture (no serving host): the flag is set
     // explicitly, and the client's fetch stub must never be called.

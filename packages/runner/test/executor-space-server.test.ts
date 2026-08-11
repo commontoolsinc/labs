@@ -271,6 +271,67 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(entries.length).toBe(1);
   });
 
+  it("aborts the handler tx when the consequence mark cannot be written (review 2026-08-11 C2): unmarked consequences never commit — events.md §4's double-consequence hatch stays closed", async () => {
+    // The mark IS the exactly-once record: a handler tx whose
+    // consequence-mark write failed but whose CONSEQUENCES still
+    // committed would re-run on the next drain — double consequences.
+    // The reviewer's probe (replace #stampRun's tx.abort with a
+    // continue) left every suite green; this pin goes red under it.
+    const created = newSpaceServer();
+    expect(await created.activate()).toBe(true);
+    const runtime = servingRuntime!;
+
+    // Fault injection at the mark-write seam: the sidecar's cell
+    // construction throws — a stand-in for any storage-layer mark
+    // failure (a compacted-away index, a schema refusal, a read fault).
+    const sidecarId = "of:stream-events:c2-mark-stream";
+    const original = runtime.getCellFromLink.bind(runtime);
+    (runtime as unknown as { getCellFromLink: unknown }).getCellFromLink = (
+      link: { id?: string },
+      ...rest: unknown[]
+    ) => {
+      if (link?.id === sidecarId) {
+        throw new Error("injected mark-write failure (C2)");
+      }
+      return (original as (...args: unknown[]) => unknown)(link, ...rest);
+    };
+    try {
+      const consequence = runtime.getCell<{ n: number }>(
+        space,
+        "c2-consequence",
+        undefined,
+      );
+      await consequence.sync();
+      const tx = runtime.edit();
+      // The would-be handler consequence rides the tx (order within
+      // one tx is immaterial — the stamp writes the mark before the
+      // handler runs in production).
+      consequence.withTx(tx).set({ n: 1 });
+      // The REAL #stampRun (installed at activation as the runtime's
+      // runStamper) attempts the mark write, which fails: the tx must
+      // ABORT — the dispatch's error arm owns the error consequence.
+      runtime.stampServerRun(tx, {
+        actionId: "test/c2-handler",
+        kind: "event-handler",
+        eventId: "evt-c2",
+        streamEntry: { sidecarId, index: 0, seq: 1 },
+      });
+      const committed = await tx.commit();
+      expect(committed.error).toBeDefined();
+
+      // Flush a wave: the unmarked consequence must NEVER land (under
+      // the probe the sealed tx commits with this wave — red).
+      await driveOneWave("c2-flush-probe");
+      const doc = Engine.read(engine, {
+        id: consequence.getAsNormalizedFullLink().id,
+      });
+      expect(doc?.value).toBeUndefined();
+    } finally {
+      (runtime as unknown as { getCellFromLink: unknown }).getCellFromLink =
+        original;
+    }
+  });
+
   it("drops a straggler's effects for a closed or abandoned wave — owned, no re-created entry, no inline flush (m-3)", async () => {
     const created = newSpaceServer();
     expect(await created.activate()).toBe(true);

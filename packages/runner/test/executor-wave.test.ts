@@ -42,7 +42,11 @@ import {
   executionLeaseHolder,
 } from "@commonfabric/memory/v2/execution-lease";
 import { selectSchedulerBasisRows } from "@commonfabric/memory/v2/scheduler-basis";
-import { decodeMemoryBoundary, resolveScopeKey } from "@commonfabric/memory/v2";
+import {
+  decodeMemoryBoundary,
+  resolveScopeKey,
+  streamEntriesDocId,
+} from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
@@ -64,6 +68,7 @@ import {
   effectCompletionKeyOf,
   markEffectCompletion,
 } from "../src/executor/effect-completion.ts";
+import { txToReactivityLog } from "../src/scheduler/reactivity.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("executor wave test");
@@ -1115,6 +1120,129 @@ describe("stage D seal-into-wave", () => {
     // re-mints it with a fresh id — so reporting it would make the loop
     // retry an event that does not exist.
     expect(outcome.requeuedEventIds).toEqual(["e-parent"]);
+  });
+
+  it("the emit-path tail read is append mechanics, not a dependency (review 2026-08-11 M3, coordinator-adjudicated, vetoable): a derivation emitter neither logs nor bases on the target sidecar", async () => {
+    // LT6's case: a demanded DERIVATION that emits. Pre-fix, cell.ts's
+    // LT1 emission read the sidecar tail UNMARKED, so the emitting
+    // run's dependency log and basis rows contained the target stream
+    // doc — a neighbor's append to the same stream RE-RAN the emitter
+    // (which re-emitted under a fresh eventId). The adjudication: a
+    // sender does not re-send because someone else sent — the read is
+    // append mechanics, classified with the machinery-read boundary
+    // (`ignoreReadForScheduling` + `mergeableOpRead`, the Cell.push
+    // precedent).
+    const lease = liveLease();
+    const servingManager = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const servingRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: servingManager,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    try {
+      const streamCell = servingRuntime.getCell<{ $stream: boolean }>(
+        space,
+        "m3-emitter-stream",
+        undefined,
+      );
+      const seed = servingRuntime.getCell<{ value: number }>(
+        space,
+        "m3-emitter-seed",
+        undefined,
+      );
+      {
+        const tx = servingRuntime.edit();
+        streamCell.withTx(tx).set({ $stream: true });
+        seed.withTx(tx).set({ value: 7 });
+        expect((await tx.commit()).error).toBeUndefined();
+      }
+      const seedSeq = Engine.serverSeq(engine);
+
+      const wave = new WaveAccumulator({
+        space,
+        basisSeq: Engine.serverSeq(engine),
+        scopeKeyIdentity: {
+          principal: signer.did(),
+          sessionId: "m3-session",
+        },
+        replicaFor: (s) => servingManager.open(s).replica,
+        lease,
+      });
+      servingRuntime.installSealDestination(wave);
+
+      // The demanded-derivation emitter: reads the seed (its one
+      // genuine dependency), then emits on the stream — the LT1
+      // same-space carriage writes the sidecar entry into this tx.
+      const emitTx = servingRuntime.edit();
+      stampWaveRunContext(emitTx, {
+        actionId: "m3-emitter",
+        kind: "derivation",
+      });
+      const base = seed.withTx(emitTx).get();
+      expect(base?.value).toBe(7);
+      streamCell.withTx(emitTx).send({ ping: 1 } as never);
+
+      const streamLink = streamCell.getAsNormalizedFullLink();
+      const sidecarId = streamEntriesDocId({
+        id: streamLink.id,
+        path: [...streamLink.path],
+      });
+      const seedId = seed.getAsNormalizedFullLink().id;
+
+      // The DEPENDENCY-LOG half (the no-re-run mechanism: the
+      // scheduler subscribes the action to exactly these reads): the
+      // sidecar must NOT be among them; the seed must be.
+      const log = txToReactivityLog(emitTx);
+      expect(log.reads.some((read) => read.id === seedId)).toBe(true);
+      expect(
+        log.reads.concat(log.shallowReads).some((read) =>
+          read.id === sidecarId
+        ),
+      ).toBe(false);
+      // The WRITE stays logged — the emitter genuinely wrote the entry.
+      expect(log.writes.some((write) => write.id === sidecarId)).toBe(true);
+
+      expect((await emitTx.commit()).error).toBeUndefined();
+      servingRuntime.clearSealDestination();
+      const outcome = await wave.commitWave(newSink());
+      await wave.settled();
+      expect(outcome.aborted).toBeUndefined();
+      expect(outcome.seq).toBeDefined();
+
+      // The BASIS-ROW half (§3b): the emitter's rows carry the seed —
+      // and never the sidecar (pre-fix the tail read put it there, so
+      // a restart-time basis check re-coupled emitter to stream too).
+      const rows = selectSchedulerBasisRows(engine, {
+        branch: "",
+        action: "m3-emitter",
+        actionScopeKey: "space",
+      });
+      expect(rows.some((row) => row.entity === seedId)).toBe(true);
+      expect(rows.some((row) => row.entity === sidecarId)).toBe(false);
+      const seedRow = rows.find((row) => row.entity === seedId);
+      expect(seedRow?.seq).toBe(seedSeq);
+
+      // Sanity: the emission itself LANDED (the exclusion removed the
+      // dependency, not the append) — stamped seq, inherited actor.
+      const sidecar = Engine.readState(engine, { id: sidecarId })?.document
+        ?.value as
+          | {
+            entries?: Array<
+              { seq?: number; firedAt?: { session?: string } }
+            >;
+          }
+          | undefined;
+      expect(sidecar?.entries?.length).toBe(1);
+      expect(typeof sidecar?.entries?.[0].seq).toBe("number");
+      expect(sidecar?.entries?.[0].firedAt?.session).toBe("server");
+    } finally {
+      lease.release();
+      await servingRuntime.dispose();
+      await servingManager.close();
+    }
   });
 
   it("drops a derivation that read a requeued handler's sealed write (nothing derived from withdrawn state commits)", async () => {

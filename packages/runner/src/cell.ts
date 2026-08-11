@@ -1579,7 +1579,23 @@ export class CellImpl<T extends FabricValue>
               scope: "space",
               path: ["entries"],
             } as unknown as NormalizedFullLink;
-            const currentEntries = this.tx.readValueOrThrow(entriesLink);
+            // The tail read is APPEND MECHANICS, not a semantic input
+            // (adjudicated coordinator 2026-08-11, VETOABLE — review
+            // M3): a sender does not re-send because someone else
+            // sent. Unmarked, this read put the target sidecar in the
+            // EMITTING run's dependency log and basis rows, so a
+            // demanded derivation emitter RE-RAN (and re-emitted,
+            // fresh eventId) on any neighbor's append to the same
+            // stream. Classified with the existing machinery-read
+            // boundary: `ignoreReadForScheduling` keeps it out of the
+            // reactivity log (no re-run subscription), and
+            // `mergeableOpRead` — the Cell.push precedent, paired
+            // with the recorded mergeable append below — keeps it out
+            // of the commit's conflict read set, and with it out of
+            // the sealed reads that feed wave basis rows (§3b).
+            const currentEntries = this.tx.readValueOrThrow(entriesLink, {
+              meta: { ...ignoreReadForScheduling, ...mergeableOpRead },
+            });
             const emittedEntry = {
               eventId: emittedId,
               stream,
@@ -1606,7 +1622,12 @@ export class CellImpl<T extends FabricValue>
             // wave's drain re-runs it (C8b), and an emitter that
             // requeues withdraws the entry with its own contribution
             // (C8d). No streamEntry on the stamp: the entry has no
-            // durable index yet — the batch owns the mark.
+            // durable index yet — the batch owns the mark. The
+            // EMITTER's eventId rides as the cascade's parentEventId
+            // (review 2026-08-11 M2): the C8d fold keys on it, and
+            // without the thread a cascade child COMMITTED while its
+            // requeued parent re-emitted under a fresh id — the
+            // orphan-consequence double.
             this.runtime.scheduler.queueEvent(
               resolvedToValueLink,
               event,
@@ -1622,6 +1643,9 @@ export class CellImpl<T extends FabricValue>
                       : {}),
                     session: acting?.session ?? "server",
                   },
+                  ...(context.eventId !== undefined
+                    ? { parentEventId: context.eventId }
+                    : {}),
                 },
               },
             );

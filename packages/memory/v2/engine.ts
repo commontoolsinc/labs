@@ -1632,12 +1632,18 @@ export type PendingStreamEventDoc = {
 
 /**
  * Scan the space's stream sidecar docs for undelivered events (Phase 3;
- * serving-loop.md §6 step 4). Bounded by the number of sidecar docs (the
- * `of:stream-events:` id prefix keys the head lookup), not by doc count:
- * activation-time cost, never per-wave. Entries at or below the watermark
- * — and consequenced entries above it, which a budget-exhausted wave left
- * durable but processed — are excluded by the idempotency rule
- * (events.md §4).
+ * serving-loop.md §6 step 4). Cost, stated honestly (review 2026-08-11,
+ * n1): the head query is a branch-wide scan filtered by the
+ * `of:stream-events:` prefix — under SQLite's default collation a LIKE
+ * prefix does NOT use the (branch, id, scope_key) primary key — so the
+ * scan is bounded by the branch's HEAD COUNT, with a per-sidecar state
+ * read on top. And it is not activation-only: the SpaceServer calls it
+ * at activation, per drain, at park evaluation, and at wave-close. If
+ * head counts make this hot, the fix is an indexed sidecar registry (or
+ * `GLOB`/range bounds that can use the PK), not a comment. Entries at
+ * or below the watermark — and consequenced entries above it, which a
+ * budget-exhausted wave left durable but processed — are excluded by
+ * the idempotency rule (events.md §4).
  */
 export const selectPendingStreamEventDocs = (
   engine: Engine,
@@ -1664,7 +1670,11 @@ WHERE branch = :branch AND id LIKE :prefix AND op != 'delete'
     const eventWatermark = typeof value.eventWatermark === "number"
       ? value.eventWatermark
       : 0;
-    const entries = (value.entries ?? []).filter((entry) =>
+    // Defensive (M1/m4, review 2026-08-11): admission refuses authored
+    // non-array logs, but a derived writer is trusted — a malformed log
+    // must SKIP, never TypeError-wedge activate/park/drain/wave-close.
+    const storedEntries = Array.isArray(value.entries) ? value.entries : [];
+    const entries = storedEntries.filter((entry) =>
       entry !== null && typeof entry === "object" &&
       typeof entry.eventId === "string" &&
       entry.consequenced !== true &&
@@ -1753,6 +1763,88 @@ const entryFiredAtMatches = (
   (supplied.session === undefined || supplied.session === stamp.session);
 
 /**
+ * The prefix-keyed sidecar SHAPE guard (independent review 2026-08-11,
+ * M1+m4). Runs for AUTHORED commits REGARDLESS of the server-execution
+ * flag, before the flag early-return:
+ *
+ * - Flag ON: a non-array write at `/value/entries` of a stream sidecar
+ *   doc is REFUSED in BOTH admission arms. Pre-guard, the arms coerced
+ *   a non-array to `[]` for validation while the write applied
+ *   verbatim — the commit ADMITTED with zero located entries, then
+ *   `selectPendingStreamEventDocs` TypeErrored over the non-array in
+ *   activate/park/drain/wave-close (wedging the space) and every
+ *   honest append hit the garbage in its dedupe read.
+ * - Flag OFF (m4): authored writes into `of:stream-events:`-prefixed
+ *   docs are refused OUTRIGHT. The OFF arm has no event-append
+ *   admission at all, so OFF-written garbage — a non-array log, or a
+ *   well-formed entry carrying a forged `firedAt` actor no admission
+ *   ever validated — would sit durable and poison the FIRST ON
+ *   activation. This is a recorded OFF-arm acceptance (writes that
+ *   formerly succeeded now refuse): defect-flavored freedom removed;
+ *   see verification-coverage.md's recorded-acceptance row (pending
+ *   owner ratification — coordinator-adjudicated 2026-08-11).
+ *
+ * Derived commits stay exempt (one trust environment — the
+ * SpaceServer's own serialization); the pending scan and the watermark
+ * recompute carry defensive `Array.isArray` guards so even a
+ * derived-written malformed log can never wedge the engine.
+ */
+const refuseMalformedAuthoredStreamWrites = (
+  commit: ClientCommit,
+  commitClass: CommitClass,
+  flagOn: boolean,
+): void => {
+  if (commitClass !== "authored") return;
+  const nonArray = (id: string): ProtocolError =>
+    new ProtocolError(
+      `authored write into stream doc "${id}" carries a non-array ` +
+        `"${STREAM_ENTRIES_POINTER}" value — the entries log is an ` +
+        "ARRAY of entries; a non-array log would wedge the pending " +
+        "scan (events.md §1, §4)",
+    );
+  for (const operation of commit.operations) {
+    if (operation.op === "sqlite") continue;
+    if (!isStreamEntriesDocId(operation.id)) continue;
+    if (!flagOn) {
+      throw new ProtocolError(
+        `authored write into stream doc "${operation.id}" refused: ` +
+          "stream sidecar docs require EXPERIMENTAL_SERVER_EXECUTION — " +
+          "the OFF arm has no event-append admission, and OFF-written " +
+          "state (unvalidated shapes, unstamped firedAt actors) would " +
+          "poison the first ON activation (events.md §1, §4)",
+      );
+    }
+    if (operation.op === "delete") continue;
+    if (operation.op === "set") {
+      const value = operation.value?.value;
+      if (
+        value !== null && typeof value === "object" &&
+        "entries" in (value as Record<string, unknown>) &&
+        !Array.isArray((value as { entries?: unknown }).entries)
+      ) {
+        throw nonArray(operation.id);
+      }
+      continue;
+    }
+    for (const patch of operation.patches) {
+      if (patch.path !== STREAM_ENTRIES_POINTER) continue;
+      if (
+        (patch.op === "add" || patch.op === "replace") &&
+        !Array.isArray(patch.value)
+      ) {
+        throw nonArray(operation.id);
+      }
+      if (
+        (patch.op === "append" || patch.op === "add-unique") &&
+        !Array.isArray(patch.values)
+      ) {
+        throw nonArray(operation.id);
+      }
+    }
+  }
+};
+
+/**
  * Validate the commit's declared event appends against events.md §1/§4 and
  * resolve the stamp plan. Runs INSIDE the apply transaction, before the
  * commit seq is allocated; the returned plan is applied per-op in the
@@ -1787,6 +1879,9 @@ const validateEventAppends = (
         "(events.md §1; the OFF arm has no event-append admission)",
     );
   }
+  // The prefix-keyed shape guard runs in BOTH flag arms (M1+m4,
+  // review 2026-08-11) — see its doc comment.
+  refuseMalformedAuthoredStreamWrites(commit, commitClass, flagOn);
   if (!flagOn) return plan;
 
   // Declarations index — one per (doc-instance, eventId); duplicates in
@@ -1843,7 +1938,12 @@ const validateEventAppends = (
     const currentValue = currentState?.document?.value as
       | StreamEventsDocValue
       | undefined;
-    const storedEntries = currentValue?.entries ?? [];
+    // Defensive Array.isArray (M1/m4, review 2026-08-11): an honest
+    // append judged against a malformed stored log must refuse/skip
+    // cleanly, never TypeError into the transient-retry-forever class.
+    const storedEntries = Array.isArray(currentValue?.entries)
+      ? currentValue!.entries!
+      : [];
 
     const located: Array<{
       entry: StreamEventEntry;
@@ -2967,10 +3067,14 @@ const maintainStreamEventWatermarks = (
     const document = state?.document;
     const value = document?.value as StreamEventsDocValue | undefined;
     if (value === undefined || document === null) continue;
-    const entries = (value.entries ?? []).filter(
-      (entry): entry is StreamEventEntry =>
-        entry !== null && typeof entry === "object",
-    );
+    // Defensive (M1/m4, review 2026-08-11): a malformed (non-array)
+    // log must not TypeError the recompute — and with it the whole
+    // derived commit's apply transaction.
+    const entries = (Array.isArray(value.entries) ? value.entries : [])
+      .filter(
+        (entry): entry is StreamEventEntry =>
+          entry !== null && typeof entry === "object",
+      );
     const stored = typeof value.eventWatermark === "number"
       ? value.eventWatermark
       : 0;

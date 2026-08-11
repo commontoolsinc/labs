@@ -209,6 +209,16 @@ export class EventAppendQueue {
     this.#queue.push(entry);
     this.#outcomes.set(entry, resolve);
     this.#persist();
+    // Belt (review 2026-08-11 n2): an enqueue AFTER close() must still
+    // settle its outcome — close() already swept the outcome map, so
+    // without this the promise hangs any barrier it joins. The intent
+    // itself stays queued+persisted for the next queue instance
+    // (closed is not refused), exactly like close()'s own sweep.
+    if (this.#closed) {
+      this.#outcomes.delete(entry);
+      resolve({ delivered: false, refused: "event queue closed" });
+      return promise;
+    }
     this.#kick();
     return promise;
   }
@@ -237,18 +247,25 @@ export class EventAppendQueue {
   }
 
   #persist(): void {
-    // Serialized BEHIND the constructor's load: a save racing the load
+    // Serialized BEHIND the constructor's load (a save racing the load
     // would write only the fresh entries, clobbering the predecessor's
-    // persisted backlog (the LT9 loss the seam exists to prevent).
-    this.#lastPersist = this.#loaded.then(() =>
-      this.#store.save(this.#space, this.#queue)
-    ).catch((error) => {
-      logger.warn("event-queue-save-failed", () => [
-        `event queue save for ${this.#space} failed; a reload before ` +
-        "delivery may lose the queued intent (LT9 durability degraded)",
-        error,
-      ]);
-    });
+    // persisted backlog — the LT9 loss the seam exists to prevent) AND
+    // behind the PREVIOUS save (review 2026-08-11 m6): an async
+    // adapter that resolves saves out of order would otherwise leave
+    // an OLDER queue snapshot durable after a newer one — chaining on
+    // `#loaded` alone let save N+1 complete before save N. Every link
+    // ends in catch, so a failed save degrades durability without
+    // poisoning the chain.
+    this.#lastPersist = this.#lastPersist
+      .then(() => this.#loaded)
+      .then(() => this.#store.save(this.#space, this.#queue))
+      .catch((error) => {
+        logger.warn("event-queue-save-failed", () => [
+          `event queue save for ${this.#space} failed; a reload before ` +
+          "delivery may lose the queued intent (LT9 durability degraded)",
+          error,
+        ]);
+      });
   }
 
   #kick(): void {

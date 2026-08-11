@@ -41,7 +41,37 @@ import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
+import { readWatermarkSeq } from "../src/executor/watermark.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+
+/** The serving-loop harness's settle-gate seam (see
+ * executor-serving-loop.test.ts): when set, the loop's settle hangs at
+ * its `inputSynced` barrier until the gate resolves — deterministically
+ * holding an open (sealed, uncommitted) wave so a rival authored commit
+ * can race a drained handler's consequence (the C8d raced-cascade
+ * test). `settleGateWhen` scopes the hold: the serving loop runs a
+ * settle in EVERY cycle (empty ones included), so an unconditional gate
+ * would catch some idle cycle already in flight and starve the drain
+ * the test needs — the predicate lets exactly the cycle that SEALED the
+ * watched state hang. Undefined everywhere else. */
+class GatedStorageManager extends EmulatedStorageManager {
+  static override connectTo(
+    server: MemoryV2Server.Server,
+    options: Parameters<typeof EmulatedStorageManager.connectTo>[1],
+  ): GatedStorageManager {
+    return super.connectTo(server, options) as GatedStorageManager;
+  }
+
+  settleGate: Promise<void> | undefined;
+  settleGateWhen: (() => boolean) | undefined;
+
+  override async inputSynced(): Promise<void> {
+    await super.inputSynced();
+    if (this.settleGate !== undefined && (this.settleGateWhen?.() ?? true)) {
+      await this.settleGate;
+    }
+  }
+}
 
 const spaceSigner = await Identity.fromPassphrase("events down space");
 const space = spaceSigner.did() as MemorySpace;
@@ -122,14 +152,21 @@ describe("Phase 3 events-down (serving side)", () => {
   let clientRuntime: Runtime;
   let extraManagers: EmulatedStorageManager[];
   let extraRuntimes: Runtime[];
+  /** The live serving runtime/manager (set by newHost's createRuntime)
+   * — the C8d raced-cascade test reads sealed state through them and
+   * closes the settle gate. */
+  let servingRuntime: Runtime | undefined;
+  let servingManager: GatedStorageManager | undefined;
 
-  const newHost = (): ExecutorHost =>
+  const newHost = (
+    policy?: ConstructorParameters<typeof ExecutorHost>[0]["policy"],
+  ): ExecutorHost =>
     new ExecutorHost({
       server,
       serviceIdentity: serviceSigner.did(),
       // deno-lint-ignore require-await
       createRuntime: async () => {
-        const manager = EmulatedStorageManager.connectTo(server, {
+        const manager = GatedStorageManager.connectTo(server, {
           as: serviceSigner,
         });
         const runtime = new Runtime({
@@ -141,6 +178,8 @@ describe("Phase 3 events-down (serving side)", () => {
             systemPatternAutoUpdate: false,
           },
         });
+        servingRuntime = runtime;
+        servingManager = manager;
         return {
           runtime,
           dispose: async () => {
@@ -149,13 +188,15 @@ describe("Phase 3 events-down (serving side)", () => {
           },
         };
       },
-      policy: { flushDeadlineMs: 5_000, idleParkMs: 600_000 },
+      policy: policy ?? { flushDeadlineMs: 5_000, idleParkMs: 600_000 },
     });
 
   beforeEach(() => {
     server = newSharedServer({ subscriptionRefreshDelayMs: 0 });
     extraManagers = [];
     extraRuntimes = [];
+    servingRuntime = undefined;
+    servingManager = undefined;
   });
 
   afterEach(async () => {
@@ -721,5 +762,260 @@ describe("Phase 3 events-down (serving side)", () => {
     });
     expect((doc?.value as { value?: number })?.value).toBe(11);
     cancelDemand();
+  });
+
+  it("C8d through the PRODUCTION cascade path (review 2026-08-11 M2): a raced parent's requeue folds its same-wave cascade child — no orphan consequence, exactly-once on retry", async () => {
+    // The reviewer's failure scenario at 71718250c: the C8d fold keyed
+    // on `context.parentEventId`, which NOTHING in production set — the
+    // LT1 same-space emission queued its cascade with only
+    // {eventId, served:{firedAt}}. So when a drained parent P's
+    // consequence raced into REQUEUE, its same-wave cascade child C
+    // COMMITTED (the orphan), and P's retry re-emitted the cascade
+    // under a FRESH id — C's consequence applied TWICE. This test
+    // drives the WHOLE production chain (cell.ts's emission carriage →
+    // the dispatch stamp → the SpaceServer's #stampRun → the wave
+    // fold), deterministically: the settle gate holds the sealed wave
+    // open while a rival authored commit races P's consequence.
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+
+    // The CHILD piece: its handler bumps the CHILD's OWN arg doc by 10.
+    // A separate doc from the parent's — only the cascade closure ties
+    // the two runs' fates (the rival races the PARENT's doc only).
+    const CHILD_TEN_PATTERN = [
+      "import { handler, pattern, Stream, Writable } from 'commonfabric';",
+      "const bump = handler<unknown, { value: Writable<number> }>(",
+      "  (_ev, { value }) => { value.set((value.get() ?? 0) + 10); },",
+      ");",
+      "export default pattern<",
+      "  { value: Writable<number> },",
+      "  { value: number; bump: Stream<unknown> }",
+      ">(({ value }) => ({ value, bump: bump({ value }) }));",
+    ].join("\n");
+    // The PARENT piece: bumps its own arg doc AND sends on the child's
+    // stream (carried in through an argument link) — the LT1 same-space
+    // emission, produced by a DRAINED handler run.
+    const PARENT_FIRE_PATTERN = [
+      "import { handler, pattern, Stream, Writable } from 'commonfabric';",
+      "const fire = handler<",
+      "  unknown,",
+      "  { value: Writable<number>; target: Stream<unknown> }",
+      ">((_ev, { value, target }) => {",
+      "  value.set((value.get() ?? 0) + 1);",
+      "  target.send({});",
+      "});",
+      "export default pattern<",
+      "  { value: Writable<number>; target: Stream<unknown> },",
+      "  { value: number; fire: Stream<unknown> }",
+      ">(({ value, target }) => ({ value, fire: fire({ value, target }) }));",
+    ].join("\n");
+
+    const child = await standUp(clientRuntime, CHILD_TEN_PATTERN, {
+      arg: "c8d-child-arg",
+      result: "c8d-child-result",
+    });
+    const parentCompiled = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: PARENT_FIRE_PATTERN }],
+    }, { space });
+    const parentArg = clientRuntime.getCell<{
+      value: number;
+      target: unknown;
+    }>(space, "c8d-parent-arg", undefined);
+    const parentResult = clientRuntime.getCell<Record<string, unknown>>(
+      space,
+      "c8d-parent-result",
+      parentCompiled.resultSchema,
+    );
+    await parentArg.sync();
+    await parentResult.sync();
+    {
+      const seed = clientRuntime.edit();
+      parentArg.withTx(seed).set({
+        value: 0,
+        target: child.result.key("bump"),
+      } as never);
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, parentCompiled, parentArg, parentResult);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const cancelChildDemand = child.result.sink(() => {});
+    const cancelParentDemand = parentResult.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    // A LONG flush deadline: the gated wave must never exhaust while
+    // the rival is being injected.
+    host = newHost({ flushDeadlineMs: 30_000, idleParkMs: 600_000 });
+    // The client's session predates the host — an authored poke
+    // activates the space (the restart test's recipe).
+    {
+      const poke = clientRuntime.edit();
+      clientRuntime.getCell<number>(space, "c8d-activate", undefined)
+        .withTx(poke).set(1);
+      expect((await poke.commit()).error).toBeUndefined();
+    }
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "the space to activate",
+    );
+
+    const parentArgId = parentArg.getAsNormalizedFullLink().id;
+    const childArgId = child.argument.getAsNormalizedFullLink().id;
+    const engineValueOf = (id: string): number | undefined =>
+      (Engine.read(engine, { id })?.value as { value?: number } | undefined)
+        ?.value;
+
+    // WARM-UP fire, ungated: proves the serving side has BOTH pieces
+    // demand-loaded and the full cascade path works (parent +1, child
+    // +10, everything consequenced). Without it the gated fire's first
+    // drain would DEFER on the cold piece load — and the gate holds
+    // the later wave the deferral needs.
+    parentResult.key("fire").send({});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await waitUntil(
+      () =>
+        engineValueOf(parentArgId) === 1 && engineValueOf(childArgId) === 10,
+      "the warm-up cascade to land",
+      30_000,
+    );
+    await waitUntil(
+      () =>
+        sidecarIdsIn(engine).every((id) => {
+          const value = Engine.read(engine, { id })?.value as
+            | StreamEventsDocValue
+            | undefined;
+          return (value?.entries ?? []).every((entry) =>
+            entry.consequenced === true
+          );
+        }),
+      "the warm-up entries to consequence",
+      30_000,
+    );
+    // Let the loop settle into wait-for-input (NOT mid-settle) before
+    // the gate closes — a gated PRIOR wave would absorb the rival
+    // before the parent ever read. W chases AUTHORED inputs only, so
+    // the probe is a fresh authored poke whose head seq W must claim.
+    {
+      const poke = clientRuntime.edit();
+      clientRuntime.getCell<number>(space, "c8d-settle-poke", undefined)
+        .withTx(poke).set(1);
+      expect((await poke.commit()).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+    const pokeId = clientRuntime.getCell<number>(
+      space,
+      "c8d-settle-poke",
+      undefined,
+    ).getAsNormalizedFullLink().id;
+    const pokeSeq = Engine.selectDocHead(engine, {
+      id: pokeId,
+      scopeKey: "space",
+    });
+    expect(pokeSeq).toBeGreaterThan(0);
+    await waitUntil(
+      () => readWatermarkSeq(engine) >= pokeSeq,
+      "the warm-up cycles to settle",
+      30_000,
+    );
+
+    // Serving-side views of both consequence docs (read through the
+    // wave's sealed overlay), synced BEFORE the gate closes.
+    const servingParentArg = servingRuntime!.getCell<{ value: number }>(
+      space,
+      "c8d-parent-arg",
+      undefined,
+    );
+    const servingChildArg = servingRuntime!.getCell<{ value: number }>(
+      space,
+      "c8d-child-arg",
+      undefined,
+    );
+    await servingParentArg.sync();
+    await servingChildArg.sync();
+
+    const gate = Promise.withResolvers<void>();
+    servingManager!.settleGate = gate.promise;
+    // Engage only in the cycle that SEALED the raced parent (an idle
+    // cycle's settle passes through) — parent==2 is visible ONLY
+    // through the open wave's sealed overlay.
+    servingManager!.settleGateWhen = () =>
+      (servingParentArg.key("value").get() as number | undefined) === 2;
+    try {
+      // The RACED fire: parent P drains, bumps its doc (1 → 2), emits
+      // the cascade; the child C runs in the SAME wave (10 → 20 on its
+      // own doc). Both seal; the gated settle holds the wave open.
+      parentResult.key("fire").send({});
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () =>
+          (servingParentArg.key("value").get() as number | undefined) === 2 &&
+          (servingChildArg.key("value").get() as number | undefined) === 20,
+        "parent and cascade child to SEAL into the open wave",
+      );
+
+      // The rival races P's consequence: a whole-doc set of the
+      // PARENT's arg doc (target link preserved) — a semantic conflict
+      // no rebase commutes, so P REQUEUES at the wave commit.
+      const storedParentArg = Engine.read(engine, { id: parentArgId })
+        ?.value as Record<string, unknown>;
+      Engine.applyCommit(engine, {
+        sessionId: "rival-session",
+        principal: "user:rival",
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: parentArgId as never,
+            value: {
+              value: { ...storedParentArg, value: 1000 },
+            } as never,
+          }],
+        },
+      });
+      gate.resolve();
+    } finally {
+      gate.resolve();
+      servingManager!.settleGate = undefined;
+      servingManager!.settleGateWhen = undefined;
+    }
+
+    // The wave commits: P requeues (its consequence raced the rival);
+    // C FOLDS with it — pre-fix C's +10 COMMITTED here (the orphan),
+    // and P's retry re-emitted the cascade under a FRESH id, applying
+    // it AGAIN (child 30). With the fold, the retry's re-emission is
+    // the ONLY application: the child lands at 20, exactly once, and
+    // every entry consequences. (The PARENT's final value is
+    // deliberately not pinned tight: the retry's read races the rival
+    // frame's integration into the serving view, so it lands as a
+    // field-level rebase either over the rival (2) or of it (1001) —
+    // C8b's territory, not this fold's.)
+    await waitUntil(
+      () =>
+        engineValueOf(childArgId) === 20 &&
+        sidecarIdsIn(engine).every((id) => {
+          const value = Engine.read(engine, { id })?.value as
+            | StreamEventsDocValue
+            | undefined;
+          return (value?.entries ?? []).every((entry) =>
+            entry.consequenced === true
+          );
+        }),
+      "the folded cascade to land exactly once, everything consequenced",
+      30_000,
+    );
+    // The settle beat: the child value must STAY 20 — never 30 (the
+    // pre-fix double: orphan commit + fresh-id re-emission re-apply).
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(engineValueOf(childArgId)).toBe(20);
+    expect([2, 1001]).toContain(engineValueOf(parentArgId));
+    cancelChildDemand();
+    cancelParentDemand();
   });
 });

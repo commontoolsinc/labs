@@ -628,6 +628,12 @@ export class SpaceServer implements TransactionSealDestination {
       actionId: info.actionId,
       kind: info.kind,
       ...(info.eventId !== undefined ? { eventId: info.eventId } : {}),
+      // C8d's fold key (review 2026-08-11 M2): a same-wave cascade
+      // child carries its emitter's eventId; the wave's requeue
+      // closure folds the child into the requeued parent's rollback.
+      ...(info.parentEventId !== undefined
+        ? { parentEventId: info.parentEventId }
+        : {}),
       ...(info.scopeKeyIdentity !== undefined
         ? { scopeKeyIdentity: info.scopeKeyIdentity }
         : {}),

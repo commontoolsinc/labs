@@ -12,6 +12,7 @@ import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
+  assertServerExecutionPostureAgreement,
   browserWorkerParamsFromInitializationData,
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
@@ -2753,6 +2754,65 @@ describe("RuntimeProcessor pattern coverage IPC", () => {
         type: RequestType.GetPatternCoverage,
       }),
     ).toEqual({ data: report });
+  });
+});
+
+describe("worker/host server-execution posture agreement (review 2026-08-11 m7)", () => {
+  it("threads the host's declared serverExecution flag through the params mapper verbatim", () => {
+    const params = browserWorkerParamsFromInitializationData(
+      {
+        apiUrl: "http://worker.test/",
+        identity: {} as never,
+        spaceDid: "did:key:space",
+        experimental: { serverExecution: true },
+      },
+      { as: { did: () => "did:key:worker" } } as unknown as Parameters<
+        typeof browserWorkerParamsFromInitializationData
+      >[1],
+      { marker() {} } as unknown as Parameters<
+        typeof browserWorkerParamsFromInitializationData
+      >[2],
+    );
+    expect(params.experimental).toEqual({ serverExecution: true });
+  });
+
+  it("agrees silently when postures match — both declared-ON and the undeclared-OFF default (OFF-arm-neutral)", () => {
+    assertServerExecutionPostureAgreement(
+      { serverExecution: true },
+      { experimental: { serverExecution: true } },
+    );
+    assertServerExecutionPostureAgreement(
+      undefined,
+      { experimental: { serverExecution: false } },
+    );
+    assertServerExecutionPostureAgreement(
+      {},
+      { experimental: {} },
+    );
+  });
+
+  it("refuses LOUDLY when the host declared ON but the worker resolved OFF (the silent F10 revert, now surfaced)", () => {
+    expect(() =>
+      assertServerExecutionPostureAgreement(
+        { serverExecution: true },
+        { experimental: { serverExecution: false } },
+      )
+    ).toThrow(/posture mismatch/);
+    expect(() =>
+      assertServerExecutionPostureAgreement(
+        { serverExecution: true },
+        { experimental: {} },
+      )
+    ).toThrow(/posture mismatch/);
+  });
+
+  it("refuses the mirrored divergence: a worker resolving ON under a host that declared nothing", () => {
+    expect(() =>
+      assertServerExecutionPostureAgreement(
+        undefined,
+        { experimental: { serverExecution: true } },
+      )
+    ).toThrow(/posture mismatch/);
   });
 });
 
