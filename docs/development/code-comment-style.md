@@ -327,11 +327,11 @@ adjacency, and so does a reader.
 
 Three shapes break this, each of which looks harmless while being written:
 
-- **A `//` note about the whole declaration, written above it.** The doc
-  comment now reads as a description of the note, and the contract is visually
-  detached from the thing it is a contract for. Open the declaration's body
-  with the note instead. When the declaration has no body — a type, an
-  interface property — fold what the note says into the doc comment.
+- **A `//` note about the whole declaration, where the declaration has a body
+  to hold it.** The doc comment reads as a description of the note, and the
+  contract is visually detached from the thing it is a contract for. Open the
+  body with the note instead — a `TODO` about a function goes inside the
+  function.
 - **A new definition placed directly under an existing doc comment.** The doc
   comment now documents the new definition, and the declaration it was written
   for is left with none. Adding a definition means placing it after the whole
@@ -340,11 +340,23 @@ Three shapes break this, each of which looks harmless while being written:
   declaration, so the other is invisible wherever documentation is rendered.
   Merge them if both say something worth keeping.
 
-Two things are exceptions. A tool directive — `// deno-lint-ignore`,
+Three things are exceptions. A tool directive — `// deno-lint-ignore`,
 `// deno-fmt-ignore`, `// @ts-types` — has to sit on the line immediately
 before the code it governs, and so has nowhere else to go.
 
-The other is narrower than it first sounds. One doc comment covers a whole
+The second is mechanics with no body to go in. A type, an interface property,
+or an overload list has no inside, so a `//` note about how that declaration
+is put together stays beside it. Do not fold it into the doc comment to get it
+out of the way: the split this document opens with holds here too, and a
+caller reading the rendered documentation is owed the contract and nothing
+else. What folds in is a note that turns out to be contract after all — what
+the type admits, what a caller may pass.
+
+Such a note goes below the doc comment rather than above it. A doc comment is
+a header, so a `//` sitting on top of one reads as a remark about the header
+instead of about the code underneath.
+
+The third is narrower than it first sounds. One doc comment covers a whole
 overload set, and `//` labels say which signature is which. Every label but
 one follows a declaration, so the rule never reached them; the exception is
 for the first label alone, which has nowhere to sit but between the doc
@@ -378,8 +390,10 @@ signatures are hard to tell apart at a glance. One that only restates the
 signature beneath it is not doing that work, and goes — even if it leaves the
 rest of a numbered series behind, because the numbering was never the point.
 
-A remark about the set as a whole is not a label, whichever line it sits on.
-It belongs in the doc comment, which is the thing that covers the set.
+A remark about the list itself — why it is written as five signatures rather
+than one recursive type, or that a second copy of it elsewhere has to be kept
+in step — stays with the list too. It is not a label, but it is mechanics, and
+what a caller needs is the only thing the doc comment owes them.
 
 A doc comment with no declaration under it at all is the same defect from the
 other direction. To title a region of a file or a class, use a section marker,
