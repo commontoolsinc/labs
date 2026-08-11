@@ -352,6 +352,10 @@ caller reading the rendered documentation is owed the contract and nothing
 else. What folds in is a note that turns out to be contract after all — what
 the type admits, what a caller may pass.
 
+Such a note goes below the doc comment rather than above it. A doc comment is
+a header, so a `//` sitting on top of one reads as a remark about the header
+instead of about the code underneath.
+
 The third is narrower than it first sounds. One doc comment covers a whole
 overload set, and `//` labels say which signature is which. Every label but
 one follows a declaration, so the rule never reached them; the exception is
