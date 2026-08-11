@@ -361,6 +361,18 @@ export type StreamEventEntry = {
    * `{ status: "dropped", reason }` on the entry itself. */
   status?: "dropped";
   reason?: string;
+  /** Processing-side (OW14, protocol.md §2b's LT4 ruling): failure
+   * notices for CROSS-SPACE appends this event's handler emitted whose
+   * DELIVERY was refused deterministically at the target — written by
+   * the source SpaceServer's outbox BEFORE the refused row retires,
+   * deduped by the refused append's eventId. The source event's own
+   * consequences stand (they committed long before); this annotates
+   * the entry per events.md §5's error-is-the-consequence shape. */
+  deliveryFailures?: Array<{
+    eventId: string;
+    targetSpace: string;
+    reason: string;
+  }>;
 };
 
 /** The sidecar doc's value shape: the entry log plus the per-stream

@@ -121,6 +121,7 @@ describe("stage G outbox + sqlite discharge", () => {
       stats,
       server,
       engine,
+      space,
       sessionId: holder,
       localSeqRef,
     }),
@@ -677,30 +678,50 @@ describe("stage G outbox + sqlite discharge", () => {
     const tx1 = runtime.edit();
     stampWaveRunContext(tx1, { actionId: "derive-x", kind: "derivation" });
     x.withTx(tx1).set({ value: 1 });
-    // events.md §2's userless space-scope emissions are a legal Phase-3
-    // producer whose delegated-floor treatment is an OPEN question
-    // (flagged in the stage-G PR): until it is ruled, staging one is a
-    // LOUD error here — never a durable row that delivery silently
-    // destroys.
+    // The OW15 floor carve-out at the SOURCE (SHAPE RULED 2026-08-05;
+    // implemented with Phase 3): a userless emission stages IFF it is
+    // DECLARED sessionless-space-scope; the floor negatives hold both
+    // ways, the declaration alongside an actor is a contradiction, and
+    // the grant stays mandatory throughout.
     expect(() =>
       wave.enqueueOutboundAppend(tx1, {
         targetSpace,
-        targetStream: "of:guard-stream",
+        targetStream: "of:stream-events:guard",
         eventId: "evt-guard",
         payload: {},
         capabilityRef: "cap-x",
       })
-    ).toThrow("acting principal");
+    ).toThrow("sessionless-space-scope");
     expect(() =>
       wave.enqueueOutboundAppend(tx1, {
         targetSpace,
-        targetStream: "of:guard-stream",
+        targetStream: "of:stream-events:guard",
         eventId: "evt-guard-2",
         payload: {},
         actingPrincipal: "user:alice",
         capabilityRef: "",
       })
     ).toThrow("capability grant");
+    expect(() =>
+      wave.enqueueOutboundAppend(tx1, {
+        targetSpace,
+        targetStream: "of:stream-events:guard",
+        eventId: "evt-guard-3",
+        payload: {},
+        actingPrincipal: "user:alice",
+        sessionlessSpaceScope: true,
+        capabilityRef: "cap-x",
+      })
+    ).toThrow("contradiction");
+    // The POSITIVE: a DECLARED userless emission stages.
+    wave.enqueueOutboundAppend(tx1, {
+      targetSpace,
+      targetStream: "of:stream-events:guard",
+      eventId: "evt-guard-declared",
+      payload: {},
+      sessionlessSpaceScope: true,
+      capabilityRef: "cap-x",
+    });
     expect((await tx1.commit()).error).toBeUndefined();
     runtime.clearSealDestination();
     wave.abandon("test over");
@@ -734,6 +755,143 @@ describe("stage G outbox + sqlite discharge", () => {
     expect(stats.outbox.failed).toBe(1);
     const targetEngine = await server.engineForSpace(targetSpace);
     expect(Engine.read(targetEngine, { id: "of:lt4-stream" })).toBeNull();
+  });
+
+  it("OW15: a DECLARED userless row delivers — the target stamps firedAt = { session: 'server' } with NO user; undeclared userless stays refused (the floor negatives)", async () => {
+    insertExecutionOutboxRows(engine, {
+      branch: "",
+      createdSeq: 1,
+      rows: [{
+        targetSpace,
+        targetStream: "of:stream-events:ow15",
+        targetStreamLink: { id: "of:ow15-stream", path: ["events"] },
+        eventId: "evt-ow15",
+        payload: { n: 1 },
+        sessionlessSpaceScope: true,
+        capabilityRef: "cap-ow15",
+      }, {
+        // The floor negative at delivery: userless WITHOUT the
+        // declaration is refused deterministically (LT4 retires it).
+        targetSpace,
+        targetStream: "of:stream-events:ow15-undeclared",
+        eventId: "evt-ow15-undeclared",
+        payload: { n: 2 },
+        capabilityRef: "cap-ow15",
+      }],
+    });
+    const { outbox, stats } = newOutbox();
+    await outbox.deliverPendingAppends();
+    const targetEngine = await server.engineForSpace(targetSpace);
+    const doc = Engine.read(targetEngine, { id: "of:stream-events:ow15" });
+    const entries =
+      (doc?.value as { entries?: Array<Record<string, unknown>> })?.entries ??
+        [];
+    expect(entries.length).toBe(1);
+    expect(entries[0].firedAt).toEqual({ session: "server" });
+    expect(typeof entries[0].seq).toBe("number");
+    const commitRow = targetEngine.database.prepare(
+      `SELECT acting_principal, acting_session FROM "commit"
+       ORDER BY seq DESC LIMIT 1`,
+    ).get() as {
+      acting_principal: string | null;
+      acting_session: string | null;
+    };
+    expect(commitRow.acting_principal).toBeNull();
+    expect(commitRow.acting_session).toBeNull();
+    // The undeclared row was refused (LT4) and retired.
+    expect(
+      Engine.read(targetEngine, { id: "of:stream-events:ow15-undeclared" }),
+    ).toBeNull();
+    expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
+      .toBe(0);
+    expect(stats.outbox.failed).toBe(1);
+  });
+
+  it("OW14: a deterministic refusal writes the failure notice onto the SOURCE event's entry BEFORE the row retires; a re-refusal dedupes the notice", async () => {
+    // The source event's entry, as the source SpaceServer would hold it
+    // (a consequenced client fire whose handler emitted the append).
+    // Derived commits — the setup AND the outbox's notice write — need
+    // the live lease (protocol.md §2's one equality check).
+    const lease = liveLease();
+    const sourceSidecar = "of:stream-events:ow14-source";
+    const holder2 = holder;
+    Engine.applyCommit(engine, {
+      sessionId: holder2,
+      space,
+      commitClass: "derived",
+      holder: holder2,
+      commit: {
+        localSeq: 990_001,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: sourceSidecar as never,
+          value: {
+            value: {
+              entries: [{
+                eventId: "evt-source",
+                stream: { id: "of:ow14-stream", path: ["s"] },
+                firedAt: { user: "user:alice", session: "sess-1" },
+                consequenced: true,
+              }],
+            },
+          } as never,
+        }],
+        eventAppends: [{ id: sourceSidecar, eventId: "evt-source" }],
+      },
+    });
+    // The refused append: userless and UNDECLARED — the target refuses
+    // deterministically — carrying the source-event reference.
+    insertExecutionOutboxRows(engine, {
+      branch: "",
+      createdSeq: 2,
+      rows: [{
+        targetSpace,
+        targetStream: "of:stream-events:ow14-target",
+        eventId: "evt-refused",
+        payload: {},
+        capabilityRef: "cap-ow14",
+        sourceEvent: { sidecarId: sourceSidecar, eventId: "evt-source" },
+      }],
+    });
+    const { outbox, stats } = newOutbox();
+    await outbox.deliverPendingAppends();
+    // The notice landed on the source entry, and the row retired.
+    const read = () =>
+      ((Engine.read(engine, { id: sourceSidecar })?.value ?? {}) as {
+        entries?: Array<{
+          deliveryFailures?: Array<
+            { eventId: string; targetSpace: string; reason: string }
+          >;
+        }>;
+      }).entries?.[0].deliveryFailures ?? [];
+    expect(read().length).toBe(1);
+    expect(read()[0].eventId).toBe("evt-refused");
+    expect(read()[0].targetSpace).toBe(targetSpace);
+    expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
+      .toBe(0);
+    expect(stats.outbox.failed).toBe(1);
+
+    // The crash window (write-then-delete): the SAME row re-sent —
+    // re-refused, RE-NOTICED deduped (never a second notice), retired.
+    insertExecutionOutboxRows(engine, {
+      branch: "",
+      createdSeq: 3,
+      rows: [{
+        targetSpace,
+        targetStream: "of:stream-events:ow14-target",
+        eventId: "evt-refused",
+        payload: {},
+        capabilityRef: "cap-ow14",
+        sourceEvent: { sidecarId: sourceSidecar, eventId: "evt-source" },
+      }],
+    });
+    const { outbox: again } = newOutbox();
+    await again.deliverPendingAppends();
+    expect(read().length).toBe(1);
+    expect(selectPendingExecutionOutboxRows(engine, { branch: "" }).length)
+      .toBe(0);
+    lease.release();
   });
 
   it("keeps the row on a transport-class delivery failure (admit-before-delete): the next drain delivers exactly one entry", async () => {

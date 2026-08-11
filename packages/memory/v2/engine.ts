@@ -1370,6 +1370,12 @@ ALTER TABLE execution_outbox
 ADD COLUMN sessionless_space_scope INTEGER;
 `);
   }
+  if (!hasColumn(database, "execution_outbox", "source_event")) {
+    database.exec(`
+ALTER TABLE execution_outbox
+ADD COLUMN source_event TEXT;
+`);
+  }
 };
 
 // Server-execution v2 Phase 1 stage C.2: the observation-payload tables are

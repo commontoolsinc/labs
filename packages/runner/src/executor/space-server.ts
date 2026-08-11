@@ -44,6 +44,7 @@ import type {
   StreamEventEntry,
   StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
+import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import { markRuntimeInjectedEventKeys } from "../cell.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import {
@@ -341,6 +342,7 @@ export class SpaceServer implements TransactionSealDestination {
     // The effect channel (stage G, serving-loop.md §4–§5).
     const outbox = new SpaceOutbox({
       stats: this.#options.stats,
+      space: this.#options.space,
       server: this.#options.server,
       engine,
       sessionId: this.#holder,
@@ -505,6 +507,24 @@ export class SpaceServer implements TransactionSealDestination {
   }
 
   /**
+   * Stage a cross-space event append onto the CURRENT wave for the run
+   * owning `tx` (Phase 3; events.md §2's cross-space arm — the append
+   * travels via the outbox as an authored commit, and the acting
+   * identity travels WITH it). Dispatched from the send site
+   * (cell.ts's serving branch) through the runtime's installed
+   * destination.
+   */
+  stageOutboundAppend(
+    tx: IExtendedStorageTransaction,
+    row: OutboxAppendRow,
+  ): void {
+    const wave = this.#openWave();
+    this.#waveByTx.set(tx, wave);
+    wave.enqueueOutboundAppend(tx, row);
+    this.#feedArrived?.resolve();
+  }
+
+  /**
    * TransactionSealDestination (stage G): take ownership of a sealed
    * transaction's post-commit effects — the loop hands external effects
    * to the outbox POST-wave-commit (serving-loop.md §3), never at seal,
@@ -598,6 +618,9 @@ export class SpaceServer implements TransactionSealDestination {
         ? { actionScopeKey: info.actionScopeKey }
         : {}),
       ...(info.acting !== undefined ? { acting: info.acting } : {}),
+      ...(info.streamEntry !== undefined
+        ? { streamEntry: info.streamEntry }
+        : {}),
     });
     if (info.streamEntry !== undefined) {
       // Phase 3 (events.md §4): the entry's `consequenced` mark rides
@@ -1665,9 +1688,14 @@ export class SpaceServer implements TransactionSealDestination {
     // seal failed transiently: its entry, too, is still pending.
     if (
       (outcome.requeuedEventIds?.length ?? 0) > 0 ||
-      (drainedEvents > 0 &&
+      ((drainedEvents > 0 || outcome.seq !== undefined) &&
         Engine.selectPendingStreamEventDocs(this.#options.engine).length > 0)
     ) {
+      // Re-arm sources: a REQUEUED event (its entry stayed pending); a
+      // drained event whose seal failed transiently; and a wave that
+      // COMMITTED same-space emitted entries (LT1's budget-exhausted
+      // fallback — the entry is durable input, the next wave processes
+      // it).
       this.#eventScanOwed = true;
     }
     // Stage G, post-commit: hand the wave's sealed effects to the

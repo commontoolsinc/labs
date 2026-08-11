@@ -118,6 +118,12 @@ export interface WaveRunContext {
   acting?: { user: string; session?: string };
   /** The event this handler run consequences (`consequenceOf` carriage). */
   eventId?: string;
+  /** The durable stream entry this handler run is processing (Phase 3;
+   * OW14's source-event carriage): a cross-space append the run emits
+   * records `{sidecarId, eventId}` on its outbox row so a
+   * deterministic delivery refusal can write its failure notice onto
+   * the SOURCE entry (protocol.md §2b's LT4 ruling). */
+  streamEntry?: { sidecarId: string; index: number; seq: number };
   /** The same-wave parent event of a cascade-minted event: a requeued
    * parent folds this contribution into the requeue set (§3d; the
    * model's C8d rollback closure). */
@@ -203,6 +209,11 @@ export interface WaveBasisInstanceRows {
 /** The batched commit the wave hands the sink, per space. */
 export interface WaveSpaceCommit {
   space: MemorySpace;
+  /** Same-space emitted event entries this batch appends (LT1,
+   * events.md §2): their declarations, so the engine's event-append
+   * admission stamps each entry's stream `seq` (a derived append must
+   * be DECLARED — seq stamping cannot be skipped by a plumbing bug). */
+  eventAppends?: Array<{ id: string; scope?: CellScope; eventId: string }>;
   /** True for the home space's derived-class commit; false for a foreign
    * space's authored-class provisioning commit (protocol.md §2b). */
   home: boolean;
@@ -636,22 +647,46 @@ export class WaveAccumulator
           "(serving-loop.md §5)",
       );
     }
-    // Fail-closed at the SOURCE (the delegated admission floor,
-    // protocol.md §2, refuses partial carriage at the target): a
-    // userless or grantless entry would be deterministically DESTROYED
-    // at delivery (the LT4 arm), so it must never become a durable row.
-    // events.md §2's userless space-scope emissions are a legal Phase-3
-    // producer whose delegated-floor treatment is an OPEN question —
-    // flagged in the stage-G PR; until it is ruled, staging one is a
-    // loud error here, never a silent loss there.
-    if (
-      entry.actingPrincipal === undefined || entry.actingPrincipal === "" ||
-      entry.capabilityRef === ""
-    ) {
+    // Fail-closed at the SOURCE, mirroring the delegated admission
+    // floor (protocol.md §2): an entry the target would refuse
+    // deterministically (the LT4 arm) must never become a durable row.
+    // The OW15 carve-out (SHAPE RULED 2026-08-05, implemented with
+    // Phase 3): a USERLESS entry stages IFF it is DECLARED
+    // sessionless-space-scope — a chain with no actor anywhere, whose
+    // delivered entry stamps `firedAt = { session: "server" }`. The
+    // floor negatives hold both ways, the declaration alongside a
+    // present actor is a refused contradiction, and grant presence
+    // stays mandatory throughout.
+    if (entry.capabilityRef === "") {
       throw new Error(
         "outbound append refused: the delegated admission floor requires " +
-          "the acting principal AND the capability grant (protocol.md §2); " +
-          "userless emissions await the Phase-3 floor ruling",
+          "the capability grant (protocol.md §2) — the " +
+          "sessionless-space-scope carve-out never lifts it",
+      );
+    }
+    const userless = entry.actingPrincipal === undefined ||
+      entry.actingPrincipal === "";
+    if (userless && entry.sessionlessSpaceScope !== true) {
+      throw new Error(
+        "outbound append refused: a userless emission stages only under " +
+          "the declared sessionless-space-scope carve-out (protocol.md " +
+          "§2, SHAPE RULED 2026-08-05; events.md §2)",
+      );
+    }
+    if (!userless && entry.sessionlessSpaceScope === true) {
+      throw new Error(
+        "outbound append refused: a sessionless-space-scope declaration " +
+          "alongside an acting principal is a contradiction — the " +
+          "declaration names a chain with NO actor (events.md §2)",
+      );
+    }
+    if (
+      userless && entry.actingSession !== undefined &&
+      entry.actingSession !== ""
+    ) {
+      throw new Error(
+        "outbound append refused: a sessionless-space-scope declaration " +
+          "alongside an acting session is a contradiction (events.md §2)",
       );
     }
     let pending = this.#pendingAppendsByTx.get(tx);
@@ -1486,11 +1521,64 @@ export class WaveAccumulator
         rows: this.#basisRowsFor(contribution),
       });
     }
+    // Same-space emitted entries (LT1): every surviving op that appends
+    // a seq-LESS entry into a stream sidecar carries a NEW event — the
+    // engine's admission requires its declaration to stamp the stream
+    // seq (a rewrite — an already-stamped entry — needs none).
+    const eventAppends: Array<{ id: string; eventId: string }> = [];
+    for (const operation of operations) {
+      if (operation.op === "sqlite" || operation.op === "delete") continue;
+      if (!operation.id.startsWith(STREAM_ENTRIES_DOC_PREFIX)) continue;
+      const entryLists: unknown[][] = [];
+      if (operation.op === "set") {
+        const value = (operation.value as { value?: { entries?: unknown[] } })
+          ?.value;
+        if (Array.isArray(value?.entries)) entryLists.push(value.entries);
+      } else {
+        for (const patch of operation.patches) {
+          if (
+            (patch.op === "append" || patch.op === "add-unique") &&
+            patch.path === "/value/entries"
+          ) {
+            entryLists.push(patch.values as unknown[]);
+          } else if (
+            (patch.op === "add" || patch.op === "replace") &&
+            patch.path === "/value/entries" &&
+            Array.isArray((patch as unknown as { value?: unknown }).value)
+          ) {
+            entryLists.push(
+              (patch as unknown as { value: unknown[] }).value,
+            );
+          }
+        }
+      }
+      for (const list of entryLists) {
+        for (const candidate of list) {
+          const entry = candidate as {
+            eventId?: string;
+            seq?: number;
+          } | null;
+          if (
+            entry !== null && typeof entry === "object" &&
+            typeof entry.eventId === "string" && entry.seq === undefined &&
+            !eventAppends.some((decl) =>
+              decl.id === operation.id && decl.eventId === entry.eventId
+            )
+          ) {
+            eventAppends.push({
+              id: operation.id,
+              eventId: entry.eventId,
+            });
+          }
+        }
+      }
+    }
     // The rebased ops stay in the batch; the sink re-verifies each
     // rebased doc still sits at the head the merge decision observed.
     return {
       space: this.#space,
       home: true,
+      ...(eventAppends.length === 0 ? {} : { eventAppends }),
       basisSeq: this.#basisSeq,
       rebasedHeads: [...rebasedHeads.entries()].map(([doc, head]) => ({
         doc,

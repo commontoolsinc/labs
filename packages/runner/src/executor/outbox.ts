@@ -30,10 +30,12 @@
 
 import type { Server as MemoryServer } from "@commonfabric/memory/v2/server";
 import type { Engine } from "@commonfabric/memory/v2/engine";
+import * as EngineModule from "@commonfabric/memory/v2/engine";
 import {
   deleteExecutionOutboxRow,
   selectPendingExecutionOutboxRows,
 } from "@commonfabric/memory/v2/execution-outbox";
+import type { PendingOutboxRow } from "@commonfabric/memory/v2/execution-outbox";
 import { ProtocolError } from "@commonfabric/memory/v2";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { PostCommitSideEffect } from "../cfc/types.ts";
@@ -58,6 +60,7 @@ export class SpaceOutbox {
   readonly #server: MemoryServer;
   readonly #engine: Engine;
   readonly #sessionId: string;
+  readonly #space?: string;
   readonly #localSeqRef: { value: number };
   /** In-flight effect entries per effect id — §4's in-flight dedupe: a
    * second admit of a live id attaches to (is served by) the first. The
@@ -96,6 +99,9 @@ export class SpaceOutbox {
     server: MemoryServer;
     /** The HOME space's engine — where the durable append rows live. */
     engine: Engine;
+    /** The HOME space did — the OW14 failure notice commits into it as
+     * a derived-class commit, whose lease admission needs the space. */
+    space?: string;
     /** The delivering service session (LT5's envelope) — the DR1
      * holder, same as the wave sink's. */
     sessionId: string;
@@ -106,6 +112,7 @@ export class SpaceOutbox {
     this.#stats = options.stats;
     this.#server = options.server;
     this.#engine = options.engine;
+    this.#space = options.space;
     this.#sessionId = options.sessionId;
     this.#localSeqRef = options.localSeqRef;
   }
@@ -298,6 +305,9 @@ export class SpaceOutbox {
         await this.#server.commitDelegatedAppend({
           targetSpace: row.targetSpace,
           targetStream: row.targetStream,
+          ...(row.targetStreamLink === undefined
+            ? {}
+            : { targetStreamLink: row.targetStreamLink }),
           eventId: row.eventId,
           payload: row.payload,
           ...(row.actingPrincipal === undefined
@@ -306,6 +316,12 @@ export class SpaceOutbox {
           ...(row.actingSession === undefined
             ? {}
             : { actingSession: row.actingSession }),
+          // The OW15 declaration passes through to the target's floor
+          // carve-out (protocol.md §2): an ABSENT acting principal
+          // admits iff declared, stamping firedAt = {session:"server"}.
+          ...(row.sessionlessSpaceScope === true
+            ? { sessionlessSpaceScope: true }
+            : {}),
           capabilityRef: row.capabilityRef,
           sessionId: this.#sessionId,
           localSeq: ++this.#localSeqRef.value,
@@ -315,13 +331,36 @@ export class SpaceOutbox {
         deleteExecutionOutboxRow(this.#engine, row.rowId);
       } catch (error) {
         if (error instanceof ProtocolError) {
-          // LT4: a deterministic admission rejection does not retry.
+          // LT4: a deterministic admission rejection does not retry. The
+          // source-side failure notice writes BEFORE the row retires
+          // (OW14's write-then-delete order): a crash between the two
+          // re-sends the row, hits the same deterministic rejection,
+          // and RE-NOTICES — deduped by the refused append's eventId —
+          // so the notice is never lost. A row with no source event (a
+          // derivation-emitted append) falls back to the warn log.
           this.#stats.outbox.failed += 1;
+          const noticed = this.#writeDeliveryFailureNotice(
+            row,
+            error instanceof Error ? error.message : String(error),
+          );
+          if (!noticed) {
+            // The notice could not be written durably: KEEP the row so
+            // the next drain re-attempts both (write-then-delete —
+            // deleting now would lose the notice forever).
+            remaining += 1;
+            logger.warn("append-notice-failed", () => [
+              `failure notice for rejected append ${row.eventId} could ` +
+              "not be written; row kept so the next drain re-notices",
+              error,
+            ]);
+            continue;
+          }
           try {
             deleteExecutionOutboxRow(this.#engine, row.rowId);
           } catch (deleteError) {
             // A failed retirement must not abort the drain; the row
-            // re-sends and hits the same deterministic rejection.
+            // re-sends, hits the same deterministic rejection, and the
+            // notice dedupes.
             remaining += 1;
             logger.warn("append-retire-failed", () => [
               `retiring rejected append ${row.eventId} failed; row kept`,
@@ -330,8 +369,8 @@ export class SpaceOutbox {
           }
           logger.warn("append-rejected", () => [
             `outbox append ${row.eventId} → ${row.targetSpace} rejected ` +
-            "deterministically; not retried (LT4). The source-side " +
-            "failure notice lands with Phase 3's events.md §5 machinery.",
+            "deterministically; not retried (LT4); the source-side " +
+            "failure notice is on the source event's entry (OW14).",
             error,
           ]);
           continue;
@@ -348,4 +387,98 @@ export class SpaceOutbox {
     }
     return { remaining };
   }
+
+  /**
+   * OW14 (protocol.md §2b's LT4 ruling): write the deterministic
+   * delivery refusal's failure notice onto the SOURCE event's stream
+   * entry — "a failure notice on the source event's stream entry,
+   * written by the source SpaceServer" — per events.md §5's
+   * error-is-the-consequence shape. Deduped by the refused append's
+   * eventId; a small derived-class engine commit of the loop's own
+   * (the completion-commit precedent: post-wave, never through §3d's
+   * sealing). Returns whether the notice is durably present (already
+   * present counts).
+   */
+  #writeDeliveryFailureNotice(
+    row: PendingOutboxRow,
+    reason: string,
+  ): boolean {
+    if (row.sourceEvent === undefined) {
+      logger.warn("append-rejected-unsourced", () => [
+        `rejected append ${row.eventId} carries no source event; the ` +
+        "failure notice has no entry to land on (a derivation-emitted " +
+        "append) — log-only",
+      ]);
+      return true;
+    }
+    try {
+      const doc = EngineModule.read(this.#engine, {
+        id: row.sourceEvent.sidecarId,
+      });
+      const entries =
+        ((doc?.value ?? {}) as { entries?: Array<StreamEventEntryShape> })
+          .entries ?? [];
+      const index = entries.findIndex((entry) =>
+        entry?.eventId === row.sourceEvent!.eventId
+      );
+      if (index < 0) {
+        // The source entry compacted away (events.md §4's allowance):
+        // the notice never outlives the entry it annotates.
+        return true;
+      }
+      const existing = entries[index]?.deliveryFailures ?? [];
+      if (existing.some((failure) => failure.eventId === row.eventId)) {
+        return true;
+      }
+      if (this.#space === undefined) {
+        logger.warn("append-notice-unspaced", () => [
+          `failure notice for ${row.eventId} needs the home space for ` +
+          "derived admission; outbox constructed without one — log-only",
+        ]);
+        return true;
+      }
+      EngineModule.applyCommit(this.#engine, {
+        sessionId: this.#sessionId,
+        space: this.#space,
+        commitClass: "derived",
+        holder: this.#sessionId,
+        commit: {
+          localSeq: ++this.#localSeqRef.value,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "patch",
+            id: row.sourceEvent.sidecarId as never,
+            patches: [{
+              op: "replace",
+              path: `/value/entries/${index}/deliveryFailures`,
+              value: [
+                ...existing,
+                {
+                  eventId: row.eventId,
+                  targetSpace: row.targetSpace,
+                  reason,
+                },
+              ] as never,
+            }],
+          }],
+        },
+      });
+      return true;
+    } catch (error) {
+      logger.warn("append-notice-write-failed", () => [
+        `failure notice write for ${row.eventId} threw`,
+        error,
+      ]);
+      return false;
+    }
+  }
 }
+
+type StreamEventEntryShape = {
+  eventId?: string;
+  deliveryFailures?: Array<{
+    eventId: string;
+    targetSpace: string;
+    reason: string;
+  }>;
+} | null;

@@ -153,6 +153,11 @@ export class EngineWaveCommitSink implements WaveCommitSink {
       ...(batch.preconditions.length > 0
         ? { preconditions: [...batch.preconditions] }
         : {}),
+      // Same-space emitted event entries (LT1): declared so admission
+      // stamps their stream seqs (events.md §2's wave carriage).
+      ...(batch.eventAppends !== undefined && batch.eventAppends.length > 0
+        ? { eventAppends: [...batch.eventAppends] }
+        : {}),
     };
     const hasSqliteOps = batch.operations.some((op) => op.op === "sqlite");
     try {

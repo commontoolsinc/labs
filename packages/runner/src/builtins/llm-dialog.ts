@@ -2510,9 +2510,15 @@ async function handlePin(
   // stage-G review's Flag 4): fire-and-forget discarded the outcome, so
   // ON-arm the serving posture's unstamped-seal refusal (serving-loop.md
   // §3d) vanished as an unhandled rejection while the tool reported
-  // success. Classification (RULED 2026-08-05; implementation with
-  // Phase 3): pin is COMPLETION-CLASS turn-lifecycle state.
+  // success. Classification (RULED 2026-08-05; IMPLEMENTED with
+  // Phase 3): pin is COMPLETION-CLASS turn-lifecycle state — the mark
+  // routes the commit through the effect-completion path (its own
+  // derived-class commit under the serving posture; a no-op elsewhere).
+  // The lifecycle subkey is deliberately NOT the turn's own effect key:
+  // retiring `llmDialog:<requestId>` mid-turn would tear the turn's
+  // in-flight dedupe entry.
   const committed = await runtime.editWithRetry((tx) => {
+    markEffectCompletion(tx, "llmDialog:lifecycle:pin");
     const currentInTx = pinnedCells.withTx(tx).get() || [];
     pinnedCells.withTx(tx).set([
       ...currentInTx,
@@ -2556,9 +2562,10 @@ async function handleUnpin(
 
   // Remove pinned cell using a transaction. Awaited and surfaced — see
   // handlePin (Flag 4). Classification (RULED 2026-08-05;
-  // implementation with Phase 3): unpin is COMPLETION-CLASS
+  // IMPLEMENTED with Phase 3): unpin is COMPLETION-CLASS
   // turn-lifecycle state.
   const committed = await runtime.editWithRetry((tx) => {
+    markEffectCompletion(tx, "llmDialog:lifecycle:unpin");
     const currentInTx = pinnedCells.withTx(tx).get() || [];
     const filteredInTx = currentInTx.filter((p) => p.path !== resolved.path);
     pinnedCells.withTx(tx).set(filteredInTx);
@@ -2676,10 +2683,18 @@ async function handleUpdateArgument(
   // Apply updates to argument fields. Awaited and surfaced — see
   // handlePin (Flag 4): the discarded outcome silently swallowed the
   // ON-arm unstamped-seal refusal while reporting success.
-  // Classification (RULED 2026-08-05; implementation with Phase 3):
-  // updateArgument is a HANDLER-CLASS consequence — Phase-3 events
-  // territory.
+  // Classification (RULED 2026-08-05; IMPLEMENTED with Phase 3):
+  // updateArgument is a HANDLER-CLASS consequence — the stamp seals it
+  // into the wave as a non-re-derivable event-handler contribution
+  // (§3d's rebase-don't-drop class). No eventId: the mutation is a
+  // tool-call consequence, not a stream event — a raced rebase that
+  // conflicts semantically rolls it back with nothing to requeue,
+  // which is the class's inherent no-event corner.
   const committed = await runtime.editWithRetry((tx) => {
+    runtime.stampServerRun(tx, {
+      actionId: "llm-dialog/update-argument",
+      kind: "event-handler",
+    });
     if (
       isRecord(cellifiedValue) && !Array.isArray(cellifiedValue) &&
       !isCell(cellifiedValue)

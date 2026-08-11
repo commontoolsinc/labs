@@ -1782,6 +1782,13 @@ export class Runtime {
     this.#serverRunStamper = options.runStamper;
   }
 
+  /** The installed seal destination (the serving loop), if any —
+   * Phase 3's send site dispatches cross-space event staging through
+   * it (cell.ts's serving branch; events.md §2's cross-space arm). */
+  get installedSealDestination(): TransactionSealDestination | undefined {
+    return this.#transactionSealDestination;
+  }
+
   /** Remove the installed seal destination (the wave closed or aborted). */
   clearSealDestination(): void {
     this.#transactionSealDestination = undefined;

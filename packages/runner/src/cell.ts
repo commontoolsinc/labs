@@ -49,6 +49,8 @@ import {
   scopeCallerEventId,
 } from "./scheduler/event-identity.ts";
 import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
+import { waveRunContextOf } from "./executor/wave.ts";
+import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
 import { cfcLabelViewForCell } from "./cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
@@ -1521,6 +1523,125 @@ export class CellImpl<T extends FabricValue>
           this.runtime.storageManager.trackPendingCommit(
             outcome as Promise<unknown>,
           );
+        }
+      }
+
+      // Server-execution v2 Phase 3, the SERVING arm (events.md §2): a
+      // send from a wave-stamped run — a handler cascade, a demanded
+      // derivation's emission — is a SERVER-ORIGINATED event carrying
+      // the run's INHERITED actor. Same-space targets get their durable
+      // stream entry as a WRITE WITHIN the current transaction (LT1's
+      // wave carriage: the entry commits with — and rolls back with —
+      // the emitting run; the committed entry is durable input the next
+      // wave's drain processes, LT1's budget-exhausted fallback).
+      // Cross-space targets stage onto the wave's outbox (FP1's durable
+      // rows; delivery is post-commit, the loop never awaits another
+      // space). Neither queues locally — the drain is the one
+      // processing path (events.md §2's "one path, two producers").
+      if (
+        this.runtime.experimental.serverExecution === true &&
+        this.runtime.servingPosture === true &&
+        this.tx !== undefined
+      ) {
+        const context = waveRunContextOf(this.tx);
+        if (context !== undefined) {
+          const stream: StreamLinkRef = {
+            id: resolvedToValueLink.id,
+            path: [...resolvedToValueLink.path],
+            ...(resolvedToValueLink.scope !== undefined
+              ? { scope: resolvedToValueLink.scope }
+              : {}),
+          };
+          const sidecarId = streamEntriesDocId(stream);
+          const emittedId = mintEventId(resolvedToValueLink, this.tx);
+          const acting = context.acting;
+          if (resolvedToValueLink.space === this.space) {
+            // LT1 same-space carriage: the entry rides the current tx.
+            // The engine stamps its stream `seq` at the wave commit
+            // (the batch declares it); `firedAt` is the inherited
+            // actor, written here — producer and admitter are one
+            // trust environment (events.md §2). RAW tx write, not
+            // Cell.push: a frame-anchored push cellifies the pushed
+            // object into a linked child doc, and a LINK where the
+            // entry should be is exactly the shape admission refuses.
+            // The mergeable-append record keeps the commit
+            // tail-relative (concurrent appends merge, never clobber).
+            const entriesLink = {
+              space: resolvedToValueLink.space,
+              id: sidecarId,
+              scope: "space",
+              path: ["entries"],
+            } as unknown as NormalizedFullLink;
+            const currentEntries = this.tx.readValueOrThrow(entriesLink);
+            const emittedEntry = {
+              eventId: emittedId,
+              stream,
+              payload: event,
+              firedAt: {
+                ...(acting?.user !== undefined ? { user: acting.user } : {}),
+                session: acting?.session ?? "server",
+              },
+            };
+            this.tx.writeValueOrThrow(entriesLink, [
+              ...(Array.isArray(currentEntries) ? currentEntries : []),
+              emittedEntry,
+            ] as never);
+            this.tx.recordMergeableOp?.(entriesLink, {
+              op: "append",
+              count: 1,
+            });
+          } else {
+            // Cross-space: the outbox's durable row (FP1), carrying the
+            // acting identity — actor inheritance crosses spaces
+            // through exactly this carriage (events.md §2) — and the
+            // OW15 declaration when the chain has no actor. The
+            // capabilityRef is structural presence (grant RESOLUTION
+            // is the OW13 owed hardening; no per-doc grant store
+            // exists yet).
+            const userless = acting?.user === undefined;
+            const row: OutboxAppendRow = {
+              targetSpace: resolvedToValueLink.space,
+              targetStream: sidecarId,
+              targetStreamLink: stream,
+              eventId: emittedId,
+              payload: event as never,
+              ...(userless ? {} : { actingPrincipal: acting!.user }),
+              ...(acting?.session !== undefined
+                ? { actingSession: acting.session }
+                : {}),
+              ...(userless && acting?.session === undefined
+                ? { sessionlessSpaceScope: true }
+                : {}),
+              capabilityRef: `stream-append:${sidecarId}`,
+              ...(context.streamEntry !== undefined &&
+                  context.eventId !== undefined
+                ? {
+                  sourceEvent: {
+                    sidecarId: context.streamEntry.sidecarId,
+                    eventId: context.eventId,
+                  },
+                }
+                : {}),
+            };
+            const destination = this.runtime.installedSealDestination as
+              | {
+                stageOutboundAppend?: (
+                  tx: IExtendedStorageTransaction,
+                  row: OutboxAppendRow,
+                ) => void;
+              }
+              | undefined;
+            if (destination?.stageOutboundAppend === undefined) {
+              throw new Error(
+                "cross-space event emission requires the serving loop's " +
+                  "outbox (events.md §2; serving-loop.md §5) — no seal " +
+                  "destination with outbound staging is installed",
+              );
+            }
+            destination.stageOutboundAppend(this.tx, row);
+          }
+          this.cleanup?.();
+          return this as unknown as Cell<T>;
         }
       }
 

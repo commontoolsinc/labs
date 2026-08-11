@@ -80,6 +80,27 @@ const BUMP_PATTERN = [
   ">(({ value }) => ({ value, bump: bump({ value }) }));",
 ].join("\n");
 
+const CASCADE_PATTERN = [
+  "import { handler, pattern, Stream, Writable } from 'commonfabric';",
+  "const secondHandler = handler<unknown, { value: Writable<number> }>(",
+  "  (_ev, { value }) => { value.set((value.get() ?? 0) + 10); },",
+  ");",
+  "const firstHandler = handler<",
+  "  unknown,",
+  "  { value: Writable<number>; second: Stream<unknown> }",
+  ">((_ev, { value, second }) => {",
+  "  value.set((value.get() ?? 0) + 1);",
+  "  second.send({});",
+  "});",
+  "export default pattern<",
+  "  { value: Writable<number> },",
+  "  { value: number; first: Stream<unknown>; second: Stream<unknown> }",
+  ">(({ value }) => {",
+  "  const second = secondHandler({ value });",
+  "  return { value, first: firstHandler({ value, second }), second };",
+  "});",
+].join("\n");
+
 const THROW_PATTERN = [
   "import { handler, pattern, Stream, Writable } from 'commonfabric';",
   "const explode = handler<unknown, { value: Writable<number> }>(",
@@ -581,6 +602,76 @@ describe("Phase 3 events-down (serving side)", () => {
       },
       "both consequences to land",
     );
+    cancelDemand();
+  });
+
+  it("same-space cascade (LT1): the served handler's send commits a durable wave-carried entry with the INHERITED actor; the next wave processes it — exactly once", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { argument, result } = await standUp(clientRuntime, CASCADE_PATTERN, {
+      arg: "cascade-arg",
+      result: "cascade-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    result.key("first").send({});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    // TWO sidecar docs materialize: the root fire's stream and the
+    // cascade's — the served run of `first` emitted `second`'s entry as
+    // a WRITE WITHIN its wave (LT1), engine-stamped and declared, and
+    // a later wave drained it (the budget-exhausted fallback shape).
+    await waitUntil(
+      () => {
+        const ids = sidecarIdsIn(engine);
+        if (ids.length < 2) return false;
+        return ids.every((id) => {
+          const value = Engine.read(engine, { id })?.value as
+            | StreamEventsDocValue
+            | undefined;
+          return (value?.entries ?? []).every(
+            (entry) =>
+              entry.consequenced === true &&
+              typeof entry.seq === "number" &&
+              value?.eventWatermark === entry.seq,
+          );
+        });
+      },
+      "both streams' entries to consequence with stamped seqs",
+      30_000,
+    );
+    // The cascade entry carries the INHERITED actor (events.md §2:
+    // events run as the session they originated from) — the root
+    // (user, session) preserved hop by hop.
+    const cascadeEntries = sidecarIdsIn(engine).flatMap((id) =>
+      ((Engine.read(engine, { id })?.value as StreamEventsDocValue)
+        .entries ?? [])
+    );
+    expect(cascadeEntries.length).toBe(2);
+    for (const entry of cascadeEntries) {
+      expect(entry.firedAt?.user).toBe(aliceSigner.did());
+    }
+    // Exactly once: 1 + 10, never doubled.
+    await waitUntil(
+      () => {
+        const doc = Engine.read(engine, {
+          id: argument.getAsNormalizedFullLink().id,
+        });
+        return ((doc?.value as { value?: number })?.value ?? 0) === 11;
+      },
+      "the cascade's consequences to land exactly once",
+      30_000,
+    );
+    // Give a settle beat: the value must STAY 11 (no re-run).
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const doc = Engine.read(engine, {
+      id: argument.getAsNormalizedFullLink().id,
+    });
+    expect((doc?.value as { value?: number })?.value).toBe(11);
     cancelDemand();
   });
 });

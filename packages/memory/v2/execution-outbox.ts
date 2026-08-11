@@ -69,6 +69,12 @@ export type OutboxAppendRow = {
    * delegation, never session-identity impersonation (protocol.md §2's
    * server-produced authored row). */
   capabilityRef: string;
+  /** The SOURCE event whose handler run emitted this append (OW14;
+   * protocol.md §2b's LT4 ruling): a deterministic delivery refusal
+   * writes its failure notice onto THIS entry before the row retires.
+   * Absent for emissions with no source event (a derivation-emitted
+   * append) — those fall back to the warn log. */
+  sourceEvent?: { sidecarId: string; eventId: string };
 };
 
 /** A pending row as read back for delivery: the stored fields plus the
@@ -84,12 +90,12 @@ const INSERT_ROW = `
 INSERT INTO execution_outbox (
   branch, target_space, target_stream, target_stream_link, event_id,
   payload, acting_principal, acting_session, sessionless_space_scope,
-  capability_ref, created_seq
+  capability_ref, source_event, created_seq
 )
 VALUES (
   :branch, :target_space, :target_stream, :target_stream_link, :event_id,
   :payload, :acting_principal, :acting_session, :sessionless_space_scope,
-  :capability_ref, :created_seq
+  :capability_ref, :source_event, :created_seq
 )
 `;
 
@@ -125,6 +131,9 @@ export const insertExecutionOutboxRows = (
       acting_session: row.actingSession ?? null,
       sessionless_space_scope: row.sessionlessSpaceScope === true ? 1 : null,
       capability_ref: row.capabilityRef,
+      source_event: row.sourceEvent === undefined
+        ? null
+        : JSON.stringify(row.sourceEvent),
       created_seq: options.createdSeq,
     });
   }
@@ -143,7 +152,7 @@ export const selectPendingExecutionOutboxRows = (
   const rows = engine.database.prepare(`
 SELECT rowid AS row_id, target_space, target_stream, target_stream_link,
        event_id, payload, acting_principal, acting_session,
-       sessionless_space_scope, capability_ref, created_seq
+       sessionless_space_scope, capability_ref, source_event, created_seq
 FROM execution_outbox
 WHERE branch = :branch
 ORDER BY rowid ASC
@@ -158,6 +167,7 @@ ORDER BY rowid ASC
     acting_session: string | null;
     sessionless_space_scope: number | null;
     capability_ref: string;
+    source_event: string | null;
     created_seq: number;
   }>;
   return rows.map((row) => ({
@@ -179,6 +189,9 @@ ORDER BY rowid ASC
       ? { sessionlessSpaceScope: true }
       : {}),
     capabilityRef: row.capability_ref,
+    ...(row.source_event === null
+      ? {}
+      : { sourceEvent: JSON.parse(row.source_event) }),
     createdSeq: row.created_seq,
   }));
 };
