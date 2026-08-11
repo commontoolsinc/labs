@@ -139,6 +139,15 @@ export function createResumeRepublisher(
     runtime.editWithRetry((tx): Cell<any>[] => {
       const result = isActive() ? getResult() : undefined;
       if (!result) return [];
+      // Out-of-band recovery write (serving-loop.md §3d, RULED
+      // 2026-08-05): the republish runs from a raw promise chain under
+      // trackUntilSettled — no scheduler run stamps it, and a SERVING
+      // runtime's wave refuses unstamped seals. Same bookkeeping stamp
+      // as the list builtins' resume-seed/settle writes.
+      runtime.stampServerRun(tx, {
+        actionId: `list-republish/${result.sourceURI}`,
+        kind: "bookkeeping",
+      });
       const inputs = inputsCell.asSchema(inputSchema).withTx(tx).get() as {
         list?: unknown;
       };

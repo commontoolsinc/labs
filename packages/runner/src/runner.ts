@@ -2446,6 +2446,19 @@ export class Runner {
       // Instantiate nodes
       const actualTx = useTx ?? this.runtime.edit();
       const shouldCommit = !useTx;
+      if (shouldCommit) {
+        // Self-minted instantiation tx (the hot-swap watcher's
+        // swapToPattern arm reaches here tx-less): runtime-internal
+        // piece machinery with no scheduler run around it, so stamp the
+        // sanctioned bookkeeping kind (serving-loop.md §3d, RULED
+        // 2026-08-05) like the sibling setup write in swapToPattern
+        // below. A PROVIDED tx keeps its caller's stamp — never
+        // restamped here. No-op off the serving posture.
+        this.runtime.stampServerRun(actualTx, {
+          actionId: `piece-instantiate/${resultCell.sourceURI}`,
+          kind: "bookkeeping",
+        });
+      }
       // A boot snapshot belongs to exactly one pattern instantiation. A later
       // patternIdentity hot-swap must register fresh under the same durable
       // piece identity rather than replaying the old implementation's cache.
@@ -2615,6 +2628,16 @@ export class Runner {
                 ) {
                   const revertRef = runningRef;
                   const rollForward = this.runtime.editWithRetry((tx) => {
+                    // Async pointer repair from the meta watcher's load
+                    // promise — no scheduler run stamps it; bookkeeping
+                    // per serving-loop.md §3d (the serving runtime runs
+                    // with systemPatternAutoUpdate, so this path is
+                    // live server-side).
+                    this.runtime.stampServerRun(tx, {
+                      actionId:
+                        `pattern-pointer-rollforward/${resultCell.sourceURI}`,
+                      kind: "bookkeeping",
+                    });
                     const cur = asPatternIdentityRef(
                       resultCell.withTx(tx).getMetaRaw("patternIdentity", {
                         meta: ignoreReadForScheduling,
@@ -2737,6 +2760,13 @@ export class Runner {
         // precondition read or prepare throwing) aborts the tx and rethrows the
         // ORIGINAL instantiate error, so the piece is left exactly as it was.
         const repairTx = this.runtime.edit();
+        // Self-minted repair tx inside startCore — piece machinery with
+        // no scheduler run around it; bookkeeping per serving-loop.md
+        // §3d (reachable server-side via the demand loader's start).
+        this.runtime.stampServerRun(repairTx, {
+          actionId: `piece-start-repair/${resultCell.sourceURI}`,
+          kind: "bookkeeping",
+        });
         try {
           // Precondition: the pinned identity must still equal the ref diagnosed
           // above. A concurrent updater or boot may have moved it; re-running
@@ -3195,6 +3225,13 @@ export class Runner {
       if (ownership.isCancelled()) return;
 
       const startTx = this.runtime.edit();
+      // Minted inside a commit callback — by definition outside any
+      // scheduler run; the deferred start's node wiring is piece
+      // machinery, stamped bookkeeping per serving-loop.md §3d.
+      this.runtime.stampServerRun(startTx, {
+        actionId: `piece-start/${resultLink.id}`,
+        kind: "bookkeeping",
+      });
       const committedResultCell = this.runtime.getCellFromLink<T>(
         resultLink,
         undefined,
@@ -3267,6 +3304,13 @@ export class Runner {
       if (ownership.isCancelled()) return;
 
       const startTx = this.runtime.edit();
+      // Minted inside a commit callback — outside any scheduler run;
+      // bookkeeping per serving-loop.md §3d, like the deferred start
+      // above.
+      this.runtime.stampServerRun(startTx, {
+        actionId: `piece-start/${resultLink.id}`,
+        kind: "bookkeeping",
+      });
       const committedResultCell = this.runtime.getCellFromLink<T>(
         resultLink,
         pattern.resultSchema,
@@ -3396,6 +3440,16 @@ export class Runner {
     options: RunnerRunOptions = {},
   ): RunResult<R> {
     const tx = providedTx ?? this.runtime.edit();
+    if (providedTx === undefined) {
+      // Self-minted fallback arm (reached e.g. from wish's async
+      // suggestion-pattern fetch continuation): setup + start writes
+      // with no scheduler run around them; bookkeeping per
+      // serving-loop.md §3d. A provided tx keeps its caller's stamp.
+      this.runtime.stampServerRun(tx, {
+        actionId: `piece-run/${resultCell.sourceURI}`,
+        kind: "bookkeeping",
+      });
+    }
     const sourceKey = getTxDebugActionId(tx) ?? "none";
 
     triggerFlowLogger.debug(`runner-run/${sourceKey}`, () => [
@@ -3536,6 +3590,13 @@ export class Runner {
       );
     } else {
       const { error } = await this.runtime.editWithRetry((tx) => {
+        // runSynced's own setup tx (async surface, e.g. compileAndRun's
+        // continuation on a served run): no scheduler run around it;
+        // bookkeeping per serving-loop.md §3d.
+        this.runtime.stampServerRun(tx, {
+          actionId: `piece-run-synced/${resultCell.sourceURI}`,
+          kind: "bookkeeping",
+        });
         assertExpectedPatternIdentity(resultCell.withTx(tx));
         setupRes = this.setupInternal(
           tx,

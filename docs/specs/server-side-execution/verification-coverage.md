@@ -906,6 +906,61 @@ re-homed pins from train-deleted test surfaces):
   discriminates — deferring the in-lock verdict publication fails
   it).
 
+Delta 2026-08-11 — lunch-gate triage leg A: §3d's unstamped-seal
+refusal caught real undeclared commit paths (this PR; serving-loop
+§7's counter shape gains `unstampedSealRefusals` — a CHANGED
+sentence, coverage below):
+
+- §3d's "every server-side commit path declares its run context"
+  (RULED 2026-08-05): the RULE was already covered (the Q4 refusal
+  row); this delta records impl CONFORMANCE. A three-run
+  instrumented triage proved the resumed list builtins'
+  container-recovery seeds (`map`/`filter`/`flatMap` resume-seed +
+  resume-settle — an out-of-band `editWithRetry` from a `.finally()`
+  continuation, no scheduler run around it) sealed unstamped on the
+  serving runtime: the wave refused, the seed retried into the
+  refusal (97,341 throws in one 5-minute run), and the demanded map
+  derivation never landed — breaking speculation.md §4's
+  overlay-retirement premise (the serving loop's first-round
+  reliability machinery makes the demanded derivation exist and
+  land). Fixed by declaring the sanctioned internal `bookkeeping`
+  kind at the runtime's posture-gated stamping seam
+  (`stampServerRun` — a no-op on the OFF arm; under client
+  speculation bookkeeping commits exactly as unstamped txs do), for
+  the full audited class: the six list-builtin recovery writes, the
+  shared list republisher, the compile-cache writebacks + pattern
+  annotation (pattern-manager), the piece
+  instantiate/start/repair/run-synced/pointer-roll-forward family
+  (runner), the pattern updater's transition writes, wish's
+  interval tick / error-UI / sidecar-run / ready writes, and the
+  fetch / fetchProgram / llmDialog teardown claims-release txs.
+  NOT stamped, per existing rulings: llm partial-stream writes
+  (partials never become commits — the serving posture now SKIPS
+  the write before minting a tx, the same ruled outcome the
+  refusal produced, keeping the new counter clean),
+  compile-and-run's async writebacks (stage-G deferral, documented
+  in-file), and llm-dialog's pin/unpin/updateArgument/invoke
+  tool-call writes (ruled completion-/handler-class — Phase-3
+  territory). Coverage: impl-gate, red-first —
+  `packages/runner/test/executor-serving-loop.test.ts` ("lands a
+  resumed map derivation whose result container was never
+  persisted") authors a map piece under client speculation (the
+  production shape that leaves the result container unpersisted),
+  resumes it through the demand loader, and pins BOTH the landed
+  derivation and `unstampedSealRefusals === 0`; at the pre-fix
+  tree the same test red-fails (counter at 3, the §3d refusal
+  storm in the log).
+- serving-loop §7's counter shape: `unstampedSealRefusals` added
+  (CHANGED sentence — the refusal becomes a health-stats fact,
+  structurally zero under conformance; any non-zero count names an
+  undeclared commit path). Coverage rides the same impl-gate
+  test's `=== 0` assertion.
+
+This closes leg A of the lunch-gate triage arc (the unstamped
+recovery-seed storm). Leg B — the OW19 demand spin
+(`structureLoadDeferred` climbing) — is separately owned; leg C
+(the speculative-pending-basis design fix) awaits an owner ruling.
+
 ## 4. Standing rule
 
 A ruling batch that adds a BINDING sentence adds its coverage row

@@ -317,10 +317,16 @@ function createUpdatePartialCallback(
         // v2 stage G): protocol.md §6 rules settled-result-only commits —
         // "partials never become commits" under the flag, and the interim
         // loss of token streaming is ACCEPTED (owner, 2026-08-02). In the
-        // serving posture this write is refused at the seal (unstamped),
-        // which IS that baseline; the OFF arm commits it exactly as today.
+        // serving posture the partial is SKIPPED before a transaction is
+        // minted — the same ruled outcome the unstamped-seal refusal
+        // produced here before, without spending a refused seal, so §3d's
+        // `unstampedSealRefusals` counter stays an undeclared-commit-path
+        // signal instead of counting this accepted baseline. The OFF arm
+        // commits it exactly as today.
         runtime.idle().then(() => {
-          if (completed || thisRun !== getCurrentRun()) {
+          if (
+            completed || thisRun !== getCurrentRun() || runtime.servingPosture
+          ) {
             return;
           }
           return runtime.editWithRetry((tx) => {

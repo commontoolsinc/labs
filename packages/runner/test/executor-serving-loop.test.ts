@@ -535,6 +535,133 @@ describe("stage F serving loop", () => {
     expect(stats.structureLoadFailures).toBe(0);
   });
 
+  it("lands a resumed map derivation whose result container was never persisted: the recovery seed commits bookkeeping-class instead of storming the §3d unstamped refusal (lunch-gate leg A)", async () => {
+    host = newHost({ flushDeadlineMs: 5_000, idleParkMs: 600_000 });
+
+    // Phase 1 — author the piece under CLIENT SPECULATION, the production
+    // client posture under EXPERIMENTAL_SERVER_EXECUTION: the piece's
+    // setup and argument writes commit durably (unstamped txs commit as
+    // today), but every derivation-kind write — the map's result
+    // container included — routes to the process-memory overlay and
+    // NEVER commits (speculation.md §6). The store this leaves behind is
+    // exactly the lunch-gate shape: a durable map piece whose result
+    // container has no durable doc. Service principal, like the
+    // creation-race test above: its session must not mint demand
+    // (serving-loop.md §1), so the demand set stays exactly what the
+    // client builds below.
+    const authorManager = SharedServerStorageManager.connectTo(server, {
+      as: serviceSigner,
+    });
+    const author = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: authorManager,
+      experimental: { serverExecution: true },
+    });
+    try {
+      const compiled = await author.patternManager.compilePattern({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { pattern } from 'commonfabric';",
+            "export default pattern<{ items: { n: number }[] }>(({ items }) => {",
+            "  return { doubled: items.map((item) => item.n * 2) };",
+            "});",
+          ].join("\n"),
+        }],
+      }, { space });
+      const authorArg = author.getCell<{ items: { n: number }[] }>(
+        space,
+        "seed-arg",
+        undefined,
+      );
+      await authorArg.sync();
+      const argTx = author.edit();
+      authorArg.withTx(argTx).set({ items: [{ n: 1 }, { n: 2 }, { n: 3 }] });
+      expect((await argTx.commit()).error).toBeUndefined();
+      const authorResult = author.getCell<{ doubled: number[] }>(
+        space,
+        "seed-result",
+        compiled.resultSchema,
+      );
+      // Presync and retry a stale-read conflict, as the loader machinery
+      // itself would (the same idiom as the tests above).
+      for (let attempt = 0;; attempt++) {
+        await authorArg.sync();
+        await authorResult.sync();
+        const tx = author.edit();
+        author.run(tx, compiled, authorArg, authorResult);
+        const committed = await tx.commit();
+        if (committed.error === undefined) break;
+        if (attempt >= 4) {
+          throw new Error(
+            `author pattern run failed: ${committed.error.message}`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await author.idle();
+    } finally {
+      // The author leaves; its speculative derivations die with its
+      // overlay. From here on, only a SERVER-resumed piece can
+      // materialize the map's output.
+      await author.dispose();
+      await authorManager.close();
+    }
+
+    // Phase 2 — an ordinary client demands the result root. The demand
+    // loader resumes the piece on the serving runtime (the fresh-runtime
+    // resume path, awaitSync held), whose map coordinator finds the
+    // result container durably ABSENT: the container pull settles with
+    // nothing, and the builtin's recovery seed — an out-of-band
+    // editWithRetry, no scheduler run around it — must seed [] so the
+    // coordinator is not wedged. On a serving runtime that seed seals
+    // into the wave, where §3d REFUSES unstamped transactions: without
+    // the bookkeeping stamp the seed storms the refusal forever and the
+    // demanded derivation NEVER lands (the lunch-gate red).
+    openClient();
+    const clientResult = clientRuntime.getCell<{ doubled: number[] }>(
+      space,
+      "seed-result",
+      undefined,
+    );
+    await clientResult.sync();
+
+    // The wave input that drives the demand cycle — and NEW map items,
+    // so the landed derivation is unambiguously the server's (the
+    // author's speculative run saw [1, 2, 3]).
+    const clientArg = clientRuntime.getCell<{ items: { n: number }[] }>(
+      space,
+      "seed-arg",
+      undefined,
+    );
+    await clientArg.sync();
+    const pokeTx = clientRuntime.edit();
+    clientArg.withTx(pokeTx).set({ items: [{ n: 2 }, { n: 3 }, { n: 4 }] });
+    expect((await pokeTx.commit()).error).toBeUndefined();
+
+    // The demanded derivation LANDS server-side and reaches the client
+    // through ordinary push + link traversal. A plain client never runs
+    // the piece itself (established by the tests above: only the serving
+    // loop derives here), so this value can only be the resumed map —
+    // seeded container, per-element runs, aggregate rebuilt.
+    await waitUntil(
+      () =>
+        JSON.stringify(clientResult.key("doubled").get() ?? null) ===
+          "[4,6,8]",
+      "the resumed map derivation to land server-side and reach the client",
+      20_000,
+    );
+
+    // The throw storm is GONE, by counter (serving-loop.md §7: tests
+    // assert on counters, not logs): every seal the serving runtime saw
+    // declared its run context — the recovery seed included.
+    const stats = host.stats();
+    expect(stats.unstampedSealRefusals).toBe(0);
+    expect(stats.derivedCommits).toBeGreaterThanOrEqual(1);
+    expect(stats.structureLoadFailures).toBe(0);
+  });
+
   it("registers NO piece demand for never-a-piece id classes: computed:/cid:/watermark roots neither retry nor count as deferred (RULED 2026-08-07)", async () => {
     host = newHost({ flushDeadlineMs: 2_000, idleParkMs: 600_000 });
     onServingRuntime = () => Promise.resolve();

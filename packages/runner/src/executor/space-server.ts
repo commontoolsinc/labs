@@ -541,6 +541,12 @@ export class SpaceServer implements TransactionSealDestination {
         scopeKeyIdentity: runtime.scopeKeyIdentity,
         replicaFor: (s) => runtime.storageManager.open(s).replica,
         lease: this.#lease,
+        // §3d refusals are COUNTED (§7): a non-zero count names an
+        // undeclared commit path — the class that wedged the resumed
+        // list builtins' recovery seeds until they stamped bookkeeping.
+        onUnstampedSeal: () => {
+          this.#options.stats.unstampedSealRefusals += 1;
+        },
       });
     }
     return this.#currentWave;

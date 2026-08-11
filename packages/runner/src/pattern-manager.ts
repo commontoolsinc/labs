@@ -1789,6 +1789,16 @@ export class PatternManager {
     await this.syncSourceCacheWriteTargets(space, modules);
     let committedModuleDelegations = moduleDelegations;
     const { error } = await this.runtime.editWithRetry((tx) => {
+      // Compile-cache writeback is runtime-internal bookkeeping
+      // (serving-loop.md §3d, RULED 2026-08-05): it runs from async
+      // compile flows with no scheduler run around it, and a SERVING
+      // runtime's wave refuses unstamped seals — unstamped, the cache
+      // never heals server-side and every cold load recompiles. No-op
+      // on the OFF arm and for plain clients.
+      this.runtime.stampServerRun(tx, {
+        actionId: `compile-cache/source-writeback/${entryIdentity}`,
+        kind: "bookkeeping",
+      });
       committedModuleDelegations = writeSourceDocs(
         this.runtime,
         space,
@@ -1883,6 +1893,13 @@ export class PatternManager {
         : 2 * importEdges + 8;
       let chunkDelegations: ModuleDelegationMap = new Map();
       const { error } = await this.runtime.editWithRetry((tx) => {
+        // Bookkeeping stamp, same §3d reason as writeBackSourceCache
+        // above (the triage-confirmed second offender: this writeback
+        // refused unstamped on the serving runtime).
+        this.runtime.stampServerRun(tx, {
+          actionId: `compile-cache/writeback/${entryIdentity}`,
+          kind: "bookkeeping",
+        });
         chunkDelegations = writeSourceAndCompiledDocs(
           this.runtime,
           space,
@@ -2139,6 +2156,12 @@ export class PatternManager {
     link: unknown,
   ): Promise<void> {
     await this.runtime.editWithRetry((tx) => {
+      // Bookkeeping stamp, same §3d reason as the cache writebacks
+      // above: fire-and-forget async write, no scheduler run around it.
+      this.runtime.stampServerRun(tx, {
+        actionId: `pattern-annotate/${entryIdentity}`,
+        kind: "bookkeeping",
+      });
       const cell = this.runtime.getCell<
         { annotations?: Record<string, unknown> }
       >(

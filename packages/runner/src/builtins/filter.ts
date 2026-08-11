@@ -156,6 +156,12 @@ export function filter(
         .then(() =>
           !active ? undefined : runtime.editWithRetry((settleTx) => {
             if (!active || !result) return;
+            // Out-of-band recovery write — stamped bookkeeping for the
+            // same §3d reason as the resume-seed below.
+            runtime.stampServerRun(settleTx, {
+              actionId: `filter/resume-settle/${parentCell.sourceURI}`,
+              kind: "bookkeeping",
+            });
             const { list } = inputsCell.asSchema(FILTER_INPUT_SCHEMA)
               .withTx(settleTx).get();
             if (
@@ -312,6 +318,20 @@ export function filter(
       const seedIfStillAbsent = () =>
         !active ? Promise.resolve() : runtime.editWithRetry((seedTx) => {
           if (!active) return;
+          // Out-of-band recovery write (serving-loop.md §3d, RULED
+          // 2026-08-05): minted outside any scheduler run, so nothing
+          // else stamps it, and a SERVING runtime's wave REFUSES an
+          // unstamped seal — the seed never lands and the demanded
+          // derivation stays wedged (the lunch-gate throw storm).
+          // Declare the sanctioned internal bookkeeping kind; stamped
+          // inside the callback so every retry's fresh tx carries it.
+          // No-op on the OFF arm; under client speculation bookkeeping
+          // commits exactly as unstamped txs do. Same shape in
+          // map.ts/flatmap.ts.
+          runtime.stampServerRun(seedTx, {
+            actionId: `filter/resume-seed/${parentCell.sourceURI}`,
+            kind: "bookkeeping",
+          });
           const container = result!.withTx(seedTx);
           if (container.getRaw() === undefined) container.set([]);
         }).then(({ error }) => {
