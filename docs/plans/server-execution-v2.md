@@ -519,15 +519,37 @@ Success criteria (the old Phase-1 ON gates land here, merged):
 
 Tasks:
 
-- [ ] Handler fire commits the event only (payload + target stream);
-      admission = append authority + CAS.
-- [ ] Server processes events — client-committed and server-originated
-      (`stream.send()`) through the same path.
-- [ ] Client handler run demoted to speculative echo.
-- [ ] Idempotent processing on durable event IDs: consequence committed ⇒
-      event not re-run across restarts.
-- [ ] Ephemeral-value rule: values captured into the payload at fire time
-      (transformer lint can trail as a follow-up).
+- [x] Handler fire commits the event only (payload + target stream);
+      admission = append authority + CAS. LANDED 2026-08-10: the fire
+      fork (cell.ts) commits a stamped append to the stream's sidecar
+      doc via the fired-order event queue (offline-durable behind the
+      LT9 store seam); the scheduler tell is the discriminator — a
+      send from a scheduler-stamped run commits nothing.
+- [x] Server processes events — client-committed and server-originated
+      (`stream.send()`) through the same path. LANDED 2026-08-10: the
+      SpaceServer's sidecar scan drains BOTH producers (and delegated
+      deliveries, and crash recovery) through one path; same-space
+      emissions ride LT1's wave carriage (the committed entry is
+      durable input the next wave drains — same-wave processing is a
+      recorded follow-up); cross-space emissions stage FP1 rows with
+      acting carriage.
+- [x] Client handler run demoted to speculative echo. LANDED
+      2026-08-10: F10 deleted — the overlay destination diverts
+      event-handler runs like derivation runs, tagged
+      `intent(eventId)`; the echo retires on the consequence signal
+      (the sidecar's value plane) with the watermark sweep as
+      backstop, and drop/error notices signal subscribers.
+- [x] Idempotent processing on durable event IDs: consequence committed ⇒
+      event not re-run across restarts. LANDED 2026-08-10: the
+      consequenced mark rides the handler's own transaction, the
+      engine maintains the contiguous per-stream `eventWatermark`
+      frontier inside the wave commit, and at-or-below-horizon
+      duplicates skip as `skippedIdempotent` (the restart pins in
+      `executor-events-down.test.ts`).
+- [x] Ephemeral-value rule: values captured into the payload at fire time
+      (transformer lint can trail as a follow-up). The fire commits the
+      binding layer's converted payload verbatim (the capture); the
+      lint TRAILS as the named follow-up.
 
 Success criteria:
 

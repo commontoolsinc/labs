@@ -802,6 +802,25 @@ Deno.test("C0-guards: connection guards; no-actor space writes carry no attribut
   const t = w3.spaces.B.streams.t.entries[0];
   assertEquals(t.firedAt.session, "server");
   assertEquals(t.firedAt.user, U1);
+  // OW15 (protocol §2's Phase-3 floor carve-out, SHAPE RULED
+  // 2026-08-05; the model pin the register row owes): a chain with NO
+  // actor ANYWHERE — a space-scope derivation's emission — crosses
+  // spaces and admits with firedAt = { session: "server" } and NO user
+  // key. The engine-side floor negatives (userless-undeclared refused,
+  // contradiction refusals, grant mandatory) are implementation-side
+  // pins (memory/test/v2-event-append.test.ts) — the model's admission
+  // deliberately models the POST-carve-out semantics only.
+  let w4 = apply(w3base, {
+    kind: "derivationEmit",
+    space: "A",
+    stream: "s",
+    acting: {},
+  });
+  w4 = apply(w4, { kind: "wave", space: "A" });
+  w4 = apply(w4, { kind: "deliver", space: "A" });
+  const sessionless = w4.spaces.B.streams.t.entries[0];
+  assertEquals(sessionless.firedAt.session, "server");
+  assertEquals(sessionless.firedAt.user, undefined, "no user key (OW15)");
 });
 
 // ---------- conformance bridge: model keys === the wire vocabulary ----------

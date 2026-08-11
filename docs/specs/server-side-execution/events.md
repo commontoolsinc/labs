@@ -285,7 +285,8 @@ choice.
 
 Under the flag, the client handler path commits **only the event**. The
 handler's writes apply to the speculation overlay, never to a storage
-transaction. Deleting the client's handler-write commit path is a Phase 3
-task, and its absence is what makes admission target+principal-only. If
-some test needs a client handler write to commit, the test is asserting
-v1 behavior — fix the test.
+transaction. The client's handler-write commit path was DELETED with
+Phase 3 (D-v2-1): the overlay destination diverts event-handler runs
+exactly like derivation runs, and its absence is what makes admission
+target+principal-only. If some test needs a client handler write to
+commit, the test is asserting v1 behavior — fix the test.

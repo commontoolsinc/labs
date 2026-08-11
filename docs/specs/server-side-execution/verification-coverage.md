@@ -787,7 +787,15 @@ above carries the coverage):**
 **Phase 3 pre-gate (when events land; pulled by Phase 3's
 pre-flight):**
 
-- OW14 — the LT4 arm's source-side notice ORDER: when Phase 3 lands
+- OW14 — LANDED with Phase 3 (2026-08-10): the LT4 arm writes the
+  events §5 failure notice onto the SOURCE event's entry (protocol
+  §2b's ruling) BEFORE deleting the refused row — a small derived
+  commit of the loop's own, deduped by the refused append's eventId;
+  the crash-window pin (re-send → re-notice deduped → retire) and the
+  unsourced fallback live in `executor-outbox.test.ts`. The notice's
+  FIELD SHAPE (`StreamEventEntry.deliveryFailures`) is an
+  implementation choice FLAGGED for ratification in the Phase-3 PR.
+  Original obligation: the LT4 arm's source-side notice ORDER: when Phase 3 lands
   events.md §5's failure-notice machinery, the deterministic-
   rejection arm must write the events §5 notice BEFORE deleting the
   refused outbox row — today the delete discards
@@ -796,7 +804,16 @@ pre-flight):**
   ordering plus its test (a crash between the two must re-send and
   re-notice, deduped, never lose the notice). Trigger: Phase 3's
   events §5 machinery landing.
-- OW15 — the sessionless space-scope floor carve-out's
+- OW15 — LANDED with Phase 3 (2026-08-10): the engine floor admits a
+  userless batch iff declared sessionless-space-scope (negatives both
+  ways + both contradiction refusals + the user-scope chimera twin in
+  `memory/test/v2-event-append.test.ts`); the source refusal in
+  `enqueueOutboundAppend` lifted symmetrically; the delivery path
+  forwards the declaration and stores NULL — never "" — for the
+  absent principal; the delivered entry stamps
+  `firedAt = { session: "server" }` with no user key (pinned end to
+  end in `executor-outbox.test.ts`); the model pin rides C0-guards.
+  Original obligation: the sessionless space-scope floor carve-out's
   IMPLEMENTATION (SHAPE-RULED 2026-08-05, protocol §2): lift the
   source refusal in `enqueueOutboundAppend` for declared
   sessionless-space-scope entries, fix the delivery path's `?? ""`
@@ -805,7 +822,14 @@ pre-flight):**
   `firedAt = { session: "server" }`; userless without the
   declaration still refused) and the model pin. Trigger: Phase 3's
   event producers going live.
-- OW16 — the llm-dialog tool mutations' RULED classifications
+- OW16 — LANDED with Phase 3 (2026-08-10): pin/unpin route through
+  `markEffectCompletion` as COMPLETION-class turn-lifecycle state
+  (their own derived commits, lifecycle subkeys so the turn's
+  in-flight entry never tears) and updateArgument stamps as a
+  HANDLER-class event-handler contribution (§3d's rebase-don't-drop
+  class; no eventId — the no-event requeue corner is the class's
+  inherent shape, noted at the call site).
+  Original obligation: the llm-dialog tool mutations' RULED classifications
   (2026-08-05), implemented: pin and unpin commit as
   COMPLETION-CLASS turn-lifecycle state; updateArgument commits as
   a HANDLER-CLASS consequence. The three call sites carry the
@@ -864,6 +888,45 @@ hardening):**
 - OW8 — push priority: subscribed derived rows flush before
   bookkeeping/bulk (README §3.3, protocol §3). Counter/ordering
   assertion in `sx2-scale`.
+
+Delta 2026-08-10 — Phase 3 (events-down, D-v2-1; the phase PR):
+
+- events.md §1/§4/§5, protocol §2's event-append rows: IMPL-GATE rows
+  now COVERED by the Phase-3 suites — admission end to end
+  (`memory/test/v2-event-append.test.ts`: stamping, disagreement
+  refusal, the dedupe-horizon CAS + replay short-circuit +
+  at-or-below re-admission, the sidecar write guard, LT1 derived
+  carriage incl. the REWRITE arm, delegated stamping, OW15's floor),
+  the serving loop (`executor-events-down.test.ts`: the full loop,
+  restart exactly-once both directions, error/skip arms, LT1
+  same-space cascade, LD1 attribution at cardinality 2), the client
+  half (`event-append-client.test.ts` + the inverted F10 pins in
+  `speculation-overlay.test.ts`), and the outbox arms
+  (`executor-outbox.test.ts`: OW15 delivery, OW14 order).
+- NEW implementation surfaces below spec granularity, FLAGGED in the
+  Phase-3 PR rather than silently normative: (i)
+  `StreamEventEntry.deliveryFailures` — OW14's notice shape on the
+  source entry; (ii) the stream-sidecar doc vocabulary
+  (`of:stream-events:` + `streamEntriesDocId` — the spec's "stream
+  document", concretely: a derivation-owned result doc cannot hold
+  durable entries); (iii) LT9's persistence SEAM (the queue rides an
+  injectable store whose default is in-memory — the same persistence
+  class as `sessionId` today, protocol §5's sessionId persistence
+  being pre-existing spec debt; the browser adapter lands with it);
+  (iv) same-space emitted entries process NEXT wave (LT1's
+  budget-exhausted fallback as the standing shape) — same-wave
+  processing is a recorded follow-up.
+- The engine's per-stream `eventWatermark` is DERIVED state: the
+  contiguous consequenced frontier recomputed inside every derived
+  commit that touches a sidecar (the model's commit-step rule
+  verbatim); a producer-supplied value is corrected, never trusted.
+- runtime-mapping N26 discharged: the receipt create-only +
+  origin-committed precondition mechanisms are disabled under the
+  flag (`eventWatermark` subsumes); the receipt VALUE surface and
+  `handlingReceiptLink` stay.
+- events §2's backlog-collapse disablement discharged (the last-wins
+  collapse is gated OFF under the flag; ledger L8's
+  collapse-but-list alternative stays open).
 
 Delta 2026-08-10 — the #5569 incremental-liveness catch-up (main
 9d6c9fe00 cascaded through the train; one NEW binding sentence, two

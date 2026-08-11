@@ -19,7 +19,7 @@ Every commit carries a `class` in its metadata. Three values, closed set:
 
 | class | producer | contents |
 | --- | --- | --- |
-| `authored` | any authorized session; server-produced only via delegated capability (§2) | doc writes (UI bindings, widget edits — and, until Phase 3 lands, client handler writes: the plan's stated interim posture) or event appends (events.md §1) |
+| `authored` | any authorized session; server-produced only via delegated capability (§2) | doc writes (UI bindings, widget edits) or event appends (events.md §1). Client HANDLER writes ended with Phase 3's events-down (F10's interim — events.md §7): a handler fire commits only the event |
 | `derived` | the space's SpaceServer (lease holder) | derivation results, watermark advance, `consequenceOf` |
 | `system` | memory server itself — its own direct writes, outside any session and outside the wave (PRODUCER-defined; note below) | e.g. space bootstrap, authorization changes, blob metadata — EXEMPLARY, not a closed list (RULED 2026-08-05) |
 
@@ -33,9 +33,10 @@ question).** ONLY scheduler-driven work moves to the server:
 scheduler-stamped runs — the derivation and event-handler kinds — are
 server work under the flag, and their writes DIVERT on clients
 (speculation.md §2 carries the overlay half of this rule) —
-derivation-kind writes since Phase 2; handler-kind writes from
-Phase 3's events-down, until which F10's interim keeps them
-committing authored (the `authored` row above). Commits
+derivation-kind writes since Phase 2; handler-kind writes since
+Phase 3's events-down (F10's interim ENDED — events.md §7: the
+client handler-write commit path is deleted, and the fire's one
+authored act is the event append). Commits
 made OUTSIDE the scheduler are the client's authored acts and commit
 as today: the setup/instantiation transactions, imperative creation —
 a `cf piece new`-style client writing the result doc with its links
