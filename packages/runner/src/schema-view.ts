@@ -570,6 +570,17 @@ const readChildAt = (
   );
 };
 
+/**
+ * What a property reads as when the schema does not describe it.
+ *
+ * An eager read leaves such a property out of the object it filters, and
+ * `undefined` is a value a property can legitimately hold, so the two cannot
+ * share a return. A view answers `undefined` to a plain property access either
+ * way — that is what reading an absent property gives — and uses this to keep
+ * enumeration and `in` agreeing with an eager read about which keys exist.
+ */
+const ABSENT: unique symbol = Symbol("absent");
+
 const refuseMutation = (what: string): never => {
   throw new Error(
     `Cannot ${what} a schema view; it is a read, not a value you own. ` +
@@ -587,7 +598,7 @@ function createObjectView(
 ): unknown {
   const schema = link.schema;
   const required = new Set(requiredKeys(schema));
-  const child = (key: string): unknown => {
+  const childOrAbsent = (key: string): unknown => {
     const narrowed = childSchema(schema, key);
     if (isExcluded(narrowed)) return undefined;
     if (!Object.hasOwn(value, key)) {
@@ -627,8 +638,13 @@ function createObjectView(
       // transaction. The read it registered does survive, which is what brings
       // the reader back when the data arrives.
       tx.clearSchemaRefusal(error);
-      return undefined;
+      return ABSENT;
     }
+  };
+
+  const child = (key: string): unknown => {
+    const result = childOrAbsent(key);
+    return result === ABSENT ? undefined : result;
   };
 
   return new Proxy({} as Record<string, unknown>, {
@@ -646,21 +662,29 @@ function createObjectView(
       }
       return child(prop);
     },
+    // `ownKeys` stays cheap — listing the keys must not read every value. The
+    // proxy target is an extensible object with no own properties, so a key
+    // listed here whose descriptor comes back `undefined` is simply not there
+    // as far as `Object.keys`, a spread, `for...in` and `JSON.stringify` are
+    // concerned; each of them asks for the descriptor before believing the key.
     ownKeys: () => visibleKeys(schema, value),
     getOwnPropertyDescriptor: (_target, prop) => {
       if (typeof prop === "symbol") return undefined;
       if (!visibleKeys(schema, value).includes(prop)) return undefined;
+      const value_ = childOrAbsent(prop);
+      if (value_ === ABSENT) return undefined;
       return {
         configurable: true,
         enumerable: true,
         writable: false,
-        value: child(prop),
+        value: value_,
       };
     },
     has: (_target, prop) =>
       typeof prop === "symbol"
         ? prop in value
-        : visibleKeys(schema, value).includes(prop),
+        : visibleKeys(schema, value).includes(prop) &&
+          childOrAbsent(prop) !== ABSENT,
     set: () => refuseMutation("assign to"),
     deleteProperty: () => refuseMutation("delete from"),
     defineProperty: () => refuseMutation("define properties on"),

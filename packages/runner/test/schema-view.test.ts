@@ -316,6 +316,42 @@ describe("schema-view", () => {
       }
     });
 
+    it("is absent from enumeration, as it is from an eager read", async () => {
+      // `Object.keys`, a spread and `in` must agree with property access about
+      // which keys exist, and with what an eager read leaves in the object.
+      const read = await seeded(
+        "absent-from-enumeration",
+        { n: "not a number", ok: 1, nothing: undefined },
+        {
+          type: "object",
+          properties: {
+            n: { type: "number" },
+            ok: { type: "number" },
+            nothing: { type: ["number", "undefined"] },
+          },
+        } as const,
+      );
+
+      const eager = read(false);
+      const lazy = read(true);
+      try {
+        const eagerValue = eager.get() as Record<string, unknown>;
+        const lazyValue = lazy.get() as Record<string, unknown>;
+        expect(Object.keys(lazyValue).sort()).toEqual(
+          Object.keys(eagerValue).sort(),
+        );
+        expect(Object.keys(lazyValue)).not.toContain("n");
+        expect("n" in lazyValue).toBe("n" in eagerValue);
+        expect(Object.keys({ ...lazyValue })).not.toContain("n");
+        // A property whose value is legitimately `undefined` is still there.
+        expect(Object.keys(lazyValue)).toContain("nothing");
+        expect("nothing" in lazyValue).toBe(true);
+      } finally {
+        await eager.tx.commit();
+        await lazy.tx.commit();
+      }
+    });
+
     it("throws when the reader touches a required value of the wrong type", async () => {
       const read = await seeded(
         "wrong-type-required",
@@ -514,7 +550,10 @@ describe("schema-view", () => {
 
       const lazy = read(true);
       try {
-        lazy.tx.writeValuesOrThrow([]);
+        // The batch write is optional on the interface, and the behavior under
+        // test is what it does, so a transaction without it has nothing to say.
+        expect(typeof lazy.tx.writeValuesOrThrow).toBe("function");
+        lazy.tx.writeValuesOrThrow!([]);
         expect((lazy.get() as { a: number }).a).toBe(1);
         // Eager materialization would have walked the sibling; a view that is
         // still lazy never looks at it.
