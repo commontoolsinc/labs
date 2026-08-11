@@ -2430,7 +2430,7 @@ export function loadMetaLinkedDocs(
 // to combine the resulting objects into one.
 // NOTE: I forgot about https://github.com/commontoolsinc/labs/pull/1868,
 // which is a more sophisticated approach.
-function combineOptionalSchema(
+export function combineOptionalSchema(
   parentSchema: JSONSchema | undefined,
   linkSchema: JSONSchema | undefined,
 ): JSONSchema | undefined {

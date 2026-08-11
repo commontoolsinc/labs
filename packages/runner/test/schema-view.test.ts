@@ -55,7 +55,7 @@ describe("schema-view", () => {
   };
 
   const pathsRead = (tx: IExtendedStorageTransaction): string[] =>
-    (getTransactionReadActivities(tx) ?? []).map((activity) =>
+    [...getTransactionReadActivities(tx) ?? []].map((activity) =>
       activity.path.join("/")
     );
 
@@ -507,6 +507,95 @@ describe("schema-view", () => {
 
       expect(await readBack(true)).toBe(42);
       expect(await readBack(false)).toBe(42);
+    });
+  });
+
+  describe("a link that carries a schema of its own", () => {
+    it("keeps the property the reader asked for and the link's schema does not name", async () => {
+      // Crossing a link is where an eager read combines the link's schema into
+      // the selector: the link's schema describes the value at its target, the
+      // reader's describes what the reader asked for, and both apply.
+      const write = runtime.edit();
+      const piece = runtime.getCell<Record<string, unknown>>(
+        space,
+        "link-schema-piece",
+        { type: "object", properties: { isHidden: { type: "boolean" } } },
+        write,
+      );
+      piece.setRaw({ isHidden: false, title: "Linked" });
+      const arg = runtime.getCell<Record<string, unknown>>(
+        space,
+        "link-schema-arg",
+        undefined,
+        write,
+      );
+      arg.setRaw({ p: piece.getAsLink({ includeSchema: true }) });
+      await write.commit();
+
+      const schema = {
+        type: "object",
+        properties: {
+          p: { type: "object", properties: { title: { type: "string" } } },
+        },
+      } as const;
+      const readBack = async (lazy: boolean) => {
+        const tx = runtime.edit();
+        if (lazy) tx.markLazyMaterialize(true);
+        const seen = (runtime.getCell(space, "link-schema-arg", schema, tx)
+          .get() as { p: { title: string } }).p.title;
+        await tx.commit();
+        return seen;
+      };
+
+      expect(await readBack(false)).toBe("Linked");
+      expect(await readBack(true)).toBe("Linked");
+    });
+  });
+
+  describe("a link that ends at a string's length", () => {
+    it("reads the length of the string it points at", async () => {
+      // `.length` on a string output lowers to a link ending in that segment,
+      // and it is the one address computed rather than stored.
+      const write = runtime.edit();
+      const target = runtime.getCell<string>(
+        space,
+        "length-target",
+        undefined,
+        write,
+      );
+      target.set("Total: 0");
+      const holder = runtime.getCell<Record<string, unknown>>(
+        space,
+        "length-holder",
+        undefined,
+        write,
+      );
+      holder.setRaw({ label: target.getAsLink() });
+      const arg = runtime.getCell<Record<string, unknown>>(
+        space,
+        "length-arg",
+        undefined,
+        write,
+      );
+      arg.setRaw({ n: holder.key("label", "length").getAsLink() });
+      await write.commit();
+
+      const schema = {
+        type: "object",
+        properties: { n: { type: "number" } },
+        required: ["n"],
+      } as const;
+      const readBack = async (lazy: boolean) => {
+        const tx = runtime.edit();
+        if (lazy) tx.markLazyMaterialize(true);
+        const seen = (runtime.getCell(space, "length-arg", schema, tx)
+          .get() as { n: number }).n;
+        await tx.commit();
+        return seen;
+      };
+
+      expect(await readBack(false)).toBe(8);
+      expect(await readBack(true)).toBe(8);
     });
   });
 

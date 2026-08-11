@@ -45,6 +45,7 @@ import { toCell } from "./back-to-cell.ts";
 import { materializeSchemaView } from "./schema-view.ts";
 import {
   canBranchMatch,
+  combineOptionalSchema,
   combineSchema,
   createDefaultTraversalContext,
   IObjectCreator,
@@ -1038,6 +1039,45 @@ function deriveDereferenceLabelView(
     : derive();
 }
 
+/**
+ * The value a resolved link points at, including the one address that is
+ * computed rather than stored.
+ *
+ * A string's `length` is not a path the store holds. Traversal answers it from
+ * the string it sits on (`getAtPath` in `traverse.ts`), so a link ending there
+ * — `subject.key("label", "length")` where `label` is a string — resolves to
+ * an address the store cannot serve, and a bare read of it yields `undefined`.
+ * Answering it from the string applies traversal's rule where a link is
+ * followed rather than where a value is walked, so both routes agree on what
+ * `<string>/length` is worth. An array's `length` needs none of this; the store
+ * reads that segment itself.
+ *
+ * The read of the string is the dependency: a string's length changes only when
+ * the string is replaced, and it is replaced at the parent's own path.
+ */
+function readValueAtResolvedLink(
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  address: IMemorySpaceValueAddress,
+): FabricValue | undefined {
+  // Read without telling the scheduler. Whatever materializes this value —
+  // the traverser or a view — registers its own reads as it walks.
+  const meta = {
+    meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
+  };
+  const value = tx.readOrThrow(address, meta);
+  if (value !== undefined || link.path.at(-1) !== "length") return value;
+  const parentLink = { ...link, path: link.path.slice(0, -1) };
+  const parent = tx.readOrThrow(toMemorySpaceAddress(parentLink), meta);
+  // Register the parent read whichever way it turns out. A string's length
+  // changes only when the string is replaced, which happens at the parent's own
+  // path; and a parent that is not there yet — a computed that has not produced
+  // — has to bring the reader back when it arrives. Non-recursive: nothing
+  // below the parent decides this.
+  tx.readValueOrThrow(parentLink, { nonRecursive: true });
+  return typeof parent === "string" ? parent.length : value;
+}
+
 export interface ValidateAndTransformOptions {
   /** When true, also read into each Cell created for asCell fields to capture dependencies */
   traverseCells?: boolean;
@@ -1225,9 +1265,7 @@ export function validateAndTransform(
   );
   // Get the full value without telling the scheduler. The traverse method will
   // notify the scheduler for shallow reads as they occur.
-  const value = tx.readOrThrow(address, {
-    meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
-  });
+  const value = readValueAtResolvedLink(tx, resolvedValueLink, address);
   const doc = { address, value: value };
   const valueSelectedSchema = isRecord(effectiveSchema)
     ? asCellCompoundSchemaForValue(effectiveSchema, value)
@@ -1250,10 +1288,21 @@ export function validateAndTransform(
   // Nothing is lost where the win is: a lift reads its argument before it
   // writes anything, so that read is still lazy.
   if (tx.isLazyMaterialize() && !tx.hasWrites()) {
+    // Crossing the last link is a hop the eager traverser combines schemas
+    // across (`linkHopSelector`), because a link's own schema describes the
+    // value at its target while the reader's schema describes what the reader
+    // asked for, and both apply. A view re-enters here for that hop instead of
+    // walking through it, so it has to do the same combining: the selector
+    // alone is the link's schema, and a reader asking for a property the link's
+    // schema does not name — `title` off a piece typed by its own
+    // registration — would read as a property the schema does not select.
+    const viewSchema = valueSelectedSchema ??
+      combineOptionalSchema(effectiveSchema, resolvedValueLink.schema) ??
+      selector.schema;
     return materializeSchemaView(
       runtime,
       tx,
-      { ...resolvedValueLink, schema: selector.schema },
+      { ...resolvedValueLink, schema: viewSchema },
       value,
       cfcLabelView,
       options?.synced ?? false,
