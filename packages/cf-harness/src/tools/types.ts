@@ -45,6 +45,12 @@ export interface HarnessToolContext {
     path: string,
     options?: { allowMissing?: boolean },
   ): Promise<boolean>;
+  /**
+   * Host directory for image-attachment snapshots (under the artifact
+   * root). Undefined when the run has no artifact store; attachments then
+   * stay locked to their source file's bytes.
+   */
+  imageAttachmentSnapshotDir?: string;
   doesHostPathIntersectArtifactRoot(
     path: string,
     options?: { allowMissing?: boolean },
