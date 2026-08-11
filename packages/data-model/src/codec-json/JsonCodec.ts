@@ -463,7 +463,7 @@ export class JsonCodec implements SerializationContext<string> {
    * according to a roster its caller never chose.
    */
   static readonly #testingRegistry: CodecRegistry = createBaseJsonRegistry()
-    .extend([UnknownValue[CODEC], ProblematicValue[CODEC]]);
+    .extend(UnknownValue[CODEC], ProblematicValue[CODEC]);
 
   /**
    * Reconstruction context for the throwaway checks in the testing helpers

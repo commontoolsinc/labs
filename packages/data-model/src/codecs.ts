@@ -42,10 +42,10 @@ import { codecs as instanceCodecs } from "./fabric-instances/index.ts";
  * `UnknownValue` by the encoding context rather than tag-routed.
  */
 export function createDefaultJsonRegistry(): CodecRegistry {
-  return createBaseJsonRegistry().extend([
-    ...primitiveJsonCodecs(),
-    ...instanceCodecs(),
-  ]);
+  return createBaseJsonRegistry().extend(
+    primitiveJsonCodecs(),
+    instanceCodecs(),
+  );
 }
 
 /**

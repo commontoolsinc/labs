@@ -172,11 +172,11 @@ describe("CodecRegistry", () => {
   describe("`extend()`", () => {
     it("returns a different instance", () => {
       const base = new CodecRegistry();
-      expect(base.extend([])).not.toBe(base);
+      expect(base.extend()).not.toBe(base);
     });
 
     it("returns a frozen instance", () => {
-      expect(Object.isFrozen(new CodecRegistry().extend([]))).toBe(true);
+      expect(Object.isFrozen(new CodecRegistry().extend())).toBe(true);
     });
 
     it("carries over every kind of registration the base holds", () => {
@@ -187,23 +187,36 @@ describe("CodecRegistry", () => {
       base.registerPrimitive("bigint", primitive);
       base.registerSelfRep("string");
 
-      const extended = base.extend([]);
+      const extended = base.extend();
 
       expect(extended.codecFromTag("carried@1")).toBe(codec);
       expect(extended.codecFromTag("prim@1")).toBe(primitive);
       expect(extended.codecFromValue("florp")).toBe(SELF_REP);
     });
 
-    it("registers the given codecs", () => {
+    it("registers a codec given on its own", () => {
       const added = new TestCodec("added@1", undefined);
-      const extended = new CodecRegistry().extend([added]);
+      const extended = new CodecRegistry().extend(added);
 
       expect(extended.codecFromTag("added@1")).toBe(added);
     });
 
+    it("registers codecs given individually and in lists, in any mix", () => {
+      const loose = new TestCodec("loose@1", undefined);
+      const listed = new TestCodec("listed@1", undefined);
+      const alsoListed = new TestCodec("alsoListed@1", undefined);
+
+      const extended = new CodecRegistry()
+        .extend(loose, [listed, alsoListed]);
+
+      expect(extended.codecFromTag("loose@1")).toBe(loose);
+      expect(extended.codecFromTag("listed@1")).toBe(listed);
+      expect(extended.codecFromTag("alsoListed@1")).toBe(alsoListed);
+    });
+
     it("leaves the base without the added registrations", () => {
       const base = new CodecRegistry();
-      base.extend([new TestCodec("added@1", undefined)]);
+      base.extend(new TestCodec("added@1", undefined));
 
       expect(base.codecFromTag("added@1")).toBe(undefined);
     });

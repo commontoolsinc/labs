@@ -140,9 +140,16 @@ export class CodecRegistry {
    * for all of them. A caller therefore reads the symbol it means and passes
    * the result, which is what lets this module stay format-agnostic.
    *
-   * @param codecs The codecs to register in addition.
+   * Arguments are taken as `Array.concat()` takes them -- any number, each
+   * either a codec or a list of them -- so that a caller combining rosters
+   * need not splice them into one array first.
+   *
+   * @param codecs The codecs to register in addition, individually or in
+   *   lists.
    */
-  extend(codecs: readonly FabricCodec[]): CodecRegistry {
+  extend(
+    ...codecs: readonly (FabricCodec | readonly FabricCodec[])[]
+  ): CodecRegistry {
     const result = new CodecRegistry();
 
     for (const [key, value] of this.#tagMap) result.#tagMap.set(key, value);
@@ -152,8 +159,14 @@ export class CodecRegistry {
     }
     for (const type of this.#selfRepTypes) result.#selfRepTypes.add(type);
 
-    for (const codec of codecs) {
-      result.register(codec);
+    for (const arg of codecs) {
+      if (Array.isArray(arg)) {
+        for (const codec of arg) {
+          result.register(codec);
+        }
+      } else {
+        result.register(arg as FabricCodec);
+      }
     }
 
     // Frozen as a statement rather than by returning `Object.freeze()`'s
