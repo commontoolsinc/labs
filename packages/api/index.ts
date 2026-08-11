@@ -2607,13 +2607,12 @@ export interface HandlerFunction {
  * The transformer extracts closures and makes them explicit, just like how
  * computed(() => expr) becomes a lift-applied computation with closure
  * extraction.
- *
- * This is the surface a PATTERN sees — `commonfabric` resolves to this file, so
- * these overloads and `builder/module.ts`'s `action()` must carry the same
- * signatures. They are maintained by hand and drift silently: an overload
- * present only in the builder is invisible to every pattern, which is how the
- * result overload below was initially missed.
  */
+// This is the surface a PATTERN sees — `commonfabric` resolves to this file, so
+// these overloads and `builder/module.ts`'s `action()` must carry the same
+// signatures. They are maintained by hand and drift silently: an overload
+// present only in the builder is invisible to every pattern, which is how the
+// result overload below was initially missed.
 export type ActionFunction = {
   (fn: () => void): Stream<void>;
   <E>(fn: (event: E) => void): Stream<E>;
