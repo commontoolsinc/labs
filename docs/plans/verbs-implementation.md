@@ -107,7 +107,8 @@ pricing, so the pricing needs to be the honest one.
 
 ## Ready to build
 
-Unblocked, small, and independent of the decision above.
+Unblocked and independent of the decision above. Small, except item 11, which
+is here because nothing gates it rather than because it is quick.
 
 **2. An unrecognized projection key is refused.** *(M)* Two denylists are
 consulted and every key in neither is accepted and ignored, so a typo selects
@@ -191,6 +192,56 @@ other command accepts, which this is the occasion to make the declared shape.
 *Exit:* the same cell, reached four ways, renders identically under the same
 selection.
 
+**11. A caller may name a reference.** *(M)* A verb whose event declares
+`Writable<T>` is callable by a model and by nothing else. `traverseAndCellify`
+(`packages/runner/src/builtins/llm-dialog.ts`) resolves `{"@link": …}` into a
+live cell before dispatch, so the LLM boundary has a complete round trip; the
+CLI rejects the address and the webhook path forwards it unresolved. The
+shape-matching payload the CLI *does* accept stores a detached copy and reports
+success.
+
+*The refusal is drift, not policy.* `closedWorldEventRejection`
+(`packages/runner/src/runner.ts`) validates a present event payload with
+`acceptOpaqueValue: (value) => isCellLink(value)` — a link passes unjudged,
+because its target cannot be read at dispatch. `verbInputSchemaError`
+(`packages/cli/lib/callable.ts`) calls the same `validateSchemaValue` with two
+arguments, so the options object defaults to `{}`. Same validator; the outer
+gate never got the option. The design is
+[references as arguments](references-as-arguments.md).
+
+Four parts, and only the first is independent:
+
+- **Refuse the structural copy.** Correct under any road, needs no vocabulary
+  and no gate change, and converts silent corruption into an error.
+- **Give the CLI gate the option the dispatch gate already passes.** One
+  argument at one call site.
+- **Lift resolution to a shared home**, beside `parseLink` and the LLM-friendly
+  pair in `packages/runner/src/link-utils.ts`.
+- **Fix event-schema emission.** An inline `Writable<{…}>` disappears from the
+  emitted properties entirely — needed under any road, and doubly once event
+  schemas close, since a field the schema does not name cannot be supplied at
+  all. The `asCell` marker is needed only if resolution goes schema-directed.
+
+*Order is not free.* Resolution precedes the gate, which is the order
+`llm-dialog` already proves. Aligning the gate first would pass a raw envelope
+to a handler expecting a cell.
+
+*One decision inside the item:* schema-blind or schema-directed resolution.
+Schema-blind is proven twice — `traverseAndCellify` and the dispatch gate;
+schema-directed is checkable and refuses a typo. It decides whether the `asCell`
+half of emission is required or merely useful, so reach it before starting
+emission.
+
+*A constraint rather than a decision:* what is accepted inbound must include the
+shape a read emits, or a caller cannot submit the address it was just handed.
+
+*CFC gets a notification, not a ruling* — an existing capability widening from
+the user's own model session to external principals.
+
+*Exit:* `cf piece call --piece <root> addPiece '{"piece": <address>}'` registers
+the piece. That is the root pattern's own verb, reachable today only from inside
+the runtime.
+
 ## Landed, and what consumes it
 
 **6. The read layer.** The shared read step, address markers with the
@@ -238,6 +289,7 @@ joins them.
 | 5 | 4 | the fourth and fifth arrivals inherit whatever a read costs |
 | 10 | 1 | listing rows carry a handler's `outputSchema`; the plumbing exists for tools already |
 | 1 | — | decided; 8 and 10 are no longer provisional, and item 10 carries the revisit condition |
+| 11 | — | independent of 1: declared results make an *output* self-describing, this is what an *input* accepts. Shares `schema-injection.ts` with item 10's emission, so one holder suits both |
 
 Items 2, 3 and 5 touch one file heavily and want to land one at a time rather
 than in parallel. Item 4 is the only one that touches the call envelope.
