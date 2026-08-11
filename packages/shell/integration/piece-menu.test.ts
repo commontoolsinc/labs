@@ -512,7 +512,7 @@ describe("piece context menu", () => {
       expect(highlight.visual.animationName).toBe("none");
     } else {
       expect(highlight.visual.animationName).toBe("cf-piece-menu-shine");
-      expect(highlight.visual.animationIterationCount).toBe("infinite");
+      expect(highlight.visual.animationIterationCount).toBe("1");
     }
     await clickPierce(page, '[test-id="piece-menu-source"]');
     // The space root runs the default app, so its entry file is that pattern.
@@ -741,7 +741,7 @@ describe("piece context menu", () => {
         expect(result.visual.animationName).toBe(
           "cf-nested-piece-menu-shine",
         );
-        expect(result.visual.animationIterationCount).toBe("infinite");
+        expect(result.visual.animationIterationCount).toBe("1");
       }
     } finally {
       await Deno.remove(identityPath).catch(() => {});
