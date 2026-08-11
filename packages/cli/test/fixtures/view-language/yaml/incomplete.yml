@@ -1,0 +1,3 @@
+script: |
+  deno task check
+  unfinished: "value
