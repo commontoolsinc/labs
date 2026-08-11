@@ -732,3 +732,109 @@ Deno.test("memory v2 server: requeue after failure does not resurrect echo suppr
     ["of:doc:b"],
   );
 });
+
+Deno.test("memory v2 server: the verdict leaves within the transact's publication turn; fan-out cannot enter it", async () => {
+  const context = await setup({
+    subscriptionRefreshDelayMs: 60_000,
+    store: "memory://verdict-catchup-publication-turn",
+  });
+  const { server, space, committer, committerMessages, committerSessionId } =
+    context;
+
+  // Train-side re-pin of #5529's verdict-precedes-fan-out: main's instrument
+  // gated runPostCommitSchedulerSideEffects, machinery this train deleted, so
+  // this test instruments the publication turn itself. The wrapper extends
+  // the transact's own turn tenure: it resolves `turnHeld` after the turn's
+  // body — including the in-lock verdict publication — finishes, then holds
+  // the lock open until the gate opens. The verdict must already be at the
+  // committing session while the turn is still owned, and fan-out must not
+  // be able to enter the turn until it is released.
+  const gate = Promise.withResolvers<void>();
+  const turnHeld = Promise.withResolvers<void>();
+  const fanoutLockAttempted = Promise.withResolvers<void>();
+  let fanoutEntered = false;
+  let transactTurnSeen = false;
+  const serverInternals = server as unknown as {
+    withSpacePublicationLock<T>(
+      space: string,
+      run: () => Promise<T>,
+    ): Promise<T>;
+  };
+  const originalLock = serverInternals.withSpacePublicationLock.bind(server);
+  serverInternals.withSpacePublicationLock = <T>(
+    lockSpace: string,
+    run: () => Promise<T>,
+  ) => {
+    if (!transactTurnSeen) {
+      transactTurnSeen = true;
+      return originalLock(lockSpace, async () => {
+        const result = await run();
+        turnHeld.resolve();
+        await gate.promise;
+        return result;
+      });
+    }
+    fanoutLockAttempted.resolve();
+    return originalLock(lockSpace, async () => {
+      fanoutEntered = true;
+      return await run();
+    });
+  };
+
+  const commit = committer.receive(encodeMemoryBoundary({
+    type: "transact",
+    requestId: "committer-turn",
+    space,
+    sessionId: committerSessionId,
+    commit: {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:doc:a",
+        value: { value: { from: "committer" } },
+      }],
+    },
+  }));
+
+  let fanout: Promise<void> | undefined;
+  try {
+    await turnHeld.promise;
+    // The verdict is already at the committing session while its transact
+    // still owns the publication turn.
+    const verdict = assertResponse<{ seq: number }>(
+      shiftMessage(committerMessages),
+    );
+    assertEquals(verdict.ok?.seq, 2);
+    assertEquals(committerMessages.length, 0);
+
+    // Fan-out serializes behind the held turn: the flush attempts the lock
+    // but cannot enter it, and no frame reaches the committer.
+    fanout = server.flushSessions([space]);
+    await fanoutLockAttempted.promise;
+    assertEquals(fanoutEntered, false);
+    assertEquals(committerMessages.length, 0);
+  } finally {
+    gate.resolve();
+    try {
+      await Promise.all([commit, fanout]);
+    } finally {
+      serverInternals.withSpacePublicationLock = originalLock;
+    }
+  }
+
+  // With the turn released, fan-out enters and delivers the parked novelty;
+  // the committer's own accepted doc:a stays echo-suppressed.
+  assertEquals(fanoutEntered, true);
+  const effect = assertEffect(shiftMessage(committerMessages));
+  const sync = effect.effect as SessionSync;
+  assertEquals(sync.caughtUpLocalSeq, 1);
+  assertEquals(
+    sync.upserts
+      .map((upsert) => ({ id: upsert.id, seq: upsert.seq, doc: upsert.doc })),
+    [
+      { id: "of:doc:b", seq: 1, doc: { value: { from: "writer" } } },
+    ],
+  );
+  assertEquals(committerMessages.length, 0);
+});

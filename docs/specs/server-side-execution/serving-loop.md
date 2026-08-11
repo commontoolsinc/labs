@@ -957,3 +957,22 @@ Phase 1; the v1 branch's shape is prior art, not existing substrate)
 and the basis index tables (§3b — a NEW reduced schema of ids + seqs
 only, overwritten in place; correctness-bearing for recovery but never
 payloads, so NOT the evidence log).
+
+One tripwire is positive rather than lexical (labs #5569): scheduler
+liveness is maintained incrementally, and NO global rebuild runs on
+the maintenance path to repair a missed transition —
+`recomputeLiveRefs` survives only as the reference definition. Any
+future demand-root kind (a new `isDemandRoot` disjunct), and any new
+site that flips effect status, materializer envelopes, provisional
+demand, or registration, MUST bracket the transition with the
+liveness notifications: capture `wasLive` before the flip, call
+`notifyNodeLivenessChange` after it (the
+`updateMaterializerRegistration` / `updateSchedulerActionType`
+shape), or route through `setNodeProvisionalDemand`. An unbracketed
+flip is SILENT — nothing repairs it anymore, and the node serves (or
+starves) work against a stale liveness answer. Review test for a diff
+that adds such a site without the bracket: reject it. Verification:
+run the runner suite with `SCHEDULER_LIVENESS_EQUIVALENCE=1` (the
+every-mutation equivalence hook in
+`packages/runner/src/scheduler/dependency-graph.ts` checks the
+incremental state against the full rebuild at each mutator exit).

@@ -865,6 +865,47 @@ hardening):**
   bookkeeping/bulk (README §3.3, protocol §3). Counter/ordering
   assertion in `sx2-scale`.
 
+Delta 2026-08-10 — the #5569 incremental-liveness catch-up (main
+9d6c9fe00 cascaded through the train; one NEW binding sentence, two
+re-homed pins from train-deleted test surfaces):
+
+- serving-loop §8's liveness-bracket tripwire: NEW binding sentence
+  (any future demand-root kind or root-flipping site MUST bracket its
+  transitions with the liveness notifications; no global rebuild
+  repairs silent flips — labs #5569). Coverage: the env-gated
+  every-mutation equivalence hook in
+  `packages/runner/src/scheduler/dependency-graph.ts`
+  (`SCHEDULER_LIVENESS_EQUIVALENCE=1`, asserts incremental state
+  equals `recomputeLiveRefs` at each mutator exit; run across the
+  whole runner suite at catch-up: zero drift, and
+  discrimination-verified by reinjecting the historical
+  `unregisterDependentEdge` root-writer decrement skip), plus
+  `test/scheduler/dependency-graph.test.ts`'s randomized
+  every-mutation reference check. Silent-root-flip audit of the
+  merged tree found every flip site bracketed
+  (`updateSchedulerActionType`, `updateMaterializerRegistration`,
+  `setNodeProvisionalDemand` callers; unsubscribe's envelope clear is
+  post-unregistration and inert).
+- per-doc-rehydration's resume-fresh reliance on scheduler-v2 §5.2's
+  registration-recount order-independence: CROSS-REFERENCE recorded
+  (a §5.2 recount change is a resume-correctness change). Coverage:
+  same instruments as above; resume paths exercised under the
+  equivalence hook by the runner suite's reload/resume tests.
+- #5388's release-vs-stop pin ("releasing a target before link
+  resolution preserves the held start") — its main-side home
+  (`reload-rehydration-safety.test.ts`) was deleted with the
+  observation machinery; RE-HOMED train-side as
+  `packages/runner/test/release-vs-stop-link-resolution.test.ts`
+  (green; discriminates — substituting stop for the release fails).
+- #5529's verdict-precedes-fan-out — its main-side instrument gated
+  `runPostCommitSchedulerSideEffects`, machinery the train deleted;
+  RE-PINNED train-side in
+  `packages/memory/test/v2-verdict-catchup.test.ts` ("the verdict
+  leaves within the transact's publication turn; fan-out cannot
+  enter it"), instrumenting the publication turn directly (green;
+  discriminates — deferring the in-lock verdict publication fails
+  it).
+
 ## 4. Standing rule
 
 A ruling batch that adds a BINDING sentence adds its coverage row
