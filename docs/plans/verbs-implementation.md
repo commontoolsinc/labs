@@ -44,7 +44,7 @@ without reconstructing it.
 | 7. session-scoped invocation ids | on main (#5610) |
 | 8. descriptive receipt schemas | on main |
 | 9a. listing marks | on main (#5309) |
-| 10. listing rows carry a handler's declared result | in review (#5629) |
+| 10. listing rows carry a handler's declared result | on main (#5629) |
 | 9b. closed-world event emission | built, parked on #5589 (#5307) |
 | 4. `receipt` as a top-level envelope field | not started — and its precondition now holds |
 | 2. an unrecognized projection key is refused | not started |
@@ -60,7 +60,6 @@ a driver needs to know what is already moving before scheduling anything new.
 
 | PR | What | State |
 | --- | --- | --- |
-| #5629 | a verb listing row carries the handler's declared result | item 10, the consumer half of the declared result |
 | #5307 | closed-world verb event schemas | parked on #5589; the minting is built, and what stays red is a renderer-semantics ruling rather than an implementation gap |
 
 **Most of the read layer has landed.** #5309, #5459, #5468, #5470, #5497 and
@@ -322,8 +321,8 @@ its own track.
 | --- | --- | --- | --- | --- |
 | 1 | The doubly-linked tracker fixture and its walkthrough | **on main** (#5639, #5631) — repro for #5577, #5632, #5633, #5637; item 11's subject | — | Five things verify against a piece that holds a back-reference, and none could be demonstrated until one existed. `verb-session-gaps.sh` is where they are asserted, and four of its assertions expect a gap and fail loudly the day it closes — so a capability arriving announces itself instead of quietly turning a check green |
 | 2 | A projected read survives a handler | #5633 | 1 | Breaks call-then-read-shaped, which is the loop items 4, 5, 10 and #5577 all demonstrate against. Diagnose before estimating: if it sits in runner materialization rather than the read path, it moves after step 7 rather than holding the line |
-| 3 | Listing rows carry a handler's declared result | item 10, #5619 | — | The consumer half of item 1 |
-| 4 | The forced-stream fallback stops inventing verbs | #5576 | 3 | Same file as step 3. It narrows the listing, so sweep the open branches for writers first |
+| 3 | Listing rows carry a handler's declared result | **on main** (#5629) — item 10, #5619 | — | The consumer half of item 1 |
+| 4 | The forced-stream fallback stops inventing verbs | #5576 | 3 | Same file as step 3, which has landed, so this is the front of the queue. It narrows the listing, so sweep the open branches for writers first |
 | 5 | The help page stops claiming a verb returns nothing | #5558 (the false claim) | — | `Output: No output on success.` is wrong for a declared verb. Asserting there is no output is worse than saying nothing, and stopping it needs no schema and no decision, which is why it precedes the half that does |
 | 5a | An author's prose reaches the caller | #5637 | 1 | Separate lane — what is missing is not in the CLI. See the measurement below: two of the three symptoms are emitted correctly and lost afterwards, so a fix aimed at the emitter would miss them |
 | 6 | Help enumerates what a verb returns | #5558 (the missing fields) | 3, 5 | Step 3 builds the declared-result lookup; this is its second consumer, at the call path rather than the listing |
@@ -508,7 +507,6 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | Issue | What | Attaches at |
 | --- | --- | --- |
 | #5633 | a projected read fails after an unrelated handler runs, while the same path unshaped succeeds | step 2 |
-| #5619 | listing rows carry a handler's declared result | step 3 |
 | #5576 | `cf piece verbs` lists data fields as handlers, so discovery reports what cannot be called | step 4 |
 | #5558 | `piece call --help` claims every handler returns nothing, including one that declares a result | steps 5 and 6 — the false claim needs nothing, enumerating the fields needs the lookup |
 | #5637 | an author's prose does not reach a caller: on a verb, on an event field, and on the event interface | step 5a — it absorbed #5559, which described one symptom and had its cause backwards |
