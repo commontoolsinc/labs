@@ -24,6 +24,7 @@ import {
   KeepAsCell,
   mergeSchemaDefaults,
   NAME,
+  parseFabricRef,
   parseLinkOrThrow,
   type Pattern,
   type PieceSourceRevision,
@@ -3263,9 +3264,18 @@ export class PieceController<T = unknown> {
       this.#pieces.runtime,
       this.#cell,
     )?.url;
-    const origin = trackedOrigin === undefined
-      ? `cf:/${sourceSpace}/${this.#cell.getAsNormalizedFullLink().id}`
-      : qualifyFabricOrigin(trackedOrigin, sourceSpace);
+    let origin: string;
+    if (trackedOrigin === undefined) {
+      const sourceRef = parseFabricRef(
+        `cf:${this.#cell.getAsNormalizedFullLink().id}`,
+      );
+      if (sourceRef === undefined || sourceRef.ref.kind !== "uri") {
+        throw new Error("piece has no fabric URI");
+      }
+      origin = formatFabricRef({ ...sourceRef, space: sourceSpace });
+    } else {
+      origin = qualifyFabricOrigin(trackedOrigin, sourceSpace);
+    }
     const program = await this.#pieces.runtime.patternManager
       .getPatternSourceProgramByIdentity(
         snapshot.pattern.identity,

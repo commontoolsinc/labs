@@ -660,7 +660,7 @@ describe("the menu a right-click opens", () => {
     }]);
   });
 
-  it("does not strand a clone when the menu is dismissed during the request", async () => {
+  it("keeps the clone dialog open until an in-flight clone completes", async () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     const navigations: unknown[] = [];
@@ -683,9 +683,16 @@ describe("the menu a right-click opens", () => {
       const menu = openMenu(cell);
       const cloning = menu.cloneIntoNewSpace({ spaceName: "copied-piece" });
       await entered.promise;
+      expect(shows(menu)).toContain("Cloning piece into a new space…");
+
+      // A pending clone cannot be dismissed: its result still needs somewhere
+      // to report a failure, and a successful clone will navigate when done.
       menu.close();
+      expect(shows(menu)).toContain("Cloning piece into a new space…");
+
       release.resolve();
       await cloning;
+      expect(shows(menu)).toBe("");
     } finally {
       release.resolve();
       globalThis.removeEventListener("cf-navigate", onNavigate);

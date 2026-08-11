@@ -991,7 +991,10 @@ export class CFPieceMenu extends BaseElement {
     void this.#readSource(cell);
   }
 
-  /** Hide the menu and forget the piece it was describing. */
+  /**
+   * Hides the menu and forgets its piece. A clone progress dialog remains
+   * mounted until the request settles so it can report failure or navigate.
+   */
   close(): void {
     if (this.clonePending) return;
     this.#setHighlightedPiece(undefined, undefined);

@@ -358,6 +358,15 @@ export class PatternUpdater {
           transitionBaseline,
         );
         const result = await runtime.editWithRetry((tx) => {
+          // editWithRetry re-runs this callback after a retryable rejection.
+          // A stop may abort this check while the previous commit is settling,
+          // so every attempt must re-enter through the lifecycle gate rather
+          // than relying on the checks that preceded the first attempt.
+          if (signal.aborted) {
+            // Throwing from the action is terminal in editWithRetry. Calling
+            // tx.abort() here would itself be classified as retryable.
+            signal.throwIfAborted();
+          }
           if (!canWrite(tx)) return false;
           applyPieceSourceTransition(
             runtime,
@@ -368,6 +377,9 @@ export class PatternUpdater {
           );
           return true;
         });
+        // Cancellation is lifecycle control, not a failed source repair. Do
+        // not report the guarded action failure after stop/dispose.
+        if (signal.aborted) return "current";
         if (result.error) {
           logger.warn("provenance-repair-failed", () => [
             "pattern source provenance repair failed",
@@ -557,6 +569,15 @@ export class PatternUpdater {
         transitionBaseline,
       );
       const result = await runtime.editWithRetry((tx) => {
+        // This callback is the retry unit. stop()/dispose() can abort the
+        // updater while editWithRetry waits for conflict repair, so checking
+        // only before entering editWithRetry would let a later attempt install
+        // a new pointer and setup on a stopped piece.
+        if (signal.aborted) {
+          // An action throw ends the retry loop; tx.abort() would consume the
+          // remaining retries with the same cancellation on every attempt.
+          signal.throwIfAborted();
+        }
         if (!canWrite(tx)) return false;
         const candidate = resultCell.withTx(tx);
         if (
@@ -592,6 +613,7 @@ export class PatternUpdater {
         }
         return true;
       });
+      if (signal.aborted) return "current";
       if (result.error) {
         logger.warn("swap-failed", () => [
           "pattern update setup failed",

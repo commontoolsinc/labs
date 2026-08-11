@@ -6,6 +6,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import {
   type Cell,
   getPatternIdentityRef,
+  getPatternSetupIdentityRef,
   getPatternSource,
   getPieceSourceRevisions,
   resolveEntryIdentity,
@@ -559,6 +560,98 @@ describe("lazy system-pattern auto-update", () => {
       href: `http://toolshed.test${SOURCE_PATH}`,
       cache: "no-cache",
     });
+  });
+
+  it("does not retry a source swap after the piece stops", async () => {
+    const v2Identity = await identityFor(source("v2"));
+    const piece = await preparePiece((input) => {
+      const href = input instanceof Request
+        ? input.url
+        : input instanceof URL
+        ? input.href
+        : input;
+      const url = new URL(href);
+      if (url.pathname === PARENT_PATH && url.searchParams.has("identity")) {
+        return Promise.resolve(new Response(v2Identity));
+      }
+      const contents = url.pathname === PARENT_PATH
+        ? parentSource
+        : url.pathname === SOURCE_PATH
+        ? source("v2")
+        : undefined;
+      return Promise.resolve(
+        new Response(contents ?? "not found", {
+          status: contents === undefined ? 404 : 200,
+        }),
+      );
+    });
+    const stamped = await runtime.editWithRetry((tx) => {
+      setPatternSource(piece, tx, PARENT_SOURCE);
+    });
+    expect(stamped.error).toBeUndefined();
+    expect(
+      await runtime.start(piece, { schedulePatternUpdate: false }),
+    ).toBe(true);
+    await runtime.idle();
+
+    const originalRef = getPatternIdentityRef(piece);
+    const originalSetupRef = getPatternSetupIdentityRef(piece);
+    const firstAttemptStaged = defer();
+    const retryGate = defer();
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    const originalLoadPatternByIdentity = runtime.patternManager
+      .loadPatternByIdentity.bind(runtime.patternManager);
+    let swapAttempts = 0;
+    let retryHarnessInstalled = false;
+    runtime.patternManager.loadPatternByIdentity = (async (...args) => {
+      const loaded = await originalLoadPatternByIdentity(...args);
+      if (
+        !retryHarnessInstalled && args[0] === originalRef!.identity &&
+        args[1] === originalRef!.symbol
+      ) {
+        // This is the last awaited operation before the source-swap
+        // editWithRetry. Install the harness here so compiler cache writes keep
+        // their ordinary transaction behavior.
+        retryHarnessInstalled = true;
+        runtime.editWithRetry = ((fn, maxRetries) => {
+          // Model a retryable rejection after the first callback has staged
+          // the swap. The callback is the unit Runtime.editWithRetry invokes
+          // again after conflict catch-up.
+          const rejectedTx = runtime.edit();
+          fn(rejectedTx);
+          swapAttempts++;
+          rejectedTx.abort("simulated retryable source-swap rejection");
+          firstAttemptStaged.resolve();
+          return retryGate.promise.then(() =>
+            originalEditWithRetry((tx) => {
+              swapAttempts++;
+              return fn(tx);
+            }, maxRetries)
+          );
+        }) as typeof runtime.editWithRetry;
+      }
+      return loaded;
+    }) as typeof runtime.patternManager.loadPatternByIdentity;
+
+    try {
+      runtime.patternUpdater.schedule(piece);
+      await firstAttemptStaged.promise;
+      runtime.runner.stop(piece);
+      retryGate.resolve();
+      await runtime.patternUpdater.idle();
+      await runtime.idle();
+    } finally {
+      retryGate.resolve();
+      runtime.editWithRetry = originalEditWithRetry;
+      runtime.patternManager.loadPatternByIdentity =
+        originalLoadPatternByIdentity;
+    }
+
+    expect(retryHarnessInstalled).toBe(true);
+    expect(swapAttempts).toBe(2);
+    expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+    expect(getPatternSetupIdentityRef(piece)).toEqual(originalSetupRef);
+    expect(getPieceSourceRevisions(piece)).toEqual([]);
   });
 
   it("records a proven system source when its identity is already current", async () => {
