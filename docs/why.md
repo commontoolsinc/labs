@@ -44,9 +44,8 @@ to write for an empty ecosystem.
 
 So we built a runtime on the opposite rule. The software is untrusted,
 and safety attaches to the data. Every datum carries its own policies,
-the way GPL code carries its license, and anything derived from it
-carries them too. Code that cannot prove it honors those policies does
-not compile. What it adds up to is a distributed, trusted microkernel
+and anything derived from it carries them too. Code that cannot prove it
+honors those policies does not compile. What it adds up to is a distributed, trusted microkernel
 for networked software in the AI era.
 
 Concretely. A program that imports your mail gets a token that could
