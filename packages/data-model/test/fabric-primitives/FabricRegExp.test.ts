@@ -49,7 +49,7 @@ describe("FabricRegExp", () => {
         expect(re.value.lastIndex).toBe(0);
       });
 
-      it("rejects one with extra enumerable properties", () => {
+      it("throws given one with extra enumerable properties", () => {
         const original = /abc/g;
         (original as unknown as Record<string, unknown>).custom = 1;
         expect(() => new FabricRegExp(original)).toThrow(
@@ -177,7 +177,7 @@ describe("FabricRegExp", () => {
           expect(decoded).toBeInstanceOf(ProblematicValue);
         });
 
-        it("accepts a malformed pattern under a non-`es2025` flavor", () => {
+        it("returns a `FabricRegExp` rather than a `ProblematicValue` for a malformed pattern under a non-`es2025` flavor", () => {
           // Only the `es2025` flavor is validated; other flavors are stored
           // faithfully, so an unparseable source is not a decode failure.
           const decoded = codec.decode(
@@ -259,7 +259,7 @@ describe("FabricRegExp", () => {
       expect((result as FabricRegExp).flags).toBe("gi");
     });
 
-    it("rejects a `RegExp` with extra enumerable properties", () => {
+    it("throws given a `RegExp` with extra enumerable properties", () => {
       const re = /abc/;
       (re as unknown as Record<string, unknown>).custom = 1;
       expect(() => shallowFabricFromNativeValue(re)).toThrow(

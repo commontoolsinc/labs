@@ -10,6 +10,7 @@ import {
   assertRejects,
   assertStringIncludes,
 } from "@std/assert";
+import { expect } from "@std/expect";
 import {
   broadcast,
   clients,
@@ -428,6 +429,78 @@ Deno.test("an update still running after one minute stays gray until it complete
     assert(fresh.startsWith(`good" data-tile-id="model-spend">`));
     assertStringIncludes(fresh, "fresh value");
     assertStringIncludes(fresh, "fresh detail");
+  } finally {
+    clients.delete(client);
+    final.resolve(finalView);
+    try {
+      await collection;
+    } finally {
+      Date.now = realNow;
+    }
+  }
+});
+
+Deno.test("a completed-views-only tile suppresses intermediate views and keeps its settled color", async () => {
+  const realNow = Date.now;
+  const startedAt = realNow() - 61_000;
+  let now = startedAt;
+  Date.now = () => now;
+  const lastView: TileView = {
+    label: "settled benchmark",
+    status: "bad",
+    value: "failed",
+    sub: "last completed result",
+  };
+  const finalView: TileView = {
+    label: "settled benchmark",
+    status: "warn",
+    value: "slower",
+    sub: "new completed result",
+  };
+  const final = deferred<TileView>();
+  let receivedPublisher = false;
+  const tile: Tile = {
+    id: "benchmark",
+    intervalMs: 0,
+    showOnlyCompletedViews: true,
+    async collect(_ctx, publish) {
+      receivedPublisher = publish !== undefined;
+      return await final.promise;
+    },
+  };
+  const messages: string[] = [];
+  const client = {
+    enqueue(value: Uint8Array) {
+      messages.push(dec.decode(value));
+    },
+  } as unknown as ReadableStreamDefaultController<Uint8Array>;
+  let collection: Promise<void> | undefined;
+  try {
+    await tick([fake("benchmark", () => lastView)]);
+    clients.add(client);
+    now++;
+    collection = tick([tile]);
+
+    expect(receivedPublisher).toBe(false);
+    expect(tileHtml("settled benchmark")).toContain(
+      `bad\" data-tile-id=\"benchmark\">`,
+    );
+    expect(messages).toEqual([]);
+
+    now += 60_000;
+    await tick([tile]);
+    expect(tileHtml("settled benchmark")).toContain(
+      `bad\" data-tile-id=\"benchmark\">`,
+    );
+    expect(tileHtml("settled benchmark")).toContain("refresh still pending");
+    expect(messages).toHaveLength(1);
+
+    final.resolve(finalView);
+    await collection;
+    expect(tileHtml("settled benchmark")).toContain(
+      `warn\" data-tile-id=\"benchmark\">`,
+    );
+    expect(messages).toHaveLength(2);
   } finally {
     clients.delete(client);
     final.resolve(finalView);

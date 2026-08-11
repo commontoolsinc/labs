@@ -809,10 +809,17 @@ export class Scheduler {
       isEffect: observation.actionKind === "effect",
     });
     if (observation.materializerWriteEnvelopes.length > 0) {
+      // Becoming a materializer makes the action a demand root, which the
+      // liveness graph only learns about when it is told.
+      const record = this.nodes.get(action);
+      const wasLive = record
+        ? isLive(this.dependencyGraphState, record)
+        : false;
       this.materializers.registerAddresses(
         action,
         observation.materializerWriteEnvelopes,
       );
+      notifyNodeLivenessChange(this.dependencyGraphState, action, wasLive);
     }
 
     const { actionOptions } = observation;
@@ -966,9 +973,11 @@ export class Scheduler {
         observationIdentityKey(observation),
       );
       if (!action) continue;
-      // Only live registrations adopt (the id index may hold entries whose
-      // node was removed through a path that bypassed unsubscribe()).
-      if (!this.nodes.get(action)) continue;
+      // Only live registrations adopt. `nodes.get` cannot decide that: a
+      // removed record stays in the registry so its ordinal and parent survive
+      // a re-registration window, so it answers for a node that is no longer
+      // scheduled. Registration is the question being asked.
+      if (!this.nodes.isComputation(action)) continue;
       if (this.nodes.isKnownEffect(action)) continue;
       // Never adopt a child-starting coordinator clean: its reconcile is what
       // (re)registers per-element children, so skipping it strands a remotely
@@ -1096,9 +1105,11 @@ export class Scheduler {
     unsubscribeSchedulerAction(this.unsubscribeState, action, options);
     this.materializers.clearAction(action);
     // Drop the adoption index entry only if it still points at this action
-    // (a re-registration may have overwritten it). Cancel paths that bypass
-    // this method leave stale entries; the adoption path re-checks node
-    // liveness before applying, so stale entries are inert.
+    // (a re-registration may have overwritten it, and that entry belongs to
+    // the action that replaced this one). The key is derived from annotations
+    // carried on the action itself, so an entry outlives its action if either
+    // of those ever changes under it; the adoption path checks registration
+    // before applying, which leaves such an entry inert.
     const identityKey = this.observationIdentityKeyForAction(action);
     if (
       identityKey !== undefined &&

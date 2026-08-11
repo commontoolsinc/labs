@@ -1,7 +1,7 @@
 /**
- * Entry point for `cf view`. Reads the input (a file argument or piped stdin),
- * parses it once — as a unified diff when it reads as one, otherwise with the
- * language selected from its filename — then either launches the interactive
+ * Entry point for `cf view`. Reads input bytes, selects a language and decodes
+ * through it, then parses once — as a unified diff when it reads as one,
+ * otherwise with the selected language. It then launches the interactive
  * pager (when stdout is a TTY) or prints the selected source or rendered
  * representation and exits, mirroring how `less`/`bat` behave when their
  * output is redirected.
@@ -11,7 +11,7 @@
  */
 import { renderLineColored } from "./highlight.ts";
 import { runPager } from "./pager.ts";
-import type { Document } from "./model.ts";
+import type { Document, Line } from "./model.ts";
 import { ViewError } from "./errors.ts";
 import { detectDiff, type DiffModel, parseDiff } from "./diff.ts";
 import {
@@ -20,16 +20,19 @@ import {
   type WorkspaceCache,
 } from "./diffdoc.ts";
 import {
+  byteInputFor,
+  canRenderDiffLines,
+  decodeLanguageInput,
   diffSemanticsFor,
   distinctLanguages,
   type Language,
   languageForFile,
   languageForName,
-  languageForSource,
   languageForTransformedOutput,
   languageNames,
   type Semantics,
 } from "./languages/language.ts";
+import type { DecodedLanguageSource } from "./languages/decoder.ts";
 import {
   type EditableSource,
   fileSource,
@@ -37,6 +40,7 @@ import {
 } from "./editsource.ts";
 import { diffSource } from "./diffedit.ts";
 import { findCommitHeaders, realGit } from "./commitmsg.ts";
+import { type BufferedViewInput, loadViewInput } from "./loadinput.ts";
 
 export { ViewError };
 
@@ -59,8 +63,40 @@ export interface ViewOptions {
 
 export async function viewMain(options: ViewOptions): Promise<void> {
   const selection = pipedSelection(options);
-  const text = await readInput(options.file);
-  if (text.trim().length === 0) {
+  const stdoutTty = Deno.stdout.isTerminal();
+  const interactive = !options.plain && stdoutTty;
+  const color = options.color === "always"
+    ? true
+    : options.color === "never"
+    ? false
+    : stdoutTty;
+  const input = await loadViewInput(
+    options.file,
+    selection.fileName ?? options.file,
+    selection.language,
+    interactive,
+    options.diff !== true,
+  );
+  if (input.kind === "rendered-stream") {
+    try {
+      await printLines(
+        byteInputFor(input.language)!.renderByteStream(input.chunks),
+        input.lineCount,
+        color,
+        options.lineNumbers,
+      );
+    } finally {
+      await input.dispose();
+    }
+    return;
+  }
+  const { doc, semantics, editSource } = buildView(
+    input,
+    options.file,
+    options.diff,
+    selection,
+  );
+  if (!editSource.allowsEmptyInput && doc.text.trim().length === 0) {
     throw new ViewError(
       options.file
         ? `cf view: "${options.file}" is empty.`
@@ -70,28 +106,13 @@ export async function viewMain(options: ViewOptions): Promise<void> {
           "or pass a file: cf view transformed.ts",
     );
   }
-
-  const { doc, semantics, editSource } = buildView(
-    text,
-    options.file,
-    options.diff,
-    selection,
-  );
-  const stdoutTty = Deno.stdout.isTerminal();
-  const interactive = !options.plain && stdoutTty;
-  const color = options.color === "always"
-    ? true
-    : options.color === "never"
-    ? false
-    : stdoutTty;
-
   if (interactive) {
     await runPager(
       doc,
       {
         color: true,
         showLineNumbers: options.lineNumbers,
-        viewMode: options.rendered ? "rendered" : "source",
+        viewMode: options.rendered ? "rendered" : undefined,
       },
       semantics(),
       editSource,
@@ -99,8 +120,22 @@ export async function viewMain(options: ViewOptions): Promise<void> {
     return;
   }
 
-  const shown = options.rendered ? editSource.render?.(doc) ?? doc : doc;
-  printDocument(shown, color, options.lineNumbers);
+  const rendered = options.rendered ||
+    editSource.defaultViewMode === "rendered";
+  const shown = rendered ? editSource.render?.(doc) ?? doc : doc;
+  if (shown === doc && !color && !options.lineNumbers) {
+    writeAllSync(Deno.stdout, input.bytes);
+    return;
+  }
+  if (shown === doc && hasUtf8Bom(input.bytes)) {
+    writeAllSync(Deno.stdout, input.bytes.subarray(0, 3));
+  }
+  await printDocument(shown, color, options.lineNumbers);
+}
+
+function hasUtf8Bom(bytes: Uint8Array): boolean {
+  return bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb &&
+    bytes[2] === 0xbf;
 }
 
 function pipedSelection(options: ViewOptions): SourceSelection {
@@ -128,6 +163,9 @@ export interface SourceSelection {
   readonly language?: Language;
   readonly fileName?: string;
 }
+
+/** Retained bytes with selection and extent established by the input stream. */
+export type ViewByteInput = BufferedViewInput;
 
 function validateSourceSelection(
   file: string | undefined,
@@ -162,7 +200,7 @@ function validateSourceSelection(
  * advisory and does not make the source editable.
  */
 export function buildView(
-  text: string,
+  input: string | Uint8Array | ViewByteInput,
   file?: string,
   forceDiff?: boolean,
   selection: SourceSelection = {},
@@ -171,10 +209,42 @@ export function buildView(
   semantics: () => Semantics | undefined;
   editSource: EditableSource;
 } {
+  let loaded: ViewByteInput;
+  if (typeof input === "string") {
+    const bytes = new TextEncoder().encode(input);
+    loaded = {
+      kind: "bytes",
+      bytes,
+      extent: { byteLength: bytes.length, complete: true },
+    };
+  } else if (input instanceof Uint8Array) {
+    loaded = {
+      kind: "bytes",
+      bytes: input,
+      extent: { byteLength: input.length, complete: true },
+    };
+  } else {
+    loaded = input;
+  }
+  const bytes = loaded.bytes;
   const sourceSelected = selection.language !== undefined ||
     selection.fileName !== undefined;
   validateSourceSelection(file, forceDiff, sourceSelected);
-  const detectContent = forceDiff !== false && !sourceSelected;
+  const fileName = selection.fileName ?? file;
+  const selectedDecoder = selection.language ?? loaded.language;
+  const decoded = selectedDecoder === undefined
+    ? decodeLanguageInput(fileName, bytes, {
+      byteLanguageDetectionComplete:
+        loaded.byteLanguageDetectionComplete === true,
+    })
+    : {
+      language: selectedDecoder,
+      source: decodeInput(selectedDecoder, bytes, fileName),
+    };
+  const selectedLanguage = decoded.language;
+  const text = decoded.source.text;
+  const detectContent = forceDiff !== false && !sourceSelected &&
+    selectedLanguage.input.kind === "text";
   const commitOutput = detectContent && looksLikeCommitOutput(text);
   const parsedDiff = forceDiff === true || commitOutput
     ? parseDiff(text)
@@ -200,7 +270,7 @@ export function buildView(
     );
     const hasRenderedView = model.files.some((diffFile) =>
       [diffFile.oldPath, diffFile.newPath].some((path) =>
-        path !== undefined && !!languageForFile(path).renderLines
+        path !== undefined && canRenderDiffLines(languageForFile(path))
       )
     );
     return {
@@ -218,25 +288,46 @@ export function buildView(
       ),
     };
   }
-  const fileName = selection.fileName ?? file;
-  const transformedOutput = fileName === undefined &&
+  const transformedOutput = selectedLanguage.input.kind === "text" &&
+    fileName === undefined &&
     looksLikeTransformedOutput(text);
   const language = selection.language ??
-    (transformedOutput
-      ? languageForTransformedOutput()
-      : languageForSource(fileName, text));
+    (transformedOutput ? languageForTransformedOutput() : selectedLanguage);
   const doc = language.parseDocument(text, fileName);
   return {
     doc,
     semantics: () =>
       language.createSemantics?.(text, { cwd: safeCwd(), fileName }),
-    // A real file is editable; a pipe (transformed output, etc.) is not.
-    editSource: file ? fileSource(file, language) : readonlySource(
-      "This view is of a pipe — there is no underlying file to edit.",
-      language,
-      fileName,
-    ),
+    // A real file gets a file-backed source. Its language may keep it read-only.
+    // A pipe (transformed output, etc.) has no file to edit.
+    editSource: file
+      ? fileSource(file, language, {
+        encode: decoded.source.encode,
+        renderExtent: loaded.extent,
+      })
+      : readonlySource(
+        "This view is of a pipe — there is no underlying file to edit.",
+        language,
+        fileName,
+        loaded.extent,
+      ),
   };
+}
+
+function decodeInput(
+  language: Language,
+  bytes: Uint8Array,
+  fileName: string | undefined,
+): DecodedLanguageSource {
+  try {
+    return language.input.decoder.decode(bytes);
+  } catch {
+    const source = fileName === undefined ? "piped input" : `"${fileName}"`;
+    throw new ViewError(
+      `cf view: ${source} cannot be decoded as ${language.input.decoder.id} ` +
+        `for language "${language.id}".`,
+    );
+  }
 }
 
 /** `cf check --show-transformed` starts each output module with this header. */
@@ -292,46 +383,56 @@ function safeCwd(): string {
   }
 }
 
-function printDocument(
+async function printDocument(
   doc: Document,
   color: boolean,
   lineNumbers: boolean,
-): void {
-  const encoder = new TextEncoder();
-  // Match the interactive gutter width: enough columns for the largest line
-  // number plus one, at least four.
-  const gutterWidth = lineNumbers
-    ? Math.max(4, String(doc.lines.length).length + 1)
-    : 0;
-  const out = doc.lines.map((line, i) => {
-    const text = renderLineColored(line, color);
-    if (gutterWidth === 0) return text;
-    return String(i + 1).padStart(gutterWidth - 1) + " " + text;
-  });
-  Deno.stdout.writeSync(encoder.encode(out.join("\n")));
+): Promise<void> {
+  await printLines(doc.lines, doc.lines.length, color, lineNumbers);
 }
 
-async function readInput(file?: string): Promise<string> {
-  if (file) {
-    return await Deno.readTextFile(file);
+async function printLines(
+  lines: Iterable<Line> | AsyncIterable<Line>,
+  lineCount: number | undefined,
+  color: boolean,
+  lineNumbers: boolean,
+): Promise<void> {
+  const encoder = new TextEncoder();
+  const gutterWidth = lineNumbers
+    ? lineCount === undefined
+      ? String(Number.MAX_SAFE_INTEGER).length + 1
+      : Math.max(4, String(lineCount).length + 1)
+    : 0;
+  let chunk = "";
+  let index = 0;
+  for await (const line of lines) {
+    if (index > 0) chunk += "\n";
+    if (gutterWidth > 0) {
+      chunk += String(index + 1).padStart(gutterWidth - 1) + " ";
+    }
+    chunk += renderLineColored(line, color);
+    index++;
+    if (chunk.length >= 64 * 1024) {
+      writeAllSync(Deno.stdout, encoder.encode(chunk));
+      chunk = "";
+    }
   }
-  if (Deno.stdin.isTerminal()) {
-    return "";
-  }
-  const chunks: Uint8Array[] = [];
-  const reader = Deno.stdin.readable.getReader();
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    if (value) chunks.push(value);
-  }
-  let total = 0;
-  for (const c of chunks) total += c.length;
-  const merged = new Uint8Array(total);
-  let off = 0;
-  for (const c of chunks) {
-    merged.set(c, off);
-    off += c.length;
-  }
-  return new TextDecoder().decode(merged);
+  if (chunk.length > 0) writeAllSync(Deno.stdout, encoder.encode(chunk));
 }
+
+interface SyncWriter {
+  writeSync(data: Uint8Array): number;
+}
+
+function writeAllSync(writer: SyncWriter, data: Uint8Array): void {
+  let offset = 0;
+  while (offset < data.length) {
+    const written = writer.writeSync(data.subarray(offset));
+    if (written <= 0) {
+      throw new Error("cf view: stdout accepted no bytes.");
+    }
+    offset += written;
+  }
+}
+
+export const _internal = { printLines, writeAllSync };

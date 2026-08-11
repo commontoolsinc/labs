@@ -9,6 +9,7 @@
 
 import {
   type Cell,
+  fabricAuthorityMatchesSpaceHost,
   type FabricRef,
   getPatternIdentityRef,
   getPatternRepository,
@@ -20,6 +21,7 @@ import {
   resolveSystemPatternSource,
   type Runtime,
   type RuntimeProgram,
+  spaceHostFromFabricAuthority,
 } from "@commonfabric/runner";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
@@ -113,7 +115,7 @@ type StableFabricRef = FabricRef & {
 };
 
 /**
- * Resolve an origin now, returning the authored program and selected export a
+ * Resolves an origin now, returning the authored program and selected export a
  * repoint transition should apply.
  */
 export async function resolvePieceOriginSource(
@@ -168,10 +170,14 @@ export async function resolvePieceOriginSource(
       runtime.mappedHostFor(sourceSpace) ??
         runtime.hostForSpace(sourceSpace),
     );
-    const explicitHost = new URL(`${routedUrl.protocol}//${ref.host}`).host;
-    if (routedUrl.host !== explicitHost) {
-      const scheme = fabricHostScheme(ref.host);
-      if (!runtime.registerSpaceHost(sourceSpace, `${scheme}//${ref.host}`)) {
+    const explicitRoute = spaceHostFromFabricAuthority(ref.host, {
+      useLoopbackHttp: routedUrl.protocol === "http:",
+    });
+    const matchesCurrentRoute =
+      (routedUrl.protocol === "http:" || routedUrl.protocol === "https:") &&
+      fabricAuthorityMatchesSpaceHost(ref.host, routedUrl.origin);
+    if (!matchesCurrentRoute) {
+      if (!runtime.registerSpaceHost(sourceSpace, explicitRoute.toString())) {
         throw new PieceOriginError(
           `the host ${ref.host} is not available for ${sourceSpace}`,
         );
@@ -216,13 +222,6 @@ async function mutableFabricOriginPattern(
   );
   await target.sync();
   return getPatternIdentityRef(target);
-}
-
-function fabricHostScheme(host: string): "http:" | "https:" {
-  const hostname = new URL(`https://${host}`).hostname;
-  const loopback = hostname === "localhost" || hostname === "[::1]" ||
-    /^127(?:\.\d{1,3}){3}$/.test(hostname);
-  return loopback ? "http:" : "https:";
 }
 
 /**

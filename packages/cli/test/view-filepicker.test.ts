@@ -5,8 +5,11 @@
  * stands in for the filesystem so this stays pure.
  */
 import { assert, assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
 import { parseDocument } from "./view-helpers.ts";
 import { Session } from "../lib/view/session.ts";
+import { buildView } from "../lib/view/mod.ts";
 import type { EditableSource } from "../lib/view/editsource.ts";
 import type { DirEntry, FileGateway } from "../lib/view/filegateway.ts";
 
@@ -139,6 +142,65 @@ Deno.test("filepicker: opening a file from a subdirectory works", () => {
   press(s, "down", "enter"); // into sub/
   press(s, "down", "enter"); // ".." -> "c.ts", open it
   assertEquals(s.doc.text, FILES["/work/sub/c.ts"]);
+});
+
+describe("filepicker view modes", () => {
+  it("applies the rendered default when opening a binary source", () => {
+    const opened = buildView(
+      new Uint8Array([0x41, 0x00, 0xff]),
+      "/work/payload.png",
+    );
+    const files: FileGateway = {
+      cwd: () => "/work",
+      list: () => [{ name: "payload.png", isDir: false }],
+      open: () => ({ source: opened.editSource, text: opened.doc.text }),
+      join: (dir, segment) => normalize(`${dir}/${segment}`),
+      parent: (path) => normalize(`${path}/..`),
+      base: (path) => path.split("/").filter(Boolean).pop() ?? path,
+    };
+    const path = "/work/a.ts";
+    const s = new Session(
+      parseDocument(FILES[path], path),
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 20 },
+      undefined,
+      fakeSource(path),
+      files,
+    );
+
+    openPicker(s);
+    press(s, "down", "enter");
+
+    assert(s.doc.lines[0].text.endsWith("|A␀␦|"));
+    expect(s.doc.lines.at(-1)?.text).toBe("00000003");
+  });
+
+  it("preserves rendered mode when opening another renderable file", () => {
+    const initial = buildView("# First\n", "/work/a.md");
+    const opened = buildView("# Second\n", "/work/b.md");
+    const files: FileGateway = {
+      cwd: () => "/work",
+      list: () => [{ name: "b.md", isDir: false }],
+      open: () => ({ source: opened.editSource, text: opened.doc.text }),
+      join: (dir, segment) => normalize(`${dir}/${segment}`),
+      parent: (path) => normalize(`${path}/..`),
+      base: (path) => path.split("/").filter(Boolean).pop() ?? path,
+    };
+    const s = new Session(
+      initial.doc,
+      { color: false, showLineNumbers: false, viewMode: "rendered" },
+      { width: 80, height: 20 },
+      undefined,
+      initial.editSource,
+      files,
+    );
+
+    openPicker(s);
+    press(s, "down", "enter");
+
+    expect(s.view().viewMode).toBe("rendered");
+    expect(s.doc.text).toBe("# Second\n");
+  });
 });
 
 Deno.test("filepicker: the .. entry steps back up", () => {

@@ -62,13 +62,13 @@ describe("BigIntCodec", () => {
     });
 
     describe("decode()", () => {
-      it("accepts unpadded base64url input", () => {
+      it("decodes unpadded base64url input", () => {
         // "Kg" is the standard unpadded base64url encoding of 42n.
         const result = codec.decode(expectedTag, "Kg", context);
         expect(result).toBe(42n);
       });
 
-      it("accepts padded base64 input", () => {
+      it("decodes padded base64 input", () => {
         // "Kg==" is the padded form of "Kg" (42n) -- padding is accepted by the
         // web-standard Uint8Array.fromBase64.
         const result = codec.decode(expectedTag, "Kg==", context);
@@ -115,12 +115,12 @@ describe("BigIntCodec", () => {
         expect(decoded).toBe(42n);
       });
 
-      it("round-trips negative bigint", () => {
+      it("round-trips a negative `bigint`", () => {
         const decoded = codec.decode(expectedTag, codec.encode(-999n), context);
         expect(decoded).toBe(-999n);
       });
 
-      it("round-trips zero bigint", () => {
+      it("round-trips a zero `bigint`", () => {
         const decoded = codec.decode(expectedTag, codec.encode(0n), context);
         expect(decoded).toBe(0n);
       });
@@ -135,13 +135,13 @@ describe("BigIntCodec", () => {
         expect(decoded).toBe(-1n);
       });
 
-      it("round-trips large bigint", () => {
+      it("round-trips a large `bigint`", () => {
         const big = 2n ** 64n;
         const decoded = codec.decode(expectedTag, codec.encode(big), context);
         expect(decoded).toBe(big);
       });
 
-      it("round-trips large negative bigint", () => {
+      it("round-trips a large negative `bigint`", () => {
         const big = -(2n ** 64n);
         const decoded = codec.decode(expectedTag, codec.encode(big), context);
         expect(decoded).toBe(big);

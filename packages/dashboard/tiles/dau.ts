@@ -26,6 +26,7 @@
 // is still switched off and light up on its own when it is turned on.
 import type { Status, Tile, TileView } from "../types.ts";
 import { serviceName, SPARK_FADE, sparkline } from "../lib.ts";
+import { CHART_LINE } from "../theme.ts";
 
 const TIMEOUT = 15_000;
 const DAY_MS = 86_400_000;
@@ -167,7 +168,7 @@ export const dau: Tile = {
     const value = series[series.length - 1];
     // One day is a number, not a trend, so there is no line to draw and no span to
     // report: the span describes the chart.
-    const chart = sparkline(series, "#727882", undefined, SPARK_FADE.good);
+    const chart = sparkline(series, CHART_LINE, undefined, SPARK_FADE.good);
 
     return {
       ...drill,

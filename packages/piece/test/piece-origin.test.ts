@@ -260,7 +260,92 @@ describe("resolvePieceOriginSource", () => {
     }
   });
 
-  it("registers an explicit source host using its transport scheme", async () => {
+  it("compares a fabric authority with a default base URL by origin", async () => {
+    const registrations: string[] = [];
+    const runtime = {
+      hostForSpace: () => new URL("https://toolshed.test/api/"),
+      mappedHostFor: () => undefined,
+      registerSpaceHost: (_space: MemorySpace, host: string) => {
+        registrations.push(host);
+        return true;
+      },
+      patternManager: {
+        getPatternSourceProgramByIdentity: () =>
+          Promise.resolve({ main: "/main.tsx", files: [] }),
+      },
+    } as unknown as Runtime;
+
+    const resolved = await resolvePieceOriginSource(
+      runtime,
+      SPACE,
+      `cf://toolshed.test/${SPACE}/pattern:${HASH}`,
+      "named",
+    );
+
+    expect(resolved.pattern).toEqual({ identity: HASH, symbol: "named" });
+    expect(registrations).toEqual([]);
+  });
+
+  it("registers a fabric authority when the default has no HTTP origin", async () => {
+    const registrations: string[] = [];
+    const runtime = {
+      hostForSpace: () => new URL("file:///tmp/toolshed"),
+      mappedHostFor: () => undefined,
+      registerSpaceHost: (_space: MemorySpace, host: string) => {
+        registrations.push(host);
+        return true;
+      },
+      patternManager: {
+        getPatternSourceProgramByIdentity: () =>
+          Promise.resolve({ main: "/main.tsx", files: [] }),
+      },
+    } as unknown as Runtime;
+
+    const resolved = await resolvePieceOriginSource(
+      runtime,
+      SPACE,
+      `cf://source.test/${SPACE}/pattern:${HASH}`,
+      "named",
+    );
+
+    expect(resolved.pattern).toEqual({ identity: HASH, symbol: "named" });
+    expect(registrations).toEqual(["https://source.test/"]);
+  });
+
+  it("registers an explicit source host using the runtime transport policy", async () => {
+    const registrations: string[] = [];
+    const runtime = {
+      hostForSpace: () => new URL("http://toolshed.test"),
+      mappedHostFor: () => undefined,
+      registerSpaceHost: (_space: MemorySpace, host: string) => {
+        registrations.push(host);
+        return true;
+      },
+      patternManager: {
+        getPatternSourceProgramByIdentity: () =>
+          Promise.resolve({ main: "/main.tsx", files: [] }),
+      },
+    } as unknown as Runtime;
+
+    for (
+      const [host, registered] of [
+        ["source.test", "https://source.test/"],
+        ["localhost:8787", "http://localhost:8787/"],
+        ["127.0.0.1:8787", "http://127.0.0.1:8787/"],
+      ]
+    ) {
+      const resolved = await resolvePieceOriginSource(
+        runtime,
+        SPACE,
+        `cf://${host}/${SPACE}/pattern:${HASH}`,
+        "named",
+      );
+      expect(resolved.pattern).toEqual({ identity: HASH, symbol: "named" });
+      expect(registrations.at(-1)).toBe(registered);
+    }
+  });
+
+  it("defaults a loopback source authority to HTTPS", async () => {
     const registrations: string[] = [];
     const runtime = {
       hostForSpace: () => new URL("https://toolshed.test"),
@@ -275,22 +360,13 @@ describe("resolvePieceOriginSource", () => {
       },
     } as unknown as Runtime;
 
-    for (
-      const [host, registered] of [
-        ["source.test", "https://source.test"],
-        ["localhost:8787", "http://localhost:8787"],
-        ["127.0.0.1:8787", "http://127.0.0.1:8787"],
-      ]
-    ) {
-      const resolved = await resolvePieceOriginSource(
-        runtime,
-        SPACE,
-        `cf://${host}/${SPACE}/pattern:${HASH}`,
-        "named",
-      );
-      expect(resolved.pattern).toEqual({ identity: HASH, symbol: "named" });
-      expect(registrations.at(-1)).toBe(registered);
-    }
+    await resolvePieceOriginSource(
+      runtime,
+      SPACE,
+      `cf://localhost:8787/${SPACE}/pattern:${HASH}`,
+      "named",
+    );
+    expect(registrations).toEqual(["https://localhost:8787/"]);
   });
 
   it("rejects an explicit source host the runtime cannot register", async () => {

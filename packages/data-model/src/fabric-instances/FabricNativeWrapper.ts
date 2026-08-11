@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import type { FabricInstance } from "@/interface.ts";
 import { BaseFabricInstance, DEEP_CLONE_CORE } from "./BaseFabricInstance.ts";
 
@@ -44,7 +45,9 @@ export abstract class FabricNativeWrapper<T extends object>
    */
   protected [DEEP_CLONE_CORE](_frozen: boolean): FabricInstance {
     throw new Error(
-      `Cannot yet handle deep cloning of \`${this.constructor.name}\`.`,
+      `Cannot yet handle deep cloning of ${
+        backtickQuote(this.constructor.name)
+      }.`,
     );
   }
 }

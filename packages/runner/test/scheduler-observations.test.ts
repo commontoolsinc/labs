@@ -1952,6 +1952,75 @@ describe("persistent scheduler observations", () => {
     }
   });
 
+  it("runs a writer whose reader a restored observation turns into a materializer", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      const { runtime } = testRuntime;
+      let writerRuns = 0;
+      const persistedWriter = Object.assign(
+        function persistedWriter() {
+          writerRuns++;
+        },
+        { writes: [writeLink] },
+      );
+      const persistedMaterializer = function persistedMaterializer() {};
+
+      // A declared writer nothing demands stays dormant, and a plain
+      // computation reading it carries no demand of its own.
+      runtime.scheduler.subscribe(persistedWriter, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      });
+      runtime.scheduler.subscribe(persistedMaterializer, {
+        reads: [writeAddress],
+        shallowReads: [],
+        writes: [],
+      });
+      await runtime.idle();
+      expect(writerRuns).toBe(0);
+
+      // Restoring the materializer envelopes makes the reader a demand root.
+      // That has to reach the liveness graph, or the writer it reads never
+      // wakes and the materializer reads a value nobody produced.
+      expect(
+        runtime.scheduler.rehydrateActionFromObservation(
+          persistedMaterializer,
+          {
+            executionContextKey: "session:test:test",
+            observation: buildSchedulerActionObservation({
+              actionId: "persistedMaterializer",
+              actionKind: "computation",
+              branch: "",
+              pieceId: "space:materializer-process",
+              processGeneration: 1,
+              implementationFingerprint: schedulerImplementationFingerprint(
+                persistedMaterializer,
+                "persistedMaterializer",
+                undefined,
+              ),
+              runtimeFingerprint: schedulerRuntimeFingerprint(),
+              observedAtSeq: 1,
+              transactionKind: "action-run",
+              currentKnownWrites: [],
+              materializerWriteEnvelopes: [materializerEnvelope],
+              transactionLog: {
+                reads: [writeAddress],
+                shallowReads: [],
+                writes: [],
+              },
+            }),
+          },
+        ),
+      ).toBe(true);
+      await runtime.idle();
+
+      expect(writerRuns).toBe(1);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
   it("falls back to the normal first run when fingerprints mismatch", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
