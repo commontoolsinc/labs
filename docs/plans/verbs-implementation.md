@@ -45,7 +45,8 @@ without reconstructing it.
 | 8. descriptive receipt schemas | on main |
 | 9a. listing marks | on main (#5309) |
 | 10. listing rows carry a handler's declared result | on main (#5629) |
-| 9b. closed-world event emission | built, parked on #5589 (#5307) |
+| 9b. closed-world event emission | **ruled against** (#5589); does not land |
+| 12. `cf` refuses an undeclared field on a call | not started — where the ruling puts this capability |
 | 4. `receipt` as a top-level envelope field | not started — and its precondition now holds |
 | 2. an unrecognized projection key is refused | not started |
 | 3. a rejection propagates up through what holds it | not started |
@@ -60,7 +61,7 @@ a driver needs to know what is already moving before scheduling anything new.
 
 | PR | What | State |
 | --- | --- | --- |
-| #5307 | closed-world verb event schemas | parked on #5589; the minting is built, and what stays red is a renderer-semantics ruling rather than an implementation gap |
+| #5307 | closed-world verb event schemas | **ruled against** on #5589 and in review. Retreating leaves nothing to land — the emission and the goldens and baselines recording it are the whole branch — so this closes rather than merges |
 
 **Most of the read layer has landed.** #5309, #5459, #5468, #5470, #5497 and
 #5500 are on main. #5458 is closed rather than merged because its rename was
@@ -264,6 +265,29 @@ the piece — the root pattern's own verb, reachable today by `pieces.add` from
 inside the runtime and by a model through the dialog builtin, and by no other
 caller.
 
+**12. `cf` refuses an undeclared field on a call.** *(S)* A payload carrying a
+field the verb does not declare is accepted, the field is dropped on the way in,
+and the caller is told the call settled — the silent-strip failure, which is
+what a caller writing JSON by hand or by model hits and a TypeScript author
+never does.
+
+*This is item 2's shape, one surface over.* There a projection key in neither
+denylist is accepted and ignored; here an event field the schema does not
+declare is accepted and ignored. Both are the CLI declining to refuse what it
+cannot honour, and both are fixed by the CLI refusing it — not by a schema
+forbidding it, which is the distinction #5589 turns on. Worth building the two
+with the same vocabulary for what a refusal says, since a caller meets both
+through the same command.
+
+*The check has a home already.* `verbInputSchemaError`
+(`packages/cli/lib/callable.ts`) validates a payload against the verb's declared
+event schema before dispatch. What it does not do is treat an undeclared field
+as a reason to refuse — and the schema it validates against names exactly the
+fields the verb declares, so the comparison needs no new source of truth.
+
+*Exit:* a call naming a field the verb does not declare is refused, the message
+names the field, and the invocation id is not spent.
+
 ## Landed, and what consumes it
 
 **6. The read layer.** On main in full: the shared read step, address markers
@@ -279,11 +303,26 @@ this; nothing else does.
 **8. Descriptive receipt schemas.** On main. Plain results only — a verb
 returning anything reactive gets none, which is what item 1 decides.
 
-**9. Closed-world event schemas and listing marks.** Half landed: the listing
-marks are on main (#5309). Closed-world emission (#5307) is built but parked on
-#5589 — closing a verb's `$event` closes it against the browser too, and
-whether a renderer's DOM-event envelope is governed by the verb's schema is a
-semantics ruling rather than an implementation gap.
+**9. Closed-world event schemas and listing marks.** The listing marks are on
+main (#5309). **Closed-world emission is ruled against** and does not land: an
+event schema is not to carry `additionalProperties: false`, because absence
+already denies a handler an undeclared field, while `false` rejects the whole
+event over a field the handler would not have received either way — and it
+locks the schema permanently, since the compatibility rules cannot take a
+closure back (#5589, and the review on #5307).
+
+*The capability is not refused, only its location.* Refusing a call whose
+payload carries a field the verb does not declare is an ergonomic property of
+`cf`, not something to enforce in the runtime. In TypeScript the compiler
+already says so at authoring time without foreclosing a later field, so what is
+missing is the check for callers who never see a type — which is the CLI. That
+is item 12.
+
+*Two mechanisms on main are left with nothing to do*, and retiring them is a
+question for whoever owns the runtime rather than a step here:
+`closedWorldEventRejection` (`packages/runner/src/runner.ts`) is a dispatch gate
+no schema can now trigger, and #5302's verb-event-role compatibility rule
+governs an open-to-closed transition that will not happen.
 
 **10. Listing rows carry a handler's declared result.** *(S)* `cf piece verbs`
 reports an `outputSchema` per row for a handler as well as for a tool, so verb
@@ -332,13 +371,10 @@ its own track.
 | 10 | Two identical projections stop colliding | #5523 | 9 | Same file. Reachable the moment anything long-lived reads twice, which the command surface invites |
 | 11 | One piece, one address | #5632, #5498 | — | Trace where each id is minted; the outcome is a fix or a statement that they are aliases. Must precede step 13, which spreads the address vocabulary to two more commands |
 | 12 | An unrecognized projection key is refused | item 2 | 9 | The largest remaining step and the only one with design surface, since it couples the projection reader to the compatibility checker's annotation keys |
+| 12a | `cf` refuses an undeclared field on a call | item 12 | — | Same refusal shape as the step above and independent of it, so it can go either side; building them together is what keeps one vocabulary for what a refusal says |
 | 13 | `cf wish` and `cf exec` take the read options | item 5 | 11, 12 | Last by construction: it spreads the vocabulary to two more starting points, so the vocabulary should have stopped moving |
 
-**Waiting on a ruling, and running beside all of the above.** Closed-world event
-emission (item 9b) is built and parked on #5589. When that answers, the branch
-merges as-is, amends `closedWorldEventRejection`, or retreats — all three are
-costed on #5307 — and it owes an item renumber, then a baseline re-record as its
-final step. A caller naming a reference (item 11, #5560) waits on confirming
+**Running beside all of the above.** A caller naming a reference (item 11, #5560) waits on confirming
 that a sigil resolves through a *declared* event field rather than an untyped
 one; it decides nothing item 1 decides — a declared result makes an *output*
 self-describing, this is what an *input* accepts — but it shares
@@ -396,14 +432,6 @@ plan as their PRs land — is the collision the per-agent split exists to avoid.
 
 Two rules earn their place, both from what went wrong when this was three
 plans:
-
-**#5307 owes a golden regeneration, and it is the only thing it owes #5501.**
-The two touch no common source file — a declared result rides a trailing
-options argument, while event stamping keys on the first — so this is a note on
-the pair rather than an edge in the sequence. But #5501's handler-schema
-fixtures were compiled while event schemas were still open, so closing them
-gives those fixtures `additionalProperties: false` on their event literals. The
-second to land regenerates, and #5501 landed first.
 
 **Two PRs can each be green and still break main together.** CI judges a PR
 against a base, so when one branch narrows a type and another still writes to
@@ -514,7 +542,7 @@ from a plan is one nobody schedules, which is the whole reason for this table.
 | #5523 | two identical `piece get` projections in one runtime collide on the transform result cell | step 10 |
 | #5632 | `--show-links` and a `$link` read return different entity ids for the same piece | step 11 |
 | #5498 | `getEntityId()` strips the entity URI scheme, collapsing two kinds to one identity | step 11, if it proves to be the same root |
-| #5589 | ruling: does a closed verb schema govern the renderer's DOM-event envelope? | the parked track — it is what unparks item 9b |
+| #5589 | ruling: does a closed verb schema govern the renderer's DOM-event envelope? | **answered** — no. Item 9b does not land, and the capability moves to item 12 |
 | #5560 | an address a call returns cannot be passed back as a verb argument | item 11 |
 | #5534 | a capability probe passes while covering nothing: a dispatch rejection is not a synchronous throw | carried alongside |
 
