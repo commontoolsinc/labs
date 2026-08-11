@@ -14,7 +14,7 @@ import { toCompactDebugString } from "@/value-debug.ts";
  * negative branch collapse to `never`). Replace it with the first real
  * primitive-plumbing member once one is identified.
  */
-export const EXAMPLE_METHOD: unique symbol = Symbol.for(
+export const EXAMPLE_METHOD: unique symbol = Symbol(
   "data-model.exampleMethod",
 );
 
