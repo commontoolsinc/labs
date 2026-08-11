@@ -176,6 +176,17 @@ The menu mounts itself on `document.body`, not inside the piece, because a piece
 own `overflow: hidden` would clip it and the tile variant's
 `transform: scale(0.5)` would shrink it; it copies the `--cf-theme-*` tokens
 across from the element that opened it, so it follows the host's theme.
+While the built-in menu or one of its panels is open, the originating
+`cf-render` shows an animated light sweep and color glow. This visual layer does
+not receive pointer events or affect layout. Closing the menu removes it, and
+opening the shared menu for another piece moves it to that piece. The menu also
+closes if its originating renderer disconnects or begins showing another piece.
+When patterns render other patterns directly, their output shares the outer
+`cf-render` instead of adding a wrapper. The renderer retains each nested
+pattern's result cell on its existing root element through the same standard
+element context protocol used for producing-space inheritance. A right-click
+selects the deepest such root in the click path, and the portalled visual layer
+clips its shine to that root. No element is inserted into the pattern's layout.
 
 Before the menu opens, `cf-render` announces the click. The event is
 **cancellable, and cancelling it takes the click**: the built-in menu does not
@@ -185,9 +196,9 @@ BUBBLES from the DOM (`bubbles`, `composed`), so a host may listen on its mount
 container or on `globalThis`.
 
 Every `cf-render` variant resolves a link-valued cell to the piece it displays
-before it chooses the menu target. This includes nested pieces rendered with the
-full variant. The renderer observes the link itself and resolves again when its
-target changes.
+before it chooses the menu target. A directly rendered nested pattern is a full
+variant, even when its containing renderer uses another variant. The renderer
+observes the link itself and resolves again when its target changes.
 
 ```ts
 import type { DID } from "@commonfabric/identity";

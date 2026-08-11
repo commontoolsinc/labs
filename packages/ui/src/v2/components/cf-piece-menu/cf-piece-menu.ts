@@ -14,10 +14,17 @@ import type {
   PieceSourceView,
 } from "@commonfabric/runtime-client";
 import {
+  getPieceBoundary,
+  subscribePieceBoundary,
+} from "@commonfabric/html/client";
+import {
   describeOrigin,
   formatTimestamp,
   shortIdentity,
 } from "./origin-view.ts";
+
+/** The marker on the rendered piece while its built-in menu is open. */
+export const PIECE_MENU_OPEN_ATTRIBUTE = "data-cf-piece-menu-open";
 
 /** Which panel is showing, if any. */
 export type Panel = "source" | "origin" | "data" | "actions";
@@ -214,6 +221,7 @@ export class CFPieceMenu extends BaseElement {
     .backdrop {
       position: absolute;
       inset: 0;
+      z-index: 1;
     }
 
     .backdrop.dimmed {
@@ -222,6 +230,7 @@ export class CFPieceMenu extends BaseElement {
 
     .menu {
       position: absolute;
+      z-index: 2;
       min-width: 15rem;
       padding: 0.25rem;
       background: var(--cf-theme-color-surface, #ffffff);
@@ -260,6 +269,7 @@ export class CFPieceMenu extends BaseElement {
 
     .panel {
       position: absolute;
+      z-index: 2;
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
@@ -271,6 +281,55 @@ export class CFPieceMenu extends BaseElement {
       border-radius: 12px;
       box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
       overflow: hidden;
+    }
+
+    .nested-piece-highlight {
+      position: fixed;
+      z-index: 0;
+      pointer-events: none;
+      background-color: rgba(99, 102, 241, 0.14);
+      background-image: linear-gradient(
+        135deg,
+        rgba(255, 255, 255, 0) 26%,
+        rgba(255, 255, 255, 0.64) 48%,
+        rgba(103, 232, 249, 0.36) 54%,
+        rgba(255, 255, 255, 0) 72%
+      );
+      background-position: 200% 0;
+      background-repeat: no-repeat;
+      background-size: 250% 100%;
+      box-shadow: inset 0 0 2.5rem rgba(129, 140, 248, 0.38);
+      animation: cf-nested-piece-menu-shine 1.7s ease-in-out infinite;
+    }
+
+    @keyframes cf-nested-piece-menu-shine {
+      from {
+        background-position: 200% 0;
+      }
+      to {
+        background-position: -200% 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .nested-piece-highlight {
+        animation: none;
+        background-position: 50% 0;
+      }
+    }
+
+    @media (forced-colors: active) {
+      .nested-piece-highlight {
+        forced-color-adjust: none;
+        background-color: transparent;
+        background-image: linear-gradient(
+          135deg,
+          transparent 26%,
+          Highlight 48%,
+          transparent 72%
+        );
+        box-shadow: inset 0 0 0 0.25rem Highlight;
+      }
     }
 
     .panel-head {
@@ -644,6 +703,20 @@ export class CFPieceMenu extends BaseElement {
   /** True while a dispatch is in flight, so a rapid double-click sends once. */
   #dispatching = false;
 
+  /** The renderer that owns the open menu. */
+  #menuOwner: Element | undefined;
+
+  /** The element whose rendered area receives the visual highlight. */
+  #highlightTarget: Element | undefined;
+
+  /** A top-level renderer marked so its shadow-root highlight becomes visible. */
+  #markedPiece: Element | undefined;
+
+  #highlightMutationObserver: MutationObserver | undefined;
+  #highlightPieceSubscription: (() => void) | undefined;
+  #highlightAnimationFrame: number | undefined;
+  #nestedHighlightGeometry: string[] = [];
+
   constructor() {
     super();
     this.x = 0;
@@ -657,13 +730,31 @@ export class CFPieceMenu extends BaseElement {
 
   override disconnectedCallback() {
     globalThis.removeEventListener("keydown", this.#onKeyDown);
+    this.#setHighlightedPiece(undefined, undefined);
     this.#resetPieceState();
     super.disconnectedCallback();
   }
 
   /** Show the menu for `cell` at a click position. */
-  open({ cell, x, y }: { cell: CellHandle; x: number; y: number }): void {
+  open(
+    { cell, x, y, highlightedPiece, highlightTarget }: {
+      cell: CellHandle;
+      x: number;
+      y: number;
+      highlightedPiece?: Element;
+      highlightTarget?: Element;
+    },
+  ): void {
+    const target = highlightTarget ?? highlightedPiece;
+    if (
+      highlightedPiece && target && target !== highlightedPiece &&
+      !this.#elementRepresentsPiece(target, cell)
+    ) {
+      this.close();
+      return;
+    }
     this.cell = cell;
+    this.#setHighlightedPiece(highlightedPiece, target);
     this.x = x;
     this.y = y;
     this.panel = undefined;
@@ -684,6 +775,7 @@ export class CFPieceMenu extends BaseElement {
 
   /** Hide the menu and forget the piece it was describing. */
   close(): void {
+    this.#setHighlightedPiece(undefined, undefined);
     this.hidden = true;
     this.panel = undefined;
     this.cell = undefined;
@@ -695,6 +787,240 @@ export class CFPieceMenu extends BaseElement {
     this.sourceExecutionWarning = undefined;
     this.compatibilityWarning = undefined;
     this.readToken++;
+  }
+
+  /** Close when `piece` is the render element this menu addresses. */
+  closeFor(piece: Element): void {
+    if (piece === this.#menuOwner) this.close();
+  }
+
+  /** Move the visual highlight to the element the menu addresses. */
+  #setHighlightedPiece(
+    owner: Element | undefined,
+    target: Element | undefined,
+  ): void {
+    this.#markedPiece?.removeAttribute(PIECE_MENU_OPEN_ATTRIBUTE);
+    this.#markedPiece = undefined;
+    this.#highlightMutationObserver?.disconnect();
+    this.#highlightMutationObserver = undefined;
+    this.#highlightPieceSubscription?.();
+    this.#highlightPieceSubscription = undefined;
+    if (this.#highlightAnimationFrame !== undefined) {
+      globalThis.cancelAnimationFrame?.(this.#highlightAnimationFrame);
+      this.#highlightAnimationFrame = undefined;
+    }
+    this.#nestedHighlightGeometry = [];
+    this.#menuOwner = owner;
+    this.#highlightTarget = target;
+
+    if (owner && target === owner) {
+      owner.setAttribute(PIECE_MENU_OPEN_ATTRIBUTE, "");
+      this.#markedPiece = owner;
+    }
+    if (
+      owner && target && target !== owner &&
+      typeof MutationObserver !== "undefined"
+    ) {
+      this.#highlightMutationObserver = new MutationObserver(() => {
+        if (this.#highlightTarget?.isConnected === false) this.close();
+        else if (!this.#highlightTargetMatchesPiece()) this.close();
+        else this.#updateNestedHighlightGeometry();
+      });
+      for (const root of this.#composedShadowRoots(target)) {
+        this.#highlightMutationObserver.observe(root, {
+          attributes: true,
+          characterData: true,
+          childList: true,
+          subtree: true,
+        });
+      }
+    }
+    if (target && target !== owner) {
+      this.#highlightPieceSubscription = subscribePieceBoundary(
+        target,
+        (piece) => {
+          if (
+            this.cell &&
+            (piece?.element !== target || !piece.cell.equals(this.cell))
+          ) this.close();
+        },
+      );
+      if (typeof globalThis.requestAnimationFrame === "function") {
+        this.#highlightAnimationFrame = globalThis.requestAnimationFrame(
+          this.#trackHighlightGeometry,
+        );
+      }
+      this.#updateNestedHighlightGeometry();
+    }
+    this.requestUpdate();
+  }
+
+  #trackHighlightGeometry = (): void => {
+    this.#highlightAnimationFrame = undefined;
+    if (
+      !this.#menuOwner || !this.#highlightTarget ||
+      this.#menuOwner === this.#highlightTarget
+    ) return;
+    if (this.#highlightTarget.isConnected === false) {
+      this.close();
+      return;
+    }
+    if (!this.#highlightTargetMatchesPiece()) {
+      this.close();
+      return;
+    }
+    this.#updateNestedHighlightGeometry();
+    if (typeof globalThis.requestAnimationFrame === "function") {
+      this.#highlightAnimationFrame = globalThis.requestAnimationFrame(
+        this.#trackHighlightGeometry,
+      );
+    }
+  };
+
+  #highlightTargetMatchesPiece(): boolean {
+    if (!this.#highlightTarget || !this.cell) return true;
+    return this.#elementRepresentsPiece(this.#highlightTarget, this.cell);
+  }
+
+  #elementRepresentsPiece(target: Element, cell: CellHandle): boolean {
+    const piece = getPieceBoundary(target);
+    return piece?.element === target && piece.cell.equals(cell);
+  }
+
+  #updateNestedHighlightGeometry(): void {
+    const next = this.#computeNestedHighlightGeometry();
+    if (
+      next.length === this.#nestedHighlightGeometry.length &&
+      next.every((style, index) =>
+        style === this.#nestedHighlightGeometry[index]
+      )
+    ) return;
+    this.#nestedHighlightGeometry = next;
+    this.requestUpdate();
+  }
+
+  /** Ancestors along the rendered tree, including slots and shadow hosts. */
+  #composedAncestors(element: Element): Element[] {
+    const ancestors: Element[] = [];
+    const visited = new Set<Element>([element]);
+    let current: Element | null = element;
+    while (current) {
+      const root: Node | undefined = typeof current.getRootNode === "function"
+        ? current.getRootNode()
+        : undefined;
+      const shadowHost: Element | null = root && "host" in root
+        ? (root as ShadowRoot).host
+        : null;
+      const next: Element | null = current.assignedSlot ??
+        current.parentElement ??
+        shadowHost;
+      if (!next || visited.has(next)) break;
+      ancestors.push(next);
+      visited.add(next);
+      current = next;
+    }
+    return ancestors;
+  }
+
+  #composedShadowRoots(element: Element): ShadowRoot[] {
+    const roots = new Set<ShadowRoot>();
+    for (const item of [element, ...this.#composedAncestors(element)]) {
+      if (typeof item.getRootNode !== "function") continue;
+      const root = item.getRootNode();
+      if (root && "host" in root) roots.add(root as ShadowRoot);
+    }
+    return [...roots];
+  }
+
+  /** Fixed overlay geometry clipped to rendered overflow and the viewport. */
+  #computeNestedHighlightGeometry(): string[] {
+    const owner = this.#menuOwner;
+    const target = this.#highlightTarget;
+    if (!owner || !target || owner === target) return [];
+
+    const ownerRect = owner.getBoundingClientRect();
+    const viewportWidth = globalThis.innerWidth ?? Number.POSITIVE_INFINITY;
+    const viewportHeight = globalThis.innerHeight ?? Number.POSITIVE_INFINITY;
+    const targetRects = typeof target.getClientRects === "function"
+      ? Array.from(target.getClientRects())
+      : [];
+    if (targetRects.every((rect) => rect.width <= 0 || rect.height <= 0)) {
+      targetRects.length = 0;
+      const range = globalThis.document?.createRange?.();
+      if (range) {
+        range.selectNodeContents(target);
+        targetRects.push(...Array.from(range.getClientRects()));
+        range.detach();
+      }
+    }
+    if (targetRects.length === 0) {
+      targetRects.push(target.getBoundingClientRect());
+    }
+
+    const clippingAncestors: Array<{
+      rect: { left: number; top: number; right: number; bottom: number };
+      clipX: boolean;
+      clipY: boolean;
+    }> = [];
+    if (typeof globalThis.getComputedStyle === "function") {
+      for (const ancestor of this.#composedAncestors(target)) {
+        const style = globalThis.getComputedStyle(ancestor);
+        const clips = (value: string) =>
+          value === "auto" || value === "scroll" || value === "hidden" ||
+          value === "clip";
+        const clipX = clips(style.overflowX);
+        const clipY = clips(style.overflowY);
+        if (clipX || clipY) {
+          const borderRect = ancestor.getBoundingClientRect();
+          const element = ancestor as HTMLElement;
+          const scaleX = element.offsetWidth > 0
+            ? borderRect.width / element.offsetWidth
+            : 1;
+          const scaleY = element.offsetHeight > 0
+            ? borderRect.height / element.offsetHeight
+            : 1;
+          const left = borderRect.left + ancestor.clientLeft * scaleX;
+          const top = borderRect.top + ancestor.clientTop * scaleY;
+          clippingAncestors.push({
+            rect: {
+              left,
+              top,
+              right: left + ancestor.clientWidth * scaleX,
+              bottom: top + ancestor.clientHeight * scaleY,
+            },
+            clipX,
+            clipY,
+          });
+        }
+      }
+    }
+
+    return targetRects.flatMap((targetRect) => {
+      let left = Math.max(0, ownerRect.left, targetRect.left);
+      let top = Math.max(0, ownerRect.top, targetRect.top);
+      let right = Math.min(viewportWidth, ownerRect.right, targetRect.right);
+      let bottom = Math.min(
+        viewportHeight,
+        ownerRect.bottom,
+        targetRect.bottom,
+      );
+      for (const ancestor of clippingAncestors) {
+        if (ancestor.clipX) {
+          left = Math.max(left, ancestor.rect.left);
+          right = Math.min(right, ancestor.rect.right);
+        }
+        if (ancestor.clipY) {
+          top = Math.max(top, ancestor.rect.top);
+          bottom = Math.min(bottom, ancestor.rect.bottom);
+        }
+      }
+      return right > left && bottom > top
+        ? [
+          `left: ${left}px; top: ${top}px; width: ${right - left}px; ` +
+          `height: ${bottom - top}px`,
+        ]
+        : [];
+    });
   }
 
   /** Drop everything the data/actions panels read, and their subscriptions. */
@@ -1048,7 +1374,28 @@ export class CFPieceMenu extends BaseElement {
 
   protected override render() {
     if (this.hidden || !this.cell) return nothing;
-    return this.panel ? this.#renderPanel(this.panel) : this.#renderMenu();
+    return html`
+      ${this.#renderNestedHighlight()} ${this.panel
+        ? this.#renderPanel(this.panel)
+        : this.#renderMenu()}
+    `;
+  }
+
+  #renderNestedHighlight(): TemplateResult | typeof nothing {
+    const styles = this.#nestedHighlightGeometry;
+    return styles.length > 0
+      ? html`
+        ${styles.map((style) =>
+          html`
+            <div
+              class="nested-piece-highlight"
+              aria-hidden="true"
+              style="${style}"
+            ></div>
+          `
+        )}
+      `
+      : nothing;
   }
 
   #renderMenu(): TemplateResult {
@@ -1556,19 +1903,23 @@ function copyThemeVariables(from: Element, to: HTMLElement): void {
 /**
  * The one menu element, mounted on `document.body`. A single shared instance
  * means a right-click while a menu is open replaces it rather than stacking
- * another overlay, and the element outlives the `cf-render` that opened it (a
- * piece can re-render, or stop, while its menu is up).
+ * another overlay. The shared element stays mounted between openings, including
+ * when the `cf-render` that opened it disconnects and closes it.
  */
 let shared: CFPieceMenu | undefined;
 
 /** Show the piece menu for `cell` at a click position. */
 export function openPieceMenu(
-  { cell, x, y, themeFrom }: {
+  { cell, x, y, themeFrom, highlightedPiece, highlightTarget }: {
     cell: CellHandle;
     x: number;
     y: number;
     /** The element the click came from, whose theme the menu adopts. */
     themeFrom?: Element;
+    /** The rendered piece to highlight while the menu remains open. */
+    highlightedPiece?: Element;
+    /** A nested pattern root to highlight within the rendered piece. */
+    highlightTarget?: Element;
   },
 ): CFPieceMenu {
   if (!shared || !shared.isConnected) {
@@ -1576,6 +1927,11 @@ export function openPieceMenu(
     globalThis.document.body.appendChild(shared);
   }
   if (themeFrom) copyThemeVariables(themeFrom, shared);
-  shared.open({ cell, x, y });
+  shared.open({ cell, x, y, highlightedPiece, highlightTarget });
   return shared;
+}
+
+/** Close the shared menu if `piece` is the render element that opened it. */
+export function closePieceMenuFor(piece: Element): void {
+  shared?.closeFor(piece);
 }

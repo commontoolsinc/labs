@@ -1389,7 +1389,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
   );
 
   await t.step(
-    "updates same-key subpattern UI payloads without reinserting",
+    "updates same-key subpatterns and retargets unchanged UI",
     async () => {
       const collector = createOpsCollector();
       const reconciler = new WorkerReconciler({
@@ -1403,14 +1403,36 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         [UI]: node,
       } as unknown as WorkerRenderNode);
 
-      const outputCell = new MockCell(
-        subpatternOutput({
-          type: "vnode",
-          name: "span",
-          props: { "data-row": "same", "data-count": "1" },
-          children: ["one"],
+      const initialOutput = subpatternOutput({
+        type: "vnode",
+        name: "span",
+        props: { "data-row": "same", "data-count": "1" },
+        children: ["one"],
+      });
+      const outputCell = new MockCell(initialOutput);
+      let resolvedOutputId = "of:fid1:nested-pattern";
+      outputCell.getAsNormalizedFullLink = () => ({
+        id: "of:fid1:stable-link-container",
+        space: signer.did(),
+        path: [],
+        scope: "space",
+      });
+      const resolvedOutputCell = {
+        getAsNormalizedFullLink: () => ({
+          id: resolvedOutputId,
+          space: signer.did(),
+          path: [],
+          scope: "space",
         }),
-      );
+        resolveAsCell() {
+          return this;
+        },
+        getMetaRaw: (field: string) =>
+          field === "patternIdentity"
+            ? { identity: "nested-pattern", symbol: "default" }
+            : undefined,
+      } as unknown as Cell<unknown>;
+      outputCell.resolveAsCell = () => resolvedOutputCell;
 
       const rootCell = new MockCell(
         {
@@ -1431,7 +1453,42 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         throw new Error("Expected initial span to be created");
       }
       const spanNodeId = spanCreate.nodeId;
+      const nestedPatternBinding = collector.getOps().find((op) =>
+        op.op === "set-piece-boundary" && op.nodeId === spanNodeId
+      );
+      assertEquals(
+        nestedPatternBinding && "cellRef" in nestedPatternBinding
+          ? nestedPatternBinding.cellRef.id
+          : undefined,
+        "of:fid1:nested-pattern",
+        "nested pattern root should carry its whole result cell",
+      );
       collector.clear();
+
+      resolvedOutputId = "of:fid1:retargeted-with-same-ui";
+      outputCell.set(initialOutput);
+      await t.settle();
+
+      const unchangedUiBinding = collector.getOps().find((op) =>
+        op.op === "set-piece-boundary" && op.nodeId === spanNodeId
+      );
+      assertEquals(
+        unchangedUiBinding && "cellRef" in unchangedUiBinding
+          ? unchangedUiBinding.cellRef.id
+          : undefined,
+        "of:fid1:retargeted-with-same-ui",
+        "an unchanged UI object should still follow a changed result cell",
+      );
+      assertEquals(
+        collector.getOps().some((op) =>
+          op.op === "create-element" || op.op === "remove-node"
+        ),
+        false,
+        "retargeting unchanged UI should keep its existing element",
+      );
+
+      collector.clear();
+      resolvedOutputId = "of:fid1:retargeted-nested-pattern";
 
       outputCell.set(
         subpatternOutput({
@@ -1442,6 +1499,17 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         }),
       );
       await t.settle();
+
+      const retargetedBinding = collector.getOps().find((op) =>
+        op.op === "set-piece-boundary" && op.nodeId === spanNodeId
+      );
+      assertEquals(
+        retargetedBinding && "cellRef" in retargetedBinding
+          ? retargetedBinding.cellRef.id
+          : undefined,
+        "of:fid1:retargeted-nested-pattern",
+        "a reused pattern root should follow a changed result-cell target",
+      );
 
       assertEquals(
         collector.getOpsOfType("create-element").some((op) =>
@@ -1472,6 +1540,100 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         ),
         true,
         "same-key child text should update",
+      );
+
+      collector.clear();
+      outputCell.set(
+        {
+          type: "vnode",
+          name: "span",
+          props: { "data-row": "plain" },
+          children: ["plain vnode"],
+        } satisfies WorkerVNode,
+      );
+      await t.settle();
+      assertEquals(
+        collector.getOps().some((op) =>
+          op.op === "clear-piece-boundary" && op.nodeId === spanNodeId
+        ),
+        true,
+        "the marker should leave a reused root when it stops being a pattern",
+      );
+
+      const blockedCandidate = subpatternOutput({
+        type: "vnode",
+        name: "cf-cfc-blocked",
+        props: { "data-row": "blocked" },
+        children: ["blocked"],
+      });
+      const deniedOutputId = "of:fid1:retargeted-to-blocked";
+      (reconciler as unknown as {
+        canRenderCellUnderPolicy: () => boolean;
+      }).canRenderCellUnderPolicy = () => resolvedOutputId !== deniedOutputId;
+      resolvedOutputId = deniedOutputId;
+      outputCell.set(blockedCandidate);
+      await t.settle();
+
+      resolvedOutputId = "of:fid1:allowed-after-block";
+      outputCell.set(blockedCandidate);
+      await t.settle();
+      collector.clear();
+
+      resolvedOutputId = deniedOutputId;
+      outputCell.set(blockedCandidate);
+      await t.settle();
+
+      assertEquals(
+        collector.hasOp("set-piece-boundary"),
+        false,
+        "a blocked placeholder should not carry the hidden piece boundary",
+      );
+      assertEquals(
+        collector.getOpsOfType("set-prop").some((op) =>
+          "key" in op && op.key === "data-cfc-blocked" &&
+          "value" in op && op.value === "true"
+        ),
+        true,
+        "a same-UI retarget should still re-run the render policy",
+      );
+    },
+  );
+
+  await t.step(
+    "does not mark an ordinary UI-shaped computed cell as a piece",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+      const uiShapedDataCell = new MockCell({
+        [UI]: {
+          type: "vnode",
+          name: "span",
+          props: {},
+          children: ["ordinary data"],
+        },
+      });
+      uiShapedDataCell.getAsNormalizedFullLink = () => ({
+        id: "of:fid1:ordinary-ui-shaped-data",
+        space: signer.did(),
+        path: [],
+        scope: "space",
+      });
+      uiShapedDataCell.resolveAsCell = () => uiShapedDataCell;
+      uiShapedDataCell.getMetaRaw = () => undefined;
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [uiShapedDataCell],
+      } as unknown as WorkerVNode);
+
+      reconciler.mount(rootCell as unknown as Cell<unknown>);
+      await t.settle();
+
+      assertEquals(
+        collector.hasOp("set-piece-boundary"),
+        false,
+        "UI-shaped data without pattern provenance is not a piece",
       );
     },
   );

@@ -18,6 +18,10 @@ import {
   formatTimestamp,
   shortIdentity,
 } from "./origin-view.ts";
+import {
+  clearPieceBoundary,
+  providePieceBoundary,
+} from "../../../../../html/src/main/space-context.ts";
 
 // The menu renders through Lit templates rather than into a real DOM here: the
 // assertions read the template a render produced, which is enough to say what
@@ -139,6 +143,9 @@ function pieceCell(
         aborted: typeof aborted === "function" ? aborted() : aborted,
       },
     }),
+    equals(other: unknown) {
+      return other === this;
+    },
   } as unknown as CellHandle;
 }
 
@@ -158,6 +165,31 @@ function openMenu(cell: CellHandle = pieceCell()): CFPieceMenu {
   const menu = newMenu();
   menu.open({ cell, x: 40, y: 60 });
   return menu;
+}
+
+/** An element stub that records the attributes the menu changes. */
+function highlightProbe(): {
+  element: Element;
+  has: (name: string) => boolean;
+} {
+  const attributes = new Set<string>();
+  return {
+    element: {
+      setAttribute: (name: string) => attributes.add(name),
+      removeAttribute: (name: string) => attributes.delete(name),
+    } as unknown as Element,
+    has: (name: string) => attributes.has(name),
+  };
+}
+
+function geometryProbe(
+  rect: { left: number; top: number; right: number; bottom: number },
+): Element {
+  return Object.assign(new EventTarget(), {
+    getBoundingClientRect: () => rect,
+    setAttribute: () => {},
+    removeAttribute: () => {},
+  }) as unknown as Element;
 }
 
 describe("piece menu entries", () => {
@@ -219,6 +251,133 @@ describe("the menu a right-click opens", () => {
     // Clamped rather than drawn off-screen, wherever the click landed.
     expect(placement).toContain("left: ");
     expect(placement).not.toContain("left: 1000000px");
+  });
+
+  it("moves the highlight to the addressed piece and removes it on close", () => {
+    const menu = newMenu();
+    const first = highlightProbe();
+    const second = highlightProbe();
+
+    menu.open({
+      cell: pieceCell(),
+      x: 0,
+      y: 0,
+      highlightedPiece: first.element,
+    });
+    expect(first.has("data-cf-piece-menu-open")).toBe(true);
+
+    menu.open({
+      cell: pieceCell(),
+      x: 0,
+      y: 0,
+      highlightedPiece: second.element,
+    });
+    expect(first.has("data-cf-piece-menu-open")).toBe(false);
+    expect(second.has("data-cf-piece-menu-open")).toBe(true);
+
+    menu.close();
+    expect(second.has("data-cf-piece-menu-open")).toBe(false);
+  });
+
+  it("closes only for the render element it highlights", () => {
+    const menu = newMenu();
+    const piece = highlightProbe();
+    const other = highlightProbe();
+    menu.open({
+      cell: pieceCell(),
+      x: 0,
+      y: 0,
+      highlightedPiece: piece.element,
+    });
+
+    menu.closeFor(other.element);
+    expect(shows(menu)).toContain("View source");
+    expect(piece.has("data-cf-piece-menu-open")).toBe(true);
+
+    menu.closeFor(piece.element);
+    expect(shows(menu)).toBe("");
+    expect(piece.has("data-cf-piece-menu-open")).toBe(false);
+  });
+
+  it("removes the highlight when its overlay disconnects", () => {
+    const menu = newMenu();
+    const piece = highlightProbe();
+    menu.open({
+      cell: pieceCell(),
+      x: 0,
+      y: 0,
+      highlightedPiece: piece.element,
+    });
+
+    menu.disconnectedCallback();
+
+    expect(piece.has("data-cf-piece-menu-open")).toBe(false);
+  });
+
+  it("draws a clipped fixed highlight over a nested pattern root", () => {
+    const menu = newMenu();
+    const owner = geometryProbe({
+      left: 10,
+      top: 20,
+      right: 210,
+      bottom: 220,
+    });
+    const target = geometryProbe({
+      left: 0,
+      top: 40,
+      right: 160,
+      bottom: 260,
+    });
+    const cell = pieceCell();
+    providePieceBoundary(target, cell);
+
+    menu.open({
+      cell,
+      x: 0,
+      y: 0,
+      highlightedPiece: owner,
+      highlightTarget: target,
+    });
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("nested-piece-highlight");
+    expect(rendered).toContain(
+      "left: 10px; top: 40px; width: 150px; height: 180px",
+    );
+
+    menu.closeFor(target);
+    expect(shows(menu)).toContain("View source");
+    menu.closeFor(owner);
+    expect(shows(menu)).toBe("");
+  });
+
+  it("closes when the nested root stops representing the open piece", () => {
+    const menu = newMenu();
+    const cell = pieceCell();
+    const owner = geometryProbe({
+      left: 0,
+      top: 0,
+      right: 200,
+      bottom: 200,
+    });
+    const target = geometryProbe({
+      left: 10,
+      top: 10,
+      right: 100,
+      bottom: 100,
+    });
+    providePieceBoundary(target, cell);
+    menu.open({
+      cell,
+      x: 0,
+      y: 0,
+      highlightedPiece: owner,
+      highlightTarget: target,
+    });
+
+    clearPieceBoundary(target);
+
+    expect(shows(menu)).toBe("");
   });
 
   it("shows the detach action after reading a followed piece", async () => {
