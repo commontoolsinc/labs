@@ -857,7 +857,9 @@ function outerCellShapesMatch(
   return left.kind === right.kind && left.scope === right.scope;
 }
 
-/** Consume a uniform outer Cell wrapper through refs and compositions. *
+/**
+ * Consume a uniform outer Cell wrapper through refs and compositions.
+ *
  * @internal Exported for focused Cell-capability contract tests.
  */
 export function localizeOuterCellContract(
