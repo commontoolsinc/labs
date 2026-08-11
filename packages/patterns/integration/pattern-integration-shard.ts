@@ -3,6 +3,12 @@ export interface PatternIntegrationShard {
   total: number;
 }
 
+export const COMPILE_ALL_PATTERN_SHARD_ASSIGNMENTS: Readonly<
+  Record<string, number>
+> = {
+  "emoji-picker.tsx": 4,
+};
+
 export function parsePatternIntegrationShard(
   raw: string | undefined,
 ): PatternIntegrationShard {
@@ -38,8 +44,23 @@ export function currentPatternIntegrationShard(): PatternIntegrationShard {
 export function selectPatternIntegrationShard<T>(
   items: readonly T[],
   shard: PatternIntegrationShard,
+  assignedShard?: (item: T) => number | undefined,
 ): T[] {
-  return items.filter((_, itemIndex) =>
-    itemIndex % shard.total === shard.index - 1
-  );
+  if (shard.total === 1) return [...items];
+
+  return items.filter((item, itemIndex) => {
+    const assigned = assignedShard?.(item);
+    if (assigned !== undefined) {
+      if (
+        !Number.isSafeInteger(assigned) || assigned < 1 ||
+        assigned > shard.total
+      ) {
+        throw new Error(
+          `Assigned pattern integration shard ${assigned} out of range.`,
+        );
+      }
+      return assigned === shard.index;
+    }
+    return itemIndex % shard.total === shard.index - 1;
+  });
 }

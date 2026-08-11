@@ -62,6 +62,10 @@ Deno.test("pattern integration shard defaults local runs to every item", () => {
     "b",
     "c",
   ]);
+  assertEquals(
+    selectPatternIntegrationShard(["a", "b", "c"], shard, () => 4),
+    ["a", "b", "c"],
+  );
 });
 
 Deno.test("pattern integration shard rejects an explicitly empty setting", () => {
@@ -87,6 +91,28 @@ Deno.test("pattern integration shard divides items exactly once", () => {
     ["a", "e"],
     ["b", "f"],
     ["c", "g"],
+    ["d"],
+  ]);
+  assertEquals(selections.flat().sort(), items);
+});
+
+Deno.test("pattern integration shard moves only assigned items", () => {
+  const total = 4;
+  const items = ["a", "b", "c", "d", "e", "f", "g"];
+  const assignments: Readonly<Record<string, number>> = { b: 3 };
+  const selections = Array.from(
+    { length: total },
+    (_, index) =>
+      selectPatternIntegrationShard(
+        items,
+        parsePatternIntegrationShard(`${index + 1}/${total}`),
+        (item) => assignments[item],
+      ),
+  );
+  assertEquals(selections, [
+    ["a", "e"],
+    ["f"],
+    ["b", "c", "g"],
     ["d"],
   ]);
   assertEquals(selections.flat().sort(), items);
@@ -160,10 +186,10 @@ Deno.test("pattern integration assignments separate expensive files", async () =
   const expensiveFiles = [
     "record-module-chrome.test.ts",
     "cf-code-editor.test.ts",
-    "convergence-storm.test.ts",
     "lunch-poll-vote.test.ts",
     "parking-coordinator-admin-view.test.ts",
     "home-profile.test.ts",
+    "cfc-group-chat-demo-two-browsers.test.ts",
   ];
   for (const name of expensiveFiles) {
     assertEquals(
@@ -191,7 +217,7 @@ Deno.test("pattern integration assignments separate expensive files", async () =
   );
 });
 
-Deno.test("pattern integration weights stay within the internal-work floor", async () => {
+Deno.test("pattern integration weights balance the modeled shard loads", async () => {
   const files = await listPatternIntegrationTests();
   const assignments = assignPatternIntegrationShards(
     files,
@@ -205,9 +231,11 @@ Deno.test("pattern integration weights stay within the internal-work floor", asy
     loads[shard - 1] += PATTERN_INTEGRATION_TEST_WEIGHTS[name] ?? 1;
   }
 
+  const lightest = Math.min(...loads);
+  const heaviest = Math.max(...loads);
   assertEquals(
-    Math.max(...loads),
-    Math.max(...PATTERN_INTEGRATION_INITIAL_SHARD_LOADS),
+    heaviest <= lightest * 1.1,
+    true,
     `modeled pattern integration shard loads: ${loads.join(", ")}`,
   );
 });

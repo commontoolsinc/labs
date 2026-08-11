@@ -83,8 +83,11 @@ timing profile receive the default weight until a later profile measures them.
 
 Use internal sharding for a single file with many independent, expensive cases.
 Moving that file intact between jobs moves the delay without dividing it. Keep
-Keep independent end-to-end files in the measured weight table when their run
-times are large enough that default-weight placement cannot balance them.
+independent end-to-end files in the measured weight table when their run times
+are large enough that default-weight placement cannot balance them. Add
+persistent outliers in the compile-all-patterns sweep to
+`COMPILE_ALL_PATTERN_SHARD_ASSIGNMENTS`. This moves the named case without
+changing the default positions of the other cases.
 
 ## Pulling Timing Data
 
