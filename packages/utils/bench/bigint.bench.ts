@@ -34,9 +34,10 @@
  * between `combined` and the sum of the two parts. It sweeps every size up to
  * 33 bytes and then doubles out to 1 MiB: the base64url layer is linear in byte
  * count with no branch structure of its own, so past the crossovers in the
- * layer below it, reach matters more than resolution. Its batch size shrinks as
- * values grow, and so is stated per benchmark rather than being BATCH
- * throughout.
+ * layer below it, reach matters more than resolution. Positive and negative
+ * tracks sit in one group per (size, direction), so the sign's effect reads off
+ * the same table as the layering. Its batch size shrinks as values grow, and so
+ * is stated per benchmark rather than being BATCH throughout.
  *
  * Run with: deno bench --no-check bench/bigint.bench.ts
  */
@@ -239,28 +240,33 @@ function b64BatchFor(bytes: number): number {
 }
 
 /**
- * Returns the minimal two's-complement encoding of a positive value that needs
- * exactly `bytes` bytes. The leading byte lands in `[0x40, 0x7f]`, so the value
+ * Returns the minimal two's-complement encoding of a value of the given sign
+ * that needs exactly `bytes` bytes. The leading byte lands in `[0x40, 0x7f]`
+ * for a positive value and `[0x80, 0xbf]` for a negative one, so the magnitude
  * sits in the upper half of its band -- the same guarantee `makePositive()`
  * gives -- while staying linear to build at megabyte sizes, where repeated
  * bigint shifting is not.
  */
-function makePositiveBytes(bytes: number, rng: () => number): Uint8Array {
+function makeBandBytes(
+  bytes: number,
+  sign: 1n | -1n,
+  rng: () => number,
+): Uint8Array {
   const out = new Uint8Array(bytes);
   for (let i = 0; i < bytes; i++) {
     out[i] = rng() & 0xff;
   }
-  out[0] = 0x40 | (out[0]! & 0x3f);
+  out[0] = (sign === 1n ? 0x40 : 0x80) | (out[0]! & 0x3f);
   return out;
 }
 
 // Warm up all six measured paths, for the same reason the first section does.
 {
   const rng = makeRng(7);
-  const warmBytes = Array.from(
-    { length: BATCH },
-    () => makePositiveBytes(8, rng),
-  );
+  const warmBytes = [
+    ...Array.from({ length: BATCH }, () => makeBandBytes(8, 1n, rng)),
+    ...Array.from({ length: BATCH }, () => makeBandBytes(8, -1n, rng)),
+  ];
   const warmVals = warmBytes.map((b) => bigintFromMinimalTwosComplement(b));
   const warmStrings = warmBytes.map((b) => toUnpaddedBase64url(b));
   for (let i = 0; i < 200; i++) {
@@ -280,82 +286,86 @@ function makePositiveBytes(bytes: number, rng: () => number): Uint8Array {
 }
 
 for (const bytes of B64_BYTE_SIZES) {
-  // Negatives are not tracked separately here: sign changes the cost of the
-  // two's-complement step, which the first section already measures both ways,
-  // and leaves the base64url step's cost untouched.
   const batch = b64BatchFor(bytes);
-  const rng = makeRng(bytes * 37 + 3);
-  const encodedBytes = Array.from(
-    { length: batch },
-    () => makePositiveBytes(bytes, rng),
-  );
-  const values = encodedBytes.map((b) => bigintFromMinimalTwosComplement(b));
-  const encodedStrings = encodedBytes.map((b) => toUnpaddedBase64url(b));
   // Pad the group key so Deno bench's grouped output sorts in size order.
   const groupKey = String(bytes).padStart(7, "0");
   const encodeGroup = `b64-encode-${groupKey}B`;
   const decodeGroup = `b64-decode-${groupKey}B`;
   const label = `${bytes}B`;
 
-  Deno.bench({
-    name: `b64 encode ${label} two's-complement step (${batch} ops)`,
-    group: encodeGroup,
-    baseline: true,
-    fn() {
-      for (let i = 0; i < batch; i++) {
-        bigintToMinimalTwosComplement(values[i]!);
-      }
-    },
-  });
+  for (const sign of [1n, -1n] as const) {
+    const signLabel = sign === 1n ? "positive" : "negative";
+    const isBaselineSign = sign === 1n;
+    const rng = makeRng(bytes * 37 + (sign === 1n ? 3 : 5));
+    const encodedBytes = Array.from(
+      { length: batch },
+      () => makeBandBytes(bytes, sign, rng),
+    );
+    const values = encodedBytes.map((b) => bigintFromMinimalTwosComplement(b));
+    const encodedStrings = encodedBytes.map((b) => toUnpaddedBase64url(b));
 
-  Deno.bench({
-    name: `b64 encode ${label} base64url step (${batch} ops)`,
-    group: encodeGroup,
-    fn() {
-      for (let i = 0; i < batch; i++) {
-        toUnpaddedBase64url(encodedBytes[i]!);
-      }
-    },
-  });
+    Deno.bench({
+      name:
+        `b64 encode ${signLabel} ${label} two's-complement step (${batch} ops)`,
+      group: encodeGroup,
+      baseline: isBaselineSign,
+      fn() {
+        for (let i = 0; i < batch; i++) {
+          bigintToMinimalTwosComplement(values[i]!);
+        }
+      },
+    });
 
-  Deno.bench({
-    name: `b64 encode ${label} combined (${batch} ops)`,
-    group: encodeGroup,
-    fn() {
-      for (let i = 0; i < batch; i++) {
-        bigintToUnpaddedBase64url(values[i]!);
-      }
-    },
-  });
+    Deno.bench({
+      name: `b64 encode ${signLabel} ${label} base64url step (${batch} ops)`,
+      group: encodeGroup,
+      fn() {
+        for (let i = 0; i < batch; i++) {
+          toUnpaddedBase64url(encodedBytes[i]!);
+        }
+      },
+    });
 
-  Deno.bench({
-    name: `b64 decode ${label} two's-complement step (${batch} ops)`,
-    group: decodeGroup,
-    baseline: true,
-    fn() {
-      for (let i = 0; i < batch; i++) {
-        bigintFromMinimalTwosComplement(encodedBytes[i]!);
-      }
-    },
-  });
+    Deno.bench({
+      name: `b64 encode ${signLabel} ${label} combined (${batch} ops)`,
+      group: encodeGroup,
+      fn() {
+        for (let i = 0; i < batch; i++) {
+          bigintToUnpaddedBase64url(values[i]!);
+        }
+      },
+    });
 
-  Deno.bench({
-    name: `b64 decode ${label} base64url step (${batch} ops)`,
-    group: decodeGroup,
-    fn() {
-      for (let i = 0; i < batch; i++) {
-        fromBase64url(encodedStrings[i]!);
-      }
-    },
-  });
+    Deno.bench({
+      name:
+        `b64 decode ${signLabel} ${label} two's-complement step (${batch} ops)`,
+      group: decodeGroup,
+      baseline: isBaselineSign,
+      fn() {
+        for (let i = 0; i < batch; i++) {
+          bigintFromMinimalTwosComplement(encodedBytes[i]!);
+        }
+      },
+    });
 
-  Deno.bench({
-    name: `b64 decode ${label} combined (${batch} ops)`,
-    group: decodeGroup,
-    fn() {
-      for (let i = 0; i < batch; i++) {
-        bigintFromUnpaddedBase64url(encodedStrings[i]!);
-      }
-    },
-  });
+    Deno.bench({
+      name: `b64 decode ${signLabel} ${label} base64url step (${batch} ops)`,
+      group: decodeGroup,
+      fn() {
+        for (let i = 0; i < batch; i++) {
+          fromBase64url(encodedStrings[i]!);
+        }
+      },
+    });
+
+    Deno.bench({
+      name: `b64 decode ${signLabel} ${label} combined (${batch} ops)`,
+      group: decodeGroup,
+      fn() {
+        for (let i = 0; i < batch; i++) {
+          bigintFromUnpaddedBase64url(encodedStrings[i]!);
+        }
+      },
+    });
+  }
 }
