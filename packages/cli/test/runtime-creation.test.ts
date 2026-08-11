@@ -1,9 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { PieceManager } from "@commonfabric/piece";
+import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
-import { loadManager } from "../lib/piece.ts";
+import { loadPieces } from "../lib/piece.ts";
 import { withEnv } from "./utils.ts";
 
 const AUTO_UPDATE_ENV = "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE";
@@ -25,7 +25,7 @@ describe("CLI runtime creation", () => {
 
     await withEnv(AUTO_UPDATE_ENV, "true", async () => {
       try {
-        await expect(loadManager({
+        await expect(loadPieces({
           apiUrl: "https://toolshed.test",
           identity: keyPath,
           space: "piece-runtime-creation",
@@ -48,9 +48,9 @@ describe("CLI runtime creation", () => {
     await Deno.writeFile(keyPath, identity.toPkcs8());
     const originalHealthCheck = Runtime.prototype.healthCheck;
     const originalGetSpaceCell = Runtime.prototype.getSpaceCell;
-    const originalSynced = PieceManager.prototype.synced;
+    const originalSynced = PiecesController.prototype.synced;
     let created: Runtime | undefined;
-    let manager: PieceManager | undefined;
+    let manager: PiecesController | undefined;
     Runtime.prototype.healthCheck = function () {
       created = this;
       return Promise.resolve(true);
@@ -63,10 +63,10 @@ describe("CLI runtime creation", () => {
       Reflect.set(cell, "sync", () => Promise.resolve());
       return cell;
     } as typeof Runtime.prototype.getSpaceCell;
-    PieceManager.prototype.synced = () => Promise.resolve();
+    PiecesController.prototype.synced = () => Promise.resolve();
 
     try {
-      manager = await loadManager({
+      manager = await loadPieces({
         apiUrl: "https://toolshed.test",
         identity: keyPath,
         space: "piece-navigation-registration",
@@ -106,7 +106,7 @@ describe("CLI runtime creation", () => {
     } finally {
       Runtime.prototype.healthCheck = originalHealthCheck;
       Runtime.prototype.getSpaceCell = originalGetSpaceCell;
-      PieceManager.prototype.synced = originalSynced;
+      PiecesController.prototype.synced = originalSynced;
       if (created) {
         await (created.storageManager as unknown as {
           closeNow(): Promise<void>;
@@ -128,9 +128,9 @@ describe("CLI runtime creation", () => {
     const originalHealthCheck = Runtime.prototype.healthCheck;
     const originalGetSpaceCell = Runtime.prototype.getSpaceCell;
     const originalEnsureSpaceSession =
-      PieceManager.prototype.ensureSpaceSession;
-    const originalManagerSynced = PieceManager.prototype.synced;
-    const managers: PieceManager[] = [];
+      PiecesController.prototype.ensureSpaceSession;
+    const originalManagerSynced = PiecesController.prototype.synced;
+    const managers: PiecesController[] = [];
     let spaceCellSyncCalls = 0;
     let spaceSessionCalls = 0;
     let managerSyncCalls = 0;
@@ -144,18 +144,18 @@ describe("CLI runtime creation", () => {
         },
       } as any;
     };
-    PieceManager.prototype.synced = () => {
+    PiecesController.prototype.synced = () => {
       managerSyncCalls++;
       return Promise.resolve();
     };
-    PieceManager.prototype.ensureSpaceSession = () => {
+    PiecesController.prototype.ensureSpaceSession = () => {
       spaceSessionCalls++;
       return Promise.resolve();
     };
 
     try {
       managers.push(
-        await loadManager({
+        await loadPieces({
           apiUrl: "https://toolshed.test",
           identity: keyPath,
           space: "piece-manager-eager-sync",
@@ -166,7 +166,7 @@ describe("CLI runtime creation", () => {
       expect(managerSyncCalls).toBe(1);
 
       managers.push(
-        await loadManager({
+        await loadPieces({
           apiUrl: "https://toolshed.test",
           identity: keyPath,
           space: "piece-manager-deferred-sync",
@@ -179,8 +179,9 @@ describe("CLI runtime creation", () => {
     } finally {
       Runtime.prototype.healthCheck = originalHealthCheck;
       Runtime.prototype.getSpaceCell = originalGetSpaceCell;
-      PieceManager.prototype.ensureSpaceSession = originalEnsureSpaceSession;
-      PieceManager.prototype.synced = originalManagerSynced;
+      PiecesController.prototype.ensureSpaceSession =
+        originalEnsureSpaceSession;
+      PiecesController.prototype.synced = originalManagerSynced;
       for (const manager of managers) {
         await (manager.runtime.storageManager as unknown as {
           closeNow(): Promise<void>;

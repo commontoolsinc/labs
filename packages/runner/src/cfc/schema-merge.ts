@@ -408,6 +408,11 @@ const mergeRequired = (
   return merged;
 };
 
+// TODO(danfuzz): `isReadonlyRecord` admits a `FabricSpecialObject` on either
+// side, and the spread copies zero properties from one — so two fabric
+// defaults merge to `{}`, and a plain-record `existing` plus a fabric
+// `candidate` silently drops the candidate's value. Wants a
+// `FabricSpecialObject` test taking the `candidate` arm.
 const mergeDefaults = (
   existing: JSONSchemaObj["default"],
   candidate: JSONSchemaObj["default"],

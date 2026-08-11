@@ -478,21 +478,22 @@ describe("cloneIfNecessary", () => {
   // Per-subclass coverage matrix.
   //
   // Systematically exercises every concrete `FabricInstance` and
-  // `FabricPrimitive` subclass in this package across the full `cloneIfNecessary`
-  // option matrix, and validates the result -- frozenness, identity preservation,
-  // observable state -- or that the call throws when a subclass's protocol
-  // implementation is a documented stub.
+  // `FabricPrimitive` subclass in this package across the full
+  // `cloneIfNecessary` option matrix, and validates the result -- frozenness,
+  // identity preservation, observable state -- or that the call throws when a
+  // subclass's protocol implementation is a documented stub.
   //
   // The point is twofold: (a) make sure existing subclasses behave consistently
   // under every option combination callers in production are likely to use, and
-  // (b) make sure any future subclass added to the package without full protocol
-  // coverage trips this matrix instead of silently breaking call sites.
+  // (b) make sure any future subclass added to the package without full
+  // protocol coverage trips this matrix instead of silently breaking call
+  // sites.
 
   /**
    * Describes what `cloneIfNecessary` is expected to do for a given subclass on
-   * a given option vector. `kind: "ok"` means the call returns; `kind: "throws"`
-   * means it throws (we don't pin the exact message -- subclass stubs use
-   * varying phrasing).
+   * a given option vector. `kind: "ok"` means the call returns; `kind:
+   * "throws"` means it throws (we don't pin the exact message -- subclass stubs
+   * use varying phrasing).
    */
   type ExpectedOutcome =
     | { kind: "ok" }
@@ -583,7 +584,7 @@ describe("cloneIfNecessary", () => {
   ];
 
   /**
-   * Compute the expected outcome of a `cloneIfNecessary(value, opts)` call for
+   * Computes the expected outcome of a `cloneIfNecessary(value, opts)` call for
    * a given subclass, by inspecting the *actual* value to predict which
    * `cloneHelper` arm is reached. The point of computing rather than tabulating
    * is so that adding a new subclass to `subclassCases` (or changing what its

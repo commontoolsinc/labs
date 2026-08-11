@@ -4,7 +4,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { pattern } from "../../../runner/src/builder/pattern.ts";
 import { setArtifactEntryRef } from "../../../runner/src/builder/pattern-metadata.ts";
 import { sourceDocKey } from "../../../runner/src/compilation-cache/cell-cache.ts";
-import { PieceManager } from "../../src/manager.ts";
+import { PiecesController } from "../../src/ops/pieces-controller.ts";
 
 const SOURCE = "export default 1;\n";
 const SOURCE_IDENTITY = "Qxkzi6OeLOLPP3A3-e-8kLe0DyNgoDZMZVIKr4PLz3w";
@@ -23,18 +23,18 @@ const runtime = new Runtime({
 
 let outcome: { history?: string[]; error?: string };
 try {
-  const manager = new PieceManager(
+  const pieces = new PiecesController(
     await createSession({
       identity: storageManager.as as Identity,
       spaceName: `piece-source-compiler-preload-${crypto.randomUUID()}`,
     }),
     runtime,
   );
-  await manager.synced();
+  await pieces.synced();
 
   const sourceTx = runtime.edit();
   runtime.getCell(
-    manager.getSpace(),
+    pieces.getSpace(),
     sourceDocKey(SOURCE_IDENTITY),
     undefined,
     sourceTx,
@@ -54,9 +54,9 @@ try {
     identity: SOURCE_IDENTITY,
     symbol: "default",
   });
-  manager.syncPatternByIdentity = () => Promise.resolve(cachedPattern);
+  pieces.syncPatternByIdentity = () => Promise.resolve(cachedPattern);
 
-  const piece = await manager.setupPersistent(
+  const piece = await pieces.setupPersistent(
     cachedPattern,
     {},
     "source-backed-piece",

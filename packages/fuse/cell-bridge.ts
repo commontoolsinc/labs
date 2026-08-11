@@ -1,4 +1,4 @@
-// cell-bridge.ts — Bridge PieceManager → FsTree
+// cell-bridge.ts — Bridge PiecesController → FsTree
 //
 // Populates the filesystem tree with piece data from Common Fabric spaces.
 // Supports multiple spaces with on-demand connection.
@@ -46,7 +46,6 @@ import {
   type DirectorySnapshotEntry,
 } from "./directory-handles.ts";
 import type { JSONSchema } from "@commonfabric/api";
-import type { PieceManager } from "@commonfabric/piece";
 import type {
   PieceController,
   PiecePatternRef,
@@ -89,7 +88,7 @@ function displayCallableInputType(
 }
 // Lazy-imported in connectSpace() to avoid pulling in heavy CLI deps at import
 // time (breaks tests that only use CellBridge for tree/symlink logic).
-// import { loadManager } from "../cli/lib/piece.ts";
+// import { loadPieces } from "../cli/lib/piece.ts";
 
 /**
  * Parse YAML frontmatter from a markdown string.
@@ -167,12 +166,12 @@ type Cancel = () => void;
 
 type ResolveLink = (value: unknown, depth: number) => string | null;
 
-type ManagerLoader = (config: {
+type PiecesLoader = (config: {
   apiUrl: string;
   space: string;
   identity: string;
   deferSpaceCellSync?: boolean;
-}) => Promise<PieceManager>;
+}) => Promise<PiecesController>;
 
 export interface CellBridgeOptions {
   cfcAnnotations?: boolean;
@@ -180,8 +179,8 @@ export interface CellBridgeOptions {
   projectionGeneration?: string;
   statusProvider?: () => Record<string, unknown>;
   onCfcProjectionRebuilt?: () => void;
-  reconnectManagerLoader?: ManagerLoader;
-  loadManager?: ManagerLoader;
+  reconnectPiecesLoader?: PiecesLoader;
+  loadPieces?: PiecesLoader;
 }
 
 /** Result of resolving an inode to a writable cell path. */
@@ -220,7 +219,6 @@ export type InvalidateInodeCallback = (ino: bigint) => void;
 
 /** Per-space state after connection. */
 export interface SpaceState {
-  manager: PieceManager;
   pieces: PiecesController;
   spaceIno: bigint;
   piecesIno: bigint;
@@ -385,8 +383,8 @@ export class CellBridge {
   private explicitCfcProjectionGeneration: string | undefined;
   private statusProvider: (() => Record<string, unknown>) | undefined;
   private onCfcProjectionRebuilt: (() => void) | undefined;
-  private reconnectManagerLoader: CellBridgeOptions["reconnectManagerLoader"];
-  private managerLoader: CellBridgeOptions["loadManager"];
+  private reconnectPiecesLoader: CellBridgeOptions["reconnectPiecesLoader"];
+  private piecesLoader: CellBridgeOptions["loadPieces"];
   private maxEntityProjections: number;
 
   private startedAt = new Date().toISOString();
@@ -439,25 +437,25 @@ export class CellBridge {
     let allSpacesRestored = spaces.length > 0;
     for (const [spaceName, state] of spaces) {
       try {
-        const loadManager = this.reconnectManagerLoader ??
-          this.managerLoader ??
-          (await import("../cli/lib/piece.ts")).loadManager;
-        const manager = await loadManager({
+        const loadPieces = this.reconnectPiecesLoader ??
+          this.piecesLoader ??
+          (await import("../cli/lib/piece.ts")).loadPieces;
+        const probe = await loadPieces({
           apiUrl: this.apiUrl,
           space: spaceName,
           identity: this.identity,
           deferSpaceCellSync: true,
         });
         try {
-          await this.verifyManagerConnection(manager);
+          await this.verifyPiecesConnection(probe);
           if (state.piecesHydrated) {
             await state.pieces.getRegisteredPieces();
           }
           // The session probe and existing pieces view verify this space.
-          // manager.synced() alone can succeed from local state while the
+          // probe.synced() alone can succeed from local state while the
           // backend is still unavailable.
         } finally {
-          await manager.runtime.dispose().catch((e) => {
+          await probe.runtime.dispose().catch((e) => {
             console.warn(
               `[FUSE] Reconnect probe cleanup failed: ${
                 e instanceof Error ? e.message : String(e)
@@ -498,8 +496,8 @@ export class CellBridge {
     this.explicitCfcProjectionGeneration = options.projectionGeneration;
     this.statusProvider = options.statusProvider;
     this.onCfcProjectionRebuilt = options.onCfcProjectionRebuilt;
-    this.reconnectManagerLoader = options.reconnectManagerLoader;
-    this.managerLoader = options.loadManager;
+    this.reconnectPiecesLoader = options.reconnectPiecesLoader;
+    this.piecesLoader = options.loadPieces;
     this.maxEntityProjections = options.maxEntityProjections ??
       DEFAULT_MAX_ENTITY_PROJECTIONS;
     if (
@@ -518,19 +516,23 @@ export class CellBridge {
     this.identity = config.identity;
   }
 
-  private async verifyManagerConnection(manager: PieceManager): Promise<void> {
-    await manager.ensureSpaceSession?.();
-    await manager.synced?.();
-    if (typeof manager.getSpace !== "function") return;
-    const authorizationError = manager.runtime?.storageManager
-      ?.authorizationError?.(manager.getSpace());
+  private async verifyPiecesConnection(
+    pieces: PiecesController,
+  ): Promise<void> {
+    await pieces.ensureSpaceSession?.();
+    await pieces.synced?.();
+    if (typeof pieces.getSpace !== "function") return;
+    const authorizationError = pieces.runtime?.storageManager
+      ?.authorizationError?.(pieces.getSpace());
     if (authorizationError) throw authorizationError;
   }
 
-  private async createSpaceManager(spaceName: string): Promise<PieceManager> {
-    const loadManager = this.managerLoader ??
-      (await import("../cli/lib/piece.ts")).loadManager;
-    return await loadManager({
+  private async createSpacePieces(
+    spaceName: string,
+  ): Promise<PiecesController> {
+    const loadPieces = this.piecesLoader ??
+      (await import("../cli/lib/piece.ts")).loadPieces;
+    return await loadPieces({
       apiUrl: this.apiUrl,
       space: spaceName,
       identity: this.identity,
@@ -831,12 +833,12 @@ export class CellBridge {
   }
 
   private async connectSpaceOnce(spaceName: string): Promise<SpaceState> {
-    let manager: PieceManager | undefined;
+    let pieces: PiecesController | undefined;
     let state: SpaceState | undefined;
     try {
-      manager = await this.createSpaceManager(spaceName);
-      await this.verifyManagerConnection(manager);
-      state = await this.buildSpaceTree(spaceName, manager);
+      pieces = await this.createSpacePieces(spaceName);
+      await this.verifyPiecesConnection(pieces);
+      state = this.buildSpaceTree(spaceName, pieces);
 
       this.updateIndexJson(state);
       this.updatePiecesJson(state);
@@ -855,8 +857,8 @@ export class CellBridge {
       }
       this.spaces.delete(spaceName);
       this.knownSpaces.delete(spaceName);
-      if (manager) {
-        await manager.runtime.dispose().catch((disposeError) => {
+      if (pieces) {
+        await pieces.runtime.dispose().catch((disposeError) => {
           console.warn(
             `[FUSE] Failed space cleanup for ${spaceName}: ${
               disposeError instanceof Error
@@ -1474,8 +1476,8 @@ export class CellBridge {
       unknown
     >;
     handlerCell.send(value);
-    await target.piece.manager().runtime.idle();
-    await target.piece.manager().synced();
+    await target.piece.pieces().runtime.idle();
+    await target.piece.pieces().synced();
   }
 
   private resolvePieceController(
@@ -1895,7 +1897,6 @@ export class CellBridge {
           pieceIno,
           propName,
           treeValue,
-          undefined,
           resolveLink,
           0,
           skipEntry,
@@ -1907,7 +1908,6 @@ export class CellBridge {
           pieceIno,
           propName,
           treeValue,
-          undefined,
           resolveLink,
           0,
           skipEntry,
@@ -2423,13 +2423,10 @@ export class CellBridge {
     );
   }
 
-  private async buildSpaceTree(
+  private buildSpaceTree(
     spaceName: string,
-    manager: PieceManager,
-  ): Promise<SpaceState> {
-    const { PiecesController } = await import("@commonfabric/piece/ops");
-    const pieces = new PiecesController(manager);
-
+    pieces: PiecesController,
+  ): SpaceState {
     // Create space directory structure
     const spaceIno = this.tree.addDir(
       this.tree.rootIno,
@@ -2439,7 +2436,7 @@ export class CellBridge {
     const entitiesIno = this.tree.addDir(spaceIno, "entities");
 
     // space.json: DID + name
-    const spaceDid = manager.getSpace();
+    const spaceDid = pieces.getSpace();
     const spaceMeta = { did: spaceDid, name: spaceName };
     const spaceAnnotator = this.makeCfcAnnotator({
       spaceName,
@@ -2479,7 +2476,6 @@ export class CellBridge {
     );
 
     const state: SpaceState = {
-      manager,
       pieces,
       spaceIno,
       piecesIno,
@@ -2555,7 +2551,7 @@ export class CellBridge {
   ): Promise<void> {
     if (state.pieceListSubscribed) return;
 
-    const piecesCell = await state.manager.getPieceRegistry();
+    const piecesCell = await state.pieces.getPieceRegistry();
     const piecesListCancel = piecesCell.sink(() => {
       setTimeout(() => {
         this.syncPieceList(state, spaceName).catch((e) => {
@@ -2781,7 +2777,7 @@ export class CellBridge {
   }
 
   private async listEntityIdsForSnapshot(state: SpaceState): Promise<string[]> {
-    if (typeof state.manager.listEntityIdPage !== "function") {
+    if (typeof state.pieces.listEntityIdPage !== "function") {
       throw new Error(
         "memory server does not support paginated entity identifier listing",
       );
@@ -2792,7 +2788,7 @@ export class CellBridge {
     let expectedServerSeq: number | undefined;
     let previousId: string | undefined;
     for (;;) {
-      const page = await state.manager.listEntityIdPage({
+      const page = await state.pieces.listEntityIdPage({
         ...(after === undefined ? {} : { after }),
         limit: ENTITY_ID_PAGE_SIZE,
         ...(expectedServerSeq === undefined ? {} : { expectedServerSeq }),
@@ -2906,8 +2902,8 @@ export class CellBridge {
     const entities = this.stateForEntitiesDir(entitiesIno);
     if (!entities) return undefined;
     const existingIno = this.tree.lookup(entitiesIno, entityId);
-    const exists = typeof entities.state.manager.entityIdExists === "function"
-      ? await entities.state.manager.entityIdExists(decodedEntityId)
+    const exists = typeof entities.state.pieces.entityIdExists === "function"
+      ? await entities.state.pieces.entityIdExists(decodedEntityId)
       : undefined;
     if (exists === false) {
       if (
@@ -3732,7 +3728,6 @@ export class CellBridge {
         parentIno,
         name,
         value,
-        undefined,
         resolveLink,
         0,
         skipEntry,

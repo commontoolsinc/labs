@@ -16,6 +16,10 @@ export abstract class BaseReconstructionContext
   implements ReconstructionContext {
   readonly #shouldDeepFreeze: boolean;
 
+  /**
+   * Constructs an instance which reports `shouldDeepFreeze` for the frozenness
+   * of what it reconstructs.
+   */
   constructor(shouldDeepFreeze: boolean) {
     this.#shouldDeepFreeze = shouldDeepFreeze;
   }

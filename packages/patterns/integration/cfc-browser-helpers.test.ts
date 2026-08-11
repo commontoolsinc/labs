@@ -825,4 +825,276 @@ describe("CFC browser helpers", () => {
       await presentationPage.close();
     }
   });
+
+  it("waits for a marked target's shifting box to settle before clicking", async () => {
+    await page.evaluate((clickTargetAttr: string) => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      const button = document.createElement("button");
+      button.id = "shifting-guest-button";
+      button.textContent = "Continue as guest";
+      root.append(button);
+      document.body.append(host);
+
+      let clicked = false;
+      button.addEventListener("click", () => {
+        clicked = true;
+      }, { once: true });
+
+      // The control is laid out when the helper marks it, but its surface then
+      // goes display:none for a spell as the join card's entrance settles — the
+      // way the real profile surface toggles display through its transition.
+      // While the marked control has no layout box, DOM.getBoxModel returns
+      // nothing, so a click that measures the box once throws "Unable to get
+      // stable box model to click on"; a click that waits for the box to settle
+      // clicks the control once its surface returns. The shift lands between the
+      // mark and the click, a window with no view settle to sequence against, so
+      // the fixture hides on the mark and restores on a timer that outlasts a
+      // single mark->click round trip. The restore states when the surface
+      // returns, not how long to wait for it: the helper's wait ends on the
+      // return, bounded only by the stuck-condition net.
+      const observer = new MutationObserver(() => {
+        if (!button.hasAttribute(clickTargetAttr)) return;
+        observer.disconnect();
+        button.style.display = "none";
+        setTimeout(() => {
+          button.style.display = "";
+        }, 1000);
+      });
+      observer.observe(button, {
+        attributes: true,
+        attributeFilter: [clickTargetAttr],
+      });
+
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = { viewSettled: () => Promise.resolve() };
+      (globalThis as typeof globalThis & {
+        __shiftingClicked: () => boolean;
+      }).__shiftingClicked = () => clicked;
+    }, { args: [CLICK_TARGET_ATTR] });
+
+    await clickCfButton(page, "#shifting-guest-button");
+
+    const clicked = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __shiftingClicked: () => boolean;
+      }).__shiftingClicked()
+    );
+    assert(
+      clicked,
+      "the click never reached the target after its hidden surface returned",
+    );
+  });
+
+  it("clicks a control its surface keeps rebuilding under the aim", async () => {
+    await page.evaluate((clickTargetAttr: string) => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      const surface = document.createElement("div");
+      root.append(surface);
+      document.body.append(host);
+
+      let clicked = 0;
+      // Listen on the surface, not the control: each rebuild is a different
+      // element, and a listener on the control would only ever see the one
+      // instance it was attached to.
+      surface.addEventListener("click", (event) => {
+        const target = event.target as HTMLElement | null;
+        if (target?.id === "rebuilt-guest-button") clicked++;
+      });
+
+      const makeButton = () => {
+        const button = document.createElement("button");
+        button.id = "rebuilt-guest-button";
+        button.textContent = "Continue as guest";
+        Object.assign(button.style, {
+          display: "block",
+          width: "200px",
+          height: "32px",
+        });
+        return button;
+      };
+      surface.append(makeButton());
+
+      // Once the helper marks the control, the surface rebuilds it on every
+      // animation frame, the way a piece re-render replaces the DOM it drew
+      // while a test is already interacting with it. Each replacement is
+      // geometrically identical, so what changes is which element is there,
+      // not where a click has to land. The mark travels to the replacement,
+      // which is what a helper addressing the control by name would find.
+      //
+      // A click that resolves the control to a handle up front and measures
+      // that handle's box some protocol round trips later measures an element
+      // the surface has since dropped, and reports "Unable to get stable box
+      // model to click on". A click that decides and measures inside one page
+      // turn measures whichever element is there at that instant, and lands.
+      const observer = new MutationObserver(() => {
+        if (!surface.querySelector(`[${clickTargetAttr}]`)) return;
+        observer.disconnect();
+        let framesLeft = 20;
+        const rebuild = () => {
+          const current = surface.querySelector("#rebuilt-guest-button");
+          if (!current || framesLeft-- <= 0) return;
+          const replacement = makeButton();
+          for (const name of current.getAttributeNames()) {
+            replacement.setAttribute(name, current.getAttribute(name)!);
+          }
+          current.replaceWith(replacement);
+          requestAnimationFrame(rebuild);
+        };
+        requestAnimationFrame(rebuild);
+      });
+      observer.observe(surface, {
+        attributes: true,
+        subtree: true,
+        attributeFilter: [clickTargetAttr],
+      });
+
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = { viewSettled: () => Promise.resolve() };
+      (globalThis as typeof globalThis & {
+        __rebuiltClicks: () => number;
+      }).__rebuiltClicks = () => clicked;
+    }, { args: [CLICK_TARGET_ATTR] });
+
+    await clickCfButton(page, "#rebuilt-guest-button");
+
+    const clicks = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __rebuiltClicks: () => number;
+      }).__rebuiltClicks()
+    );
+    assertEquals(
+      clicks,
+      1,
+      "the click never reached the control the surface rebuilt under it",
+    );
+  });
+
+  it("tells the interaction observer where a marked click landed", async () => {
+    // A presentation recording animates its cursor from these callbacks. The
+    // click is aimed at a point rather than resolved to a handle, so the
+    // observer is told about a point with no element to name.
+    const observed: { phase: string; x: number; y: number }[] = [];
+    page.setInteractionObserver({
+      beforeClick: (_element, point) =>
+        void observed.push({ phase: "before", x: point.x, y: point.y }),
+      afterClick: (_element, point) =>
+        void observed.push({ phase: "after", x: point.x, y: point.y }),
+    });
+    try {
+      await page.evaluate(() => {
+        const host = document.createElement("div");
+        const root = host.attachShadow({ mode: "open" });
+        const button = document.createElement("button");
+        button.id = "observed-guest-button";
+        button.textContent = "Continue as guest";
+        Object.assign(button.style, {
+          position: "fixed",
+          left: "40px",
+          top: "40px",
+          width: "120px",
+          height: "40px",
+          margin: "0",
+        });
+        root.append(button);
+        document.body.append(host);
+        (globalThis as typeof globalThis & {
+          commonfabric: { viewSettled: () => Promise<void> };
+        }).commonfabric = { viewSettled: () => Promise.resolve() };
+      });
+
+      await clickCfButton(page, "#observed-guest-button");
+
+      assertEquals(
+        observed.map((entry) => entry.phase),
+        ["before", "after"],
+        "the observer should bracket the click",
+      );
+      // The control sits at 40,40 and is 120x40, so its centre is 100,60.
+      assertEquals({ x: observed[0].x, y: observed[0].y }, { x: 100, y: 60 });
+      assertEquals({ x: observed[1].x, y: observed[1].y }, { x: 100, y: 60 });
+    } finally {
+      page.setInteractionObserver(undefined);
+    }
+  });
+
+  it("clicks a control on a page that is not being rendered", async () => {
+    // A page sharing a browser with a fronted page is hidden, and a hidden page
+    // produces no animation frames. A settle that waits for a frame there waits
+    // for one that never arrives, and a settle that yields only to the
+    // microtask queue starves the timers and tasks that would bring a
+    // momentarily hidden control back — so it spins against a control it is
+    // itself preventing from returning. Both leave the click unable to land.
+    const background = await browser.newPage();
+    const fronted = await browser.newPage();
+    try {
+      assertEquals(
+        await background.evaluate(() => document.visibilityState),
+        "hidden",
+        "the background page should not be rendering",
+      );
+
+      await background.evaluate((clickTargetAttr: string) => {
+        const host = document.createElement("div");
+        const root = host.attachShadow({ mode: "open" });
+        const button = document.createElement("button");
+        button.id = "background-guest-button";
+        button.textContent = "Continue as guest";
+        Object.assign(button.style, {
+          display: "block",
+          width: "200px",
+          height: "32px",
+        });
+        root.append(button);
+        document.body.append(host);
+
+        let clicked = 0;
+        button.addEventListener("click", () => {
+          clicked++;
+        });
+
+        // The control goes away for a spell once marked and comes back on a
+        // task. Only a settle that lets the event loop turn will ever see it
+        // return.
+        const observer = new MutationObserver(() => {
+          if (!button.hasAttribute(clickTargetAttr)) return;
+          observer.disconnect();
+          button.style.display = "none";
+          setTimeout(() => {
+            button.style.display = "block";
+          }, 250);
+        });
+        observer.observe(button, {
+          attributes: true,
+          attributeFilter: [clickTargetAttr],
+        });
+
+        (globalThis as typeof globalThis & {
+          commonfabric: { viewSettled: () => Promise<void> };
+        }).commonfabric = { viewSettled: () => Promise.resolve() };
+        (globalThis as typeof globalThis & {
+          __backgroundClicks: () => number;
+        }).__backgroundClicks = () => clicked;
+      }, { args: [CLICK_TARGET_ATTR] });
+
+      await clickCfButton(background, "#background-guest-button");
+
+      const clicks = await background.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __backgroundClicks: () => number;
+        }).__backgroundClicks()
+      );
+      assertEquals(
+        clicks,
+        1,
+        "the click never landed on the unrendered page's control",
+      );
+    } finally {
+      await fronted.close();
+      await background.close();
+    }
+  });
 });

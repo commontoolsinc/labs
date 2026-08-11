@@ -2,7 +2,8 @@ import { createSession, Identity } from "@commonfabric/identity";
 import { entityIdFrom, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { RuntimeProgram } from "../../runner/src/harness/types.ts";
-import { pieceId, PieceManager } from "../src/manager.ts";
+import { pieceId } from "../src/piece-id.ts";
+import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("piece cold runtime bench");
 
@@ -58,26 +59,26 @@ async function createSeed(): Promise<Seed> {
     identity: signer,
     spaceName: `piece-cold-runtime-bench-${crypto.randomUUID()}`,
   });
-  const manager = new PieceManager(session, runtime);
-  await manager.synced();
+  const pieces = new PiecesController(session, runtime);
+  await pieces.synced();
 
   const compiledDefaultPattern = await runtime.patternManager.compilePattern(
     defaultPatternProgram,
   );
-  const defaultPatternPiece = await manager.runPersistent(
+  const defaultPatternPiece = await pieces.runPersistent(
     compiledDefaultPattern,
     { pieceRegistry: [] },
     "piece-cold-runtime-default-pattern",
   );
-  await manager.linkDefaultPattern(defaultPatternPiece);
-  await manager.runtime.idle();
-  await manager.synced();
+  await pieces.linkDefaultPattern(defaultPatternPiece);
+  await pieces.runtime.idle();
+  await pieces.synced();
 
   const compiledPiecePattern = await runtime.patternManager.compilePattern(
     persistedPieceProgram,
   );
   for (let index = 0; index < 128; index++) {
-    await manager.runPersistent(
+    await pieces.runPersistent(
       compiledPiecePattern,
       { value: index },
       `piece-cold-runtime-${index}`,
@@ -91,9 +92,9 @@ async function createSeed(): Promise<Seed> {
   };
 }
 
-async function withFreshManager<T>(
+async function withFreshPieces<T>(
   seed: Seed,
-  run: (env: { runtime: Runtime; manager: PieceManager }) => Promise<T>,
+  run: (env: { runtime: Runtime; pieces: PiecesController }) => Promise<T>,
 ): Promise<T> {
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
@@ -103,13 +104,13 @@ async function withFreshManager<T>(
     identity: signer,
     spaceName: seed.spaceName,
   });
-  const manager = new PieceManager(session, runtime);
-  await manager.synced();
+  const pieces = new PiecesController(session, runtime);
+  await pieces.synced();
   try {
-    return await run({ runtime, manager });
+    return await run({ runtime, pieces });
   } finally {
     await runtime.idle();
-    await manager.synced();
+    await pieces.synced();
     await runtime.dispose();
   }
 }
@@ -117,14 +118,14 @@ async function withFreshManager<T>(
 let nextPieceIndex = 0;
 
 Deno.bench({
-  name: "PieceManager.getDefaultPattern(runIt=true, fresh runtime)",
+  name: "PiecesController.getDefaultPattern(runIt=true, fresh runtime)",
   async fn(b) {
     const seed = await createSeed();
     try {
-      await withFreshManager(seed, async ({ manager }) => {
+      await withFreshPieces(seed, async ({ pieces }) => {
         b.start();
         try {
-          await manager.getDefaultPattern(true);
+          await pieces.getDefaultPattern(true);
         } finally {
           b.end();
         }
@@ -136,7 +137,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "PieceManager.add(single persisted piece, fresh runtime)",
+  name: "PiecesController.add(single persisted piece, fresh runtime)",
   async fn(b) {
     const storageManager = StorageManager.emulate({
       as: signer,
@@ -149,34 +150,34 @@ Deno.bench({
       identity: signer,
       spaceName: `piece-cold-runtime-add-${crypto.randomUUID()}`,
     });
-    const seedManager = new PieceManager(seedSession, seedRuntime);
-    await seedManager.synced();
+    const seedPieces = new PiecesController(seedSession, seedRuntime);
+    await seedPieces.synced();
 
     try {
       const compiledDefaultPattern = await seedRuntime.patternManager
         .compilePattern(
           defaultPatternProgram,
         );
-      const defaultPatternPiece = await seedManager.runPersistent(
+      const defaultPatternPiece = await seedPieces.runPersistent(
         compiledDefaultPattern,
         { pieceRegistry: [] },
         "piece-cold-runtime-default-pattern",
       );
-      await seedManager.linkDefaultPattern(defaultPatternPiece);
-      await seedManager.runtime.idle();
-      await seedManager.synced();
+      await seedPieces.linkDefaultPattern(defaultPatternPiece);
+      await seedPieces.runtime.idle();
+      await seedPieces.synced();
 
       const compiledPiecePattern = await seedRuntime.patternManager
         .compilePattern(
           persistedPieceProgram,
         );
-      const persistedPiece = await seedManager.runPersistent(
+      const persistedPiece = await seedPieces.runPersistent(
         compiledPiecePattern,
         { value: nextPieceIndex++ },
         "piece-cold-runtime-add-piece",
       );
-      await seedManager.runtime.idle();
-      await seedManager.synced();
+      await seedPieces.runtime.idle();
+      await seedPieces.synced();
 
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
@@ -186,23 +187,23 @@ Deno.bench({
         identity: signer,
         spaceName: seedSession.spaceName!,
       });
-      const manager = new PieceManager(session, runtime);
-      await manager.synced();
+      const pieces = new PiecesController(session, runtime);
+      await pieces.synced();
 
       try {
         const piece = runtime.getCellFromEntityId(
-          manager.getSpace(),
+          pieces.getSpace(),
           entityIdFrom(pieceId(persistedPiece)!),
         );
         b.start();
         try {
-          await manager.add([piece]);
+          await pieces.add([piece]);
         } finally {
           b.end();
         }
       } finally {
         await runtime.idle();
-        await manager.synced();
+        await pieces.synced();
         await runtime.dispose();
       }
     } finally {

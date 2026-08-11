@@ -1,15 +1,18 @@
 /**
  * Hashing Performance Benchmarks
  *
- * Run with: deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check bench/hashing.bench.ts
+ * Run with:
+ *
+ *     deno bench --allow-read --allow-write --allow-net --allow-ffi \
+ *       --allow-env --no-check bench/hashing.bench.ts
  */
 
 import { hashOf } from "../src/value-hash.ts";
 import { deepFreeze } from "../src/deep-freeze.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Pre-generated test data
-// ---------------------------------------------------------------------------
+//
 
 const smallObject = {
   name: "Alice",
@@ -85,9 +88,9 @@ for (let i = 0; i < 20; i++) {
   hashOf(smallObject);
 }
 
-// ==========================================================================
+//
 // Same-object benchmarks (measures cache effectiveness)
-// ==========================================================================
+//
 
 Deno.bench({
   name: "small object (5 keys)",
@@ -169,9 +172,9 @@ Deno.bench({
   },
 });
 
-// ==========================================================================
+//
 // Fresh-object benchmarks (no cache benefit -- measures raw hashing speed)
-// ==========================================================================
+//
 
 function freshSmallObject() {
   return {
@@ -246,9 +249,9 @@ Deno.bench({
   },
 });
 
-// ==========================================================================
+//
 // sparse arrays
-// ==========================================================================
+//
 
 const sparseArray = new Array(100);
 for (let i = 0; i < 100; i += 3) {
@@ -263,9 +266,9 @@ Deno.bench({
   },
 });
 
-// ==========================================================================
-// Deep-frozen same-object benchmarks (WeakMap cache should activate)
-// ==========================================================================
+//
+// Deep-frozen same-object benchmarks (the `WeakMap` cache activates)
+//
 
 const frozenSmallFlat = deepFreeze({
   name: "Alice",
@@ -350,9 +353,9 @@ Deno.bench({
   },
 });
 
-// ==========================================================================
+//
 // Deep-frozen fresh-object benchmarks (freeze + hash each iteration)
-// ==========================================================================
+//
 
 Deno.bench({
   name: "frozen small flat (fresh)",
@@ -397,9 +400,9 @@ Deno.bench({
   },
 });
 
-// ==========================================================================
-// {the, of} unclaimed-fact pattern benchmarks
-// ==========================================================================
+//
+// `{the, of}` unclaimed-fact pattern benchmarks
+//
 
 const frozenTheOf = Object.freeze({
   the: "application/json" as const,

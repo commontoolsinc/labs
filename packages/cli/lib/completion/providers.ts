@@ -81,7 +81,7 @@ export function resolveSpaceContext(
       // Completion reserves stdout for candidates. `jsonOutput` is how the
       // runtime is told stdout is machine-readable: it routes status lines
       // that would otherwise `console.log` (the navigateTo notice in
-      // `loadManager`) to stderr, where the shell function discards them.
+      // `loadPieces`) to stderr, where the shell function discards them.
       // Without it such a line would be offered to the user as a candidate.
       jsonOutput: true,
     };

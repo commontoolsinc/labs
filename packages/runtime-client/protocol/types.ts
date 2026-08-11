@@ -135,6 +135,17 @@ export type IPCRemoteResponse = {
 
 export type IPCRemoteMessage = IPCRemoteNotification | IPCRemoteResponse;
 
+/**
+ * Base of every request a handler receives.
+ *
+ * **Ownership.** Any value reaching a handler implementation is owned outright
+ * by the receiver: it is guaranteed not to be shared elsewhere already, and not
+ * to become shared later, except by the receiver's own action. A handler may
+ * therefore retain, mutate, or cede what it is given without defending itself.
+ *
+ * That is a requirement on whatever delivers a request, not a property of any
+ * particular transport -- see `RuntimeTransport.send()`.
+ */
 export interface BaseRequest {
   type: RequestType;
 }
@@ -245,10 +256,39 @@ export interface CellGetRequest extends BaseRequest {
   includeRef?: boolean;
 }
 
+/**
+ * A cell's value as this connection carries it: the data a cell holds, with a
+ * `CellRef` wherever a cell sits.
+ *
+ * Distinct from `JSONValue` in the two ways the traffic actually differs: a
+ * present `undefined` is a value a cell can hold, and the containers are
+ * readonly.
+ *
+ * TODO(danfuzz): this still cannot carry the whole `FabricValue` domain. A
+ * `FabricSpecialObject` has no representation here, and neither does a
+ * `bigint` or a `symbol`, both of which are `FabricValue` arms. The transport
+ * is `postMessage` rather than JSON, so that is a gap rather than a limit --
+ * though structured clone alone does not close it, a class instance arriving
+ * with its prototype and private fields gone. `JsonCodec`
+ * (`@commonfabric/data-model/codec-json`) is the mechanism, already used for
+ * blob-upload bodies in `backends/runtime-processor.ts`. Until then
+ * `CellHandle.serialize()` refuses all three, so what the gap costs is a throw
+ * rather than silent loss.
+ */
+export type WireCellValue =
+  | null
+  | undefined
+  | boolean
+  | number
+  | string
+  | readonly WireCellValue[]
+  | { readonly [key: string]: WireCellValue }
+  | CellRef;
+
 export interface CellSetRequest extends BaseRequest {
   type: RequestType.CellSet;
   cell: CellRef;
-  value: JSONValue;
+  value: WireCellValue;
 }
 
 // A read-modify-write append (`CellHandle.push`). Same wire shape as CellSet —
@@ -258,13 +298,13 @@ export interface CellSetRequest extends BaseRequest {
 export interface CellPushRequest extends BaseRequest {
   type: RequestType.CellPush;
   cell: CellRef;
-  value: JSONValue;
+  value: WireCellValue;
 }
 
 export interface CellSendRequest extends BaseRequest {
   type: RequestType.CellSend;
   cell: CellRef;
-  event: JSONValue;
+  event: WireCellValue;
 }
 
 export interface CellSubscribeRequest extends BaseRequest {
@@ -499,7 +539,12 @@ export interface UploadBlobRequest extends BaseRequest {
   /** The space the blob belongs to — uploads target ITS host. */
   space: DID;
   contentType: string;
-  body: number[];
+  /**
+   * The blob's bytes. The type has to stay structured-clone-able, this being an
+   * IPC payload: a class does not survive the crossing, where a typed array
+   * does and carries whole rather than element by element.
+   */
+  body: Uint8Array;
   suffix?: string;
 }
 
@@ -994,31 +1039,14 @@ export interface PendingWritesNotification {
 }
 
 /**
- * VDOM operation for IPC.
+ * The vocabulary of DOM mutations carried by a VDOM batch. The worker
+ * reconciler that produces them and the main-thread applicator that consumes
+ * them both live in `@commonfabric/html`, which defines the union; the protocol
+ * re-exports it so a message shape and the ops inside it cannot describe
+ * different things.
  */
-export type VDomOp =
-  | { op: "create-element"; nodeId: number; tagName: string }
-  | { op: "create-text"; nodeId: number; text: string }
-  | { op: "update-text"; nodeId: number; text: string }
-  | { op: "set-prop"; nodeId: number; key: string; value: JSONValue }
-  | { op: "remove-prop"; nodeId: number; key: string }
-  | { op: "set-event"; nodeId: number; eventType: string; handlerId: number }
-  | { op: "remove-event"; nodeId: number; eventType: string }
-  | { op: "set-binding"; nodeId: number; propName: string; cellRef: CellRef }
-  | {
-    op: "insert-child";
-    parentId: number;
-    childId: number;
-    beforeId: number | null;
-  }
-  | {
-    op: "move-child";
-    parentId: number;
-    childId: number;
-    beforeId: number | null;
-  }
-  | { op: "remove-node"; nodeId: number }
-  | { op: "set-attrs"; nodeId: number; attrs: Record<string, JSONValue> };
+import type { VDomOp } from "@commonfabric/html/vdom-ops";
+export type { VDomOp };
 
 /**
  * VDOM batch notification sent from worker to main thread.

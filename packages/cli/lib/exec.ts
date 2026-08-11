@@ -1,4 +1,3 @@
-import type { PieceManager } from "@commonfabric/piece";
 import {
   PieceController,
   type PiecePatternRef,
@@ -27,7 +26,7 @@ import {
   findMountForPath,
   type MountStateEntry,
 } from "./fuse.ts";
-import { loadManager, type SpaceConfig } from "./piece.ts";
+import { loadPieces, type SpaceConfig } from "./piece.ts";
 
 export interface MountedPieceMeta {
   id: string;
@@ -41,7 +40,7 @@ export interface ResolvedMountedCallableFile {
   callablePath: MountedCallablePath;
   callableCell: Cell<any>;
   commandSpec: ExecCommandSpec;
-  manager: PieceManager;
+  pieces: PiecesController;
   mount: { entry: MountStateEntry; path: string };
   piece: PieceController;
   pieceId: string;
@@ -50,9 +49,9 @@ export interface ResolvedMountedCallableFile {
 
 export interface ExecDependencies {
   stateDir?: string;
-  loadManager?: (config: SpaceConfig) => Promise<PieceManager>;
+  loadPieces?: (config: SpaceConfig) => Promise<PiecesController>;
   loadPiece?: (
-    manager: PieceManager,
+    pieces: PiecesController,
     pieceId: string,
   ) => Promise<PieceController>;
   stat?: (path: string) => Promise<Deno.FileInfo>;
@@ -80,10 +79,10 @@ export interface ResolveMountedCallableOptions {
 }
 
 async function defaultLoadPiece(
-  manager: PieceManager,
+  pieces: PiecesController,
   pieceId: string,
 ): Promise<PieceController> {
-  return await new PiecesController(manager).get(pieceId, true);
+  return await pieces.get(pieceId, true);
 }
 
 async function readMountedPieceMeta(
@@ -262,14 +261,14 @@ export async function resolveMountedCallableFile(
 
   await assertMountedCallableFileExists(canonicalAbsPath, deps);
   const pieceMeta = await readMountedPieceMeta(canonicalAbsPath, callablePath);
-  const manager = await (deps.loadManager ?? loadManager)({
+  const pieces = await (deps.loadPieces ?? loadPieces)({
     apiUrl: mount.entry.apiUrl,
     identity: mount.entry.identity,
     space: callablePath.spaceName,
     ...(options.jsonOutput ? { jsonOutput: true } : {}),
   });
   const piece = await (deps.loadPiece ?? defaultLoadPiece)(
-    manager,
+    pieces,
     pieceMeta.id,
   );
   const rootCell: Cell<any> = await piece[callablePath.cellProp].getCell();
@@ -287,7 +286,7 @@ export async function resolveMountedCallableFile(
     callablePath,
     callableCell,
     commandSpec: callableCommandSpec(callableCell, callablePath.callableKind),
-    manager,
+    pieces,
     mount,
     piece,
     pieceId: pieceMeta.id,
@@ -311,8 +310,8 @@ export async function executeMountedCallableFile(
       callableCell: resolved.callableCell,
       callableKind: resolved.callablePath.callableKind,
       cellKey: resolved.callablePath.cellKey,
-      manager: resolved.manager,
-      space: resolved.manager.getSpace(),
+      pieces: resolved.pieces,
+      space: resolved.pieces.getSpace(),
     },
     commandSpec: resolved.commandSpec,
     rawArgs,
@@ -330,7 +329,7 @@ export async function executeMountedCallableFile(
   if (!result.helpText) {
     try {
       await resolved.piece.getCell().pull();
-      await resolved.manager.synced();
+      await resolved.pieces.synced();
     } catch {
       // Auto-step is best-effort; the handler already executed successfully.
     }

@@ -1,73 +1,49 @@
-import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
-import { currentGitCommit, dashboardVersion } from "./version.ts";
+import {
+  assertEquals,
+  assertNotEquals,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
+import { dashboardVersion, processStartVersion } from "./version.ts";
 
-const FIRST_COMMIT = "1".repeat(40);
-const SECOND_COMMIT = "a".repeat(40);
-const encoder = new TextEncoder();
+const DEPLOYED_COMMIT = "1".repeat(40);
+const START = new Date("2026-08-05T07:15:34.820Z");
+const LATER_START = new Date("2026-08-05T07:15:34.821Z");
 
 Deno.test("dashboard version uses the deployed image commit", () => {
   assertEquals(
     dashboardVersion(
-      (name) => name === "DASHBOARD_GIT_COMMIT" ? FIRST_COMMIT : undefined,
+      (name) => name === "DASHBOARD_GIT_COMMIT" ? DEPLOYED_COMMIT : undefined,
       () => {
-        throw new Error("Git must not run for a deployed image");
+        throw new Error("A deployed image must not read the clock");
       },
     ),
-    FIRST_COMMIT,
+    DEPLOYED_COMMIT,
   );
 });
 
-Deno.test("dashboard version reads the current commit for local development", () => {
+Deno.test("dashboard version reports the start time when no commit is deployed", () => {
   assertEquals(
-    dashboardVersion(() => undefined, () => SECOND_COMMIT),
-    SECOND_COMMIT,
+    dashboardVersion(() => undefined, () => START),
+    "local-2026-08-05T07:15:34.820Z",
   );
 });
 
-Deno.test("dashboard version rejects missing or abbreviated commits", () => {
-  for (const version of ["", "abc123", "g".repeat(40)]) {
+Deno.test("dashboard version rejects a missing or abbreviated commit", () => {
+  for (const commit of ["", "abc123", "g".repeat(40)]) {
     assertThrows(
-      () => dashboardVersion(() => version, () => FIRST_COMMIT),
+      () => dashboardVersion(() => commit, () => START),
       Error,
-      "Dashboard Git commit must be a full 40-character lowercase hash.",
+      "Dashboard deployment commit must be a full 40-character lowercase hash.",
     );
   }
 });
 
-Deno.test("local dashboard version matches the checked-out commit", () => {
-  const result = new Deno.Command("git", {
-    args: ["rev-parse", "--verify", "HEAD^{commit}"],
-    cwd: new URL("../../", import.meta.url),
-    stdout: "piped",
-  }).outputSync();
-  assertEquals(result.success, true);
-  assertEquals(
-    dashboardVersion(() => undefined),
-    new TextDecoder().decode(result.stdout).trim(),
+Deno.test("a start a millisecond later is a different version", () => {
+  assertNotEquals(
+    processStartVersion(START),
+    processStartVersion(LATER_START),
   );
-});
-
-Deno.test("dashboard version reports Git command failures", () => {
-  for (
-    const [stderr, message] of [
-      [
-        "fatal: not a git repository",
-        "Could not read the dashboard Git commit: fatal: not a git repository",
-      ],
-      ["", "Could not read the dashboard Git commit."],
-    ]
-  ) {
-    assertThrows(
-      () =>
-        currentGitCommit(() => ({
-          success: false,
-          stdout: new Uint8Array(),
-          stderr: encoder.encode(stderr),
-        })),
-      Error,
-      message,
-    );
-  }
 });
 
 Deno.test("dashboard image requires the publishing workflow commit", async () => {

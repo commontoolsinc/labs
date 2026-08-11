@@ -119,8 +119,6 @@ export * from "./components/cf-keybind/index.ts";
 export * from "./components/cf-tools-chip/index.ts";
 export * from "./components/keyboard-context.ts";
 export * from "./components/keyboard-router.ts";
-export * from "./components/modal-context.ts";
-export * from "./components/cf-modal-provider/index.ts";
 export * from "./components/cf-modal/index.ts";
 export * from "./components/cf-attachments-bar/index.ts";
 export * from "./components/cf-chip/index.ts";

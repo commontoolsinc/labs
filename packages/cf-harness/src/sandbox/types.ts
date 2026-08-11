@@ -1,8 +1,6 @@
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import type { HarnessCfcInvocationContext } from "../contracts/cfc-invocation-context.ts";
 
-export type HarnessSandboxKind = "docker-runsc-cfc";
-
 export type DockerNetworkMode = "none" | "bridge" | "host";
 
 export type SandboxRuntimeMountKind =
@@ -59,16 +57,7 @@ export type DockerRunscAdditionalMount =
   | DockerRunscFabricAdditionalMount
   | DockerRunscHostBindAdditionalMount;
 
-export interface DockerRunscCfcInvocationContextSidecarTransport {
-  kind: "sidecar";
-  dir: string;
-}
-
-export type DockerRunscCfcInvocationContextTransport =
-  DockerRunscCfcInvocationContextSidecarTransport;
-
 export interface DockerRunscSandboxConfig {
-  kind: "docker-runsc-cfc";
   dockerBinary: string;
   runtimeName: string;
   image: string;
@@ -80,10 +69,8 @@ export interface DockerRunscSandboxConfig {
   additionalMounts: readonly DockerRunscAdditionalMount[];
   extraDockerArgs: readonly string[];
   cfcResultDir?: string;
-  cfcInvocationContextTransport?: DockerRunscCfcInvocationContextTransport;
+  cfcInvocationContextDir?: string;
 }
-
-export type HarnessSandboxConfig = DockerRunscSandboxConfig;
 
 export interface ResolveDockerRunscSandboxConfigOptions {
   dockerBinary?: string;
@@ -98,7 +85,6 @@ export interface ResolveDockerRunscSandboxConfigOptions {
   extraDockerArgs?: readonly string[];
   cfcResultDir?: string;
   cfcInvocationContextDir?: string;
-  cfcInvocationContextTransport?: DockerRunscCfcInvocationContextTransport;
 }
 
 export interface SandboxCommandRequest {
@@ -128,7 +114,7 @@ export interface SandboxCommandResult {
 }
 
 export interface SandboxRuntimeDescription {
-  kind: HarnessSandboxKind;
+  kind: "docker-runsc-cfc";
   defaultWorkingDirectory: string;
   cfc?: {
     runtimeRequested: boolean;
@@ -143,11 +129,10 @@ export interface SandboxRuntimeDescription {
 }
 
 export interface SandboxRuntime {
-  readonly kind: HarnessSandboxKind;
-  describe?(): SandboxRuntimeDescription;
+  describe(): SandboxRuntimeDescription;
   resolvePath(path: string, cwd?: string): string;
   isPathWithinWorkspace(path: string): boolean;
-  isPathWithinAllowedRoots?(path: string): boolean;
+  isPathWithinAllowedRoots(path: string): boolean;
   defaultWorkingDirectory(): string;
   run(request: SandboxCommandRequest): Promise<SandboxCommandResult>;
   runShell(request: SandboxShellRequest): Promise<SandboxCommandResult>;

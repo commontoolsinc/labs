@@ -158,7 +158,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   // TODO(unused)
-  // Currently unused in shell, but a PieceManager-like layer
+  // Currently unused in shell, but a PiecesController-like layer
   // could be built using this
   async getCell<T>(
     space: DID,
@@ -373,7 +373,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   /**
-   * Wait for the PieceManager to be synced with storage.
+   * Wait for the space's pieces controller to be synced with storage.
    *
    * Note: storage sync is connection-wide, so this awaits all open
    * spaces; `space` only selects which space's piece context (and its
@@ -661,6 +661,10 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  /**
+   * Uploads a blob to the given space. `body` is not consumed -- it crosses to
+   * the runtime as a clone -- so the caller may keep using its array.
+   */
   async uploadBlob(options: {
     space: DID;
     contentType: string;
@@ -671,7 +675,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.UploadBlob,
       space: options.space,
       contentType: options.contentType,
-      body: Array.from(options.body),
+      body: options.body,
       suffix: options.suffix,
     });
   }

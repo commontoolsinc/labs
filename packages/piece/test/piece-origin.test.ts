@@ -12,7 +12,6 @@ import {
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
-import { PieceManager } from "../src/manager.ts";
 import {
   DEFAULT_APP_PATTERN_SOURCE,
   PiecesController,
@@ -228,15 +227,15 @@ describe("resolvePieceOriginSource", () => {
       storageManager,
     });
     try {
-      const manager = new PieceManager(
+      const controller = new PiecesController(
         await createSession({
           identity: signer,
           spaceName: `same-host-origin-${crypto.randomUUID()}`,
         }),
         runtime,
       );
-      await manager.synced();
-      const piece = await new PiecesController(manager).create({
+      await controller.synced();
+      const piece = await controller.create({
         main: "/main.tsx",
         files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
       }, { input: { label: "same host" } });
@@ -245,8 +244,8 @@ describe("resolvePieceOriginSource", () => {
       for (const host of ["toolshed.test", "TOOLSHED.TEST:80"]) {
         const resolved = await resolvePieceOriginSource(
           runtime,
-          manager.getSpace(),
-          `cf://${host}/${manager.getSpace()}/pattern:${
+          controller.getSpace(),
+          `cf://${host}/${controller.getSpace()}/pattern:${
             state.pattern!.identity
           }`,
           state.pattern!.symbol,
@@ -490,7 +489,6 @@ describe("readPieceSourceState collects every recorded fact", () => {
 describe("reading a piece's source state", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
   let controller: PiecesController;
   let restoreFetch: () => void;
 
@@ -503,15 +501,14 @@ describe("reading a piece's source state", () => {
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
     });
-    manager = new PieceManager(
+    controller = new PiecesController(
       await createSession({
         identity: signer,
         spaceName: `source-state-${crypto.randomUUID()}`,
       }),
       runtime,
     );
-    await manager.synced();
-    controller = new PiecesController(manager);
+    await controller.synced();
   });
 
   afterEach(async () => {
@@ -534,7 +531,7 @@ describe("reading a piece's source state", () => {
     expect(state.pattern?.symbol).toBe("default");
     expect(state.entry).toBe("/main.tsx");
     expect(state.files.map((file) => file.name)).toEqual(["/main.tsx"]);
-    expect(state.space).toBe(manager.getSpace());
+    expect(state.space).toBe(controller.getSpace());
     expect(state.history).toHaveLength(1);
     expect(state.history[0]).toMatchObject({
       operation: "create",

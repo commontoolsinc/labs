@@ -47,10 +47,11 @@ class TestStorageManager extends StorageManager {
   static create(
     signer: Signer,
     sessionFactory: SessionFactory,
+    memoryHost = new URL("https://default-toolshed.test"),
   ): TestStorageManager {
     return new TestStorageManager({
       as: signer,
-      memoryHost: new URL("https://default-toolshed.test"),
+      memoryHost,
     }, sessionFactory);
   }
 
@@ -112,6 +113,53 @@ describe("late space host hints", () => {
           "https://different-toolshed.test",
         ),
       ).toBe(false);
+    } finally {
+      await manager.close();
+      await defaultServer.close();
+    }
+  });
+
+  it("confirms the default host after the caller mutates the host URL", async () => {
+    const signer = await Identity.fromPassphrase("mutated-default-host-hint");
+    const targetSpace = (await Identity.fromPassphrase(
+      "mutated-default-host-target",
+    )).did();
+    const targetId = "of:mutated-default-host-target" as URI;
+    const defaultServer = makeServer("mutated-default-host");
+    const memoryHost = new URL("https://default-toolshed.test");
+    let targetSessions = 0;
+    const manager = TestStorageManager.create(
+      signer,
+      new LoopbackSessionFactory(() => {
+        targetSessions++;
+        return defaultServer;
+      }),
+      memoryHost,
+    );
+
+    try {
+      const provider = manager.open(targetSpace);
+      const provisionalReplica = provider.replica;
+      const firstRead = await provider.sync(targetId, {
+        path: [],
+        schema: true,
+      });
+      expect(firstRead.error).toBeUndefined();
+      expect(targetSessions).toBe(1);
+
+      memoryHost.href = "https://moved-toolshed.test/";
+
+      expect(
+        manager.registerSpaceHost(
+          targetSpace,
+          "https://default-toolshed.test",
+        ),
+      ).toBe(true);
+      await manager.crossSpaceSettled();
+
+      expect(manager.open(targetSpace)).toBe(provider);
+      expect(provider.replica).toBe(provisionalReplica);
+      expect(targetSessions).toBe(1);
     } finally {
       await manager.close();
       await defaultServer.close();

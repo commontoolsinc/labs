@@ -76,7 +76,9 @@ describe("cli id", () => {
   it("Derives a passphrase key from stdin via '-'", async () => {
     // Trailing newline (as `echo`/files produce) must be stripped so the
     // result matches the equivalent argv invocation.
-    const { code, stdout, stderr } = await cf("id derive -", "common user\n");
+    const { code, stdout, stderr } = await cf("id derive -", {
+      stdin: "common user\n",
+    });
     const keyBuffer = encode(stdout.join("\n"));
     const identity = await Identity.fromPkcs8(keyBuffer);
     expect(identity.did()).toBe(COMMON_USER_DID);
@@ -85,7 +87,9 @@ describe("cli id", () => {
   });
 
   it("Derives a passphrase key from stdin when the argument is omitted", async () => {
-    const { code, stdout, stderr } = await cf("id derive", "common user");
+    const { code, stdout, stderr } = await cf("id derive", {
+      stdin: "common user",
+    });
     const keyBuffer = encode(stdout.join("\n"));
     const identity = await Identity.fromPkcs8(keyBuffer);
     expect(identity.did()).toBe(COMMON_USER_DID);
@@ -96,7 +100,7 @@ describe("cli id", () => {
   it("Derives a mnemonic key from stdin via '-'", async () => {
     const { code, stdout, stderr } = await cf(
       "id from-mnemonic -",
-      `${TEST_MNEMONIC}\n`,
+      { stdin: `${TEST_MNEMONIC}\n` },
     );
     const keyBuffer = encode(stdout.join("\n"));
     const identity = await Identity.fromPkcs8(keyBuffer);
@@ -106,7 +110,7 @@ describe("cli id", () => {
   });
 
   it("Errors when no secret is provided on stdin", async () => {
-    const { code, stdout } = await cf("id from-mnemonic -", "");
+    const { code, stdout } = await cf("id from-mnemonic -", { stdin: "" });
     expect(code).not.toBe(0);
     expect(stdout.length).toBe(0);
   });

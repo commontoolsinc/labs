@@ -4,18 +4,24 @@ import ts from "typescript";
 import { createDataFlowAnalyzer } from "../src/ast/mod.ts";
 import { CrossStageState, TransformationContext } from "../src/core/mod.ts";
 import {
-  assertValidComputeWrapCandidate,
   findPendingComputeWrapCandidate,
+  resolveComputeWrapCandidate,
 } from "../src/transformers/expression-rewrite/emitters/compute-wrap-invariants.ts";
+import { rewriteHelperOwnedExpression } from "../src/transformers/expression-rewrite/emitters/helper-owned-expression.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
 // These tests exercise the compute-wrap invariant guard that emitters call
-// before adding a compute wrapper. The guard turns a disagreement between the
-// emitter's wrap decision and the shared reactive-context classifier into a
-// loud "compiler bug" error, and it also drives the pending-candidate search
-// that emitters use to find the reactive node to wrap. Each test pins one of
-// those behaviors: which node the search selects, when it yields nothing, and
-// what the compiler-bug message contains.
+// before adding a compute wrapper, and the pending-candidate search that
+// emitters use to find the reactive node to wrap. A disagreement between the
+// emitter's wrap decision and the shared reactive-context classifier is
+// handled two ways: an AUTHORED culprit inside an owned pattern boundary is
+// reported as the author-facing `reactive:call-argument-computation`
+// diagnostic (the guard returns a `{ kind: "skip-reported" }` verdict and the
+// caller skips the wrap), while every synthetic-culprit disagreement stays a
+// loud "compiler bug" error (thrown, never returned).
+// Each test pins one of those behaviors: which node the search selects, when
+// it yields nothing, which path reports vs throws, and what the messages
+// contain.
 
 const HEADER =
   `import { __cfHelpers, pattern, cell, lift, UI } from "commonfabric";\n`;
@@ -208,7 +214,32 @@ Deno.test(
 );
 
 Deno.test(
-  "assertValidComputeWrapCandidate throws when the culprit is already classified as compute",
+  "resolveComputeWrapCandidate returns a wrap verdict when the wrap agrees with the classification",
+  () => {
+    const { sourceFile, checker: _checker, context } = createContext(
+      HEADER +
+        `export default pattern((_s) => {
+          const count = cell(0);
+          const branch = count.get() + 1;
+          return { [UI]: <div>{branch}</div> };
+        });`,
+    );
+    const branch = findInitializer(sourceFile, "branch");
+    assertStrictEquals(
+      resolveComputeWrapCandidate(
+        branch,
+        branch,
+        "binary expression",
+        context,
+      ).kind,
+      "wrap",
+    );
+    assertStrictEquals(context.diagnostics.length, 0);
+  },
+);
+
+Deno.test(
+  "resolveComputeWrapCandidate throws when the culprit is already classified as compute",
   () => {
     const { sourceFile, checker: _checker, context } = createContext(
       HEADER +
@@ -224,7 +255,7 @@ Deno.test(
     // emitter that still tried to wrap it, so the guard reports the bug.
     let message = "";
     try {
-      assertValidComputeWrapCandidate(
+      resolveComputeWrapCandidate(
         branch,
         branch,
         "binary expression",
@@ -242,7 +273,7 @@ Deno.test(
 );
 
 Deno.test(
-  "assertValidComputeWrapCandidate throws when the culprit sits inside an already-supported pattern boundary",
+  "resolveComputeWrapCandidate reports the call-argument diagnostic for an authored culprit inside an owned pattern boundary",
   () => {
     const { sourceFile, checker: _checker, context } = createContext(
       HEADER +
@@ -256,16 +287,70 @@ Deno.test(
     const branch = findInitializer(sourceFile, "branch");
     // Container is `lifted({ v: count }) + 1`; the culprit is the reactive
     // object argument of the lift-applied call, which lives inside a supported
-    // pattern boundary between it and the container.
+    // pattern boundary between it and the container. The culprit is authored
+    // pattern code, so instead of the internal compiler-bug throw the guard
+    // reports the author-facing hoist diagnostic and tells the caller to skip
+    // the wrap.
     const culprit = findFirst(
       sourceFile,
       (node): node is ts.ObjectLiteralExpression =>
         ts.isObjectLiteralExpression(node),
     );
+    assertStrictEquals(
+      resolveComputeWrapCandidate(
+        culprit,
+        branch,
+        "binary expression",
+        context,
+      ).kind,
+      "skip-reported",
+    );
+    assertStrictEquals(context.diagnostics.length, 1);
+    const diagnostic = context.diagnostics[0]!;
+    assertStrictEquals(diagnostic.severity, "error");
+    assertStrictEquals(diagnostic.type, "reactive:call-argument-computation");
+    assertStringIncludes(
+      diagnostic.message,
+      "cannot be compiled inline in the arguments of `lifted(...)`",
+    );
+    assertStringIncludes(
+      diagnostic.message,
+      "Hoist it to a body-level const or computed(...)",
+    );
+  },
+);
+
+Deno.test(
+  "resolveComputeWrapCandidate still throws for a synthetic culprit inside an owned pattern boundary",
+  () => {
+    const { sourceFile, checker: _checker, context } = createContext(
+      HEADER +
+        `export default pattern((_s) => {
+          const count = cell(0);
+          const lifted = lift((x: { v: number }) => x.v);
+          const branch = lifted({ v: count }) + 1;
+          return { [UI]: <div>{branch}</div> };
+        });`,
+    );
+    const branch = findInitializer(sourceFile, "branch");
+    const authored = findFirst(
+      sourceFile,
+      (node): node is ts.ObjectLiteralExpression =>
+        ts.isObjectLiteralExpression(node),
+    );
+    // A synthesized culprit in the same boundary position has no authored
+    // source range to hang a diagnostic on, so the internal invariant stays a
+    // loud compiler-bug error.
+    const synthesized = ts.factory.createBinaryExpression(
+      ts.factory.createNumericLiteral(1),
+      ts.SyntaxKind.PlusToken,
+      ts.factory.createNumericLiteral(2),
+    );
+    (synthesized as { parent: ts.Node }).parent = authored.parent;
     let message = "";
     try {
-      assertValidComputeWrapCandidate(
-        culprit,
+      resolveComputeWrapCandidate(
+        synthesized,
         branch,
         "binary expression",
         context,
@@ -275,6 +360,50 @@ Deno.test(
     }
     assertStringIncludes(message, "Internal Common Fabric compiler error");
     assertStringIncludes(message, "already-supported pattern boundary");
+    assertStrictEquals(context.diagnostics.length, 0);
+  },
+);
+
+Deno.test(
+  "rewriteHelperOwnedExpression skips the wrap and reports when its assert container spans an owned boundary",
+  () => {
+    const { sourceFile, checker, context } = createContext(
+      HEADER +
+        `export default pattern((_s) => {
+          const count = cell(0);
+          const lifted = lift((x: { v: number }) => x.v);
+          const outer = lifted({ v: count.get() + 1 }) ? "a" : "b";
+          return { [UI]: <div>{outer}</div> };
+        });`,
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+    const outer = findInitializer(sourceFile, "outer");
+    const objectArg = findFirst(
+      sourceFile,
+      (node): node is ts.ObjectLiteralExpression =>
+        ts.isObjectLiteralExpression(node),
+    );
+    const computation = findObjectPropertyInitializer(objectArg, "v");
+    // The helper-arg rewriter is handed the computation with an assert
+    // container above the lift-applied call (mirroring the conditional-helper
+    // arg path, which passes the whole helper call as assertContainer). The
+    // walk from the culprit to that container crosses the owned lift-applied
+    // boundary, so the guard reports the hoist diagnostic and the rewriter
+    // returns the expression unwrapped instead of value-lifting it.
+    const result = rewriteHelperOwnedExpression({
+      expression: computation,
+      containerLabel: "ifElse branch",
+      assertContainer: outer,
+      context,
+      analyze,
+      rewriteChildren: (node) => node,
+    });
+    assertStrictEquals(result, computation);
+    assertStrictEquals(context.diagnostics.length, 1);
+    assertStrictEquals(
+      context.diagnostics[0]!.type,
+      "reactive:call-argument-computation",
+    );
   },
 );
 
@@ -294,7 +423,7 @@ Deno.test(
     context.markSyntheticComputeOwnedSubtree(branch);
     let message = "";
     try {
-      assertValidComputeWrapCandidate(
+      resolveComputeWrapCandidate(
         branch,
         branch,
         "binary expression",
@@ -332,7 +461,7 @@ Deno.test(
     context.markSyntheticComputeOwnedSubtree(synthesized);
     let message = "";
     try {
-      assertValidComputeWrapCandidate(
+      resolveComputeWrapCandidate(
         synthesized,
         branch,
         "binary expression",

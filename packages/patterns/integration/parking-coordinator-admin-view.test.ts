@@ -43,7 +43,7 @@ describe("parking coordinator admin view integration test", () => {
       "main.tsx",
     );
     const rootPath = join(import.meta.dirname!, "..");
-    const program = await cc.manager().runtime.harness.resolve(
+    const program = await cc.runtime.harness.resolve(
       new FileSystemProgramResolver(sourcePath, rootPath),
     );
     const piece = await cc.create(program, {
@@ -78,7 +78,7 @@ describe("parking coordinator admin view integration test", () => {
       },
     });
     pieceId = piece.id;
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink(() => {});
   });
 

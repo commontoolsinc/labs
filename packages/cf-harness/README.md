@@ -73,8 +73,8 @@ What works today:
 - persisted run state, transcript, run reports, Loom run manifests, capability
   snapshots, and tool outputs, plus explicit skill registry and activation
   artifacts
-- provider-neutral run-report model-attempt diagnostics; the compatibility
-  gateway retains its existing gateway-attempt records
+- provider-neutral run-report model-attempt diagnostics, one record per attempt,
+  naming the provider and the API operation that served it
 - provider-reported per-turn token usage in run reports, with aggregate input,
   cached-input, cache-write, output, reasoning, and total tokens surfaced in
   operator and batch results
@@ -143,6 +143,8 @@ What is not done yet:
   - owner-keyed credential store and OpenAI Codex OAuth flows
 - [src/cli.ts](src/cli.ts)
   - package-local operator CLI
+- [src/provenance.ts](src/provenance.ts)
+  - what caused a gateway request, reported on the request
 - [src/interactive-chat-stdio.ts](src/interactive-chat-stdio.ts)
   - NDJSON stdio transport for the interactive chat protocol
 - [src/sqlite-session-store.ts](src/sqlite-session-store.ts)
@@ -343,6 +345,105 @@ export CF_HARNESS_MODEL=gpt-oss-120b
 CLI flags take precedence over these variables. `CF_HARNESS_MODEL` is ignored on
 `--resume-run`; an explicitly different `--model` is also rejected for Codex
 runs because its encrypted continuation is model-bound.
+
+### Request provenance
+
+Every request the harness sends to the gateway says what caused it, so gateway
+traffic can be read by the workload behind it rather than as one undivided
+stream. The values travel as `x-cf-harness-*` headers and, condensed, inside the
+`User-Agent`:
+
+| Field       | Meaning                                                              |
+| ----------- | -------------------------------------------------------------------- |
+| `invoker`   | `cli`, `test`, `integration-test`, `ci`, `loom`, or `service`        |
+| `command`   | the subcommand: `auth`, `models`, `whoami`, or `prompt`              |
+| `principal` | a random label for this machine, drawn once and kept                 |
+| `session`   | a fresh identifier per process, so one run's requests group together |
+| `ci`        | `github:<workflow>:<run id>`, naming one continuous-integration run  |
+| `dispatch`  | the dispatch class, when a Loom run manifest asked for one           |
+| `agent`     | `claude-code` or `codex`, when running inside one of their sessions  |
+| `service`   | the service that launched the harness, when one did                  |
+
+`invoker` is worked out from the environment: `CF_HARNESS_INTEGRATION=1` means
+the integration suite, `ENV=test` the unit suite, `GITHUB_ACTIONS` or `CI` a
+continuous-integration run, `OTEL_SERVICE_NAME` a service, and anything else a
+person at a terminal. A Loom run manifest sets it to `loom`, along with the
+dispatch class. `CF_HARNESS_PRINCIPAL` supplies a principal.
+
+`agent` says which coding agent's session the harness is running inside, from
+`CLAUDECODE` for Claude Code and `CODEX_SANDBOX` for the Codex CLI, both of
+which those tools export to every process they spawn. Only which variable was
+found is reported, never its value. An absent `agent` says no coding agent is in
+the picture, which is what a person at a shell or a locally launched service
+reports. The field is orthogonal to `invoker`, so a Loom dispatch started from
+inside a Claude Code session reports both.
+
+A service reaches this through `OTEL_SERVICE_NAME`, which it already sets to
+name itself for tracing. Every process it spawns inherits the variable, so a
+harness a service launches reports `invoker=service` and carries the service's
+own name in `service`. The local dev launcher sets the name for both toolshed
+and the background piece service.
+
+No filesystem path and no git metadata contributes to any field. An absent field
+means the value was not there to read.
+
+The principal is generated on first use and kept in
+`$CF_HARNESS_HOME/principal`, so nothing about the machine determines it. A
+principal that could not be stored is reported as `unstable-<label>`; it lasts
+for that process alone, so grouping by it undercounts.
+
+Nothing derived from a prompt, a message, a tool argument, or a command line is
+included. The subcommand comes from a closed set, so an unrecognized argument
+reports `prompt`, and every value is bounded to a short run of characters that
+cannot break a header or carry structure into one. A Loom manifest contributes
+only its dispatch class.
+[`docs/features/gateway-request-provenance.md`](../../docs/features/gateway-request-provenance.md)
+holds the invariants these follow from.
+
+The gateway's access log records the user agent of every request, so the
+`User-Agent` copy is readable against the gateway as deployed. In Cloud Logging:
+
+```text
+resource.type="k8s_container"
+resource.labels.namespace_name="envoy-gateway-system"
+jsonPayload.method="POST"
+jsonPayload."user-agent"=~"^cf-harness "
+```
+
+Requests through the Codex path (`--model-provider openai-codex`) address a
+different endpoint and carry no provenance. Subagents share their parent's
+client, so their requests carry the parent's session.
+
+A principal names a machine and nothing else, so putting a name to one means
+asking. Each person can read their own:
+
+```bash
+deno task run -- whoami
+```
+
+Each machine prints its own principal, and the command addresses whoever ran it.
+The values below stand in for that; no two machines report the same ones:
+
+```text
+principal  <this machine's principal>
+invoker    cli
+session    <a fresh identifier for this process>
+agent      claude-code
+command    whoami
+
+The principal is a random label drawn once for this machine and kept in
+the harness home. It is what the LLM gateway records for requests from
+here, so when a run is traced to a principal, <that principal> is yours.
+
+user agent  cf-harness (principal=<principal>; invoker=cli; session=<first 8 characters>; agent=claude-code; command=whoami)
+```
+
+`whoami --json` prints the same fields for a script to read. A principal covers
+one harness home, so someone who runs the harness from a laptop and a dev box
+has one for each, and a home that is wiped starts a new one.
+
+No real principal appears in this document. A principal published next to the
+name of whoever committed it is tied to a person for good.
 
 On hosts without the `runsc-cfc` Docker runtime (or where the installed CFC
 policy does not label the workspace mount, which makes in-sandbox file reads

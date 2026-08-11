@@ -2,9 +2,7 @@ import type { Constructor } from "@commonfabric/utils/types";
 
 import type { FabricInstance, FabricValue } from "@/interface.ts";
 
-/**
- * Well-known symbol for binding the getter `FabricClassWithCodec[CODEC]`.
- */
+/** Well-known symbol for binding the getter `FabricClassWithCodec[CODEC]`. */
 export const CODEC: unique symbol = Symbol.for("data-model.codec");
 
 /**
@@ -32,9 +30,7 @@ export interface FabricCodec {
    */
   get recognizedTypeTag(): string | undefined;
 
-  /**
-   * Returns `true` if this handler can encode the state of the given value.
-   */
+  /** Returns `true` if this handler can encode the state of the given value. */
   canEncode(value: FabricValue): boolean;
 
   /**
@@ -47,15 +43,15 @@ export interface FabricCodec {
   tagForValue(value: FabricValue): string;
 
   /**
-   * Decodes a value from the given essential state, which is (alleged / supposed)
-   * to be a value that was produced by an earlier call to {@link #encode} on
-   * a compatible class to this one. The result is expected to be a _shallow_
-   * decoding. The codec system handles recursively converting `state` contents
-   * as necessary.
+   * Decodes a value from the given essential state, which is (alleged /
+   * supposed) to be a value that was produced by an earlier call to
+   * {@link #encode} on a compatible class to this one. The result is expected
+   * to be a _shallow_ decoding. The codec system handles recursively
+   * converting `state` contents as necessary.
    *
-   * The given `typeTag` is what was associated with the given `state` and
-   * does not necessarily correspond to {@link #recognizedTypeTag} (depending on
-   * how an instance of this class got hooked up).
+   * The given `typeTag` is what was associated with the given `state` and does
+   * not necessarily correspond to {@link #recognizedTypeTag} (depending on how
+   * an instance of this class got hooked up).
    */
   decode(
     typeTag: string,
@@ -88,8 +84,10 @@ export interface FabricClassWithCodec {
  * See Section 2.5 of the formal spec.
  */
 export interface ReconstructionContext {
-  /** Resolves a cell reference. Used by types that need to intern or look up
-   *  existing instances during reconstruction. */
+  /**
+   * Resolves a cell reference, for a type that needs to intern or look up an
+   * existing instance during reconstruction.
+   */
   getCell(
     ref: { id: string; path: string[]; space: string },
   ): FabricInstance;
@@ -122,8 +120,12 @@ export interface ReconstructionContext {
  * machinery is private to the context implementation.
  */
 export interface SerializationContext<SerializedForm = unknown> {
-  /** Whether failed reconstructions produce `ProblematicValue` instead of
-   *  throwing. @default false */
+  /**
+   * Whether a failed reconstruction produces a `ProblematicValue` instead of
+   * throwing.
+   *
+   * @default false
+   */
   readonly lenient: boolean;
 
   /** Encodes a fabric value into serialized form for boundary crossing. */

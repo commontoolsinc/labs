@@ -2,6 +2,8 @@ import { isRecord } from "@commonfabric/utils/types";
 import type { CfcConfClause } from "../cfc/clause.ts";
 import { type FactoryInput, type JSONSchema, type NodeRef } from "./types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { FabricInstance } from "@commonfabric/data-model/fabric-value";
+import { refuseFabricInstance } from "../fabric-special-object.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import {
   getCellOrThrow,
@@ -125,12 +127,29 @@ function attachCfcToOutputs(
     }
     return;
   } else if (isRecord(outputs)) {
-    // Descend into objects and arrays
-    // TODO(danfuzz): This `isRecord`-gated `Object.entries` descent has no
-    // `FabricSpecialObject` guard; a `FabricPrimitive` output is decomposed
-    // (its state is private) and a `FabricInstance` is walked by internal
-    // slots, so CFC labels are not attached to the special object's actual
-    // contents.
+    // Descend into objects and arrays.
+    //
+    // A `FabricPrimitive` among them is inert here and correctly so: it has
+    // zero enumerable own properties, so the descent ends at it, and a leaf
+    // holds no cell to label.
+    //
+    // A `FabricInstance` is refused. Its codec contents can hold a `Cell`,
+    // unreachable by property name, so passing one through leaves that cell
+    // _unlabelled_ while its plain siblings are labelled -- confidentiality
+    // silently not applied, which is the unsafe direction, unlike the
+    // policy-input walks in `runner.ts` whose equivalent gap fails closed.
+    //
+    // Nothing reaches this in production today, de facto rather than by
+    // construction: a `FabricError` is ungated and exposed to pattern authors,
+    // so what keeps this safe is that no pattern yet returns one holding a
+    // cell.
+    //
+    // TODO(danfuzz): descend by codec-mediated traversal into instance state,
+    // at which point this becomes a walk rather than a refusal.
+    if (outputs instanceof FabricInstance) {
+      refuseFabricInstance(outputs, "when attaching CFC labels to outputs");
+    }
+
     for (const [_, value] of Object.entries(outputs)) {
       attachCfcToOutputs(value, lubConfidentiality);
     }

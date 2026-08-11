@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { utf8Compare, utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
-describe("utf8Compare", () => {
+describe("utf8Compare()", () => {
   it("returns `0` for two equal UTF-8 strings", () => {
     expect(utf8Compare("abc", "abc")).toBe(0);
   });
@@ -67,7 +67,7 @@ describe("utf8Compare", () => {
   });
 });
 
-describe("utf8SortedKeysOf", () => {
+describe("utf8SortedKeysOf()", () => {
   it("returns a sorted array of keys for an object", () => {
     const obj = { b: 2, a: 1, c: 3 };
     const sorted = utf8SortedKeysOf(obj);

@@ -7,6 +7,7 @@ import {
   entityKindOfIdString,
   entityUriSchemePrefix,
   hasEntityUriScheme,
+  hashStringForEntityAddress,
   isEntityKind,
   stripEntityUriScheme,
   uriSchemeForEntityKind,
@@ -89,5 +90,40 @@ describe("entity-kind", () => {
     expect(stripEntityUriScheme("future:fid1:abc")).toBe(
       "future:fid1:abc",
     );
+  });
+
+  describe("hashStringForEntityAddress()", () => {
+    it("returns the same hash string for a bare hash and its `of:` URI", () => {
+      expect(hashStringForEntityAddress("fid1:abc")).toBe("fid1:abc");
+      expect(hashStringForEntityAddress("of:fid1:abc")).toBe("fid1:abc");
+    });
+
+    it("throws for a `computed:` id, naming the address", () => {
+      expect(() => hashStringForEntityAddress("computed:fid1:abc")).toThrow(
+        "Kinded entity id `computed:fid1:abc`",
+      );
+    });
+
+    it("throws for every kinded entity URI scheme", () => {
+      // Driven by the scheme list so a kind added there is refused without a
+      // further edit here.
+      for (const scheme of ENTITY_URI_SCHEMES) {
+        if (scheme === "of") continue;
+        expect(() => hashStringForEntityAddress(`${scheme}:fid1:abc`)).toThrow(
+          `\`${scheme}:fid1:abc\``,
+        );
+      }
+    });
+
+    it("returns a string carrying no entity scheme unchanged", () => {
+      expect(hashStringForEntityAddress("my-board")).toBe("my-board");
+      expect(hashStringForEntityAddress("data:application/json,{}")).toBe(
+        "data:application/json,{}",
+      );
+      expect(hashStringForEntityAddress("future:fid1:abc")).toBe(
+        "future:fid1:abc",
+      );
+      expect(hashStringForEntityAddress("")).toBe("");
+    });
   });
 });

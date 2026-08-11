@@ -37,6 +37,21 @@ describe("combineSchema type handling", () => {
       a: { type: "integer" },
       b: { type: "string" },
     },
+    {
+      name: "a fabric-primitive type and string are disjoint",
+      a: { type: "FabricBytes" },
+      b: { type: "string" },
+    },
+    {
+      name: "two different fabric-primitive types are disjoint",
+      a: { type: "FabricBytes" },
+      b: { type: "FabricHash" },
+    },
+    {
+      name: "a fabric-primitive type and array are disjoint",
+      a: { type: "FabricRegExp" },
+      b: { type: "array" },
+    },
   ];
   const directions = [
     { name: "a is the parent", combine: combineSchema },
@@ -106,6 +121,34 @@ describe("combineSchema type handling", () => {
 
   for (const testCase of numberIntegerCases) {
     it(`${testCase.name} narrows number to integer in either direction`, () => {
+      expect(combineSchema(testCase.a, testCase.b)).toEqual({
+        type: testCase.expectedType,
+      });
+      expect(combineSchema(testCase.b, testCase.a)).toEqual({
+        type: testCase.expectedType,
+      });
+    });
+  }
+
+  // Each fabric-primitive type is a subtype of "object" (mirroring
+  // integer under number), so the intersection keeps the narrower member.
+  const fabricObjectCases = [
+    {
+      name: "object and a fabric-primitive type",
+      a: { type: "object" },
+      b: { type: "FabricBytes" },
+      expectedType: "FabricBytes",
+    },
+    {
+      name: "type arrays with only an object/fabric-primitive overlap",
+      a: { type: ["string", "object"] },
+      b: { type: ["boolean", "FabricEpochNsec"] },
+      expectedType: "FabricEpochNsec",
+    },
+  ] as const;
+
+  for (const testCase of fabricObjectCases) {
+    it(`${testCase.name} narrows object to the fabric type in either direction`, () => {
       expect(combineSchema(testCase.a, testCase.b)).toEqual({
         type: testCase.expectedType,
       });

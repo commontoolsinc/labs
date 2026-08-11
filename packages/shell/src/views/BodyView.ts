@@ -86,10 +86,6 @@ export class XBodyView extends BaseView {
       margin: 0;
       font-family: monospace;
     }
-
-    v-box {
-      flex: 1;
-    }
   `;
 
   @property({ attribute: false })
