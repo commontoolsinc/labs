@@ -27,14 +27,16 @@ import {
   type Writable,
 } from "commonfabric";
 
-/** A note as the board projects it. Deliberately small: this fixture is about
- * what a verb hands back, not about modelling notes. */
+/** One note. Deliberately small: this fixture is about what a verb hands back,
+ * not about modelling notes. */
 export interface NoteOutput {
   [NAME]: string;
   title: string;
   body: string;
-  /** Bumped by `retitle`, so a caller can tell a write happened. */
+  /** Bumped by `append`, so a caller can tell a write happened. */
   revision: number;
+  /** Append a line to the body. */
+  append: Stream<AppendEvent, AppendResult>;
 }
 
 interface NoteInput {
@@ -52,15 +54,11 @@ interface AppendResult {
   body: string;
 }
 
-interface NoteVerbs extends NoteOutput {
-  append: Stream<AppendEvent, AppendResult>;
-}
-
 /** One note, deployed as a child of the board below. It carries a verb of its
  * own so the walkthrough can do the thing a reference result exists for: take
  * the piece a create handed back, resolve its address with `--show-links`, and
  * call it. */
-export const Note = pattern<NoteInput, NoteVerbs>(
+export const Note = pattern<NoteInput, NoteOutput>(
   ({ title, body, revision }) => {
     const append = action<AppendEvent, AppendResult>((event) => {
       const addition = (event.text ?? "").trim();
