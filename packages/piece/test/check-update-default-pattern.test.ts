@@ -1665,6 +1665,8 @@ describe("checkAndUpdateDefaultPattern", () => {
     const after = (await controller.getDefaultPattern(true))!;
     await runtime.idle();
     expect(getPatternIdentityRef(after)).toEqual(staleRef);
+    // Functional pin, not just metadata: the old pattern's nodes remain live
+    // after the candidate setup is rejected.
     expect(after.key("marker").get()).toBe("v1");
   });
 
