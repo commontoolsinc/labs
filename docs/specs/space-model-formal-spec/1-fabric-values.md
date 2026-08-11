@@ -343,8 +343,11 @@ they are `FabricPrimitive` subclasses (Section 1.4.6). `FabricPrimitive` extends
 `FabricSpecialObject`, and the `FabricValue` union includes
 `FabricSpecialObject`, so all `FabricPrimitive` subclasses are implicitly
 members of `FabricValue`. They are always-frozen value types that bypass the
-`freeze` option in conversion functions. Each hosts its own `[CODEC]` for
-wire-format serialization, just like the wrappers; what distinguishes them
+`freeze` option in conversion functions. Each hosts its own codec for
+wire-format serialization, but bound per wire format — under
+`[JSON_CODEC]` for JSON — rather than under the format-neutral `[CODEC]` a
+wrapper binds, because a primitive's codec terminates an encoding where a
+wrapper's only decomposes. What further distinguishes them
 is the hashing layer, where each has a dedicated primitive hash tag rather
 than the `TAG_INSTANCE` path (Section 6.3). They do not carry a
 `wireTypeTag` property (no fabric type does, save the `ExplicitTagValue`
@@ -1096,7 +1099,8 @@ content-addressing schemes. The algorithm tag is part of the content ID's
 identity — two `FabricHash` instances with the same hash bytes but
 different algorithm tags are distinct values.
 
-Like every fabric class, `FabricHash` hosts a `[CODEC]` (tag `Hash@1`).
+Like every fabric primitive, `FabricHash` hosts a `[JSON_CODEC]` (tag
+`Hash@1`).
 Its encoded state is `{ tag, hash }` — the algorithm tag plus the hash as
 an unpadded base64url string (i.e., `.hashString`); `decode()` validates
 both fields are strings, producing a `ProblematicValue` on malformed
@@ -1166,7 +1170,7 @@ export class FabricBytes extends FabricPrimitive {
 Unlike the previous `FabricUint8Array` (which was a `FabricInstance` wrapping
 `Uint8Array` via `FabricNativeWrapper`), `FabricBytes` is a `FabricPrimitive`.
 It does not implement the `FabricInstance` members; like every fabric
-class, it hosts its own `[CODEC]` (tag `Bytes@1`), the same shape as
+primitive, it hosts its own `[JSON_CODEC]` (tag `Bytes@1`), the same shape as
 `FabricEpochNsec` and `FabricEpochDays`. The hashing system uses the
 dedicated `TAG_BYTES` primitive tag (Section 6.3).
 
@@ -1741,7 +1745,9 @@ Two helpers round out the vocabulary:
 - **`codecOf(value)`** (`codec-common/codecOf.ts`) returns the `[CODEC]`
   of a value's class, throwing a "shouldn't happen" error if the class has
   none. The hashing system (Section 6) and other instance-state walkers
-  use it.
+  use it. A `FabricPrimitive` binds no `[CODEC]` and so throws here; a
+  caller wanting a primitive's codec reads the symbol of the format it
+  means.
 
 Key contracts:
 
@@ -2459,25 +2465,26 @@ anything below.
 `createDefaultJsonRegistry()` (`codecs.ts`) adds the classes, and is the
 registry the shared JSON codec uses. The wire-format surface is **explicit and
 curated**: fabric classes whose instances have a fixed wire tag supply their
-codec via the static `[CODEC]`, and the curated `codecClasses()` list from each
-of `fabric-primitives/` and `fabric-instances/` is the source of truth for
-which classes participate — the wire surface is curated there, in one obvious
+codec as a static getter, and the curated `codecClasses()` list from each of
+`fabric-primitives/` and `fabric-instances/` is the source of truth for which
+classes participate. Each list is read through the symbol its classes bind —
+`[JSON_CODEC]` for a primitive, `[CODEC]` for an instance — the wire surface is curated there, in one obvious
 place per area, rather than implied by scattered registrations. A caller
 needing classes of its own extends what this returns.
 
 | Registration | Codec / type | Tag | Notes |
 |--------------|--------------|-----|-------|
-| `register(cls[CODEC])` | `FabricBytes` | `Bytes@1` | Via `fabric-primitives` `codecClasses()`. |
+| `register(cls[JSON_CODEC])` | `FabricBytes` | `Bytes@1` | Via `fabric-primitives` `codecClasses()`. |
 | 〃 | `FabricHash` | `Hash@1` | 〃 |
 | 〃 | `FabricEpochNsec` | `EpochNsec@1` | 〃 |
 | 〃 | `FabricEpochDays` | `EpochDays@1` | 〃 |
 | 〃 | `FabricRegExp` | `RegExp@1` | 〃 |
-| 〃 | `FabricError` | `Error@1` | Via `fabric-instances` `codecClasses()`. |
+| `register(cls[CODEC])` | `FabricError` | `Error@1` | Via `fabric-instances` `codecClasses()`. |
 | 〃 | `FabricMap` | `Map@1` | 〃 (implementation currently stubbed; see Section 1.4.3). |
 | 〃 | `FabricSet` | `Set@1` | 〃 (implementation currently stubbed; see Section 1.4.4). |
 | 〃 | `UnknownValue` | _(per-instance)_ | No `recognizedTypeTag`; `tagForValue()` reads the preserved tag (Section 3). |
 | 〃 | `ProblematicValue` | _(per-instance)_ | 〃 |
-| `registerPrimitive` | `BigIntCodec` (`bigint`) | `BigInt@1` | Encodes as unpadded base64 of minimal two's complement big-endian bytes. Standalone codec in `codec-common/` — no owned class to host a `[CODEC]`. |
+| `registerPrimitive` | `BigIntCodec` (`bigint`) | `BigInt@1` | Encodes as unpadded base64 of minimal two's complement big-endian bytes. Standalone codec in `codec-json/` — no owned class to host a codec getter. |
 | 〃 | `SpecialNumberCodec` (`number`) | `SpecialNumber@1` | Catches `-0` / `NaN` / `±Infinity`; finite numbers fall to self-representation. |
 | 〃 | `SymbolCodec` (`symbol`) | `Symbol@1` | Registry-interned symbols only; an uninterned symbol matches no codec and is correctly unencodable. |
 | 〃 | `UndefinedCodec` (`undefined`) | `Undefined@1` | Stateless; state is `null`. |

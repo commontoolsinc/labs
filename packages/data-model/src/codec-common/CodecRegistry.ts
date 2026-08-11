@@ -125,19 +125,20 @@ export class CodecRegistry {
   }
 
   /**
-   * Creates a frozen copy of this instance with the given classes' codecs
-   * additionally registered. This instance is left untouched, so a shared
-   * registry can be built on without being altered, and the result is frozen
-   * so that it in turn can be shared.
+   * Creates a frozen copy of this instance with the given codecs additionally
+   * registered. This instance is left untouched, so a shared registry can be
+   * built on without being altered, and the result is frozen so that it in
+   * turn can be shared.
    *
-   * This is the intended way to add classes to a registry someone else
-   * assembled: extending what a factory returns is what keeps a caller from
-   * omitting, by accident, everything that factory put there.
+   * This is the intended way to add to a registry someone else assembled:
+   * extending what a factory returns is what keeps a caller from omitting, by
+   * accident, everything that factory put there.
    *
-   * Takes codecs rather than the classes carrying them, because which symbol
-   * a class binds its codec to is the caller's business: a `FabricPrimitive`
-   * binds per wire format, a `FabricInstance` binds once. Keeping that choice
-   * out here is what lets this module stay format-agnostic.
+   * It takes codecs rather than the classes carrying them, because which
+   * symbol a class binds its codec to is the caller's business: a
+   * `FabricPrimitive` binds one per wire format, a `FabricInstance` binds one
+   * for all of them. A caller therefore reads the symbol it means and passes
+   * the result, which is what lets this module stay format-agnostic.
    *
    * @param codecs The codecs to register in addition.
    */

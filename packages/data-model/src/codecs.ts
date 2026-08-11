@@ -32,8 +32,10 @@ import { codecClasses as instanceCodecClasses } from "./fabric-instances/index.t
  *
  * The two curated `codecClasses()` lists are the source of truth for which
  * classes participate, so the wire-format surface is decided where those are
- * written rather than here. Each class supplies its codec via a static
- * `[CODEC]`.
+ * written rather than here. Each list is read through the symbol its classes
+ * bind: a `FabricPrimitive` supplies a codec per wire format, so the JSON one
+ * comes from its static `[JSON_CODEC]`; a `FabricInstance` supplies one that
+ * serves every format, from its static `[CODEC]`.
  *
  * `UnknownValue` and `ProblematicValue` are among them, but their codecs
  * recognize no single wire tag: the encode path resolves an instance's tag
@@ -41,8 +43,6 @@ import { codecClasses as instanceCodecClasses } from "./fabric-instances/index.t
  * `UnknownValue` by the encoding context rather than tag-routed.
  */
 export function createDefaultJsonRegistry(): CodecRegistry {
-  // Each roster is read through the symbol its classes bind: a primitive's
-  // codec is per-format, an instance's is not.
   return createBaseJsonRegistry().extend([
     ...primitiveCodecClasses().map((cls) => cls[JSON_CODEC]),
     ...instanceCodecClasses().map((cls) => cls[CODEC]),
