@@ -3,12 +3,8 @@ import type {
   FabricEpochNsecConstructor as ApiFabricEpochNsecConstructor,
 } from "@commonfabric/api";
 import {
-  fromBase64url,
-  toUnpaddedBase64url,
-} from "@commonfabric/utils/base64url";
-import {
-  bigintFromMinimalTwosComplement,
-  bigintToMinimalTwosComplement,
+  bigintFromUnpaddedBase64url,
+  bigintToUnpaddedBase64url,
 } from "@commonfabric/utils/bigint";
 
 import type { FabricValue } from "@/interface.ts";
@@ -63,7 +59,7 @@ export class FabricEpochNsec extends BaseFabricPrimitive
 
       /** @inheritDoc */
       encode(value: FabricEpochNsec): FabricValue {
-        return toUnpaddedBase64url(bigintToMinimalTwosComplement(value.#value));
+        return bigintToUnpaddedBase64url(value.#value);
       }
 
       /** @inheritDoc */
@@ -80,9 +76,7 @@ export class FabricEpochNsec extends BaseFabricPrimitive
           );
         }
         try {
-          return new FabricEpochNsec(
-            bigintFromMinimalTwosComplement(fromBase64url(state)),
-          );
+          return new FabricEpochNsec(bigintFromUnpaddedBase64url(state));
         } catch {
           return new ProblematicValue(
             typeTag,

@@ -1,10 +1,6 @@
 import {
-  fromBase64url,
-  toUnpaddedBase64url,
-} from "@commonfabric/utils/base64url";
-import {
-  bigintFromMinimalTwosComplement,
-  bigintToMinimalTwosComplement,
+  bigintFromUnpaddedBase64url,
+  bigintToUnpaddedBase64url,
 } from "@commonfabric/utils/bigint";
 import type { Constructor } from "@commonfabric/utils/types";
 
@@ -40,7 +36,7 @@ export class BigIntCodec extends BaseFabricCodec {
 
   /** @inheritDoc */
   encode(value: bigint): FabricValue {
-    return toUnpaddedBase64url(bigintToMinimalTwosComplement(value));
+    return bigintToUnpaddedBase64url(value);
   }
 
   /** @inheritDoc */
@@ -57,7 +53,7 @@ export class BigIntCodec extends BaseFabricCodec {
       );
     }
     try {
-      return bigintFromMinimalTwosComplement(fromBase64url(state));
+      return bigintFromUnpaddedBase64url(state);
     } catch {
       return new ProblematicValue(
         typeTag,

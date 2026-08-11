@@ -3,12 +3,8 @@ import type {
   FabricEpochDaysConstructor as ApiFabricEpochDaysConstructor,
 } from "@commonfabric/api";
 import {
-  fromBase64url,
-  toUnpaddedBase64url,
-} from "@commonfabric/utils/base64url";
-import {
-  bigintFromMinimalTwosComplement,
-  bigintToMinimalTwosComplement,
+  bigintFromUnpaddedBase64url,
+  bigintToUnpaddedBase64url,
 } from "@commonfabric/utils/bigint";
 
 import type { FabricValue } from "@/interface.ts";
@@ -57,7 +53,7 @@ export class FabricEpochDays extends BaseFabricPrimitive
 
       /** @inheritDoc */
       encode(value: FabricEpochDays): FabricValue {
-        return toUnpaddedBase64url(bigintToMinimalTwosComplement(value.#value));
+        return bigintToUnpaddedBase64url(value.#value);
       }
 
       /** @inheritDoc */
@@ -74,9 +70,7 @@ export class FabricEpochDays extends BaseFabricPrimitive
           );
         }
         try {
-          return new FabricEpochDays(
-            bigintFromMinimalTwosComplement(fromBase64url(state)),
-          );
+          return new FabricEpochDays(bigintFromUnpaddedBase64url(state));
         } catch {
           return new ProblematicValue(
             typeTag,
