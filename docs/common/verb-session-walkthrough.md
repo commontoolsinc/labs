@@ -24,6 +24,60 @@ Section headers inside the help output below are the literal strings
 `renderPieceCallHelp` emits (`packages/cli/lib/exec-schema.ts`). Their contents
 are illustrative.
 
+## What you are driving
+
+Two patterns. A **board** holds root items; an **item** holds its own subtree
+and its own verbs, so the thing a create hands back is itself callable.
+
+```tsx
+// Shown for illustration only.
+/** One work item. */
+interface ItemOutput {
+  title: string;
+  /** "open" until a verb changes it — "done" or "archived". */
+  status: string;
+  /** Append-only. Each entry carries a time the pattern stamped, not the
+   *  caller: reading the clock is a handler capability. */
+  notes: { body: string; at: number }[];
+  /** Null at a root. Carried so a caller can walk up as well as down. */
+  parent: ItemOutput | null;
+  /** The tree. */
+  children: ItemOutput[];
+  /** The graph. A blocker is any item anywhere on the board, not a
+   *  descendant — which is what makes one item reachable by two paths. */
+  blockedOn: ItemOutput[];
+}
+
+/** The board holds ROOT items only. Everything deeper is reached through
+ *  `children`, which is why an unshaped read of `items` expands the whole
+ *  tree — the cost shaped reads exist to bound. */
+interface BoardOutput {
+  items: ItemOutput[];
+  addItem: Stream<{ title: string }, { item: ItemOutput }>;
+}
+```
+
+Every field above is a **reference**, not a copy: `children` holds links to
+item pieces, and so does `blockedOn`. That is the whole reason addresses
+matter here — the same item can sit under one item's `children` and in
+another's `blockedOn`, and only an address tells a reader those are one item
+rather than two.
+
+The verbs, and what each one is for:
+
+| On | Verb | Changes | Hands back |
+| --- | --- | --- | --- |
+| board | `addItem` | files a new root item | the item it created |
+| item | `addChild` | files an item beneath this one | the item it created |
+| item | `recordNote` | appends a note | the note, with the time it stamped |
+| item | `finish` | marks done, optionally notes why | the time, and how many descendants are still open |
+| item | `blockOn` | records that this waits on another item | both endpoints of the edge |
+| item | `archive` | marks archived | nothing — the value-less shape |
+
+`finish` is worth singling out: **`openBelow` is the count of open items
+anywhere beneath this one**, which a caller cannot compute without walking the
+whole subtree. That is the shape of thing a verb result is for.
+
 ## 1. Arrive with a slug **[today]**
 
 An address a person can type, rather than a fid from a previous command.
@@ -36,11 +90,9 @@ cf piece verbs --piece board
 ```text
 pattern  tracker.tsx @ src:9f2a…
 NAME     KIND     ON
-add      handler  result
-block    handler  result
-note     handler  result
-remove   handler  result
-rollup   tool     result
+$NAME    handler  result
+addItem  handler  result
+items    handler  result
 ```
 
 Slug resolution sits on the shared path (`resolvePieceConfigWithPieces`,
@@ -52,22 +104,21 @@ client tells it is talking to a newer pattern than it was written against.
 ## 2. Ask what a verb wants **[today]**
 
 ```bash
-cf piece call --piece board add --help
+cf piece call --piece board addItem -- --help
 ```
 
 ```text
 Usage:
-  cf piece call --piece board add --help
-  cf piece call --piece board add <json>
-  cf piece call --piece board add -- --title <string> [--parent <string>]
+  cf piece call --piece board addItem -- --help
+  cf piece call --piece board addItem <json>
+  cf piece call --piece board addItem -- --title <string>
 
 JSON input:
   Pass inline JSON as one positional argument or after `--json`.
-  { title: string; parent?: string }
+  { title: string }
 
 Flags after `--`:
   --title <string>    Required.
-  --parent <string>   Optional.
 
 Output:
   No output on success.
@@ -98,7 +149,7 @@ So the help page shows `--title <string>  Required.` and stops.
 
 Three things are wrong with that page rather than missing from it.
 
-**`Output:` is false.** `add` declares a result and returns one; the value
+**`Output:` is false.** `addItem` declares a result and returns one; the value
 arrives on `invocation.result`. The handler branch of `renderPieceCallHelp`
 prints the fixed string regardless.
 
@@ -107,14 +158,14 @@ ready for it and the generator does not supply it.
 
 **The verb's purpose is absent**, and unlike the flags it is absent from the
 source of truth as well: an event interface's own doc comment is dropped in
-emission, so there is nothing downstream to render. `cf` can say what `add`
+emission, so there is nothing downstream to render. `cf` can say what `addItem`
 takes and not what it is for.
 
 ## 3. Complete against the live piece **[today]**
 
 ```bash
 cf piece call --piece board <TAB>
-add  block  note  remove  rollup
+addItem  items  $NAME
 ```
 
 Verb names and piece addresses complete against the space
@@ -127,11 +178,11 @@ offer, because nothing in the system knows the result has a field called `item`.
 ## 4. Create, and carry the address forward **[stack]**
 
 ```bash
-EPIC=$(cf piece call --piece board add -- --title "Login rewrite" \
+EPIC=$(cf piece call --piece board addItem -- --title "Login rewrite" \
        --select 'item@' | jq -r '.result.item."$link".id')
 
-cf piece call --piece "$EPIC" add -- --title "Session cookie handling"
-cf piece call --piece "$EPIC" note -- --body "Blocked on the cookie spec"
+cf piece call --piece "$EPIC" addChild -- --title "Session cookie handling"
+cf piece call --piece "$EPIC" recordNote -- --body "Blocked on the cookie spec"
 ```
 
 **This is the composition the surface exists for.** A create hands back the
@@ -168,7 +219,7 @@ read layer, several arrivals.
 ## 6. Relate two items **[blocked]**
 
 ```bash
-cf piece call --piece "$EPIC" block --on "$OTHER"
+cf piece call --piece "$EPIC" blockOn -- --on "$OTHER"
 ```
 
 This is where the session stops.
@@ -190,7 +241,7 @@ arrives as a string the pattern cannot resolve into a reference.
 A tree mostly hides this, because the natural shape is to call the verb *on* the
 parent — the receiver carries the relationship, so no address needs to be an
 argument. It surfaces the moment two items must be related to each other:
-`block`, `duplicates`, `move`, or a `remove` that names a child rather than an
+`blockOn`, a `duplicates` edge, a `move`, or a removal that names a child rather than an
 index. Indices are not addresses; a position shifts under concurrent writes.
 
 [CLI surface shape](../plans/cli-surface-shape.md) states the property for
