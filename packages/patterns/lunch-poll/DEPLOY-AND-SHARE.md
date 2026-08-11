@@ -101,7 +101,35 @@ export CF_API_URL=https://rapids.saga-castor.ts.net/   # fast-moving instance; e
 export CF_IDENTITY=./your-identity.key
 PIECE=fid1:bRHO0S5yN6Zuyct8MWgmIJgYpKkj5d2yiCCjNW1QulQ    # rapids; current as of 2026-08-03
 SPACE=team-lunch
+
+# Keep this complete set on every source deployment in this guide.
+LUNCH_POLL_TEST_ARGS=(
+  --test packages/patterns/lunch-poll/art-sync.test.tsx
+  --test packages/patterns/lunch-poll/generated-art.test.tsx
+  --test packages/patterns/lunch-poll/lunch-stats.test.tsx
+  --test packages/patterns/lunch-poll/main.test.tsx
+  --test packages/patterns/lunch-poll/multi-user.test.tsx
+  --test packages/patterns/lunch-poll/participant-identity-card.test.tsx
+  --test packages/patterns/lunch-poll/poll-option-card.test.tsx
+)
 ```
+
+Before any `piece new` or `piece setsrc` command below, run every authored
+pattern test and stop if one fails:
+
+```bash
+deno task cf test packages/patterns/lunch-poll/art-sync.test.tsx --root packages/patterns
+deno task cf test packages/patterns/lunch-poll/generated-art.test.tsx --root packages/patterns
+deno task cf test packages/patterns/lunch-poll/lunch-stats.test.tsx --root packages/patterns
+deno task cf test packages/patterns/lunch-poll/main.test.tsx --root packages/patterns
+deno task cf test packages/patterns/lunch-poll/multi-user.test.tsx --root packages/patterns
+deno task cf test packages/patterns/lunch-poll/participant-identity-card.test.tsx --root packages/patterns
+deno task cf test packages/patterns/lunch-poll/poll-option-card.test.tsx --root packages/patterns
+```
+
+The quoted `"${LUNCH_POLL_TEST_ARGS[@]}"` expansion below repeats every `--test`
+entry. Deployment packages and type-checks the tests but does not run them,
+which is why both the test commands and the flags are required.
 
 **Identity key:**
 
@@ -151,6 +179,8 @@ instance.
 
 ```bash
 deno task cf piece setsrc --piece "$PIECE" -s "$SPACE" \
+  --root packages/patterns \
+  "${LUNCH_POLL_TEST_ARGS[@]}" \
   packages/patterns/lunch-poll/main.tsx
 deno task cf piece step --piece "$PIECE" -s "$SPACE"
 ```
@@ -186,6 +216,8 @@ without touching the shared poll):
 ```bash
 # 1. Create your own empty piece (note the new ID it prints).
 MINE=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
+  --root packages/patterns \
+  "${LUNCH_POLL_TEST_ARGS[@]}" \
   -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
 
 # 2. Copy each PerSpace field from the shared piece into yours.
@@ -294,7 +326,8 @@ everyone sees, and direct `set` races anyone's live browser session.**
 ### Re-establishing (if it's lost / 404s)
 
 ```bash
-deno task cf piece new packages/patterns/lunch-poll/main.tsx -s "$SPACE"
+deno task cf piece new packages/patterns/lunch-poll/main.tsx \
+  --root packages/patterns "${LUNCH_POLL_TEST_ARGS[@]}" -s "$SPACE"
 # → prints a new fid1:… — update the "live pieces" block above.
 ```
 
@@ -312,6 +345,8 @@ once when a "reset votes" click wedged the running instance. `setsrc` does
 # 1. Confirm it's instance-specific: deploy the same code to a NEW piece. If the
 #    fresh piece works, the old one's process is wedged.
 NEW=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
+  --root packages/patterns \
+  "${LUNCH_POLL_TEST_ARGS[@]}" \
   -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
 
 # 2. Copy the PerSpace state across with the Option B loop (history carries too,

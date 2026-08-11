@@ -365,6 +365,11 @@ deno task cf piece step --piece <PIECE_ID>
 deno task cf piece get tests/1/assertion --piece <PIECE_ID>
 ```
 
+This diagnostic command deliberately deploys the test pattern as the executable
+entry so its action and assertion cells can be inspected. A normal deployment
+uses the subject pattern as the executable entry and attaches this test with
+`--test ./main.test.tsx`.
+
 ### 3. Expose Debug Data
 
 Add extra fields to your test pattern for debugging:

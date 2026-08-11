@@ -191,6 +191,9 @@ directory containing the main entry and every test entry. An explicit `--root`
 remains authoritative. Each test's reachable imports are merged into the
 authored `Program` as source-only roots. Compilation type-checks and verifies
 those modules, while execution still begins exclusively at `Program.main`.
+Run each authored test entry separately with `cf test`; attaching it does not
+execute it. Repeat the complete set of `--test` flags on every `setsrc` because
+each update defines a complete source revision.
 The source-document cache retains the test roots through its synthetic
 retention links. Source recovery and `cf piece getsrc` therefore return the
 executable source and its attached tests together. `set-home --reset` rejects

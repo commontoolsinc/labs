@@ -147,7 +147,8 @@ say what it does. Step 2 has the measurement.
 An address a person can type, rather than a fid from a previous command.
 
 ```bash
-cf piece new tracker.tsx --slug board
+cf test tracker.test.tsx
+cf piece new tracker.tsx --test tracker.test.tsx --slug board
 cf piece verbs --piece board
 ```
 

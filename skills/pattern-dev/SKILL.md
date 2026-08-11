@@ -9,6 +9,13 @@ Start with the shared pattern development guidance in:
 
 Read that guide first. It is the canonical reference.
 
+For new or changed behavior, completion includes the whole source lifecycle:
+write automated pattern tests, run every test entry with `cf test`, and attach
+every entry with repeatable `--test` flags on `piece new` and every later
+`piece setsrc`. Manual browser or CLI verification does not replace the
+automated tests. Deployment packages and type-checks attached tests but does not
+run them.
+
 Also read the foundational reactivity references before implementing or
 debugging pattern state:
 
@@ -157,7 +164,7 @@ Task({
 })
 
 Task({
-  prompt: "Deploy and test [pattern].",
+  prompt: "Run every authored test, then deploy [pattern] with each test attached.",
   subagent_type: "pattern-user"
 })
 
