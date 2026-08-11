@@ -7,21 +7,23 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 
 describe("codecOf()", () => {
-  it("returns the class's `[CODEC]` for a `FabricInstance`", () => {
-    const err = FabricError.fromNativeError(new Error("x"));
-    expect(codecOf(err)).toBe(FabricError[CODEC]);
-  });
+  describe("given no `altCodec`", () => {
+    it("returns the class's `[CODEC]` for a `FabricInstance`", () => {
+      const err = FabricError.fromNativeError(new Error("x"));
+      expect(codecOf(err)).toBe(FabricError[CODEC]);
+    });
 
-  it("throws for a `FabricPrimitive`", () => {
-    // A primitive's codec terminates an encoding, so it is bound per wire
-    // format under that format's own symbol rather than to `[CODEC]`.
-    const fb = new FabricBytes(new Uint8Array([1, 2, 3]));
-    expect(() => codecOf(fb)).toThrow("no `[CODEC]`");
-  });
+    it("throws for a `FabricPrimitive`", () => {
+      // A primitive's codec terminates an encoding, so it is bound per wire
+      // format under that format's own symbol rather than to `[CODEC]`.
+      const fb = new FabricBytes(new Uint8Array([1, 2, 3]));
+      expect(() => codecOf(fb)).toThrow("no `[CODEC]`");
+    });
 
-  it("throws for a `FabricSpecialObject` binding no `[CODEC]`", () => {
-    class NoCodec extends FabricSpecialObject {}
-    expect(() => codecOf(new NoCodec())).toThrow("no `[CODEC]`");
+    it("throws for a `FabricSpecialObject` binding no `[CODEC]`", () => {
+      class NoCodec extends FabricSpecialObject {}
+      expect(() => codecOf(new NoCodec())).toThrow("no `[CODEC]`");
+    });
   });
 
   describe("given an `altCodec`", () => {
