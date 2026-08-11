@@ -104,7 +104,7 @@ relative value. Record the reason in this plan.
   diffs.
 - [x] Detect known binary files and NUL-containing input before source
   decoding.
-- [ ] Build a fixture corpus with direct-file, diff, incomplete-edit, and
+- [x] Build a fixture corpus with direct-file, diff, incomplete-edit, and
   selection cases from the survey.
 - [ ] Run a parser-adapter spike on Python, Go, shell, and HTML.
 - [ ] Record the parser decision before implementing Stage 2.
