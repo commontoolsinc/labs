@@ -79,6 +79,20 @@ VERBS=$($CF piece verbs --piece "$BOARD" $ARGS --json 2>/dev/null)
 echo "$VERBS" | jq -r '.verbs[]? | "    " + .name' 2>/dev/null | head -10
 echo "$VERBS" | jq -e '[.verbs[]?.name] | index("createNote")' >/dev/null 2>&1 &&
   ok "createNote is listed" || bad "createNote missing from the verb listing"
+# A declared result rides the listing, so a caller learns the shape of what it
+# will get back WITHOUT calling — the half of verb discovery that makes a call
+# something you can prepare for rather than discover by trying.
+check "note" "$(echo "$VERBS" | jq -r '.verbs[] |
+  select(.name == "createNote") | .outputSchema.properties | keys | join(",")' \
+  2>/dev/null)" "createNote advertises the result it declared"
+check "label,revision" "$(echo "$VERBS" | jq -r '.verbs[] |
+  select(.name == "setLabel") | .outputSchema.properties | keys | join(",")' \
+  2>/dev/null)" "setLabel advertises every field of its declared result"
+# The value-less shape says so by carrying no result at all, rather than an
+# empty one a caller would have to interpret.
+check "false" "$(echo "$VERBS" | jq -r '.verbs[] |
+  select(.name == "touch") | has("outputSchema")' 2>/dev/null)" \
+  "a value-less verb advertises no result"
 
 step "3. A create hands back the piece it created"
 R=$($CF piece call --quiet --piece "$BOARD" $ARGS --invocation create-1 \

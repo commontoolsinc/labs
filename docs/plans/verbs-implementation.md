@@ -275,10 +275,15 @@ verb contract arc. Both unblocked; both wanted a courtesy review rather than a
 gate.
 
 **10. Listing rows carry a handler's declared result.** *(S)* `cf piece verbs`
-already reports an `outputSchema` per row, and the type says why it is empty for
-handlers: *"Tools only, until handlers gain declared results."* Item 1 is what
-supplies them. This is the deferred half of verb discovery finally closing, and
-it is a consumer change — the plumbing is built.
+reports an `outputSchema` per row for a handler as well as for a tool, so verb
+discovery answers both halves of its question: what a caller may send, and what
+it gets back. A tool's result schema rides its callable cell and its branch
+just reads it. A handler's rides the node it compiled to, so the listing
+resolves the piece's pattern once and matches each handler node's `$event`
+input against the result property exposing the same stream — one structural
+comparison inside one compiled object. A stream two handler nodes share names
+no single result, and a piece whose pattern will not resolve keeps every row
+and loses only the schema.
 
 *A terminology collision made this look like more than it is.* A pattern's
 **result-schema literal** is where its stream properties live, and the listing

@@ -78,6 +78,28 @@ before relying on any of its behavior.
 cf piece verbs --piece <piece> --json
 ```
 
+Each row carries the verb's input schema and, when the verb declares a result,
+the schema of what it hands back — so both halves of "what may I send, and what
+do I get" are answerable before the first call rather than by making one:
+
+```json
+{
+  "name": "addNote",
+  "kind": "handler",
+  "on": "result",
+  "inputSchema": { "…": "…" },
+  "outputSchema": {
+    "type": "object",
+    "properties": { "note": { "$ref": "#/$defs/NoteOutput" } },
+    "required": ["note"],
+    "$defs": { "…": "…" }
+  }
+}
+```
+
+A value-less verb carries no `outputSchema` at all, which is how a caller tells
+the two apart without calling.
+
 ### Call a verb and read its result
 
 `cf piece call` prints one settled **Invocation JSON** object on stdout:
