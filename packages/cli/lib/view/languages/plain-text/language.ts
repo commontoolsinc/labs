@@ -4,6 +4,7 @@
  * registry's fallback.
  */
 import type { Language } from "../language.ts";
+import { utf8Decoder } from "../decoder.ts";
 import {
   createPlainTextHighlighter,
   plainTextDocument,
@@ -12,6 +13,8 @@ import {
 
 export const plainTextLanguage: Language = {
   id: "plain-text",
+
+  input: { kind: "text", decoder: utf8Decoder },
 
   metadata: {
     extensions: [".txt"],

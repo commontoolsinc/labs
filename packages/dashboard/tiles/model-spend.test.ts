@@ -4,7 +4,11 @@
 // this month and how far back to ask.
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx } from "../types.ts";
+import { themedChartSeries } from "../theme.ts";
 import { modelSpend } from "./model-spend.ts";
+
+const themedSwatch = (color: string) =>
+  `<span class="swatch" style="background:${themedChartSeries(color).color}"></span>`;
 
 function ctx(env: Record<string, string> = {}): Ctx {
   return {
@@ -118,8 +122,8 @@ Deno.test("model spend: all three providers read -> green, combined MTD, a line 
       // line ends), OpenRouter's total inline since it has no line.
       assertStringIncludes(
         v.extra ?? "",
-        `<p class="sub"><span class="swatch" style="background:#10a37f"></span> OpenAI • ` +
-          `<span class="swatch" style="background:#d97757"></span> Anthropic • OR $5</p>`,
+        `<p class="sub">${themedSwatch("#10a37f")} OpenAI • ` +
+          `${themedSwatch("#d97757")} Anthropic • OR $5</p>`,
       );
       // Each line is drawn in its provider's color and labelled with its own MTD.
       assertStringIncludes(v.extra ?? "", `pointer-events:none">$${DOM}</span>`);
@@ -157,7 +161,7 @@ Deno.test("model spend: a provider that errors -> $??? and gray, the rest still 
       assert(v.value?.startsWith("≥"), `the total is a lower bound, got ${v.value}`);
       assertStringIncludes(
         v.extra ?? "",
-        `<p class="sub"><span class="swatch" style="background:#10a37f"></span> OpenAI • Anthropic $??? • OR $5</p>`,
+        `<p class="sub">${themedSwatch("#10a37f")} OpenAI • Anthropic $??? • OR $5</p>`,
       );
       assertEquals(v.duration, 45 * DAY); // OpenAI's line is still drawn
       assertStringIncludes(v.extra ?? "", "#10a37f");
@@ -182,7 +186,7 @@ Deno.test("model spend: one day of data draws no chart, so the provider's total 
   await withFetch({ "api.openai.com": () => json({ data: [oaBucket(today, 12)] }) }, async () => {
     const v = await modelSpend.collect(ctx({ OPENAI_ADMIN_KEY: "oa" }));
     assertEquals(v.status, "good");
-    assertEquals(v.extra, `<p class="sub"><span class="swatch" style="background:#10a37f"></span> OpenAI $12</p>`);
+    assertEquals(v.extra, `<p class="sub">${themedSwatch("#10a37f")} OpenAI $12</p>`);
     assertEquals(v.aside, `<span class="hmtd">$12 MTD</span>`);
     assertEquals(v.duration, 0);
   });

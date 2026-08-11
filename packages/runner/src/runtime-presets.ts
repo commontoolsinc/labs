@@ -321,7 +321,7 @@ export interface PatternTestPresetParams extends CoreParams {
 }
 
 export interface BrowserWorkerPresetParams extends CoreParams {
-  /** Space DID → host base URL map (federation); decided by the shell host. */
+  /** Map from space DIDs to HTTP or HTTPS origins selected by the shell host. */
   spaceHostMap?: Record<string, string>;
   /** Host-controlled rollout dials, from `InitializationData`. */
   cfcEnforcementMode?: CfcEnforcementMode;

@@ -8,7 +8,13 @@ exact names, compound patterns, explicit aliases, and direct interpreter
 shebangs. Python files with recognized extensions now have syntax highlighting.
 Automatic container detection is limited to structurally identified raw unified
 diffs and standard Git commit output. Recognized shebangs and transformed
-compiler headers remain explicit source selectors.
+compiler headers remain explicit source selectors. Binary is a supported,
+read-only language with raw-byte decoding and a hex-dump rendered view. Known
+binary filenames, NUL-containing input, and invalid UTF-8 select it before text
+decoding. Interactive binary views use a bounded preview, while redirected
+output streams the complete dump. Text saves use the encoder paired with the
+decoded source, including preservation of a UTF-8 byte order mark. Binary files
+remain outside diff editing and semantic source loading.
 The order is provisional because recent activity was measured in six of the 24
 active organization repositories.
 
@@ -96,7 +102,7 @@ relative value. Record the reason in this plan.
   aliases, and shebang interpreters as language metadata.
 - [x] Keep content detection only for unambiguous containers such as unified
   diffs.
-- [ ] Detect known binary files and NUL-containing input before source
+- [x] Detect known binary files and NUL-containing input before source
   decoding.
 - [ ] Build a fixture corpus with direct-file, diff, incomplete-edit, and
   selection cases from the survey.

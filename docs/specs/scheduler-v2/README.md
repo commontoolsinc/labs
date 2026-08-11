@@ -370,23 +370,49 @@ live(N) ⇔ N is an effect (registered, not cancelled)
 
 ### 5.2 Maintenance
 
-Liveness is stored as a reference count (`liveRefs`) and recomputed only after
-an **actual edge or demand-root change** — a run whose read set changed,
-register/unregister, or provisional-root transition — never per data change.
-Updates in one registration/resubscribe operation are batched. If its edge set
-is unchanged, no rebuild occurs.
+Liveness is stored as a reference count (`liveRefs`) — the number of live direct
+readers — and updated only on an **actual edge or demand-root change**: a run
+whose read set changed, register/unregister, or a provisional-root transition.
+Ordinary value changes pay nothing. A node is live when it is registered and
+either holds demand on its own (effect, materializer, provisional demand) or has
+at least one live reader.
 
-The rebuild starts at explicit roots (effects, materializers, and provisional
-demand), walks reader→writer edges to form the root-reachable set, then counts
-each reachable node's live direct readers. This is cycle-safe (a rootless cycle
-cannot keep itself live) and diamond-accurate (both arms count; removing one arm
-does not strand the shared writer). A single visited-set delta walk cannot
-provide both properties because path deduplication undercounts diamonds.
+Maintenance is incremental, and the two directions are not symmetric.
+
+**Granting** — a new edge, or a node becoming a root — can only add demand. The
+new reader hands one reference to each writer it reads, and a writer that
+crosses from dormant to live passes the same contribution further upstream. A
+node is enqueued only on that crossing, so a cycle settles instead of looping.
+Each arm of a diamond hands over its own reference, so the shared writer counts
+two.
+
+A reference is granted only while the writer is registered, so an edge naming a
+node that has not registered yet leaves it holding none. Registration therefore
+recounts the node's own references from its live readers before deciding whether
+it came alive, which keeps edge and registration order independent of each
+other.
+
+**Withdrawing** — an edge removed, or a root status lost — can strand nodes, and
+a reference count cannot tell a genuine supporter from a rootless cycle holding
+itself up. A node that loses a root status is therefore re-derived even when it
+still looks live, because the references it holds may be exactly that cycle. So
+withdrawal re-derives, over the region that can be affected and no further:
+`origin`'s transitive upstream, which is closed under the writer edge.
+Any node whose support routes through `origin` is upstream of it, so a live
+reader *outside* that region cannot owe its own liveness to anything inside, and
+its support is taken at face value. Clearing the region and re-seeding from the
+roots inside it plus the live readers outside is cycle-safe (a rootless cycle
+finds no seed and settles dormant) and diamond-accurate (each surviving arm
+re-contributes its own reference).
+
+`recomputeLiveRefs` derives the same state from the roots in one pass over the
+whole graph. Nothing on the maintenance path calls it: it is the definition the
+incremental updates implement, and the reference the unit tests check them
+against after every mutation.
 
 This replaces v1's per-query graph walks (`isDemandedPullComputation` walked
-dependents transitively on every candidate check) with O(V+E) work per changed
-edge/root batch and O(1) liveness queries; ordinary value changes pay zero
-liveness-maintenance cost.
+dependents transitively on every candidate check) with O(1) liveness queries and
+maintenance proportional to the change rather than to the size of the graph.
 
 ### 5.3 Provisional demand
 
@@ -1140,7 +1166,7 @@ field bag.)
 | Component | Owns | Key operations |
 | --- | --- | --- |
 | `registry` | Node records, identity, lifecycle | `register`, `remove`, `get` |
-| `graph` | Reader index (trigger semantics), static writer map, envelope index, node edges, liveness refcounts | `applyReadDelta`, `match(change)`, `edgesFor`, `recomputeLiveRefs` |
+| `graph` | Reader index (trigger semantics), static writer map, envelope index, node edges, liveness refcounts | `applyReadDelta`, `match(change)`, `edgesFor`, `registerDependentEdge`/`unregisterDependentEdge` |
 | `invalidation` | Storage subscription → `markInvalid` + tick | `onNotification` |
 | `settle` | The pass: work set, toposort, run-gating, iteration/budget bounds | `pass()` |
 | `runner` | One-tx run, commit watch, retries, read-delta handoff, observation attach | `runNode` |
@@ -1204,7 +1230,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
 | v1 mechanism | v2 disposition | Safety argument |
 | --- | --- | --- |
 | Push mode (5 modules, mode branches, APIs) | Deleted | Pull is the only production mode; push exists only as test toggles. |
-| `pending`/`dirty`/`stale` + upstream-stale counts | One `status` + liveness refcount; downstream closure per pass | P2 holds for the **run** decision (effects gate on their own value-accurate invalid bit). The one reachability query that survives — the event-preflight consistency gate (§7.5/I4) — is served without per-data-change transitive marking by **inverting** it over the maintained invalid-node set (decision 15); liveness rebuilds from explicit roots only when graph topology or demand roots change. |
+| `pending`/`dirty`/`stale` + upstream-stale counts | One `status` + liveness refcount; downstream closure per pass | P2 holds for the **run** decision (effects gate on their own value-accurate invalid bit). The one reachability query that survives — the event-preflight consistency gate (§7.5/I4) — is served without per-data-change transitive marking by **inverting** it over the maintained invalid-node set (decision 15); liveness is maintained incrementally, and only when graph topology or demand roots change. |
 | `scheduleAffectedEffects` + `conditionallyScheduledEffects` + `changedWritesHistory` | Deleted | Effects run-gate on their own value-accurate invalid bit (§7.2/§7.3) — same observable filter, no watermarks. |
 | Post-run `recordChangedComputationWrites` / `markReadersDirtyForChangedWrites` | Deleted | Local commit notifications are synchronous + value-bearing (P1); the channel already delivers exactly this. |
 | `pullDemandedFirstRunComputations` / continuation set / `activePullDemandActions` | Provisional demand (§5.3) | Continuations are ordinary invalidation under P1; first-run demand is creation-context inheritance. |

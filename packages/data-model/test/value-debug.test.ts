@@ -395,7 +395,7 @@ describe("value-debug", () => {
         .toBe('Symbol.for("ind")');
     });
 
-    it("renders nested function and symbol as bare tokens", () => {
+    it("renders a nested `function` and `symbol` as bare tokens", () => {
       function qux() {}
       const v = { fn: qux, sym: Symbol("s") };
       expect(toIndentedDebugString(v))

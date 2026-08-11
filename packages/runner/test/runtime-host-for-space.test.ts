@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import { Runtime } from "@commonfabric/runner";
+import { Runtime, SpaceHostValidationError } from "@commonfabric/runner";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("runtime-host-for-space");
@@ -16,6 +16,27 @@ function makeRuntime(spaceHostMap?: Record<string, string>) {
     spaceHostMap,
     storageManager,
   });
+}
+
+function captureError(run: () => unknown): Error {
+  try {
+    run();
+  } catch (error) {
+    if (error instanceof Error) return error;
+    throw error;
+  }
+  throw new Error("Expected call to throw");
+}
+
+function expectSafeValidationCause(
+  error: Error,
+  secret: string,
+  message: string,
+): void {
+  expect(error.message).not.toContain(secret);
+  expect(error.cause).toBeInstanceOf(SpaceHostValidationError);
+  expect((error.cause as Error).message).toBe(message);
+  expect((error.cause as Error).message).not.toContain(secret);
 }
 
 describe("Runtime.registerSpaceHost", () => {
@@ -63,7 +84,7 @@ describe("Runtime.registerSpaceHost", () => {
     }
   });
 
-  it("rejects non-HTTP hints before forwarding them to storage", async () => {
+  it("rejects non-origin hints before forwarding them to storage", async () => {
     const storageVerdicts: Array<[string, string]> = [];
     const storageManager = Object.assign(
       StorageManager.emulate({ as: signer }),
@@ -84,6 +105,11 @@ describe("Runtime.registerSpaceHost", () => {
           "ws://host-b.test",
           "wss://host-b.test",
           "ftp://host-b.test",
+          "https://user@host-b.test/",
+          "https://host-b.test/api",
+          "https://host-b.test/api/..",
+          "https://host-b.test/?region=west",
+          "https://host-b.test/#primary",
         ]
       ) {
         expect(() => runtime.registerSpaceHost(spaceB, host))
@@ -101,6 +127,42 @@ describe("Runtime.registerSpaceHost", () => {
       await runtime.dispose();
     }
   });
+
+  it("preserves safe validation causes without repeating route secrets", async () => {
+    const hosts = [
+      [
+        "https://user:route-password-sentinel@host-b.test/",
+        "route-password-sentinel",
+        "Space host must not include credentials",
+      ],
+      [
+        "https://host-b.test/?token=route-query-sentinel",
+        "route-query-sentinel",
+        "Space host must not include a query",
+      ],
+      [
+        "https://user:route-parse-password-sentinel@[/",
+        "route-parse-password-sentinel",
+        "Invalid space host URL",
+      ],
+    ] as const;
+    const runtime = makeRuntime();
+    try {
+      for (const [host, secret, message] of hosts) {
+        const error = captureError(() =>
+          runtime.registerSpaceHost(spaceB, host)
+        );
+        expectSafeValidationCause(error, secret, message);
+      }
+    } finally {
+      await runtime.dispose();
+    }
+
+    for (const [host, secret, message] of hosts) {
+      const error = captureError(() => makeRuntime({ [spaceB]: host }));
+      expectSafeValidationCause(error, secret, message);
+    }
+  });
 });
 
 describe("Runtime.hostForSpace", () => {
@@ -110,6 +172,11 @@ describe("Runtime.hostForSpace", () => {
         "ws://host-b.test",
         "wss://host-b.test",
         "ftp://host-b.test",
+        "https://user@host-b.test/",
+        "https://host-b.test/api",
+        "https://host-b.test/%2e%2e/",
+        "https://host-b.test/?region=west",
+        "https://host-b.test/#primary",
       ]
     ) {
       expect(() => makeRuntime({ [spaceB]: host }))

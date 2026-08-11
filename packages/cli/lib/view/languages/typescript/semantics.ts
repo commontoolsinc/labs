@@ -28,7 +28,11 @@ import type {
   Semantics,
   SemanticsOptions as Options,
 } from "../language.ts";
-import { languageForFile } from "../language.ts";
+import {
+  decodeLanguageInput,
+  languageForFile,
+  readOnlyReasonFor,
+} from "../language.ts";
 import { cpLen } from "../../ansi.ts";
 
 interface SectionFile {
@@ -81,7 +85,7 @@ export function createSemantics(
   const readReal = (path: string): string | undefined => {
     if (realFiles.has(path)) return realFiles.get(path);
     const content = within(path, root)
-      ? safe(() => Deno.readTextFileSync(path))
+      ? safe(() => readSourceFile(path))
       : undefined;
     realFiles.set(path, content);
     return content;
@@ -185,7 +189,7 @@ export function createDiffSemantics(
   const readReal = (path: string): string | undefined => {
     if (realFiles.has(path)) return realFiles.get(path);
     const content = within(path, root)
-      ? safe(() => Deno.readTextFileSync(path))
+      ? safe(() => readSourceFile(path))
       : undefined;
     realFiles.set(path, content);
     return content;
@@ -447,7 +451,7 @@ function makeHost(
     let content: string | undefined;
     if (readable(path)) {
       try {
-        content = Deno.readTextFileSync(path);
+        content = readSourceFile(path);
       } catch {
         content = undefined;
       }
@@ -652,6 +656,20 @@ function within(child: string, parent: string): boolean {
   } catch {
     return false;
   }
+}
+
+function readSourceFile(path: string): string {
+  const selected = languageForFile(path);
+  const selectedReadOnlyReason = readOnlyReasonFor(selected);
+  if (selectedReadOnlyReason !== undefined) {
+    throw new TypeError(selectedReadOnlyReason);
+  }
+  const decoded = decodeLanguageInput(path, Deno.readFileSync(path));
+  const decodedReadOnlyReason = readOnlyReasonFor(decoded.language);
+  if (decodedReadOnlyReason !== undefined) {
+    throw new TypeError(decodedReadOnlyReason);
+  }
+  return decoded.source.text;
 }
 
 /** Directory holding the bundled `lib.*.d.ts`, derived from the ts module URL. */
