@@ -29,24 +29,17 @@ import {
 /** One work item. Deliberately small: this fixture is about what a verb hands
  * back and how a caller addresses what it made, not about modelling work. */
 export interface ItemOutput {
-  /** File a new item beneath this one. Takes the child's title; returns the
-   * child it created as a reference, so the caller can call verbs on it
-   * without looking it up. */
+  /** File a new item beneath this one. */
   addChild: Stream<AddChildEvent, AddChildResult>;
-  /** Append a progress note. Takes the note's body; returns the note as
-   * persisted — carrying a time the caller did not supply and could not — and
-   * the number of notes this item holds after the append. */
+  /** Append a progress note. Notes are append-only; nothing rewrites one. */
   recordNote: Stream<RecordNoteEvent, RecordNoteResult>;
-  /** Mark this item done. Takes an optional closing note, stamped with the
-   * same time as the finish; returns that time and how many descendants are
-   * still open, which takes a walk of the whole subtree to answer. */
+  /** Mark this item done. Descendants are left alone — finishing a parent
+   * says nothing about its children, which is what `openBelow` reports. */
   finish: Stream<FinishEvent, FinishResult>;
-  /** Record that this item waits on another. Takes the blocker as a
-   * reference, not a copy of it; returns both endpoints of the edge and how
-   * many blockers this item now has. */
+  /** Record that this item waits on another. The blocker may be anywhere on
+   * the board — this is the edge that makes the tree a graph. */
   blockOn: Stream<BlockOnEvent, BlockOnResult>;
-  /** Mark this item archived. Takes nothing and returns nothing — the
-   * value-less shape, for contrast with every verb above. */
+  /** Mark this item archived. Declares no result — the value-less shape. */
   archive: Stream<void>;
   [NAME]: string;
   title: string;
@@ -126,11 +119,13 @@ interface BlockOnEvent {
 }
 
 interface BlockOnResult {
-  /** Both endpoints of the edge just written. `on` stays a reference all the
-   * way through: it arrives as one, is stored as one, and is handed back as
-   * one, so the caller gets an address rather than a copy of the target. */
+  /** The item that now waits — this one. */
   blocked: ItemOutput;
+  /** The item it waits on. Still a reference: it arrived as one, is stored as
+   * one, and is handed back as one, so the caller gets an address rather than
+   * a copy of the target. */
   on: Writable<ItemOutput>;
+  /** How many items this one waits on, after the edge was written. */
   blockedOnCount: number;
 }
 
@@ -235,8 +230,7 @@ interface BoardOutput {
   [NAME]: string;
   /** Root items only. The tree hangs off each one's `children`. */
   items: ItemOutput[];
-  /** File a new root item. Takes its title; returns the item it created as a
-   * reference, which is the address every later command in a session uses. */
+  /** File a new root item on the board. */
   addItem: Stream<AddItemEvent, AddItemResult>;
 }
 
