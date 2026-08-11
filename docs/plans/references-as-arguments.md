@@ -1,23 +1,75 @@
 # References as arguments
 
-**The ask: carry a declared reference into the emitted event schema, and honor
-it at the two boundary sites that read one.**
+**The ask: lift address resolution out of the LLM builtin and into the boundary
+every external caller crosses, and settle one encoding for it.**
 
-A verb whose event declares a reference — `Writable<T>` on an event field —
-cannot be called by anything outside the runtime. The declaration compiles, the
-runtime honors it internally, and the emitted schema drops it, so nothing at the
-serialized boundary can tell a reference position from a value position.
+A caller outside the runtime can be *handed* an address and cannot hand one
+back — unless that caller is an LLM, which can, because the LLM dialog builtin
+solved this for itself.
 
-This is one change, and it is the completion of a mechanism that already
-exists rather than a new capability.
+## The team already needed this and already built it
 
-## Why this matters, measured
+`traverseAndCellify` (`packages/runner/src/builtins/llm-dialog.ts`) walks an LLM
+tool call's input, finds `{"@link": "…"}`, and resolves it through
+`runtime.getCellFromLink()` before dispatch. Its output becomes
+`invocationArgs`, which goes into the `handler` branch's stream send. Its
+counterpart `traverseAndSerialize` renders cells *out* in the same shape, so
+the LLM boundary has a complete round trip: a model is handed an address and
+can hand it back.
 
-[The pattern verb contract](pattern-verb-contract.md) states its goal as making
-any pattern agent-drivable through its own verbs. That is currently false for a
-specific and enumerable class of verbs.
+That is proof of need from inside the codebase. Somebody hit this wall on a
+surface that matters and built the resolution rather than working around it.
 
-Every event field across the shipped patterns that declares a reference:
+**The problem is where it lives.** It sits inside one builtin, so it serves one
+consumer. Every other caller that crosses the same serialized boundary is
+second-class:
+
+| Consumer | Can pass a reference? |
+| --- | --- |
+| LLM tool call (`llm-dialog`) | **yes** — `@link`, resolved before dispatch |
+| `cf piece call` | no — validated structurally, an address is rejected |
+| Webhook POST (`sendToStream`, `packages/toolshed/routes/webhooks/`) | no — the raw payload is sent unresolved |
+| [Ingest channels](ingest-channels-journal-sink.md) | no — builds on the same dispatch |
+| `cf exec` and the FUSE projection | no — JSON in, same path as the CLI |
+
+The same handler, reached two ways, accepts a reference from one and not the
+other. Nothing about the verb differs; only the door the caller came through.
+
+## One concept, three encodings
+
+The divergence has already started, which is the more expensive half.
+
+| Spelling | Where | Direction |
+| --- | --- | --- |
+| `{"@link": "…"}` | `llm-dialog` | in **and** out |
+| `{"$link": {id, space, scope, path}}` | shaped reads ([shaped reads](shaped-reads-and-verb-results.md)) | out only |
+| `{"/": {"link@1": {…}}}` | the runtime's internal envelope | neither — internal form |
+
+Three ways to write "an address goes here," none of them agreeing, and only one
+accepted inbound. A consumer that renders with one and submits with another —
+which is what any caller reading a `$link` result and calling a verb would do —
+has no route that works.
+
+## What this costs today, measured
+
+Not "you cannot do this yet." The boundary **accepts a wrong payload and stores
+the wrong thing.**
+
+Declaring a reference on an event and calling it three ways:
+
+| Payload | Result |
+| --- | --- |
+| `{"on": "fid1:…"}` | rejected — *value does not match type object* |
+| the runtime link envelope | rejected — *missing required property title* |
+| a literal shape-matching object | **accepted** |
+
+The accepted one settles, reports a plausible result, and stores a **detached
+copy inside the caller's own document**. The edge does not point at the target.
+Nothing reports an error. Measured addresses and reproduction:
+[#5560](https://github.com/commontoolsinc/labs/issues/5560).
+
+The verbs this reaches are not hypothetical. Every event field across the
+shipped patterns that declares a reference:
 
 ```text
 addPiece     Stream<{ piece: MentionablePiece }>
@@ -30,110 +82,66 @@ removeItem   Stream<{ item: ReadingItemPiece }>
 removeItem   Stream<{ item: TodoItem }>
 ```
 
-Eight of 238 verb declarations. The count is not the point — the **shape** is.
-Every one is *put this existing thing here* or *take this existing thing out*,
-which is precisely the class of operation that has to name something that
-already exists. None of them can be invoked by an agent, a script, or the CLI.
-
-The sharpest case is the root pattern's, since every space has one:
+Every one is *put this existing thing here* or *take this existing thing out* —
+the class of operation that must name something that already exists. The
+sharpest is the root pattern's, since every space has one:
 
 ```bash
 $ cf piece call --piece <root> addPiece '{"piece":"fid1:…"}'
 Invalid input for "addPiece": piece: value does not match type object
 ```
 
-`addPiece` on `packages/patterns/system/default-app.tsx` is how a piece is
-registered in a space. It is reachable from inside the runtime — `pieces.add`
-sends to exactly this stream — and unreachable through the verb surface.
-
-## This is a correctness defect, not a missing feature
-
-The boundary does not refuse an unusable payload. It accepts one and stores the
-wrong thing.
-
-Declaring `on: ItemOutput` on an event and calling it three ways:
-
-| Payload | Result |
-| --- | --- |
-| `{"on": "fid1:…"}` | rejected — *value does not match type object* |
-| the runtime link envelope | rejected — *missing required property title* |
-| a literal `ItemOutput`-shaped object | **accepted** |
-
-The accepted one settles, reports a plausible result, and stores a **detached
-copy inside the caller's own document**. The edge does not point at the target.
-Finishing the target would never unblock the blocked item, and nothing anywhere
-reports an error. Reproduction and measured addresses:
-[#5560](https://github.com/commontoolsinc/labs/issues/5560).
-
-So the status quo is not "you cannot do this yet." It is "the obvious attempt
-succeeds and writes a wrong graph."
-
-## What already exists
-
-Three of the four pieces are built. This is why the ask is small.
-
-**The author-facing spelling.** `Writable<T>` on an event field is how a
-reference position is declared, and shipped patterns use it — the list above is
-that spelling in production.
-
-**The runtime capability.** Those events carry live cells today. Piece
-registration in every space runs through `addPiece`, so references in event
-payloads are not novel; they are load-bearing.
-
-**The wire encoding.** A rendered address — `{ id, space, scope, path }` — is
-already what a `$link` read emits
-([shaped reads](shaped-reads-and-verb-results.md)). Accepting the same shape
-inbound makes an address round-trip, which is the property
-[CLI surface shape](cli-surface-shape.md) already states for commands: an
-address printed by one command is accepted by the next.
+`pieces.add` sends to that exact stream from inside the runtime. An LLM could
+invoke it. A webhook could not, and neither can the CLI.
 
 ## What is missing
 
-**The marker is dropped in emission.** An event field declared
+**Resolution at the shared boundary rather than in one consumer.**
+`traverseAndCellify` is the working reference implementation; what it needs is a
+home where every caller reaches it.
+
+**A marker in the emitted event schema.** An event field declared
 `Writable<ItemOutput>` emits as `{"$ref": "#/$defs/ItemOutput"}` with no
-`asCell` anywhere; an inline `Writable<{ title: string }>` disappears from the
-emitted properties entirely. Measured both ways. Nothing downstream can
-distinguish a reference position, because the emitted schema does not say there
-is one.
+`asCell`; an inline `Writable<{ title: string }>` disappears from the emitted
+properties entirely. Measured both ways. `llm-dialog` sidesteps this by
+resolving schema-blind — it cellifies any `@link` it finds — but a boundary with
+closed-world input validation cannot, because the gate has to know the position
+takes an address before it can accept one there.
 
-Everything else follows from that one omission:
-
-| Site | What it needs |
-| --- | --- |
-| handler-schema emission (`packages/ts-transformers/src/transformers/schema-injection.ts`) | carry the marker onto an event property declared `Writable<T>` |
-| verb input validation | accept an address at a marked position instead of validating structurally |
-| dispatch | resolve the address into a cell before the handler runs |
+*Whether resolution should stay schema-blind or become schema-directed is an
+implementation question this document does not settle.* Schema-blind is proven
+and simpler; schema-directed is checkable and refuses a typo. The answer decides
+whether the emission change is required or merely useful.
 
 ## Size
 
-**Medium.** The emission change is the bulk of it and lands in the same file
-that carries a verb's declared result, so whoever does one is in position to do
-the other. The validation and resolution changes are each small and have
-existing machinery to lean on — the runtime resolves links from addresses
-throughout.
+**Medium**, and smaller than it looks because the hard part is written. The
+emission change lands in
+`packages/ts-transformers/src/transformers/schema-injection.ts`, the same file
+that carries a verb's declared result. Resolution is a lift-and-share of
+existing, exercised code. Nothing durable is written, so it reverses by
+assignment rather than migration.
 
-Nothing durable is written and no baseline records it, so the change is
-reversible by assignment rather than migration.
-
-## The one decision that gates the shape
+## The decision that gates the shape
 
 **Is the argument path missing a reference vocabulary, or refusing one?**
 
-Accepting an address as an argument lets a caller aim a pattern at a cell the
-*caller* named, rather than one the pattern reached through its own inputs.
-That is a confinement question, and it belongs to whoever owns CFC rather than
-to the read model or the verb contract.
+Accepting an address lets a caller aim a pattern at a cell the *caller* named
+rather than one the pattern reached through its own inputs. That is a
+confinement question and belongs to whoever owns CFC.
 
-If references are excluded from the argument path deliberately, the answer is
-not this change — it is this change plus a rights check, which is a materially
-larger design with a different owner. **That question should be answered before
-the work starts**, because the two roads differ in kind and not only in effort.
+It is sharpened rather than answered by the LLM precedent: a model — the least
+trusted caller in the system — can already do this. Either that is a considered
+position and the same reasoning extends to other callers, or it is an
+inconsistency worth knowing about. Both readings argue for deciding it
+deliberately rather than leaving one door open and the rest shut by omission.
 
-No evidence was found either way: the emission drops the marker without a
-comment explaining whether that is deliberate.
+**This wants answering before the work starts.** If references are excluded
+deliberately, the answer is not this change but this change plus a rights
+check — a materially larger design with a different owner.
 
 ## What does not wait for that answer
 
-Refusing a structural copy where a reference is declared is correct under
-either road. It needs no new vocabulary, no wire format, and no decision about
-confinement — and it converts today's silent corruption into an error.
+Refusing a structural copy where a reference is declared is correct under either
+road. It needs no new vocabulary, no encoding decision, and no confinement
+ruling, and it converts today's silent corruption into an error.
