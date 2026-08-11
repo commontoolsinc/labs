@@ -9,12 +9,13 @@ import {
   friendlyError,
   github,
   multiSparkline,
+  SPARK_FADE,
   thin,
 } from "../lib.ts";
+import { themedChartSeries } from "../theme.ts";
 
 const MEMBERS_COLOR = "#58a6ff";
 const COLLABORATORS_COLOR = "#a371f7";
-const LINE_FADE = "#0e1915";
 
 const HISTORY_MAX_AGE_DAYS = 60;
 const PLOT_POINTS = 500;
@@ -172,29 +173,31 @@ export function createGithubMembers(): Tile {
         ? history.points[history.points.length - 1].t - history.points[0].t
         : 0;
       const plot = thin(history.points, PLOT_POINTS);
+      const membersSeries = themedChartSeries(MEMBERS_COLOR);
+      const collaboratorsSeries = themedChartSeries(COLLABORATORS_COLOR);
       const chart = multiSparkline(
         [
           {
             vals: plot.map((point) => point.members),
-            color: MEMBERS_COLOR,
+            ...membersSeries,
             label: String(members),
           },
           {
             vals: plot.map((point) => point.collaborators),
-            color: COLLABORATORS_COLOR,
+            ...collaboratorsSeries,
             label: String(collaborators),
           },
         ],
-        { fadeFrom: LINE_FADE },
+        { fadeFrom: SPARK_FADE.good },
       );
       const swatch = (color: string) =>
         `<span class="swatch" style="background:${escapeHtml(color)}"></span>`;
       const subline = chart
-        ? `<p class="sub">${swatch(MEMBERS_COLOR)} members · ${
-          swatch(COLLABORATORS_COLOR)
+        ? `<p class="sub">${swatch(membersSeries.color)} members · ${
+          swatch(collaboratorsSeries.color)
         } collaborators</p>`
-        : `<p class="sub">${swatch(MEMBERS_COLOR)} members ${members} · ${
-          swatch(COLLABORATORS_COLOR)
+        : `<p class="sub">${swatch(membersSeries.color)} members ${members} · ${
+          swatch(collaboratorsSeries.color)
         } collaborators ${collaborators}</p>`;
 
       return {

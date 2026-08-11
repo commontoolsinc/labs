@@ -37,10 +37,16 @@ import {
   GANTT_MAX_RUNS,
 } from "../ci-job-history.ts";
 import {
-  PERFORMANCE_PROGRESS_STYLES,
   PERFORMANCE_VIEW_STYLES,
   performanceViewNav,
 } from "../performance-views.ts";
+import {
+  CHART_HIGHLIGHT,
+  CHART_LINE,
+  DASHBOARD_THEME_CLIENT,
+  DASHBOARD_THEME_HEAD,
+  dashboardThemeToggle,
+} from "../theme.ts";
 
 const CIGANTT = fromFileUrl(
   new URL("../../../scripts/ci-gantt.ts", import.meta.url),
@@ -93,7 +99,7 @@ export async function renderGantt(
       "--limit",
       String(limit),
       "--theme",
-      "dark",
+      p.get("theme") === "light" ? "default" : "dark",
       "--out",
       out,
     ];
@@ -179,14 +185,17 @@ export function ciGanttPage(url: URL): string {
     stat,
   });
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CI run Gantt</title>
+${DASHBOARD_THEME_HEAD}
 <style>
   ${PERFORMANCE_VIEW_STYLES}
-  .imgwrap{background:#0c0d11;border:1px solid #23262d;border-radius:12px;padding:10px;overflow:auto;min-height:60px}
+  .imgwrap{background:var(--surface-deep);border:1px solid var(--border);border-radius:12px;padding:10px;overflow:auto;min-height:60px}
   #g{width:100%;height:auto;display:none}
 </style></head><body>
   <div class="top"><a class="back" href="/">← dashboard</a><b>Performance history</b><span>${
     escapeHtml(source.repo)
-  } · ${escapeHtml(source.workflow)} · scripts/ci-gantt.ts</span></div>
+  } · ${
+    escapeHtml(source.workflow)
+  } · scripts/ci-gantt.ts</span></div>
   ${viewNav}
   <div class="controls">
     <label class="field" for="repo">repository <select id="repo"><option value="labs"${
@@ -201,6 +210,8 @@ export function ciGanttPage(url: URL): string {
   ${ciFetchProgressPanel(undefined, { ariaLabel: "CI Gantt fetch progress" })}
   <div class="imgwrap"><img id="g" alt="CI Gantt chart"></div>
   <p class="note">Run, job, and step timings share the persistent server cache used by CI history. Regeneration reads cached past runs and fetches only missing runs or newer attempts.</p>
+${dashboardThemeToggle()}
+${DASHBOARD_THEME_CLIENT}
 <script>
   const $ = (id) => document.getElementById(id);
   const g = $('g'), fetchProgress = $('fetch-progress'), title = $('fetch-title'), total = $('fetch-total'), detail = $('fetch-detail'), bar = $('fetch-bar');
@@ -214,6 +225,7 @@ export function ciGanttPage(url: URL): string {
   }
   function imageUrl(){
     const p = parameters();
+    p.set('theme', document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
     p.set('t', Date.now());
     return '/bench/gantt.svg?' + p.toString();
   }
@@ -377,6 +389,7 @@ export function ciGanttPage(url: URL): string {
   $('limit').addEventListener('input', () => { $('limitv').textContent = $('limit').value; });
   $('limit').addEventListener('change', regen);
   ['mainOnly','allConcl'].forEach((id) => $(id).addEventListener('change', regen));
+  addEventListener('dashboardthemechange', regen);
   regen();
   setInterval(() => {
     if (document.visibilityState === 'visible') regen();
@@ -439,6 +452,7 @@ export function ciCommitGanttPage(url: URL): string {
   const chart = document.getElementById('g');
   let collectionWarning = '';
   let chartSettled = false;
+  let chartLoad = 0;
   const stream = new EventSource(${JSON.stringify(progressUrl)});
   const idle = (message, warning = '', error = false) => {
     fetchProgress.classList.remove('error', 'warning');
@@ -496,9 +510,11 @@ export function ciCommitGanttPage(url: URL): string {
     idle('Progress connection closed; collection continues on the server.', '', true);
   };
   let chartSrc = '';
-  fetch(${
-      JSON.stringify(imageUrl)
-    }, { cache: 'no-store' }).then(async (response) => {
+  const loadChart = () => {
+    const load = ++chartLoad;
+    const url = new URL(${JSON.stringify(imageUrl)}, location.href);
+    url.searchParams.set('theme', document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
+    fetch(url, { cache: 'no-store' }).then(async (response) => {
     if (!response.ok) throw new Error((await response.text()).trim());
     const src = URL.createObjectURL(await response.blob());
     return await new Promise((resolve, reject) => {
@@ -510,20 +526,26 @@ export function ciCommitGanttPage(url: URL): string {
       };
       image.src = src;
     });
-  }).then((src) => {
+    }).then((src) => {
+    if (load !== chartLoad) { URL.revokeObjectURL(src); return; }
     chartSettled = true;
     stream.close();
+    if (chartSrc) URL.revokeObjectURL(chartSrc);
     chartSrc = src;
     chart.src = src;
     chart.style.display = 'block';
     idle('Chart includes ${runCount} successful run${
       runCount === 1 ? "" : "s"
     } for this commit.', collectionWarning);
-  }).catch((error) => {
+    }).catch((error) => {
+    if (load !== chartLoad) return;
     chartSettled = true;
     stream.close();
     idle('Last collection stopped: ' + (error.message || 'failed to generate chart'), '', true);
-  });
+    });
+  };
+  addEventListener('dashboardthemechange', loadChart);
+  loadChart();
   window.addEventListener('pagehide', () => {
     stream.close();
     if (chartSrc) URL.revokeObjectURL(chartSrc);
@@ -533,34 +555,40 @@ export function ciCommitGanttPage(url: URL): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CI Gantt · ${
     escapeHtml(shortSha)
   }</title>
+${DASHBOARD_THEME_HEAD}
 <style>
-  body{margin:0;background:#0d0e11;color:#e7e9ee;font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:18px 20px 26px;max-width:1400px;margin:0 auto}
+  ${PERFORMANCE_VIEW_STYLES}
+  body{max-width:1400px}
   .top{display:flex;align-items:baseline;gap:10px;margin-bottom:14px;flex-wrap:wrap}
-  .top b{font-size:16px;font-weight:600}.top span{font-size:12px;color:#6f757f}
-  a{color:#6ea8fe;text-decoration:none}.back{font-size:13px}.commit{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-  ${PERFORMANCE_PROGRESS_STYLES}
-  .imgwrap{background:#0c0d11;border:1px solid #23262d;border-radius:12px;padding:10px;overflow:auto;min-height:60px}
+  a{color:var(--accent);text-decoration:none}.back{font-size:13px}.commit{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .imgwrap{background:var(--surface-deep);border:1px solid var(--border);border-radius:12px;padding:10px;overflow:auto;min-height:60px}
   #g{width:100%;height:auto;display:none}
-  .empty{background:#16181d;border:1px solid #2f333c;border-radius:12px;padding:18px;color:#9aa0ab}
+  .empty{background:var(--surface);border:1px solid var(--border-strong);border-radius:12px;padding:18px;color:var(--text-muted)}
 </style></head><body>
   <div class="top"><a class="back" href="/">← dashboard</a><b>CI Gantt</b><span>${
     escapeHtml(source.repo)
   } · <a class="commit" href="${
     escapeHtml(commitUrl)
-  }" target="_blank" rel="noopener">${escapeHtml(shortSha)} ↗</a></span></div>
+  }" target="_blank" rel="noopener">${
+    escapeHtml(shortSha)
+  } ↗</a></span></div>
   ${
     ciFetchProgressPanel(undefined, {
       ariaLabel: "Commit CI Gantt fetch progress",
     })
   }
   ${chart}
+  ${dashboardThemeToggle()}
+  ${DASHBOARD_THEME_CLIENT}
   ${script}
 </body></html>`;
 }
 
-function commitGanttUrl(url: URL): URL | null {
+export function commitGanttUrl(url: URL): URL | null {
   const parameters = commitGanttParameters(url);
   if (!parameters) return null;
+  const theme = url.searchParams.get("theme");
+  if (theme === "dark" || theme === "light") parameters.set("theme", theme);
   const normalized = new URL(url);
   normalized.search = parameters.toString();
   return normalized;
@@ -713,9 +741,9 @@ function makeCiDuration(
         sub: usingTime
           ? `median · ${window.length} passing runs in the last ${DUR_MAX_AGE_HOURS}h`
           : `median · last ${window.length} passing runs`,
-        extra: sparkline(series, "#727882", {
+        extra: sparkline(series, CHART_LINE, {
           count: window.length,
-          color: "#c7ccd4",
+          color: CHART_HIGHLIGHT,
         }, SPARK_FADE[s]),
         duration: spanMs,
         href: opts.href,

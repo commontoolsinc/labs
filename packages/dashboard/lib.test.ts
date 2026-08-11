@@ -303,6 +303,18 @@ Deno.test("multiSparkline: highlight redraws the trailing slice in a lighter tin
   assertEquals([...plain.matchAll(/<polyline/g)].length, 1);
 });
 
+Deno.test("multiSparkline: a series can supply a theme-aware highlight", () => {
+  const svg = multiSparkline(
+    [{
+      vals: [1, 2, 3],
+      color: "light-dark(#07523f,#10a37f)",
+      highlightColor: "light-dark(#063e30,#a0dcca)",
+    }],
+    { highlight: { count: 2 } },
+  );
+  assert(svg.includes('stroke="light-dark(#063e30,#a0dcca)"'));
+});
+
 Deno.test("a slice covering the whole series leaves the line in its own color", () => {
   // A window at least as long as the series marks nothing off, so drawing it would
   // repaint the whole line in the tint and lose the line's own color.

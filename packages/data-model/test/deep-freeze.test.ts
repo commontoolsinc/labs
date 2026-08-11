@@ -10,7 +10,7 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 
 describe("deep-freeze", () => {
-  describe("isDeepFrozen", () => {
+  describe("isDeepFrozen()", () => {
     describe("primitives", () => {
       it("returns `true` for `null`", () => {
         expect(isDeepFrozen(null)).toBe(true);

@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import type { IncrementalHasher } from "@/interface.ts";
 
@@ -35,7 +36,7 @@ export abstract class BaseIncrementalHasher implements IncrementalHasher {
         return result;
       }
       default: {
-        throw new Error(`Unknown encoding: \`${encoding}\``);
+        throw new Error(`Unknown encoding: ${backtickQuote(encoding)}`);
       }
     }
   }

@@ -46,7 +46,7 @@ describe("FabricEpochNsec", () => {
         expect(sn.value).toBe(-1000000000n);
       });
 
-      it("handles a large future date (year 3000)", () => {
+      it("returns the value it was given for a year-3000 timestamp", () => {
         const nsec = 32503680000000000000n;
         const sn = new FabricEpochNsec(nsec);
         expect(sn.value).toBe(nsec);

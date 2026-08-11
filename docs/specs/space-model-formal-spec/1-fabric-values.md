@@ -1417,6 +1417,11 @@ lifecycle symbols live on the implementation base class `BaseFabricInstance`
 (Section 2.3), kept off the pure-protocol `FabricInstance` interface as
 implementation plumbing.
 
+Each is a genuinely unique symbol rather than a registry-interned one, so a
+member keyed by it is reachable only by importing the symbol. The string passed
+to `Symbol()` is a description, for debugging; it is not a key anything can look
+the symbol up by.
+
 ```typescript
 // file: packages/data-model/codec-common/interface.ts
 
@@ -1425,7 +1430,7 @@ implementation plumbing.
  * A class hosts its serialization codec as a static getter keyed by this
  * symbol (see Section 2.4).
  */
-export const CODEC: unique symbol = Symbol.for('data-model.codec');
+export const CODEC: unique symbol = Symbol('data-model.codec');
 ```
 
 ```typescript
@@ -1437,7 +1442,7 @@ export const CODEC: unique symbol = Symbol.for('data-model.codec');
  * into any nested `FabricValue`s via a `subFreeze` callback supplied by the
  * generic `deepFreeze()` utility. See Section 8.6.
  */
-export const DEEP_FREEZE = Symbol.for('data-model.deepFreeze');
+export const DEEP_FREEZE: unique symbol = Symbol('data-model.deepFreeze');
 
 /**
  * Well-known symbol for checking whether a fabric instance is already
@@ -1447,7 +1452,7 @@ export const DEEP_FREEZE = Symbol.for('data-model.deepFreeze');
  * via a `subIsDeepFrozen` callback, returning the boolean conjunction.
  * See Section 8.6.
  */
-export const IS_DEEP_FROZEN = Symbol.for('data-model.isDeepFrozen');
+export const IS_DEEP_FROZEN: unique symbol = Symbol('data-model.isDeepFrozen');
 
 /**
  * Well-known symbol for the **internal** shallow-clone hook: a `protected`
@@ -1458,9 +1463,12 @@ export const IS_DEEP_FROZEN = Symbol.for('data-model.isDeepFrozen');
  * `shallowClone()` template method on `BaseFabricInstance` is its only caller
  * (Section 2.3).
  */
-export const SHALLOW_UNFROZEN_CLONE = Symbol.for('data-model.shallowUnfrozenClone');
+export const SHALLOW_UNFROZEN_CLONE: unique symbol = Symbol(
+  'data-model.shallowUnfrozenClone',
+);
 
-// Protocol evolution: Symbol.for('data-model.codec@2'), etc.
+// Protocol evolution: a further exported symbol, e.g.
+// `Symbol('data-model.codec@2')`.
 ```
 
 ### 2.3 Instance Protocol

@@ -20,7 +20,7 @@ describe("frozen-builtins", () => {
       expect(Object.isFrozen(fm)).toBe(true);
     });
 
-    it("supports read operations", () => {
+    it("reads back what it was constructed with", () => {
       const fm = new FrozenMap<string, number>([["a", 1], ["b", 2]]);
       expect(fm.size).toBe(2);
       expect(fm.get("a")).toBe(1);
@@ -48,13 +48,13 @@ describe("frozen-builtins", () => {
       expect(() => fm.clear()).toThrow("Cannot mutate a `FrozenMap`");
     });
 
-    it("rejects intrinsic `Map` mutators", () => {
+    it("throws from the intrinsic `Map` mutators", () => {
       const fm = new FrozenMap<string, number>([["a", 1]]);
       expect(() => Map.prototype.set.call(fm, "b", 2)).toThrow();
       expect(fm.has("b")).toBe(false);
     });
 
-    it("rejects a receiver that has no backing store", () => {
+    it("throws for a receiver that has no backing store", () => {
       const foreign = Object.create(FrozenMap.prototype) as FrozenMap<
         string,
         number
@@ -113,24 +113,24 @@ describe("frozen-builtins", () => {
       expect(fm.has("b")).toBe(false);
     });
 
-    it("supports forEach iteration", () => {
+    it("visits every entry in order under `forEach()`", () => {
       const fm = new FrozenMap([["x", 10], ["y", 20]]);
       const entries: [string, number][] = [];
       fm.forEach((v, k) => entries.push([k, v]));
       expect(entries).toEqual([["x", 10], ["y", 20]]);
     });
 
-    it("supports empty construction", () => {
+    it("has a size of `0` when constructed with no argument", () => {
       const fm = new FrozenMap();
       expect(fm.size).toBe(0);
     });
 
-    it("supports `null` entries argument", () => {
+    it("has a size of `0` when constructed with `null`", () => {
       const fm = new FrozenMap(null);
       expect(fm.size).toBe(0);
     });
 
-    it("rejects builder writes after `finish()`", () => {
+    it("throws on a builder write after `finish()`", () => {
       const builder = FrozenMap.createBuilder<string, number>();
       builder.set("a", 1);
 
@@ -194,7 +194,7 @@ describe("frozen-builtins", () => {
       expect(Object.isFrozen(fs)).toBe(true);
     });
 
-    it("supports read operations", () => {
+    it("reads back what it was constructed with", () => {
       const fs = new FrozenSet<number>([1, 2, 3]);
       expect(fs.size).toBe(3);
       expect(fs.has(1)).toBe(true);
@@ -217,13 +217,13 @@ describe("frozen-builtins", () => {
       expect(() => fs.clear()).toThrow("Cannot mutate a `FrozenSet`");
     });
 
-    it("rejects intrinsic `Set` mutators", () => {
+    it("throws from the intrinsic `Set` mutators", () => {
       const fs = new FrozenSet<number>([1]);
       expect(() => Set.prototype.add.call(fs, 2)).toThrow();
       expect(fs.has(2)).toBe(false);
     });
 
-    it("rejects a receiver that has no backing store", () => {
+    it("throws for a receiver that has no backing store", () => {
       const foreign = Object.create(FrozenSet.prototype) as FrozenSet<number>;
 
       expect(() => foreign.has(1)).toThrow("Incompatible `FrozenSet` receiver");
@@ -253,24 +253,24 @@ describe("frozen-builtins", () => {
       expect([...fs.keys()]).toEqual([1, 2]);
     });
 
-    it("supports forEach iteration", () => {
+    it("visits every element in order under `forEach()`", () => {
       const fs = new FrozenSet([10, 20, 30]);
       const values: number[] = [];
       fs.forEach((v) => values.push(v));
       expect(values).toEqual([10, 20, 30]);
     });
 
-    it("supports empty construction", () => {
+    it("has a size of `0` when constructed with no argument", () => {
       const fs = new FrozenSet();
       expect(fs.size).toBe(0);
     });
 
-    it("supports `null` values argument", () => {
+    it("has a size of `0` when constructed with `null`", () => {
       const fs = new FrozenSet(null);
       expect(fs.size).toBe(0);
     });
 
-    it("rejects builder writes after `finish()`", () => {
+    it("throws on a builder write after `finish()`", () => {
       const builder = FrozenSet.createBuilder<number>();
       builder.add(1);
 
@@ -330,7 +330,7 @@ describe("frozen-builtins", () => {
         expect([...result]).toEqual([1, 2, 3]);
       });
 
-      it("handles an empty operand on both sides", () => {
+      it("computes set algebra with an empty operand on either side", () => {
         const empty = new FrozenSet<number>();
 
         expect([...empty.union(new Set([1]))]).toEqual([1]);

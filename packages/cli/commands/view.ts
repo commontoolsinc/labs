@@ -13,6 +13,9 @@ uses, so blocks, closures, schemas, type positions and Common Fabric builders
 Markdown, JSON, JSONC, YAML and Python files use syntax highlighting selected
 from language metadata. Python interpreter shebangs select Python. Node, Deno
 and Bun shebangs select the TypeScript and JavaScript language family.
+Known binary filenames, NUL-containing input and invalid UTF-8 select the binary
+language. Its rendered view is a read-only hex dump with control pictures for
+bytes that have no printable ASCII character.
 Filename-free compiler output keeps TypeScript highlighting when its
 transformed-module header identifies it. Other unnamed source and named files
 with unrecognized syntax remain plain text. Piped source can select syntax
@@ -24,11 +27,11 @@ Source views remain verbatim and add colour only.
 
 Raw unified diffs are detected automatically when their structural header is
 the first nonblank line. Standard Git commit output is detected from its complete
-header. Other source content is not used to guess a language. Piping 'git diff'
-in gives added and removed lines their tints, full syntax colour, a structure
-tree of the code each hunk touches, and the semantic features (inferred types,
-go-to-definition) answered against the CURRENT state of the workspace files the
-diff names.
+header. Binary detection examines bytes; other source content is not used to
+guess a language. Piping 'git diff' in gives added and removed lines their
+tints, full syntax colour, a structure tree of the code each hunk touches, and
+the semantic features (inferred types, go-to-definition) answered against the
+CURRENT state of the workspace files the diff names.
 
 COMMON USAGE:
   cf check ./pattern.tsx --show-transformed --no-run | cf view
