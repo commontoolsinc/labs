@@ -18,7 +18,7 @@ import {
   type FabricCodec,
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
-import { JSON_CODEC } from "./BaseFabricPrimitive.ts";
+import { JSON_CODEC } from "@/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 

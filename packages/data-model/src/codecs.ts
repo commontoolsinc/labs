@@ -15,14 +15,13 @@
 import { isInstance } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "./fabric-value.ts";
-import { CODEC, type ReconstructionContext } from "./codec-common/interface.ts";
-import { JSON_CODEC } from "./fabric-primitives/BaseFabricPrimitive.ts";
+import type { ReconstructionContext } from "./codec-common/interface.ts";
 import { EmptyReconstructionContext } from "./codec-common/EmptyReconstructionContext.ts";
 import type { CodecRegistry } from "./codec-common/CodecRegistry.ts";
 import { JsonCodec } from "./codec-json/JsonCodec.ts";
 import { createBaseJsonRegistry } from "./codec-json/createBaseJsonRegistry.ts";
-import { codecClasses as primitiveCodecClasses } from "./fabric-primitives/index.ts";
-import { codecClasses as instanceCodecClasses } from "./fabric-instances/index.ts";
+import { jsonCodecs as primitiveJsonCodecs } from "./fabric-primitives/index.ts";
+import { codecs as instanceCodecs } from "./fabric-instances/index.ts";
 
 /**
  * Creates a registry pairing the JSON format with the fabric classes this
@@ -44,8 +43,8 @@ import { codecClasses as instanceCodecClasses } from "./fabric-instances/index.t
  */
 export function createDefaultJsonRegistry(): CodecRegistry {
   return createBaseJsonRegistry().extend([
-    ...primitiveCodecClasses().map((cls) => cls[JSON_CODEC]),
-    ...instanceCodecClasses().map((cls) => cls[CODEC]),
+    ...primitiveJsonCodecs(),
+    ...instanceCodecs(),
   ]);
 }
 

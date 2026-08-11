@@ -15,6 +15,7 @@ import {
 // that cycle fails with "Cannot access 'BaseFabricInstance' before
 // initialization". `codecOf.ts` itself is a leaf.
 import { codecOf } from "@/codec-common/codecOf.ts";
+import { JSON_CODEC } from "@/interface.ts";
 
 /**
  * Sentinel marker used to wrap content that should appear unquoted in the
@@ -154,10 +155,11 @@ class DebugStringifier {
           // some of the instance's actual state instead of an opaque `(...)`.
           let fullTag;
           try {
-            // A `FabricPrimitive` binds no `[CODEC]` -- its codec is bound
-            // per wire format -- so this throws for one, and the `catch`
-            // below lands it on the class name.
-            fullTag = codecOf(value).tagForValue(value);
+            // A `FabricPrimitive` binds no `[CODEC]`, so its JSON codec
+            // stands in for the tag. That is a borrowed answer -- a rendering
+            // has no reason to look JSON-ish -- and becomes the right one
+            // once primitives carry a codec bound for debug output.
+            fullTag = codecOf(value, JSON_CODEC).tagForValue(value);
           } catch {
             // Never let the debug formatter throw; fall back to the class name.
             fullTag = className;

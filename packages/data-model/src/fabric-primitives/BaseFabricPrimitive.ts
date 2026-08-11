@@ -1,5 +1,5 @@
 import type { FabricCodec } from "@/codec-common/interface.ts";
-import { FabricPrimitive } from "@/interface.ts";
+import { FabricPrimitive, JSON_CODEC } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 
 /**
@@ -20,33 +20,10 @@ export const EXAMPLE_METHOD: unique symbol = Symbol(
 );
 
 /**
- * Well-known symbol for binding the static getter
- * `FabricPrimitiveClassWithJsonCodec[JSON_CODEC]`.
- *
- * A `FabricPrimitive`'s codec is bound per wire format, not once for all of
- * them, because a primitive's codec _terminates_ an encoding rather than
- * decomposing a value for someone else to finish: `FabricBytes` encodes to a
- * base64url string, which is JSON's answer and nobody else's. A format that
- * carries bytes natively wants a different codec, or none, and says so by
- * looking up a different symbol.
- *
- * That is what separates these from a `FabricInstance`'s codec, which is bound
- * to the generic `[CODEC]`: an instance's codec only decomposes an instance
- * into other `FabricValue`s and leaves every terminal decision to whatever is
- * walking the result, so one binding serves every format.
- *
- * The symbol lives here rather than with the format that consumes it, so that
- * `fabric-primitives` need not depend on `codec-json`. Reading it the other
- * way round: this class declares the codec slots its subclasses may fill, and
- * a slot is class-side vocabulary.
- */
-export const JSON_CODEC: unique symbol = Symbol("data-model.jsonCodec");
-
-/**
  * Interface for `FabricPrimitive` classes that provide a codec for the JSON
  * wire format, guaranteed to operate on instances of the class.
  */
-export interface FabricPrimitiveClassWithJsonCodec {
+export interface FabricClassWithJsonCodec {
   /** The JSON codec to use for instances of this class. */
   get [JSON_CODEC](): FabricCodec;
 }

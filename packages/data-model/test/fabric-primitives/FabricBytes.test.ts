@@ -1,4 +1,4 @@
-import { JSON_CODEC } from "@/fabric-primitives/BaseFabricPrimitive.ts";
+import { JSON_CODEC } from "@/interface.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
