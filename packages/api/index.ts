@@ -757,13 +757,12 @@ export interface IKeyable<out T, Wrap extends HKT> {
   /**
    * Navigate to nested properties by one or more keys.
    *
-   * Overloads to avoid recursive type evaluation which causes stack overflow.
-   *
    * @example
    * cell.key("user")                      // Cell<User>
    * cell.key("user", "profile")           // Cell<Profile>
    * cell.key("user", "profile", "name")   // Cell<string>
    */
+  // Overloads to avoid recursive type evaluation which causes stack overflow
   // Zero keys
   key(this: IsThisObject): Apply<Wrap, T>;
   // One key
@@ -983,9 +982,8 @@ export type KeyResultTypeOpaque<
 export interface IKeyableOpaque<T> {
   /**
    * Navigate to nested properties by one or more keys.
-   *
-   * Overloads to avoid recursive type evaluation which causes stack overflow.
    */
+  // Overloads to avoid recursive type evaluation which causes stack overflow
   key(this: IsThisObject): OpaqueCell<T>;
   key<K1 extends keyof UnwrapCell<T>>(
     this: IsThisObject,
