@@ -15,7 +15,12 @@ describes the agent runtime used by the operation.
 
 Design. Labs contains the agent harness, authoring guidance, source lifecycle,
 and source replacement machinery needed by this design. It does not yet expose
-a hosted authoring service or the product entry points specified here.
+a hosted authoring service or the product entry points specified here. Local
+`cf piece new` and `cf piece setsrc` now accept repeatable `--test` entries,
+package and type-check those tests, and retain them as source roots. FUSE source
+writeback preserves the attached roots. Those are foundations for the test
+retention contract below, but they do not run the tests or provide the complete
+authored-program manifest still required by the piece source lifecycle.
 
 ## Last updated
 
@@ -54,6 +59,14 @@ absence of the operation is not mistaken for a permissions or loading failure.
 The piece identity is taken from the menu context. The person does not type or
 paste it into the request. This keeps authority over the target outside the
 model's text.
+
+The target is the same whole piece that the existing context menu resolves. A
+right-click inside nested rendered pieces selects the innermost piece boundary,
+not the outer container. A renderer showing a field inside a piece does not
+become a piece target. If the renderer disconnects or changes its target before
+submission, the menu closes instead of submitting the stale selection. Once a
+session starts, its canonical target remains fixed even if that renderer later
+changes.
 
 Submitting starts an existing-piece authoring session. The form changes to a
 session view that shows the current activity, verification results, final
@@ -193,10 +206,17 @@ Each request gets one persistent `cf-harness` session. The session has:
 - a writable candidate workspace;
 - the relevant current pattern source, if changing a piece;
 - Labs source and documentation mounted read-only;
-- the Pattern Factory build guide and the `cf` skill;
+- the general pattern-development and testing guidance and the current `cf`,
+  `pattern-dev`, `pattern-test`, and `pattern-deploy` skills;
 - `cf check`, `cf test`, and the other explicitly allowed development tools;
 - an isolated runtime target for checks that need a running piece;
 - no readable user key, provider credential, or publication credential.
+
+The current `cf`, `pattern-dev`, `pattern-test`, and `pattern-deploy` skills
+already tell an agent to run every authored test and attach every test entry to
+each source revision. The hosted adapter loads those live resources. It does
+not copy their command syntax into a separate prompt that can drift from the
+CLI.
 
 The authoring profile has no general outbound network access. Access to a
 model provider, local test runtime, browser lease, or approved fetch operation
@@ -229,6 +249,15 @@ therefore preserve the tests with the pattern. The runtime does not execute
 the test files as part of the deployed piece; the authoring verification gate
 runs them before publication.
 
+Current source packaging represents attached tests as additional source roots.
+The complete manifest records those entry paths and directly retains their
+files along with every other authored file and the public-subpath map. Hosted
+authoring supplies the full root set on every create or update, just as the CLI
+requires every `--test` entry on each `piece new` or `piece setsrc`. It never
+treats `sourceRoots` or the reachable source closure as a substitute for the
+complete manifest. The service does not invoke those CLI commands to publish,
+but it uses the same program and source-lifecycle representation beneath them.
+
 An edit starts from the complete retained manifest. The candidate preserves
 every existing test file unless the agent deliberately deletes or replaces it
 and records that change in the final report. Publication never constructs a
@@ -248,36 +277,15 @@ The service records the request, session events, tool results, candidate
 artifacts, and final result so a failed or interrupted session can be inspected
 without relying on the model's last message.
 
-### Developer-tooling feedback
+### Developer-tooling feedback follow-up
 
-The session tool set includes `report_developer_tooling_need`. The agent uses
-it whenever a missing or defective development capability makes the work
-slower, less reliable, or impossible. Reports can cover compiler bugs or poor
-diagnostics, missing `cf` behavior, missing Unix tools, documentation gaps,
-sandbox restrictions, browser tooling, or any other obstacle to producing a
-good pattern.
-
-A report contains a category, short summary, impact, expected behavior, and
-the smallest useful evidence. The service adds the authoring session,
-environment versions, and relevant tool invocation identifiers. The full
-local artifact receives the combined CFC labels of the request, evidence, tool
-results, and session context. The person can see it through the same
-CFC-checked session access as other authoring artifacts.
-
-Automatic submission to the developer-tooling triage sink uses a bounded
-projection made by trusted code. It can contain only enumerated category and
-impact values, tool and environment versions, and stable diagnostic codes. It
-cannot contain model-authored free text, source, request text, paths, session
-or piece identifiers, commands, arguments, or raw results. The projection must
-also pass its CFC flow check. Sending the full report or other free text
-requires an authorized person to review and explicitly release it through the
-ordinary declassification path. A report that cannot be exported remains with
-the session and is marked as not exported.
-
-The tool does not install software, grant a capability, change the sandbox, or
-waive a verification gate. The agent continues with available tools when it
-can. If the missing capability blocks completion, the failed result references
-the feedback report.
+The authoring environment should eventually let its agent report compiler
+bugs, poor diagnostics, missing `cf` behavior, missing Unix tools,
+documentation gaps, sandbox restrictions, browser-tooling gaps, and anything
+else it lacks to do good work. This is independent of changing or publishing a
+pattern. The separate
+[developer-tooling feedback plan](../plans/hosted-pattern-authoring-tooling-feedback.md)
+defines the proposed `report_developer_tooling_need` tool and its CFC boundary.
 
 ## Publication
 
@@ -420,9 +428,6 @@ The feature is complete when automated tests prove all of the following:
   receive the same event and result shapes as their browser counterparts.
 - The piece and Home session views show durable authoring progress as it
   arrives without exposing private model reasoning.
-- A developer-tooling report records useful evidence and grants no new
-  authority. Its full artifact retains the evidence labels, and only the
-  bounded projection reaches the triage sink without explicit human release.
 - A request or observed source that names another target cannot redirect
   publication.
 - The model cannot read caller or provider credentials.
@@ -440,3 +445,7 @@ authoring phases, automatic merging after a concurrent edit, automatic
 repository tracking, scheduled self-improvement, or model-approved schema
 incompatibility. These can be proposed separately if evidence from the single
 session flow shows they are needed.
+
+The developer-tooling feedback follow-up improves the environment without
+changing the authoring or publication steel thread. Its separate plan is linked
+above.

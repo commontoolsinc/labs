@@ -36,7 +36,9 @@ land. Existing-piece or new-space publication cannot ship until:
   available to the ordinary creation path.
 
 Add focused lifecycle tests for those capabilities instead of reproducing them
-inside the authoring service.
+inside the authoring service. Repeatable `--test` packaging and FUSE preservation
+of attached `sourceRoots` are already implemented. Reuse that foundation; it is
+not a replacement for the complete manifest prerequisite.
 
 ## Stage 1: shared service contract
 
@@ -66,40 +68,36 @@ and recovered after a service restart. No stage can publish source yet.
 ## Stage 2: one autonomous harness session
 
 - [ ] Add a hosted-authoring adapter for `cf-harness`.
+- [ ] Use `cf-harness` capability discovery and configuration validation for
+  the selected run profile. Establish provider availability through the
+  session's selected provider request and record any failure on that session;
+  do not probe unrelated configured models.
 - [ ] Create a writable workspace containing the candidate and a read-only
   mount containing the selected Labs source and documentation.
 - [ ] For an existing piece, materialize the exact retained authored source and
   record the expected source revision. Fail before model invocation when exact
   source is unavailable.
-- [ ] Give the session the Pattern Factory build guide, `cf` skill, and only the
-  development tools needed to inspect, edit, compile, test, and perform allowed
-  runtime checks.
+- [ ] Give the session the general pattern-development and testing guidance,
+  the current `cf`, `pattern-dev`, `pattern-test`, and `pattern-deploy` skills,
+  and only the development tools needed to inspect, edit, compile, test, and
+  perform allowed runtime checks.
+- [ ] Load current authoring and deployment skill resources at session start.
+  Do not duplicate their `cf test` or test-attachment command syntax in the
+  adapter prompt.
 - [ ] Instruct the agent to add or update focused pattern tests for behavior it
   changes. Require an explicit evidence-based explanation when a behavior
   cannot usefully be covered by a pattern test.
 - [ ] Include every authored test file in the complete authored-program
   manifest so source retrieval, history, and revert preserve it with the
   pattern even when it is outside the runtime import graph.
+- [ ] Carry the complete test-entry set from the existing `sourceRoots`
+  packaging path into complete-manifest construction on every candidate create
+  or update. Never publish from `sourceRoots` or a reachable closure alone. Add
+  an integration test equivalent to repeatable CLI `--test` flags and to FUSE
+  root preservation.
 - [ ] Build an edit candidate from the complete predecessor manifest. Preserve
   unchanged test files and require the final report to name deliberate test
   deletion or replacement.
-- [ ] Add `report_developer_tooling_need` as a mediated harness tool. Accept a
-  category, summary, impact, expected behavior, and minimal evidence, then add
-  session and environment context outside the model.
-- [ ] Store each full tooling report as a durable session artifact carrying the
-  combined labels of its request, evidence, tool results, and session context.
-- [ ] Define a trusted export projection limited to enumerated category and
-  impact values, tool and environment versions, and stable diagnostic codes.
-  Reject free text, source, request text, paths, identifiers, commands,
-  arguments, and raw results from automatic export.
-- [ ] Send that bounded projection to the developer-tooling triage sink only
-  after its CFC flow check passes. Require an authorized person's explicit
-  declassification to send full reports or free text.
-- [ ] Prove the feedback tool cannot install software, expand the tool set,
-  alter the sandbox, publish source, or satisfy a verification gate.
-- [ ] Test that the local report retains sensitive labels, the automatic
-  projection rejects every disallowed field, and permitted diagnostic metadata
-  reaches the triage sink only after the CFC check passes.
 - [ ] Disable general outbound network access. Represent the model provider,
   local runtime, browser lease, and any approved fetch as separate mediated
   capabilities with fixed destinations.
@@ -155,6 +153,10 @@ once and every failure leaves it unchanged.
 ## Stage 4: existing-piece entry points
 
 - [ ] Add **Request a change** to the shared piece context menu.
+- [ ] Use the menu's existing nearest whole-piece resolution. Prove a request
+  from a nested piece targets that inner piece, a field-level renderer is not a
+  target, and a retargeted or disconnected renderer closes the unsubmitted
+  form.
 - [ ] Ask the service whether a complete retained authored program is available.
   Disable the menu item with an explanation when it is not.
 - [ ] Add the request form, durable progress view, verification result, failure
@@ -264,6 +266,10 @@ automatic repository following, scheduled source updates, automatic stale
 candidate merging, or an agent-controlled compatibility override. This plan
 can grow only when a concrete product requirement or measured failure of the
 single-session design requires one of those mechanisms.
+
+Developer-tooling feedback is tracked independently in
+[`hosted-pattern-authoring-tooling-feedback.md`](hosted-pattern-authoring-tooling-feedback.md).
+It does not block this plan.
 
 ## Required documentation updates while implementing
 
