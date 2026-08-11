@@ -1145,7 +1145,11 @@ function assertLiveDiffLineOffsets(
     );
     assert(!target.spans.some((span) => span.cls === "propertyName"));
 
-    source.save(edited, diff);
+    source.save(
+      edited,
+      source.lineEndingProvenance!(edited),
+      diff,
+    );
     const afterSave = highlighter.update(
       edited.replace("+  target: new", "+  target: newer"),
     );

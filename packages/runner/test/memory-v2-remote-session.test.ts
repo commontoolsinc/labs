@@ -17,8 +17,40 @@ import {
   toWebSocketAddress,
   WebSocketTransport,
 } from "../src/storage/v2-remote-session.ts";
+import { SpaceHostValidationError } from "../src/space-host.ts";
 import { StorageManager } from "../src/storage/v2.ts";
 import { TEST_HELLO_SESSION_OPEN } from "./memory-v2-test-utils.ts";
+
+function captureError(run: () => unknown): Error {
+  try {
+    run();
+  } catch (error) {
+    if (error instanceof Error) return error;
+    throw error;
+  }
+  throw new Error("Expected call to throw");
+}
+
+function expectSafeValidationCause(
+  error: Error,
+  secret: string,
+  message: string,
+): void {
+  expect(error.message).not.toContain(secret);
+  expect(error.cause).toBeInstanceOf(SpaceHostValidationError);
+  expect((error.cause as Error).message).toBe(message);
+  expect((error.cause as Error).message).not.toContain(secret);
+}
+
+function urlWithThrowingHref(cause: Error): URL {
+  const host = new URL("https://host-b.test/");
+  Object.defineProperty(host, "href", {
+    get() {
+      throw cause;
+    },
+  });
+  return host;
+}
 
 describe("memory v2 remote session websocket address", () => {
   it("upgrades http and https urls to websocket protocols", () => {
@@ -148,6 +180,73 @@ describe("per-space storage address resolution", () => {
         { [spaceB]: "ftp://host-b.test" },
       )
     ).toThrow(`Invalid spaceHostMap entry for ${spaceB}`);
+  });
+
+  it("rejects route components beyond the origin", () => {
+    for (
+      const host of [
+        "https://user@host-b.test/",
+        "https://host-b.test/api",
+        "https://host-b.test/api/..",
+        "https://host-b.test/?region=west",
+        "https://host-b.test/#primary",
+      ]
+    ) {
+      expect(() => storageAddressForHost(host)).toThrow();
+      expect(() =>
+        createStorageAddressResolver(
+          new URL("https://host-a.test"),
+          { [spaceB]: host },
+        )
+      ).toThrow(`Invalid spaceHostMap entry for ${spaceB}`);
+    }
+  });
+
+  it("preserves safe validation causes without repeating route secrets", () => {
+    const hosts = [
+      [
+        "https://user:storage-password-sentinel@host-b.test/",
+        "storage-password-sentinel",
+        "Space host must not include credentials",
+      ],
+      [
+        "https://host-b.test/?token=storage-query-sentinel",
+        "storage-query-sentinel",
+        "Space host must not include a query",
+      ],
+      [
+        "https://user:storage-parse-password-sentinel@[/",
+        "storage-parse-password-sentinel",
+        "Invalid space host URL",
+      ],
+    ] as const;
+    for (const [host, secret, message] of hosts) {
+      const error = captureError(() =>
+        createStorageAddressResolver(
+          new URL("https://host-a.test"),
+          { [spaceB]: host },
+        )
+      );
+      expectSafeValidationCause(error, secret, message);
+    }
+  });
+
+  it("propagates non-validation errors unchanged", () => {
+    for (
+      const cause of [
+        new Error("unexpected route read failure"),
+        new TypeError("unexpected route read type failure"),
+      ]
+    ) {
+      const host = urlWithThrowingHref(cause) as unknown as string;
+      const error = captureError(() =>
+        createStorageAddressResolver(
+          new URL("https://host-a.test"),
+          { [spaceB]: host },
+        )
+      );
+      expect(error).toBe(cause);
+    }
   });
 });
 
@@ -298,16 +397,54 @@ describe("StorageManager.registerSpaceHost", () => {
 
   it("rejects an unusable first hint without fixing the route", async () => {
     const manager = await makeManager();
-    expect(() =>
-      manager.registerSpaceHost(
-        spaceLearned,
+    for (
+      const host of [
         "mailto:memory@example.test",
-      )
-    ).toThrow(`Invalid host for space ${spaceLearned}`);
-    expect(() => manager.registerSpaceHost(spaceLearned, "wss://host-b.test"))
-      .toThrow(`Invalid host for space ${spaceLearned}`);
+        "wss://host-b.test",
+        "https://user@host-b.test/",
+        "https://host-b.test/api",
+        "https://host-b.test/%2e%2e/",
+        "https://host-b.test/?region=west",
+        "https://host-b.test/#primary",
+      ]
+    ) {
+      expect(() => manager.registerSpaceHost(spaceLearned, host))
+        .toThrow(`Invalid host for space ${spaceLearned}`);
+    }
     expect(manager.registerSpaceHost(spaceLearned, "https://host-b.test"))
       .toBe(true);
+  });
+
+  it("preserves safe live validation causes without repeating route secrets", async () => {
+    const manager = await makeManager();
+    try {
+      for (
+        const [host, secret, message] of [
+          [
+            "https://user:live-password-sentinel@host-b.test/",
+            "live-password-sentinel",
+            "Space host must not include credentials",
+          ],
+          [
+            "https://host-b.test/?token=live-query-sentinel",
+            "live-query-sentinel",
+            "Space host must not include a query",
+          ],
+          [
+            "https://user:live-parse-password-sentinel@[/",
+            "live-parse-password-sentinel",
+            "Invalid space host URL",
+          ],
+        ] as const
+      ) {
+        const error = captureError(() =>
+          manager.registerSpaceHost(spaceLearned, host)
+        );
+        expectSafeValidationCause(error, secret, message);
+      }
+    } finally {
+      await manager.closeNow();
+    }
   });
 });
 

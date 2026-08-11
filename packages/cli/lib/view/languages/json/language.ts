@@ -8,6 +8,7 @@
  * remapStructure} the TypeScript language also uses.
  */
 import type { Language } from "../language.ts";
+import { utf8Decoder } from "../decoder.ts";
 import { remapStructure } from "../../diffremap.ts";
 import {
   createJsonHighlighter,
@@ -17,6 +18,8 @@ import {
 
 export const jsonLanguage: Language = {
   id: "json",
+
+  input: { kind: "text", decoder: utf8Decoder },
 
   metadata: {
     extensions: [".json", ".jsonc"],

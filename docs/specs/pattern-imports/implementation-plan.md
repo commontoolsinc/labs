@@ -1191,8 +1191,9 @@ One integration test (runner-level, in-process, two "deploys"):
   data. A different-host hint can replace an operation that is waiting for a
   session. The route becomes fixed when the session accepts a stateful
   operation for issue, even if acknowledgement later fails. Initial site-table
-  hydration selects the last valid HTTP or HTTPS entry for each space without
-  replacing a route already accepted through IPC.
+  hydration selects the last entry for each space that contains only an HTTP or
+  HTTPS origin, with no credentials, path, query, or fragment. It does not
+  replace a route already accepted through IPC.
   A conflicting table route accepted first makes later IPC registration fail.
   Dynamic registration and site-table hydration exist as foundations, but
   import-resolver integration, host failure, and replacement of an explicit

@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import type {
   FabricRegExp as ApiFabricRegExp,
   FabricRegExpConstructor as ApiFabricRegExpConstructor,
@@ -121,7 +122,9 @@ export class FabricRegExp extends BaseFabricPrimitive
   get value(): RegExp {
     if (this.#value === undefined) {
       throw new Error(
-        `Cannot represent flavor \`${this.#flavor}\` as a native \`RegExp\`.`,
+        `Cannot represent flavor ${
+          backtickQuote(this.#flavor)
+        } as a native \`RegExp\`.`,
       );
     }
     return new RegExp(this.#value);

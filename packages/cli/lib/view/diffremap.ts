@@ -25,6 +25,7 @@ export function remapStructure(ctx: HunkStructureContext): StructureNode[] {
     diffLineStarts: ctx.diffLineStarts,
     rawLines: ctx.rawLines,
     sourceLineStarts: ctx.sourceLineStarts,
+    sourceOmitsUtf8Bom: ctx.sourceOmitsUtf8Bom,
     definitions: ctx.definitions,
   };
   const out: StructureNode[] = [];
@@ -41,7 +42,19 @@ export interface RemapCtx {
   rawLines: string[];
   /** Line starts of the source text the nodes were parsed from. */
   sourceLineStarts: number[];
+  sourceOmitsUtf8Bom: boolean;
   definitions: Map<string, Definition[]>;
+}
+
+function codeStartCol(sourceLine: number, ctx: RemapCtx): number {
+  const diffLine = ctx.newToDiff.get(sourceLine);
+  const raw = diffLine === undefined ? "" : ctx.rawLines[diffLine] ?? "";
+  const markerWidth = raw.length === 0 ? 0 : 1;
+  const bomWidth = ctx.sourceOmitsUtf8Bom && sourceLine === 0 &&
+      raw[markerWidth] === "\uFEFF"
+    ? 1
+    : 0;
+  return markerWidth + bomWidth;
 }
 
 /** An object/array literal or one of its entries — a generic node the diff
@@ -98,12 +111,15 @@ export function remapNode(
 
   const startDiffLine = ctx.newToDiff.get(firstVisible)!;
   const endDiffLine = ctx.newToDiff.get(lastVisible)!;
-  // Columns: the marker occupies column 0, so code column c becomes c+1. A
-  // clamped boundary (the node's true start/end line is not visible) covers
-  // the whole shown line instead.
-  const startCol = firstVisible === node.startLine ? node.startCol + 1 : 1;
+  // Columns begin past the diff marker and any decoded BOM. A clamped boundary
+  // covers the whole source portion of the shown line.
+  const startCodeCol = codeStartCol(firstVisible, ctx);
+  const endCodeCol = codeStartCol(lastVisible, ctx);
+  const startCol = firstVisible === node.startLine
+    ? node.startCol + startCodeCol
+    : startCodeCol;
   const endCol = lastVisible === node.endLine
-    ? node.endCol + 1
+    ? node.endCol + endCodeCol
     : cpLen(ctx.rawLines[endDiffLine]);
   const startOffset = ctx.diffLineStarts[startDiffLine] +
     cpToUtf16(ctx.rawLines[startDiffLine], startCol);
@@ -203,7 +219,7 @@ function remapNameOffset(
   const diffLine = ctx.newToDiff.get(n);
   if (diffLine === undefined) return undefined;
   const col = node.nameOffset - ctx.sourceLineStarts[n]; // UTF-16 in the line
-  return ctx.diffLineStarts[diffLine] + 1 + col; // +1: the marker is 1 unit
+  return ctx.diffLineStarts[diffLine] + codeStartCol(n, ctx) + col;
 }
 
 /** UTF-16 index of code-point column `col` within `text`. */

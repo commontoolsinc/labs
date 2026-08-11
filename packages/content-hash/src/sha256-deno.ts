@@ -1,5 +1,6 @@
 /** Deno version of SHA256. */
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isDeno } from "@commonfabric/utils/env";
 import type { IncrementalHasher } from "@/interface.ts";
 import { BaseIncrementalHasher } from "@/BaseIncrementalHasher.ts";
@@ -52,7 +53,7 @@ class DenoHasher extends BaseIncrementalHasher {
         );
       }
       default: {
-        throw new Error(`Unknown encoding: \`${encoding}\``);
+        throw new Error(`Unknown encoding: ${backtickQuote(encoding)}`);
       }
     }
   }

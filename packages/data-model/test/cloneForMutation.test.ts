@@ -6,7 +6,7 @@ import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 
-describe("cloneForMutation", () => {
+describe("cloneForMutation()", () => {
   describe("empty path", () => {
     it("returns the root as mutable, plus identical `pathValue`", () => {
       const root = Object.freeze({ a: 1, b: 2 });
@@ -50,7 +50,7 @@ describe("cloneForMutation", () => {
       expect(Object.isFrozen(value)).toBe(false);
     });
 
-    it("handles an empty-path `FabricInstance` via `shallowClone(false)`", () => {
+    it("returns a thawed copy of an empty-path `FabricInstance`", () => {
       const err = FabricError.fromNativeError(new Error("test"));
       Object.freeze(err);
       const { value, pathValue } = cloneForMutation(
@@ -274,7 +274,7 @@ describe("cloneForMutation", () => {
   });
 
   describe("mutation through pathValue", () => {
-    it("supports array push without touching the input", () => {
+    it("leaves the input untouched when the clone's array is pushed to", () => {
       const notes = Object.freeze([{ id: 1 }, { id: 2 }]);
       const root = Object.freeze({ notes });
 
@@ -292,7 +292,7 @@ describe("cloneForMutation", () => {
       expect(notes.length).toBe(2);
     });
 
-    it("supports object property delete without touching the input", () => {
+    it("leaves the input untouched when a property is deleted from the clone", () => {
       const root = Object.freeze({
         keep: 1,
         drop: 2,

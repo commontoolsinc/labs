@@ -26,6 +26,7 @@ import {
   spendChart,
   summarizeDailySpend,
 } from "../spend.ts";
+import { themedChartSeries } from "../theme.ts";
 
 interface UsageItem {
   date: string;
@@ -443,7 +444,7 @@ export const githubCiSpend: Tile = {
       : blacksmithBudget;
     const budget = hasCombinedBudget ? combinedBudget : providerBudget;
     const swatch = (color: string) =>
-      `<span class="swatch" style="background:${color}"></span>`;
+      `<span class="swatch" style="background:${themedChartSeries(color).color}"></span>`;
     const legendItem = (
       configured: boolean,
       spend: DailySpend | null,

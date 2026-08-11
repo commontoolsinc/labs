@@ -16,7 +16,7 @@ import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
  * Distinct from `deepClone()`: `[DEEP_FREEZE]` freezes the existing instance
  * in place; `deepClone()` constructs a new instance.
  */
-export const DEEP_FREEZE: unique symbol = Symbol.for("data-model.deepFreeze");
+export const DEEP_FREEZE: unique symbol = Symbol("data-model.deepFreeze");
 
 /**
  * Well-known symbol for checking whether a fabric instance is already deeply
@@ -34,7 +34,7 @@ export const DEEP_FREEZE: unique symbol = Symbol.for("data-model.deepFreeze");
  * crash. (`[DEEP_FREEZE]` is a mutator and uses "death before confusion" on
  * a malformed internal slot; a status check must not.)
  */
-export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
+export const IS_DEEP_FROZEN: unique symbol = Symbol(
   "data-model.isDeepFrozen",
 );
 
@@ -46,7 +46,7 @@ export const IS_DEEP_FROZEN: unique symbol = Symbol.for(
  * `[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`), while `shallowClone()` stays a
  * regular-named client method.
  */
-export const SHALLOW_UNFROZEN_CLONE: unique symbol = Symbol.for(
+export const SHALLOW_UNFROZEN_CLONE: unique symbol = Symbol(
   "data-model.shallowUnfrozenClone",
 );
 
@@ -63,7 +63,7 @@ export const SHALLOW_UNFROZEN_CLONE: unique symbol = Symbol.for(
  * sharing" the `deepClone()` contract promises -- but must be force-copied
  * when `frozen` is `false`).
  */
-export const DEEP_CLONE_CORE: unique symbol = Symbol.for(
+export const DEEP_CLONE_CORE: unique symbol = Symbol(
   "data-model.deepCloneCore",
 );
 

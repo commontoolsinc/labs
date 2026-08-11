@@ -3,7 +3,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { type MemorySpace, type Signer } from "@commonfabric/memory/interface";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
-import { normalizeSpaceHost } from "../space-host.ts";
+import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 
 export interface SessionFactory {
   /** Opt in to StorageManager's ACL genesis handshake. Scripted factories used
@@ -44,7 +44,7 @@ export const toSpaceWebSocketAddress = (
 export const MEMORY_STORAGE_PATH = "/api/storage/memory";
 
 /**
- * Resolve a shared HTTP or HTTPS space host to the memory storage endpoint.
+ * Resolves a shared HTTP or HTTPS space host to the memory storage endpoint.
  * Space hosts also serve compute requests, so WebSocket-only URLs are not
  * valid routes.
  */
@@ -75,8 +75,8 @@ const storageAddressForMemoryHost = (host: URL): URL => {
 export const SESSION_OPEN_TTL_SECONDS = 300;
 
 /**
- * Build the per-space storage-endpoint resolver: a space present in
- * `spaceHostMap` resolves against that host's base URL, everything else
+ * Builds the per-space storage-endpoint resolver: a space present in
+ * `spaceHostMap` resolves against that host's origin, everything else
  * against `defaultHost`. Host selection lives here, next to the
  * websocket address builders, so the storage-endpoint join happens in
  * exactly one place.
@@ -89,8 +89,8 @@ export const createStorageAddressResolver = (
   defaultHost: URL,
   spaceHostMap?: Record<string, string>,
   /**
-   * Late-bound host hints mapping a space DID to a host base URL, learned at
-   * runtime, e.g. from the home-space site table. Consulted AFTER the
+   * Late-bound host hints mapping a space DID to an HTTP or HTTPS origin.
+   * Learned at runtime, e.g. from the home-space site table. Consulted AFTER the
    * seed map and BEFORE the default. The caller keeps the first accepted
    * hint stable, including after the space opens.
    */
@@ -98,14 +98,17 @@ export const createStorageAddressResolver = (
 ): (space: MemorySpace) => URL => {
   const overrides = new Map<string, URL>();
   for (const [space, host] of Object.entries(spaceHostMap ?? {})) {
+    let route: URL;
     try {
-      overrides.set(space, storageAddressForHost(host));
+      route = normalizeSpaceHost(host);
     } catch (cause) {
+      if (!(cause instanceof SpaceHostValidationError)) throw cause;
       throw new Error(
-        `Invalid spaceHostMap entry for ${space}: "${host}"`,
+        `Invalid spaceHostMap entry for ${space}`,
         { cause },
       );
     }
+    overrides.set(space, new URL(MEMORY_STORAGE_PATH, route));
   }
   const fallback = storageAddressForMemoryHost(defaultHost);
   return (space) => {
