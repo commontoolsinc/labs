@@ -6,7 +6,7 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { hashOf } from "@/value-hash.ts";
 import { newDefaultJsonCodec } from "@/codecs.ts";
 import { EmptyReconstructionContext } from "@/codec-common/index.ts";
-import { codeSpanIn } from "./parse-code-span.ts";
+import { backtickQuote } from "@commonfabric/utils/markdown";
 
 /**
  * Builds a class instance whose `constructor.name` holds the given text.
@@ -34,8 +34,9 @@ describe("message quoting", () => {
         } catch (e) {
           message = (e as Error).message;
         }
-        expect(codeSpanIn(message, "Invalid content hash string: "))
-          .toBe(source);
+        expect(message).toContain(
+          `Invalid content hash string: ${backtickQuote(source)}`,
+        );
       }
     });
   });
@@ -49,7 +50,9 @@ describe("message quoting", () => {
         } catch (e) {
           message = (e as Error).message;
         }
-        expect(codeSpanIn(message, "unsupported object type ")).toBe(name);
+        expect(message).toContain(
+          `unsupported object type ${backtickQuote(name)}`,
+        );
       }
     });
   });
@@ -63,7 +66,7 @@ describe("message quoting", () => {
         } catch (e) {
           message = (e as Error).message;
         }
-        expect(codeSpanIn(message, "Cannot clone: ")).toBe(name);
+        expect(message).toContain(`Cannot clone: ${backtickQuote(name)}`);
       }
     });
   });
@@ -78,9 +81,9 @@ describe("message quoting", () => {
         } catch (e) {
           message = (e as Error).message;
         }
-        expect(
-          codeSpanIn(message, "Not a JSON-encoded `FabricValue` string: "),
-        ).toBe(data);
+        expect(message).toContain(
+          "Not a JSON-encoded `FabricValue` string: " + backtickQuote(data),
+        );
       }
     });
   });

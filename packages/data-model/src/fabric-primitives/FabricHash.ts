@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import type {
   FabricHash as ApiFabricHash,
   FabricHashConstructor as ApiFabricHashConstructor,
@@ -19,7 +20,6 @@ import {
 } from "@/codec-common/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
-import { backtickQuote } from "@/value-debug.ts";
 
 /**
  * Content-addressed identifier: a hash digest paired with an algorithm tag.

@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
 
 import type { FabricClassWithCodec } from "@/codec-common/interface.ts";
@@ -7,7 +8,6 @@ import { FabricEpochDays } from "./FabricEpochDays.ts";
 import { FabricEpochNsec } from "./FabricEpochNsec.ts";
 import { FabricHash } from "./FabricHash.ts";
 import { FabricRegExp } from "./FabricRegExp.ts";
-import { backtickQuote } from "@/value-debug.ts";
 
 export { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 export { FabricBytes } from "./FabricBytes.ts";

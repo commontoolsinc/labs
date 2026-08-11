@@ -39,6 +39,15 @@ for (const createFunc of createFuncs) {
     let testId = -1;
     let oneLength = 10; // For multi-byte variety; updated pseudorandomly.
 
+    // A caller-supplied encoding name reaches the message, so a name holding
+    // a backtick must not break the span around it.
+    it("quotes an unknown encoding name safely, backticks and all", () => {
+      const hasher = createFunc();
+      hasher.update(new Uint8Array([1, 2, 3]));
+      expect(() => hasher.digest("a`b" as "base64url"))
+        .toThrow("Unknown encoding: ``a`b``");
+    });
+
     describe("after `digest()`", () => {
       const alreadyDone = /`digest\(\)` already done/;
 

@@ -5,6 +5,7 @@
  * {@link valueFromDataUriPayloadText}).
  */
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   fromBase64url,
   toUnpaddedBase64url,
@@ -12,7 +13,6 @@ import {
 import { EmptyReconstructionContext } from "./codec-common/index.ts";
 import { jsonFromValue, valueFromJson } from "./codecs.ts";
 import type { FabricValue } from "./fabric-value.ts";
-import { backtickQuote } from "./value-debug.ts";
 
 /**
  * A URI in string form. Structurally identical to (and hence

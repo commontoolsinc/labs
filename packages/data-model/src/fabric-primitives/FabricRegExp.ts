@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import type {
   FabricRegExp as ApiFabricRegExp,
   FabricRegExpConstructor as ApiFabricRegExpConstructor,
@@ -14,7 +15,6 @@ import {
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { isPlainObject } from "@commonfabric/utils/types";
-import { backtickQuote } from "@/value-debug.ts";
 
 /** The only regex flavor currently representable as a native `RegExp`. */
 const DEFAULT_FLAVOR = "es2025";
