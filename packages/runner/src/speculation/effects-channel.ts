@@ -1,0 +1,256 @@
+// The client half of the client-effect channel (server-execution v2
+// Phase 4; docs/specs/server-side-execution/protocol.md §5): every
+// flag-ON NON-serving runtime subscribes to its own session's instance
+// of the well-known effects doc in each space it connects to, ENACTS
+// unacked intents (navigation — the one shipped kind), and ACKS by
+// nonce with an ordinary AUTHORED write into the session's own instance
+// (the plan's interim-postures Phase-4 row). The instance resolves from
+// the runtime's authenticated session — the client names no scope key
+// (T2.Q3).
+//
+// Exactly-once per nonce is THIS side's duty (protocol.md §5), kept by
+// the ENACTED-NONCE RECORD — process memory, deliberately reload-wiped:
+// a reload between intent and ack re-reads the unacked intent on
+// resubscribe and MAY re-enact it, which is ACCEPTED for reversible
+// effects (LT8, RULED 2026-08-03). The record has two writers:
+//
+// - the OPTIMISTIC path — the speculation overlay enacts a speculative
+//   run's navigateTo (speculation.md §2) and records the run's
+//   deterministic nonce here after the flush, so the authoritative
+//   intent CONVERGES on the already-enacted nonce and is acked without
+//   a second navigation (T2.Q7);
+// - the AUTHORITATIVE path — an intent arriving unenacted (a reload, a
+//   client that never speculated the run) is enacted here, then
+//   recorded, then acked.
+//
+// The ack is once-per-nonce and the server-side retirement is
+// idempotent, so the accepted LT8 re-enactment never doubles anything
+// downstream of the client.
+
+import {
+  SERVER_EXECUTION_EFFECTS_DOC_ID,
+  type SessionEffectsDocValue,
+} from "@commonfabric/memory/v2";
+import { getLogger } from "@commonfabric/utils/logger";
+import type { Runtime } from "../runtime.ts";
+import type { MemorySpace } from "../storage/interface.ts";
+
+const logger = getLogger("effects-channel", {
+  enabled: true,
+  level: "warn",
+});
+
+export class EffectsChannel {
+  readonly #runtime: Runtime;
+  /** The enacted-nonce record (LT8): reload-wiped by construction. */
+  readonly #enacted = new Set<string>();
+  /** space -> cancel fn for the effects-doc sink. */
+  readonly #sinks = new Map<MemorySpace, () => void>();
+  /** In-flight ack writes (`${space}\0${nonce}`) — one authored ack per
+   * nonce at a time; a failed ack retries on the next sink delivery
+   * (the entry is still unacked there). */
+  readonly #acking = new Set<string>();
+  #warnedNoNavigate = false;
+  #closed = false;
+
+  constructor(runtime: Runtime) {
+    this.#runtime = runtime;
+  }
+
+  /** DIAGNOSTIC (tests): whether a nonce is recorded enacted. */
+  hasEnacted(nonce: string): boolean {
+    return this.#enacted.has(nonce);
+  }
+
+  /** Record a nonce as enacted (the optimistic path — the speculation
+   * overlay's navigateTo flush carries the run's deterministic nonce). */
+  recordEnacted(nonce: string): void {
+    this.#enacted.add(nonce);
+  }
+
+  /** Subscribe to this session's effects instance in `space` (idempotent
+   * per space). The doc link names scope "session" and NO key: the
+   * instance resolves from the runtime's own authenticated session, and
+   * push delivers only this session's rows (protocol.md §3's applicable
+   * set). */
+  ensureSubscribed(space: MemorySpace): void {
+    if (this.#closed || this.#sinks.has(space)) return;
+    if (this.#runtime.installedSealDestination !== undefined) {
+      // A runtime with a WAVE seal destination installed is serving-side
+      // machinery (or a wave test bench), never a client enact surface —
+      // production non-serving runtimes never install one
+      // (installSealDestination's contract). Subscribing here would
+      // inject the sink's setup transaction into the wave's serial seal
+      // order (a concurrent seal). Skip.
+      return;
+    }
+    try {
+      const cell = this.#runtime.getCellFromLink<SessionEffectsDocValue>({
+        space,
+        id: SERVER_EXECUTION_EFFECTS_DOC_ID as never,
+        scope: "session",
+        path: [],
+      });
+      const cancel = cell.sink((value) => {
+        this.#reconcile(space, value as SessionEffectsDocValue | undefined);
+      });
+      this.#sinks.set(space, cancel);
+      // The RESUBSCRIBE re-read (protocol.md §5's reload journey; LT8):
+      // a sink alone fires on PUSH — a fresh runtime whose instance
+      // already holds unacked intents sees nothing until the next
+      // commit touches the doc. The explicit sync pulls the STORED
+      // instance, so a reload enacts what it left unacked.
+      const pulled = cell.sync();
+      this.#runtime.trackAsyncWork(
+        Promise.resolve(pulled).catch(() => undefined) as Promise<unknown>,
+      );
+    } catch (error) {
+      logger.warn("effects-subscribe-failed", () => [
+        `effects-doc subscription for ${space} failed; intents for this ` +
+        "space will not enact in this runtime",
+        error,
+      ]);
+    }
+  }
+
+  /** One delivery of the session's effects instance: enact unacked
+   * intents this runtime has not enacted (recording each), converge on
+   * already-enacted nonces, and ack every unacked entry by nonce. */
+  #reconcile(
+    space: MemorySpace,
+    value: SessionEffectsDocValue | undefined,
+  ): void {
+    if (this.#closed) return;
+    if (value === null || typeof value !== "object") return;
+    const entries = Array.isArray(value.entries) ? value.entries : [];
+    const acks = value.acks !== null && typeof value.acks === "object" &&
+        !Array.isArray(value.acks)
+      ? value.acks
+      : {};
+    for (const entry of entries) {
+      if (
+        entry === null || typeof entry !== "object" ||
+        typeof entry.nonce !== "string"
+      ) {
+        continue;
+      }
+      if ((acks as Record<string, unknown>)[entry.nonce] === true) continue;
+      if (!this.#enacted.has(entry.nonce)) {
+        if (entry.kind !== "navigate") {
+          // A kind this client does not ship (protocol.md §5's closed
+          // set): leave it unacked — acking would claim an enactment
+          // that never happened.
+          logger.warn("unknown-intent-kind", () => [
+            `effects intent ${entry.nonce} carries unknown kind ` +
+            `${String((entry as { kind?: unknown }).kind)}; left unacked`,
+          ]);
+          continue;
+        }
+        const navigate = this.#runtime.navigateCallback;
+        if (navigate === undefined) {
+          // No enactment surface on this runtime (a headless client):
+          // leave the intent unacked — a capable client of the same
+          // session (or a reload with a callback) enacts it.
+          if (!this.#warnedNoNavigate) {
+            this.#warnedNoNavigate = true;
+            logger.warn("no-navigate-callback", () => [
+              "effects intents arriving but navigateCallback is not " +
+              "set; intents stay unacked",
+            ]);
+          }
+          continue;
+        }
+        // Record BEFORE invoking the (possibly async) callback so a
+        // re-entrant delivery cannot double-enact; a thrown callback is
+        // today's posture — logged, the navigation consumed.
+        this.#enacted.add(entry.nonce);
+        try {
+          const target = entry.args?.target;
+          if (target === null || typeof target !== "object") {
+            throw new Error("intent carries no target");
+          }
+          const targetCell = this.#runtime.getCellFromLink({
+            space: (target.space ?? space) as MemorySpace,
+            id: target.id as never,
+            scope: (target.scope ?? "space") as never,
+            path: [...(target.path ?? [])],
+          });
+          const work = Promise.resolve().then(() => navigate(targetCell));
+          this.#runtime.trackAsyncWork(work);
+          work.catch((error) => {
+            logger.warn("enact-failed", () => [
+              `navigate enactment for ${entry.nonce} failed`,
+              error,
+            ]);
+          });
+        } catch (error) {
+          logger.warn("enact-failed", () => [
+            `navigate enactment for ${entry.nonce} failed`,
+            error,
+          ]);
+        }
+      }
+      this.#ack(space, entry.nonce);
+    }
+  }
+
+  /** The ack (protocol.md §5): an ordinary authored write of this
+   * session's own ack mark — `acks[nonce] = true` — into the instance
+   * its authenticated session resolves to. Once per nonce in flight; a
+   * failed commit retries on the next delivery (the entry is still
+   * unacked in the store). */
+  #ack(space: MemorySpace, nonce: string): void {
+    const key = `${space}\0${nonce}`;
+    if (this.#acking.has(key)) return;
+    this.#acking.add(key);
+    try {
+      const tx = this.#runtime.edit();
+      this.#runtime.getCellFromLink<boolean>({
+        space,
+        id: SERVER_EXECUTION_EFFECTS_DOC_ID as never,
+        scope: "session",
+        path: ["acks", nonce],
+      }).withTx(tx).set(true);
+      const committed = tx.commit();
+      this.#runtime.trackAsyncWork(committed as Promise<unknown>);
+      committed.then(({ error }) => {
+        this.#acking.delete(key);
+        if (error) {
+          logger.warn("ack-failed", () => [
+            `effects ack for ${nonce} failed; retrying on the next ` +
+            "delivery",
+            error,
+          ]);
+        }
+      }).catch((error) => {
+        this.#acking.delete(key);
+        logger.warn("ack-failed", () => [
+          `effects ack for ${nonce} rejected; retrying on the next ` +
+          "delivery",
+          error,
+        ]);
+      });
+    } catch (error) {
+      this.#acking.delete(key);
+      logger.warn("ack-failed", () => [
+        `effects ack for ${nonce} could not be staged`,
+        error,
+      ]);
+    }
+  }
+
+  /** Dispose: release the sinks. The enacted-nonce record dies with the
+   * process (LT8's accepted wipe). */
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    for (const cancel of this.#sinks.values()) {
+      try {
+        cancel();
+      } catch {
+        // sink cancellation is best-effort during teardown
+      }
+    }
+    this.#sinks.clear();
+  }
+}

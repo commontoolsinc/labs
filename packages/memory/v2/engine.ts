@@ -34,6 +34,7 @@ import {
   type DerivedWriteAnnotation,
   encodeMemoryBoundary,
   type EntityDocument,
+  type EffectIntentEntry,
   type EntityId,
   type EventAppendDecl,
   EventAppendDuplicateError,
@@ -47,6 +48,8 @@ import {
   resolveScopeKey,
   type ScopeKey,
   scopeOfScopeKey,
+  SERVER_EXECUTION_EFFECTS_DOC_ID,
+  type SessionEffectsDocValue,
   type SessionId,
   type SqliteOperation,
   STREAM_ENTRIES_DOC_PREFIX,
@@ -1691,6 +1694,108 @@ WHERE branch = :branch AND id LIKE :prefix AND op != 'delete'
   return pending;
 };
 
+/** One retirable effects instance (server-execution v2 Phase 4;
+ * protocol.md §5's "the next wave retires acked entries"): the pruned
+ * value the SpaceServer's bookkeeping write lands — acked entries
+ * removed, their marks with them, stale marks (an ack naming no stored
+ * entry) pruned too. */
+export type RetirableEffectsInstance = {
+  scopeKey: string;
+  /** Entries surviving retirement (unacked intents persist — a reload
+   * re-reads and may re-enact them, LT8). */
+  remainingEntries: EffectIntentEntry[];
+  /** Ack marks surviving retirement: acks whose entry still stands
+   * (structurally none today — an ack retires its entry — kept exact
+   * so the write is a pure prune, never an invention). */
+  remainingAcks: Record<string, true>;
+  /** The acked nonces this retirement consumes (diagnostics). */
+  retiredNonces: string[];
+};
+
+/**
+ * The retirement scan (Phase 4, protocol.md §5): session-keyed
+ * instances of the well-known effects doc whose value holds acked
+ * entries — or stale ack marks — to prune. The
+ * `selectPendingStreamEventDocs` shape one function up: heads by the
+ * exact doc id, `readState` per instance, defensive against malformed
+ * values (the ack half is AUTHORED client state — a garbage `acks` or
+ * `entries` must skip, never wedge the wave cycle). Non-session
+ * instances are skipped: the effects doc is a session-scoped instance
+ * by definition (T9), and the retirement writer stamps a session
+ * identity parsed from the key.
+ */
+export const selectRetirableEffectsInstances = (
+  engine: Engine,
+  options: { branch?: BranchName } = {},
+): RetirableEffectsInstance[] => {
+  const branch = options.branch ?? DEFAULT_BRANCH;
+  const heads = engine.database.prepare(`
+SELECT id, scope_key
+FROM head
+WHERE branch = :branch AND id = :id AND op != 'delete'
+`).all({
+      branch,
+      id: SERVER_EXECUTION_EFFECTS_DOC_ID,
+    }) as Array<{ id: string; scope_key: string }>;
+  const retirable: RetirableEffectsInstance[] = [];
+  for (const head of heads) {
+    if (scopeOfScopeKey(head.scope_key) !== "session") continue;
+    const state = readState(engine, {
+      id: head.id,
+      branch,
+      scopeKey: head.scope_key,
+    });
+    const value = state?.document?.value as SessionEffectsDocValue | undefined;
+    if (value === null || typeof value !== "object" || value === undefined) {
+      continue;
+    }
+    const storedEntries = Array.isArray(value.entries) ? value.entries : [];
+    const acks = value.acks !== null && typeof value.acks === "object" &&
+        !Array.isArray(value.acks)
+      ? value.acks as Record<string, unknown>
+      : {};
+    const ackedNonces = new Set(
+      Object.entries(acks)
+        .filter(([, marked]) => marked === true)
+        .map(([nonce]) => nonce),
+    );
+    const remainingEntries = storedEntries.filter((entry) =>
+      entry !== null && typeof entry === "object" &&
+      typeof entry.nonce === "string" && !ackedNonces.has(entry.nonce)
+    );
+    const remainingNonces = new Set(
+      remainingEntries.map((entry) => entry.nonce),
+    );
+    const remainingAcks: Record<string, true> = {};
+    const retiredNonces: string[] = [];
+    let staleMarks = false;
+    for (const nonce of Object.keys(acks)) {
+      if (acks[nonce] !== true) {
+        // A malformed mark (not `true`) is pruned as hygiene.
+        staleMarks = true;
+        continue;
+      }
+      if (remainingNonces.has(nonce)) {
+        remainingAcks[nonce] = true;
+      } else if (storedEntries.some((entry) => entry?.nonce === nonce)) {
+        retiredNonces.push(nonce);
+      } else {
+        // An ack naming no stored entry (already retired, or never
+        // issued): pruned so marks never accumulate.
+        staleMarks = true;
+      }
+    }
+    if (retiredNonces.length === 0 && !staleMarks) continue;
+    retirable.push({
+      scopeKey: head.scope_key,
+      remainingEntries,
+      remainingAcks,
+      retiredNonces,
+    });
+  }
+  return retirable;
+};
+
 export const headSeq = (
   engine: Engine,
   branch: BranchName = DEFAULT_BRANCH,
@@ -2245,6 +2350,140 @@ const stampEventAppendOperation = <
     }
     entry.seq = seq;
     entry.firedAt = stamp.firedAt;
+  }
+  return cloned;
+};
+
+/** An effect-intent-shaped entry (protocol.md §5's `{nonce, kind, args,
+ * issuedIn}`). */
+const isEffectIntentShaped = (
+  value: unknown,
+): value is EffectIntentEntry =>
+  value !== null && typeof value === "object" &&
+  typeof (value as EffectIntentEntry).nonce === "string" &&
+  (value as EffectIntentEntry).kind === "navigate";
+
+/** An intent entry awaiting its `issuedIn` stamp (the `null` sentinel —
+ * protocol.md §5's `issuedIn: <derived commit seq>`, written by the
+ * producer before the wave's seq exists). */
+const isUnstampedEffectIntent = (
+  value: unknown,
+): value is EffectIntentEntry & { issuedIn: null } =>
+  isEffectIntentShaped(value) && value.issuedIn === null;
+
+/**
+ * Transform a DERIVED-class write of the well-known effects doc at apply
+ * time (server-execution v2 Phase 4; protocol.md §5). Two duties, both
+ * on a CLONE (the input operation object is shared with replica overlays
+ * and must never be mutated):
+ *
+ * - **`issuedIn` stamping** — the stream-entry `seq` precedent one
+ *   function up: the producing wave writes the `null` sentinel (the
+ *   commit seq is allocated only here) and the engine stamps it. Keyed
+ *   by the WELL-KNOWN doc id (the id is the declaration — a producer
+ *   cannot forget it); derived-class only — an authored write carrying
+ *   the sentinel (a client authoring into its own instance,
+ *   protocol.md §1's accepted intrusion class) is stored as-is.
+ *
+ * - **nonce dedupe on APPEND-shaped patches** — an appended intent whose
+ *   nonce already exists in the STORED instance value is dropped from
+ *   the append: the nonce is deterministic per (event × navigateTo
+ *   instance), so a re-run of the producing action (a wave retry, an
+ *   event requeue, a server restart re-demand) re-appends the same
+ *   nonce, and the store — not the serving replica's scope-name-keyed
+ *   local view, which collapses instances at cardinality > 1 (the OW17
+ *   residual) — is the idempotency authority. Whole-value SETs are
+ *   deliberately EXEMPT from dedupe: the retirement write (the
+ *   bookkeeping-stamped prune, serving-loop.md §3d) rewrites surviving
+ *   entries as a whole value, and deduping those against themselves
+ *   would empty every retirement.
+ */
+const transformEffectsDocOperation = <
+  Op extends Exclude<Operation, SqliteOperation>,
+>(
+  engine: Engine,
+  operation: Op,
+  seq: number,
+  keys: { branch: BranchName; scopeKey: string | undefined },
+): Op => {
+  const hasIntent = (value: unknown, depth: number): boolean => {
+    if (depth > 8 || value === null || typeof value !== "object") return false;
+    if (isEffectIntentShaped(value)) return true;
+    if (Array.isArray(value)) {
+      return value.some((item) => hasIntent(item, depth + 1));
+    }
+    return Object.values(value).some((item) => hasIntent(item, depth + 1));
+  };
+  const probe = operation.op === "set"
+    ? hasIntent(operation.value?.value, 0)
+    : operation.op === "patch"
+    ? operation.patches.some((patch) =>
+      hasIntent((patch as { value?: unknown }).value, 0) ||
+      hasIntent((patch as { values?: unknown }).values, 0)
+    )
+    : false;
+  if (!probe) return operation;
+
+  // The stored instance's nonce set — the dedupe basis. Read per
+  // instance via the annotation-supplied scope key (the same override
+  // writeOperation applies below). Defensive: a scoped op with no
+  // resolvable key skips dedupe (stamping still applies) rather than
+  // throwing here — the scoped-write admission checks own that refusal.
+  const storedNonces = new Set<string>();
+  try {
+    const state = readState(engine, {
+      id: operation.id,
+      branch: keys.branch,
+      scope: operation.scope,
+      scopeKey: keys.scopeKey,
+    });
+    const storedValue = state?.document?.value as
+      | SessionEffectsDocValue
+      | undefined;
+    if (storedValue !== null && typeof storedValue === "object") {
+      const entries = Array.isArray(storedValue?.entries)
+        ? storedValue.entries
+        : [];
+      for (const entry of entries) {
+        if (isEffectIntentShaped(entry)) storedNonces.add(entry.nonce);
+      }
+    }
+  } catch {
+    // no resolvable instance — dedupe is best-effort; stamping proceeds
+  }
+
+  const cloned = structuredClone(operation) as Op;
+  const stamp = (value: unknown, depth: number): void => {
+    if (depth > 8 || value === null || typeof value !== "object") return;
+    if (isUnstampedEffectIntent(value)) {
+      (value as { issuedIn: number | null }).issuedIn = seq;
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) stamp(item, depth + 1);
+      return;
+    }
+    for (const item of Object.values(value)) stamp(item, depth + 1);
+  };
+  if (cloned.op === "set") {
+    stamp(cloned.value?.value, 0);
+  } else if (cloned.op === "patch") {
+    for (const patch of cloned.patches) {
+      if (
+        (patch.op === "append" || patch.op === "add-unique") &&
+        Array.isArray(patch.values)
+      ) {
+        // Dedupe the APPEND against the stored instance, then stamp the
+        // survivors.
+        patch.values = patch.values.filter((item) =>
+          !(isEffectIntentShaped(item) && storedNonces.has(item.nonce))
+        );
+        stamp(patch.values, 0);
+        continue;
+      }
+      stamp((patch as { value?: unknown }).value, 0);
+      stamp((patch as { values?: unknown }).values, 0);
+    }
   }
   return cloned;
 };
@@ -2984,9 +3223,22 @@ const applyCommitTransaction = (
     // above, pre-stamp) records the as-received payload so replay
     // comparison stays stable.
     const stamps = eventAppendPlan.get(opIndex);
-    const effectiveOperation = stamps === undefined
+    const appendStamped = stamps === undefined
       ? operation
       : stampEventAppendOperation(operation, stamps, seq);
+    // The effects-doc transform (Phase 4, protocol.md §5): a
+    // derived-class write of the well-known effects doc gets its intent
+    // entries' `issuedIn` sentinels stamped with this commit's seq and
+    // its APPENDS deduped by stored nonce — see
+    // transformEffectsDocOperation.
+    const effectiveOperation =
+      commitClass === "derived" &&
+        appendStamped.id === SERVER_EXECUTION_EFFECTS_DOC_ID
+        ? transformEffectsDocOperation(engine, appendStamped, seq, {
+          branch,
+          scopeKey: scopeKeyByOpIndex.get(opIndex),
+        })
+        : appendStamped;
     const revision = writeOperation(engine, {
       branch,
       seq,

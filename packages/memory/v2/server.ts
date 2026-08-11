@@ -3664,6 +3664,22 @@ export class Server {
     );
   }
 
+  /** Whether ONE specific (principal, sessionId) pair holds a live
+   * session on the space — the served `navigateTo` connectivity check
+   * (server-execution v2 Phase 4; builtins.md §4's LT3 ruling: the
+   * intent write requires the acting session to be a CONNECTED session
+   * of the COMPUTING space, else there is no channel to deliver the
+   * intent on). The per-session twin of `hasLiveSessionsForSpace`. */
+  hasLiveSessionFor(
+    space: string,
+    principal: string,
+    sessionId: string,
+  ): boolean {
+    return this.#sessions.sessionsForSpace(space).some((session) =>
+      session.id === sessionId && session.principal === principal
+    );
+  }
+
   /**
    * The space's demanded roots (serving-loop.md §1: demand is
    * value-granular client pull — a subscription names what to serve).

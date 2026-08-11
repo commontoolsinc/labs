@@ -374,6 +374,15 @@ export class SpeculationOverlayDestination
         for (const effect of enactable) {
           try {
             await effect.flush(tx);
+            // Phase 4 (protocol.md §5, T2.Q7): the optimistic enactment
+            // carries the run's deterministic nonce — record it so the
+            // AUTHORITATIVE intent, arriving on the effects channel with
+            // the same nonce, is acked without a second navigation. The
+            // record lives in the reload-wiped channel (LT8's accepted
+            // window).
+            if (effect.nonce !== undefined) {
+              this.#runtime.effectsChannel?.recordEnacted(effect.nonce);
+            }
           } catch (error) {
             logger.error(
               "speculative-enact-failed",

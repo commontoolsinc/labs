@@ -70,6 +70,12 @@ import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { resolveScopeKey, type ScopeKey } from "@commonfabric/memory/v2";
 import { waveRunContextOf } from "./executor/wave.ts";
+import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
+import {
+  navigateEventContextFromRunInfo,
+  navigateEventContextOf,
+  setNavigateEventContext,
+} from "./builtins/navigate-context.ts";
 import {
   type AddCancel,
   type Cancel,
@@ -3232,6 +3238,16 @@ export class Runner {
         actionId: `piece-start/${resultLink.id}`,
         kind: "bookkeeping",
       });
+      // Phase 4 (builtins.md §4): a deferred start minted from an
+      // EVENT-HANDLER run carries that run's event context across to
+      // the start tx, so a navigateTo instantiated under it can address
+      // the firing session (navigate-context.ts's capture point 1).
+      const navigateContext = navigateEventContextFromRunInfo(
+        waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+      );
+      if (navigateContext !== undefined) {
+        setNavigateEventContext(startTx, navigateContext);
+      }
       const committedResultCell = this.runtime.getCellFromLink<T>(
         resultLink,
         undefined,
@@ -3311,6 +3327,15 @@ export class Runner {
         actionId: `piece-start/${resultLink.id}`,
         kind: "bookkeeping",
       });
+      // Phase 4 (builtins.md §4): carry the instantiating event-handler
+      // run's event context to the start tx — capture point 1, as in
+      // startAfterSuccessfulCommit above.
+      const navigateContext = navigateEventContextFromRunInfo(
+        waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+      );
+      if (navigateContext !== undefined) {
+        setNavigateEventContext(startTx, navigateContext);
+      }
       const committedResultCell = this.runtime.getCellFromLink<T>(
         resultLink,
         pattern.resultSchema,
@@ -6573,6 +6598,20 @@ export class Runner {
     const builtinAction = isRawBuiltinResult(builtinResult)
       ? builtinResult.action
       : builtinResult;
+    // Phase 4 (builtins.md §4; navigate-context.ts's capture point 2):
+    // tag the builtin's action with the event context its instantiation
+    // was a consequence of — the deferred start's carried context, or
+    // the instantiating handler tx's own stamp when the result pattern
+    // runs under it directly. The builtin's later scheduler runs (which
+    // stamp as ordinary derivations) read the tag off the action. OFF
+    // arm: both sources are undefined; one WeakMap miss.
+    const navigateContext = navigateEventContextOf(tx) ??
+      navigateEventContextFromRunInfo(
+        waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+      );
+    if (navigateContext !== undefined) {
+      setNavigateEventContext(builtinAction, navigateContext);
+    }
     const builtinIsEffect = isRawBuiltinResult(builtinResult)
       ? builtinResult.isEffect
       : undefined;

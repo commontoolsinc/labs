@@ -517,6 +517,12 @@ export type PostCommitSideEffect = {
   id: string;
   kind: string;
   idempotencyKey?: string;
+  /** The client-effect nonce this enactment carries (server-execution v2
+   * Phase 4, protocol.md §5) — set by `navigateTo` under the flag so the
+   * speculation overlay's OPTIMISTIC enactment records the SAME nonce the
+   * authoritative intent arrives with, and the effects channel converges
+   * on it instead of re-enacting (T2.Q7). Absent everywhere else. */
+  nonce?: string;
   flush(tx: unknown): void | Promise<void>;
 };
 

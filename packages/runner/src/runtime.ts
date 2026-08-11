@@ -58,6 +58,7 @@ import {
   SpeculationOverlayDestination,
   stampSpeculationRunContext,
 } from "./speculation/overlay-destination.ts";
+import { EffectsChannel } from "./speculation/effects-channel.ts";
 import { Action, Scheduler } from "./scheduler.ts";
 import {
   type CommitBackpressurePolicy,
@@ -783,6 +784,9 @@ export class Runtime {
   // the replica's pending overlay through it — the structural removal of
   // the client derivation-commit path. Never created in the OFF arm.
   #speculationOverlay: SpeculationOverlayDestination | undefined;
+  /** The client-effect channel (server-execution v2 Phase 4,
+   * protocol.md §5) — constructed for flag-ON non-serving runtimes. */
+  #effectsChannel: EffectsChannel | undefined;
   // Whether THIS runtime explicitly set the serverExecution flag at
   // construction (the only case its dispose participates in the
   // process-global ambient lifecycle — see the constructor's propagation
@@ -1274,6 +1278,24 @@ export class Runtime {
     this.navigateCallback = options.navigateCallback;
     this.pieceCreatedCallback = options.pieceCreatedCallback;
 
+    // The client-effect channel (server-execution v2 Phase 4,
+    // protocol.md §5): every flag-ON NON-serving runtime subscribes to
+    // its session's effects-doc instance per space — the enact/ack duty
+    // the Phase-4 posture adds. The serving runtime never enacts (the
+    // SpaceServer computes intents; clients enact), and the OFF arm
+    // pays nothing here.
+    if (
+      this.experimental.serverExecution === true && !this.servingPosture
+    ) {
+      const channel = new EffectsChannel(this);
+      this.#effectsChannel = channel;
+      const manager = this.storageManager;
+      manager.spaceOpenObserver = (space) => channel.ensureSubscribed(space);
+      for (const space of manager.openedSpaces?.() ?? []) {
+        channel.ensureSubscribed(space);
+      }
+    }
+
     // Handle pattern environment configuration. Only set the (process-global)
     // pattern environment when a host explicitly provides one — setting it
     // unconditionally from every Runtime would let the last-constructed runtime
@@ -1344,6 +1366,20 @@ export class Runtime {
    */
   effectMemoObserver:
     | ((event: { kind: "hit"; id: string }) => void)
+    | undefined;
+
+  /**
+   * The served `navigateTo` connectivity probe (server-execution v2
+   * Phase 4; builtins.md §4's LT3 ruling): whether (principal,
+   * sessionId) holds a live session on the serving space — the intent
+   * write requires the acting session CONNECTED to the COMPUTING space,
+   * else there is no channel to deliver the intent on. Installed by the
+   * SpaceServer at activation on the serving runtime; undefined
+   * everywhere else (the served half then skips the check — unit
+   * fixtures without a memory server co-host).
+   */
+  connectedSessionProbe:
+    | ((principal: string, sessionId: string) => boolean)
     | undefined;
 
   /**
@@ -1566,6 +1602,8 @@ export class Runtime {
     // close.
     this.#speculationOverlay?.close();
     this.#speculationOverlay = undefined;
+    this.#effectsChannel?.close();
+    this.#effectsChannel = undefined;
 
     // Background source checks are deliberately outside the scheduler. Abort
     // and settle them before the storage sessions they may write through close.
@@ -1746,6 +1784,15 @@ export class Runtime {
    * runtime has one. */
   get speculationOverlay(): SpeculationOverlayDestination | undefined {
     return this.#speculationOverlay;
+  }
+
+  /** The client-effect channel of a flag-ON non-serving runtime
+   * (server-execution v2 Phase 4, protocol.md §5): the overlay's
+   * optimistic navigateTo enactment records its nonce here, and the
+   * channel acks the authoritative intent without re-enacting.
+   * Undefined in the OFF arm and on serving runtimes. */
+  get effectsChannel(): EffectsChannel | undefined {
+    return this.#effectsChannel;
   }
 
   /**

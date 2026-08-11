@@ -930,8 +930,20 @@ export class StorageManager implements IStorageManager {
     return { principal: this.as.did(), sessionId: this.#sessionId };
   }
 
+  /** IStorageManager (server-execution v2 Phase 4): first-open observer
+   * — the flag-ON client effects channel subscribes per space through
+   * it. Assigned post-construction by the Runtime; undefined otherwise. */
+  spaceOpenObserver?: (space: MemorySpace) => void;
+
+  /** IStorageManager (Phase 4): the currently-open spaces, for the
+   * effects channel's construction-time sweep. */
+  openedSpaces(): MemorySpace[] {
+    return [...this.#providers.keys()];
+  }
+
   open(space: MemorySpace): IStorageProvider {
     let provider = this.#providers.get(space);
+    const firstOpen = !provider;
     if (!provider) {
       // Session principal drives user/session scoped storage. Even when we have
       // a derived space key for named spaces, the connection must authenticate
@@ -964,6 +976,18 @@ export class StorageManager implements IStorageManager {
         eventAppendQueueStore: this.#eventAppendQueueStore,
       });
       this.#providers.set(space, provider);
+    }
+    if (firstOpen && this.spaceOpenObserver !== undefined) {
+      // Deferred a microtask: the observer subscribes cells, which
+      // re-enters open() and the sync machinery — never re-entrantly
+      // inside the first open call.
+      queueMicrotask(() => {
+        try {
+          this.spaceOpenObserver?.(space);
+        } catch (error) {
+          console.warn("spaceOpenObserver threw", error);
+        }
+      });
     }
     return provider;
   }

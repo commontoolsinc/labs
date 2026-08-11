@@ -87,8 +87,10 @@ import type { ServingLoopStats } from "./stats.ts";
 import { type SealedEffectBatch, SpaceOutbox } from "./outbox.ts";
 import { effectCompletionKeyOf } from "./effect-completion.ts";
 import {
+  identityOfScopeKey,
   resolveScopeKey,
   type ScopeKeyIdentity,
+  SERVER_EXECUTION_EFFECTS_DOC_ID,
   SERVER_EXECUTION_WATERMARK_DOC_ID,
 } from "@commonfabric/memory/v2";
 import type { PostCommitSideEffect } from "../cfc/types.ts";
@@ -99,6 +101,13 @@ const logger = getLogger("space-server", { enabled: true, level: "warn" });
  * §3d, RULED 2026-08-05: stage F names the kinds when it installs the
  * seal destination). */
 const WATERMARK_ACTION_ID = "server-execution/watermark";
+
+/** The acked-effect retirement's durable action id (Phase 4,
+ * protocol.md §5: "the next wave retires acked entries" — a
+ * bookkeeping-stamped wave write among protocol.md §1's
+ * service-identity writes; serving-loop.md §3d names it with the
+ * watermark advance). */
+const EFFECTS_RETIREMENT_ACTION_ID = "server-execution/effects-retirement";
 
 export type SpaceServerPolicy = {
   /** serving-loop.md §3's consequence-flush deadline T_flush (order
@@ -148,6 +157,11 @@ const DEFAULT_IDLE_PARK_MS = 30_000;
  * alike) — the complete terminal-state design is the owed follow-up. */
 const neverAPieceRootId = (id: string): boolean =>
   id === SERVER_EXECUTION_WATERMARK_DOC_ID ||
+  // Phase 4: the effects doc is a session-scoped VALUE doc every
+  // flag-ON client subscribes to (protocol.md §5) — it can never carry
+  // `patternIdentity` meta, so piece demand for it is structurally
+  // futile (the same never-a-piece class as the watermark doc).
+  id === SERVER_EXECUTION_EFFECTS_DOC_ID ||
   id.startsWith("computed:") ||
   id.startsWith("cid:");
 
@@ -219,6 +233,13 @@ export class SpaceServer implements TransactionSealDestination {
    * input (serving-loop.md §3's event-append classification; §6
    * step 4's reprocess scan is the same move at activation). */
   #eventScanOwed = false;
+  /** Phase 4 (protocol.md §5): an effects-doc-touching authored commit
+   * (an ack) — or activation (a crash between ack and retirement must
+   * still retire) — owes the next wave the acked-entry retirement scan.
+   * Cleared only when the scan finds nothing retirable, so a dropped
+   * retirement write (the bookkeeping conflict class's drop-whole arm,
+   * serving-loop.md §3d) self-heals on the following cycle. */
+  #effectsRetirementOwed = false;
   /** Consequence-notice seals in flight (the error/drop/skip arms):
    * awaited before the wave closes so their marks ride THIS wave. */
   readonly #eventNoticeWork = new Set<Promise<unknown>>();
@@ -380,6 +401,15 @@ export class SpaceServer implements TransactionSealDestination {
     // catches up.
     runtime.storageManager.open(space).replica.shadowFlipObserver = () =>
       this.#feedArrived?.resolve();
+
+    // Phase 4 (builtins.md §4, LT3): the served navigateTo's
+    // connectivity check — the intent write requires the acting session
+    // CONNECTED to this (computing) space.
+    runtime.connectedSessionProbe = (principal, sessionId) =>
+      this.#options.server.hasLiveSessionFor(space, principal, sessionId);
+    // Phase 4 (protocol.md §5): arm the acked-effect retirement scan —
+    // a crash between an ack and its retirement re-owes the scan here.
+    this.#effectsRetirementOwed = true;
 
     // W = read watermark doc (0 if absent).
     this.#watermark = readWatermarkSeq(engine);
@@ -984,7 +1014,8 @@ export class SpaceServer implements TransactionSealDestination {
   #hasWork(): boolean {
     return this.#feed.length > 0 ||
       (this.#currentWave?.contributionCount ?? 0) > 0 ||
-      this.#eventScanOwed;
+      this.#eventScanOwed ||
+      this.#effectsRetirementOwed;
   }
 
   async #waitForInput(maxMs: number): Promise<void> {
@@ -1016,6 +1047,19 @@ export class SpaceServer implements TransactionSealDestination {
       this.#coverageHead = record.seq;
       if (record.class === "authored") {
         this.#options.stats.authoredSeen += 1;
+        // Phase 4 (protocol.md §5; serving-loop.md §7): an authored
+        // commit touching the effects doc is an effect-channel ACK —
+        // counted so the amplification metric can exclude acks
+        // (testing.md §4's `authoredSeen − effectAcks`), and the
+        // next-wave retirement scan is armed.
+        if (
+          record.writes.some((write) =>
+            write.id === SERVER_EXECUTION_EFFECTS_DOC_ID
+          )
+        ) {
+          this.#options.stats.effectAcks += 1;
+          this.#effectsRetirementOwed = true;
+        }
       }
       // serving-loop.md §3: "if c.class == event-append: enqueue for
       // handler processing". The notice carries ids only; the drain
@@ -1314,6 +1358,100 @@ export class SpaceServer implements TransactionSealDestination {
     }
   }
 
+  /**
+   * Retire acked effect entries (server-execution v2 Phase 4;
+   * protocol.md §5's "the next wave retires acked entries"). Per
+   * retirable SESSION instance of the well-known effects doc — the
+   * ENGINE is the scan authority (`selectRetirableEffectsInstances`
+   * reads true per-instance values; the serving replica's local view
+   * collapses instances by scope name, the OW17 residual, and is never
+   * consulted) — one BOOKKEEPING-stamped transaction writes the pruned
+   * value at that instance: the SpaceServer's OWN write under its
+   * service identity, carrying ADDRESSING (the seal-time scope-key
+   * annotation from the stamped identity) and NO acting principal
+   * (protocol.md §1's service-identity writes; T2.Q4). Conflict class:
+   * a whole-doc bookkeeping SET drops whole on any concurrent write
+   * (serving-loop.md §3d) — the owed flag stays armed until a scan
+   * finds nothing retirable, so a dropped retirement self-heals next
+   * cycle. Un-acked intents persist by construction: the prune removes
+   * only acked entries (a reload re-reads and may re-enact them — LT8).
+   */
+  #retireAckedEffects(runtime: Runtime): void {
+    if (!this.#effectsRetirementOwed) return;
+    let retirable: ReturnType<
+      typeof Engine.selectRetirableEffectsInstances
+    >;
+    try {
+      retirable = Engine.selectRetirableEffectsInstances(
+        this.#options.engine,
+      );
+    } catch (error) {
+      logger.warn("effects-scan-failed", () => [
+        "acked-effect retirement scan failed; retrying next cycle",
+        error,
+      ]);
+      return;
+    }
+    if (retirable.length === 0) {
+      this.#effectsRetirementOwed = false;
+      return;
+    }
+    for (const instance of retirable) {
+      const identity = identityOfScopeKey(instance.scopeKey);
+      if (
+        identity?.principal === undefined || identity.sessionId === undefined
+      ) {
+        // Not a session instance (the scan already filters; defensive).
+        continue;
+      }
+      try {
+        const tx = runtime.edit();
+        stampWaveRunContext(tx, {
+          actionId: EFFECTS_RETIREMENT_ACTION_ID,
+          kind: "bookkeeping",
+          // ADDRESSING only: the seal resolves the write's scope key
+          // from this identity; bookkeeping carries no acting principal
+          // (protocol.md §1).
+          scopeKeyIdentity: identity,
+        });
+        tx.writeValueOrThrow(
+          {
+            space: this.#options.space,
+            id: SERVER_EXECUTION_EFFECTS_DOC_ID,
+            scope: "session",
+            path: [],
+          } as never,
+          {
+            entries: instance.remainingEntries,
+            acks: instance.remainingAcks,
+          } as never,
+        );
+        tx.commit().then(({ error }) => {
+          if (error) {
+            logger.warn("effects-retirement-seal-failed", () => [
+              `retirement for ${instance.scopeKey} failed to seal; ` +
+              "the armed scan retries next cycle",
+              error,
+            ]);
+          }
+        }).catch((error) => {
+          logger.warn("effects-retirement-seal-failed", () => [
+            `retirement for ${instance.scopeKey} rejected; the armed ` +
+            "scan retries next cycle",
+            error,
+          ]);
+        });
+      } catch (error) {
+        logger.warn("effects-retirement-failed", () => [
+          `retirement for ${instance.scopeKey} could not be staged`,
+          error,
+        ]);
+      }
+    }
+    // Stay armed: the next cycle's scan verifies the retirements landed
+    // (and clears), or re-writes what a conflict dropped.
+  }
+
   /** Load graph structure for the demanded values (serving-loop.md §1):
    * the server-side watch registry names what clients demand; each
    * demanded root's owning piece is ensured running (the sanctioned
@@ -1503,6 +1641,7 @@ export class SpaceServer implements TransactionSealDestination {
     const { batchHead } = this.#drainFeed();
     await this.#loadDemandedStructure();
     const drainedEvents = await this.#drainStreamEvents(runtime);
+    this.#retireAckedEffects(runtime);
 
     // Settle to quiescence under the flush deadline: idle() is the wave
     // boundary; synced() lets the loopback session's frames land so the
@@ -1885,6 +2024,7 @@ export class SpaceServer implements TransactionSealDestination {
       if (this.#runtime !== undefined) {
         this.#runtime.asyncWorkObserver = undefined;
         this.#runtime.effectMemoObserver = undefined;
+        this.#runtime.connectedSessionProbe = undefined;
         // The shadow-flip wake dies with the tenure (a late flip on a
         // disposing replica must not poke a parked loop's stale wait).
         this.#runtime.storageManager.open(this.#options.space).replica

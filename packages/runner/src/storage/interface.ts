@@ -140,6 +140,23 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   open(space: MemorySpace): IStorageProvider;
 
   /**
+   * Observer of FIRST opens per space (server-execution v2 Phase 4): the
+   * flag-ON client runtime's effects channel installs one so it can
+   * subscribe to its session's effects-doc instance in every space the
+   * manager connects to (protocol.md §5's effects-doc subscription duty).
+   * Optional — the OFF arm and managers that never re-open pay nothing;
+   * the `shadowFlipObserver` precedent on ISpaceReplica.
+   */
+  spaceOpenObserver?: (space: MemorySpace) => void;
+
+  /**
+   * The spaces this manager currently holds providers for — the effects
+   * channel's construction-time sweep (spaces opened before the observer
+   * was installed). Optional, like the observer.
+   */
+  openedSpaces?(): MemorySpace[];
+
+  /**
    * Record a runtime-learned HTTP or HTTPS host hint for a space
    * (federation site table). Optional: managers without remote resolution
    * (emulated/test) simply don't implement it. Returns true when the

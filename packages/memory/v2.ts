@@ -399,6 +399,135 @@ export type EventAppendDecl = {
   scope?: CellScope;
   eventId: string;
 };
+
+// ---------------------------------------------------------------------------
+// The client-effect channel (server-execution v2 Phase 4;
+// docs/specs/server-side-execution/protocol.md §5). Session-scoped,
+// server-computed, client-enacted effects: the SpaceServer writes INTENT
+// entries into the acting session's instance of the ONE well-known effects
+// doc, the session's client enacts and ACKS by nonce (an ordinary authored
+// write into its own instance), and the next wave retires acked entries.
+// Protocol vocabulary, defined once here (the LD3 direction).
+// ---------------------------------------------------------------------------
+
+/**
+ * The well-known client-effects doc, one id per space (protocol.md §5,
+ * T9): the effects doc is a SESSION-SCOPED INSTANCE of this one doc id —
+ * `scope_key = session:<principal>:<sessionId>` — never a path
+ * convention. The SpaceServer writes intents into the acting session's
+ * instance by naming that key (seal-time addressing annotations); the
+ * session's own client resolves the same instance from its authenticated
+ * session and never names a key. The document value is
+ * {@link SessionEffectsDocValue}. Session-lifetime: a retired session's
+ * unacked intents retire with its effects instance under the SAME
+ * session-data GC as every other session instance (scopes.md §3).
+ */
+export const SERVER_EXECUTION_EFFECTS_DOC_ID = "of:server-execution-effects";
+
+/** The navigation target an intent carries (builtins.md §4): an entity
+ * link. `space` is absent for a target within the computing space (the
+ * common case). A cross-space TARGET is legal — LT3 defers the
+ * cross-space CONTEXT (the acting session must be connected to the
+ * COMPUTING space), not the destination: "the CONTEXT is same-space
+ * even when the navigation TARGET is a cross-space link". */
+export type EffectIntentTarget = {
+  space?: string;
+  id: EntityId;
+  path: readonly string[];
+  scope?: CellScope;
+};
+
+/**
+ * One client-effect intent entry (protocol.md §5's shape): `{ nonce,
+ * kind, args, issuedIn }`. v2 ships exactly ONE kind — `navigate` — and
+ * a new kind is a protocol.md §5 spec edit first.
+ *
+ * `nonce` is minted server-side as a DETERMINISTIC function of the
+ * firing event and the navigateTo instance ({@link effectIntentNonce}),
+ * which is what lets the client's OPTIMISTIC enactment (speculation.md
+ * §2's local enact) predict the same nonce and converge on the
+ * authoritative intent without re-enacting — exactly-once per nonce is
+ * the CLIENT's duty (T2.Q2/Q7).
+ *
+ * `issuedIn` is the derived commit seq that issued the intent —
+ * ENGINE-STAMPED at apply time (the stream-entry `seq` precedent): the
+ * producer writes the `null` sentinel (the wave's own seq is allocated
+ * only at the commit step), and the engine stamps derived-class writes
+ * of this doc. Informational: nothing in the ack/retirement lifecycle
+ * reads it.
+ */
+export type EffectIntentEntry = {
+  nonce: string;
+  kind: "navigate";
+  args: { target: EffectIntentTarget };
+  issuedIn: number | null;
+};
+
+/**
+ * The effects doc's value shape (protocol.md §5): the intent append-list
+ * plus the session's ack marks. The ACK is an ordinary AUTHORED write by
+ * the owning session into its own instance — `acks[nonce] = true`, one
+ * mark per nonce so concurrent acks of distinct intents never overwrite
+ * each other (ack-by-nonce is once-per-nonce; a scalar last-ack field
+ * would lose an earlier unretired ack under two quick intents). The
+ * SpaceServer's next-wave retirement removes acked entries AND their
+ * marks in one bookkeeping-stamped write (serving-loop.md §3d).
+ */
+export type SessionEffectsDocValue = {
+  entries?: EffectIntentEntry[];
+  acks?: Record<string, true>;
+};
+
+/**
+ * THE nonce constructor (protocol.md §5; T2.Q2's "nonce minted
+ * server-side" with T2.Q7's convergence): deterministic over the firing
+ * event's durable id and the navigateTo instance's cause-derived result
+ * doc id. Both sides compute it — the SERVED half when it writes the
+ * intent, the client's SPECULATIVE run when it optimistically enacts —
+ * so the optimistic enactment carries the same nonce the authoritative
+ * intent arrives with (result-as-pattern children converge by
+ * cause-derived identity, speculation.md §2; the instance id is that
+ * convergence). One event × one navigateTo instance ⇒ one nonce, so a
+ * re-run of either side is idempotent by presence check.
+ */
+export const effectIntentNonce = (
+  eventId: string,
+  instanceId: string,
+): string => `nav:${hashStringOf({ eventId, instance: instanceId })}`;
+
+/**
+ * Inspect half for instance keys (the retirement writer's parse): the
+ * {@link ScopeKeyIdentity} embedded in a `user:`/`session:` scope key,
+ * or undefined for `space` and malformed keys. The segments are
+ * encodeURIComponent-encoded, so `:`-splitting is exact
+ * (key-vocabulary.md §Anchors).
+ */
+export const identityOfScopeKey = (
+  scopeKey: string,
+): ScopeKeyIdentity | undefined => {
+  if (scopeKey.startsWith("session:")) {
+    const parts = scopeKey.split(":");
+    if (parts.length !== 3) return undefined;
+    try {
+      return {
+        principal: decodeURIComponent(parts[1]),
+        sessionId: decodeURIComponent(parts[2]),
+      };
+    } catch {
+      return undefined;
+    }
+  }
+  if (scopeKey.startsWith("user:")) {
+    const part = scopeKey.slice("user:".length);
+    if (part.length === 0) return undefined;
+    try {
+      return { principal: decodeURIComponent(part) };
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+};
 /**
  * The identity annotation on one write WITHIN a derived-class commit's body
  * (protocol.md §1's transaction identity model, §7's closed metadata list).
