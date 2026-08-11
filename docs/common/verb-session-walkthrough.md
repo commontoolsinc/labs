@@ -8,8 +8,11 @@ into the next.
 This walks a whole session using it, and marks where the surface is still
 incomplete.
 
-The subject is a work-item tracker — items in a tree, plus typed cross-links —
-sketched here rather than deployed. No pattern file backs it yet.
+The subject is a work-item tracker — items in a tree, plus typed cross-links.
+It is a real pattern: `packages/cli/integration/pattern/tracker.tsx`, which
+belongs to this document and the two scripts beside it, so a change to a
+pattern the product ships can never break a demonstration of the verb surface.
+Every measurement below was taken against it on a local toolshed.
 
 **Every step is marked for what is real.** The point of the document is the
 line between them.
@@ -17,8 +20,11 @@ line between them.
 | Mark | Meaning |
 | --- | --- |
 | **[today]** | works against a current build |
-| **[stack]** | built and merging incrementally: the `$link` marker has landed, so these steps are reachable today through a full `--schema`. What is pending is the concise `--select` spelling and its arrival on `piece call` ([the verbs plan](../plans/verbs-implementation.md) tracks the order) |
 | **[blocked]** | needs something decided or built |
+
+The read layer this document was drafted against has since landed in full: the
+concise `--select` spelling, the `@` address suffix, and their arrival on
+`piece call` all work today, so no step here is merely pending.
 
 Section headers inside the help output below are the literal strings
 `renderPieceCallHelp` emits (`packages/cli/lib/exec-schema.ts`). Their contents
@@ -137,12 +143,20 @@ cf piece verbs --piece board
 ```
 
 ```text
-pattern  tracker.tsx @ src:9f2a…
-NAME     KIND     ON
-$NAME    handler  result
-addItem  handler  result
-items    handler  result
+PATTERN cf:module/ZPxyGdkkv-YmizdHdNx5DIlqlpc9JRSm5iXTl4Tb2T0#default
+NAME    KIND    ON     MARKS
+$NAME   handler result
+addItem handler result
+items   handler result
 ```
+
+**Two of those three rows are not verbs.** `items` is the board's array of root
+items and `$NAME` is its display name — data, not callables, and
+`cf piece call --piece board items` will not do anything useful. The listing
+over-reports: its forced-stream fallback answers the cast for values that are
+not streams
+([#5576](https://github.com/commontoolsinc/labs/issues/5576)). Only `addItem`
+is real here.
 
 Slug resolution sits on the shared path (`resolvePieceConfigWithPieces`,
 `packages/cli/lib/piece.ts`), so every command below takes `board` too.
@@ -181,8 +195,9 @@ can currently say about a verb, and the split is worth holding onto:
 | flag name, placeholder, required-ness | the event's **type** — `{ title: string }` | **yes** |
 | what `title` means, what the verb is for | the author's **doc comments** | **no** |
 
-The structural half needs nothing authored per pattern: `parseInputFlags`
-builds a descriptor per input-schema property, so `--title <string> Required.`
+The structural half needs nothing authored per pattern:
+`parseObjectInput` builds a `FlagDescriptor` per input-schema property, so
+`--title <string> Required.`
 falls out of the type. That is why the page exists at all.
 
 The prose half is **emitted and then lost**, which is worth stating precisely
@@ -273,7 +288,7 @@ Verb names and piece addresses complete against the space
 What does not complete is a result field — `--select 'it<TAB>'` has nothing to
 offer, because nothing in the system knows the result has a field called `item`.
 
-## 4. Create, and carry the address forward **[stack]**
+## 4. Create, and carry the address forward **[today]**
 
 ```bash
 EPIC=$(cf piece call --piece board addItem -- --title "Login rewrite" \
@@ -297,12 +312,22 @@ position renders the address and suppresses the fetch without consulting a
 source schema at all. What a declared result would add is that `cf` could
 derive the selection instead of the caller supplying it.
 
-## 5. Read the tree back, bounded **[stack]**
+## 5. Read the tree back, bounded **[today]**
 
 ```bash
-cf piece get --piece board items \
-  --select 'title,status,children@' \
+cf piece get --piece board items --select 'title,status,children@'
+
+cf piece get --piece board items --select 'title,status' \
   --filter '.status != "done"'
+```
+
+Two commands rather than one, because **an `@` suffix and `--filter` are
+refused together**, with a reason worth keeping:
+
+```text
+--filter cannot be combined with an `@` suffix in --select: a filtered array's
+elements no longer say which positions they came from, and an address names a
+position
 ```
 
 `--filter` runs before projection, so `status` decides membership and need not
@@ -365,8 +390,7 @@ Declared results make an **output** self-describing; this is about what an
 | `--select` completion, and refusal before the call | A declared result |
 | An address accepted as an argument | The round-trip property above |
 
-Three of the six need no decision at all, and three of them are the same
-mechanism seen from different sides: an author writes prose about a verb — on
-its event interface, on an event field, on the verb itself — and none of it
-reaches a caller. That is one emission gap with three symptoms, not three
-bugs.
+Eight rows, six distinct gaps: the three prose rows are one problem seen from
+three sides — an author writes about a verb on its event interface, on an event
+field, or on the verb itself, and none of it reaches a caller. Of the six,
+three need no decision from anyone.
