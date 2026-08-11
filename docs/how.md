@@ -289,6 +289,23 @@ silently swallowed.
 That test drives a recorded model fixture rather than a live endpoint,
 and it isolates the integrity axis; confidentiality is out of its scope.
 
+What that closes is narrower than "injection is solved" and more useful
+than a prompt that asks the model to be careful. The attack has to cross
+a boundary the runtime checks — a field declared to require integrity
+the model's output does not carry — and at that boundary the check reads
+where the value came from, not what it says. An attack that stays inside
+what a pattern is already permitted to do is not addressed by any of
+this. What is gone is the dependence on the model's judgment.
+
+That generalizes because injection was never really about models.
+Software today asks you to trust the author of everything you run, which
+makes the trusted computing base the entire program; injection is what a
+trusted base that large looks like once the thing inside it can be
+talked to. The runtime's answer is the same one it gives everywhere
+else: check the flow, not the author. A pattern is untrusted whether its
+hostile input arrived in a document, a tool result, or a model's own
+output.
+
 ## What runs this
 
 Every pattern in the repository is compiled, transformed and
