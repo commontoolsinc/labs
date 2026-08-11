@@ -224,54 +224,40 @@ interface TopicCard {
   // written by an older version of this pattern gets updated against — and a
   // required property that its stored rows lack refuses the update outright
   // (`deno task pattern-vintage` catches exactly that).
+  //
+  // `TopicCrossref` satisfies this structurally. Declaring it this way is what
+  // stops ordering the board from carrying a reference-bearing row schema:
+  // `topic` is a two-field projection, so a card reads prose and scalars and
+  // can never expand a sibling, while `TopicCrossref`'s reference fields stay
+  // available to consumers of the published result.
   fid: string | Default<"">;
   title: string | Default<"">;
-  body: string | Default<"">;
+  topic: {
+    body: string | Default<"">;
+    createdByName: string | Default<"">;
+  };
   createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
-  createdByName: string | Default<"">;
   commentCount: number | Default<0>;
   lastActivityAt: number | Default<0>;
   refsOutLinks: TopicNavigationLink[] | Default<[]>;
   referencedByLinks: TopicNavigationLink[] | Default<[]>;
 }
 
-/** The fields of a crossref row that a card is built from. `TopicCrossref`
- * satisfies this structurally; declaring the parameter this way is what stops
- * ordering the board from carrying a reference-bearing row schema. */
-interface TopicCardSource {
-  fid: string;
-  title: string;
-  topic: { body: string; createdByName: string };
-  createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
-  commentCount: number;
-  lastActivityAt: number;
-  refsOutLinks: TopicNavigationLink[];
-  referencedByLinks: TopicNavigationLink[];
-}
-
 /**
  * The board's cards, most recently active first.
  *
+ * Sorts and returns the rows themselves. It does not build a card object per
+ * row, and that is the point: a constructed object is a new value with no
+ * identity, so every render would hand the mapped sub-pattern fresh content
+ * and every card's subtree would be re-addressed — new scheduler actions
+ * registered and the old ones torn down — for rows whose content never
+ * changed. Passing a row through keeps the identity it already has.
+ *
  * Separate from `crossrefRows` so the published rows keep the board's own
- * order, and declared over `TopicCardSource`/`TopicCard` rather than over
- * `TopicCrossref` so neither the sort nor the render carries a schema that can
- * expand a sibling. `TopicCrossref`'s reference fields exist for consumers of
- * the published result; a card reads prose and scalars and never follows one.
+ * order while the cards carry the board's.
  */
-const cardsByActivity = lift((rows: TopicCardSource[]): TopicCard[] =>
-  rows
-    .toSorted((a, b) => b.lastActivityAt - a.lastActivityAt)
-    .map((row) => ({
-      fid: row.fid,
-      title: row.title,
-      body: row.topic.body,
-      createdBy: row.createdBy,
-      createdByName: row.topic.createdByName,
-      commentCount: row.commentCount,
-      lastActivityAt: row.lastActivityAt,
-      refsOutLinks: row.refsOutLinks,
-      referencedByLinks: row.referencedByLinks,
-    }))
+const cardsByActivity = lift((rows: TopicCard[]): TopicCard[] =>
+  rows.toSorted((a, b) => b.lastActivityAt - a.lastActivityAt)
 );
 
 /**
@@ -464,16 +450,18 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
                     <cf-text block style="font-weight: 600;">
                       {card.title || "(untitled topic)"}
                     </cf-text>
-                    {card.body
+                    {card.topic.body
                       ? (
                         <cf-text tone="muted" block truncate>
-                          {snippet(card.body, 120)}
+                          {snippet(card.topic.body, 120)}
                         </cf-text>
                       )
                       : null}
                     <cf-text variant="caption" tone="muted">
-                      {card.commentCount} comments · by{" "}
-                      {topicAuthorLabel(card.createdBy, card.createdByName)}
+                      {card.commentCount} comments · by {topicAuthorLabel(
+                        card.createdBy,
+                        card.topic.createdByName,
+                      )}
                       {" · "}
                       {whenLabel(card.lastActivityAt)}
                     </cf-text>
