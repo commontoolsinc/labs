@@ -19,8 +19,8 @@ export function renderNewSession(write: (text: string) => void = render): void {
 export const invocationSession = new Command()
   .name("invocation-session")
   .description(
-    "Mint an invocation session: the caller an invocation id passed to " +
-      "`cf piece call` was chosen within. One per agent run.",
+    "Mint an invocation session: the caller identity that an invocation id " +
+      "passed to `cf piece call` is chosen within. One per agent run.",
   )
   .default("help")
   /* invocation-session new */

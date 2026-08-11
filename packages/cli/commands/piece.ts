@@ -793,16 +793,22 @@ export async function parsePieceCallSelection(
  * acknowledged abandons un-executed work rather than leaving it settling
  * elsewhere: before the `committed` phase, the invocation may not have
  * executed or committed at all. The recovery is re-invoking with the SAME
- * id — safe in every phase, because it deduplicates against the create-only
- * receipt when the commit landed and re-executes when it never did. The
- * exit reports the id and the furthest phase so the caller can.
+ * id AND session — safe in every phase, because it deduplicates against the
+ * create-only receipt when the commit landed and re-executes when it never
+ * did.
+ *
+ * Both halves are named because both reach the address: an id alone is
+ * replayable within no session, and `resolveInvocationIdentity` refuses one
+ * offered without its session rather than putting that id on a different
+ * outcome. The dispatch announcement puts the pair on stderr, which is where
+ * a caller acting on this recovers them from.
  */
 export class WaitBoundExpired extends Error {
   constructor(readonly seconds: number) {
     super(
       `--wait bound of ${seconds}s expired: the invocation may not have ` +
-        "executed or committed — re-invoke with the same invocation id " +
-        "to finish it or read the outcome back",
+        "executed or committed — re-invoke with the same invocation id and " +
+        "session to finish it or read the outcome back",
     );
     this.name = "WaitBoundExpired";
   }
