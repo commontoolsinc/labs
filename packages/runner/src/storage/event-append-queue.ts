@@ -1,0 +1,329 @@
+// The client-side event-append queue (server-execution v2 Phase 3;
+// events.md §5, speculation.md §5, LT9). Under the flag a client's
+// handler fire commits ONLY the event — an authored append to the
+// stream's sidecar doc (events.md §1, §7) — and this queue owns that
+// commit's delivery: fired-order discharge, retry across transport
+// loss and session replacement, and the duplicate-as-delivered
+// classification the dedupe horizon makes sound.
+//
+// Why a queue and not a bare transact: events are INTENTS. Unlike an
+// ordinary authored write — whose CAS staleness needs application-level
+// repair, so the storage layer deliberately rejects it on transport
+// death — an event append is safe to resubmit forever: admission
+// dedupes by eventId above the stream's `eventWatermark`
+// (events.md §4), the engine's replay check covers the same-session
+// resend, and the server signals "already appended" with a NAMED error
+// (`EventAppendDuplicateError`) precisely so a discharging client
+// treats it as delivered rather than re-raising forever (events.md §5's
+// duplicate-submission rule).
+//
+// Ordering: strictly one in-flight append per space, in fired order —
+// events.md §5's "discharge on reconnect in fired order". (Per-stream
+// order is the spec's requirement; per-space serialization implies it
+// and keeps the machinery obvious.)
+//
+// Durability (LT9, RULED 2026-08-03): the queue rides an injectable
+// {@link EventAppendQueueStore} — "the same persistence class as
+// `sessionId`" (events.md §5, protocol.md §5). Protocol §5's
+// sessionId-persistence itself is unimplemented spec debt (today's
+// sessionId is process-lifetime), so the DEFAULT store is in-memory —
+// the same class — and a host that persists sessions supplies a durable
+// store through the same seam. The contract tests drive a durable fake
+// across queue instances; the browser adapter lands with the sessionId
+// persistence work it depends on.
+
+import { getLogger } from "@commonfabric/utils/logger";
+import type {
+  ClientCommit,
+  EventAppendDecl,
+  StreamEventEntry,
+  StreamLinkRef,
+} from "@commonfabric/memory/v2";
+import type { FabricValue } from "@commonfabric/api";
+
+const logger = getLogger("event-append-queue", {
+  enabled: true,
+  level: "warn",
+});
+
+/** One queued fire, exactly the durable shape (persisted verbatim). */
+export type QueuedEventAppend = {
+  /** The stream's sidecar doc ({@link streamEntriesDocId}). */
+  sidecarId: string;
+  /** The stream link the entry self-describes (events.md §1). */
+  stream: StreamLinkRef;
+  /** The durable client-minted event id (event-identity). */
+  eventId: string;
+  payload?: FabricValue;
+  /** The one client-minted firedAt component (events.md §1): orders
+   * this session's own appends and steers nothing. */
+  clientSeq: number;
+  runtimeInjectedEventKeys?: string[];
+};
+
+/** The delivery outcome one discharge resolves with. */
+export type EventAppendOutcome =
+  | { delivered: true; deduped?: boolean }
+  | { delivered: false; refused: string };
+
+/** The LT9 persistence seam. Both methods are best-effort from the
+ * queue's view — a failing store degrades durability, never liveness. */
+export interface EventAppendQueueStore {
+  load(space: string): Promise<QueuedEventAppend[]>;
+  save(space: string, entries: readonly QueuedEventAppend[]): Promise<void>;
+}
+
+/** An in-memory store: the default persistence class (see header). */
+export const memoryEventAppendQueueStore = (): EventAppendQueueStore => {
+  const bySpace = new Map<string, QueuedEventAppend[]>();
+  return {
+    load: (space) => Promise.resolve([...(bySpace.get(space) ?? [])]),
+    save: (space, entries) => {
+      bySpace.set(space, [...entries]);
+      return Promise.resolve();
+    },
+  };
+};
+
+const RETRY_BASE_MS = 250;
+const RETRY_CAP_MS = 10_000;
+
+/** Wire-error names that classify a discharge outcome. Everything not
+ * named here is treated as TRANSIENT and retried with backoff — the
+ * fail-open direction is deliberate: a mis-classified transient error
+ * only delays delivery (dedupe keeps the resend sound), while
+ * mis-classifying a transient as refused would LOSE a user intent. */
+const REFUSED_ERROR_NAMES = new Set([
+  // Deterministic server verdicts: resubmitting the identical append
+  // can never succeed (shape violations, admission refusals).
+  "ProtocolError",
+  "RowLabelCommitError",
+  "PreconditionFailedError",
+  "TransactionError",
+  "ConflictError",
+]);
+
+export class EventAppendQueue {
+  readonly #space: string;
+  readonly #store: EventAppendQueueStore;
+  readonly #transact: (commit: ClientCommit) => Promise<unknown>;
+  readonly #nextLocalSeq: () => number;
+  readonly #onRefused?: (append: QueuedEventAppend, reason: string) => void;
+  readonly #queue: QueuedEventAppend[] = [];
+  readonly #outcomes = new Map<
+    string,
+    (outcome: EventAppendOutcome) => void
+  >();
+  #clientSeq = 0;
+  #draining = false;
+  #closed = false;
+  #retryTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Resolves the drain loop's in-flight backoff wait — close() must
+   * settle it (clearing the timer alone would leave the loop's await
+   * pending forever, wedging dispose-time sanitizers). */
+  #retryRelease: (() => void) | undefined;
+  #loaded: Promise<void>;
+
+  constructor(options: {
+    space: string;
+    /** Sends one ClientCommit; resolves on accept, rejects with the
+     * (name-carrying) wire error otherwise. */
+    transact: (commit: ClientCommit) => Promise<unknown>;
+    /** Allocated at SEND time, per attempt — the increasing-localSeq
+     * send-order discipline (04-protocol §3.9) forbids holding one
+     * across other commits, and a session-replacement resubmit needs a
+     * fresh one anyway. */
+    nextLocalSeq: () => number;
+    store?: EventAppendQueueStore;
+    onRefused?: (append: QueuedEventAppend, reason: string) => void;
+  }) {
+    this.#space = options.space;
+    this.#store = options.store ?? memoryEventAppendQueueStore();
+    this.#transact = options.transact;
+    this.#nextLocalSeq = options.nextLocalSeq;
+    this.#onRefused = options.onRefused;
+    this.#loaded = this.#store.load(this.#space).then((persisted) => {
+      // Persisted intents fired EARLIER than anything this instance
+      // enqueues (they survived a reload): they discharge first.
+      this.#queue.unshift(...persisted);
+      for (const entry of persisted) {
+        if (entry.clientSeq >= this.#clientSeq) {
+          this.#clientSeq = entry.clientSeq + 1;
+        }
+      }
+      if (persisted.length > 0) this.#kick();
+    }).catch((error) => {
+      logger.warn("event-queue-load-failed", () => [
+        `event queue load for ${this.#space} failed; queued intents ` +
+          "from a previous session (if any) are not recovered",
+        error,
+      ]);
+    });
+  }
+
+  /** Live entries (pending discharge), fired order. */
+  get pending(): readonly QueuedEventAppend[] {
+    return this.#queue;
+  }
+
+  /** Resolves once the persisted backlog (if any) has been loaded. */
+  get loaded(): Promise<void> {
+    return this.#loaded;
+  }
+
+  nextClientSeq(): number {
+    return this.#clientSeq++;
+  }
+
+  /** Queue one fire. Resolves with the delivery outcome (delivered /
+   * deduped-as-delivered / refused). The caller does NOT have to await
+   * it — the echo renders regardless (speculation.md §5). */
+  enqueue(
+    append: Omit<QueuedEventAppend, "clientSeq"> & { clientSeq?: number },
+  ): Promise<EventAppendOutcome> {
+    const entry: QueuedEventAppend = {
+      ...append,
+      clientSeq: append.clientSeq ?? this.nextClientSeq(),
+    };
+    const { promise, resolve } = Promise.withResolvers<EventAppendOutcome>();
+    this.#queue.push(entry);
+    this.#outcomes.set(entry.eventId, resolve);
+    this.#persist();
+    this.#kick();
+    return promise;
+  }
+
+  /** Nudge the discharge loop (reconnect, session replacement). */
+  kick(): void {
+    this.#kick();
+  }
+
+  close(): void {
+    this.#closed = true;
+    if (this.#retryTimer !== undefined) {
+      clearTimeout(this.#retryTimer);
+      this.#retryTimer = undefined;
+    }
+    this.#retryRelease?.();
+    this.#retryRelease = undefined;
+  }
+
+  #persist(): void {
+    void this.#store.save(this.#space, this.#queue).catch((error) => {
+      logger.warn("event-queue-save-failed", () => [
+        `event queue save for ${this.#space} failed; a reload before ` +
+          "delivery may lose the queued intent (LT9 durability degraded)",
+        error,
+      ]);
+    });
+  }
+
+  #kick(): void {
+    if (this.#draining || this.#closed) return;
+    this.#draining = true;
+    void this.#drain().finally(() => {
+      this.#draining = false;
+      // Entries that arrived while the loop wound down.
+      if (this.#queue.length > 0 && !this.#closed) this.#kick();
+    });
+  }
+
+  async #drain(): Promise<void> {
+    await this.#loaded;
+    let attempt = 0;
+    while (this.#queue.length > 0 && !this.#closed) {
+      const head = this.#queue[0];
+      try {
+        await this.#transact(this.#commitFor(head));
+        this.#settle(head, { delivered: true });
+        attempt = 0;
+      } catch (error) {
+        const name = (error as { name?: string })?.name ?? "";
+        const message = error instanceof Error
+          ? error.message
+          : String(error);
+        if (name === "EventAppendDuplicateError") {
+          // The first append landed; its consequences are (or will be)
+          // the authoritative outcome (events.md §5).
+          this.#settle(head, { delivered: true, deduped: true });
+          attempt = 0;
+          continue;
+        }
+        if (REFUSED_ERROR_NAMES.has(name)) {
+          logger.warn("event-append-refused", () => [
+            `event append ${head.eventId} refused deterministically; ` +
+              "dropped from the queue",
+            { name, message },
+          ]);
+          this.#settle(head, { delivered: false, refused: message });
+          this.#onRefused?.(head, message);
+          attempt = 0;
+          continue;
+        }
+        // Transient (transport death, session replacement, handshake
+        // in progress): keep the head queued and retry with backoff.
+        // Delivery order holds — nothing behind the head sends first.
+        attempt += 1;
+        const delay = Math.min(
+          RETRY_BASE_MS * 2 ** Math.min(attempt - 1, 10),
+          RETRY_CAP_MS,
+        );
+        await new Promise<void>((resolve) => {
+          this.#retryRelease = resolve;
+          this.#retryTimer = setTimeout(() => {
+            this.#retryTimer = undefined;
+            this.#retryRelease = undefined;
+            resolve();
+          }, delay);
+        });
+      }
+    }
+  }
+
+  #settle(entry: QueuedEventAppend, outcome: EventAppendOutcome): void {
+    const index = this.#queue.indexOf(entry);
+    if (index >= 0) this.#queue.splice(index, 1);
+    this.#persist();
+    const resolve = this.#outcomes.get(entry.eventId);
+    if (resolve !== undefined) {
+      this.#outcomes.delete(entry.eventId);
+      resolve(outcome);
+    }
+  }
+
+  /** The append commit, built fresh per attempt: the tail-relative
+   * merge patch (concurrent appends merge against durable state; the
+   * array and path create if absent) plus the declaration admission
+   * stamps from (events.md §1; the same shape the memory server's own
+   * delegated delivery uses). Reads are EMPTY — admission is append
+   * authority + the eventId CAS, never a base-revision check. */
+  #commitFor(append: QueuedEventAppend): ClientCommit {
+    const entry: StreamEventEntry = {
+      eventId: append.eventId,
+      stream: append.stream,
+      payload: append.payload,
+      firedAt: { clientSeq: append.clientSeq } as never,
+      ...(append.runtimeInjectedEventKeys !== undefined
+        ? { runtimeInjectedEventKeys: append.runtimeInjectedEventKeys }
+        : {}),
+    };
+    const decl: EventAppendDecl = {
+      id: append.sidecarId as EventAppendDecl["id"],
+      eventId: append.eventId,
+    };
+    return {
+      localSeq: this.#nextLocalSeq(),
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "patch",
+        id: append.sidecarId as never,
+        patches: [{
+          op: "append",
+          path: "/value/entries",
+          values: [entry as never],
+        }],
+      }],
+      eventAppends: [decl],
+    };
+  }
+}

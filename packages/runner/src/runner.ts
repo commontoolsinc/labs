@@ -5107,7 +5107,14 @@ export class Runner {
       tx,
     );
     const receiptsEnabled =
-      this.runtime.experimental.commitPreconditions === true;
+      this.runtime.experimental.commitPreconditions === true &&
+      // Events-down (server-execution v2 Phase 3; runtime-mapping N26):
+      // receipt create-only exactly-once is SUBSUMED by the stream's
+      // `eventWatermark` (events.md §4), and the two mechanisms must not
+      // be active for the same event — client handler runs divert to the
+      // overlay anyway, and a serving run's create-only mark would ride
+      // the WAVE commit as a precondition the watermark already covers.
+      this.runtime.experimental.serverExecution !== true;
     // Expose the handling's receipt address on the transaction, where the
     // sender's commit callback can read it (verb contract WS-D). Stashed
     // before the branches so BOTH outcomes carry it: a committed handling

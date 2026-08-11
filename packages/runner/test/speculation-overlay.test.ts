@@ -13,9 +13,10 @@
 // - retirement is watermark-driven (speculation.md §4): the pushed
 //   derived commit + the replicated watermark doc cover the entry, the
 //   overlay empties, and the STORE value renders;
-// - client HANDLER writes still commit authored-class (F10 — the
-//   Phase-3 interim, protocol.md §1), and UI-binding/imperative writes
-//   are untouched authorship;
+// - client HANDLER runs divert to the overlay too (Phase 3 —
+//   events-down; events.md §7: the F10 interim's handler-write commit
+//   path is DELETED, and the fire's one authored act is the EVENT
+//   append); UI-binding/imperative writes are untouched authorship;
 // - a speculative run's post-commit effects follow the egress rule:
 //   external-sink kinds are DROPPED (the client never performs egress
 //   under the flag — README §3.5), while the reversible `navigateTo`
@@ -295,9 +296,21 @@ describe("Phase 2 speculation overlay", () => {
     cancelDemand();
   });
 
-  it("client handler writes still commit authored-class (F10: the Phase-3 interim stands)", async () => {
-    host = newHost();
-    openClient();
+  it("a client handler fire commits ONLY the event: the append lands stamped, the handler write diverts to the echo (events.md §1, §7 — F10 deleted)", async () => {
+    // Deliberately NO serving host: the client half must hold on its
+    // own — the append lands, the handler write does not, the echo
+    // renders and STAYS (no wave exists to cover it). The full loop
+    // (server processes the event, consequences land, the echo
+    // retires) is the serving-side suite's pin. The flag is explicit
+    // (no host pinned the ambient).
+    clientManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientManager,
+      experimental: { serverExecution: true },
+    });
     const engine = await server.engineForSpace(space);
 
     const HANDLER_PATTERN = [
@@ -342,10 +355,13 @@ describe("Phase 2 speculation overlay", () => {
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
 
-    // Fire the handler client-side: its write is AUTHORED-class and
-    // must land in the store (F10 — the client is still the handler
-    // authority until Phase 3).
+    // Fire the handler client-side. Under events-down the client's ONE
+    // computational commit is the EVENT APPEND (events.md §1, §7): the
+    // stream's sidecar doc gains a stamped entry, and the handler's own
+    // write never reaches the store — it renders as the overlay echo.
     const before = Engine.serverSeq(engine);
+    const overlay = clientRuntime.speculationOverlay;
+    expect(overlay).toBeDefined();
     result.key("bump").send({});
     await clientRuntime.idle();
     await clientRuntime.storageManager.synced();
@@ -356,17 +372,40 @@ describe("Phase 2 speculation overlay", () => {
         });
         return records.some((record) => record.class === "authored");
       },
-      "an authored-class handler commit",
+      "the authored event-append commit",
     );
-    // The consequence renders — and it is durable state, not an
-    // overlay entry (the store carries the authored write).
+    // The store's ONLY new state is the event: the sidecar entry is
+    // stamped from the authenticated envelope (firedAt = the firing
+    // session — protocol.md §2's authored event-append row), and the
+    // handler's consequence doc is UNTOUCHED durably (events.md §7:
+    // no client handler-write commit path exists).
+    const sidecarDocs = Engine.selectPendingStreamEventDocs(engine);
+    expect(sidecarDocs.length).toBe(1);
+    expect(sidecarDocs[0].entries.length).toBe(1);
+    const entry = sidecarDocs[0].entries[0];
+    expect(typeof entry.seq).toBe("number");
+    expect(entry.firedAt?.user).toBe(aliceSigner.did());
+    expect(typeof entry.firedAt?.session).toBe("string");
+    expect(typeof entry.firedAt?.clientSeq).toBe("number");
+    const afterFire = Engine.selectCommitsSince(engine, { fromSeq: before });
+    expect(afterFire.length).toBe(1);
+    expect(afterFire[0].class).toBe("authored");
+    // The ECHO: the handler ran locally and its write renders through
+    // the overlay — a live entry tagged with the fired event's id.
     await waitUntil(
       () => {
         const value = argument.key("value").get() as number | undefined;
         return (value ?? 0) >= 1;
       },
-      "the handler consequence to be readable",
+      "the handler echo to render",
     );
+    expect(overlay!.entryCount(space)).toBeGreaterThanOrEqual(1);
+    // The durable half of the doc the handler wrote did NOT change:
+    // reading the STORE view (the engine) shows the seed value only.
+    const argDoc = Engine.read(engine, { id: "of:handler-arg" });
+    expect(
+      (argDoc?.value as { value?: number } | undefined)?.value ?? 0,
+    ).toBe(0);
     cancelDemand();
   });
 
@@ -403,14 +442,24 @@ describe("Phase 2 speculation overlay", () => {
     );
     expect(flushed).toEqual(["navigateTo"]);
 
-    // A handler-kind tx keeps today's inline flush (ownership refused).
+    // An event-handler echo follows the SAME egress rule since Phase 3
+    // (events.md §7: the echo owns its effects — egress kinds dropped,
+    // navigateTo enacts); a bookkeeping tx keeps today's inline flush.
     const handlerTx = {} as unknown as IExtendedStorageTransaction;
     stampSpeculationRunContext(handlerTx, {
       actionId: "spec-test-handler",
       kind: "event-handler",
     });
     expect(destination.deferSealedEffects(handlerTx, [effectOf("fetch")]))
-      .toBe(false);
+      .toBe(true);
+    const bookkeepingTx = {} as unknown as IExtendedStorageTransaction;
+    stampSpeculationRunContext(bookkeepingTx, {
+      actionId: "spec-test-bookkeeping",
+      kind: "bookkeeping",
+    });
+    expect(
+      destination.deferSealedEffects(bookkeepingTx, [effectOf("fetch")]),
+    ).toBe(false);
   });
 
   it("an effectful builtin reached by client speculation never fires egress: pending renders, zero client fetch calls (README §3.5's never-execute rule)", async () => {

@@ -331,7 +331,14 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
       // The matching (stream, handler) count can only reach the cap once the
       // whole queue is at it, so this O(queue) scan runs only after a backlog
       // has already formed — ordinary enqueue stays O(1).
-      state.eventQueue.length >= MAX_EVENT_BACKLOG_PER_STREAM
+      state.eventQueue.length >= MAX_EVENT_BACKLOG_PER_STREAM &&
+      // Events-down (server-execution v2 Phase 3; events.md §2): the
+      // last-wins collapse would DESTROY durable intent ids — the root
+      // fire's committed append id, a cascade id bound for
+      // `consequenceOf` — so under the flag collapse is DISABLED and
+      // backpressure is shaped at the binding layer instead (README
+      // §3.8; ledger L8 records the collapse-but-list alternative).
+      state.runtime.experimental.serverExecution !== true
     ) {
       let pending = 0;
       let lastSameOrigin: QueuedEvent | undefined;
@@ -1012,7 +1019,14 @@ export async function dispatchQueuedEvent(state: {
     if (
       originLocalSeq !== undefined &&
       state.lineageStatus(queuedEvent.originTx) === "pending" &&
-      state.runtime.experimental.commitPreconditions === true
+      state.runtime.experimental.commitPreconditions === true &&
+      // Events-down (runtime-mapping N26): the receipt/precondition
+      // exactly-once machinery is SUBSUMED by the stream's
+      // `eventWatermark` (events.md §4) and the two mechanisms MUST NOT
+      // be active for the same event. Under the flag the handler run is
+      // a diverted echo (client) or a wave-sealed run (server) — its
+      // tx never carries wire preconditions.
+      state.runtime.experimental.serverExecution !== true
     ) {
       tx.addCommitPrecondition?.(queuedEvent.eventLink.space, {
         kind: "origin-committed",

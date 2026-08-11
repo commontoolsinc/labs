@@ -33,13 +33,22 @@ import {
 } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { ReadonlyCell } from "@commonfabric/api";
-import type { SqliteDbRef, SqliteParamsWire } from "@commonfabric/memory/v2";
+import {
+  type SqliteDbRef,
+  type SqliteParamsWire,
+  streamEntriesDocId,
+  type StreamLinkRef,
+} from "@commonfabric/memory/v2";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
 import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
 import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
 import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
-import { scopeCallerEventId } from "./scheduler/event-identity.ts";
+import {
+  mintEventId,
+  scopeCallerEventId,
+} from "./scheduler/event-identity.ts";
+import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
 import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
 import { cfcLabelViewForCell } from "./cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
@@ -1451,6 +1460,70 @@ export class CellImpl<T extends FabricValue>
       ) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 
+      const mintedKeys = mintedRuntimeInjectedEventKeys(
+        sendOptions?.runtimeInjectedEventKeys,
+      );
+      // Server-execution v2 Phase 3 (events-down; events.md §1, §7): on a
+      // flag-ON CLIENT, a fire from OUTSIDE the scheduler — the tx is
+      // absent or unstamped: a DOM/renderer fire, an imperative send —
+      // commits THE EVENT as its one authored act: an append to the
+      // stream's sidecar doc, queued for fired-order delivery (offline
+      // queue, events.md §5/LT9). The local run below is the speculative
+      // ECHO. A send from WITHIN a scheduler-stamped run (a handler
+      // cascade, echo-side) commits nothing — the scheduler tell
+      // (protocol.md §1): only scheduler-driven work moved to the server,
+      // and the server's authoritative run produces the durable cascade.
+      let firedEventId: string | undefined;
+      if (
+        this.runtime.experimental.serverExecution === true &&
+        this.runtime.servingPosture !== true &&
+        (this.tx === undefined ||
+          speculationRunContextOf(this.tx) === undefined)
+      ) {
+        firedEventId = sendOptions?.eventId === undefined
+          ? mintEventId(resolvedToValueLink, this.tx ?? undefined)
+          : scopeCallerEventId(sendOptions.eventId, resolvedToValueLink);
+        const stream: StreamLinkRef = {
+          id: resolvedToValueLink.id,
+          path: [...resolvedToValueLink.path],
+          ...(resolvedToValueLink.scope !== undefined
+            ? { scope: resolvedToValueLink.scope }
+            : {}),
+        };
+        const sidecarId = streamEntriesDocId(stream);
+        const space = resolvedToValueLink.space;
+        const replica = this.runtime.storageManager.open(space).replica;
+        if (replica.enqueueEventAppend !== undefined) {
+          const overlay = this.runtime.speculationOverlay;
+          overlay?.trackIntent(space, sidecarId, firedEventId);
+          const eventId = firedEventId;
+          const outcome = replica.enqueueEventAppend({
+            sidecarId,
+            stream,
+            eventId,
+            payload: event as never,
+            ...(mintedKeys !== undefined
+              ? { runtimeInjectedEventKeys: [...mintedKeys] }
+              : {}),
+          }).then((delivery) => {
+            if (!delivery.delivered) {
+              // Deterministic admission refusal: the intent is dead —
+              // un-render the echo and signal (events.md §5).
+              overlay?.resolveIntent(space, sidecarId, eventId, {
+                kind: "refused",
+                reason: delivery.refused,
+              });
+            }
+            return delivery;
+          });
+          // The durability barrier (`synced()`) covers undischarged
+          // intents: an event queued offline is an unacked write.
+          this.runtime.storageManager.trackPendingCommit(
+            outcome as Promise<unknown>,
+          );
+        }
+      }
+
       // Trigger on fully resolved link
       this.runtime.scheduler.queueEvent(
         resolvedToValueLink,
@@ -1462,7 +1535,12 @@ export class CellImpl<T extends FabricValue>
           // The caller's key is opaque and unscoped; queueEvent expects a
           // durable delivery id. Binding it to this stream is what keeps two
           // verbs that share input bindings from colliding on one receipt.
-          eventId: sendOptions?.eventId === undefined
+          // Under events-down the COMMITTED append's id is the one the
+          // echo must carry (overlay origin `intent(eventId)`,
+          // speculation.md §1) — the same id, one mint.
+          eventId: firedEventId !== undefined
+            ? firedEventId
+            : sendOptions?.eventId === undefined
             ? undefined
             : scopeCallerEventId(sendOptions.eventId, resolvedToValueLink),
           originTx: this.tx ?? undefined,
@@ -1471,9 +1549,7 @@ export class CellImpl<T extends FabricValue>
           // in-process or sandboxed caller could pass — is dropped, and the
           // closed-world gate then judges the key like any other undeclared
           // field.
-          runtimeInjectedEventKeys: mintedRuntimeInjectedEventKeys(
-            sendOptions?.runtimeInjectedEventKeys,
-          ),
+          runtimeInjectedEventKeys: mintedKeys,
         },
       );
 

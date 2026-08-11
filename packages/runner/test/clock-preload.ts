@@ -44,5 +44,10 @@ installFakeClock({
     // (the serving side of the client-loses-derivation-commit journey)
     // under the same wall-clock policies.
     "speculation-overlay",
+    // The Phase-3 client event-append suite drives a live memory server
+    // plus the queue's real-time discharge pacing (retry backoff is a
+    // wall-clock policy, and the tests wait on transport edges with
+    // bounded timeouts — the same class as the serving-loop suites).
+    "event-append-client",
   ],
 });

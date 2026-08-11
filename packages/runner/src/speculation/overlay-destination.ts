@@ -10,15 +10,24 @@
 // wire, and none that could construct a `derived`-class commit
 // (protocol.md §1's FORBIDDEN clause holds structurally).
 //
-// What stays on today's commit path, exactly (the plan's Phase 2
-// interim postures row):
-// - event-handler runs — client HANDLER writes stay authored-class
-//   until Phase 3 lands events-down (F10, protocol.md §1);
+// What stays on today's commit path, exactly (the plan's Phase 3
+// interim postures row — F10's handler interim ENDED with events-down,
+// events.md §7):
 // - bookkeeping runs (the client-side pattern swap's pointer write is
 //   an ordinary authored input);
-// - UNSTAMPED transactions — UI-binding writes and imperative edits
-//   are state authorship under existing ACL + CAS (README §3.6), and
-//   they never pass through the scheduler's stamping choke points.
+// - UNSTAMPED transactions — UI-binding writes, imperative edits, and
+//   the event-append commit itself (the fire's one authored act,
+//   events.md §1) are state authorship under existing ACL + CAS
+//   (README §3.6), and they never pass through the scheduler's
+//   stamping choke points.
+//
+// Event-HANDLER runs divert here exactly like derivation runs since
+// Phase 3 (D-v2-1): the handler's writes are the speculative ECHO
+// (speculation.md §2), tagged with the fired event's id so the echo
+// retires when the authoritative consequences (or the dropped-event
+// notice) arrive (speculation.md §4 step 2; the watermark sweep is the
+// backstop). The client handler-write COMMIT path is deleted — there
+// is no code path from a handler run to the wire (events.md §7).
 //
 // The overlay is process-memory only (speculation.md §1): entries are
 // never serialized, never synced, never committed, and they stay OUT
@@ -46,6 +55,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import {
   type CellScope,
   SERVER_EXECUTION_WATERMARK_DOC_ID,
+  type StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
 import type { Runtime, ServerRunInfo } from "../runtime.ts";
 import type {
@@ -95,6 +105,17 @@ export const speculationRunContextOf = (
  * never by default. */
 const SPECULATION_ENACTABLE_EFFECT_KINDS = new Set(["navigateTo"]);
 
+/** A terminal event-intent outcome the client is SIGNALED about
+ * (events.md §5): dropped (the conflicting-discharge notice), errored
+ * (the handler threw server-side — the error is the consequence), or
+ * refused (deterministic admission refusal at discharge). */
+export type EventIntentOutcome = {
+  space: MemorySpace;
+  eventId: string;
+  kind: "dropped" | "errored" | "refused";
+  reason: string;
+};
+
 type OverlayEntry = {
   space: MemorySpace;
   localSeq: number;
@@ -123,6 +144,12 @@ type OverlayEntry = {
    * relative to the verdict — and on a quiet space no further
    * watermark event would re-sweep. */
   settled: Promise<unknown>;
+  /** origin `intent(eventId)` (speculation.md §1): set on event-handler
+   * echoes — the fired event's durable id. `retireIntent` withdraws by
+   * it when the authoritative consequences (or the dropped-event
+   * notice) arrive (speculation.md §4 step 2); the watermark sweep
+   * stays the backstop. */
+  eventId?: string;
 };
 
 /**
@@ -139,6 +166,21 @@ export class SpeculationOverlayDestination
   readonly #watermarkSinks = new Map<MemorySpace, () => void>();
   /** space -> last observed watermark (for registration-time sweeps). */
   readonly #watermarks = new Map<MemorySpace, number>();
+  /** Fired-intent notice watch (events.md §5, speculation.md §5):
+   * space -> sidecarId -> eventIds awaiting their consequence signal.
+   * Bounded by pending-intent count; the sidecar sink releases when its
+   * last tracked id resolves. */
+  readonly #trackedIntents = new Map<
+    MemorySpace,
+    Map<string, Set<string>>
+  >();
+  /** space\0sidecarId -> cancel fn for the sidecar-doc sink. */
+  readonly #intentSinks = new Map<string, () => void>();
+  /** Subscribers to terminal intent outcomes — the events.md §5 "the
+   * client MUST be signaled so the UI can react" hook. */
+  readonly #intentOutcomeSubscribers = new Set<
+    (outcome: EventIntentOutcome) => void
+  >();
   #closed = false;
 
   constructor(runtime: Runtime) {
@@ -152,9 +194,11 @@ export class SpeculationOverlayDestination
 
   seal(tx: IExtendedStorageTransaction): Promise<Result<Unit, CommitError>> {
     const kind = speculationRunContextOf(tx)?.kind;
-    if (kind !== "derivation") {
-      // Handler runs (authored until Phase 3 — F10), bookkeeping runs,
-      // and unstamped transactions commit exactly as today.
+    if (kind !== "derivation" && kind !== "event-handler") {
+      // Bookkeeping runs and unstamped transactions commit exactly as
+      // today. Scheduler-stamped runs — derivations since Phase 2,
+      // event handlers since Phase 3 (events.md §7: the F10 interim's
+      // handler-write commit path is DELETED) — divert below.
       return tx.tx.commit();
     }
     return this.#sealSpeculative(tx);
@@ -169,6 +213,7 @@ export class SpeculationOverlayDestination
       // construction).
       return { ok: {} };
     }
+    const context = speculationRunContextOf(tx);
     const inner = tx.tx;
     if (inner.sealInto === undefined) {
       // Fail CLOSED: a transport without seal support must not fall
@@ -241,6 +286,10 @@ export class SpeculationOverlayDestination
           pendingReadDocs: [...pendingDocs.values()],
           originLocalSeqs: [...originLocalSeqs],
           settled: sealed.settled.catch(() => undefined),
+          ...(context?.kind === "event-handler" &&
+              context.eventId !== undefined
+            ? { eventId: context.eventId }
+            : {}),
         };
         sealedSpaces.push({ space, entry });
         return Promise.resolve({ ok: {} });
@@ -292,7 +341,8 @@ export class SpeculationOverlayDestination
     tx: IExtendedStorageTransaction,
     effects: readonly PostCommitSideEffect[],
   ): boolean {
-    if (speculationRunContextOf(tx)?.kind !== "derivation") {
+    const kind = speculationRunContextOf(tx)?.kind;
+    if (kind !== "derivation" && kind !== "event-handler") {
       return false;
     }
     const enactable = effects.filter((effect) =>
@@ -314,6 +364,197 @@ export class SpeculationOverlayDestination
       })();
     }
     return true;
+  }
+
+  /**
+   * Watch a fired intent's stream sidecar until its consequence signal
+   * arrives (events.md §5; speculation.md §4 step 2, §5): the entry
+   * marked `consequenced` retires the echo; `status: "dropped"` (the
+   * conflicting-discharge notice) or an `error` consequence retires it
+   * AND signals subscribers — the UI hook the ruling requires. The
+   * watch reads the VALUE plane (the notice and the consequence mark
+   * are ordinary doc writes riding the same first flush as the
+   * consequences), so no commit-metadata carriage is needed; the
+   * watermark sweep stays the backstop for signals this misses.
+   */
+  trackIntent(
+    space: MemorySpace,
+    sidecarId: string,
+    eventId: string,
+  ): void {
+    if (this.#closed) return;
+    let bySidecar = this.#trackedIntents.get(space);
+    if (bySidecar === undefined) {
+      bySidecar = new Map();
+      this.#trackedIntents.set(space, bySidecar);
+    }
+    let ids = bySidecar.get(sidecarId);
+    if (ids === undefined) {
+      ids = new Set();
+      bySidecar.set(sidecarId, ids);
+    }
+    ids.add(eventId);
+    const sinkKey = `${space}\0${sidecarId}`;
+    if (this.#intentSinks.has(sinkKey)) return;
+    try {
+      const cell = this.#runtime.getCellFromLink<StreamEventsDocValue>({
+        space,
+        id: sidecarId as never,
+        scope: "space",
+        path: [],
+      });
+      const cancel = cell.sink((value) => {
+        this.#scanIntentNotices(
+          space,
+          sidecarId,
+          value as StreamEventsDocValue | undefined,
+        );
+      });
+      this.#intentSinks.set(sinkKey, cancel);
+    } catch (error) {
+      logger.warn("intent-sink-failed", () => [
+        `intent sidecar sink for ${space} failed; echo retirement for ` +
+          "its events rides the watermark backstop only",
+        error,
+      ]);
+    }
+  }
+
+  /** Resolve a tracked intent WITHOUT a store signal (a refused
+   * delivery): retire its echo and signal subscribers. */
+  resolveIntent(
+    space: MemorySpace,
+    sidecarId: string,
+    eventId: string,
+    outcome: { kind: "refused"; reason: string },
+  ): void {
+    this.#untrackIntent(space, sidecarId, eventId);
+    this.retireIntent(space, eventId);
+    this.#notifyIntentOutcome({
+      space,
+      eventId,
+      kind: outcome.kind,
+      reason: outcome.reason,
+    });
+  }
+
+  /** Subscribe to terminal intent outcomes (dropped server-side, errored
+   * server-side, refused at admission). Returns an unsubscribe fn. */
+  subscribeIntentOutcomes(
+    subscriber: (outcome: EventIntentOutcome) => void,
+  ): () => void {
+    this.#intentOutcomeSubscribers.add(subscriber);
+    return () => this.#intentOutcomeSubscribers.delete(subscriber);
+  }
+
+  #notifyIntentOutcome(outcome: EventIntentOutcome): void {
+    for (const subscriber of [...this.#intentOutcomeSubscribers]) {
+      try {
+        subscriber(outcome);
+      } catch (error) {
+        logger.warn("intent-outcome-subscriber-failed", () => [
+          "event intent outcome subscriber threw",
+          error,
+        ]);
+      }
+    }
+  }
+
+  #scanIntentNotices(
+    space: MemorySpace,
+    sidecarId: string,
+    value: StreamEventsDocValue | undefined,
+  ): void {
+    const ids = this.#trackedIntents.get(space)?.get(sidecarId);
+    if (ids === undefined || ids.size === 0) return;
+    for (const entry of value?.entries ?? []) {
+      if (entry === null || typeof entry !== "object") continue;
+      if (typeof entry.eventId !== "string" || !ids.has(entry.eventId)) {
+        continue;
+      }
+      if (entry.status === "dropped") {
+        // The conflicting-discharge notice (events.md §5, LT4/T7): the
+        // echo un-renders instead of lingering as false state, and the
+        // UI is signaled.
+        this.#untrackIntent(space, sidecarId, entry.eventId);
+        this.retireIntent(space, entry.eventId);
+        this.#notifyIntentOutcome({
+          space,
+          eventId: entry.eventId,
+          kind: "dropped",
+          reason: entry.reason ?? "dropped",
+        });
+      } else if (entry.consequenced === true) {
+        this.#untrackIntent(space, sidecarId, entry.eventId);
+        this.retireIntent(space, entry.eventId);
+        if (entry.error !== undefined) {
+          // The handler threw server-side: the error IS the consequence
+          // (events.md §5) — the echo still retires, and subscribers
+          // hear the error outcome.
+          this.#notifyIntentOutcome({
+            space,
+            eventId: entry.eventId,
+            kind: "errored",
+            reason: entry.error,
+          });
+        }
+      }
+    }
+  }
+
+  #untrackIntent(
+    space: MemorySpace,
+    sidecarId: string,
+    eventId: string,
+  ): void {
+    const bySidecar = this.#trackedIntents.get(space);
+    const ids = bySidecar?.get(sidecarId);
+    if (ids === undefined) return;
+    ids.delete(eventId);
+    if (ids.size === 0) {
+      bySidecar!.delete(sidecarId);
+      const sinkKey = `${space}\0${sidecarId}`;
+      const cancel = this.#intentSinks.get(sinkKey);
+      if (cancel !== undefined) {
+        this.#intentSinks.delete(sinkKey);
+        try {
+          cancel();
+        } catch {
+          // sink cancellation is best-effort
+        }
+      }
+      if (bySidecar!.size === 0) this.#trackedIntents.delete(space);
+    }
+  }
+
+  /**
+   * Retire every overlay entry whose origin is `intent(eventId)`
+   * (speculation.md §4 step 2): the authoritative consequences — or the
+   * dropped-event notice — now exist, so the echo's job is done. Runs
+   * ahead of watermark coverage (serving-loop.md §3's sealing-order
+   * guarantee: consequences ride the FIRST flush even when W lags to
+   * quiescence); the watermark sweep remains the backstop for entries
+   * this never reaches.
+   */
+  retireIntent(space: MemorySpace, eventId: string): void {
+    const entries = this.#entries.get(space);
+    if (entries === undefined) return;
+    for (const entry of [...entries.values()]) {
+      if (entry.eventId !== eventId) continue;
+      entries.delete(entry.localSeq);
+      entry.resolveVerdict({
+        withdrawn: {
+          message: "event echo retired: the authoritative consequences " +
+            "(or the dropped-event notice) arrived (speculation.md §4)",
+          superseded: true,
+        },
+      });
+      void entry.settled.then(() => {
+        if (this.#closed) return;
+        this.#sweep(space, this.#watermarks.get(space) ?? 0);
+      });
+    }
+    if (entries.size === 0) this.#entries.delete(space);
   }
 
   #ensureWatermarkSink(space: MemorySpace): void {
@@ -459,5 +700,15 @@ export class SpeculationOverlayDestination
       }
     }
     this.#watermarkSinks.clear();
+    for (const cancel of this.#intentSinks.values()) {
+      try {
+        cancel();
+      } catch {
+        // sink cancellation is best-effort during teardown
+      }
+    }
+    this.#intentSinks.clear();
+    this.#trackedIntents.clear();
+    this.#intentOutcomeSubscribers.clear();
   }
 }

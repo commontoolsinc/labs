@@ -2605,6 +2605,14 @@ export class Server {
           const responseError = preconditionError ? preconditionError : toError(
             error instanceof Engine.ConflictError
               ? "ConflictError"
+              // The eventId dedupe-horizon CAS (events.md §4, §5): the name
+              // must survive the wire UNCHANGED — a client discharging its
+              // offline event queue classifies by it, treating "already
+              // appended" as DELIVERED rather than as a failure to surface
+              // (re-raising would re-discharge forever). Checked before its
+              // ProtocolError parent so the subclass name wins.
+              : error instanceof EventAppendDuplicateError
+              ? "EventAppendDuplicateError"
               : error instanceof Engine.ProtocolError
               ? "ProtocolError"
               // A RowLabelCommitError (Phase 3.c commit-time row-label refusal,

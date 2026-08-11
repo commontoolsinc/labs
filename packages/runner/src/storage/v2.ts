@@ -84,6 +84,12 @@ import type {
   Unit,
 } from "./interface.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
+import {
+  type EventAppendOutcome,
+  EventAppendQueue,
+  type EventAppendQueueStore,
+  type QueuedEventAppend,
+} from "./event-append-queue.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import {
   getDirectTransactionMergeableOpAddresses,
@@ -531,6 +537,13 @@ export interface Options {
   /** Space authority used only for fresh named-space ACL genesis. The durable
    *  replica session still authenticates as `as`. */
   spaceIdentity?: Signer;
+  /** The LT9 event-intent persistence seam (server-execution v2 Phase 3;
+   *  events.md §5): where each space's queued-but-undelivered event
+   *  appends live across manager lifetimes. Absent = in-memory (the
+   *  same persistence class as `sessionId` today — protocol.md §5's
+   *  sessionId persistence is itself unbuilt; a host that persists
+   *  sessions supplies a durable store through this seam). */
+  eventAppendQueueStore?: EventAppendQueueStore;
 }
 
 /**
@@ -760,6 +773,7 @@ export class StorageManager implements IStorageManager {
   #pendingCommits = new Set<Promise<unknown>>();
   #pendingCommitsSubscribers = new Set<(pending: boolean) => void>();
   #sessionFactory: SessionFactory;
+  #eventAppendQueueStore?: EventAppendQueueStore;
   #spaceIdentities = new Map<MemorySpace, Signer>();
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
@@ -813,6 +827,7 @@ export class StorageManager implements IStorageManager {
     this.as = options.as;
     this.#settings = options.settings ?? {};
     this.#sessionFactory = sessionFactory;
+    this.#eventAppendQueueStore = options.eventAppendQueueStore;
     if (options.spaceIdentity) {
       this.registerSpaceIdentity(options.spaceIdentity);
     }
@@ -946,6 +961,7 @@ export class StorageManager implements IStorageManager {
         syncReplayDependencies: (document) =>
           this.syncCfcSchemaDocument(space, document),
         getTelemetry: () => this.#telemetry,
+        eventAppendQueueStore: this.#eventAppendQueueStore,
       });
       this.#providers.set(space, provider);
     }
@@ -1703,6 +1719,8 @@ type ProviderOptions = {
   ) => Promise<Error | undefined>;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
+  /** The LT9 event-intent persistence seam (see Options). */
+  eventAppendQueueStore?: EventAppendQueueStore;
 };
 
 type SpaceReplicaOptions = Omit<ProviderOptions, "createSession"> & {
@@ -2066,6 +2084,12 @@ class SpaceReplica implements ISpaceReplica {
   );
   #watchedIds = new Set<string>();
   #nextLocalSeq = 1;
+  /** The Phase-3 event-intent queue (events.md §5, LT9), created on the
+   * first fire into this space. Owns fired-order discharge and the
+   * duplicate-as-delivered classification; its entries are the client's
+   * offline event queue. */
+  #eventAppendQueue?: EventAppendQueue;
+  #eventAppendQueueStore?: EventAppendQueueStore;
   #closed = false;
   readonly #closeSignal = Promise.withResolvers<void>();
   #getTelemetry: () => TelemetrySink | undefined;
@@ -2163,6 +2187,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#settings = options.settings;
     this.#routeState = options.routeState;
     this.#routeGeneration = options.routeGeneration;
+    this.#eventAppendQueueStore = options.eventAppendQueueStore;
   }
 
   did(): MemorySpace {
@@ -2472,6 +2497,45 @@ class SpaceReplica implements ISpaceReplica {
    * decision) runs inside settlement, so consulting the parked set
    * before settlement would race it.
    */
+  /**
+   * Queue one event append for this space (server-execution v2 Phase 3;
+   * events.md §1, §5): the client's ONLY computational commit under the
+   * flag. Fired-order discharge with retry across transport loss and
+   * session replacement; a duplicate above the stream's dedupe horizon
+   * resolves as delivered (`EventAppendDuplicateError` — events.md §5's
+   * duplicate-submission rule). The returned promise settles with the
+   * delivery outcome; rendering never waits on it (the echo is local).
+   */
+  enqueueEventAppend(
+    append: Omit<QueuedEventAppend, "clientSeq"> & { clientSeq?: number },
+  ): Promise<EventAppendOutcome> {
+    return this.#ensureEventAppendQueue().enqueue(append);
+  }
+
+  /** Pending (undischarged) event intents — the offline queue's live
+   * content, bounded by pending-intent count (speculation.md §5). */
+  pendingEventAppends(): readonly QueuedEventAppend[] {
+    return this.#eventAppendQueue?.pending ?? [];
+  }
+
+  #ensureEventAppendQueue(): EventAppendQueue {
+    if (this.#eventAppendQueue === undefined) {
+      this.#eventAppendQueue = new EventAppendQueue({
+        space: this.#space,
+        transact: async (commit) => {
+          const { session } = await this.activeSessionHandle();
+          return await session.transact(commit, () => {});
+        },
+        // Allocated at SEND time from the replica's one counter, so the
+        // increasing-localSeq send-order discipline (04-protocol §3.9)
+        // holds across event appends and ordinary commits alike.
+        nextLocalSeq: () => this.#nextLocalSeq++,
+        store: this.#eventAppendQueueStore,
+      });
+    }
+    return this.#eventAppendQueue;
+  }
+
   whenApplied(localSeq: number): Promise<void> {
     if (!this.#parkedAccepts.has(localSeq)) return Promise.resolve();
     let waiter = this.#appliedWaiters.get(localSeq);
@@ -2516,6 +2580,7 @@ class SpaceReplica implements ISpaceReplica {
   async close(): Promise<void> {
     this.#closed = true;
     this.#closeSignal.resolve();
+    this.#eventAppendQueue?.close();
     this.resetConflictAdmissionState();
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     // Settle any queued (not-yet-sent) watch refresh first so its pull promise
@@ -2670,6 +2735,7 @@ class SpaceReplica implements ISpaceReplica {
   closeNow(): void {
     this.#closed = true;
     this.#closeSignal.resolve();
+    this.#eventAppendQueue?.close();
     this.resetConflictAdmissionState();
     this.cancelQueuedWatchRefresh();
     this.#watchView?.close();
@@ -4972,6 +5038,10 @@ class SpaceReplica implements ISpaceReplica {
           // double-applies — their contribution.
           resolved.session.onSessionReplaced = () => {
             this.applyParkedAcceptsNow();
+            // A replaced session rejected its outstanding commits; queued
+            // event intents re-submit under fresh localSeqs (the target's
+            // eventId dedupe keeps a landed original sound — events.md §5).
+            this.#eventAppendQueue?.kick();
           };
           return resolved;
         },

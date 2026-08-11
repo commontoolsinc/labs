@@ -1823,6 +1823,27 @@ export interface ISpace {
   did(): MemorySpace;
 }
 
+/** One event append handed to {@link ISpaceReplica.enqueueEventAppend}
+ * (structural twin of the queue module's QueuedEventAppend — stated here
+ * so the interface stays free of storage-internal imports). */
+export type EventAppendRequest = {
+  /** The stream's sidecar doc id (`streamEntriesDocId`). */
+  sidecarId: string;
+  /** The stream link the entry self-describes (events.md §1). */
+  stream: { id: string; path: readonly string[]; scope?: CellScope };
+  /** The durable client-minted event id (event-identity). */
+  eventId: string;
+  payload?: unknown;
+  /** Client-minted append order within this session; allocated by the
+   * queue when absent. */
+  clientSeq?: number;
+  runtimeInjectedEventKeys?: string[];
+};
+
+export type EventAppendDeliveryOutcome =
+  | { delivered: true; deduped?: boolean }
+  | { delivered: false; refused: string };
+
 export interface ISpaceReplica extends ISpace {
   /**
    * Return a state for the requested entry or returns `undefined` if replica
@@ -1883,6 +1904,23 @@ export interface ISpaceReplica extends ISpace {
    * inside settlement.
    */
   whenApplied?(localSeq: number): Promise<void>;
+
+  /**
+   * Queue one EVENT APPEND for this space — the client's only
+   * computational commit under EXPERIMENTAL_SERVER_EXECUTION
+   * (server-execution v2 Phase 3; events.md §1, §5, §7): fired-order
+   * discharge with retry across transport loss and session replacement,
+   * a duplicate above the stream's dedupe horizon resolved as delivered,
+   * and LT9's durable-queue seam behind it. Resolves with the delivery
+   * outcome; the local echo never waits on it.
+   */
+  enqueueEventAppend?(
+    append: EventAppendRequest,
+  ): Promise<EventAppendDeliveryOutcome>;
+
+  /** Pending (undischarged) event intents — the offline event queue's
+   * live content (speculation.md §5), bounded by pending-intent count. */
+  pendingEventAppends?(): readonly EventAppendRequest[];
 
   /**
    * The lowest server seq among inbound FOREIGN novelty whose visibility
