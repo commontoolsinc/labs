@@ -396,11 +396,15 @@ in step — stays with the list too. It is not a label, but it is mechanics, and
 what a caller needs is the only thing the doc comment owes them.
 
 A doc comment with no declaration under it at all is the same defect from the
-other direction. To title a region of a file or a class, use a section marker,
-which is a `//` block; see [Section markers](#section-markers) above.
+other direction, with one exception: the file header documents the file rather
+than any declaration in it, and is written as a doc comment for that reason;
+see [File headers](#file-headers) below. Everything else in that shape is the
+defect. To title a region of a file or a class, use a section marker, which is
+a `//` block; see [Section markers](#section-markers) above.
 
 ### What gets one
 
+- Every file, as a header; see [File headers](#file-headers) below.
 - Every exported symbol: variable, function, class, type.
 - Every class and every public member of one, including the constructor,
   whether or not the class is exported.
@@ -483,6 +487,65 @@ phrase: `Writes the donut preferences to stable storage.` Special cases:
 **Variables and properties** start with a noun phrase, usually without an
 article: `Special designation category of the donut.` Use "the" for something
 singleton-ish: `The cache of all known donut manufacturers.`
+
+### File headers
+
+A file gets a doc comment of its own, and it goes at the very top: above the
+first `import`, above the first `export`, above every declaration, with nothing
+between it and them but a blank line. Only a shebang or a file-scoped pragma
+such as `deno-lint-ignore-file` precedes it.
+
+It is the one doc comment whose subject is the file rather than the code
+beneath it, which is why [Where one goes](#where-one-goes) excepts it and
+nothing else. The blank line is load-bearing for that same reason: it is what
+keeps the header from being read as the doc comment of the first declaration
+under it.
+
+Every file with logic or type declarations in it gets one. A re-export barrel
+and a test fixture whose content is the point are the exceptions.
+
+Two placements look close enough to pass and are not. A `//` block is not an
+alternative form of a header: it reads as a note about the line beneath it,
+which is what makes it right for local mechanics and wrong for a statement
+about the whole file. And a header below the import block fails twice over — it
+is separated from what it describes by the longest stretch of unrelated text in
+the file, and it sits exactly where a reader expects the doc comment of the
+first declaration.
+
+A file header takes the same three things as any other doc comment: what the
+file is, why it exists, and the bound on anything it claims. Two shapes waste
+the slot:
+
+- **A title.** `Shopping List Pattern` above `shopping-list.tsx` restates the
+  filename, and a doc comment that restates the name has added nothing. Open
+  with a claim, in a full sentence.
+- **Tag scaffolding.** No `@fileoverview` and no `@module`. Which file the
+  comment heads is not in doubt, and the tags crowd out the sentence that would
+  have carried the content.
+
+```ts
+// Shown for illustration only.
+
+// Wrong: below the imports, in the `//` form, and titled rather than stated.
+
+import { FryerCat } from "./fryer-cat.ts";
+
+// Fryer Scheduling
+```
+
+```ts
+// Shown for illustration only.
+
+// Right.
+
+/**
+ * Assigns donuts to fryers. The order is not first-come: a fritter leaves the
+ * oil unusable for anything else in the same shift, so fritters are batched
+ * last. Scheduling only — nothing here starts a fryer.
+ */
+
+import { FryerCat } from "./fryer-cat.ts";
+```
 
 ## Error and log messages
 
