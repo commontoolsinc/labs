@@ -1175,12 +1175,14 @@ red-first-evidenced where the batch required it):
 - n3 (recorded note, no mechanism moved): a send from a
   BOOKKEEPING-stamped run on a flag-ON client is silent loss — the
   stamp suppresses the client append (the fire fork keys on "outside
-  the scheduler") and no wave carries it; the only CLIENT-side
-  bookkeeping producer today is the pattern-swap setupTx (runner.ts),
-  which does not send (the serving loop's watermark write is the
-  other bookkeeping stamp, wave-carried server-side). The row becomes
-  load-bearing the day a client bookkeeping path sends; route it as
-  an event then.
+  the scheduler") and no wave carries it. The bookkeeping class is
+  the pattern-swap setupTx plus, since the lunch-gate leg-A delta
+  above, the audited recovery/writeback family (list-builtin seeds,
+  compile-cache writebacks, the piece start/repair family, pattern
+  updater transitions, wish tick/UI writes, teardown claims) — all
+  CELL WRITES; none calls `.send()` today. The row becomes
+  load-bearing the day a bookkeeping path sends on a client; route
+  it as an event then.
 - n4 — the Phase-3 flagged-surfaces list above omitted one NEW
   below-spec-granularity surface, recorded here: the
   `execution_outbox` EVENT-CARRIAGE MIGRATION
