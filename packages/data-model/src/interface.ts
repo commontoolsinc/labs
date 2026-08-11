@@ -20,11 +20,15 @@
  * `FabricClassWithJsonCodec[JSON_CODEC]` on a `FabricPrimitive` class.
  *
  * A `FabricPrimitive`'s codec is bound per wire format, not once for all of
- * them, because such a codec _terminates_ an encoding rather than decomposing
- * a value for someone else to finish: `FabricBytes` encodes to a base64url
- * string, which is JSON's answer and nobody else's. A format that carries
- * bytes natively wants a different codec, or none, and says so by looking up
- * a different symbol.
+ * them, because these classes are where the formats disagree. `FabricBytes`
+ * encodes to a base64url string, which is JSON's answer and nobody else's: a
+ * format that carries bytes natively wants a different codec, or none, and
+ * says so by looking up a different symbol.
+ *
+ * What differs can be the _kind_ of codec and not merely the state it
+ * produces, which is why the binding is per format rather than a property of
+ * the class. `FabricRegExp` decomposes into a record of strings under JSON,
+ * which has no pattern type of its own to terminate into.
  *
  * That is what separates these from a `FabricInstance`'s codec, bound to the
  * generic `[CODEC]`: an instance's codec only decomposes an instance into

@@ -3,6 +3,7 @@ import { SpecialNumberCodec } from "./SpecialNumberCodec.ts";
 import { SymbolCodec } from "./SymbolCodec.ts";
 import { UndefinedCodec } from "./UndefinedCodec.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
+import type { JsonCodecValue } from "./interface.ts";
 
 /**
  * Creates a registry holding this format's determination about JavaScript's
@@ -29,8 +30,8 @@ import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
  * The result is frozen, so add classes with `CodecRegistry.extend()` rather
  * than by registering onto it.
  */
-export function createBaseJsonRegistry(): CodecRegistry {
-  const registry = new CodecRegistry();
+export function createBaseJsonRegistry(): CodecRegistry<JsonCodecValue> {
+  const registry = new CodecRegistry<JsonCodecValue>();
 
   // JS primitives that need tagged encoding, registered by `typeof`.
   registry.registerPrimitive("bigint", new BigIntCodec());

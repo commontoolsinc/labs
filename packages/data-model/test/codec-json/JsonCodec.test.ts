@@ -21,6 +21,9 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 import { BaseReconstructionContext } from "@/codec-common/BaseReconstructionContext.ts";
 import { CodecRegistry } from "@/codec-common/CodecRegistry.ts";
+import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 
 /**
  * Shared test `ReconstructionContext`: `getCell()` always throws (no test
@@ -139,6 +142,150 @@ describe("JsonCodec", () => {
 
       expect(result).toBeInstanceOf(UnknownValue);
       expect((result as UnknownValue).wireTypeTag).toBe("Error@1");
+    });
+  });
+
+  describe("terminal vs. decomposing codecs", () => {
+    // The two kinds differ in exactly one respect: whether the walker
+    // processes the state a codec produces. Every codec this package registers
+    // for JSON hides that difference, because each of their states is a
+    // self-representing value -- one of `null`, `boolean`, `number`, `string`
+    // -- and the walker is the identity on those by definition.
+    //
+    // Nothing in the types requires that. `JsonCodecValue` admits structure,
+    // and a structured state is where the two kinds part company.
+    //
+    // These cases use a state that does not survive one: a plain object
+    // carrying a `/`-prefixed key. The walker escapes such an object with
+    // `/quote` on the way out, and decodes the tag it names on the way back,
+    // so which kind of codec produced it is legible in the wire form and in
+    // what `decode()` is handed.
+
+    const PROBE_TAG = "Probe@1";
+    const PROBE_STATE = Object.freeze({ "/Bytes@1": "AQID" });
+
+    /** Stateless instance, existing only to have a class to dispatch on. */
+    class ProbeInstance extends BaseFabricInstance {
+      get wireTypeTag(): string {
+        return PROBE_TAG;
+      }
+
+      protected [SHALLOW_UNFROZEN_CLONE](): FabricInstance {
+        return new ProbeInstance();
+      }
+
+      protected [DEEP_CLONE_CORE](_frozen: boolean): FabricInstance {
+        return new ProbeInstance();
+      }
+
+      [DEEP_FREEZE](
+        _subFreeze: (value: FabricValue) => FabricValue,
+      ): FabricValue {
+        return this;
+      }
+
+      [IS_DEEP_FROZEN](
+        _subIsDeepFrozen: (value: FabricValue) => boolean,
+      ): boolean {
+        return true;
+      }
+    }
+
+    class ProbeTerminalCodec extends BaseTerminalCodec<JsonCodecValue> {
+      /** State most recently handed to `decode()`. */
+      received: JsonCodecValue = null;
+
+      constructor() {
+        super(PROBE_TAG, ProbeInstance);
+      }
+
+      encode(_value: FabricValue): JsonCodecValue {
+        return PROBE_STATE;
+      }
+
+      decode(_typeTag: string, state: JsonCodecValue): FabricValue {
+        this.received = state;
+        return new ProbeInstance();
+      }
+    }
+
+    class ProbeDecomposingCodec extends BaseFabricCodec {
+      /** State most recently handed to `decode()`. */
+      received: FabricValue = null;
+
+      constructor() {
+        super(PROBE_TAG, ProbeInstance);
+      }
+
+      encode(_value: FabricValue): FabricValue {
+        return PROBE_STATE;
+      }
+
+      decode(_typeTag: string, state: FabricValue): FabricValue {
+        this.received = state;
+        return new ProbeInstance();
+      }
+    }
+
+    /** Builds a codec over the default registry plus the given probe. */
+    function codecWith(
+      probe: ProbeTerminalCodec | ProbeDecomposingCodec,
+    ): JsonCodec {
+      return new JsonCodec({
+        registry: createDefaultJsonRegistry().extend(probe),
+      });
+    }
+
+    /** The wire tree a probe produces for a `ProbeInstance`. */
+    function wireFormatFrom(
+      probe: ProbeTerminalCodec | ProbeDecomposingCodec,
+    ): JsonCodecValue {
+      const encoded = codecWith(probe).encode(new ProbeInstance());
+      return JSON.parse(
+        encoded.slice(ENCODING_PREFIX.length),
+      ) as JsonCodecValue;
+    }
+
+    it("writes a terminal codec's state to the wire untouched", () => {
+      expect(wireFormatFrom(new ProbeTerminalCodec())).toEqual({
+        [`/${PROBE_TAG}`]: { "/Bytes@1": "AQID" },
+      });
+    });
+
+    it("walks a decomposing codec's state on the way to the wire", () => {
+      // The `/quote` wrapper is the walker's mark: it saw a plain object with
+      // a reserved key and escaped it.
+      expect(wireFormatFrom(new ProbeDecomposingCodec())).toEqual({
+        [`/${PROBE_TAG}`]: { "/quote": { "/Bytes@1": "AQID" } },
+      });
+    });
+
+    it("hands a terminal codec the wire state exactly as it arrived", () => {
+      const probe = new ProbeTerminalCodec();
+
+      codecWith(probe).decode(
+        JsonCodec.wrapEncodedValueForTesting(
+          JSON.stringify({ [`/${PROBE_TAG}`]: { "/Bytes@1": "AQID" } }),
+          true,
+        ),
+        new TestReconstructionContext(),
+      );
+
+      expect(probe.received).toEqual({ "/Bytes@1": "AQID" });
+    });
+
+    it("hands a decomposing codec state that has been decoded", () => {
+      const probe = new ProbeDecomposingCodec();
+
+      codecWith(probe).decode(
+        JsonCodec.wrapEncodedValueForTesting(
+          JSON.stringify({ [`/${PROBE_TAG}`]: { "/Bytes@1": "AQID" } }),
+          true,
+        ),
+        new TestReconstructionContext(),
+      );
+
+      expect(probe.received).toBeInstanceOf(FabricBytes);
     });
   });
 

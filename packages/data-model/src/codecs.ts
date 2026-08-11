@@ -18,6 +18,7 @@ import type { FabricValue } from "./fabric-value.ts";
 import type { ReconstructionContext } from "./codec-common/interface.ts";
 import { EmptyReconstructionContext } from "./codec-common/EmptyReconstructionContext.ts";
 import type { CodecRegistry } from "./codec-common/CodecRegistry.ts";
+import type { JsonCodecValue } from "./codec-json/interface.ts";
 import { JsonCodec } from "./codec-json/JsonCodec.ts";
 import { createBaseJsonRegistry } from "./codec-json/createBaseJsonRegistry.ts";
 import { jsonCodecs as primitiveJsonCodecs } from "./fabric-primitives/index.ts";
@@ -41,7 +42,7 @@ import { codecs as instanceCodecs } from "./fabric-instances/index.ts";
  * with `tagForValue()`, and an unrecognized tag on decode is wrapped in an
  * `UnknownValue` by the encoding context rather than tag-routed.
  */
-export function createDefaultJsonRegistry(): CodecRegistry {
+export function createDefaultJsonRegistry(): CodecRegistry<JsonCodecValue> {
   return createBaseJsonRegistry().extend(
     primitiveJsonCodecs(),
     instanceCodecs(),

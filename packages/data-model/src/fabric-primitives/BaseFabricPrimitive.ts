@@ -1,4 +1,5 @@
 import type { FabricCodec } from "@/codec-common/interface.ts";
+import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { FabricPrimitive, JSON_CODEC } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 
@@ -25,7 +26,7 @@ export const EXAMPLE_METHOD: unique symbol = Symbol(
  */
 export interface FabricClassWithJsonCodec {
   /** The JSON codec to use for instances of this class. */
-  get [JSON_CODEC](): FabricCodec;
+  get [JSON_CODEC](): FabricCodec<JsonCodecValue>;
 }
 
 /**

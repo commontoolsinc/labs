@@ -3,6 +3,7 @@ import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
 
 import type { FabricPrimitive } from "@/interface.ts";
 import type { FabricCodec } from "@/codec-common/interface.ts";
+import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import { JSON_CODEC } from "@/interface.ts";
 import type { FabricClassWithJsonCodec } from "./BaseFabricPrimitive.ts";
 import { FabricBytes } from "./FabricBytes.ts";
@@ -37,7 +38,7 @@ export function codecClasses(): readonly FabricClassWithJsonCodec[] {
  *
  * Returned frozen so callers cannot mutate the shared list.
  */
-export function jsonCodecs(): readonly FabricCodec[] {
+export function jsonCodecs(): readonly FabricCodec<JsonCodecValue>[] {
   return JSON_CODECS;
 }
 
@@ -49,7 +50,7 @@ const CODEC_CLASSES: readonly FabricClassWithJsonCodec[] = Object.freeze([
   FabricRegExp,
 ]);
 
-const JSON_CODECS: readonly FabricCodec[] = Object.freeze(
+const JSON_CODECS: readonly FabricCodec<JsonCodecValue>[] = Object.freeze(
   CODEC_CLASSES.map((cls) => cls[JSON_CODEC]),
 );
 

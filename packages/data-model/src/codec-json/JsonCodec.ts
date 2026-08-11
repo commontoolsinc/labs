@@ -38,7 +38,7 @@ export class JsonCodec implements SerializationContext<string> {
   readonly lenient: boolean;
 
   /** Registry consulted for per-type encoding and decoding. */
-  readonly #registry: CodecRegistry;
+  readonly #registry: CodecRegistry<JsonCodecValue>;
 
   /**
    * Constructs an instance. `options.registry` supplies the codecs this
@@ -47,7 +47,9 @@ export class JsonCodec implements SerializationContext<string> {
    * question this class has no standing to answer. `options.lenient` makes a
    * failed reconstruction produce a `ProblematicValue` instead of throwing.
    */
-  constructor(options: { registry: CodecRegistry; lenient?: boolean }) {
+  constructor(
+    options: { registry: CodecRegistry<JsonCodecValue>; lenient?: boolean },
+  ) {
     this.lenient = options.lenient ?? false;
     this.#registry = options.registry;
   }
@@ -147,12 +149,12 @@ export class JsonCodec implements SerializationContext<string> {
     value: FabricValue,
     _seen?: Set<object>,
   ): JsonCodecValue {
-    const codec = this.#registry.codecFromValue(value);
+    const matched = this.#registry.codecFromValue(value);
 
-    if (codec === SELF_REP) {
+    if (matched === SELF_REP) {
       // A self-representing primitive is its own wire form.
       return value as JsonCodecValue;
-    } else if (codec) {
+    } else if (matched) {
       const seen = _seen ?? new Set<object>();
       let addedToSeen = false;
 
@@ -168,10 +170,18 @@ export class JsonCodec implements SerializationContext<string> {
       // of `value`, because `value` might not actually know what codec is being
       // used for it, and it is up to the _codec_ not the value per se to
       // determine the correct tag.
-      const tag = codec.tagForValue(value);
-
-      const unprocessedState = codec.encode(value);
-      const finalState = this.#encodeValue(unprocessedState, seen);
+      // A terminal codec's state is already in this format's domain, so it is
+      // final; a decomposing codec's is made of fabric values, which this
+      // walker has yet to encode.
+      let tag: string;
+      let finalState: JsonCodecValue;
+      if ("terminal" in matched) {
+        tag = matched.terminal.tagForValue(value);
+        finalState = matched.terminal.encode(value);
+      } else {
+        tag = matched.decomposing.tagForValue(value);
+        finalState = this.#encodeValue(matched.decomposing.encode(value), seen);
+      }
       const result: JsonCodecValue = { [`/${tag}`]: finalState };
 
       if (addedToSeen) {
@@ -316,53 +326,44 @@ export class JsonCodec implements SerializationContext<string> {
         return Object.freeze(result);
       }
 
-      // Except for `/quote` and `/object`, the `state` needs to be fully
-      // decoded.
-      const state = this.#decodeValue(rawState, context);
+      // Registry-based (tag lookup) dispatch. The lookup comes first because
+      // it decides what form the state is wanted in: a terminal codec takes
+      // the state exactly as it arrived, and everything else takes state this
+      // walker has decoded. (`/quote` and `/object` returned above, being the
+      // two forms whose contents are never decoded.)
+      const matched = this.#registry.codecFromTag(tag);
 
-      // A bare `"/"` key (empty tag after stripping the leading slash) is
-      // always an encoding error per spec §9 — no valid tag has an empty
-      // name. Produce a `ProblematicValue` rather than an `UnknownValue` with
-      // an empty tag.
-      if (tag === "") {
-        return new ProblematicValue(
+      if (matched === undefined) {
+        const state = this.#decodeValue(rawState, context);
+
+        // A bare `"/"` key (empty tag after stripping the leading slash) is
+        // always an encoding error per spec §9 — no valid tag has an empty
+        // name. Produce a `ProblematicValue` rather than an `UnknownValue`
+        // with an empty tag.
+        //
+        // Otherwise the tag is simply one this registry does not carry, and
+        // the unknown form is preserved so that it round-trips. Neither of
+        // these is covered by the deep-frozen contract described on
+        // `#decodeChecked()`.
+        return (tag === "")
+          ? new ProblematicValue(tag, state, `object has bare "/" key`)
+          : new UnknownValue(tag, state);
+      }
+
+      if ("terminal" in matched) {
+        return this.#decodeChecked(
           tag,
-          state,
-          `object has bare "/" key`,
+          rawState,
+          () => matched.terminal.decode(tag, rawState, context),
         );
       }
 
-      // Registry-based (tag lookup) dispatch
-      //
-      // `FabricCodec.decode()` makes a contractual guarantee that its
-      // results are deep-frozen, rather than relying on every caller to
-      // freeze: every return out of this arm passes through `deepFreeze()`.
-      // This covers the handler's produced value (e.g. `FabricPrimitive`
-      // subclasses -- already frozen, so this is an O(1) cache hit) and the
-      // lenient-mode `ProblematicValue` fallback. The class-registry
-      // fallback below is a separate arm and is intentionally NOT covered by
-      // this contract.
-      const codec = this.#registry.codecFromTag(tag);
-      if (codec) {
-        if (this.lenient) {
-          try {
-            return deepFreeze(codec.decode(tag, state, context));
-          } catch (e: unknown) {
-            return deepFreeze(
-              new ProblematicValue(
-                tag,
-                state,
-                e instanceof Error ? e.message : String(e),
-              ),
-            );
-          }
-        }
-        return deepFreeze(codec.decode(tag, state, context));
-      }
-
-      // No registered codec for this tag: preserve the unknown form for
-      // round-tripping.
-      return new UnknownValue(tag, state);
+      const state = this.#decodeValue(rawState, context);
+      return this.#decodeChecked(
+        tag,
+        state,
+        () => matched.decomposing.decode(tag, state, context),
+      );
     }
 
     // Primitives pass through.
@@ -432,6 +433,41 @@ export class JsonCodec implements SerializationContext<string> {
     return Object.freeze(result);
   }
 
+  /**
+   * Runs a codec's `decode()` under this class's two standing guarantees.
+   *
+   * Deep-frozen contract: a codec's `decode()` promises deep-frozen results
+   * rather than relying on every caller to freeze, so every return from here
+   * passes through `deepFreeze()`. That covers the codec's own product (a
+   * `FabricPrimitive` is already frozen, making this an O(1) cache hit) and
+   * the lenient-mode fallback alike.
+   *
+   * Lenience: when `lenient` is set, a throw becomes a `ProblematicValue` over
+   * `state` -- which is the state the codec was actually handed, so the report
+   * says what the codec choked on.
+   */
+  #decodeChecked(
+    tag: string,
+    state: FabricValue,
+    decode: () => FabricValue,
+  ): FabricValue {
+    if (!this.lenient) {
+      return deepFreeze(decode());
+    }
+
+    try {
+      return deepFreeze(decode());
+    } catch (e: unknown) {
+      return deepFreeze(
+        new ProblematicValue(
+          tag,
+          state,
+          e instanceof Error ? e.message : String(e),
+        ),
+      );
+    }
+  }
+
   //
   // Static members
   //
@@ -462,8 +498,9 @@ export class JsonCodec implements SerializationContext<string> {
    * A helper drawing on a fuller registry would instead accept or reject text
    * according to a roster its caller never chose.
    */
-  static readonly #testingRegistry: CodecRegistry = createBaseJsonRegistry()
-    .extend(UnknownValue[CODEC], ProblematicValue[CODEC]);
+  static readonly #testingRegistry: CodecRegistry<JsonCodecValue> =
+    createBaseJsonRegistry()
+      .extend(UnknownValue[CODEC], ProblematicValue[CODEC]);
 
   /**
    * Reconstruction context for the throwaway checks in the testing helpers
@@ -577,7 +614,7 @@ export class JsonCodec implements SerializationContext<string> {
   static unwrapEncodedValueForTesting(
     encoded: string,
     isMalformed = false,
-    registry: CodecRegistry = JsonCodec.#testingRegistry,
+    registry: CodecRegistry<JsonCodecValue> = JsonCodec.#testingRegistry,
   ): string {
     if (isMalformed) {
       if (!JsonCodec.seemsLikeEncoded(encoded)) {
@@ -633,7 +670,7 @@ export class JsonCodec implements SerializationContext<string> {
   static wrapEncodedValueForTesting(
     json: string,
     isMalformed = false,
-    registry: CodecRegistry = JsonCodec.#testingRegistry,
+    registry: CodecRegistry<JsonCodecValue> = JsonCodec.#testingRegistry,
   ): string {
     const encoded = ENCODING_PREFIX_TAG + json;
 

@@ -18,7 +18,7 @@ import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import {
   CODEC,
-  type FabricCodec,
+  type DecomposingCodec,
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";
@@ -147,7 +147,7 @@ export class FabricLink extends BaseFabricInstance implements ApiFabricLink {
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): DecomposingCodec {
     return this.#codec;
   }
 }

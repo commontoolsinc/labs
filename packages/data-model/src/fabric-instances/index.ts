@@ -1,7 +1,7 @@
 import {
   CODEC,
+  type DecomposingCodec,
   type FabricClassWithCodec,
-  type FabricCodec,
 } from "@/codec-common/interface.ts";
 import { FabricError } from "./FabricError.ts";
 import { FabricLink } from "./FabricLink.ts";
@@ -44,7 +44,7 @@ export function codecClasses(): readonly FabricClassWithCodec[] {
  *
  * Returned frozen so callers cannot mutate the shared list.
  */
-export function codecs(): readonly FabricCodec[] {
+export function codecs(): readonly DecomposingCodec[] {
   return CODECS;
 }
 
@@ -57,6 +57,6 @@ const CODEC_CLASSES: readonly FabricClassWithCodec[] = Object.freeze([
   UnknownValue,
 ]);
 
-const CODECS: readonly FabricCodec[] = Object.freeze(
+const CODECS: readonly DecomposingCodec[] = Object.freeze(
   CODEC_CLASSES.map((cls) => cls[CODEC]),
 );

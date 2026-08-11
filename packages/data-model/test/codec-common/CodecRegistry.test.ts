@@ -101,7 +101,9 @@ describe("CodecRegistry", () => {
           cls,
           example,
         );
-        expect(registry.codecFromValue(example)).toBe(handler);
+        expect(registry.codecFromValue(example)).toEqual({
+          decomposing: handler,
+        });
         // Only the class-matched codec is consulted -- there is no linear scan.
         expect(first.canEncodeCalled).toBe(false);
         expect(handler.canEncodeCalled).toBe(true);
@@ -138,8 +140,8 @@ describe("CodecRegistry", () => {
       const registry = new CodecRegistry();
       const codec = new TestCodec("Big@1", undefined, 42n);
       registry.registerPrimitive("bigint", codec);
-      expect(registry.codecFromValue(42n)).toBe(codec);
-      expect(registry.codecFromTag("Big@1")).toBe(codec);
+      expect(registry.codecFromValue(42n)).toEqual({ decomposing: codec });
+      expect(registry.codecFromTag("Big@1")).toEqual({ decomposing: codec });
     });
 
     it("returns `undefined` when the codec's `canEncode()` says no", () => {
@@ -164,7 +166,7 @@ describe("CodecRegistry", () => {
       const codec = new TestCodec("Num@1", undefined, 42);
       registry.registerPrimitive("number", codec);
       registry.registerSelfRep("number");
-      expect(registry.codecFromValue(42)).toBe(codec); // codec match
+      expect(registry.codecFromValue(42)).toEqual({ decomposing: codec }); // codec match
       expect(registry.codecFromValue(99)).toBe(SELF_REP); // self-rep fallback
     });
   });
@@ -189,8 +191,12 @@ describe("CodecRegistry", () => {
 
       const extended = base.extend();
 
-      expect(extended.codecFromTag("carried@1")).toBe(codec);
-      expect(extended.codecFromTag("prim@1")).toBe(primitive);
+      expect(extended.codecFromTag("carried@1")).toEqual({
+        decomposing: codec,
+      });
+      expect(extended.codecFromTag("prim@1")).toEqual({
+        decomposing: primitive,
+      });
       expect(extended.codecFromValue("florp")).toBe(SELF_REP);
     });
 
@@ -198,7 +204,7 @@ describe("CodecRegistry", () => {
       const added = new TestCodec("added@1", undefined);
       const extended = new CodecRegistry().extend(added);
 
-      expect(extended.codecFromTag("added@1")).toBe(added);
+      expect(extended.codecFromTag("added@1")).toEqual({ decomposing: added });
     });
 
     it("registers codecs given individually and in lists, in any mix", () => {
@@ -209,9 +215,13 @@ describe("CodecRegistry", () => {
       const extended = new CodecRegistry()
         .extend(loose, [listed, alsoListed]);
 
-      expect(extended.codecFromTag("loose@1")).toBe(loose);
-      expect(extended.codecFromTag("listed@1")).toBe(listed);
-      expect(extended.codecFromTag("alsoListed@1")).toBe(alsoListed);
+      expect(extended.codecFromTag("loose@1")).toEqual({ decomposing: loose });
+      expect(extended.codecFromTag("listed@1")).toEqual({
+        decomposing: listed,
+      });
+      expect(extended.codecFromTag("alsoListed@1")).toEqual({
+        decomposing: alsoListed,
+      });
     });
 
     it("leaves the base without the added registrations", () => {
@@ -250,7 +260,7 @@ describe("CodecRegistry", () => {
       base.register(codec);
       Object.freeze(base);
 
-      expect(base.codecFromTag("readable@1")).toBe(codec);
+      expect(base.codecFromTag("readable@1")).toEqual({ decomposing: codec });
     });
   });
 
@@ -259,7 +269,7 @@ describe("CodecRegistry", () => {
       const registry = new CodecRegistry();
       const codec = new TestCodec("Foo@1", undefined);
       registry.register(codec);
-      expect(registry.codecFromTag("Foo@1")).toBe(codec);
+      expect(registry.codecFromTag("Foo@1")).toEqual({ decomposing: codec });
     });
 
     it("returns `undefined` for an unregistered tag", () => {
@@ -274,7 +284,7 @@ describe("CodecRegistry", () => {
       const second = new TestCodec("Dup@1", undefined);
       registry.register(first);
       registry.register(second);
-      expect(registry.codecFromTag("Dup@1")).toBe(second);
+      expect(registry.codecFromTag("Dup@1")).toEqual({ decomposing: second });
     });
   });
 });

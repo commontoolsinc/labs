@@ -9,10 +9,11 @@ import {
 
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
-import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
+import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
+import type { JsonCodecValue } from "@/codec-json/interface.ts";
 import {
-  type FabricCodec,
   type ReconstructionContext,
+  type TerminalCodec,
 } from "@/codec-common/interface.ts";
 import { JSON_CODEC } from "@/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
@@ -51,21 +52,21 @@ export class FabricEpochNsec extends BaseFabricPrimitive
   //
 
   static #codec = Object.freeze(
-    new (class EpochNsecCodec extends BaseFabricCodec {
+    new (class EpochNsecCodec extends BaseTerminalCodec<JsonCodecValue> {
       /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.EpochNsec, FabricEpochNsec);
       }
 
       /** @inheritDoc */
-      encode(value: FabricEpochNsec): FabricValue {
+      encode(value: FabricEpochNsec): JsonCodecValue {
         return bigintToUnpaddedBase64url(value.#value);
       }
 
       /** @inheritDoc */
       decode(
         typeTag: string,
-        state: FabricValue,
+        state: JsonCodecValue,
         _context: ReconstructionContext,
       ): FabricValue {
         if (typeof state !== "string") {
@@ -89,7 +90,7 @@ export class FabricEpochNsec extends BaseFabricPrimitive
   );
 
   /** The codec for instances of this class. */
-  static get [JSON_CODEC](): FabricCodec {
+  static get [JSON_CODEC](): TerminalCodec<JsonCodecValue> {
     return this.#codec;
   }
 }

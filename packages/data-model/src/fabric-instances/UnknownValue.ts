@@ -7,7 +7,7 @@ import {
 } from "./BaseFabricInstance.ts";
 import {
   CODEC,
-  type FabricCodec,
+  type DecomposingCodec,
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
 import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
@@ -87,7 +87,7 @@ export class UnknownValue extends ExplicitTagValue {
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): FabricCodec {
+  static get [CODEC](): DecomposingCodec {
     return this.#codec;
   }
 }

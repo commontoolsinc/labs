@@ -1,5 +1,12 @@
 import type { FabricValue } from "@/interface.ts";
-import type { FabricCodec } from "./interface.ts";
+import type {
+  CodecDispatch,
+  DecomposingCodec,
+  FabricCodec,
+  MatchedCodec,
+  TerminalCodec,
+} from "./interface.ts";
+import { BaseTerminalCodec } from "./BaseTerminalCodec.ts";
 import type { Constructor } from "@commonfabric/utils/types";
 
 /**
@@ -61,15 +68,18 @@ function constructorOf(
  * was constructed with and would otherwise see a later registration. Use
  * {@link #extend} to build on one that is already frozen.
  */
-export class CodecRegistry {
+export class CodecRegistry<Encoded> {
   /** Tag -> codec map for O(1) decode dispatch. */
-  readonly #tagMap = new Map<string, FabricCodec>();
+  readonly #tagMap = new Map<string, MatchedCodec<Encoded>>();
 
   /** Class -> codec map for O(1) encode dispatch on object values. */
-  readonly #classMap = new Map<Constructor, FabricCodec>();
+  readonly #classMap = new Map<Constructor, MatchedCodec<Encoded>>();
 
   /** Primitive `type` -> codec map for O(1) encode dispatch on primitives. */
-  readonly #primitiveCodecs = new Map<PrimitiveTypeName, FabricCodec>();
+  readonly #primitiveCodecs = new Map<
+    PrimitiveTypeName,
+    MatchedCodec<Encoded>
+  >();
 
   /** Primitive `type`s that are self-representing (encoded as-is). */
   readonly #selfRepTypes = new Set<PrimitiveTypeName>();
@@ -80,17 +90,19 @@ export class CodecRegistry {
    * in which case the codec is left unindexed for the corresponding lookup;
    * note that a codec with no `uniqueHandledClass` is unreachable for encoding.
    */
-  register(codec: FabricCodec): void {
+  register(codec: FabricCodec<Encoded>): void {
     this.#assertNotFrozen();
+
+    const matched = CodecRegistry.#matched<Encoded>(codec);
 
     const uniqueClass = codec.uniqueHandledClass;
     if (uniqueClass !== undefined) {
-      this.#classMap.set(uniqueClass, codec);
+      this.#classMap.set(uniqueClass, matched);
     }
 
     const tag = codec.recognizedTypeTag;
     if (tag !== undefined) {
-      this.#tagMap.set(tag, codec);
+      this.#tagMap.set(tag, matched);
     }
   }
 
@@ -99,14 +111,19 @@ export class CodecRegistry {
    * Indexes the codec by its `recognizedTypeTag` (for decode) and by `type`
    * (for O(1) encode dispatch on primitives).
    */
-  registerPrimitive(type: PrimitiveTypeName, codec: FabricCodec): void {
+  registerPrimitive(
+    type: PrimitiveTypeName,
+    codec: FabricCodec<Encoded>,
+  ): void {
     this.#assertNotFrozen();
 
-    this.#primitiveCodecs.set(type, codec);
+    const matched = CodecRegistry.#matched<Encoded>(codec);
+
+    this.#primitiveCodecs.set(type, matched);
 
     const tag = codec.recognizedTypeTag;
     if (tag !== undefined) {
-      this.#tagMap.set(tag, codec);
+      this.#tagMap.set(tag, matched);
     }
   }
 
@@ -148,9 +165,12 @@ export class CodecRegistry {
    *   lists.
    */
   extend(
-    ...codecs: readonly (FabricCodec | readonly FabricCodec[])[]
-  ): CodecRegistry {
-    const result = new CodecRegistry();
+    ...codecs: readonly (
+      | FabricCodec<Encoded>
+      | readonly FabricCodec<Encoded>[]
+    )[]
+  ): CodecRegistry<Encoded> {
+    const result = new CodecRegistry<Encoded>();
 
     for (const [key, value] of this.#tagMap) result.#tagMap.set(key, value);
     for (const [key, value] of this.#classMap) result.#classMap.set(key, value);
@@ -165,7 +185,7 @@ export class CodecRegistry {
           result.register(codec);
         }
       } else {
-        result.register(arg as FabricCodec);
+        result.register(arg as FabricCodec<Encoded>);
       }
     }
 
@@ -195,7 +215,7 @@ export class CodecRegistry {
    */
   codecFromValue(
     value: FabricValue,
-  ): FabricCodec | typeof SELF_REP | undefined {
+  ): MatchedCodec<Encoded> | typeof SELF_REP | undefined {
     // Primitive dispatch on the value's primitive `type` key (its `typeof`, or
     // `"null"`). The type's codec is tried first, then self-representation.
     let type: PrimitiveTypeName | undefined;
@@ -225,9 +245,9 @@ export class CodecRegistry {
     }
 
     if (type !== undefined) {
-      const codec = this.#primitiveCodecs.get(type);
-      if (codec && codec.canEncode(value)) {
-        return codec;
+      const matched = this.#primitiveCodecs.get(type);
+      if (matched && CodecRegistry.#codecOfMatch(matched).canEncode(value)) {
+        return matched;
       }
       if (this.#selfRepTypes.has(type)) {
         return SELF_REP;
@@ -238,9 +258,9 @@ export class CodecRegistry {
     // Match by the value's exact constructor.
     const constructorFn = constructorOf(value);
     if (constructorFn) {
-      const codec = this.#classMap.get(constructorFn);
-      if (codec && codec.canEncode(value)) {
-        return codec;
+      const matched = this.#classMap.get(constructorFn);
+      if (matched && CodecRegistry.#codecOfMatch(matched).canEncode(value)) {
+        return matched;
       }
     }
 
@@ -248,7 +268,27 @@ export class CodecRegistry {
   }
 
   /** Looks up a codec by tag for decoding. */
-  codecFromTag(typeTag: string): FabricCodec | undefined {
+  codecFromTag(typeTag: string): MatchedCodec<Encoded> | undefined {
     return this.#tagMap.get(typeTag);
+  }
+
+  //
+  // Static members
+  //
+
+  /**
+   * Pairs a codec with its kind. The kind comes from which base class the
+   * codec extends, which is the same declaration that fixed its `encode()` and
+   * `decode()` signatures, so the two cannot disagree.
+   */
+  static #matched<Encoded>(codec: FabricCodec<Encoded>): MatchedCodec<Encoded> {
+    return (codec instanceof BaseTerminalCodec)
+      ? { terminal: codec as TerminalCodec<Encoded> }
+      : { decomposing: codec as DecomposingCodec };
+  }
+
+  /** Gets the codec out of a match, for the parts that need only dispatch. */
+  static #codecOfMatch<Encoded>(matched: MatchedCodec<Encoded>): CodecDispatch {
+    return ("terminal" in matched) ? matched.terminal : matched.decomposing;
   }
 }
