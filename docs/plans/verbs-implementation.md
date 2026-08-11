@@ -33,13 +33,12 @@ belongs in one document even when the reasoning belongs in two.
 
 ## State
 
-Four pull requests remain open against this work. They are listed here because
+These pull requests remain open against this work. They are listed here because
 a driver needs to know what is already moving before scheduling anything new.
 
 | PR | What | State |
 | --- | --- | --- |
-| #5501 | a verb's declared result reaches its module | ready; the decision below is made, and the producer half is green |
-| #5504 | `@` marks a position in a field list | green, walkthrough 38/38 against a live toolshed. The two `notes@` assertions that failed there were the feature, not the test: a pattern result stores each field as a redirect link into the argument document, so the compose walk never saw the array. Markers now align against the source schema, as the mask already did |
+| #5629 | a verb listing row carries the handler's declared result | item 10, the consumer half of the declared result. Collides with #5623, which relocates a doc comment in the same region of `packages/cli/lib/piece.ts`; the collision is a real git conflict rather than a silent merge, and whichever lands second keeps both |
 | #5609 | a rejected position is not a required one | split out of #5504, because the defect it fixes is on main. A `$link` marker beside any other projection key returns nothing: the rejected position stays in the source's `required`, so the projected schema is unsatisfiable and the whole selection reads as absent |
 | #5307 | closed-world verb event schemas | parked on #5589; the minting is built, and what stays red is a renderer-semantics ruling rather than an implementation gap |
 
@@ -256,9 +255,9 @@ caller.
 ## Landed, and what consumes it
 
 **6. The read layer.** The shared read step, address markers with the
-deepest-link rule, container inference, the flag split, and entity-URI intake
-are on main. Two pieces are not: the `@` suffix (#5504) is still open, and call
-selection went back out with #5505's revert.
+deepest-link rule, container inference, the flag split, entity-URI intake and
+the `@` suffix are on main. One piece is not: call selection went back out with
+#5505's revert.
 
 **7. Session-scoped invocation ids.** **Reverted** — #5469 is out of main
 again. It is the one address-changing commit, and the whole plan is ordered
@@ -296,7 +295,7 @@ joins them.
 
 | Item | After | Why |
 | --- | --- | --- |
-| 6 | — | landed but for #5504, and for call selection, which #5582 reverted |
+| 6 | — | landed but for call selection, which #5582 reverted |
 | 7 | — | **reverted; must land again before 4 can start** |
 | 8, 9 | — | independent |
 | 2 | 6 | changes what the flags accept |
