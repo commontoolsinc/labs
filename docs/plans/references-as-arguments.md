@@ -11,21 +11,27 @@ address, the webhook sends it through unresolved. **The shape-matching payload
 the CLI does accept stores a detached copy instead of an edge, and reports
 success.**
 
-**The ask:** move that resolution to the boundary every external caller crosses.
+**The fix:** move that resolution to the boundary every external caller
+crosses, and give the outer gates the link acceptance the dispatch gate already
+has. Medium work, mostly relocating code that already runs in production.
 
 **One constraint, not a second decision:** what is accepted inbound has to
 include the shape a read already emits. Otherwise a caller still cannot submit
 the address it was just handed, and the capability does not compose. Which
 spelling wins is the implementer's call.
 
-**Decide first:** whether accepting a caller-named address is a confinement
-question — noting that the model, the least trusted caller in the system,
-already has this capability. If it is, this is the wrong-sized change and CFC
-owns it. If it is not, the work is medium and mostly relocating code that
-already runs in production.
+**Not a confinement decision — the runtime already took a position.** The
+dispatch-side closed-world gate accepts a link value opaquely and defers its
+schema check to the handler's own reads (`closedWorldEventRejection`,
+`packages/runner/src/runner.ts`, via its `acceptOpaqueValue: isCellLink`
+option). The CLI's pre-dispatch gate calls the same validator without that
+option (`verbInputSchemaError`, `packages/cli/lib/callable.ts`); the webhook
+path has no gate at all. The refusal is drift between the outer layers and the
+gate they feed, not policy. CFC gets a heads-up — an existing capability
+widening to external principals — not a ruling to wait for.
 
-**True either way:** refusing the structural copy, instead of storing it, needs
-no encoding decision and no confinement ruling.
+**Independent of all of it:** refusing the structural copy, instead of storing
+it, needs no encoding decision and no gate change.
 
 The rest of this document is the evidence for the paragraphs above.
 
@@ -120,20 +126,26 @@ invoke it. A webhook could not, and neither can the CLI.
 
 **Resolution at the shared boundary rather than in one consumer.**
 `traverseAndCellify` is the working reference implementation; what it needs is a
-home where every caller reaches it.
+home where every caller reaches it. Beside it, the CLI's pre-dispatch gate
+needs the `acceptOpaqueValue` option the dispatch gate already passes, so the
+two gates stop disagreeing about link values.
 
-**A marker in the emitted event schema.** An event field declared
-`Writable<ItemOutput>` emits as `{"$ref": "#/$defs/ItemOutput"}` with no
-`asCell`; an inline `Writable<{ title: string }>` disappears from the emitted
-properties entirely. Measured both ways. `llm-dialog` sidesteps this by
-resolving schema-blind — it cellifies any `@link` it finds — but a boundary with
-closed-world input validation cannot, because the gate has to know the position
-takes an address before it can accept one there.
+**A schema emission fix, and a marker for one road only.** An event field
+declared `Writable<ItemOutput>` emits as `{"$ref": "#/$defs/ItemOutput"}` with
+no `asCell`; an inline `Writable<{ title: string }>` disappears from the
+emitted properties entirely. Measured both ways. The disappearance needs fixing
+under any road: a field the schema does not name cannot be validated or
+documented, and once event schemas close (verb contract WS-C) cannot be
+supplied at all. The `asCell` marker is needed only if resolution becomes
+schema-directed — schema-blind acceptance already composes with closed-world
+validation, as `closedWorldEventRejection` demonstrates: a link value passes
+opaquely in any declared position while an undeclared key still rejects.
 
 *Whether resolution should stay schema-blind or become schema-directed is an
 implementation question this document does not settle.* Schema-blind is proven
-and simpler; schema-directed is checkable and refuses a typo. The answer decides
-whether the emission change is required or merely useful.
+twice — `traverseAndCellify` and the dispatch gate; schema-directed is
+checkable and refuses a typo. The answer decides whether the `asCell` emission
+is required or merely useful.
 
 ## Size
 
@@ -141,29 +153,50 @@ whether the emission change is required or merely useful.
 emission change lands in
 `packages/ts-transformers/src/transformers/schema-injection.ts`, the same file
 that carries a verb's declared result. Resolution is a lift-and-share of
-existing, exercised code. Nothing durable is written, so it reverses by
-assignment rather than migration.
+existing, exercised code, and the gate alignment is one option at one call
+site — pass the `acceptOpaqueValue` the dispatch gate already passes. Nothing
+durable is written, so it reverses by assignment rather than migration.
 
-## The decision that gates the shape
+## The refusal is drift, not policy
 
-**Is the argument path missing a reference vocabulary, or refusing one?**
+At what layer are references disallowed? None of them chooses to. The layers
+disagree, and the innermost one already ruled in favor.
 
-Accepting an address lets a caller aim a pattern at a cell the *caller* named
-rather than one the pattern reached through its own inputs. That is a
-confinement question and belongs to whoever owns CFC.
+**The dispatch-side gate accepts links.** `closedWorldEventRejection`
+(`packages/runner/src/runner.ts`) validates a present event payload with
+`acceptOpaqueValue: (value) => isCellLink(value)`: a link value passes
+unjudged, because its target cannot be read at dispatch and its schema check
+belongs to the handler's own reactive reads. The same gate works out how to
+stop a caller smuggling undeclared *keys* through links without ever banning
+link *values*. That is a considered position on exactly this question, taken in
+the layer most careful about what a caller may submit.
 
-It is sharpened rather than answered by the LLM precedent: a model — the least
-trusted caller in the system — can already do this. Either that is a considered
-position and the same reasoning extends to other callers, or it is an
-inconsistency worth knowing about. Both readings argue for deciding it
-deliberately rather than leaving one door open and the rest shut by omission.
+**The CLI gate is the same validator minus the option.** `verbInputSchemaError`
+(`packages/cli/lib/callable.ts`) calls the identical `validateSchemaValue` with
+no `acceptOpaqueValue`. It has no link concept, so it descends into a link
+envelope as if it were the declared object — the measured rejections above.
+The comments around that gate give its purpose: refuse a malformed payload
+before it spends the invocation id. Nothing there elects to refuse references.
 
-**This wants answering before the work starts.** If references are excluded
-deliberately, the answer is not this change but this change plus a rights
-check — a materially larger design with a different owner.
+**The webhook path takes no position.** `sendToStream`
+(`packages/toolshed/routes/webhooks/webhooks.utils.ts`) forwards the raw
+payload with no gate and no traversal.
 
-## What does not wait for that answer
+**And "data cannot name a cell" is not a core invariant.** A sigil link is a
+link wherever it appears in stored data (`isLinkRef`,
+`packages/data-model/src/cell-rep.ts`). Whether a sigil riding a webhook
+payload survives `send()` as a live edge is untested; if it does, that door is
+already open under the native spelling, and this plan names a capability rather
+than adds one.
 
-Refusing a structural copy where a reference is declared is correct under either
-road. It needs no new vocabulary, no encoding decision, and no confinement
-ruling, and it converts today's silent corruption into an error.
+What remains for whoever owns CFC is a notification, not a ruling: opening the
+outer doors widens an existing exposure — an external principal, not just the
+user's own model session, gets to name an address a handler will act on with
+its own authority. They should hear that and can object. But the precedent this
+change extends is the runtime's own gate, not a workaround.
+
+## What is correct regardless
+
+Refusing a structural copy where a reference is declared stands on its own: no
+new vocabulary, no encoding decision, no gate change, and it converts today's
+silent corruption into an error.
