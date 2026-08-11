@@ -12,6 +12,10 @@ mapped in [`../README.md`](../README.md).
 
 - [`DEVELOPMENT.md`](DEVELOPMENT.md) — coding standards, design principles,
   and the build and test workflow. Read this first
+- [`code-comment-style.md`](code-comment-style.md) — how a comment is written:
+  what earns one, the rule that a comment describes the system as it stands and
+  the shapes that break it, the Markdown markup comments and error messages
+  share, and what a doc comment carries
 - [`LOCAL_DEV_SERVERS.md`](LOCAL_DEV_SERVERS.md) — starting the local servers,
   and what to do when they misbehave. Use `dev-local` for the shell, not `dev`
 - [`TESTING.md`](TESTING.md) — running the test suites, and how unit and
@@ -35,6 +39,10 @@ mapped in [`../README.md`](../README.md).
 
 ## Testing
 
+- [`unit-test-coding-style.md`](unit-test-coding-style.md) — how a unit test
+  file is shaped: where it goes and what it is named, how its `describe()` and
+  `it()` blocks nest, which assertions to reach for, and the matcher traps
+  that produce a test which cannot fail
 - [`UI_TESTING.md`](UI_TESTING.md) — reaching into shadow DOM from an
   integration test, and why accessibility locators are the preferred way
 - [`waiting-in-tests.md`](waiting-in-tests.md) — waiting on a real event

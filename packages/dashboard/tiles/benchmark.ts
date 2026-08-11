@@ -6,7 +6,11 @@
 // Each processor has its own coloured line. The headline shows the largest
 // established trend. Orange means at least one processor trends up. Green means
 // every established processor stays flat or falls. Red means the most recent
-// run failed, or finished successfully without readable benchmark data. Deno
+// run failed, or finished successfully without readable benchmark data. A tile
+// in the failed state drops its benchmark count and window span and names the
+// failure in their place: how long ago the benchmarks last worked, and how many
+// runs have failed since. A run under way puts a "running" badge in the header.
+// Deno
 // bench samples each benchmark to a fixed time budget. Performance changes the
 // per-operation times without materially changing the run's wall-clock time.
 //
@@ -17,13 +21,19 @@
 // BENCH_TREND_MIN_RUNS, whichever is larger. The full line spans about 45 days.
 // The failed state reads the workflow-run list and the latest run's cached
 // result. It therefore works when artifacts cannot be read. Without usable
-// data, the tile reads "collecting…" during a fetch. It reads "benchmark data
-// unavailable" after an empty fetch. A failed fetch keeps the last-known
-// processor lines gray and names the reason.
+// data, the dashboard keeps the last completed color and values while a fetch
+// runs. It reads "benchmark data unavailable" after an empty fetch. A failed
+// fetch keeps the last-known processor lines gray and names the reason.
 //
-// The /bench drill-down keeps the deeper picture. The benchmarks.yml job runs
-// `deno bench --json` and uploads the output as a `bench-results` artifact with
-// 90-day retention. There is no committed history. The drill-down lists recent
+// Every collection pages the run list, once a minute, which is the cadence the
+// run state needs. The artifact history behind the tile moves with the runs
+// instead: a collection whose sampled runs match the last refresh downloads
+// nothing.
+//
+// The /bench drill-down keeps the deeper picture, and closes with a link that
+// hands a rerun to GitHub: this token reads, so GitHub is where a run starts.
+// The benchmarks.yml job runs `deno bench --json` and uploads the output as a
+// `bench-results` artifact with 90-day retention. There is no committed history. The drill-down lists recent
 // main runs and keeps one artifact per shortest-view time bucket. It unzips
 // each artifact in the process and reads every benchmark's timings and
 // processor identity. Results for a run attempt are immutable and persisted.
@@ -83,6 +93,12 @@ import {
   trendStatus,
 } from "../trend.ts";
 import { ciGanttPage } from "./ci-duration.ts";
+import {
+  DASHBOARD_THEME_CLIENT,
+  DASHBOARD_THEME_HEAD,
+  dashboardThemeToggle,
+  themedChartSeries,
+} from "../theme.ts";
 
 export { trendPct, trendStatus } from "../trend.ts";
 
@@ -171,27 +187,12 @@ interface BenchmarkSeries {
 }
 
 let snapshot: BenchmarkSeries[] = [];
-// The most recent benchmarks.yml run list fetched by a collection, reused to
-// render the tile's run-duration view. The drill-down's artifact refresh fills it
-// as a side effect of its own paging, so the tile costs no extra request in the
-// common case.
+// The last benchmarks.yml run list a collection paged, which the drill-down reads
+// to name the run its rerun hand-off points at. A collection replaces it only on
+// a fetch that worked, so the hand-off keeps naming the failed run while a later
+// fetch is in flight or has failed. The tile itself reads the list its own
+// collection fetched, never this one.
 let latestBenchmarkRuns: Run[] | undefined;
-
-// Notified with the run list the moment a collection has paged it — before the
-// slower per-run artifact backfill — so the tile can paint its headline early
-// instead of waiting on the drill-down's downloads.
-const benchmarkRunListListeners = new Set<(runs: Run[]) => void>();
-function notifyBenchmarkRunList(runs: Run[]): void {
-  const listeners = [...benchmarkRunListListeners];
-  benchmarkRunListListeners.clear();
-  for (const listener of listeners) {
-    try {
-      listener(runs);
-    } catch {
-      // A listener that throws is simply dropped; the tile still finalizes below.
-    }
-  }
-}
 
 export type BenchmarkFetchPhase =
   | "discovering"
@@ -239,7 +240,6 @@ let benchmarkProgressSequence = 0;
 let benchmarkRefreshedAt = 0;
 let benchmarkRefreshFailedAt = 0;
 let benchmarkRefreshError = "";
-let benchmarkInitialCollection = true;
 const benchmarkProgressById = new Map<string, BenchmarkProgressRecord>();
 
 function benchmarkVersion(value: BenchmarkSeries[]): string {
@@ -459,8 +459,9 @@ async function fetchZip(
 }
 
 // The benchmarks.yml runs on main, newest first, paging back until past the
-// window (or the 12-page ceiling). The job runs on both pushes and a schedule, so
-// this is not filtered by event.
+// window (or the 12-page ceiling). The workflow runs to a four-hourly schedule
+// and on manual dispatch. Both kinds of run land on main, and the list is
+// filtered by branch alone, so it holds either.
 async function pageBenchmarkRuns(
   github: BenchmarkGitHub,
   token: string,
@@ -675,12 +676,13 @@ export function sampleBenchmarkRuns<
 
 const benchmarkDrill = {
   href: "/bench?view=runtime&repo=labs",
-  hint: "all metrics ↗",
+  hint: "metrics ↗",
 };
 
-function benchmarkUnavailable(sub: string): TileView {
+function benchmarkUnavailable(sub: string, aside?: string): TileView {
   return {
     ...benchmarkDrill,
+    aside,
     label: "benchmarks",
     status: "unknown",
     value: "—",
@@ -850,31 +852,114 @@ function benchmarkCpuIndices(
     });
 }
 
+const runIsCompleted = (run: Run): boolean =>
+  run.status === "completed" && run.conclusion !== null;
+
+// Only a genuine failure counts (concDot's red set), so a cancelled or
+// superseded run is not read as one.
+const runFailed = (run: Run): boolean =>
+  concDot(run.conclusion, run.run_attempt ?? 1) === "red";
+
+// The newest completed run, reading the newest-first run list. A run still in
+// flight is passed over until it finishes.
+const latestCompletedRun = (runs: Run[]): Run | undefined =>
+  runs.find(runIsCompleted);
+
+// How many of the most recent runs failed in a row, reading the newest-first run
+// list. Counting stops at the first completed run that did not fail. A run still
+// in flight is passed over. The count covers the runs this collection fetched,
+// so a streak reaching past the window reads as the length of the window.
+function failedRunStreak(runs: Run[]): number {
+  let streak = 0;
+  for (const run of runs) {
+    if (!runIsCompleted(run)) continue;
+    if (!runFailed(run)) break;
+    streak++;
+  }
+  return streak;
+}
+
+// The newest run that passed. A run that passed on a later attempt counts: it
+// ran and it worked.
+const lastSuccessfulRun = (runs: Run[]): Run | undefined =>
+  runs.find((run) => run.conclusion === "success");
+
+// The failed tile's line: how long ago the benchmarks last worked, and how many
+// runs have failed since. The age comes first because it is the size of the
+// outage. Without a passing run to date the outage from — every run in the
+// window failed — the line is the count alone.
+export function benchmarkFailureLabel(runs: Run[], now: number): string {
+  const streak = failedRunStreak(runs);
+  const failures = `${streak} run${streak === 1 ? "" : "s"} failed`;
+  const good = lastSuccessfulRun(runs);
+  if (good === undefined) {
+    return streak > 1 ? `last ${streak} runs failed` : "last run failed";
+  }
+  return `last good ${
+    humanSpan(now - Date.parse(good.created_at))
+  } ago · ${failures}`;
+}
+
+export interface BenchmarkRerunHandoff {
+  href: string;
+  label: string;
+  hint: string;
+}
+
+// Where the drill-down's rerun control sends the viewer. The dashboard reads
+// GitHub with a read-only token, so starting a run is GitHub's own job: the
+// control is a link, and GitHub decides whether the viewer may press the button
+// it lands on. A failed newest run points at that run, whose "Re-run all jobs"
+// repeats it. Anything else points at the workflow, whose "Run workflow" starts
+// a fresh run. Without a run list the workflow is the target, which is one click
+// from the newest run either way.
+export function benchmarkRerunHandoff(
+  runs: Run[] | undefined,
+): BenchmarkRerunHandoff {
+  const latest = latestCompletedRun(runs ?? []);
+  return latest !== undefined && runFailed(latest)
+    ? {
+      href: `https://github.com/${REPO}/actions/runs/${latest.id}`,
+      label: "rerun the failed benchmark run ↗",
+      hint: "Re-run all jobs on GitHub repeats it.",
+    }
+    : {
+      href: `https://github.com/${REPO}/actions/workflows/${WORKFLOW}`,
+      label: "run benchmarks now ↗",
+      hint: "Run workflow on GitHub starts a fresh run.",
+    };
+}
+
+// A run that has not finished, anywhere in the list. A rerun of an older run
+// keeps that run's place in the list rather than moving to the head, so this
+// looks past the newest entries.
+const runInFlight = (runs: Run[]): boolean =>
+  runs.some((run) => run.status !== "completed");
+
+const RUNNING_BADGE =
+  `<span class="running"><span class="rdot"></span>running</span>`;
+
 // The grid tile trends a scale-invariant benchmark index over about 45 days.
 // Each processor has its own index and line. Every index starts at one and
 // changes only between runs on that processor. Hardware changes therefore
 // never become benchmark changes. The headline shows the largest established
 // trend. Orange means any processor trends up. Red means the most recent run
-// failed or produced no readable data. `offline` names a fetch failure. The
-// tile then keeps its last-known trends gray, or shows a gray dash when no
-// history is cached.
+// failed or produced no readable data. The line under the headline then dates
+// the outage instead of counting the benchmarks measured. `offline` names a
+// fetch failure. The tile then keeps its last-known trends gray, or shows a
+// gray dash when no history is cached.
 function benchmarkIndexView(
   runs: Run[],
   now: number,
-  collecting = false,
   offline?: string,
 ): TileView {
   const cutoff = now - SPARK_DAYS * 86_400_000;
-  // The most recent completed run (the list is newest first) sets the failed
-  // state; an in-flight run at the head is skipped until it finishes. Only a
-  // genuine failure counts (concDot's red set), so a cancelled or superseded run
-  // does not raise a false alarm.
-  const latestCompleted = runs.find((run) =>
-    run.status === "completed" && run.conclusion !== null
-  );
-  const failedCi = latestCompleted !== undefined &&
-    concDot(latestCompleted.conclusion, latestCompleted.run_attempt ?? 1) ===
-      "red";
+  // The most recent completed run sets the failed state.
+  const latestCompleted = latestCompletedRun(runs);
+  const failedCi = latestCompleted !== undefined && runFailed(latestCompleted);
+  // A run under way is a header badge, and leaves the verdict to the runs that
+  // have finished. The badge is what says the tile's colour may be about to move.
+  const aside = runInFlight(runs) ? RUNNING_BADGE : undefined;
   // A run that finished green on CI but whose artifact resolved to no readable
   // benchmark data is as good as failed: it ran and produced nothing usable. Only
   // a cached run with an empty result counts — a run still unread (or read-failed)
@@ -884,7 +969,9 @@ function benchmarkIndexView(
     : undefined;
   const noData = latestResult !== undefined && latestResult.metrics.size === 0;
   const failed = failedCi || noData;
-  const failSub = failedCi ? "last run failed" : "no benchmark data";
+  const failSub = failedCi
+    ? benchmarkFailureLabel(runs, now)
+    : "no benchmark data";
   // The successful runs with processor identities and readable artifacts in the
   // window, oldest -> newest.
   const cached = (benchmarkStore.refreshedRuns() ?? benchmarkStore.list(cutoff))
@@ -895,7 +982,7 @@ function benchmarkIndexView(
   const indices = benchmarkCpuIndices(cached, now);
   if (!indices.length) {
     // A fetch failure with nothing cached to stand on: a gray dash and the reason.
-    if (offline) return benchmarkUnavailable(offline);
+    if (offline) return benchmarkUnavailable(offline, aside);
     if (failed) {
       return {
         ...benchmarkDrill,
@@ -903,14 +990,14 @@ function benchmarkIndexView(
         status: "bad",
         value: "—",
         sub: failSub,
+        aside,
       };
     }
-    // No data yet: "collecting…" while a fetch is still in progress (the early paints,
-    // including the one before the run list is fetched), "benchmark data unavailable"
-    // once a fetch has finished empty, "no benchmark runs" when it found none at all.
-    if (collecting) return benchmarkUnavailable("collecting…");
+    // A completed fetch with runs but no readable artifacts reports the missing
+    // data. A completed fetch with no runs reports the missing run history.
     return benchmarkUnavailable(
       runs.length ? "benchmark data unavailable" : "no benchmark runs",
+      aside,
     );
   }
   const established = indices.filter((series) => series.trend.label !== "new");
@@ -941,8 +1028,11 @@ function benchmarkIndexView(
   const windowLabel = headline.windowCount < headline.points.length
     ? ` · last ${humanSpan(spanMs(headline.windowPoints))}`
     : "";
-  const countLine =
-    `<div style="font-size:13px;color:#9aa0ab;margin:5px 0 0">${count} benchmark${
+  // A failed tile has no count line. Its sub line lands in the same place and in
+  // the same style, and names the failure there.
+  const countLine = failed
+    ? ""
+    : `<div style="font-size:13px;color:var(--text-muted);margin:5px 0 0">${count} benchmark${
       count === 1 ? "" : "s"
     }${windowLabel}</div>`;
   const allPoints = indices.flatMap((series) => series.points);
@@ -953,7 +1043,7 @@ function benchmarkIndexView(
   const chart = multiSparkline(
     indices.map((series) => ({
       vals: series.points.map((point) => point.index),
-      color: series.color,
+      ...themedChartSeries(series.color),
       xs: series.points.map((point) => (point.at - chartStart) / chartAxis),
       highlightCount: series.windowCount,
       maxXGap: CPU_LINE_MAX_X_GAP,
@@ -969,6 +1059,7 @@ function benchmarkIndexView(
     sub: offline ?? (failed ? failSub : undefined),
     extra: `${countLine}${chart}`,
     duration: chartSpan,
+    aside,
   };
 }
 
@@ -980,15 +1071,17 @@ async function collectBenchmark(
   token: string,
   progress: BenchmarkProgressRecord,
   github: BenchmarkGitHub,
+  // The run list the caller has already paged, when it has one. The tile pages it
+  // for its own headline moments earlier, and one list serves both.
+  knownRuns?: Run[],
 ): Promise<BenchmarkCollectionOutcome> {
   const now = Date.now();
   const cutoff = now - SPARK_DAYS * 86_400_000;
 
   try {
     await benchmarkStore.load();
-    const runs = await pageBenchmarkRuns(github, token, cutoff);
+    const runs = knownRuns ?? await pageBenchmarkRuns(github, token, cutoff);
     latestBenchmarkRuns = runs;
-    notifyBenchmarkRunList(runs);
 
     const chosen = sampleBenchmarkRuns(runs, cutoff);
     const priorRefresh = benchmarkStore.refresh;
@@ -1097,6 +1190,11 @@ function startBenchmarkRefresh(
   baseline?: string,
   snapshotIsFresh = false,
   scope: BenchmarkRefreshScope = "bench",
+  // The caller's own run list, still in flight. Passing it registers this refresh
+  // before the list arrives, so a drill-down request landing meanwhile queues
+  // behind this collection instead of starting a second one. The refresh then
+  // decides whether there is anything to fetch once the list is in.
+  knownRuns?: Promise<Run[] | undefined>,
 ): BenchmarkRefresh {
   const github = scope === "bench"
     ? performanceBenchmarkGitHub
@@ -1125,14 +1223,25 @@ function startBenchmarkRefresh(
   });
   const collection = async (): Promise<BenchmarkCollectionOutcome> => {
     await previousCollection;
-    if (
-      queuedBehindOtherScope && benchmarkRefreshedAt &&
-      Date.now() - benchmarkRefreshedAt >= 0 &&
-      Date.now() - benchmarkRefreshedAt < BENCHMARK_REFRESH_MS
-    ) {
+    let known: Run[] | undefined;
+    if (knownRuns) {
+      known = await knownRuns;
+      // The caller's list is the only one this refresh reads. Its failure is the
+      // caller's to report, and there is nothing here to refresh against.
+      if (!known) return {};
+      // Nothing new has been sampled since the last refresh, and that refresh is
+      // recent, so the artifact history already covers this list.
+      if (
+        benchmarkSnapshotIsFresh() && benchmarkRefreshCovers(known, Date.now())
+      ) {
+        return {};
+      }
+    } else if (queuedBehindOtherScope && benchmarkSnapshotIsFresh()) {
+      // A queued refresh with no run list reuses the fresh shared artifact
+      // history.
       return {};
     }
-    return await collectBenchmark(token, progress, github);
+    return await collectBenchmark(token, progress, github, known);
   };
   let refreshFinished = false;
   const finishRefresh = () => {
@@ -1177,6 +1286,19 @@ function startBenchmarkRefresh(
   return { progress: { ...progress.state }, result };
 }
 
+// Whether the drill-down's last refresh already covers the runs this list names.
+// The refresh records which runs it sampled, and only a successful run in a new
+// time bucket changes that set, so an unchanged set means there is no artifact to
+// fetch and no reason to redo the work.
+function benchmarkRefreshCovers(runs: Run[], now: number): boolean {
+  const refresh = benchmarkStore.refresh;
+  if (!refresh) return false;
+  const chosen = sampleBenchmarkRuns(runs, now - SPARK_DAYS * 86_400_000).map((
+    run,
+  ) => ({ runId: run.id, runAttempt: run.run_attempt ?? 1 }));
+  return JSON.stringify(refresh.runs) === JSON.stringify(chosen);
+}
+
 function benchmarkSnapshotIsFresh(now = Date.now()): boolean {
   const age = now - benchmarkRefreshedAt;
   return Boolean(
@@ -1208,7 +1330,11 @@ function benchmarkServerContext(): Ctx {
 
 export const benchmark: Tile = {
   id: "benchmark",
-  intervalMs: 3_600_000,
+  // The run state is what this cadence is for: a benchmark run lasts about an
+  // hour, so an hourly collection can miss one from start to finish. The
+  // artifact reads behind the tile keep their own, slower gate.
+  intervalMs: 60_000,
+  showOnlyCompletedViews: true,
   routes: [
     {
       path: "/bench",
@@ -1248,75 +1374,45 @@ export const benchmark: Tile = {
       handler: (_req, url) => benchmarkHistoryProgressResponse(url),
     },
   ] satisfies Route[],
-  async collect(ctx, publish): Promise<TileView> {
+  async collect(ctx): Promise<TileView> {
     const token = ctx.env("GH_TOKEN") ?? ctx.env("GITHUB_TOKEN");
     if (!token) return benchmarkUnavailable("set GH_TOKEN");
     await loadCachedBenchmarkSnapshot();
-    const initialCollection = benchmarkInitialCollection;
-    benchmarkInitialCollection = false;
-    // Only trust the run list this collection fetches, never a prior one: a
-    // collection whose fetch fails must gray the tile rather than show stale runs.
-    latestBenchmarkRuns = undefined;
-    // Paint the headline as soon as the refresh has paged the run list, without
-    // waiting for it to backfill the drill-down's artifacts. This is a collection in
-    // progress, so with no cached data yet the tile reads "collecting…", not the
-    // finished-and-empty "benchmark data unavailable".
-    const paintEarly = (runs: Run[]) => {
-      // Registered only when publish exists, and the notifier fires each listener at
-      // most once, so this needs no re-entry guard.
-      if (publish) publish(benchmarkIndexView(runs, Date.now(), true));
-    };
-    if (publish) benchmarkRunListListeners.add(paintEarly);
-    // Paint at once, before the run list is even fetched, so a freshly loaded
-    // dashboard shows the cached headline immediately (warm) or "collecting…" (cold)
-    // rather than a blank tile while the first collection gets under way. The empty
-    // run list carries no failed state yet; paintEarly and the final return supply it.
-    if (publish) publish(benchmarkIndexView([], Date.now(), true));
-    // Drive the drill-down's artifact history (green while fresh, so its expensive
-    // artifact reads are skipped). Its collection also pages the benchmarks.yml run
-    // list into latestBenchmarkRuns, which the tile reuses. A read that only failed
-    // on the artifacts still leaves the run list, so the tile stands.
-    const outcome = await startBenchmarkRefresh(
+    // The run list is the tile's own read, made by every collection. This is the
+    // part that keeps up with a run starting: the artifact history behind it moves
+    // far more slowly than the tile's cadence.
+    let listError: unknown;
+    const listing = pageBenchmarkRuns(
+      ordinaryBenchmarkGitHub,
+      token,
+      Date.now() - SPARK_DAYS * 86_400_000,
+    ).catch((error) => {
+      listError = error;
+      return undefined;
+    });
+    // Drive the drill-down's artifact history off the same list. It reads nothing
+    // while its snapshot is fresh and already covers these runs. A refresh that
+    // failed on the artifacts leaves the run list standing, so the tile keeps its
+    // trend rather than graying.
+    const refresh = startBenchmarkRefresh(
       ctx,
       undefined,
-      initialCollection && benchmarkSnapshotIsFresh(),
+      false,
       "dashboard",
+      listing,
     ).result;
-    benchmarkRunListListeners.delete(paintEarly);
-    const now = Date.now();
-    let runs: Run[] | undefined = latestBenchmarkRuns;
+    const runs = await listing;
     if (!runs) {
-      // No run list this collection: on a failed fetch keep the last-known trend
-      // grayed with the reason (benchmarkIndexView with an empty run list and an
-      // offline reason); otherwise it short-circuited on a fresh snapshot, so read
-      // the list directly for the tile.
-      if (outcome.error !== undefined) {
-        return benchmarkIndexView(
-          [],
-          now,
-          false,
-          friendlyError(errorMessage(outcome.error)),
-        );
-      }
-      let directError: unknown;
-      runs = await pageBenchmarkRuns(
-        ordinaryBenchmarkGitHub,
-        token,
-        now - SPARK_DAYS * 86_400_000,
-      ).catch((error) => {
-        directError = error;
-        return undefined;
-      });
-      if (!runs) {
-        return benchmarkIndexView(
-          [],
-          now,
-          false,
-          friendlyError(errorMessage(directError)),
-        );
-      }
+      await refresh;
+      return benchmarkIndexView(
+        [],
+        Date.now(),
+        friendlyError(errorMessage(listError)),
+      );
     }
-    return benchmarkIndexView(runs, now);
+    latestBenchmarkRuns = runs;
+    await refresh;
+    return benchmarkIndexView(runs, Date.now());
   },
 };
 
@@ -1539,6 +1635,7 @@ export function benchPage(
     stat: stat.label,
   });
   const version = benchmarkSnapshotVersion();
+  const handoff = benchmarkRerunHandoff(latestBenchmarkRuns);
   const progress = options.progress;
   const progressIdle = !progress || progress.phase === "complete" ||
     progress.phase === "error";
@@ -1651,7 +1748,7 @@ export function benchPage(
       const spark = multiSparkline(
         cpus.map((series) => ({
           vals: series.values,
-          color: series.color,
+          ...themedChartSeries(series.color),
           xs: series.points.map((point) => (point.at - axisStart) / axisSpan),
           maxXGap: CPU_LINE_MAX_X_GAP,
           showSinglePoint: true,
@@ -1710,6 +1807,7 @@ export function benchPage(
           [...cpuDetails]
             .sort(([a], [b]) => a.localeCompare(b))
             .map(([cpu, detail]) => {
+              const displayColor = themedChartSeries(detail.color).color;
               const benchmarks = `${detail.benchmarks} benchmark${
                 detail.benchmarks === 1 ? "" : "s"
               }`;
@@ -1723,9 +1821,9 @@ export function benchPage(
                 }`;
               const { label: cpuId, anchor } = cpuKeys.get(cpu)!;
               return `<div class="cpu-key" id="${anchor}" data-cpu-id="${cpuId}"><span class="swatch" style="background:${
-                escapeHtml(detail.color)
+                escapeHtml(displayColor)
               }"></span><span class="cpu-id" style="--cpu-color:${
-                escapeHtml(detail.color)
+                escapeHtml(displayColor)
               }">${cpuId}</span><span class="cpu-description"><span class="cpu-name">${
                 escapeHtml(cpu)
               }</span><span class="cpu-detail">${benchmarks} · ${runs} · ${observed}</span></span></div>`;
@@ -1734,6 +1832,7 @@ export function benchPage(
     }
     const rowHtml = (r: (typeof rows)[number], label: string) => {
       const series = r.representative;
+      const displayColor = themedChartSeries(series.color).color;
       const { label: cpuId, anchor } = cpuKeys.get(series.cpu)!;
       const latest = formatNs(series.latest);
       const sampleCount = series.sampleCount;
@@ -1743,7 +1842,7 @@ export function benchPage(
       return `<div class="brow ${r.st}"><div class="bspark">${r.spark}${r.dur}</div><div class="bmeta">` +
         `<span class="bname">${escapeHtml(label)}</span>` +
         `<span class="bval" data-cpu-id="${cpuId}" data-sample-count="${sampleCount}" style="--cpu-color:${
-          escapeHtml(series.color)
+          escapeHtml(displayColor)
         }" title="${
           escapeHtml(`${series.cpu} · ${samples}`)
         }" aria-label="${
@@ -1798,29 +1897,42 @@ export function benchPage(
     ${body}
     ${cpuLegend}
     <p class="note">Successful main runs come from the <a href="https://github.com/${REPO}/actions/workflows/${WORKFLOW}" target="_blank" rel="noopener">${WORKFLOW} runs ↗</a> (deno bench artifacts). Collection keeps enough samples for the shortest window, and charts reduce longer windows to about ${CI_HISTORY_POINT_TARGET} evenly spaced points.</p>
+    <p class="handoff"><a href="${
+    escapeHtml(handoff.href)
+  }" target="_blank" rel="noopener">${
+    escapeHtml(handoff.label)
+  }</a><span>${
+    escapeHtml(handoff.hint)
+  } This board reads GitHub and does not start runs itself.</span></p>
   </div>`;
   if (options.fragment) return rangeContent;
 
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Benchmarks — ${
     escapeHtml(stat.label)
   }</title>
+${DASHBOARD_THEME_HEAD}
 <style>
   ${PERFORMANCE_VIEW_STYLES}
   .bval{display:flex;align-items:baseline;min-width:0}
   .bval .cpu-id{margin-right:7px;align-self:center}
   .bval a.cpu-id{text-decoration:none}
-  .bval a.cpu-id:hover{border-color:#6ea8fe;color:#fff}
-  .bval a.cpu-id:focus-visible{outline:2px solid #6ea8fe;outline-offset:2px}
+  .bval a.cpu-id:hover{border-color:var(--accent);color:var(--text-strong)}
+  .bval a.cpu-id:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .btrend{margin-left:8px}
-  .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.42)}
-  .cpu-id{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--cpu-color,#454b56);border-radius:4px;padding:1px 4px;font-size:9px;line-height:1.2;font-weight:500;color:#c7ccd4;white-space:nowrap}
+  .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;flex:none;box-shadow:0 0 0 1px var(--icon-subtle)}
+  .cpu-id{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--cpu-color,var(--border-hover));border-radius:4px;padding:1px 4px;font-size:9px;line-height:1.2;font-weight:500;color:var(--text-secondary);white-space:nowrap}
   .cpu-legend{margin-top:22px}.cpu-legend-title{margin:0 0 8px}
+  .handoff{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:10px}
+  .handoff a{font-size:13px;color:var(--text-secondary);text-decoration:none;border:1px solid var(--border-strong);border-radius:6px;padding:4px 10px}
+  .handoff a:hover{border-color:var(--accent);color:var(--text-strong)}
+  .handoff a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .handoff span{font-size:11px;color:var(--text-faint)}
   .cpu-keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:7px}
-  .cpu-key{display:flex;align-items:flex-start;gap:8px;background:#16181d;border:1px solid #23262d;border-radius:8px;padding:8px 10px}
-  .cpu-key:target{border-color:#6ea8fe;box-shadow:0 0 0 1px rgba(110,168,254,.24);scroll-margin-top:16px}
+  .cpu-key{display:flex;align-items:flex-start;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 10px}
+  .cpu-key:target{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 24%,transparent);scroll-margin-top:16px}
   .cpu-key>.swatch,.cpu-key>.cpu-id{margin-top:3px}.cpu-description{min-width:0}
-  .cpu-name{display:block;font-size:12px;color:#c7ccd4;overflow-wrap:anywhere}
-  .cpu-detail{display:block;font-size:10px;color:#878d97;margin-top:2px}
+  .cpu-name{display:block;font-size:12px;color:var(--text-secondary);overflow-wrap:anywhere}
+  .cpu-detail{display:block;font-size:10px;color:var(--text-subtle);margin-top:2px}
   body.hide-green .brow.good{display:none}
   body.hide-green .benchmark-group:not(:has(.brow:not(.good))){display:none}
 </style></head><body data-snapshot-version="${escapeHtml(version)}">
@@ -1834,6 +1946,8 @@ export function benchPage(
     days === 1 ? "" : "s"
   }</output><input type="range" id="days" name="days" min="${CI_HISTORY_MIN_DAYS}" max="${CI_HISTORY_DAYS}" step="1" value="${days}"></label><nav class="choice-group" aria-label="Benchmark metric"><span class="lbl">metric</span>${statSel}</nav><nav class="choice-group" aria-label="Sort benchmarks"><span class="lbl">sort</span>${sortSel}</nav><label class="check trailing"><input type="checkbox" id="hg"> hide green</label></form>
   ${rangeContent}
+${dashboardThemeToggle()}
+${DASHBOARD_THEME_CLIENT}
 <script>
   const hg = document.getElementById("hg"), days = document.getElementById("days"), daysv = document.getElementById("daysv"), controls = days.form, KEY = "benchHideGreen", DEFAULT_DAYS = days.value;
   let rangeContent = document.getElementById("range-content"), fetchProgress = document.getElementById("fetch-progress"), title = document.getElementById("fetch-title"), total = document.getElementById("fetch-total"), detail = document.getElementById("fetch-detail"), bar = document.getElementById("fetch-bar"), pageVersion = fetchProgress.dataset.snapshotVersion, appliedDays = days.value;

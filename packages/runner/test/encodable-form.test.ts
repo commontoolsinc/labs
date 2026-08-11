@@ -1,14 +1,22 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
 import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import {
   encodableFormOf,
   hasEncodableForm,
   replaceArtifacts,
 } from "../src/encodable-form.ts";
+import { createRef } from "../src/create-ref.ts";
+import { Runtime } from "../src/runtime.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 /**
  * The walk under test, with the copy callback ignored -- what a caller that
@@ -35,17 +43,17 @@ function factoryArtifact(serialized: unknown): () => void {
 describe("encodable-form", () => {
   describe("replaceArtifacts()", () => {
     describe("values carrying no artifact", () => {
-      it("answers a record by identity", () => {
+      it("returns a record by identity", () => {
         const value = { a: 1, b: { c: [1, 2, 3] } };
         expect(flatten(value)).toBe(value);
       });
 
-      it("answers a nested array by identity", () => {
+      it("returns a nested array by identity", () => {
         const value = [{ a: 1 }, [2, [3]]];
         expect(flatten(value)).toBe(value);
       });
 
-      it("answers a value carrying a sparse hole by identity", () => {
+      it("returns a value carrying a sparse hole by identity", () => {
         const value = [1, , 3];
         const result = flatten(value);
         expect(result).toBe(value);
@@ -75,7 +83,7 @@ describe("encodable-form", () => {
         });
       });
 
-      it("replaces a FUNCTION-shaped artifact", () => {
+      it("replaces a _function_-shaped artifact", () => {
         // A factory is a function carrying its module's members, so an artifact
         // is reached in two shapes and both have to be covered. This is the
         // shape the live idiom produces: `tools: { x: { pattern: SomePattern } }`.
@@ -90,7 +98,7 @@ describe("encodable-form", () => {
         // time and keeps that second answer, storing a value the array never
         // held at any single moment and which the walk never inspected.
         //
-        // Order matters. The accessor sits BEFORE the artifact, so it has
+        // Order matters. The accessor sits _before_ the artifact, so it has
         // already been read by the time the artifact forces a copy -- which is
         // exactly the window a copy-by-re-reading reads it in again.
         let reads = 0;
@@ -126,6 +134,70 @@ describe("encodable-form", () => {
         const result = flatten(value) as Record<string, unknown>;
         expect(reads).toBe(1);
         expect(result.accessor).toBe(1);
+      });
+
+      it("reads an accessor-backed serializer once", () => {
+        // The member itself can be accessor-backed, and the walk classifies a
+        // value by reading it before invoking it. Reading a second time to
+        // invoke would run the accessor again and serialize whatever the second
+        // read produced -- the same hazard as the element and member cases
+        // above, one level up, on the serializer rather than on the data.
+        let reads = 0;
+        const value = {
+          get toEncodableForm() {
+            reads++;
+            const nth = reads;
+            return () => ({ fromRead: nth });
+          },
+        };
+        expect(flatten(value)).toEqual({ fromRead: 1 });
+        expect(reads).toBe(1);
+      });
+
+      it("reads an accessor-backed serializer on a _function_ once", () => {
+        // The function branch classifies and invokes separately too, and a
+        // factory is a function carrying its module's members.
+        let reads = 0;
+        const value = Object.defineProperty(() => {}, "toEncodableForm", {
+          configurable: true,
+          get() {
+            reads++;
+            const nth = reads;
+            return () => ({ fromRead: nth });
+          },
+        });
+        expect(flatten(value)).toEqual({ fromRead: 1 });
+        expect(reads).toBe(1);
+      });
+
+      it(
+        "invokes a _function_ artifact's serializer once, on the artifact",
+        () => {
+          // The object branch has the shared-artifact case below to pin its
+          // invoke count, and the pre-existing receiver case under
+          // `encodableFormOf()` pins the shared invoke. Neither reaches the
+          // function branch, which reads and invokes on its own.
+          let calls = 0;
+          const value = Object.assign(() => {}, {
+            marker: "factory",
+            toEncodableForm(this: { marker?: string }) {
+              calls++;
+              return { saw: this?.marker, nth: calls };
+            },
+          });
+          expect(flatten(value)).toEqual({ saw: "factory", nth: 1 });
+          expect(calls).toBe(1);
+        },
+      );
+
+      it("invokes an object artifact's serializer on the artifact", () => {
+        const value = {
+          marker: "module",
+          toEncodableForm(this: { marker?: string }) {
+            return { saw: this?.marker };
+          },
+        };
+        expect(flatten(value)).toEqual({ saw: "module" });
       });
 
       it("descends into the serialized form", () => {
@@ -205,6 +277,15 @@ describe("encodable-form", () => {
         expect(flatten(value)).toBe(value);
       });
 
+      it("leaves a plain object carrying a non-function `toEncodableForm` alone", () => {
+        // A query-result proxy reports an own property for any key its record
+        // holds, so the name alone does not make a value an artifact. A fabric
+        // record has no function-valued member, and that is what the walk keys
+        // on; without it this value would reach the invoke and throw.
+        const value = { toEncodableForm: 1 };
+        expect(flatten({ value }).value).toBe(value);
+      });
+
       it("leaves a plain object carrying an own `toJSON` alone", () => {
         // `toJSON` is not how a builder artifact spells its serializer, so an
         // object bearing one is ordinary data as far as this is concerned, and
@@ -247,6 +328,48 @@ describe("encodable-form", () => {
       });
     });
 
+    describe("the `replaceOther` hook", () => {
+      // The hook is how a caller names what _else_ has no fabric
+      // representation -- a `Cell`, in the runtime.
+      const viaHook = (value: unknown, replace: (v: object) => unknown) => {
+        const seen: { copy: unknown; original: unknown }[] = [];
+        const result = replaceArtifacts(
+          value,
+          (copy, original) => seen.push({ copy, original }),
+          replace,
+        );
+        return { result, seen };
+      };
+
+      it("returns what the hook puts in a value's place", () => {
+        const stood = new Date(0);
+        const { result } = viaHook(
+          { held: stood },
+          (v) => v === stood ? "stand-in" : v,
+        );
+        expect(result).toEqual({ held: "stand-in" });
+      });
+
+      it("tells the copy callback about a hook's replacement", () => {
+        // The hook's replacement is a copy like any other, and identity-keyed
+        // facts have to be able to follow it.
+        const stood = new Date(0);
+        const { seen } = viaHook(
+          { held: stood },
+          (v) => v === stood ? "stand-in" : v,
+        );
+        expect(seen).toContainEqual({ copy: "stand-in", original: stood });
+      });
+
+      it("returns a value the hook left alone by identity", () => {
+        const untouched = new Date(0);
+        const value = { held: untouched };
+        const { result, seen } = viaHook(value, (v) => v);
+        expect(result).toBe(value);
+        expect(seen).toEqual([]);
+      });
+    });
+
     describe("the copy callback", () => {
       // Identity-keyed facts -- trust, the content-addressed entry ref -- do not
       // travel with the bytes, so a caller is told about each copy in order to
@@ -279,7 +402,7 @@ describe("encodable-form", () => {
         expect(announced!.copy).toBe(result);
       });
 
-      it("is NOT told about a value that came back unchanged", () => {
+      it("is _not_ told about a value that came back unchanged", () => {
         // Answered by identity, so there is no copy and nothing to carry.
         const { seen } = copies({ a: 1, b: { c: [1, 2, 3] } });
         expect(seen).toEqual([]);
@@ -298,10 +421,11 @@ describe("encodable-form", () => {
       expect(hasEncodableForm({ toEncodableForm: () => ({}) })).toBe(true);
     });
 
-    it("returns true for a value carrying only `toSigilLinkOrNull`", () => {
-      // A `Cell` answers this name -- the link is what stands in for a cell on
-      // the way to storage -- and a cell is not a builder artifact.
-      expect(hasEncodableForm({ toSigilLinkOrNull: () => ({}) })).toBe(true);
+    it("returns false for a value carrying only `toSigilLinkOrNull`", () => {
+      // A cell returns the link that stands in for it, and it returns
+      // under the one name asked here. The link accessor is not that name, so
+      // a value that merely names a link does not become storable by saying so.
+      expect(hasEncodableForm({ toSigilLinkOrNull: () => ({}) })).toBe(false);
     });
 
     it("returns false for a value carrying only `toJSON`", () => {
@@ -311,7 +435,7 @@ describe("encodable-form", () => {
       expect(hasEncodableForm({ toJSON: () => ({}) })).toBe(false);
     });
 
-    it("returns true for an INHERITED member", () => {
+    it("returns true for an _inherited_ member", () => {
       // Deliberately broader than the walk's own test: callers here ask about
       // a specific value they hold, not about every object in a graph.
       class Serializable {
@@ -322,7 +446,7 @@ describe("encodable-form", () => {
       expect(hasEncodableForm(new Serializable())).toBe(true);
     });
 
-    it("returns true for a FUNCTION carrying the member", () => {
+    it("returns true for a _function_ carrying the member", () => {
       expect(hasEncodableForm(Object.assign(() => {}, {
         toEncodableForm: () => ({}),
       }))).toBe(true);
@@ -332,9 +456,8 @@ describe("encodable-form", () => {
       expect(hasEncodableForm({ a: 1 })).toBe(false);
     });
 
-    it("returns false for a non-callable member of either name", () => {
-      expect(hasEncodableForm({ toEncodableForm: 1, toSigilLinkOrNull: 2 }))
-        .toBe(false);
+    it("returns false for a non-callable `toEncodableForm`", () => {
+      expect(hasEncodableForm({ toEncodableForm: 1 })).toBe(false);
     });
 
     it("returns false for `null` and for a primitive", () => {
@@ -346,25 +469,12 @@ describe("encodable-form", () => {
   });
 
   describe("encodableFormOf()", () => {
-    it("answers what `toEncodableForm` returns", () => {
+    it("returns the result of `toEncodableForm`", () => {
       expect(encodableFormOf({ toEncodableForm: () => ({ a: 1 }) }))
         .toEqual({ a: 1 });
     });
 
-    it("falls back to `toSigilLinkOrNull` when that is the only name", () => {
-      expect(encodableFormOf({ toSigilLinkOrNull: () => ({ b: 2 }) }))
-        .toEqual({ b: 2 });
-    });
-
-    it("prefers `toEncodableForm` when a value carries both", () => {
-      const value = {
-        toEncodableForm: () => ({ preferred: true }),
-        toSigilLinkOrNull: () => ({ preferred: false }),
-      };
-      expect(encodableFormOf(value)).toEqual({ preferred: true });
-    });
-
-    it("calls the member ON the value, so `this` is the receiver", () => {
+    it("calls the member _on_ the value, so `this` is the receiver", () => {
       const value = {
         marker: "self",
         toEncodableForm(this: { marker: string }) {
@@ -374,8 +484,160 @@ describe("encodable-form", () => {
       expect(encodableFormOf(value)).toEqual({ saw: "self" });
     });
 
-    it("answers `undefined` for a value carrying neither name", () => {
-      expect(encodableFormOf({ a: 1 })).toBe(undefined);
+    it("returns the result of a member only `Reflect.apply` can call", () => {
+      // A method can arrive wrapped in a proxy that answers _every_ property
+      // read with something of its own, so nothing read off the method --
+      // `.call` included -- is callable, while the method itself still is. So
+      // the invoke has to reach a function's call behavior rather than read a
+      // property that names it.
+      //
+      // The live producer of that shape is the reactive proxy in `cell.ts`: a
+      // `cellMethods` name comes back as a proxy over the bound method, and
+      // every read off _that_ is data navigation.
+      const method = new Proxy(function () {
+        return { invoked: true };
+      }, { get: () => ({ notAFunction: true }) });
+      expect(encodableFormOf({ toEncodableForm: method }))
+        .toEqual({ invoked: true });
+    });
+
+    it("returns the value itself when it carries no such member", () => {
+      const value = { a: 1 };
+      expect(encodableFormOf(value)).toBe(value);
+    });
+
+    it("returns the form, not the value, when the member is there", () => {
+      // Including when the form is itself nullish, which the value-fallback
+      // must not swallow: a caller telling those apart asks
+      // `hasEncodableForm()`.
+      expect(encodableFormOf({ toEncodableForm: () => null })).toBe(null);
+      expect(encodableFormOf({ toEncodableForm: () => undefined }))
+        .toBe(undefined);
+    });
+
+    it("returns `ifNone` instead of the value when given one", () => {
+      const value = { a: 1 };
+      expect(encodableFormOf(value, "none")).toBe("none");
+    });
+
+    it("tells an explicit `undefined` `ifNone` from an omitted one", () => {
+      // The distinction is what lets a caller stand a computed fallback behind
+      // a `??`: omitting it answers the value, which is never nullish for an
+      // object, so a `??` would never reach the fallback.
+      const value = { a: 1 };
+      expect(encodableFormOf(value)).toBe(value);
+      expect(encodableFormOf(value, undefined)).toBe(undefined);
+    });
+
+    it("returns the form, not `ifNone`, when the member is there", () => {
+      expect(encodableFormOf({ toEncodableForm: () => ({ a: 1 }) }, "none"))
+        .toEqual({ a: 1 });
+    });
+
+    it("reads the member once when given an `ifNone`", () => {
+      let reads = 0;
+      const value = {
+        get toEncodableForm() {
+          reads++;
+          const nth = reads;
+          return () => ({ fromRead: nth });
+        },
+      };
+      expect(encodableFormOf(value, undefined)).toEqual({ fromRead: 1 });
+      expect(reads).toBe(1);
+    });
+
+    it("reads the member once", () => {
+      // One question instead of two. Asking `hasEncodableForm()` first and then
+      // calling this reads an accessor-backed member twice, and the second read
+      // is what would get serialized.
+      let reads = 0;
+      const value = {
+        get toEncodableForm() {
+          reads++;
+          const nth = reads;
+          return () => ({ fromRead: nth });
+        },
+      };
+      expect(encodableFormOf(value)).toEqual({ fromRead: 1 });
+      expect(reads).toBe(1);
+    });
+  });
+
+  describe("a cell and the reactive that stands for it", () => {
+    let runtime: Runtime;
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let tx: IExtendedStorageTransaction;
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+    });
+
+    afterEach(async () => {
+      await tx.commit();
+      await runtime?.dispose();
+      await storageManager?.close();
+    });
+
+    /** A cell, and the `Reactive` proxy a pattern holds it through. */
+    function subjects() {
+      const cell = runtime.getCell<{ value: number }>(
+        space,
+        "encodable-form-cell",
+        undefined,
+        tx,
+      );
+      cell.set({ value: 42 });
+      return { cell, reactive: cell.getAsReactiveProxy() };
+    }
+
+    it("both return the link the cell names", () => {
+      const { cell, reactive } = subjects();
+      expect(hasEncodableForm(cell)).toBe(true);
+      expect(hasEncodableForm(reactive)).toBe(true);
+      expect(encodableFormOf(cell)).toEqual(cell.toSigilLinkOrNull());
+      expect(encodableFormOf(reactive)).toEqual(cell.toSigilLinkOrNull());
+    });
+
+    it("derive the id their own link derives as plain data", () => {
+      // An id is derived from a value's encodable form, so the reference is the
+      // link itself written out as data -- a value that reaches `createRef`
+      // through none of the cell or proxy machinery. Comparing the two subjects
+      // only to each other would hold just as well if _both_ moved; comparing
+      // each to the link pins where they land, without naming a hash that a
+      // later change to link shape would have to come back and edit.
+      const { cell, reactive } = subjects();
+      const idOf = (held: unknown) => createRef({ held }, "cause").toString();
+      const link = idOf(cell.toSigilLinkOrNull());
+
+      expect(idOf(cell)).toBe(link);
+      expect(idOf(reactive)).toBe(link);
+
+      // And the comparison discriminates: a different cell's link is a
+      // different id, so the three above do not agree merely by being ids.
+      const other = runtime.getCell<{ value: number }>(
+        space,
+        "encodable-form-other-cell",
+        undefined,
+        tx,
+      );
+      other.set({ value: 42 });
+      expect(idOf(other.toSigilLinkOrNull())).not.toBe(link);
+    });
+
+    it("are left alone by the walk, being no builder's artifacts", () => {
+      // Neither is a plain object, so the walk does not descend into one --
+      // the member each carries never comes up. What stands in for a cell is
+      // `replaceArtifacts`'s `replaceOther` hook, whose caller knows an
+      // `isCell()` when it holds one.
+      const { cell, reactive } = subjects();
+      const held = { cell, reactive };
+      expect(flatten(held)).toBe(held);
     });
   });
 });

@@ -38,3 +38,13 @@ fresh; a piece resumed from a synced state holds each action's initial run
 until the space finishes syncing (`awaitSyncBeforeInitialRun`), so
 re-derivations read confirmed-loaded inputs instead of racing the data.
 That hold is a bounded anti-churn gate, not a correctness precondition.
+
+"Registers every action fresh" now RELIES on
+[README §5.2](README.md#52-maintenance)'s registration recount (labs
+#5569): liveness is maintained incrementally, and a node registering
+with edges already naming it recounts its own references from its live
+readers, which keeps edge and registration order independent. Resume
+leans on that order-independence — actions and their edges reappear in
+whatever order registration runs, with no persisted liveness to
+reconcile against — so a change to §5.2's recount semantics is a
+change to resume correctness, not just to maintenance cost.

@@ -83,15 +83,15 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
       "counter",
       "counter.tsx",
     );
-    const program = await cc.manager().runtime.harness.resolve(
+    const program = await cc.runtime.harness.resolve(
       new FileSystemProgramResolver(sourcePath),
     );
     piece = await cc.create(program, { start: true });
     // The live reader is the DEMAND (serving-loop.md §1): it keeps the
     // piece reactive locally AND is the client subscription the serving
     // loop maps to server-side demand in the ON arm.
-    const resultCell = cc.manager().getResult(piece.getCell());
-    sinkCancel = resultCell.sink((value) => {
+    const resultCell = cc.getResult(piece.getCell());
+    sinkCancel = resultCell.sink((value: unknown) => {
       latestValue = (value as { value?: number } | undefined)?.value;
     });
     // Settle ROUND ONE before the measured window (testing.md §6: the
@@ -108,7 +108,7 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
     // here; this gate measures the steady-state window the spec
     // defines.
     if (FLAG_ON) {
-      const runtime = cc.manager().runtime;
+      const runtime = cc.runtime;
       const space = piece.getCell().getAsNormalizedFullLink()
         .space as MemorySpace;
       await runtime.storageManager.synced();
@@ -128,7 +128,7 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
       // client-derived, byte-identical to today.
       assertEquals(stats0, undefined);
       await piece.result.set(5, ["value"]);
-      await cc.manager().runtime.storageManager.synced();
+      await cc.runtime.storageManager.synced();
       assertEquals(await piece.result.get(["value"]), 5);
       return;
     }
@@ -137,7 +137,7 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
       "the ON arm must expose the servingLoop stats block",
     );
 
-    const runtime = cc.manager().runtime;
+    const runtime = cc.runtime;
     const space = piece.getCell().getAsNormalizedFullLink()
       .space as MemorySpace;
 
@@ -153,7 +153,7 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
     // the replica's instantaneous view while the ON arm makes
     // server-derived required properties legitimately late), and this
     // gate measures the SERVING LOOP, not the controller's validation.
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     for (const value of [10, 20, 30]) {
       const tx = runtime.edit();
       resultCell.withTx(tx).key("value").set(value);
@@ -230,14 +230,14 @@ describe("sx2 serving loop (Phase 2 gates)", () => {
     // stale-pointer roll-forward journey is the named follow-up.
     const stats = await fetchServingLoopStats();
     assert(stats !== undefined);
-    const runtime = cc.manager().runtime;
+    const runtime = cc.runtime;
     const space = piece.getCell().getAsNormalizedFullLink()
       .space as MemorySpace;
     const watermarkBefore =
       (watermarkCell(runtime, space).get() as { seq?: number } | undefined)
         ?.seq ?? 0;
     {
-      const resultCell = cc.manager().getResult(piece.getCell());
+      const resultCell = cc.getResult(piece.getCell());
       const tx = runtime.edit();
       resultCell.withTx(tx).key("value").set(41);
       const committed = await tx.commit();

@@ -1,0 +1,239 @@
+import type { FabricValue } from "@/interface.ts";
+import {
+  CODEC,
+  type FabricClassWithCodec,
+  type FabricCodec,
+} from "./interface.ts";
+import type { Constructor } from "@commonfabric/utils/types";
+
+/**
+ * Sentinel returned by {@link CodecRegistry#codecFromValue} for a
+ * self-representing value -- one that is its own wire form (encoded as-is, with
+ * no codec and no tag).
+ */
+export const SELF_REP = "self-rep" as const;
+
+/**
+ * The primitive `type` keys the registry accepts: the `typeof` results that are
+ * encodable `FabricValue` primitives, plus `"null"` for the `null` value.
+ * `"object"` and `"function"` are deliberately excluded -- object values are
+ * matched by class via {@link CodecRegistry#register}.
+ */
+export type PrimitiveTypeName =
+  | "null"
+  | "undefined"
+  | "boolean"
+  | "number"
+  | "bigint"
+  | "string"
+  | "symbol";
+
+/**
+ * Gets the constructor function ("class") of the given value, if any, for
+ * class-based codec lookup.
+ */
+function constructorOf(
+  value: FabricValue,
+): Constructor | undefined {
+  if (typeof value === "object") {
+    if (value === null) {
+      return undefined;
+    }
+
+    const proto = Object.getPrototypeOf(value);
+    if (proto === null) {
+      return undefined;
+    }
+
+    return proto.constructor;
+  } else if (value !== undefined) {
+    // This gets the pseudo-constructor of a primitive. **Note:** `function` is
+    // not included in the `FabricValue` union.
+    return value.constructor as Constructor;
+  } else {
+    return undefined;
+  }
+}
+
+/**
+ * Registry of `FabricCodec`s. Provides tag-based lookup for decoding, and
+ * primitive-type and class matching for encoding.
+ *
+ * An instance is mutable while it is being built and immutable once
+ * `Object.freeze()`d: every mutator refuses on a frozen instance. Freezing is
+ * how a registry becomes safe to hand out, since a codec holds the registry it
+ * was constructed with and would otherwise see a later registration. Use
+ * {@link #extend} to build on one that is already frozen.
+ */
+export class CodecRegistry {
+  /** Tag -> codec map for O(1) decode dispatch. */
+  readonly #tagMap = new Map<string, FabricCodec>();
+
+  /** Class -> codec map for O(1) encode dispatch on object values. */
+  readonly #classMap = new Map<Constructor, FabricCodec>();
+
+  /** Primitive `type` -> codec map for O(1) encode dispatch on primitives. */
+  readonly #primitiveCodecs = new Map<PrimitiveTypeName, FabricCodec>();
+
+  /** Primitive `type`s that are self-representing (encoded as-is). */
+  readonly #selfRepTypes = new Set<PrimitiveTypeName>();
+
+  /**
+   * Registers a codec, indexing it by its `recognizedTypeTag` (for decode) and
+   * its `uniqueHandledClass` (for encode dispatch). Either may be `undefined`,
+   * in which case the codec is left unindexed for the corresponding lookup;
+   * note that a codec with no `uniqueHandledClass` is unreachable for encoding.
+   */
+  register(codec: FabricCodec): void {
+    this.#assertNotFrozen();
+
+    const uniqueClass = codec.uniqueHandledClass;
+    if (uniqueClass !== undefined) {
+      this.#classMap.set(uniqueClass, codec);
+    }
+
+    const tag = codec.recognizedTypeTag;
+    if (tag !== undefined) {
+      this.#tagMap.set(tag, codec);
+    }
+  }
+
+  /**
+   * Registers a codec for a primitive `type` (see {@link PrimitiveTypeName}).
+   * Indexes the codec by its `recognizedTypeTag` (for decode) and by `type`
+   * (for O(1) encode dispatch on primitives).
+   */
+  registerPrimitive(type: PrimitiveTypeName, codec: FabricCodec): void {
+    this.#assertNotFrozen();
+
+    this.#primitiveCodecs.set(type, codec);
+
+    const tag = codec.recognizedTypeTag;
+    if (tag !== undefined) {
+      this.#tagMap.set(tag, codec);
+    }
+  }
+
+  /**
+   * Registers a primitive `type` (see {@link PrimitiveTypeName}) as
+   * self-representing: a value of that type is its own wire form, so
+   * {@link #codecFromValue} returns {@link SELF_REP} for it. A type may be both
+   * self-representing and have a {@link #registerPrimitive} codec (e.g.
+   * `"number"`: finite numbers are self-representing, special ones go through a
+   * codec); the codec is tried first.
+   */
+  registerSelfRep(type: PrimitiveTypeName): void {
+    this.#assertNotFrozen();
+
+    this.#selfRepTypes.add(type);
+  }
+
+  /**
+   * Creates a frozen copy of this instance with the given classes' codecs
+   * additionally registered. This instance is left untouched, so a shared
+   * registry can be built on without being altered, and the result is frozen
+   * so that it in turn can be shared.
+   *
+   * This is the intended way to add classes to a registry someone else
+   * assembled: extending what a factory returns is what keeps a caller from
+   * omitting, by accident, everything that factory put there.
+   *
+   * @param classes Classes whose static `[CODEC]` is to be registered.
+   */
+  extend(classes: readonly FabricClassWithCodec[]): CodecRegistry {
+    const result = new CodecRegistry();
+
+    for (const [key, value] of this.#tagMap) result.#tagMap.set(key, value);
+    for (const [key, value] of this.#classMap) result.#classMap.set(key, value);
+    for (const [key, value] of this.#primitiveCodecs) {
+      result.#primitiveCodecs.set(key, value);
+    }
+    for (const type of this.#selfRepTypes) result.#selfRepTypes.add(type);
+
+    for (const cls of classes) {
+      result.register(cls[CODEC]);
+    }
+
+    // Frozen as a statement rather than by returning `Object.freeze()`'s
+    // result, whose `Readonly<CodecRegistry>` type drops the private-field
+    // brand and so is not assignable back to `CodecRegistry`.
+    Object.freeze(result);
+    return result;
+  }
+
+  /**
+   * Guards a mutator against a frozen instance.
+   *
+   * @throws If this instance is frozen.
+   */
+  #assertNotFrozen(): void {
+    if (Object.isFrozen(this)) {
+      throw new Error("Cannot modify frozen `CodecRegistry`");
+    }
+  }
+
+  /**
+   * Finds how to encode the given value: a `FabricCodec` that can encode it,
+   * {@link SELF_REP} if it is a self-representing primitive, or `undefined` if
+   * neither matches (the caller falls through to structural handling for
+   * arrays and plain objects, or fails for an unencodable value).
+   */
+  codecFromValue(
+    value: FabricValue,
+  ): FabricCodec | typeof SELF_REP | undefined {
+    // Primitive dispatch on the value's primitive `type` key (its `typeof`, or
+    // `"null"`). The type's codec is tried first, then self-representation.
+    let type: PrimitiveTypeName | undefined;
+    const valueType = typeof value;
+    switch (valueType) {
+      case "bigint":
+      case "boolean":
+      case "number":
+      case "string":
+      case "symbol":
+      case "undefined": {
+        type = valueType;
+        break;
+      }
+
+      case "object": {
+        if (value === null) {
+          type = "null";
+        }
+        break;
+      }
+
+      case "function": {
+        // Not a `FabricValue`; nothing can encode it.
+        return undefined;
+      }
+    }
+
+    if (type !== undefined) {
+      const codec = this.#primitiveCodecs.get(type);
+      if (codec && codec.canEncode(value)) {
+        return codec;
+      }
+      if (this.#selfRepTypes.has(type)) {
+        return SELF_REP;
+      }
+      // No primitive match -- fall through to the class lookup below.
+    }
+
+    // Match by the value's exact constructor.
+    const constructorFn = constructorOf(value);
+    if (constructorFn) {
+      const codec = this.#classMap.get(constructorFn);
+      if (codec && codec.canEncode(value)) {
+        return codec;
+      }
+    }
+
+    return undefined;
+  }
+
+  /** Looks up a codec by tag for decoding. */
+  codecFromTag(typeTag: string): FabricCodec | undefined {
+    return this.#tagMap.get(typeTag);
+  }
+}

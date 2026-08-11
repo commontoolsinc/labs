@@ -1,16 +1,28 @@
 /**
- * Where the editor's changes come from and go back to. A view is editable only
- * when it has an underlying file (or set of files, for a diff); a pipe of
- * transformed output, or a diff that does not match any file on disk, is not.
+ * Where the editor's changes come from and go back to. A view needs an
+ * underlying file, or set of files for a diff, before it can be editable. A
+ * language can keep a file-backed view read-only. Pipes and diffs that match no
+ * workspace files are also read-only.
  *
- * For a plain file the editable text is the document's retained source text, so
- * re-highlighting is a re-parse and saving is a write. Its displayed lines may
- * be a rendered projection. The diff source (in `diffedit.ts`) maps the single
- * editable text back onto the files it touches.
+ * For an editable plain file the editable text is the document's retained
+ * source text, so re-highlighting is a re-parse and saving is a write. Its
+ * displayed lines may be a rendered projection. The diff source (in
+ * `diffedit.ts`) maps the single editable text back onto the files it touches.
  */
-import type { Document, Line } from "./model.ts";
-import type { Highlighter, Language } from "./languages/language.ts";
-import { languageForFile, renderedLinesFor } from "./languages/language.ts";
+import type { Document, Line, ViewMode } from "./model.ts";
+import type { DiffHunk, DiffModel } from "./diff.ts";
+import type { LineEndingProvenance } from "./editbuffer.ts";
+import type {
+  Highlighter,
+  Language,
+  RenderInputExtent,
+} from "./languages/language.ts";
+import {
+  decoderFor,
+  languageForFile,
+  readOnlyReasonFor,
+  renderedLinesFor,
+} from "./languages/language.ts";
 
 /** How much a revert restores: the cursor's hunk, the cursor's file, the commit
  * message the cursor is in, or all. */
@@ -38,6 +50,8 @@ export interface ExpandResult {
   cursorLine: number;
   insertedAt: number;
   inserted: number;
+  /** Exact workspace endings for the rows inserted into `text`. */
+  insertedLineEndings: readonly (LineEndingProvenance | undefined)[];
   up: boolean;
   removedAt: number | null;
   /** Which lines of the workspace file the reveal showed, as the file numbers
@@ -64,21 +78,32 @@ export interface SaveOptions {
 }
 
 export interface EditableSource {
-  /** A short label for the editable target (the filename), or null. */
+  /** A short label for the backing target (the filename), or null. */
   readonly label: string | null;
   /** True for a diff view, whether or not it is editable. Absent or false for a
    * plain file or a non-diff pipe. */
   readonly isDiff?: boolean;
-  /** False when there is no underlying file to edit. `reason` is shown when a
-   * cursor move is attempted on a non-editable view. */
+  /** False when there is no underlying file to edit or the selected language
+   * is read-only. `reason` is shown when a cursor move is attempted on a
+   * non-editable view. */
   readonly editable: boolean;
   readonly reason?: string;
+  /** Representation used when the caller did not choose one explicitly. */
+  readonly defaultViewMode?: ViewMode;
+  /** Whether rendered rows retain the source document's line layout. */
+  readonly renderLineTopology?: "source" | "independent";
+  /** Whether an empty decoded input is a complete view. */
+  readonly allowsEmptyInput?: boolean;
   /** Re-parse edited text into a Document — lines, structure and definitions. */
-  parse(text: string): Document;
+  parse(
+    text: string,
+    lineEndings?: readonly (LineEndingProvenance | undefined)[],
+  ): Document;
   /**
    * Build the alternate rendered representation. Rendered documents retain the
-   * source text and one display line per source line. Absent when the source's
-   * languages offer no rendered view.
+   * source text. Most renderers keep one display line per source line;
+   * whole-file renderers may own an independent layout. Absent when the
+   * source's languages offer no rendered view.
    */
   render?(source: Document): Document;
   /** Re-highlight the edited text into rendered lines only (no structure tree),
@@ -97,10 +122,22 @@ export interface EditableSource {
   createHighlighter?(
     text: string,
     seedLines?: readonly Line[],
+    lineEndings?: readonly (LineEndingProvenance | undefined)[],
   ): Highlighter;
-  /** Persist the edited text. `baseline` is the text at the last successful
-   * save. Returns a status message. Throws on failure. */
-  save(text: string, baseline?: string, options?: SaveOptions): string;
+  /** Exact file-ending information for transformed editable rows. */
+  lineEndingProvenance?(
+    text: string,
+  ): readonly (LineEndingProvenance | undefined)[];
+  /** Attempt to persist the edited text. `lineEndings` carries exact source
+   * endings for rows that came from a file. `baseline` is the text at the last
+   * successful save. A read-only source returns its refusal reason without
+   * writing. Returns a status message and throws on write failure. */
+  save(
+    text: string,
+    lineEndings: readonly (LineEndingProvenance | undefined)[],
+    baseline?: string,
+    options?: SaveOptions,
+  ): string;
   /** The clean baseline after a successful save. Most sources persist the
    * whole buffer and omit this method. A commit view that saves files without
    * amending keeps commit-message edits outside the returned baseline, so they
@@ -125,7 +162,12 @@ export interface EditableSource {
     current: string,
     cursorLine: number,
     scope: RevertScope,
-  ): { text: string; cursorLine: number } | null;
+    lineEndings?: readonly (LineEndingProvenance | undefined)[],
+  ): {
+    text: string;
+    cursorLine: number;
+    lineEndings?: readonly (LineEndingProvenance | undefined)[];
+  } | null;
   /** Reveal more of the underlying file around the hunk `cursorLine` sits in (a
    * diff only). Returns the grown diff text, the matching grown baseline (so
    * revealing context is not itself an edit), and where the cursor moves — or
@@ -147,6 +189,9 @@ export interface EditableSource {
    * map to fixed file lines: edits stay within a line, past the diff marker. A
    * plain file has no policy and is edited freely. */
   readonly policy?: EditPolicy;
+  /** The last editable column on a line when the source gives a trailing
+   * carriage return meaning beyond ordinary CRLF transport. */
+  logicalEnd?(lines: readonly string[], row: number): number;
   /** When changed `git show` output contains the HEAD commit, the commit a save
    * would amend — for the confirmation prompt. Null when no such change is
    * pending. Absent on sources that never edit a commit. */
@@ -189,6 +234,13 @@ export interface EditPolicy {
     lines: readonly string[],
     row: number,
   ): "hunk" | "removed" | "message" | null;
+  /** The parsed diff hunk containing a body row. */
+  hunkAt?(
+    lines: readonly string[],
+    row: number,
+  ): { model: DiffModel; hunk: DiffHunk } | null;
+  /** Whether the workspace file for the hunk at `row` uses a UTF-8 BOM. */
+  hasUtf8Bom?(lines: readonly string[], row: number): boolean | undefined;
   /** The marker a newly inserted line is given inside a hunk (a diff adds an
    * added line, so `"+"`), keeping the diff well-formed as the user adds lines.
    * A commit message uses its own indent instead. */
@@ -197,17 +249,32 @@ export interface EditPolicy {
   readonly messageIndent: string;
 }
 
-/** An on-disk file: the document text is the file, edits write straight back. */
+export interface FileSourceOptions {
+  /** Encoder paired with the bytes read when the source was opened. */
+  readonly encode?: (text: string) => Uint8Array;
+  /** Full byte size information for a bounded rendered preview. */
+  readonly renderExtent?: RenderInputExtent;
+}
+
+/** An on-disk file. Writable languages persist edits to the file. Read-only
+ * languages expose the document without allowing edits or writes. */
 export function fileSource(
   path: string,
   language: Language = languageForFile(path),
+  options: FileSourceOptions = {},
 ): EditableSource {
   // The language is chosen once, and every edit-time operation dispatches
   // through it.
-  const render = sourceRenderer(language, path);
+  const render = sourceRenderer(language, path, options.renderExtent);
+  const readOnlyReason = readOnlyReasonFor(language);
+  const encode = options.encode ?? decoderFor(language).encode;
   return {
     label: shortName(path),
-    editable: true,
+    editable: readOnlyReason === undefined,
+    reason: readOnlyReason,
+    defaultViewMode: language.defaultViewMode ?? "source",
+    renderLineTopology: language.renderLineTopology ?? "source",
+    allowsEmptyInput: language.allowsEmptyInput,
     path,
     parse: (text) => language.parseDocument(text, path),
     ...render,
@@ -222,7 +289,8 @@ export function fileSource(
         cursorLine: Math.min(cursorLine, original.split("\n").length - 1),
       },
     save: (text) => {
-      Deno.writeTextFileSync(path, text);
+      if (readOnlyReason !== undefined) return readOnlyReason;
+      Deno.writeFileSync(path, encode(text));
       return "Saved 1 file";
     },
   };
@@ -233,12 +301,16 @@ export function readonlySource(
   reason: string,
   language: Language = languageForFile(undefined),
   fileName?: string,
+  renderExtent?: RenderInputExtent,
 ): EditableSource {
-  const render = sourceRenderer(language, fileName);
+  const render = sourceRenderer(language, fileName, renderExtent);
   return {
     label: null,
     editable: false,
     reason,
+    defaultViewMode: language.defaultViewMode ?? "source",
+    renderLineTopology: language.renderLineTopology ?? "source",
+    allowsEmptyInput: language.allowsEmptyInput,
     parse: (text) => language.parseDocument(text, fileName),
     ...render,
     save: () => reason,
@@ -248,13 +320,14 @@ export function readonlySource(
 function sourceRenderer(
   language: Language,
   fileName?: string,
+  extent?: RenderInputExtent,
 ): Partial<Pick<EditableSource, "render">> {
-  if (!language.renderLines) return {};
+  if (language.input.kind !== "bytes" && !language.renderLines) return {};
   return {
     render: (source: Document): Document => {
       return {
         ...source,
-        lines: renderedLinesFor(language, source.text, fileName)!,
+        lines: renderedLinesFor(language, source.text, fileName, extent)!,
       };
     },
   };

@@ -47,7 +47,10 @@ if (
 // touched and it went out in their next commit. Measured in a scratch project.
 // Type errors are still reported; only lockfile integrity goes unchecked here,
 // and CI checks that against the real lock.
-const check = new Deno.Command("deno", {
+// `Deno.execPath()`: the check runs under the Deno running this hook, not
+// whichever `deno` comes first on `PATH`, so the type errors it reports are the
+// ones the pinned compiler reports.
+const check = new Deno.Command(Deno.execPath(), {
   args: ["check", "--no-lock", filePath],
   stdout: "piped",
   stderr: "piped",

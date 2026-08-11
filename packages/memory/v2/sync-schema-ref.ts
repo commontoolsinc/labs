@@ -54,7 +54,7 @@ const payloadSchemaRef = (
  * superset relationship with the recursive mapper — equal on link
  * positions, wider by exactly the legacy alias positions — is enforced
  * mechanically by the walker-agreement test in
- * test/v2-sync-schema-table-test.ts; teach both (and
+ * test/v2-sync-schema-table.test.ts; teach both (and
  * `containsSyncSchemaRefString`) in the same change or that test fails.
  */
 export const findSyncSchemaRef = (value: unknown): string | undefined => {

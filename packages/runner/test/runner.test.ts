@@ -11,6 +11,7 @@ import {
   type Pattern,
 } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { entityKey } from "../src/scheduler/keys.ts";
 import {
   extractDefaultValues,
   getPatternIdentityRef,
@@ -1845,6 +1846,52 @@ describe("setup/start", () => {
     setupTrusted(runtime, undefined, pattern, { input: 9 }, resultCell);
     cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 9 });
+  });
+
+  it("does not retain direct ownership after stop wins a start race", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (v: { input: number }) => v.input,
+          },
+          inputs: { $alias: { cell: "argument", path: [] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
+        },
+      ],
+    };
+
+    const resultCell = runtime.getCell(space, "stopped direct start");
+    setupTrusted(runtime, undefined, pattern, { input: 1 }, resultCell);
+    await runtime.start(resultCell);
+
+    // The redundant start resolves on the already-running fast path, so its
+    // claim to a direct lifetime is decided by the bookkeeping that runs when
+    // its promise settles — after the stop and the replacement run below.
+    const redundantStart = runtime.start(resultCell);
+    runtime.runner.stop(resultCell);
+    runTrusted(runtime, undefined, pattern, { input: 2 }, resultCell);
+
+    // The stop superseded the redundant start: it reports that it left
+    // nothing running and claims no lifetime for the replacement's
+    // registration.
+    await expect(redundantStart).resolves.toBe(false);
+
+    await resultCell.pull();
+    const resultKey = entityKey(
+      resultCell.getAsNormalizedFullLink(),
+      runtime.scopeKeyIdentity,
+    );
+    expect(runtime.runner.cancels.has(resultKey)).toBe(true);
+    runtime.runner.releaseChild(resultCell, undefined);
+    expect(runtime.runner.cancels.has(resultKey)).toBe(false);
   });
 
   it("stop and restart works with setup/start", async () => {

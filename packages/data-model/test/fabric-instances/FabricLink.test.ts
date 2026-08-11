@@ -18,7 +18,7 @@ import { CODEC } from "@/codec-common/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { jsonFromValue, valueFromJson } from "@/codec-json/index.ts";
+import { jsonFromValue, valueFromJson } from "@/codecs.ts";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricLink", () => {
@@ -45,7 +45,7 @@ describe("FabricLink", () => {
       expect(Object.isFrozen(new FabricLink({ id: "fid1:abc" }))).toBe(false);
     });
 
-    it("accepts a payload with a non-string (schema) value — an outgoing ref", () => {
+    it("keeps a non-string payload value, such as an outgoing ref's schema", () => {
       const link = new FabricLink({
         id: "fid1:abc",
         schema: { type: "object", properties: { x: { type: "string" } } },
@@ -56,27 +56,27 @@ describe("FabricLink", () => {
       });
     });
 
-    it("accepts an empty payload", () => {
+    it("keeps an empty payload empty", () => {
       expect(new FabricLink({}).payload).toEqual({});
     });
 
     describe("validation", () => {
-      it("rejects a non-plain-object payload", () => {
+      it("throws given a non-plain-object payload", () => {
         expect(() => new FabricLink([] as unknown as Record<string, never>))
           .toThrow("must be a plain object");
       });
 
-      it("rejects `null`", () => {
+      it("throws given `null`", () => {
         expect(() => new FabricLink(null as unknown as Record<string, never>))
           .toThrow("must be a plain object");
       });
 
-      it("rejects a `__proto__` key", () => {
+      it("throws given a `__proto__` key", () => {
         const evil = JSON.parse('{ "__proto__": "x" }');
         expect(() => new FabricLink(evil)).toThrow("forbidden key");
       });
 
-      it("rejects a `constructor` key", () => {
+      it("throws given a `constructor` key", () => {
         const evil = JSON.parse('{ "constructor": "x" }');
         expect(() => new FabricLink(evil)).toThrow("forbidden key");
       });
@@ -96,11 +96,11 @@ describe("FabricLink", () => {
       expect(Object.isFrozen(frozen.payload.schema)).toBe(true);
     });
 
-    it("`isDeepFrozen()` is false for a mutable instance", () => {
+    it("`isDeepFrozen()` is `false` for a mutable instance", () => {
       expect(isDeepFrozen(new FabricLink({ id: "fid1:abc" }))).toBe(false);
     });
 
-    it("`[IS_DEEP_FROZEN]` (direct) is false before, true after `[DEEP_FREEZE]`", () => {
+    it("`[IS_DEEP_FROZEN]` (direct) is `false` before and `true` after `[DEEP_FREEZE]`", () => {
       // Direct member invocation: `isDeepFrozen()` short-circuits via
       // `deepFreeze()`'s cache, so the protocol method only runs when called
       // straight, as here.

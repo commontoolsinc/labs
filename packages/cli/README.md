@@ -15,11 +15,32 @@ alias. Both options keep the pipe read-only and suppress unified-diff
 auto-detection. An explicit language takes priority when both options are
 present. Use `--diff` instead when the pipe is a unified diff.
 
-Automatic container detection is limited to structurally identified raw unified
-diffs and standard Git commit output. A raw diff starts at the first nonblank
-line. Recognized shebangs and transformed compiler headers remain explicit
-selectors. JSON-, YAML-, Markdown-, Python-, and other language-shaped source is
-not guessed from its syntax.
+The binary language handles known binary filenames, input containing a NUL byte,
+and input that is not valid UTF-8. It starts in a read-only rendered view with
+16 bytes per hex-dump row. Printable ASCII bytes appear at the right of each
+row. Other bytes use the same control-picture glyphs as the pager's
+non-printable display mode. Use `--language binary` or its `bytes` alias to
+select it explicitly for piped input. Interactive views retain at most 256 KiB
+and report the omitted byte count when the complete size is known. Use `--plain`
+to stream the complete dump without building it in memory.
+
+Each language selects how bytes are decoded. Text languages currently require
+valid UTF-8. The binary language keeps each raw byte unchanged. An explicit
+language also selects its decoder, so an invalid UTF-8 sequence reported under
+an explicit text language is an error rather than silently becoming binary. A
+UTF-8 byte order mark is removed before parsing and restored when an edited file
+is saved. Binary workspace files and Git blobs remain outside text diff editing
+and TypeScript semantic lookup.
+
+Automatic content detection is limited to binary input, structurally identified
+raw unified diffs, and standard Git commit output. A raw diff starts at the
+first nonblank line. Recognized shebangs and transformed compiler headers remain
+explicit selectors. JSON-, YAML-, Markdown-, Python-, and other language-shaped
+source is not guessed from its syntax.
+
+A diff shows its whole-diff change totals at the top right corner of its first
+line: the added line count and the removed line count, coloured like additions
+and removals.
 
 Markdown files can switch between the source and a rendered terminal view with
 `V`. The rendered view formats headings, emphasis, links, quotes, lists, task
@@ -32,9 +53,10 @@ wrapping, and word wrapping. Hard wrapping fills every screen row before it
 continues. Word wrapping breaks at whitespace and repeats the line's leading
 punctuation and whitespace on each continuation row.
 
-Redirected output keeps the source text verbatim by default and adds ANSI color
-only when the selected color mode permits it. Pass `--rendered` to start in, or
-print, the rendered representation when one is available. Editing from a
+Redirected text output keeps the source text verbatim by default and adds ANSI
+color only when the selected color mode permits it. Binary output uses its
+hex-dump view by default. Pass `--rendered` to start in, or print, another
+language's rendered representation when one is available. Editing from a
 rendered view returns to source first.
 
 ```bash
@@ -45,6 +67,7 @@ git diff upstream/main | cf view
 cf view --rendered README.md
 generate-source | cf view --filename generated.py
 generate-markdown | cf view --language markdown --rendered
+generate-bytes | cf view --language binary
 ```
 
 ## Piece discovery
@@ -125,7 +148,7 @@ to a smaller shape:
 cf piece get --piece ID items --filter '.status == "open"'
 cf piece get --piece ID items \
   --filter '.status == "open" and .score >= 10' \
-  --schema id,title,author.name
+  --select id,title,author.name
 ```
 
 `--filter` is jq-inspired rather than a full jq interpreter. It applies only to
@@ -135,43 +158,111 @@ arrays and accepts value paths (`.status`, `.author.name`, `.["display-name"]`,
 missing path simply does not match. A stored `undefined` is treated like a
 missing value and is also falsey. Filtering happens before schema projection.
 
-`--schema` accepts one of three forms:
+Two flags project, one per input language:
 
-- a comma-separated field projection such as `id,title,author.name`;
-- an inline JSON Schema object;
-- `@path/to/schema.json`.
+- `--select` takes a comma-separated field list such as `id,title,author.name`;
+- `--schema` takes an inline JSON Schema object or `@path/to/schema.json`, and
+  also accepts the same field list `--select` takes.
 
-For an array result, the concise form describes each item. An inline/file JSON
+A command that names both has not said which shape it wants, and is refused
+before the read.
+
+For an array result, the field list describes each item. An inline/file JSON
 Schema describes the complete returned value, so a schema combined with
-`--filter` must have an array root. Object `properties` are a whitelist by
+`--filter` must have an array root. Object `properties` are an allowlist by
 default; use `"additionalProperties": true` to retain unspecified properties.
 Projection schemas support structural `properties`, `items`, and scalar leaf
-schemas. In an array-item projection, a scalar leaf whose declared type does not
-match the stored value is omitted by the runtime rather than reported as an
-error; prefer `true` leaves unless that type filtering is intentional. Schema
-combinators and references are rejected in caller-supplied projection schemas.
-Concise dotted paths follow the declared source schema through nested arrays, so
-`comments.body` selects `body` from every comment without retaining comment
-siblings. The projection preserves source-declared nullable items and
-properties, including `type` arrays and `anyOf` unions. When the source schema
-does not identify a nested container, the concise form applies the same field
-mask across arrays encountered in the value so siblings still cannot leak; use
-an explicit JSON Schema when the output schema itself must be fixed. If a
-present source value cannot materialize the transform, the command exits nonzero
-and states that the failure is not JSON `null`. An absent optional source
-remains the ordinary successful `null` CLI response, as does a valid projected
-null.
+schemas. A position that names an object keyword (`properties`,
+`additionalProperties`, `required`) projects an object and one that names
+`items` projects an array, at every level of nesting and whether or not it also
+states `type` — `{"properties":{"topic":{"properties":{"title":true}}}}` returns
+`topic.title`. Neither `true` nor `{}` names a container, and both keep
+everything at the position they sit at. In an array-item projection, a scalar
+leaf whose declared type does not match the stored value is omitted by the
+runtime rather than reported as an error; prefer `true` leaves unless that type
+filtering is intentional. Schema combinators and references are rejected in
+caller-supplied projection schemas. Concise dotted paths follow the declared
+source schema through nested arrays, so `comments.body` selects `body` from
+every comment without retaining comment siblings. The projection preserves
+source-declared nullable items and properties, including `type` arrays and
+`anyOf` unions. When the source schema does not identify a nested container, the
+concise form applies the same field mask across arrays encountered in the value
+so siblings still cannot leak; use an explicit JSON Schema when the output
+schema itself must be fixed. If a present source value cannot materialize the
+transform, the command exits nonzero and states that the failure is not JSON
+`null`. An absent optional source remains the ordinary successful `null` CLI
+response, as does a valid projected null.
 
 Both transforms run as a short-lived computed pattern in the caller's session.
-The runtime's list filter/map builtins therefore handle CFC exactly as authored
-pattern expressions do: predicate observations label array membership,
-projection reads propagate labels, and filtered elements retain their source
-links. Projection map/lift nodes construct the requested shape from a
-source-schema-selected read rather than returning a widening identity alias.
+When the declared source schema fixes the root container shape, the pattern
+constructs its first storage read from the union of predicate-observed and
+projected paths. Structurally declared properties, including local `$ref` item
+schemas, are pruned to that union: predicate-only fields can decide membership
+without appearing in the result, and omitted linked subgraphs are not hydrated.
+Schema-less or root-union sources retain a value-shape read before the transform
+because their array/object projection semantics cannot be established from the
+declaration. Ambiguous source-schema compositions remain intact and can retain a
+wider selector. The runtime's list filter/map builtins therefore handle CFC
+exactly as authored pattern expressions do: predicate observations label array
+membership, projection reads propagate labels, and filtered elements retain
+their source links. Projection map/lift nodes construct the requested shape from
+a source-schema-selected read rather than returning a widening identity alias.
 Nested non-stream Cell handles are materialized before the predicate/projection
 JavaScript runs; stream handles remain capabilities. The source cell's schema
 remains authoritative for Common Fabric metadata. A caller cannot introduce or
 override `ifc`, `asCell`, `scope`, or `default` through `--schema`.
+
+#### Asking for an address instead of contents
+
+A JSON `--schema` marks a position with `"$link": true` to get that position's
+address rather than what is behind it:
+
+```bash
+cf piece get --piece ID notes --schema '{"type":"array","items":{"$link":true}}'
+```
+
+```json
+[{
+  "$link": {
+    "id": "of:fid1:…",
+    "space": "did:key:…",
+    "scope": "space",
+    "path": []
+  }
+}]
+```
+
+All four fields are always present, so a caller indexes them without branching:
+`id` keeps its scheme, `space` and `scope` are filled in even when they match
+the reader's own, and `path` is `[]` at a document's root. No schema is inlined
+and no write-redirect flag rides along. The rendered `id`, minus its `of:`
+prefix, is what `cf piece call --piece` and `cf piece get --piece` accept.
+
+The address names the deepest stored link crossed on the way to the marked
+position, plus the segments that remain below that link. Marking `title` under
+each element of a `notes` array whose entries are links returns the note's own
+`id` with `path` `["title"]`, not the board's `id` with `path`
+`["notes","0","title"]`: a link is a durable identity, while a position in a
+containing document is a slot, and reordering the collection above it leaves the
+same path naming a different value. Where the stored link carries a path of its
+own, that path comes first and the segments below it follow — a link to
+`{"path":["content"]}` marked at `title` renders `["content","title"]`. Where
+nothing is linked on the way, the value lives in the source document itself and
+the address is its position there.
+
+The marker sits beside a projection when both are wanted —
+`{"$link":true,"type":"object","properties":{"title":true}}` returns the address
+and the title — and replaces the contents when it is alone. It is accepted
+anywhere `properties` is, except under `additionalProperties`, whose membership
+the stored value rather than the selection decides.
+
+A marked position is never fetched: it contributes a rejecting selector to the
+same path union the projection builds, and the address is composed from links
+already stored in the documents the read visited rather than by following one. A
+marked collection therefore costs one document read rather than one per element.
+The marker is a JSON-schema spelling only, and it cannot be combined with
+`--filter`: the elements a predicate keeps no longer say which positions they
+came from, and an address names a position.
 
 ## Built Binary
 

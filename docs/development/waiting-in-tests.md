@@ -130,9 +130,12 @@ before marking any of them. Mark the targets inside the successful predicate so
 the click addresses the elements that passed the settle check.
 
 `clickCfButton` and `clickCfButtonsConcurrently` work this way.
-`clickTrustedAction`, `submitViaEnter`, and `settleAndClickNoteButton` in
-`packages/patterns/integration/note-button-helpers.ts` still settle before
-resolving their target, and carry the gap described above.
+`clickTrustedAction` and `settleAndClickNoteButton` in
+`packages/patterns/integration/note-button-helpers.ts` use `clickMarked` for
+the final geometry check and replacement handling. Their earlier readiness
+checks differ from `clickCfButton`'s settle-and-mark predicate.
+`submitViaEnter` is a keyboard interaction and settles before resolving its
+input.
 
 Ask `probe.isRendered` for that check rather than hand-rolling it, and note that
 it is deliberately not `probe.isVisible`, which additionally requires the
@@ -154,6 +157,45 @@ why it belongs in the predicate that tags the control. Whether the control is
 `disabled` is a separate question — a disabled control still takes the click and
 declines it. A test that needs a control enabled before clicking says so with
 `waitForDisabled(page, selector, false)`.
+
+A control has to be rendered when the predicate tags it, but that alone does
+not make the click that follows safe. The page keeps running between the tag and
+the click, and the surface the control sits in can still be settling: a join
+card's profile surface toggles display through its entrance, a re-render relays
+out the region, or a piece re-render replaces the control with an equivalent one.
+So `clickMarked` settles the control and works out where to click it in a single
+page turn. That turn holds until the tagged control's bounding box is unchanged
+across two consecutive animation frames. It then scrolls the control into view
+and measures the point without handing control back to the test process in
+between. The hold is frame-driven and drops its baseline whenever the box
+disappears. A control hidden partway through is picked up once it returns rather
+than clicked mid-shift. The stuck-condition net bounds a box that never settles.
+
+The page can move again after that first measurement. An interaction observer
+also runs before the trusted click and can give the page time to change. Just
+before dispatch, `clickMarked` resolves the marked control in one page turn and
+reads its current center. If the control has moved or disappeared, the helper
+settles it again and applies the caller's tagging predicate to any replacement.
+It takes one final current measurement after that settle, then dispatches the
+single trusted click at that point.
+
+Deciding and measuring in one turn is the point of the design, not an
+optimization. Split across protocol round trips, the measurement describes a
+different moment from the decision. A control the page dropped in between then
+measures as nothing at all. This is what "Unable to get stable box model to
+click on" means. A helper that tags a control by name also passes its tagging
+predicate to `clickMarked`. A control the page rebuilt is therefore tagged
+again on whatever took its place, under that helper's own readiness rules,
+rather than reported as gone.
+
+That error message covers more than a missing layout box: the underlying
+`DOM.getBoxModel` reports a node the browser's DOM agent no longer knows about
+the same way it reports a node with no box, and the agent forgets every
+outstanding node the moment anything queries the document afresh. Any diagnosis
+that reads the message as "the element had no layout box" is therefore reading
+in more than it says. `Page`'s own click measures through the element rather
+than through a node handle, and names the condition it found — detached from
+the document, no layout box, or a handle that no longer resolves.
 
 Waiting for a click's effect carries the same requirement, for the same reason.
 Nothing in an integration test holds a UI subscription, so between one check and
@@ -245,6 +287,35 @@ ambient test or CI limit rather than failing fast. The CLI suite's readiness
 probe is such a client. It disposes its controller once the wait returns, which
 also keeps a finished wait from holding the loop open for the rest of the
 suite.
+
+### Naming the arrival, across runtimes
+
+A wait for state a *different* runtime wrote takes the same `defer()`-from-a-sink
+shape, once the arrival it waits on is named. `cf test`'s multi-user mode
+(`packages/cli/lib/multi-user-test-runner.ts`) runs each participant in its own
+worker realm against one shared space, and its `{ label }` / `{ await }` markers
+are writes to a marker document in that space — one per participant, so no
+document has two writers. Announcing a marker commits it after everything the
+announcing participant has already committed, and the orchestrator announces
+only once that commit is confirmed. Crossing a marker resolves a `defer()` from
+that document's sink in the awaiting worker.
+
+By the time the marker arrives, the server holds what the announcing participant
+wrote before it, so the reads that follow resolve against a server that has it.
+Two mechanisms deliver it and both are ordered behind the marker. A document
+already in the awaiting replica's watch set arrives in a fan-out frame the
+server computes by diffing current storage, so a frame carrying the marker
+cannot omit an earlier write it has not yet sent. A document outside that set is
+fetched on demand by the assertion's own `pull()`, and the response reflects
+current server state. The assertion is therefore read once, at quiescence, with
+no convergence loop around it: a false value is a failure.
+
+Reach for this rather than a settle-and-retry loop whenever the write is
+something the test can name — name the arrival, wait on it, then read. What the
+awaiting side gets in place of the Deno fail-fast above is the orchestrator's
+worker RPC deadline, which is the ambient limit the previous paragraph
+describes: a marker that never arrives is reported against the participant,
+marker, and announcer rather than fast.
 
 ### Browser-hosted unit tests have a harness backstop
 
@@ -429,6 +500,31 @@ never arrives quiesce the loop so Deno fails the pending wait. The multi-space
 mergeable-commit test's move onto the fake clock is the worked example, in [the
 rationale
 document](waiting-in-tests-rationale.md#the-runner-clock-retired-exemptions-and-converted-waits).
+
+### Gating storage fan-out: manual flush, not a long delay
+
+A multi-session storage test whose premise is controlled staleness — one
+replica provably NOT having received a concurrent write — gates the shared
+in-process memory server's fan-out rather than racing it. The primitive is the
+server's `subscriptionRefreshDelayMs: "manual"` mode (via
+`newSharedServer({ subscriptionRefreshDelayMs: "manual" })` in the runner's
+test utils, or `newLoopbackServer` for other packages): the flush timer is
+never armed, dirty spaces accumulate, and frames spread only at the explicit
+synchronization points — `server.flushSessions([space])` at the point delivery
+is wanted, or `server.idle()`, which drains held fan-out to keep its
+quiescence contract.
+
+A large numeric delay is not a substitute. Under auto-advance the pump fires
+the earliest pending `src/`-armed timer regardless of its nominal delay, so a
+"held" 60-second flush timer fires as soon as the event loop idles — the hold
+only ever worked by accident. Manual mode has no timer to fire, on any clock.
+
+Single-manager `StorageManager.emulate()` harnesses need none of this: their
+private server flushes on a zero-delay timer, so awaited round trips deliver
+their own fan-out and there is no second session to keep stale. The loopback
+transport itself delivers each server frame on its own zero-delay timer turn,
+so `clock.settle()` drains in-flight deliveries without letting any coalescing
+window elapse.
 
 ## The background-piece-service suite: the same clock for a polling loop
 
@@ -713,7 +809,7 @@ control, and there is no single "it converged" promise to await.
   the timing-sensitive re-queue can recover. The automatic re-run is the behavior
   under test; there is by construction no event to await.
 - `packages/runner/test/memory-v2-reconnect-race.test.ts` and
-  `packages/memory/test/v2-restore-flush-test.ts` — the waits that watch for a
+  `packages/memory/test/v2-restore-flush.test.ts` — the waits that watch for a
   deliberate mid-flight sabotage or a restore replay to reach a specific in-flight
   point. These are race checkpoints the surrounding interleaving depends on;
   bounded polling expresses "wait until the sabotage/replay happened" without
@@ -745,7 +841,13 @@ control, and there is no single "it converged" promise to await.
 `packages/patterns/integration/multi-runtime-harness.ts`), a different method
 that settles several in-process Deno-worker runtimes and reads durable cells
 across them. It is not the `@commonfabric/integration` `waitFor`, has no page,
-and its cross-runtime convergence poll is the honest mechanism.
+and its cross-runtime convergence poll is the honest mechanism for a caller
+that names only the state it wants and not the write that produces it.
+
+A caller that can name the write does better, and the multi-user `cf test`
+markers are that shape: a marker committed after the writes it stands for turns
+"has it converged yet" into "has this arrived", which a sink answers. [Naming
+the arrival, across runtimes](#naming-the-arrival-across-runtimes) describes it.
 
 ### Cross-page joint condition
 

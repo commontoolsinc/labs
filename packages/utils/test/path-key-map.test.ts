@@ -16,7 +16,7 @@ describe("PathKeyMap", () => {
     });
   });
 
-  describe("set / get / has", () => {
+  describe("set()/get()/has()", () => {
     it("stores and retrieves a value at the root path", () => {
       const m = new PathKeyMap<string>();
       m.set([], "root-value");
@@ -47,7 +47,7 @@ describe("PathKeyMap", () => {
       expect(m.get(["x"])).toBe("second");
     });
 
-    it("distinguishes a present-but-undefined value from an absent key", () => {
+    it("distinguishes a present-but-`undefined` value from an absent key", () => {
       const m = new PathKeyMap<number | undefined>();
       m.set(["a"], undefined);
       expect(m.has(["a"])).toBe(true);
@@ -56,8 +56,8 @@ describe("PathKeyMap", () => {
     });
   });
 
-  describe("delete", () => {
-    it("removes a present value and returns true", () => {
+  describe("delete()", () => {
+    it("removes a present value and returns `true`", () => {
       const m = new PathKeyMap<number>();
       m.set(["a", "b"], 1);
       m.set(["a", "b", "c"], 2);
@@ -67,7 +67,7 @@ describe("PathKeyMap", () => {
       expect(m.get(["a", "b", "c"])).toBe(2);
     });
 
-    it("returns false on a re-delete or an absent path", () => {
+    it("returns `false` on a re-delete or an absent path", () => {
       const m = new PathKeyMap<number>();
       m.set(["a"], 1);
       expect(m.delete(["a"])).toBe(true);
@@ -76,7 +76,7 @@ describe("PathKeyMap", () => {
     });
   });
 
-  describe("clear", () => {
+  describe("clear()", () => {
     it("empties everything", () => {
       const m = new PathKeyMap<number>();
       m.set([], 0);
@@ -90,8 +90,8 @@ describe("PathKeyMap", () => {
     });
   });
 
-  describe("invalidateChain", () => {
-    it("on the root path behaves like clear", () => {
+  describe("invalidateChain()", () => {
+    it("on the root path behaves like `clear()`", () => {
       const m = new PathKeyMap<number>();
       m.set([], 0);
       m.set(["a"], 1);
@@ -161,7 +161,7 @@ describe("PathKeyMap", () => {
       expect(m.get(["zzz"])).toBe("/zzz");
     });
 
-    it("works on a one-segment path", () => {
+    it("drops the root and the subtree for a one-segment path", () => {
       const m = new PathKeyMap<string>();
       m.set([], "ROOT");
       m.set(["a"], "/a");
@@ -175,7 +175,7 @@ describe("PathKeyMap", () => {
     });
   });
 
-  describe("keys / entries", () => {
+  describe("keys()/entries()", () => {
     it("iterates every present path", () => {
       const m = new PathKeyMap<number>();
       m.set(["a"], 1);

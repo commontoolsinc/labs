@@ -16,8 +16,7 @@
 import { parseArgs } from "@std/cli/parse-args";
 import type { Cell } from "@commonfabric/runner";
 import { cellConstructorFactory } from "../../runner/src/cell.ts";
-import { loadManager } from "../../cli/lib/piece.ts";
-import { PiecesController } from "@commonfabric/piece/ops";
+import { loadPieces } from "../../cli/lib/piece.ts";
 import { runSyncLoop } from "./daemon.ts";
 import type { Edit, FailedEdit, Todo } from "./types.ts";
 
@@ -64,13 +63,12 @@ if (!spaceName) {
 
 console.log(`Connecting to ${apiUrl}, space "${spaceName}"...`);
 
-const manager = await loadManager({
+const pieces = await loadPieces({
   apiUrl,
   space: spaceName,
   identity: identityPath,
 });
 
-const pieces = new PiecesController(manager);
 const piece = await pieces.get(pieceId, true);
 
 console.log(`Connected to piece ${piece.id}`);
@@ -95,8 +93,8 @@ const failedEditsCell = argCell.key("failedEdits") as unknown as Cell<
 console.log(`Starting sync loop: ${filePath} <-> piece ${piece.id}`);
 
 const handle = runSyncLoop(
-  manager.runtime,
-  manager.getSpace(),
+  pieces.runtime,
+  pieces.getSpace(),
   todosCell,
   editsCell,
   appliedEditsCell,

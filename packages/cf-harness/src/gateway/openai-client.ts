@@ -3,6 +3,12 @@ import {
   defaultHarnessFetch,
   type HarnessFetch,
 } from "../contracts/http-fetch.ts";
+import {
+  currentProvenance,
+  type HarnessProvenance,
+  provenanceHeaders,
+  provenanceUserAgent,
+} from "../provenance.ts";
 
 export interface OpenAICompatibleGatewayClientOptions {
   baseUrl: string;
@@ -12,6 +18,10 @@ export interface OpenAICompatibleGatewayClientOptions {
   chatCompletionTransportRetries?: number;
   chatCompletionRetryDelayMs?: number;
   fetchFn?: HarnessFetch;
+  /**
+   * What caused these requests. Resolved from the process when absent.
+   */
+  provenance?: HarnessProvenance;
 }
 
 export type OpenAIChatMessageRole = "system" | "user" | "assistant" | "tool";
@@ -100,6 +110,15 @@ export interface OpenAIResponsesRequest {
   store?: boolean;
   stream?: boolean;
   include?: readonly string[];
+  /**
+   * Server-side compaction. When rendered tokens cross `compact_threshold`,
+   * the provider folds prior context into an encrypted compaction item and
+   * prunes before continuing inference.
+   */
+  context_management?: readonly {
+    type: "compaction";
+    compact_threshold: number;
+  }[];
   prompt_cache_key?: string;
   prompt_cache_options?: {
     mode: "implicit" | "explicit";
@@ -346,6 +365,7 @@ export class OpenAICompatibleGatewayClient {
   readonly #fetchFn: HarnessFetch;
   readonly #chatCompletionTransportRetries: number;
   readonly #chatCompletionRetryDelayMs: number;
+  readonly #provenance?: HarnessProvenance;
 
   constructor(options: OpenAICompatibleGatewayClientOptions) {
     this.baseUrl = new URL(options.baseUrl);
@@ -353,6 +373,7 @@ export class OpenAICompatibleGatewayClient {
     this.apiKey = options.apiKey;
     this.apiKeySource = options.apiKeySource;
     this.#fetchFn = options.fetchFn ?? defaultHarnessFetch;
+    this.#provenance = options.provenance;
     this.#chatCompletionTransportRetries = nonNegativeIntegerOrDefault(
       options.chatCompletionTransportRetries,
       DEFAULT_CHAT_COMPLETION_TRANSPORT_RETRIES,
@@ -383,17 +404,20 @@ export class OpenAICompatibleGatewayClient {
     return new URL(path, this.baseUrl);
   }
 
+  /**
+   * The headers every request carries, including the provenance that tells the
+   * gateway what caused it.
+   */
   headers(): HeadersInit {
-    if (this.authMode === "none") {
-      return {
-        "Content-Type": "application/json",
-      };
-    }
-    const apiKey = this.#requireApiKey();
-    return {
+    const provenance = this.#provenance ?? currentProvenance();
+    const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      "User-Agent": provenanceUserAgent(provenance),
+      ...provenanceHeaders(provenance),
     };
+    if (this.authMode === "none") return headers;
+    headers.Authorization = `Bearer ${this.#requireApiKey()}`;
+    return headers;
   }
 
   async listModels(signal?: AbortSignal): Promise<Response> {

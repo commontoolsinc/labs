@@ -8,6 +8,7 @@
  */
 import type { StructureNode } from "../../model.ts";
 import type { HunkStructureContext, Language } from "../language.ts";
+import { utf8Decoder } from "../decoder.ts";
 import {
   createMarkdownHighlighter,
   highlightMarkdownLines,
@@ -18,6 +19,8 @@ import {
 
 export const markdownLanguage: Language = {
   id: "markdown",
+
+  input: { kind: "text", decoder: utf8Decoder },
 
   metadata: {
     extensions: [".md", ".markdown", ".mdown", ".mkd", ".mdx"],

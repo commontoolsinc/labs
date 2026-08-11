@@ -818,11 +818,17 @@ describe("effect/computation tracking", () => {
     await runtime.idle();
     expect(materializerRuns).toBe(1);
 
+    // Commit the three updates back-to-back and drain the in-flight frames
+    // with the clock held, so every dirty notification lands inside one
+    // debounce window instead of the window elapsing between commits.
+    const commits: Promise<unknown>[] = [];
     for (const value of [1, 2, 3]) {
       const updateTx = runtime.edit();
       source.withTx(updateTx).set(value);
-      await updateTx.commit();
+      commits.push(updateTx.commit());
     }
+    await clock.settle();
+    await Promise.all(commits);
     await runtime.idle();
 
     expect(materializerRuns).toBe(2);
@@ -946,13 +952,19 @@ describe("effect/computation tracking", () => {
     await runtime.idle();
     observed.length = 0;
 
+    // Commit both updates back-to-back and drain with the clock held, so the
+    // materializer's dirtiness and the effect's demand land in the same
+    // scheduler pass — the premise this ordering test is about.
     const sourceUpdateTx = runtime.edit();
     source.withTx(sourceUpdateTx).set(2);
-    await sourceUpdateTx.commit();
+    const sourceCommit = sourceUpdateTx.commit();
 
     const triggerUpdateTx = runtime.edit();
     trigger.withTx(triggerUpdateTx).set(1);
-    await triggerUpdateTx.commit();
+    const triggerCommit = triggerUpdateTx.commit();
+
+    await clock.settle();
+    await Promise.all([sourceCommit, triggerCommit]);
     await runtime.idle();
 
     expect(observed).toEqual([2]);

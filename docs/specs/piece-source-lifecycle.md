@@ -31,6 +31,9 @@ An unseeded space now uses the default host provisionally until a stateful
 operation is issued there. Before that cutoff, its first accepted host hint
 replaces the route and replays prior reads, including when a pattern followed a
 link before site-table hydration completed.
+Per-space route seeds, live hints, and durable site-table entries accept only an
+HTTP or HTTPS origin. Host-qualified historical fabric origins use the same
+route parser when they register a hint.
 
 This lifecycle slice is partial. Revisions retain the existing verified
 `pattern:<identity>` source-document closure rather than the complete authored
@@ -789,8 +792,8 @@ replicated-host failover remain open design work.
 | Register a late host hint before a space opens | **Implemented** | `StorageManager.registerSpaceHost` adds the route. A seed can only be confirmed, and the first accepted late hint becomes authoritative |
 | Keep an accepted late hint stable before opening | **Implemented** | `StorageManager.registerSpaceHost` accepts the first late hint and rejects a different hint before or after the space opens |
 | Replace a provisional default route after opening | **Implemented** | The first late hint invalidates an unseeded provider that opened through the default host before its session accepts a stateful operation. It cancels unfinished connection, initial or reconnect session signature creation, mount, and ACL work. Registered document reads, existing sync barriers, and overlapping read-only calls continue through the hinted host, including verified CFC schema documents discovered from the hinted data. Transactions based on the old replica are rejected as inconsistent at issue time, including when they write another space. Invalid scheduler observations do not reject or strand valid observations. A matching default-host hint confirms without reconnecting. Ordinary and scheduler transactions, ACL setup, and SQLite source registration fix the route when issued, even if acknowledgement later fails |
-| Hydrate durable hints in a new runtime | **Implemented** | The runtime processor watches the home-space site table, selects its last route that passes the current HTTP or HTTPS check for each space, and registers those hints. Hydration can replace a provisional default route. A route already accepted through IPC remains fixed; a conflicting table route accepted first makes later IPC registration fail |
-| Apply one origin-only grammar to every route | **Route normalization required** | `normalizeSpaceHost` checks the HTTP or HTTPS scheme but still accepts credentials, a non-root path, a query, and a fragment. Seeds, live hints, and hydration all use that permissive rule. Bare `cf://` authorities use a lifecycle-local scheme heuristic rather than a shared route rule |
+| Hydrate durable hints in a new runtime | **Implemented** | The runtime processor watches the home-space site table, selects its last origin-only HTTP or HTTPS route for each space, and registers those hints. It ignores credentials, paths, queries, fragments, malformed URLs, unsupported schemes, and entries whose `did` does not start with `did:`. Hydration can replace a provisional default route. A route already accepted through IPC remains fixed; a conflicting table route accepted first makes later IPC registration fail |
+| Apply one origin-only grammar to every route | **Partial** | `normalizeSpaceHost` rejects credentials, a non-root path, a query, and a fragment. Seeds, live hints, and hydration use it. The shared fabric-authority helper defaults to HTTPS and derives HTTP only for loopback when the current runtime route explicitly uses HTTP. Applying the grammar to the default host, future share-link receipt, and future effective-host results remains required |
 | Append an accepted route with commit acknowledgement | **Runtime persistence API required** | Generic `CellHandle` writes either overwrite the table or return before a remote append failure can reach the caller. There is no dedicated operation that synchronizes and applies the table's existing candidate, registers the supplied route, transactionally appends it, inspects the commit result, and reports live conflict separately from persistence failure |
 | Accept a host-qualified piece origin | **Origin integration required** | No source lifecycle operation persists and registers a `cf://` hint before resolving and committing the origin |
 | Receive a host-qualified fabric link in the shell | **Link-receipt integration required** | **Copy link** still copies the frontend URL. No shell path emits or receives the `spaceHost` share-link form, asks the runtime for the effective per-space host, or waits for acknowledged route persistence before navigation |
@@ -1078,7 +1081,7 @@ The implementation evidence for this table is concentrated in:
   implementation and migration input, not a target lifecycle exception.
 - Storage supports late registration of a space-to-host hint before that space
   opens. The runtime processor hydrates durable hints from the home-space site
-  table by selecting its last valid HTTP or HTTPS entry for each space. A
+  table by selecting its last origin-only HTTP or HTTPS entry for each space. A
   seeded route can only be confirmed. An unseeded default-host provider remains
   provisional until its session accepts a stateful operation. The first
   accepted hint can replace it, cancel unfinished session setup, clear its
@@ -1197,17 +1200,16 @@ The implementation evidence for this table is concentrated in:
    table. Design reliable discovery, authenticated route replacement, host
    failover, and explicit close-and-reopen behavior for unavailable or moved
    spaces.
-9. Tighten `normalizeSpaceHost` to the origin-only grammar and use it for the
-   default host, `spaceHostMap` seeds, live registration, site-table hydration,
-   share-link receipt, and effective-host results. Reject invalid defaults and
-   seeds during initialization. Reject an invalid live hint before registration.
-   Ignore invalid legacy site-table entries. Move the `cf://` authority scheme
-   rule into the shared route-normalization module. Use HTTPS by default and
-   permit derived HTTP only for loopback under an explicit local-development or
-   test policy.
-   Test credentials, paths, queries, and fragments through every route input.
-   Test initialization failure, live rejection, legacy-entry filtering, and both
-   transport outcomes for a bare fabric authority.
+9. Apply `normalizeSpaceHost` to the default host, share-link receipt, and
+   effective-host results. `spaceHostMap` seeds, live registration, and
+   site-table hydration already reject credentials, paths, queries, fragments,
+   malformed URLs, and unsupported schemes. The shared `cf://` authority
+   helper defaults to HTTPS. It derives HTTP only for loopback when its caller
+   requests that transport. The historical-origin caller requests HTTP when
+   the configured runtime route already uses HTTP. Add the deployment-level
+   local-development or test policy before another caller selects HTTP. Reject
+   an invalid default during initialization. Test every remaining route input
+   and both default-host transports.
 10. Add a dedicated failure-propagating route operation and expose it through
    the runtime-client protocol. Revalidate its DID and normalized origin in the
    worker. Synchronize the home site table before reading it or registering the

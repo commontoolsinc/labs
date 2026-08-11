@@ -2,10 +2,7 @@ import {
   type EntityRef,
   getModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import {
-  jsonFromValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
+import { jsonFromValue, valueFromJson } from "@commonfabric/data-model/codecs";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import type {
   FabricPlainObject,
@@ -1113,6 +1110,7 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 let serverExecutionEnabled = false;
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
+let ownWriteEchoEnabled = true;
 
 /**
  * Ambient runtime flag for server-execution v2
@@ -1168,6 +1166,27 @@ export function getSyncSchemaTableConfig(): boolean {
 
 export function resetSyncSchemaTableConfig(): void {
   syncSchemaTableEnabled = true;
+}
+
+/**
+ * Ambient server behavior for own-write echo on sync frames (CT-1965): a
+ * session's own accepted patch-produced heads ride the covering frame as full
+ * post-apply documents, so promotion retires the pending overlay against
+ * delivered truth instead of extrapolating merged state it never saw. Set- and
+ * delete-produced heads stay elided — the client provably holds their outcome.
+ * Off restores full echo suppression (the pre-CT-1965 behavior). Not a
+ * protocol capability: every client generation handles the echoed frames.
+ */
+export function setOwnWriteEchoConfig(enabled?: boolean): void {
+  ownWriteEchoEnabled = enabled ?? true;
+}
+
+export function getOwnWriteEchoConfig(): boolean {
+  return ownWriteEchoEnabled;
+}
+
+export function resetOwnWriteEchoConfig(): void {
+  ownWriteEchoEnabled = true;
 }
 
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
@@ -1334,7 +1353,7 @@ export const wireMemoryProtocolFlags = (
  * tag-like strings): the client receive-path expansion gate (v2/client.ts),
  * `containsReservedSchemaRefSubstring` (v2/sync-schema-ref.ts), and the
  * engine's commit/stored-row probes (v2/engine.ts). A pinning test in
- * test/v2-sync-schema-table-test.ts fails loudly if verbatim embedding ever
+ * test/v2-sync-schema-table.test.ts fails loudly if verbatim embedding ever
  * stops holding.
  */
 export const encodeMemoryBoundary = (value: FabricValue): string =>

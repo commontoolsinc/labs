@@ -24,40 +24,9 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Cell } from "../src/cell.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
-
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("pull-first-sync-race");
 const space = signer.did();
@@ -67,12 +36,12 @@ const RECEIPT_VALUE = { note: { title: "Original", revision: 1 } };
 
 describe("pull() and the first sync of an unseen doc", () => {
   let server: MemoryV2Server.Server;
-  let writerStorage: SharedServerStorageManager;
+  let writerStorage: EmulatedStorageManager;
   let writerRt: Runtime;
 
   beforeEach(async () => {
     server = newSharedServer();
-    writerStorage = SharedServerStorageManager.connectTo(server, {
+    writerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     writerRt = new Runtime({
@@ -97,7 +66,7 @@ describe("pull() and the first sync of an unseen doc", () => {
   });
 
   it("resolves the doc's value even when the sync answer arrives after idle", async () => {
-    const readerStorage = SharedServerStorageManager.connectTo(server, {
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     const readerRt = new Runtime({
@@ -143,7 +112,7 @@ describe("pull() and the first sync of an unseen doc", () => {
     // The swallow arm: a failed first sync must degrade to what the replica
     // holds (here: nothing), never reject or hang the pull. Same stance as
     // link-resolution's kicks — the read still resolves.
-    const readerStorage = SharedServerStorageManager.connectTo(server, {
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     const readerRt = new Runtime({

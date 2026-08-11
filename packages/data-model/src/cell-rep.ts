@@ -4,6 +4,7 @@
  * entity-id reference form.
  */
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   isPlainObject,
   isRecord,
@@ -17,9 +18,7 @@ import type { FabricPlainObject } from "@/interface.ts";
 // Configuration flags
 //
 
-/**
- * Module-level flag for the modern cell representation.
- */
+/** Module-level flag for the modern cell representation. */
 let modernCellRepEnabled = false;
 
 /** Activates or deactivates the modern cell representation flag. */
@@ -115,9 +114,9 @@ export const LINK_V1_TAG = "link@1" as const;
 /**
  * A link reference, wrapping a link payload. Its concrete shape is
  * flag-dispatched: with the modern cell representation _off_ it is the plain
- * `{ "/": { "link@1": … } }` envelope; with it _on_ it is a {@link FabricLink}
- * instance. This is the link analog of {@link EntityRef}'s `{ "/": string }` →
- * {@link FabricHash}.
+ * `{ "/": { "link@1": … } }` envelope; with it _on_ it is a
+ * {@link FabricLink} instance. This is the link analog of
+ * {@link EntityRef}'s `{ "/": string }` → {@link FabricHash}.
  *
  * Construction ({@link linkRefFrom}), recognition ({@link isLinkRef}) and
  * extraction ({@link linkRefPayload}) are gathered here so this chokepoint is
@@ -129,8 +128,9 @@ export const LINK_V1_TAG = "link@1" as const;
  * stored/serialized fabric record) but otherwise open, so this layer needn't
  * know the exact field types (URI / MemorySpace / JSONSchema — those stay in
  * `runner`). In modern mode the payload type is erased: a {@link FabricLink}
- * holds an unparameterized {@link FabricPlainObject}, just as {@link FabricHash} is
- * unparameterized on the modern arm of {@link EntityRef}.
+ * holds an unparameterized {@link FabricPlainObject}, just as
+ * {@link FabricHash} is unparameterized on the modern arm of
+ * {@link EntityRef}.
  */
 export type LinkRef<Payload extends FabricPlainObject> =
   | FabricLink
@@ -187,16 +187,16 @@ export function linkRefPayload<Payload extends FabricPlainObject>(
 /**
  * The storage sub-path, relative to a value's position in the document tree, at
  * which a link rooted there exposes its recognizable form. This encodes the
- * link layout for consumers that navigate _into_ the document tree (notably link
- * resolution), so they need not hardcode the layout — or the link tag —
+ * link layout for consumers that navigate _into_ the document tree (notably
+ * link resolution), so they need not hardcode the layout — or the link tag —
  * themselves.
  *
  * The sub-path is flag-dispatched to match the regime's storage layout. In
  * legacy mode a link is a decomposed plain-object envelope
  * (`{ "/": { "link@1": … } }`), so the recognizable payload sits two segments
- * down at `["/", "link@1"]`. In modern mode a link is an atomic {@link FabricLink}
- * value at the position itself, so the sub-path is empty. Pair with
- * {@link linkPayloadAtProbe} to interpret whatever is read at
+ * down at `["/", "link@1"]`. In modern mode a link is an atomic
+ * {@link FabricLink} value at the position itself, so the sub-path is empty.
+ * Pair with {@link linkPayloadAtProbe} to interpret whatever is read at
  * `position + linkProbeSubPath()`.
  */
 export function linkProbeSubPath(): readonly string[] {
@@ -235,13 +235,13 @@ export function linkPayloadAtProbe(
 const CELL_LINK_WIRE_PREFIX = "fcl1:";
 
 /**
- * A cell-link payload in its wire-transmissible form: a plain object whose every
- * property value is a string or an array of strings. This is the subset of a
- * link payload that is provably plain JSON — the addressing fields (id, space,
- * scope, path, overwrite). Richer payload fields (a `schema`, which can carry an
- * arbitrary {@link FabricValue} default, or cfc side-channels) are deliberately
- * NOT in this form: they are not plain JSON and have no role at a string
- * boundary. The exact field set is a consumer concern (e.g. runner's
+ * A cell-link payload in its wire-transmissible form: a plain object whose
+ * every property value is a string or an array of strings. This is the subset
+ * of a link payload that is provably plain JSON — the addressing fields (id,
+ * space, scope, path, overwrite). Richer payload fields (a `schema`, which can
+ * carry an arbitrary {@link FabricValue} default, or cfc side-channels) are
+ * deliberately NOT in this form: they are not plain JSON and have no role at a
+ * string boundary. The exact field set is a consumer concern (e.g. runner's
  * `WebhookCellLinkRefPayload`); this layer enforces only the generic shape.
  */
 export type WireLinkRefPayload = {
@@ -263,14 +263,16 @@ function assertWireLinkRefPayloadShape(
   }
   for (const [key, val] of Object.entries(value)) {
     if (isUnsafeObjectKey(key)) {
-      throw new Error(`Cell-link wire payload has a forbidden key: "${key}".`);
+      throw new Error(
+        `Cell-link wire payload has a forbidden key: ${backtickQuote(key)}.`,
+      );
     }
     const ok = typeof val === "string" ||
       (Array.isArray(val) && val.every((e) => typeof e === "string"));
     if (!ok) {
       throw new Error(
-        `Cell-link wire payload field "${key}" must be a \`string\` or ` +
-          `\`string[]\`.`,
+        `Cell-link wire payload field ${backtickQuote(key)} must be a ` +
+          `\`string\` or \`string[]\`.`,
       );
     }
   }
@@ -279,8 +281,9 @@ function assertWireLinkRefPayloadShape(
 /**
  * Serializes a link payload to a wire string for transport across a string
  * boundary (e.g. an HTTP body), tagged with the `fcl1:` prefix. The payload
- * must satisfy {@link WireLinkRefPayload}; throws otherwise (so a non-transmissible
- * payload fails here, at the producer, rather than corrupting silently).
+ * must satisfy {@link WireLinkRefPayload}; throws otherwise (so a
+ * non-transmissible payload fails here, at the producer, rather than corrupting
+ * silently).
  */
 export function linkRefPayloadToString(payload: WireLinkRefPayload): string {
   assertWireLinkRefPayloadShape(payload);
@@ -296,7 +299,7 @@ export function linkRefPayloadToString(payload: WireLinkRefPayload): string {
 export function linkRefPayloadFromString(wire: string): WireLinkRefPayload {
   if (!wire.startsWith(CELL_LINK_WIRE_PREFIX)) {
     throw new Error(
-      `Not a cell-link wire string (missing "${CELL_LINK_WIRE_PREFIX}" prefix).`,
+      `Not a cell-link wire string (missing \`${CELL_LINK_WIRE_PREFIX}\` prefix).`,
     );
   }
   let parsed: unknown;

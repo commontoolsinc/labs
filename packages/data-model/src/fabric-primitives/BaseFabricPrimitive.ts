@@ -14,7 +14,7 @@ import { toCompactDebugString } from "@/value-debug.ts";
  * negative branch collapse to `never`). Replace it with the first real
  * primitive-plumbing member once one is identified.
  */
-export const EXAMPLE_METHOD: unique symbol = Symbol.for(
+export const EXAMPLE_METHOD: unique symbol = Symbol(
   "data-model.exampleMethod",
 );
 
@@ -38,11 +38,11 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
    * which have no enumerable own properties for an inspector to find.
    *
    * Delegates to the canonical debug renderer rather than formatting here, so
-   * that this surface improves whenever that one does -- including the state
-   * rendering its own `TODO` describes, currently elided as `(...)`.
+   * that this surface improves whenever that one does. Instance state is
+   * elided as `(...)`.
    *
-   * Duplicated on `BaseFabricInstance`, unavoidably. There is no shared base class
-   * below `FabricSpecialObject`, and `FabricSpecialObject` itself is the
+   * Duplicated on `BaseFabricInstance`, unavoidably. There is no shared base
+   * class below `FabricSpecialObject`, and `FabricSpecialObject` itself is the
    * runtime-import-free abstract contract, so it cannot reach `value-debug`.
    */
   [Symbol.for("Deno.customInspect")](): string {

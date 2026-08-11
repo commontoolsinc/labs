@@ -385,23 +385,49 @@ live(N) ⇔ N is an effect (registered, not cancelled)
 
 ### 5.2 Maintenance
 
-Liveness is stored as a reference count (`liveRefs`) and recomputed only after
-an **actual edge or demand-root change** — a run whose read set changed,
-register/unregister, or provisional-root transition — never per data change.
-Updates in one registration/resubscribe operation are batched. If its edge set
-is unchanged, no rebuild occurs.
+Liveness is stored as a reference count (`liveRefs`) — the number of live direct
+readers — and updated only on an **actual edge or demand-root change**: a run
+whose read set changed, register/unregister, or a provisional-root transition.
+Ordinary value changes pay nothing. A node is live when it is registered and
+either holds demand on its own (effect, materializer, provisional demand) or has
+at least one live reader.
 
-The rebuild starts at explicit roots (effects, materializers, and provisional
-demand), walks reader→writer edges to form the root-reachable set, then counts
-each reachable node's live direct readers. This is cycle-safe (a rootless cycle
-cannot keep itself live) and diamond-accurate (both arms count; removing one arm
-does not strand the shared writer). A single visited-set delta walk cannot
-provide both properties because path deduplication undercounts diamonds.
+Maintenance is incremental, and the two directions are not symmetric.
+
+**Granting** — a new edge, or a node becoming a root — can only add demand. The
+new reader hands one reference to each writer it reads, and a writer that
+crosses from dormant to live passes the same contribution further upstream. A
+node is enqueued only on that crossing, so a cycle settles instead of looping.
+Each arm of a diamond hands over its own reference, so the shared writer counts
+two.
+
+A reference is granted only while the writer is registered, so an edge naming a
+node that has not registered yet leaves it holding none. Registration therefore
+recounts the node's own references from its live readers before deciding whether
+it came alive, which keeps edge and registration order independent of each
+other.
+
+**Withdrawing** — an edge removed, or a root status lost — can strand nodes, and
+a reference count cannot tell a genuine supporter from a rootless cycle holding
+itself up. A node that loses a root status is therefore re-derived even when it
+still looks live, because the references it holds may be exactly that cycle. So
+withdrawal re-derives, over the region that can be affected and no further:
+`origin`'s transitive upstream, which is closed under the writer edge.
+Any node whose support routes through `origin` is upstream of it, so a live
+reader *outside* that region cannot owe its own liveness to anything inside, and
+its support is taken at face value. Clearing the region and re-seeding from the
+roots inside it plus the live readers outside is cycle-safe (a rootless cycle
+finds no seed and settles dormant) and diamond-accurate (each surviving arm
+re-contributes its own reference).
+
+`recomputeLiveRefs` derives the same state from the roots in one pass over the
+whole graph. Nothing on the maintenance path calls it: it is the definition the
+incremental updates implement, and the reference the unit tests check them
+against after every mutation.
 
 This replaces v1's per-query graph walks (`isDemandedPullComputation` walked
-dependents transitively on every candidate check) with O(V+E) work per changed
-edge/root batch and O(1) liveness queries; ordinary value changes pay zero
-liveness-maintenance cost.
+dependents transitively on every candidate check) with O(1) liveness queries and
+maintenance proportional to the change rather than to the size of the graph.
 
 ### 5.3 Provisional demand
 
@@ -764,7 +790,9 @@ correctness comes from cancellation, not staging:
    Ownership of a commit-gated start begins when the start is scheduled, not
    when its post-commit callback installs it. Cancelling the parent or lineage
    before that commit tombstones the pending start, so the callback must not
-   install it. After installation, cancellation may stop only the exact local
+   install it; stopping the result key does the same, so a piece the user
+   stopped before the origin commit does not start afterwards. After
+   installation, cancellation may stop only the exact local
    registration installed by that attempt; if another attempt has replaced or
    won the same result key, its registration remains live. This prevents a
    receipt-losing duplicate from stopping the winner.
@@ -809,6 +837,23 @@ written through the receipt cell's standard write conversion — plain JSON
 persists as-is, a live cell handle converts to a link, so a one-line setter
 verb's receipt links to the cell it mutated. The create-only witness
 semantics are unchanged either way.
+
+A receipt-only handling also describes what it wrote, in the same transaction,
+on the cell's durable `schema` metadata — so a receipt says what it holds the
+way any other cell does, which is what lets a reader's selection narrow the
+fetch instead of filtering an already-loaded value. The description is
+structural and nothing more: the root container kind, plus the property names
+when that kind is a record. Every property is left admissible, which is what
+keeps a link position honest, since the spelling that would name one is
+`asCell` and `["cell"]` asserts a writable handle on a document nothing can be
+written through. A value with no container kind of its own — a scalar, or a
+link, whose kind is its target's — goes undeclared. A `data:` link is the one
+link that is described: it carries its value inside its own identifier and the
+write inlines it, so the receipt holds that value rather than a link to it, and
+the description is taken after the same inlining. None of this constrains a
+later write: the create-only mark means the value the schema describes is the
+only value that document ever holds. A verb's *declared* result type is a
+separate question, settled at the type layer and never reaching the runtime.
 
 For an inline, non-navigation handler result, an `inSpace` child does not move
 that canonical handler-result wrapper into the child space. The result/receipt
@@ -879,7 +924,12 @@ phase E).
 **Computation-launched children are outside I10.** Computations are
 idempotent and re-runnable; their children converge through deterministic
 ids and normal re-runs, and orphaned registrations are bounded by the same
-retry budget. (The exhausted-retry zombie is accepted as pre-existing; the
+retry budget. The runner is nonetheless stricter for the launches it can tie
+to a transaction: a child whose setup transaction does not become durable has
+its registration stopped rather than left for a re-run to converge over, since
+the bookkeeping a coordinator keeps would otherwise make that re-run skip the
+staging the child needs. [Runner child-run
+ownership](../runner-child-run-ownership.md) states the rules. (The exhausted-retry zombie is accepted as pre-existing; the
 implementation should leave a watch-this comment at the retry-exhaustion
 sites.)
 
@@ -1098,7 +1148,7 @@ field bag.)
 | Component | Owns | Key operations |
 | --- | --- | --- |
 | `registry` | Node records, identity, lifecycle | `register`, `remove`, `get` |
-| `graph` | Reader index (trigger semantics), static writer map, envelope index, node edges, liveness refcounts | `applyReadDelta`, `match(change)`, `edgesFor`, `recomputeLiveRefs` |
+| `graph` | Reader index (trigger semantics), static writer map, envelope index, node edges, liveness refcounts | `applyReadDelta`, `match(change)`, `edgesFor`, `registerDependentEdge`/`unregisterDependentEdge` |
 | `invalidation` | Storage subscription → `markInvalid` + tick | `onNotification` |
 | `settle` | The pass: work set, toposort, run-gating, iteration/budget bounds | `pass()` |
 | `runner` | One-tx run, commit watch, retries, read-delta handoff, observation attach | `runNode` |
@@ -1162,7 +1212,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
 | v1 mechanism | v2 disposition | Safety argument |
 | --- | --- | --- |
 | Push mode (5 modules, mode branches, APIs) | Deleted | Pull is the only production mode; push exists only as test toggles. |
-| `pending`/`dirty`/`stale` + upstream-stale counts | One `status` + liveness refcount; downstream closure per pass | P2 holds for the **run** decision (effects gate on their own value-accurate invalid bit). The one reachability query that survives — the event-preflight consistency gate (§7.5/I4) — is served without per-data-change transitive marking by **inverting** it over the maintained invalid-node set (decision 15); liveness rebuilds from explicit roots only when graph topology or demand roots change. |
+| `pending`/`dirty`/`stale` + upstream-stale counts | One `status` + liveness refcount; downstream closure per pass | P2 holds for the **run** decision (effects gate on their own value-accurate invalid bit). The one reachability query that survives — the event-preflight consistency gate (§7.5/I4) — is served without per-data-change transitive marking by **inverting** it over the maintained invalid-node set (decision 15); liveness is maintained incrementally, and only when graph topology or demand roots change. |
 | `scheduleAffectedEffects` + `conditionallyScheduledEffects` + `changedWritesHistory` | Deleted | Effects run-gate on their own value-accurate invalid bit (§7.2/§7.3) — same observable filter, no watermarks. |
 | Post-run `recordChangedComputationWrites` / `markReadersDirtyForChangedWrites` | Deleted | Local commit notifications are synchronous + value-bearing (P1); the channel already delivers exactly this. |
 | `pullDemandedFirstRunComputations` / continuation set / `activePullDemandActions` | Provisional demand (§5.3) | Continuations are ordinary invalidation under P1; first-run demand is creation-context inheritance. |

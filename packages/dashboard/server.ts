@@ -112,8 +112,7 @@ export const clients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 const enc = new TextEncoder();
 const encodeUpdate = (update: DashboardUpdate) =>
   enc.encode(`event: update\ndata: ${JSON.stringify(update)}\n\n`);
-export const broadcast = (update: DashboardUpdate) => {
-  const event = encodeUpdate(update);
+const send = (event: Uint8Array) => {
   for (const c of clients) {
     try {
       c.enqueue(event);
@@ -122,6 +121,14 @@ export const broadcast = (update: DashboardUpdate) => {
     }
   }
 };
+export const broadcast = (update: DashboardUpdate) => send(encodeUpdate(update));
+// A tick that collects nothing publishes nothing, so a browser cannot read
+// silence as a fault unless the server speaks on its own schedule. The
+// heartbeat is that schedule: a browser that stops hearing it replaces its
+// stream. The SSE data field carries the tick count because an event with no
+// data is not delivered to the page.
+let beats = 0;
+export const heartbeat = () => send(enc.encode(`event: ping\ndata: ${++beats}\n\n`));
 
 const runSourceKey = (source: RunSource): string => `${source.repo} ${source.workflow}`;
 const runSourceTileKey = (source: RunSource, tile: Tile): string => `${runSourceKey(source)} ${tile.id}`;
@@ -153,9 +160,10 @@ const STALE_UPDATE_MS = 60_000;
 const STALE_UPDATE_SUB = "refresh still pending";
 
 function activeTileView(tile: Tile, view: TileView): TileView {
-  return activeTileUpdates.get(tile.id)?.stale
-    ? { ...view, status: "unknown", sub: STALE_UPDATE_SUB }
-    : view;
+  if (!activeTileUpdates.get(tile.id)?.stale) return view;
+  return tile.showOnlyCompletedViews
+    ? { ...view, sub: STALE_UPDATE_SUB }
+    : { ...view, status: "unknown", sub: STALE_UPDATE_SUB };
 }
 
 function grayStaleTileUpdates(now: number): void {
@@ -233,7 +241,7 @@ async function collectView(
     try {
       return await tile.collect(
         collectionCtx,
-        publish
+        publish && !tile.showOnlyCompletedViews
           ? (intermediate) => {
             if (acceptingIntermediate) publish(intermediate);
           }
@@ -447,6 +455,15 @@ export async function handle(req: Request): Promise<Response> {
   return new Response(page(), { headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
+// One turn of the server's clock: tell every connected browser the server is
+// still there, then collect whatever tiles are due.
+export async function serveTick(
+  collect: () => void | Promise<void> = tick,
+): Promise<void> {
+  heartbeat();
+  await collect();
+}
+
 // The side effects: collect once, keep collecting, and serve. Running the file
 // starts them; importing it does not.
 export function start(
@@ -454,12 +471,14 @@ export function start(
   collect: () => void | Promise<void> = tick,
 ) {
   collect();
-  const timer = setInterval(collect, TICK_MS);
+  // Returned so a caller can run one turn of the clock on demand.
+  const onTick = () => serveTick(collect);
+  const timer = setInterval(onTick, TICK_MS);
   const server = serve({
     port: PORT,
     onListen: () => console.log(`\n  Fabric wall LIVE:  http://localhost:${PORT}\n  ${TILES.length} tiles registered.\n`),
   }, handle);
-  return { timer, server };
+  return { timer, server, onTick };
 }
 
 // Running the file boots; importing it (the tests do) boots nothing.

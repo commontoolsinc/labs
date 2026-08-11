@@ -1,5 +1,11 @@
 export { Runtime } from "./runtime.ts";
-export { normalizeSpaceHost } from "./space-host.ts";
+export {
+  fabricAuthorityMatchesSpaceHost,
+  type FabricSpaceHostOptions,
+  normalizeSpaceHost,
+  spaceHostFromFabricAuthority,
+  SpaceHostValidationError,
+} from "./space-host.ts";
 export type {
   ConsoleHandler,
   ConsoleHandlerOutput,
@@ -52,6 +58,7 @@ export type {
   ChangeGroup,
   IExtendedStorageTransaction,
   MemorySpace,
+  TransactionCommitOptions,
 } from "./storage/interface.ts";
 export type {
   EntityIdListOptions,
@@ -64,6 +71,7 @@ export {
   type TransactionSummary,
 } from "./storage/transaction-summary.ts";
 export {
+  type CellLinkInput,
   convertCellsToLinks,
   isCell,
   isReadableCell,

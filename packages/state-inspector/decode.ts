@@ -14,12 +14,11 @@
 // live runtime/Cell needed). In the encoded form embedded links are
 // `/quote`-escaped literals, so a context-less decode is inert.
 
-import {
-  seemsLikeJsonEncodedFabricValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
+import { seemsLikeJsonEncodedFabricValue } from "@commonfabric/data-model/codec-json";
+import { valueFromJson } from "@commonfabric/data-model/codecs";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { isPlainObject } from "@commonfabric/utils/types";
 
 /** Decode a stored payload string, routing the `data-model` codec envelope. */
 export function decodeStored(data: string): unknown {
@@ -38,8 +37,16 @@ export interface DecodedLink {
 
 type Json = unknown;
 
-function isPlainObject(v: Json): v is Record<string, Json> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
+/**
+ * Whether `v` is a record this file may descend by property name.
+ *
+ * The question is about SHAPE, and a class instance is not one whatever its
+ * contents: a `FabricSpecialObject` keeps its state in private fields, so
+ * rebuilding one from its enumerable properties yields `{}`. Descending is
+ * reserved for values whose properties are the whole of what they say.
+ */
+function isNameWalkable(v: Json): v is Record<string, Json> {
+  return isPlainObject(v);
 }
 
 function payloadToLink(payload: Record<string, Json>): DecodedLink {
@@ -56,15 +63,15 @@ function payloadToLink(payload: Record<string, Json>): DecodedLink {
 
 /** A sigil link: `{ "/": { "link@N": {...} } }` (legacy at-rest form). */
 export function parseSigilLink(v: Json): DecodedLink | null {
-  if (!isPlainObject(v)) return null;
+  if (!isNameWalkable(v)) return null;
   const keys = Object.keys(v);
   if (keys.length !== 1 || keys[0] !== "/") return null;
   const inner = v["/"];
-  if (!isPlainObject(inner)) return null;
+  if (!isNameWalkable(inner)) return null;
   const linkKey = Object.keys(inner).find((k) => k.startsWith("link@"));
   if (!linkKey) return null;
   const payload = inner[linkKey];
-  if (!isPlainObject(payload)) return null;
+  if (!isNameWalkable(payload)) return null;
   return payloadToLink(payload);
 }
 
@@ -88,14 +95,14 @@ export function decodedLinkOf(v: Json): DecodedLink | null {
 
 /** An entity reference: `{ "/": "of:…" | "computed:…" | "fid1:…" }`. */
 export function parseEntityRef(v: Json): string | null {
-  if (!isPlainObject(v)) return null;
+  if (!isNameWalkable(v)) return null;
   const keys = Object.keys(v);
   if (keys.length !== 1 || keys[0] !== "/") return null;
   return typeof v["/"] === "string" ? (v["/"] as string) : null;
 }
 
 export function isStream(v: Json): boolean {
-  return isPlainObject(v) && v["$stream"] === true;
+  return isNameWalkable(v) && v["$stream"] === true;
 }
 
 function shortDid(did?: string): string | undefined {
@@ -164,7 +171,7 @@ export function annotate(v: Json, maxDepth = 8): Json {
   if (typeof v === "function") return "[function]";
 
   if (Array.isArray(v)) return v.map((x) => annotate(x, maxDepth - 1));
-  if (isPlainObject(v)) {
+  if (isNameWalkable(v)) {
     const out: Record<string, Json> = {};
     for (const [k, val] of Object.entries(v)) {
       out[k] = annotate(val, maxDepth - 1);
@@ -189,7 +196,7 @@ export function summarize(v: Json): string {
   if (v === null) return "null";
   if (typeof v === "bigint") return `${v}n`;
   if (Array.isArray(v)) return `[${v.length}]`;
-  if (isPlainObject(v)) return `{${Object.keys(v).join(", ")}}`;
+  if (isNameWalkable(v)) return `{${Object.keys(v).join(", ")}}`;
   if (typeof v === "object") return toCompactDebugString(v);
   if (typeof v === "string") {
     return v.length > 40 ? `"${v.slice(0, 37)}…"` : `"${v}"`;
@@ -210,7 +217,7 @@ export function collectLinks(v: Json, maxDepth = 12): DecodedLink[] {
     if (isStream(x) || parseEntityRef(x) !== null) return;
     if (Array.isArray(x)) {
       for (const e of x) walk(e, depth - 1);
-    } else if (isPlainObject(x)) {
+    } else if (isNameWalkable(x)) {
       for (const e of Object.values(x)) walk(e, depth - 1);
     }
   };
@@ -226,7 +233,7 @@ export function countLinks(v: Json, maxDepth = 8): number {
   if (Array.isArray(v)) {
     return v.reduce<number>((n, x) => n + countLinks(x, maxDepth - 1), 0);
   }
-  if (isPlainObject(v)) {
+  if (isNameWalkable(v)) {
     return Object.values(v).reduce<number>(
       (n, x) => n + countLinks(x, maxDepth - 1),
       0,

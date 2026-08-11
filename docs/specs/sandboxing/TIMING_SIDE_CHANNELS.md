@@ -204,19 +204,23 @@ Landing order, smallest and safest first. Each is its own commit/PR.
     other real-time async primitive.
   - Tested in `runner/test/fetch-capability.test.ts` (gate contexts, grid
     arithmetic, settle ordering, response fidelity, compartment injection).
-  - **Consequence — pattern code must guard timer use.** The compartment endows
-    no `setTimeout` (part of the structural barrier above), so an API client's
-    retry/backoff `sleep` must read `globalThis.setTimeout` and no-op when it is
-    absent (a member access yields `undefined` in-sandbox; a bare call throws).
-    Backoff then degrades to an immediate retry in-sandbox, which is acceptable
-    precisely because the gated fetch already spaces every attempt on the one-
-    second grid — the explicit delay is redundant with that settlement. The
-    client helpers now carry this guard (`airtable-client`, `gmail-send-client`,
-    `google-docs-client`, `google-docs-comment-orchestrator`, and the
-    `importer-prompt` template mirror `calendar-write-client`'s existing
-    `waitIfTimersAreAvailable`). Pinned by `runner/test/sandbox-timers.test.ts`
-    (the compartment omits timers; a raw `setTimeout` call throws in it; the
-    guard resolves immediately).
+  - **Consequence — an API client cannot sleep in-sandbox.** The compartment
+    endows no `setTimeout` (part of the structural barrier above), and the name
+    is withheld from the authored surface, so a pattern that reaches for it
+    fails to compile rather than throwing once it runs. A retry or backoff
+    `sleep` therefore has nothing to wait on. The `airtable-client`,
+    `gmail-send-client`, and `google-docs-client` helpers do not attempt one: a
+    401 refreshes the token and retries, and a 429 or any other failure is
+    thrown to the caller for the reactive layer to re-drive. No spacing is lost
+    by this, because the gated fetch already settles every attempt on the
+    one-second grid. The one helper that still waits is
+    `calendar-write-client`, whose `waitIfTimersAreAvailable` reads `setTimeout`
+    off `globalThis` as a member access, which yields `undefined` in-sandbox
+    instead of raising a `ReferenceError`, and resolves immediately when it is
+    absent. That helper therefore waits for real in a host context and degrades
+    to an immediate retry inside a compartment. Pinned by
+    `runner/test/sandbox-timers.test.ts` (the compartment omits timers; a raw
+    `setTimeout` call throws in it; the guard resolves immediately).
   - **Rejected alternative — a coarse sandbox `setTimeout`.** Endowing the
     compartment with a grid-quantized `setTimeout` (delays rounded up to the
     next one-second boundary, matching the gated-fetch settlement) would let
@@ -225,8 +229,8 @@ Landing order, smallest and safest first. Each is its own commit/PR.
     `security-timing.test.ts` pins, so it needs an explicit security
     sign-off, and its only benefit — honoring a long `Retry-After` — is marginal
     once every fetch settles on the grid anyway. If a future need justifies it,
-    the guard sites already degrade cleanly and would transparently begin
-    honoring the endowed timer.
+    `calendar-write-client`'s guard already degrades cleanly and would
+    transparently begin honoring the endowed timer.
 
 - **W1 — Keystone: frame-gate the clock, entropy, and lift event-emit.**
   - **Clock/entropy gate: DONE (always-on, unconditional).** The gated ambient

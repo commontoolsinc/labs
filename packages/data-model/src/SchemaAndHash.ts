@@ -24,14 +24,14 @@ export class SchemaAndHash {
   readonly #hash: FabricHash;
 
   /**
-   * Constructs a `SchemaAndHash` from an already-deep-frozen schema and
+   * Constructs an instance, from an already-deep-frozen schema and
    * its pre-computed hash. Throws if the schema is not deep-frozen.
    * Prefer `internSchema()` from `schema-hash.ts` for the friendly entry
    * point that handles freezing, hashing, and interning.
    */
   constructor(schema: JSONSchema | undefined, hash: FabricHash) {
     if (!isDeepFrozen(schema)) {
-      throw new Error("SchemaAndHash: schema must be deep-frozen");
+      throw new Error("`SchemaAndHash`: schema must be deep-frozen");
     }
     this.#schema = schema;
     this.#hash = hash;

@@ -34,36 +34,36 @@ function arrayString(arr: readonly number[]): string {
   return result.join("");
 }
 
-// ============================================================================
-// toUnpaddedBase64url and polyfill
-// ============================================================================
+//
+// `toUnpaddedBase64url()` and polyfill
+//
 
 for (const toBase64 of [toUnpaddedBase64url, toBase64Polyfill]) {
-  describe(`${toBase64.name}`, () => {
+  describe(`${toBase64.name}()`, () => {
     for (const { arr, b64 } of TEST_PAIRS) {
       const arrStr = arrayString(arr);
-      it(`encodes ${arrStr} to "${b64}"`, () => {
+      it(`encodes ${arrStr} to \`${b64}\``, () => {
         expect(toBase64(new Uint8Array(arr))).toBe(b64);
       });
     }
   });
 }
 
-// ============================================================================
-// fromBase64url and polyfill
-// ============================================================================
+//
+// `fromBase64url()` and polyfill
+//
 
 for (const fromBase64 of [fromBase64url, fromBase64Polyfill]) {
-  describe(`${fromBase64.name}`, () => {
+  describe(`${fromBase64.name}()`, () => {
     for (const { arr, b64 } of TEST_PAIRS) {
       const arrStr = arrayString(arr);
       const paddingCount = 2 - ((arr.length + 2) % 3);
       const paddedStr = `${b64}${"=".repeat(paddingCount)}`;
-      it(`decodes "${b64}" to ${arrStr}`, () => {
+      it(`decodes \`${b64}\` to ${arrStr}`, () => {
         expect(fromBase64(b64)).toEqual(new Uint8Array(arr));
       });
       if (paddedStr !== b64) {
-        it(`decodes "${paddedStr}" to ${arrStr}`, () => {
+        it(`decodes \`${paddedStr}\` to ${arrStr}`, () => {
           expect(fromBase64(paddedStr)).toEqual(new Uint8Array(arr));
         });
       }
@@ -71,9 +71,9 @@ for (const fromBase64 of [fromBase64url, fromBase64Polyfill]) {
   });
 }
 
-// ============================================================================
+//
 // Base64url round-trip
-// ============================================================================
+//
 
 describe("base64url round-trip", () => {
   it("round-trips various byte arrays", () => {

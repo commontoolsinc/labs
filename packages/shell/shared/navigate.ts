@@ -1,8 +1,8 @@
 import {
-  App,
   AppView,
   appViewToUrlPath,
   preserveAppViewMode,
+  ShellApp,
   urlToAppView,
 } from "./app/mod.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -92,12 +92,12 @@ export function updatePageTitle(title: string) {
 //
 // Navigation can occur in the following scenarios:
 // * Browser back/forward buttons/shortcuts
-// * Clicking on a `<x-piece-link>`
+// * A link or control calling `navigate()`
 //
 // On instantiation, parses the current URL and applies app state as needed.
 export class Navigation {
-  #app: App;
-  constructor(app: App) {
+  #app: ShellApp;
+  constructor(app: ShellApp) {
     this.#app = app;
 
     globalThis.addEventListener(NavigationEventName, this.onNavigate);
@@ -181,14 +181,14 @@ export class Navigation {
 // events to use a space name if it's the same as the active runtime
 // to preserve space name in navigation/URL bar.
 function mapNavigationView(
-  app: App,
+  app: ShellApp,
   view: NavigationCommand,
 ): NavigationCommand {
   const currentView = app.state().view;
   const currentSpaceName = "spaceName" in currentView
     ? currentView.spaceName
     : undefined;
-  const currentSpaceDID = app.element().getRuntimeSpaceDID();
+  const currentSpaceDID = app.getRuntimeSpaceDID();
   if (
     "spaceDid" in view && view.spaceDid && currentSpaceName &&
     view.spaceDid === currentSpaceDID

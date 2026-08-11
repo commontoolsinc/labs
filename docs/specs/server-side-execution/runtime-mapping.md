@@ -78,12 +78,12 @@ Status legend:
 | 30 | `setup` / `start` / `run` / `runSynced`: argument staging, setup state, node instantiation | `runner.ts:1077`, `1941`, `2950`, `3052`, `startCore` `runner.ts:2037-2530` | serving-loop §3 (hosted runtime) | COVERED |
 | 31 | Who starts pieces: shell navigation, `ensurePieceRunning` on event, CLI, roots at bootstrap | `ensure-piece-running.ts:97`, `runner.ts:2343-2530` | serving-loop §1 (no piece-start policy; demand-driven pull) | RULED |
 | 32 | `stop` / `stopAll`: cancel groups, start-generation tombstones, lifecycle epochs | `runner.ts:3807-3852`, `3926-3956`, `2056-2077` | serving-loop §1 (park = dispose) | COVERED |
-| 33 | Child pieces from list coordinators (map/filter/flatMap): per-element `runner.run`, identity reuse, stop-on-removal, `resumeMode: "always-run"` | `builtins/map.ts:344-412`, registration `scheduler/facade.ts:316-322` | builtins §1 (listed as pure) | CHANGED |
-| 34 | Resume compensation for list builtins (`resume-recover`, `resume-republish`) | `builtins/resume-recover.ts:29-46`, used `builtins/filter.ts:165`, `flatmap.ts:105` | builtins §5 (do not port) | COVERED |
+| 33 | Child pieces from list coordinators (map/filter/flatMap): per-element `runner.run`, identity reuse, release-on-removal, `resumeMode: "always-run"` | `builtins/map.ts:344-412`, release `builtins/list-element-keys.ts:38-59`, registration `scheduler/facade.ts:316-322` | builtins §1 (listed as pure) | CHANGED |
+| 34 | Resume compensation for list builtins (`resume-republish`) | `builtins/resume-republish.ts:77-95`, used `builtins/filter.ts:113`, `flatmap.ts:120` | builtins §5 (do not port) | COVERED |
 | 35 | Resumed-start machinery: per-doc rehydration snapshots, sync-holds, rehydration barrier | `runner.ts:3216-3395`, `scheduler/facade.ts:680-803`, barrier `scheduler/work-oracle.ts:79-86` | serving-loop §3b, §6 | CHANGED |
 | 36 | Runtime teardown ordering: settle pointer commits, updater dispose, scheduler dispose | `runtime.ts:1343-1424`, `runner.ts:3900-3924` | README §4 (teardown O(1) budget) | COVERED |
 
-### 1e. Results that are patterns (charm creation from computation)
+### 1e. Results that are patterns (piece creation from computation)
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
@@ -304,8 +304,10 @@ until then its derivations stay dirty-unmaterialized by design.
 **N33 (list coordinators are not "pure").** builtins §1 classifies
 map/filter/flatMap as pure structural with "port cost: none". The
 functions are deterministic, but the coordinators *start child
-pattern runs* (`map.ts:355-395`), own their lifecycle
-(stop-on-removal, `map.ts:392`), and register `always-run` on resume
+pattern runs* (`map.ts:355-395`), own their lifecycle — an element
+the list stops holding has its child released rather than stopped, so
+a result opened in its own right keeps running
+(`list-element-keys.ts:38-59`) — and register `always-run` on resume
 because a clean skip would strand children (`map.ts:412`,
 `facade.ts:316-322`). Port cost is real: server-side a coordinator
 materializes under demand like any node (the N22/N31 ruling — no
@@ -317,7 +319,7 @@ them.
 **N35 (resume machinery).** The whole client-resume complex — per-doc
 snapshot buckets (`runner.ts:3296`), sync-holds
 (`INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS`, `scheduler/constants.ts:67`),
-the rehydration barrier, resume-recover/republish (row 34) — exists
+the rehydration barrier, resume-republish (row 34) — exists
 because a *remote* replica reloads against a store it has not
 finished syncing. The SpaceServer's store is local and its recovery
 is recompute-from-current-state (serving-loop §6), so on the server

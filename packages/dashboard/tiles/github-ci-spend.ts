@@ -26,6 +26,7 @@ import {
   spendChart,
   summarizeDailySpend,
 } from "../spend.ts";
+import { themedChartSeries } from "../theme.ts";
 
 interface UsageItem {
   date: string;
@@ -443,7 +444,7 @@ export const githubCiSpend: Tile = {
       : blacksmithBudget;
     const budget = hasCombinedBudget ? combinedBudget : providerBudget;
     const swatch = (color: string) =>
-      `<span class="swatch" style="background:${color}"></span>`;
+      `<span class="swatch" style="background:${themedChartSeries(color).color}"></span>`;
     const legendItem = (
       configured: boolean,
       spend: DailySpend | null,
@@ -512,11 +513,13 @@ export const githubCiSpend: Tile = {
           spend: githubDollars,
           color: GITHUB_COLOR,
           label: githubDollars ? usd(githubDollars.mtd) : undefined,
+          lagDays: GITHUB_LAG_DAYS,
         },
         {
           spend: blacksmithValue,
           color: BLACKSMITH_COLOR,
           label: blacksmithValue ? usd(blacksmithValue.mtd) : undefined,
+          lagDays: BLACKSMITH_LAG_DAYS,
         },
       ],
       now,

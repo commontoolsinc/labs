@@ -1485,6 +1485,14 @@ export function normalizeAndDiff(
     // writes land in a slot whose stored parent is still an array and storage
     // rejects them with a TypeMismatchError. This mirrors the array branch
     // above, which resets a mismatched container via `value: []`.
+    //
+    // TODO(danfuzz): `isObject` is also true for a `FabricSpecialObject`, so
+    // a stored special object (which reaches storage whole via this
+    // function's `FabricSpecialObject` branch above) is treated as an
+    // existing plain record: no reset is emitted, its zero keys yield no
+    // removals, and the per-key child writes land in slots whose stored
+    // parent is still the special object. The special-object→object
+    // transition wants the same reset the array→object one gets.
     if (!isObject(currentValue) || isPrimitiveCellLink(currentValue)) {
       diffLogger.debug(
         "diff",
@@ -1527,7 +1535,9 @@ export function normalizeAndDiff(
       )
       : undefined;
 
-    for (const key in newValue) {
+    // `Object.keys`, not `for...in`: the latter also walks the prototype chain,
+    // and only `newValue`'s own keys are being written.
+    for (const key of Object.keys(newValue)) {
       diffLogger.debug("diff", () => {
         const childPath = [...link.path, key].join(".");
         return `[DIFF_RECURSE] Recursing into key='${key}' childPath=${childPath}`;
@@ -1541,7 +1551,12 @@ export function normalizeAndDiff(
       // a real change — the slot becomes present-but-undefined — but the
       // value diff below sees `undefined === undefined` and would emit
       // nothing. `undefined` is a leaf, so emit the write directly.
-      if (newValue[key] === undefined && !(key in currentRecord)) {
+      //
+      // `Object.hasOwn`, not `in`: `key` is a data key and `currentRecord` is
+      // data. `in` walks the prototype chain, so setting a key called
+      // `toString` to `undefined` looked like it was already present and the
+      // write was dropped.
+      if (newValue[key] === undefined && !Object.hasOwn(currentRecord, key)) {
         changes.push({
           location: { ...link, path: [...link.path, key], schema: childSchema },
           value: undefined,
@@ -1557,7 +1572,12 @@ export function normalizeAndDiff(
         context,
         options,
         state,
-        currentRecord[key],
+        // Indexing alone would fall through to the prototype: for a key named
+        // `valueOf`, a record with no such own property yields
+        // `Object.prototype.valueOf`, and the diff below then fails with
+        // "Cannot compare a function value" — a write refused because of a
+        // method the data never had. Absent means absent.
+        Object.hasOwn(currentRecord, key) ? currentRecord[key] : undefined,
         requiredProps === undefined ? undefined : requiredProps.has(key),
       );
       changes.push(...nestedChanges);
@@ -1580,8 +1600,14 @@ export function normalizeAndDiff(
       ? resolvedParentSchema.properties
       : undefined;
     if (isRecord(schemaProperties)) {
-      for (const key in schemaProperties) {
-        if (key in newValue) continue;
+      // `Object.keys`, not `for...in`: the latter walks the prototype chain
+      // too, and these are the schema's OWN declared property names.
+      for (const key of Object.keys(schemaProperties)) {
+        // `Object.hasOwn`, not `in`, for the same reason one line up: `key` is
+        // a schema-declared name and `newValue` is data, so a property called
+        // `toString` looked present on every object and its eager scoping was
+        // skipped.
+        if (Object.hasOwn(newValue, key)) continue;
         const childSchema = ContextualFlowControl.getSchemaAtPath(link.schema, [
           key,
         ]);
@@ -1661,8 +1687,13 @@ export function normalizeAndDiff(
 
     // Handle removed keys: explicit deletes, so a key the new value omits is
     // removed rather than left behind as present-but-undefined.
-    for (const key in currentRecord) {
-      if (!(key in newValue) && !eagerScopedKeys.has(key)) {
+    //
+    // `Object.keys` + `Object.hasOwn`, not `for...in` + `in`: both walk the
+    // prototype chain. A stored property named `toString` was never removed,
+    // because `"toString" in newValue` is true for every object — so setting
+    // `{ name }` over `{ name, toString }` left the `toString` behind.
+    for (const key of Object.keys(currentRecord)) {
+      if (!Object.hasOwn(newValue, key) && !eagerScopedKeys.has(key)) {
         changes.push({
           location: { ...link, path: [...link.path, key] },
           value: undefined,

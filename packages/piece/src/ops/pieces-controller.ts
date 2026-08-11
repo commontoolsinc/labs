@@ -1,15 +1,29 @@
 import {
   applyPieceSourceTransition,
   type Cell,
+  Console as RuntimeConsole,
+  EntityId,
   entityIdFrom,
+  type EntityIdListOptions,
+  type EntityIdListResult,
   type EnvReader,
   experimentalOptionsFromEnv,
+  getEntityId,
+  getMetaLink,
   getPatternIdentityRef,
   getPieceSourceSnapshot,
+  isCell,
+  isLink,
   isStoredArgumentSchemaRefusal,
+  isStream,
   type JSONSchema,
+  KeepAsCell,
+  type MemorySpace,
+  type Module,
   type ModuleByteCache,
   normalizePatternSource,
+  parseLink,
+  type Pattern,
   type PatternCoverageCollector,
   type PatternUpdateOutcome,
   type PieceSourceTransition,
@@ -20,26 +34,40 @@ import {
   type Schema,
   setPatternRepository,
   setPatternSource,
+  type SpaceCellContents,
 } from "@commonfabric/runner";
+import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 import type { CellScope } from "@commonfabric/api";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
-import { type NameSchema, nameSchema } from "@commonfabric/runner/schemas";
+import {
+  type NameSchema,
+  nameSchema,
+  pieceListSchema,
+} from "@commonfabric/runner/schemas";
 import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
-import { PieceManager } from "../index.ts";
+import {
+  type EntityRef,
+  entityRefToString,
+  isEntityRef,
+} from "@commonfabric/data-model/cell-rep";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { createSession, Identity, type Session } from "@commonfabric/identity";
+import { isRecord } from "@commonfabric/utils/types";
+import { getLogger } from "@commonfabric/utils/logger";
+import { ensureNotRenderThread } from "@commonfabric/utils/env";
+import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
+import { homeSchema } from "@commonfabric/home-schemas";
+import {
+  getResultCellWithSourceSchema,
+  isLegacyPieceRegistryRoot,
+} from "../../../runner/src/piece-helpers.ts";
+import { prepareSourceClosureVerification } from "../../../runner/src/compilation-cache/cell-cache.ts";
+import { pieceId } from "../piece-id.ts";
 import { PieceController } from "./piece-controller.ts";
 import { compileProgram } from "./utils.ts";
-import { createSession, Identity } from "@commonfabric/identity";
-import { getLogger } from "@commonfabric/utils/logger";
-import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
-import { ACLManager } from "./acl-manager.ts";
-import { homeSchema } from "@commonfabric/home-schemas";
-
-const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
-  Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
-
 // System space-root pattern refs, their derivation, and the source→URL
-// resolution live in ../system-pattern-url.ts (shared with PieceManager's
-// default-root heal-on-load-failure retry); re-exported here for existing
+// resolution live in ../system-pattern-url.ts; re-exported here for existing
 // importers.
 import {
   DEFAULT_APP_PATTERN_SOURCE,
@@ -53,20 +81,61 @@ export {
   HOME_PATTERN_SOURCE,
 };
 
+ensureNotRenderThread();
+
+const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
+  Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
+
+const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
+  type: "array",
+  items: { type: "unknown", asCell: ["cell"] },
+  default: [],
+  ifc: { confidentiality: [cfcAtom.resource("PrivilegedPieceList")] },
+});
+
 // Default roots have a stronger update policy than ordinary pieces: an
 // existing root is reconciled before start, while a new root is compiled from
 // the current source immediately before creation. Keep the runner's watcher,
 // but do not schedule its duplicate fire-and-forget source check.
 const DEFAULT_ROOT_RUN_OPTIONS = { schedulePatternUpdate: false } as const;
 
-// Same logger as manager.ts's timePiecePhase: timing stats record even while
-// the logger is disabled, so controller phases show up in the load summaries
-// (browser worker included) as `piece/phase/<label>`.
+// Timing stats record even while the logger is disabled, so every phase is
+// visible in the load summaries (browser worker included, where the
+// CF_CLI_TRACE_TIMINGS console path cannot run) as `piece/phase/<label>`.
 const pieceTimingLogger = getLogger("piece", { enabled: false });
 const pieceUpdateLogger = getLogger("piece.update", {
   enabled: true,
   level: "warn",
 });
+
+async function timePiecePhase<T>(
+  label: string,
+  run: () => T | Promise<T>,
+): Promise<T> {
+  const start = performance.now();
+  try {
+    return await run();
+  } finally {
+    pieceTimingLogger.time(start, "phase", label);
+    if (PIECE_TRACE_TIMINGS) {
+      const elapsed = Math.round(performance.now() - start);
+      console.error(`[piece-phase] ${elapsed}ms :: ${label}`);
+    }
+  }
+}
+
+/**
+ * Filters an array of pieces by removing any that match the target cell
+ */
+function filterOutCell(
+  list: Cell<Cell<unknown>[]>,
+  target: Cell<unknown>,
+): Cell<unknown>[] {
+  const resolvedTarget = target.resolveAsCell();
+  return list.get().filter((piece) =>
+    !piece.resolveAsCell().equals(resolvedTarget)
+  );
+}
 
 /** Backward-compatible name for the result of a pattern update check. */
 export type UpdateOutcome = PatternUpdateOutcome;
@@ -114,20 +183,8 @@ const isCfcMigrationRejection = (error: unknown): boolean =>
 const readEnv: EnvReader = (key) =>
   typeof Deno !== "undefined" ? Deno.env.get(key) : undefined;
 
-async function timePiecesPhase<T>(
-  label: string,
-  run: () => T | Promise<T>,
-): Promise<T> {
-  const start = performance.now();
-  try {
-    return await run();
-  } finally {
-    pieceTimingLogger.time(start, "phase", label);
-    if (PIECE_TRACE_TIMINGS) {
-      const elapsed = Math.round(performance.now() - start);
-      console.error(`[piece-phase] ${elapsed}ms :: ${label}`);
-    }
-  }
+export interface PiecesControllerOptions {
+  deferSpaceCellSync?: boolean;
 }
 
 export interface CreatePieceOptions {
@@ -137,109 +194,47 @@ export interface CreatePieceOptions {
   start?: boolean;
 }
 
+/**
+ * The space-level surface for pieces: the registry, the pieces themselves, and
+ * the space's default root pattern. One instance serves one space.
+ */
 export class PiecesController<T = unknown> {
-  #manager: PieceManager;
-  #disposed = false;
+  private space: MemorySpace;
 
-  constructor(manager: PieceManager) {
-    this.#manager = manager;
-  }
+  private spaceCell: Cell<SpaceCellContents>;
 
-  manager(): PieceManager {
-    this.disposeCheck();
-    return this.#manager;
-  }
+  private diagnosticConsole: RuntimeConsole;
 
-  async create<U = T>(
-    program: RuntimeProgram | string,
-    options: CreatePieceOptions = {},
-    cause: string | undefined = undefined,
-  ): Promise<PieceController<U>> {
-    this.disposeCheck();
-    const start = options.start ?? true;
-    const pattern = await compileProgram(this.#manager, program);
-    const piece = await this.#manager.runPersistent<U>(
-      pattern,
-      options.input,
-      cause,
-      { repository: options.repository, origin: options.origin, start },
-    );
-    if (!start) {
-      await this.#manager.runtime.idle();
-      await this.#manager.synced();
-    }
-    return new PieceController<U>(this.#manager, piece);
-  }
+  /**
+   * Promise resolved when the controller is ready.
+   */
+  ready: Promise<void>;
 
-  async get<S extends JSONSchema = JSONSchema>(
-    pieceId: string,
-    runIt: boolean,
-    schema: S,
-    scope?: CellScope,
-  ): Promise<PieceController<Schema<S>>>;
-  async get<T = unknown>(
-    pieceId: string,
-    runIt?: boolean,
-    schema?: JSONSchema,
-    scope?: CellScope,
-  ): Promise<PieceController<T>>;
-  async get(
-    pieceId: string,
-    runIt: boolean = false,
-    schema?: JSONSchema,
-    scope?: CellScope,
-  ): Promise<PieceController> {
-    this.disposeCheck();
-    const cell = await (await this.#manager.get(pieceId, runIt, schema, scope))
-      .sync();
-    return new PieceController(this.#manager, cell);
-  }
+  constructor(
+    private session: Session,
+    public runtime: Runtime,
+    options: PiecesControllerOptions = {},
+  ) {
+    this.diagnosticConsole = new RuntimeConsole(runtime.harness);
+    this.space = this.session.space;
 
-  /** Return the piece registry, not every stored piece root. */
-  async getRegisteredPieces() {
-    this.disposeCheck();
-    const piecesCell = await this.#manager.getPieceRegistry();
-    const pieces = await this.#manager.syncPieces(piecesCell);
-    return pieces.map((piece) =>
-      new PieceController(this.#manager, piece.asSchema(undefined))
-    );
-  }
+    // Use the space DID as the cause - it's derived from the space name
+    // and consistently available everywhere
+    const isHomeSpace = this.space === this.runtime.userIdentityDID;
+    this.spaceCell = isHomeSpace
+      ? this.runtime.getHomeSpaceCell()
+      : this.runtime.getSpaceCell(this.space);
 
-  async remove(pieceId: string): Promise<boolean> {
-    this.disposeCheck();
-    const piece = this.#manager.runtime.getCellFromEntityId(
-      this.#manager.getSpace(),
-      entityIdFrom(pieceId),
-    );
-    const removed = await this.#manager.remove(piece);
-    // Ensure full synchronization
-    if (removed) {
-      await this.#manager.runtime.idle();
-      await this.#manager.synced();
-    }
-    return removed;
-  }
+    const syncSpaceCellContents = options.deferSpaceCellSync
+      ? Promise.resolve()
+      : Promise.resolve(this.spaceCell.sync());
 
-  async start(pieceId: string): Promise<void> {
-    this.disposeCheck();
-    await this.#manager.startPiece(pieceId);
-  }
-
-  async stop(pieceId: string): Promise<void> {
-    this.disposeCheck();
-    await this.#manager.stopPiece(pieceId);
-  }
-
-  async dispose() {
-    this.disposeCheck();
-    this.#disposed = true;
-    await this.#manager.runtime.dispose();
-  }
-
-  private disposeCheck() {
-    if (this.#disposed) {
-      throw new Error("PiecesController has been disposed.");
-    }
+    // Note: pieceRegistry and recentPieces are managed by the default pattern,
+    // not directly on the space cell. The space cell only contains a link to
+    // defaultPattern.
+    // Default pattern creation is handled by ensureDefaultPattern(), which is
+    // called by CLI/shell entry points. Construction doesn't auto-create it.
+    this.ready = syncSpaceCellContents.then(() => {});
   }
 
   static async initialize(
@@ -279,13 +274,1119 @@ export class PiecesController<T = unknown> {
       }),
     }));
 
-    const manager = new PieceManager(session, runtime);
-    await manager.synced();
-    return new PiecesController(manager);
+    const pieces = new PiecesController(session, runtime);
+    await pieces.synced();
+    return pieces;
   }
 
-  acl(): ACLManager {
-    return new ACLManager(this.#manager.runtime, this.#manager.getSpace());
+  getSpace(): MemorySpace {
+    return this.space;
+  }
+
+  getSpaceName(): string | undefined {
+    return this.session.spaceName;
+  }
+
+  async synced(): Promise<void> {
+    await this.ready;
+    return await this.runtime.storageManager.synced();
+  }
+
+  async ensureSpaceSession(): Promise<void> {
+    await this.ready;
+    await this.runtime.storageManager.open(this.space).ensureSession?.();
+  }
+
+  async listEntityIds(): Promise<string[] | undefined> {
+    await this.ready;
+    return await this.runtime.storageManager.open(this.space).listEntityIds?.();
+  }
+
+  async listEntityIdPage(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult | undefined> {
+    await this.ready;
+    return await this.runtime.storageManager.open(this.space)
+      .listEntityIdPage?.(
+        options,
+      );
+  }
+
+  async entityIdExists(id: string): Promise<boolean | undefined> {
+    await this.ready;
+    return await this.runtime.storageManager.open(this.space).entityIdExists?.(
+      id,
+    );
+  }
+
+  getSpaceCellContents(): Cell<SpaceCellContents> {
+    return this.spaceCell;
+  }
+
+  async dispose() {
+    await this.runtime.dispose();
+  }
+
+  /**
+   * Link the default pattern cell to the space cell.
+   * This should be called after the default pattern is created.
+   * @param defaultPatternCell - The cell representing the default pattern
+   */
+  async linkDefaultPattern(
+    defaultPatternCell: Cell<any>,
+  ): Promise<void> {
+    await this.runtime.editWithRetry((tx) => {
+      const spaceCellWithTx = this.spaceCell.withTx(tx);
+      spaceCellWithTx.key("defaultPattern").set(defaultPatternCell.withTx(tx));
+    });
+    await this.runtime.idle();
+  }
+
+  /**
+   * Clears the defaultPattern link from the space cell.
+   * Used when the default pattern is being deleted.
+   */
+  async unlinkDefaultPattern(): Promise<void> {
+    await this.runtime.editWithRetry((tx) => {
+      const spaceCellWithTx = this.spaceCell.withTx(tx);
+      spaceCellWithTx.key("defaultPattern").set(undefined);
+    });
+    await this.runtime.idle();
+  }
+
+  /**
+   * Get the default pattern cell from the space cell.
+   * @returns The default pattern cell, or undefined if not set
+   */
+  async getDefaultPattern(
+    runIt: boolean = true,
+  ): Promise<Cell<NameSchema> | undefined> {
+    const cell = await timePiecePhase(
+      "getDefaultPattern.spaceCell.sync",
+      () => this.spaceCell.key("defaultPattern").sync(),
+    );
+    const defaultPattern = cell.get();
+    if (!defaultPattern) {
+      return undefined;
+    }
+
+    await timePiecePhase(
+      "getDefaultPattern.defaultPattern.sync",
+      () => defaultPattern.sync(),
+    );
+    if (
+      defaultPattern.getRaw() === undefined &&
+      getPatternIdentityRef(defaultPattern) === undefined
+    ) {
+      return undefined;
+    }
+    try {
+      return await timePiecePhase(
+        `getDefaultPattern.get(runIt=${runIt})`,
+        () =>
+          this.getPieceCell(
+            defaultPattern,
+            runIt,
+            nameSchema,
+          ),
+      );
+    } catch (error) {
+      // An obsolete root whose stored pattern this runtime can no longer load
+      // used to heal on ONE entry point only — the boot path
+      // (ensureDefaultPattern reconciles before start).
+      // Every other consumer resolves the root HERE — piece registry
+      // listings, `cf piece ls`, FUSE, the shell's list cells — and
+      // inherited no heal at all: the load failure propagated and every
+      // listing died with the root (2026-07-29 vendor gate,
+      // the cf-cell-context type retirement). Run the same awaited updater
+      // check from this choke point and retry the start ONCE when it
+      // updated; any other outcome rethrows the original failure untouched.
+      if (!runIt || !this.runtime.experimental?.systemPatternAutoUpdate) {
+        throw error;
+      }
+      let outcome: PatternUpdateOutcome;
+      try {
+        const root = await this.getPieceCell(defaultPattern, false, nameSchema);
+        outcome = await this.runtime.patternUpdater.checkDefaultPattern(
+          root,
+          deriveSystemPatternSource(this.space, this.runtime),
+        );
+      } catch {
+        throw error;
+      }
+      if (outcome !== "updated" && outcome !== "repaired-provenance") {
+        throw error;
+      }
+      pieceUpdateLogger.warn("default-root-healed-on-load-failure", () => [
+        "getDefaultPattern: start failed, updater rolled the root forward;",
+        `retrying start once (${this.space})`,
+      ]);
+      // The metadata swap committed through a transaction view; settle, then
+      // resolve the root AGAIN so the retry observes the committed
+      // patternIdentity rather than the pre-transaction snapshot held by
+      // `defaultPattern` (same trap the boot path documents in
+      // startEnsuredDefaultPattern). The whole settle/re-resolve/retry
+      // sequence surfaces the ORIGINAL start failure if anything in it goes
+      // wrong — a secondary failure here is a diagnostic detail, not the
+      // caller's error.
+      try {
+        await this.runtime.idle();
+        const refreshedSlot = await timePiecePhase(
+          "getDefaultPattern.spaceCell.resync(after-heal)",
+          () => this.spaceCell.key("defaultPattern").sync(),
+        );
+        const healedPattern = refreshedSlot.get();
+        if (!healedPattern) throw error;
+        await healedPattern.sync();
+        return await timePiecePhase(
+          "getDefaultPattern.get(retry-after-heal)",
+          () => this.getPieceCell(healedPattern, runIt, nameSchema),
+        );
+      } catch (retryError) {
+        pieceUpdateLogger.warn("default-root-heal-retry-failed", () => [
+          "getDefaultPattern: post-heal retry failed; surfacing the",
+          `original start failure (${this.space})`,
+          retryError,
+        ]);
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Get the cell containing the registered pieces in this space.
+   * This is the discovery root, not a list of every stored piece root. Reads
+   * the default pattern's pieceRegistry export. An eligible legacy system root
+   * is read through its retired registry export.
+   */
+  async getPieceRegistry(): Promise<Cell<Cell<unknown>[]>> {
+    const defaultPattern = await this.getDefaultPattern(true);
+    if (!defaultPattern) {
+      // Return empty array cell if no default pattern. Loud on purpose: any
+      // subscription made against this placeholder never fires again, so a
+      // cold-cache miss here silently freezes piece listings (e.g. FUSE).
+      console.warn(
+        `getPieceRegistry: no default pattern found for space ${this.space}; ` +
+          "returning detached empty piece list",
+      );
+      return this.runtime.getCell(this.space, "empty-pieces", pieceListSchema);
+    }
+
+    const cell = defaultPattern.asSchema({
+      type: "object",
+      properties: {
+        pieceRegistry: pieceListSchema,
+        allPieces: pieceListSchema,
+      },
+    });
+    const pieceRegistry = cell.key("pieceRegistry") as Cell<Cell<unknown>[]>;
+    await this.syncPieces(pieceRegistry);
+    if (!isLegacyPieceRegistryRoot(defaultPattern)) {
+      return pieceRegistry;
+    }
+
+    const legacyPieceRegistry = cell.key("allPieces") as Cell<
+      Cell<unknown>[]
+    >;
+    await this.syncPieces(legacyPieceRegistry);
+    return legacyPieceRegistry;
+  }
+
+  /** Return the piece registry, not every stored piece root. */
+  async getRegisteredPieces() {
+    const piecesCell = await this.getPieceRegistry();
+    const pieces = await this.syncPieces(piecesCell);
+    return pieces.map((piece) =>
+      new PieceController(this, piece.asSchema(undefined))
+    );
+  }
+
+  async add(newPieces: Cell<unknown>[]): Promise<void> {
+    const defaultPattern = await timePiecePhase(
+      "add.getDefaultPattern",
+      () => this.getDefaultPattern(true),
+    );
+    if (!defaultPattern) {
+      throw new Error("Cannot add pieces: default pattern not available");
+    }
+
+    const cell = defaultPattern.asSchema({
+      type: "object",
+      properties: {
+        addPiece: { asCell: ["stream"] },
+      },
+    });
+
+    const addPieceHandler = await cell.key("addPiece").pull();
+    if (!isStream(addPieceHandler)) {
+      throw new Error(
+        "Cannot add pieces: addPiece handler not found on default pattern",
+      );
+    }
+
+    // Send each piece and wait for transaction commit.
+    // The onCommit callback fires both on success AND when retries are
+    // exhausted (scheduler.ts ~line 2089). We check tx.status() to
+    // distinguish the two — otherwise pieces are silently dropped.
+    // Retries are handled by the scheduler internally.
+    for (const piece of newPieces) {
+      await timePiecePhase(
+        "add.send",
+        () =>
+          new Promise<void>((resolve, reject) => {
+            addPieceHandler.send({ piece }, (tx) => {
+              const txStatus = tx.status();
+              if (txStatus.status === "error") {
+                console.error(
+                  "Piece registration failed: addPiece transaction error:",
+                  txStatus.error,
+                );
+                reject(
+                  new Error(
+                    "Piece registration failed: addPiece transaction aborted after retries",
+                  ),
+                );
+              } else {
+                resolve();
+              }
+            });
+          }),
+      );
+    }
+
+    await timePiecePhase("add.runtime.idle", () => this.runtime.idle());
+    await timePiecePhase("add.synced", () => this.synced());
+  }
+
+  syncPieces(cell: Cell<Cell<unknown>[]>) {
+    // TODO(@ubik2) We use elevated permissions here temporarily.
+    // Our request for the piece list will walk the schema tree, and that will
+    // take us into confidential data of pieces. If that happens, we still want
+    // this bit to work, so we elevate this request.
+    return cell.asSchema(PRIVILEGED_PIECE_LIST_SCHEMA).pull();
+  }
+
+  /**
+   * Resolve a piece to its canonical result cell, optionally starting it.
+   */
+  async getPieceCell<S extends JSONSchema = JSONSchema>(
+    id: string | Cell<unknown>,
+    runIt: boolean,
+    asSchema: S,
+    scope?: CellScope,
+  ): Promise<Cell<Schema<S>>>;
+  async getPieceCell<T = unknown>(
+    id: string | Cell<unknown>,
+    runIt?: boolean,
+    asSchema?: JSONSchema,
+    scope?: CellScope,
+  ): Promise<Cell<T>>;
+  async getPieceCell<T = unknown>(
+    id: string | Cell<unknown>,
+    runIt: boolean = false,
+    asSchema?: JSONSchema,
+    scope?: CellScope,
+  ): Promise<Cell<T>> {
+    // Get the piece cell
+    const addressed: Cell<unknown> = isCell(id)
+      ? id
+      : this.runtime.getCellFromEntityId(
+        this.space,
+        entityIdFrom(id),
+        [],
+        undefined,
+        undefined,
+        scope,
+      );
+
+    // Load the addressed cell. Syncing a value-link "slot" address also loads
+    // its link target — the piece's canonical result cell — together with that
+    // cell's `argument`/`patternIdentity` meta, because the query follows the
+    // top-of-doc value link and returns the target's meta docs. So this one sync
+    // makes both the slot and the canonical cell (with its metadata) local.
+    await timePiecePhase("get.piece.sync", () => addressed.sync());
+
+    // Canonicalize the value-link "slot" to the piece's canonical result cell.
+    // A piece created inside a handler and stored into a list/object (e.g. the
+    // topics board's `addTopic` doing `topics.push(Topic({...}))`) is addressed
+    // by a plain value-link that redirects to the result cell, where setup wrote
+    // `patternIdentity` and the `argument` meta-link. start() needs that identity
+    // and reads need that metadata, so resolving here makes start / read / stop
+    // operate on the real piece rather than the wrapper. The sync above already
+    // made the canonical cell local, so this resolves over local links with no
+    // further sync. Idempotent for a normal top-level piece.
+    const piece = addressed.resolveAsCell();
+
+    if (runIt) {
+      // start() handles pattern loading and running. It's idempotent - no
+      // effect if already running.
+      await timePiecePhase(
+        "get.runtime.start",
+        () => this.runtime.start(piece),
+      );
+    }
+
+    // If caller provided a schema, use it
+    if (asSchema) {
+      return piece.asSchema<T>(asSchema);
+    }
+
+    // Otherwise, recover the result schema from the cell's metadata if present.
+    return getResultCellWithSourceSchema(piece as Cell<T>);
+  }
+
+  async get<S extends JSONSchema = JSONSchema>(
+    pieceId: string,
+    runIt: boolean,
+    schema: S,
+    scope?: CellScope,
+  ): Promise<PieceController<Schema<S>>>;
+  async get<T = unknown>(
+    pieceId: string,
+    runIt?: boolean,
+    schema?: JSONSchema,
+    scope?: CellScope,
+  ): Promise<PieceController<T>>;
+  async get(
+    pieceId: string,
+    runIt: boolean = false,
+    schema?: JSONSchema,
+    scope?: CellScope,
+  ): Promise<PieceController> {
+    const cell = await (await this.getPieceCell(pieceId, runIt, schema, scope))
+      .sync();
+    return new PieceController(this, cell);
+  }
+
+  /**
+   * Find registered pieces that the given piece reads from via sigil links.
+   * Unregistered targets are not returned.
+   * @param piece The piece to check
+   * @returns Array of registered pieces that are read from
+   */
+  async getReadingFrom(piece: Cell<unknown>): Promise<Cell<unknown>[]> {
+    // Get registered pieces that might be referenced
+    const piecesCell = await this.getPieceRegistry();
+    const registeredPieces = piecesCell.get();
+    const result: Cell<unknown>[] = [];
+    const seenEntityIds = new Set<string>(); // Track entities we've already processed
+    const maxDepth = 10; // Prevent infinite recursion
+    const maxResults = 50; // Prevent too many results from overwhelming the UI
+    const resolvedPiece = piece.resolveAsCell();
+
+    if (!piece) return result;
+
+    try {
+      // Get the argument data - this is where references to other pieces are stored
+      const argumentCell = await this.getArgument(piece);
+      if (!argumentCell) return result;
+
+      // Get the raw argument value
+      let argumentValue;
+
+      try {
+        argumentValue = argumentCell.getRaw();
+      } catch (err) {
+        this.diagnosticConsole.debug("Error getting argument value:", err);
+        return result;
+      }
+
+      // Helper function to add a matching piece to the result
+      const addMatchingPiece = (docId: EntityRef) => {
+        if (!isEntityRef(docId)) return;
+
+        const entityIdStr = entityRefToString(docId);
+
+        // Skip if we've already processed this entity
+        if (seenEntityIds.has(entityIdStr)) return;
+        seenEntityIds.add(entityIdStr);
+
+        // Find matching piece by entity ID
+        const matchingPiece = registeredPieces.find((c) => {
+          const cId = getEntityId(c);
+          return isEntityRef(cId) && entityRefToString(cId) === entityIdStr;
+        });
+
+        if (matchingPiece) {
+          const resolvedMatching = matchingPiece.resolveAsCell();
+          const isNotSelf = !resolvedMatching.equals(resolvedPiece);
+          const notAlreadyInResult = !result.some((c) =>
+            c.resolveAsCell().equals(resolvedMatching)
+          );
+
+          if (isNotSelf && notAlreadyInResult && result.length < maxResults) {
+            result.push(matchingPiece);
+          }
+        }
+      };
+
+      // Find references in the argument structure
+      const processValue = (
+        value: unknown,
+        parent: Cell<unknown>,
+        visited = new Set<unknown>(), // Track objects directly, not string representations
+        depth = 0,
+      ) => {
+        // The argument here is `argumentCell.getRaw()`, a raw `FabricValue`.
+        // A `FabricPrimitive` is not decomposed by this walk -- nothing is
+        // rebuilt, and a leaf holds no link to find, so the empty `Object.keys`
+        // ends the descent with nothing lost.
+        //
+        // TODO(danfuzz): a link nested in a `FabricInstance`'s codec contents
+        // is missed, so a piece referenced only from inside a wrapper does not
+        // appear in the result. Unlike the sibling walks in the runner, this
+        // one does _not_ refuse such a value: every path out of here is wrapped
+        // in a `catch` that reports to `diagnosticConsole` and returns an empty
+        // result by design (the outer handler says so in as many words), so a
+        // throw would be swallowed rather than surfaced. A tripwire that cannot
+        // fire is worse than a marker that says so, because it reads as a guard
+        // while being incapable of acting as one. Refusing here needs that
+        // error handling changed first.
+        if (!isRecord(value) || depth > maxDepth) return;
+
+        // Prevent cycles in our traversal by tracking object references directly
+        if (visited.has(value)) return;
+        visited.add(value);
+
+        try {
+          // Handle values that are themselves cells, docs, or cell links
+          if (isLink(value)) {
+            const link = parseLink(value, parent);
+            if (link.id) {
+              addMatchingPiece(getEntityId(link.id)!);
+            }
+
+            const resultCell = followCellToResult(
+              this.runtime.getCellFromLink(link),
+              this.diagnosticConsole,
+              new Set(),
+              0,
+            );
+            if (resultCell !== undefined) addMatchingPiece(resultCell.entityId);
+          } else if (Array.isArray(value)) {
+            // Safe recursive processing of arrays
+            for (let i = 0; i < value.length; i++) {
+              try {
+                processValue(
+                  value[i],
+                  parent,
+                  new Set([...visited]),
+                  depth + 1,
+                );
+              } catch (err) {
+                this.diagnosticConsole.debug(
+                  `Error processing array item at index ${i}:`,
+                  err,
+                );
+              }
+            }
+          } else if (typeof value === "object") {
+            // Process regular object properties
+            const keys = Object.keys(value);
+            for (let i = 0; i < keys.length; i++) {
+              const key = keys[i];
+
+              try {
+                processValue(
+                  value[key],
+                  parent,
+                  new Set([...visited]),
+                  depth + 1,
+                );
+              } catch (err) {
+                this.diagnosticConsole.debug(
+                  `Error processing object property '${key}':`,
+                  err,
+                );
+              }
+            }
+          }
+        } catch (err) {
+          this.diagnosticConsole.debug("Error in processValue:", err);
+        }
+      };
+
+      // Start processing from the argument value
+      if (argumentValue && typeof argumentValue === "object") {
+        processValue(
+          argumentValue,
+          argumentCell,
+          new Set(),
+          0,
+        );
+      }
+    } catch (error) {
+      this.diagnosticConsole.debug(
+        "Error finding references in piece arguments:",
+        error,
+      );
+      // Don't throw the error - return an empty result instead
+    }
+
+    return result;
+  }
+
+  /**
+   * Find registered pieces that read from the given piece via sigil links.
+   * Unregistered readers are not returned.
+   * @param piece The piece to check
+   * @returns Array of registered pieces that read from this piece
+   */
+  async getReadByPieces(piece: Cell<unknown>): Promise<Cell<unknown>[]> {
+    // Get registered pieces to check
+    const piecesCell = await this.getPieceRegistry();
+    const registeredPieces = piecesCell.get();
+    const result: Cell<unknown>[] = [];
+    const seenEntityIds = new Set<string>(); // Track entities we've already processed
+    const maxDepth = 10; // Prevent infinite recursion
+    const maxResults = 50; // Prevent too many results from overwhelming the UI
+
+    if (!piece) return result;
+
+    const pieceEntityId = getEntityId(piece);
+    if (!pieceEntityId) return result;
+
+    const resolvedPiece = piece.resolveAsCell();
+
+    // Helper function to add a matching piece to the result
+    const addReadingPiece = (otherPiece: Cell<unknown>) => {
+      const otherPieceId = getEntityId(otherPiece);
+      if (!isEntityRef(otherPieceId)) return;
+
+      const entityIdStr = entityRefToString(otherPieceId);
+
+      // Skip if we've already processed this entity
+      if (seenEntityIds.has(entityIdStr)) return;
+      seenEntityIds.add(entityIdStr);
+
+      const resolvedOther = otherPiece.resolveAsCell();
+      const notAlreadyInResult = !result.some((c) =>
+        c.resolveAsCell().equals(resolvedOther)
+      );
+
+      if (notAlreadyInResult && result.length < maxResults) {
+        result.push(otherPiece);
+      }
+    };
+
+    // Helper to check if a document refers to our target piece
+    const checkRefersToTarget = (
+      value: unknown,
+      parent: Cell<unknown>,
+      visited = new Set<unknown>(), // Track objects directly, not string representations
+      depth = 0,
+    ): boolean => {
+      // Same shape as `processValue` above, and the same account applies: a
+      // `FabricPrimitive` costs this walk nothing, while a link inside a
+      // `FabricInstance` is missed.
+      //
+      // TODO(danfuzz): refusing one here waits on the same thing -- this walk's
+      // `catch` swallows, so a throw would not surface.
+      if (!isRecord(value) || depth > maxDepth) return false;
+
+      // Prevent cycles in our traversal by tracking object references directly
+      if (visited.has(value)) return false;
+      visited.add(value);
+
+      try {
+        if (isLink(value)) {
+          try {
+            const link = parseLink(value, parent);
+
+            // Check if the cell link's doc is our target
+            if (link.id === piece.sourceURI) return true;
+
+            // Check if cell link's source chain leads to our target
+            const resultCell = followCellToResult(
+              this.runtime.getCellFromLink(link),
+              this.diagnosticConsole,
+              new Set(),
+              0,
+            );
+            if (resultCell?.sourceURI === piece.sourceURI) return true;
+          } catch (err) {
+            this.diagnosticConsole.debug(
+              "Error handling cell link in checkRefersToTarget:",
+              err,
+            );
+          }
+          return false; // Don't traverse runtime metadata link contents
+        }
+
+        // Safe recursive processing of arrays
+        if (Array.isArray(value)) {
+          for (let i = 0; i < value.length; i++) {
+            try {
+              if (
+                checkRefersToTarget(
+                  value[i],
+                  parent,
+                  new Set([...visited]),
+                  depth + 1,
+                )
+              ) {
+                return true;
+              }
+            } catch (err) {
+              this.diagnosticConsole.debug(
+                `Error checking array item at index ${i}:`,
+                err,
+              );
+            }
+          }
+        } else if (isRecord(value)) {
+          // Process regular object properties
+          const keys = Object.keys(value);
+          for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+
+            try {
+              if (
+                checkRefersToTarget(
+                  value[key],
+                  parent,
+                  new Set([...visited]),
+                  depth + 1,
+                )
+              ) {
+                return true;
+              }
+            } catch (err) {
+              this.diagnosticConsole.debug(
+                `Error checking object property '${key}':`,
+                err,
+              );
+            }
+          }
+        }
+      } catch (err) {
+        this.diagnosticConsole.debug("Error in checkRefersToTarget:", err);
+      }
+
+      return false;
+    };
+
+    // Check each piece to see if it references this piece
+    for (const otherPiece of registeredPieces) {
+      if (otherPiece.resolveAsCell().equals(resolvedPiece)) continue; // Skip self
+
+      if (checkRefersToTarget(otherPiece, otherPiece, new Set(), 0)) {
+        addReadingPiece(otherPiece);
+        continue; // Skip additional checks for this piece
+      }
+
+      // Also specifically check the argument data where references are commonly found
+      try {
+        const argumentCell = await this.getArgument(otherPiece);
+        if (argumentCell) {
+          const argumentValue = argumentCell.getRaw();
+
+          // Check if the argument references our target
+          if (argumentValue && typeof argumentValue === "object") {
+            if (
+              checkRefersToTarget(
+                argumentValue,
+                argumentCell,
+                new Set(),
+                0,
+              )
+            ) {
+              addReadingPiece(otherPiece);
+            }
+          }
+        }
+      } catch (_) {
+        // Error checking argument references for piece
+      }
+    }
+
+    return result;
+  }
+
+  async getCellById<T>(
+    id: EntityId | string,
+    path: string[] = [],
+    schema?: JSONSchema,
+    scope?: CellScope,
+  ): Promise<Cell<T>> {
+    const cell = this.runtime.getCellFromEntityId<T>(
+      this.space,
+      id,
+      path,
+      schema,
+      undefined,
+      scope,
+    );
+    await cell.sync();
+    return cell;
+  }
+
+  // Return Cell with argument content, loading the pattern if needed.
+  getArgument<T = unknown>(
+    piece: Cell<unknown | T>,
+  ): Cell<T> {
+    // The piece is a result cell; read its argument metadata link directly.
+    // With this approach, we aren't using the argumentSchema from the pattern
+    // but that should have been written into the Result Cell's argument link.
+    const argumentLink = getMetaLink(piece, "argument", {});
+    if (argumentLink === undefined) {
+      throw new Error("piece missing argument cell");
+    }
+    return this.runtime.getCellFromLink(argumentLink);
+  }
+
+  getResult<T = unknown>(
+    piece: Cell<T>,
+  ): Cell<T> {
+    return piece;
+  }
+
+  // note: removing a piece doesn't clean up the piece's cells
+  async remove(pieceOrId: string | Cell<unknown>): Promise<boolean> {
+    const piece = typeof pieceOrId === "string"
+      ? this.runtime.getCellFromEntityId(this.space, entityIdFrom(pieceOrId))
+      : pieceOrId;
+    const piecesCell = await this.getPieceRegistry();
+    await this.syncPieces(piecesCell);
+
+    // Check if this is the default pattern and clear the link
+    const defaultPattern = await this.getDefaultPattern(false);
+    if (
+      defaultPattern &&
+      piece.resolveAsCell().equals(defaultPattern.resolveAsCell())
+    ) {
+      await this.unlinkDefaultPattern();
+    }
+
+    const { ok } = await this.runtime.editWithRetry((tx) => {
+      const pieces = piecesCell.withTx(tx);
+
+      // Remove from main list
+      const newPieces = filterOutCell(pieces, piece);
+      if (newPieces.length !== pieces.get().length) {
+        pieces.set(newPieces);
+        return true;
+      } else {
+        return false;
+      }
+    });
+
+    // Ensure full synchronization
+    if (ok) {
+      await this.runtime.idle();
+      await this.synced();
+    }
+
+    return !!ok;
+  }
+
+  /** Compile a program and register the piece it creates in this space. */
+  async create<U = T>(
+    program: RuntimeProgram | string,
+    options: CreatePieceOptions = {},
+    cause: string | undefined = undefined,
+  ): Promise<PieceController<U>> {
+    const start = options.start ?? true;
+    const pattern = await compileProgram(this, program);
+    const piece = await this.runPersistent<U>(
+      pattern,
+      options.input,
+      cause,
+      { repository: options.repository, origin: options.origin, start },
+    );
+    if (!start) {
+      await this.runtime.idle();
+      await this.synced();
+    }
+    return new PieceController<U>(this, piece);
+  }
+
+  async runPersistent<T = unknown>(
+    pattern: Pattern | Module,
+    inputs?: unknown,
+    cause?: unknown,
+    options?: { start?: boolean; repository?: string; origin?: string },
+  ): Promise<Cell<T>> {
+    const start = options?.start ?? true;
+    const piece = await this.setupPersistent<T>(
+      pattern,
+      inputs,
+      cause,
+      { repository: options?.repository, origin: options?.origin },
+    );
+    if (start) {
+      await this.startPiece(piece);
+    }
+    return piece;
+  }
+
+  // Consistently return the `Cell<Piece>` of piece with
+  // id `pieceId`, applies the provided `pattern` (which may be
+  // its current pattern -- useful when we are only updating inputs),
+  // and optionally applies `inputs` if provided.
+  async runWithPattern(
+    pattern: Pattern | Module,
+    pieceId: string,
+    inputs?: object,
+    options?: {
+      start?: boolean;
+      expectedPatternIdentity?: { identity: string; symbol: string };
+      validateCurrentArgument?: (
+        argumentCell: Cell<unknown>,
+      ) => void;
+      validateArgumentLinks?: (
+        argumentCell: Cell<unknown>,
+        argumentSchema: JSONSchema,
+      ) => void;
+      repository?: string;
+      sourceTransition?: PieceSourceTransition;
+    },
+  ): Promise<Cell<unknown>> {
+    const piece = this.runtime.getCellFromEntityId(
+      this.space,
+      entityIdFrom(pieceId),
+    );
+    await piece.sync();
+    const start = options?.start ?? true;
+    let currentPiece = piece;
+    if (start) {
+      currentPiece = await this.runtime.runSynced(piece, pattern, inputs, {
+        expectedPatternIdentity: options?.expectedPatternIdentity,
+        patternRepository: options?.repository,
+        pieceSourceTransition: options?.sourceTransition,
+        validateCurrentArgument: options?.validateCurrentArgument,
+        validateArgumentLinks: options?.validateArgumentLinks,
+      });
+    } else {
+      if (options?.expectedPatternIdentity) {
+        throw new Error("atomic pattern updates require starting the piece");
+      }
+      await this.runtime.setup(undefined, pattern, inputs ?? {}, piece, {
+        patternRepository: options?.repository,
+      });
+    }
+    await this.syncPattern(currentPiece);
+    if (start) {
+      await this.getResult(currentPiece).pull();
+    }
+
+    return currentPiece;
+  }
+
+  /**
+   * Prepare a new piece by setting up its process/result cells and pattern
+   * metadata without scheduling the pattern's nodes.
+   */
+  async setupPersistent<T = unknown>(
+    pattern: Pattern | Module,
+    inputs?: unknown,
+    cause?: unknown,
+    options?: { repository?: string; origin?: string },
+  ): Promise<Cell<T>> {
+    await timePiecePhase(
+      "setupPersistent.runtime.idle",
+      () => this.runtime.idle(),
+    );
+    const piece = this.runtime.getCell<T>(
+      this.space,
+      cause ?? { space: this.space, random: crypto.randomUUID() },
+      pattern.resultSchema,
+    );
+    // Fast path: the pattern's content-addressed entry ref, if it carries one
+    // (every space-compiled pattern does). Lets us load by identity without
+    // waiting for the piece's `patternIdentity` meta to settle.
+    const knownEntryRef = this.runtime.patternManager.getArtifactEntryRef(
+      pattern,
+    );
+    if (knownEntryRef !== undefined) {
+      await timePiecePhase(
+        "setupPersistent.prepareSourceClosureVerification",
+        () => prepareSourceClosureVerification(),
+      );
+    }
+    await timePiecePhase(
+      "setupPersistent.runtime.setup",
+      () =>
+        this.runtime.setup(undefined, pattern, inputs ?? {}, piece, {
+          patternRepository: options?.repository,
+          initializePieceSourceHistory: true,
+          initialPieceSourceOrigin: options?.origin,
+        }),
+    );
+    await timePiecePhase(
+      "setupPersistent.syncPattern",
+      () =>
+        knownEntryRef
+          ? this.syncPatternByIdentity(knownEntryRef)
+          : this.syncPattern(piece),
+    );
+
+    return piece;
+  }
+
+  /** Start scheduling and running a prepared piece. */
+  async startPiece<T = unknown>(
+    pieceOrId: string | Cell<T>,
+    options: { schedulePatternUpdate?: boolean } = {},
+  ): Promise<void> {
+    const piece = typeof pieceOrId === "string"
+      ? await timePiecePhase(
+        "startPiece.get",
+        () => this.getPieceCell<T>(pieceOrId),
+      )
+      : pieceOrId;
+    if (!piece) throw new Error("Piece not found");
+    await timePiecePhase(
+      "startPiece.runtime.start",
+      () => this.runtime.start(piece, options),
+    );
+    await timePiecePhase(
+      "startPiece.result.pull",
+      () => this.getResult(piece).pull(),
+    );
+    await timePiecePhase("startPiece.synced", () => this.synced());
+  }
+
+  /** Stop a running piece (no-op if not running). */
+  async stopPiece<T = unknown>(pieceOrId: string | Cell<T>): Promise<void> {
+    const piece = typeof pieceOrId === "string"
+      ? await this.getPieceCell<T>(pieceOrId)
+      : pieceOrId;
+    if (!piece) throw new Error("Piece not found");
+    this.runtime.runner.stop(piece);
+    await this.runtime.idle();
+  }
+
+  // FIXME(JA): this really really really needs to be revisited
+  async syncPattern(piece: Cell<unknown>) {
+    await timePiecePhase("syncPattern.piece.sync", () => piece.sync());
+
+    // When we subscribe to a doc, our subscription includes the doc's pattern
+    // pointer (`patternIdentity`), so read that.
+    let ref = getPatternIdentityRef(piece);
+    if (!ref) {
+      // Under remote sync, metadata can transiently lag the result value even
+      // though setup just wrote both. Wait for storage to settle and retry once
+      // before treating the pattern metadata as missing.
+      await timePiecePhase("syncPattern.retry.synced", () => this.synced());
+      await timePiecePhase("syncPattern.retry.piece.sync", () => piece.sync());
+      ref = getPatternIdentityRef(piece);
+    }
+    if (!ref) throw new Error("piece missing pattern identity");
+
+    return await timePiecePhase(
+      "syncPattern.loadPattern",
+      () => this.syncPatternByIdentity(ref),
+    );
+  }
+
+  async syncPatternByIdentity(ref: { identity: string; symbol: string }) {
+    if (!ref) throw new Error("pattern identity is required");
+    const pattern = await this.runtime.patternManager.loadPatternByIdentity(
+      ref.identity,
+      ref.symbol,
+      this.space,
+    );
+    return pattern;
+  }
+
+  async sync(entity: Cell<unknown>, _waitForStorage: boolean = false) {
+    await entity.sync();
+  }
+
+  // Returns the piece from our active piece list if it is present,
+  // or undefined if it is not
+  async getActivePiece(pieceCell: Cell<unknown>) {
+    const piecesCell = await this.getPieceRegistry();
+    const resolved = pieceCell.resolveAsCell();
+    return piecesCell.get().find((piece) =>
+      piece.resolveAsCell().equals(resolved)
+    );
+  }
+
+  /**
+   * Set the target cell's argument cell at target path to be a link to the
+   * link cell's content at linkPath.
+   *
+   * @param linkPieceId
+   * @param linkPath
+   * @param targetPieceId
+   * @param targetPath
+   * @param options
+   */
+  async link(
+    linkPieceId: string,
+    linkPath: (string | number)[],
+    targetPieceId: string,
+    targetPath: (string | number)[],
+    options?: {
+      start?: boolean;
+      sourceScope?: CellScope;
+      targetScope?: CellScope;
+    },
+  ): Promise<void> {
+    const start = options?.start ?? true;
+    let linkCell = this.runtime.getCellFromEntityId(
+      this.space,
+      entityIdFrom(linkPieceId),
+      [],
+      undefined,
+      undefined,
+      options?.sourceScope,
+    );
+    await linkCell.sync();
+    linkCell = linkCell.asSchemaFromLinks(); // Make sure we have the full schema
+    linkCell = linkCell.key(...linkPath);
+    // Keep Piece result links anchored at the public result projection. Its
+    // durable, monotonically narrowing result schema is the producer contract;
+    // resolving through an alias here would discard that contract and point at
+    // an untyped internal cell instead.
+
+    // Get target cell (piece or arbitrary cell)
+    const { cell: targetCell, isPiece: targetIsPiece } =
+      await getCellByIdOrPiece(
+        this,
+        targetPieceId,
+        "Target",
+        options,
+      );
+
+    const result = await this.runtime.editWithRetry((tx) => {
+      let targetInputCell = targetCell.withTx(tx);
+      if (targetIsPiece) {
+        // For pieces, target fields are in the result cell's argument
+        const resultCell = followCellToResult(
+          targetInputCell,
+          this.diagnosticConsole,
+        );
+        if (!resultCell) {
+          throw new Error("Target piece has no result cell");
+        }
+        const targetArgumentLink = getMetaLink(resultCell, "argument");
+        if (targetArgumentLink === undefined) {
+          throw new Error("Target piece has no argument cell");
+        }
+        targetInputCell = resultCell.runtime.getCellFromLink(
+          targetArgumentLink,
+          undefined,
+          tx,
+        );
+      }
+
+      targetInputCell.key(...targetPath).setRawUntyped(
+        linkCell.getAsLink({
+          base: targetInputCell,
+          includeSchema: true,
+          keepAsCell: KeepAsCell.OnlyStream,
+        }),
+      );
+    });
+    if (result.error) throw result.error;
+
+    if (targetIsPiece && start) {
+      await this.getResult(targetCell).pull();
+    }
+    await this.synced();
   }
 
   /**
@@ -301,20 +1402,20 @@ export class PiecesController<T = unknown> {
    */
   private async getDefaultAppUrlFromHome(): Promise<string> {
     try {
-      const homeSpaceCell = this.#manager.runtime.getHomeSpaceCell();
-      await timePiecesPhase(
+      const homeSpaceCell = this.runtime.getHomeSpaceCell();
+      await timePiecePhase(
         "getDefaultAppUrlFromHome.homeSpaceCell.sync",
         () => homeSpaceCell.sync(),
       );
 
-      const url = await timePiecesPhase(
+      const url = await timePiecePhase(
         "getDefaultAppUrlFromHome.defaultAppUrl.get",
         () =>
           homeSpaceCell.key("defaultPattern")
             .asSchema(homeSchema).key("defaultAppUrl").get(),
       );
       return typeof url === "string"
-        ? normalizePatternSource(url.trim(), this.#manager.runtime.apiUrl)
+        ? normalizePatternSource(url.trim(), this.runtime.apiUrl)
         : "";
     } catch (error) {
       console.warn("Failed to read defaultAppUrl from home space:", error);
@@ -333,7 +1434,6 @@ export class PiecesController<T = unknown> {
   async recreateDefaultPattern(
     options?: { customProgram?: RuntimeProgram; repository?: string },
   ): Promise<PieceController<NameSchema>> {
-    this.disposeCheck();
     if (
       options?.repository !== undefined && options.customProgram === undefined
     ) {
@@ -345,18 +1445,17 @@ export class PiecesController<T = unknown> {
     // Stop and unlink the existing default pattern first (before any operations that might fail)
     // We need to stop it to prevent resource leaks or duplicate behavior from the old pattern
     // Access the space cell directly to get the pattern reference without running it
-    const spaceCellContents = this.#manager.getSpaceCellContents();
+    const spaceCellContents = this.getSpaceCellContents();
     await spaceCellContents.sync();
     const defaultPatternRef = spaceCellContents.key("defaultPattern").get();
     if (defaultPatternRef) {
       // Stop the existing pattern (no-op if not running)
-      this.#manager.runtime.runner.stop(defaultPatternRef);
+      this.runtime.runner.stop(defaultPatternRef);
     }
-    await this.#manager.unlinkDefaultPattern();
+    await this.unlinkDefaultPattern();
 
     // Determine which pattern to use based on space type
-    const isHomeSpace =
-      this.#manager.getSpace() === this.#manager.runtime.userIdentityDID;
+    const isHomeSpace = this.getSpace() === this.runtime.userIdentityDID;
 
     let patternConfig: { name: string; source: string; cause: string };
     let pattern;
@@ -369,9 +1468,9 @@ export class PiecesController<T = unknown> {
           ? `home-pattern-${Date.now()}`
           : `space-root-${Date.now()}`,
       };
-      pattern = await this.#manager.runtime.patternManager.compilePattern(
+      pattern = await this.runtime.patternManager.compilePattern(
         options.customProgram,
-        { space: this.#manager.getSpace() },
+        { space: this.getSpace() },
       );
     } else {
       if (isHomeSpace) {
@@ -391,33 +1490,33 @@ export class PiecesController<T = unknown> {
 
       const patternUrl = patternSourceUrl(
         patternConfig.source,
-        this.#manager.runtime.apiUrl,
+        this.runtime.apiUrl,
       );
 
       // Load and compile the pattern (cache in the target space — CT-1623).
-      const program = await this.#manager.runtime.harness.resolve(
+      const program = await this.runtime.harness.resolve(
         new HttpProgramResolver(patternUrl.href),
       );
-      pattern = await this.#manager.runtime.patternManager.compilePattern(
+      pattern = await this.runtime.patternManager.compilePattern(
         program,
-        { space: this.#manager.getSpace() },
+        { space: this.getSpace() },
       );
     }
 
     // Create new piece cell
     let pieceCell: Cell<NameSchema>;
 
-    const { error } = await this.#manager.runtime.editWithRetry((tx) => {
+    const { error } = await this.runtime.editWithRetry((tx) => {
       // Create piece cell within this transaction
-      pieceCell = this.#manager.runtime.getCell<NameSchema>(
-        this.#manager.getSpace(),
+      pieceCell = this.runtime.getCell<NameSchema>(
+        this.getSpace(),
         patternConfig.cause,
         nameSchema,
         tx,
       );
 
       // Run pattern setup within same transaction
-      this.#manager.runtime.run(
+      this.runtime.run(
         tx,
         pattern,
         {},
@@ -457,17 +1556,17 @@ export class PiecesController<T = unknown> {
     }
 
     // Fetch the final result
-    const finalPattern = await this.#manager.getDefaultPattern(false);
+    const finalPattern = await this.getDefaultPattern(false);
     if (!finalPattern) {
       throw new Error("Failed to create default pattern");
     }
 
     // Start the piece
-    await this.#manager.startPiece(finalPattern, DEFAULT_ROOT_RUN_OPTIONS);
-    await this.#manager.runtime.idle();
-    await this.#manager.synced();
+    await this.startPiece(finalPattern, DEFAULT_ROOT_RUN_OPTIONS);
+    await this.runtime.idle();
+    await this.synced();
 
-    return new PieceController<NameSchema>(this.#manager, finalPattern);
+    return new PieceController<NameSchema>(this, finalPattern);
   }
 
   /**
@@ -483,20 +1582,17 @@ export class PiecesController<T = unknown> {
    * @returns The default pattern piece, either existing or newly created
    */
   async ensureDefaultPattern(): Promise<PieceController<NameSchema>> {
-    this.disposeCheck();
-
     // Fast path: resolve the existing root WITHOUT starting it. The updater
     // must get a chance to replace an obsolete patternIdentity before
     // bootstrap tries to load that identity; otherwise an unloadable old root
     // prevents the very repair that would make it loadable.
-    const existingPattern = await this.#manager.getDefaultPattern(false);
+    const existingPattern = await this.getDefaultPattern(false);
     if (existingPattern) {
       return await this.startEnsuredDefaultPattern(existingPattern, true);
     }
 
     // Determine which pattern to use based on space type
-    const isHomeSpace =
-      this.#manager.getSpace() === this.#manager.runtime.userIdentityDID;
+    const isHomeSpace = this.getSpace() === this.runtime.userIdentityDID;
 
     let patternConfig: { name: string; source: string; cause: string };
 
@@ -507,7 +1603,7 @@ export class PiecesController<T = unknown> {
         cause: "home-pattern",
       };
     } else {
-      const customUrl = await timePiecesPhase(
+      const customUrl = await timePiecePhase(
         "ensureDefaultPattern.getDefaultAppUrlFromHome",
         () => this.getDefaultAppUrlFromHome(),
       );
@@ -520,26 +1616,26 @@ export class PiecesController<T = unknown> {
 
     const patternUrl = patternSourceUrl(
       patternConfig.source,
-      this.#manager.runtime.apiUrl,
+      this.runtime.apiUrl,
     );
 
     // Load and compile the pattern (async work outside transaction)
-    const program = await timePiecesPhase(
+    const program = await timePiecePhase(
       "ensureDefaultPattern.resolveProgram",
       () =>
-        this.#manager.runtime.harness.resolve(
+        this.runtime.harness.resolve(
           new HttpProgramResolver(patternUrl.href),
         ),
     );
-    const pattern = await timePiecesPhase(
+    const pattern = await timePiecePhase(
       "ensureDefaultPattern.compilePattern",
       () =>
-        this.#manager.runtime.patternManager.compilePattern(
+        this.runtime.patternManager.compilePattern(
           program,
           // Route the space-root compile through the content-addressed cell
           // cache so the reload (fresh worker) reuses the compiled module set
           // instead of cold-compiling the home/default-app pattern (CT-1623).
-          { space: this.#manager.getSpace() },
+          { space: this.getSpace() },
         ),
     );
 
@@ -548,12 +1644,12 @@ export class PiecesController<T = unknown> {
     // - Reading defaultPattern inside the transaction creates an invariant
     // - If another process creates it first, the commit fails and retries
     // - On retry, we'll see the existing pattern and return early
-    const creationResult = await timePiecesPhase(
+    const creationResult = await timePiecePhase(
       "ensureDefaultPattern.editWithRetry",
       () =>
-        this.#manager.runtime.editWithRetry((tx) => {
+        this.runtime.editWithRetry((tx) => {
           // Double-check pattern doesn't exist (read establishes invariant)
-          const spaceCellWithTx = this.#manager.getSpaceCellContents().withTx(
+          const spaceCellWithTx = this.getSpaceCellContents().withTx(
             tx,
           );
           const defaultPatternCell = spaceCellWithTx.key("defaultPattern");
@@ -567,15 +1663,15 @@ export class PiecesController<T = unknown> {
           }
 
           // Create piece cell within this transaction
-          const pieceCell = this.#manager.runtime.getCell<NameSchema>(
-            this.#manager.getSpace(),
+          const pieceCell = this.runtime.getCell<NameSchema>(
+            this.getSpace(),
             patternConfig.cause,
             nameSchema,
             tx,
           );
 
           // Run pattern setup within same transaction
-          this.#manager.runtime.run(
+          this.runtime.run(
             tx,
             pattern,
             {},
@@ -596,9 +1692,9 @@ export class PiecesController<T = unknown> {
 
     // After transaction commits, fetch the final result
     // (either we created it, or another process did)
-    const finalPattern = await timePiecesPhase(
+    const finalPattern = await timePiecePhase(
       "ensureDefaultPattern.getDefaultPattern(false)",
-      () => this.#manager.getDefaultPattern(false),
+      () => this.getDefaultPattern(false),
     );
     if (!finalPattern) {
       throw new Error("Failed to create or find default pattern");
@@ -620,20 +1716,20 @@ export class PiecesController<T = unknown> {
   ): Promise<PieceController<NameSchema>> {
     let rootToStart = root;
     if (reconcileBeforeStart) {
-      await timePiecesPhase(
+      await timePiecePhase(
         "ensureDefaultPattern.checkAndUpdateDefaultPattern",
         () => this.checkAndUpdateDefaultPattern(root),
       );
       // The metadata swap committed through a transaction view. Resolve the
       // root again so start() observes the committed patternIdentity rather
       // than the pre-transaction snapshot held by the caller's cell.
-      rootToStart = await this.#manager.getDefaultPattern(false) ?? root;
+      rootToStart = await this.getDefaultPattern(false) ?? root;
     }
 
     try {
-      await timePiecesPhase(
+      await timePiecePhase(
         "ensureDefaultPattern.startPiece",
-        () => this.#manager.startPiece(rootToStart, DEFAULT_ROOT_RUN_OPTIONS),
+        () => this.startPiece(rootToStart, DEFAULT_ROOT_RUN_OPTIONS),
       );
     } catch (startError) {
       // Cold-start setup repair. checkAndUpdateDefaultPattern moves
@@ -661,7 +1757,7 @@ export class PiecesController<T = unknown> {
       // an unreadable value at every later read. Fail closed: if the repair
       // cannot proceed or fails for its own reasons, surface the ORIGINAL start
       // error; nothing is torn down or overwritten.
-      const runtime = this.#manager.runtime;
+      const runtime = this.runtime;
       const ref = getPatternIdentityRef(rootToStart);
       if (ref === undefined) throw startError;
       let pattern;
@@ -669,7 +1765,7 @@ export class PiecesController<T = unknown> {
         pattern = await runtime.patternManager.loadPatternByIdentity(
           ref.identity,
           ref.symbol,
-          this.#manager.getSpace(),
+          this.getSpace(),
         );
       } catch {
         throw startError;
@@ -700,7 +1796,7 @@ export class PiecesController<T = unknown> {
       // and continuing — without it this catch never sees commit-level
       // failures and a dead root would be reported as a successful start.
       try {
-        await timePiecesPhase(
+        await timePiecePhase(
           "ensureDefaultPattern.coldStartSetupRepair",
           () =>
             runtime.runSynced(writableRoot, repairPattern, undefined, {
@@ -772,16 +1868,16 @@ export class PiecesController<T = unknown> {
         );
       }
     }
-    await timePiecesPhase(
+    await timePiecePhase(
       "ensureDefaultPattern.runtime.idle",
-      () => this.#manager.runtime.idle(),
+      () => this.runtime.idle(),
     );
-    await timePiecesPhase(
+    await timePiecePhase(
       "ensureDefaultPattern.synced",
-      () => this.#manager.synced(),
+      () => this.synced(),
     );
 
-    return new PieceController<NameSchema>(this.#manager, rootToStart);
+    return new PieceController<NameSchema>(this, rootToStart);
   }
 
   /**
@@ -821,8 +1917,8 @@ export class PiecesController<T = unknown> {
     pinnedRef: { identity: string; symbol: string },
     migrationError: unknown,
   ): Promise<Cell<NameSchema>> {
-    const runtime = this.#manager.runtime;
-    const space = this.#manager.getSpace();
+    const runtime = this.runtime;
+    const space = this.getSpace();
     // Reuse the canonical official-URL derivation (home.tsx for the home DID,
     // default-app.tsx otherwise) — never hard-code home here.
     const officialUrlPath = deriveSystemPatternSource(space, runtime);
@@ -997,10 +2093,10 @@ export class PiecesController<T = unknown> {
     // identity and makes runSynced THROW on a setup-commit failure rather than
     // log-and-continue — so an official pattern that ALSO cannot migrate the
     // doc surfaces here as the clear error below, not a silently-dead root.
-    const swappedRoot = await this.#manager.getDefaultPattern(false) ??
+    const swappedRoot = await this.getDefaultPattern(false) ??
       rootToStart;
     try {
-      await timePiecesPhase(
+      await timePiecePhase(
         "ensureDefaultPattern.rollForwardMaterialize",
         () =>
           runtime.runSynced(swappedRoot.withTx(), officialPattern, undefined, {
@@ -1046,13 +2142,13 @@ export class PiecesController<T = unknown> {
   async checkAndUpdateDefaultPattern(
     resolvedRoot?: Cell<NameSchema>,
   ): Promise<UpdateOutcome> {
-    const runtime = this.#manager.runtime;
-    const space = this.#manager.getSpace();
+    const runtime = this.runtime;
+    const space = this.getSpace();
     if (!runtime.experimental?.systemPatternAutoUpdate) {
       return "skipped-disabled";
     }
     try {
-      const root = resolvedRoot ?? await this.#manager.getDefaultPattern(false);
+      const root = resolvedRoot ?? await this.getDefaultPattern(false);
       if (!root) return "current";
       return await runtime.patternUpdater.checkDefaultPattern(
         root,
@@ -1066,5 +2162,110 @@ export class PiecesController<T = unknown> {
       ]);
       return "current";
     }
+  }
+}
+
+async function getCellByIdOrPiece(
+  pieces: PiecesController,
+  cellId: string,
+  label: string,
+  options?: { start?: boolean; targetScope?: CellScope },
+): Promise<{ cell: Cell<unknown>; isPiece: boolean }> {
+  const start = options?.start ?? true;
+  // The registry check below compares id STRINGS, and a registered piece
+  // reports its own id as the bare tagged hash, so an `of:`-schemed address
+  // has to be reduced to that one spelling before it can match. Reducing it
+  // out here also keeps a kinded address's refusal out of the catch below,
+  // which would otherwise report it as a missing cell. Messages keep `cellId`,
+  // so they echo the address the caller actually gave.
+  const hashString = hashStringForEntityAddress(cellId);
+  try {
+    // Try to get as a piece first
+    const piece = await pieces.getPieceCell(
+      hashString,
+      start,
+      undefined,
+      options?.targetScope,
+    );
+    if (!piece) {
+      throw new Error(`Piece ${cellId} not found`);
+    }
+    if (
+      getMetaLink(piece, "result") === undefined &&
+      getPatternIdentityRef(piece) === undefined
+    ) {
+      throw new Error(
+        `Piece ${cellId} has neither a parent result nor a pattern`,
+      );
+    }
+    return { cell: piece, isPiece: true };
+  } catch (_) {
+    // If getPieceCell() fails (e.g., "patternId is required"), try as arbitrary
+    // cell ID
+    try {
+      const cell = await pieces.getCellById(
+        entityIdFrom(hashString),
+        [],
+        undefined,
+        options?.targetScope,
+      );
+
+      // Check whether this cell is registered as a piece.
+      const piecesCell = await pieces.getPieceRegistry();
+      const registered = piecesCell.get();
+      const isRegisteredPiece = registered.some((piece: Cell<unknown>) => {
+        const id = pieceId(piece);
+        // An entry without a piece ID cannot establish registration.
+        if (!id) return false;
+        return id === hashString;
+      });
+      return { cell, isPiece: isRegisteredPiece };
+    } catch (_) {
+      throw new Error(`${label} "${cellId}" not found as piece or cell`);
+    }
+  }
+}
+
+// Helper function to follow alias chain to its source
+const MAX_DEPTH = 10;
+function followCellToResult(
+  cell: Cell<unknown>,
+  diagnosticConsole: RuntimeConsole,
+  visited = new Set<string>(),
+  depth = 0,
+): Cell<unknown> | undefined {
+  if (depth > MAX_DEPTH) return undefined; // Prevent infinite recursion
+
+  try {
+    const docId = cell.entityId;
+    if (!isEntityRef(docId)) return undefined;
+
+    const docIdStr = entityRefToString(docId);
+
+    // Prevent cycles
+    if (visited.has(docIdStr)) return undefined;
+    visited.add(docIdStr);
+
+    try {
+      // If document has result metadata, follow it to the owning result cell.
+      const resultLink = getMetaLink(cell, "result");
+      if (resultLink !== undefined) {
+        const resultCell = cell.runtime.getCellFromLink(resultLink);
+        return followCellToResult(
+          resultCell,
+          diagnosticConsole,
+          visited,
+          depth + 1,
+        );
+      }
+    } catch (err) {
+      // Ignore errors getting doc value
+      diagnosticConsole.debug("Error getting doc value:", err);
+    }
+
+    return cell; // Return the current document's ID if no further references
+  } catch (err) {
+    diagnosticConsole.debug("Error in followCellToResult:", err);
+    return undefined;
   }
 }

@@ -10,7 +10,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Database } from "@db/sqlite";
 import { clonePaths } from "@commonfabric/state-inspector";
-import { cf, withEnv } from "./utils.ts";
+import { cf } from "./utils.ts";
 
 /** `CliResult` streams are line arrays; join before substring assertions. */
 const text = (lines: string[]): string => lines.join("\n");
@@ -171,18 +171,16 @@ describe("cf space", () => {
     await withFixture(async ({ snapshot, root }) => {
       const live = `${root}/live-memory`;
       await Deno.mkdir(live);
-      // The CLI subprocess inherits this env, which is how it learns what the
-      // local server is serving.
-      await withEnv("MEMORY_DIR", `file://${live}/`, async () => {
-        const result = await cf(
-          `space clone ${SPACE} --from ${snapshot} --to ${live}/clone`,
-        );
-        expect(result.code).not.toBe(0);
-        expect(text(result.stderr)).toContain(
-          "overlaps the live store directory",
-        );
-        expect(await exists(`${live}/clone`)).toBe(false);
-      });
+      // MEMORY_DIR is how the CLI learns what the local server is serving.
+      const result = await cf(
+        `space clone ${SPACE} --from ${snapshot} --to ${live}/clone`,
+        { env: { MEMORY_DIR: `file://${live}/` } },
+      );
+      expect(result.code).not.toBe(0);
+      expect(text(result.stderr)).toContain(
+        "overlaps the live store directory",
+      );
+      expect(await exists(`${live}/clone`)).toBe(false);
     });
   });
 
@@ -572,15 +570,14 @@ describe("cf space", () => {
     await withFixture(async ({ snapshot, root }) => {
       const live = `${root}/single-file`;
       await Deno.mkdir(live);
-      await withEnv("DB_PATH", `${live}/store.sqlite`, async () => {
-        const result = await cf(
-          `space clone ${SPACE} --from ${snapshot} --to ${live}/clone`,
-        );
-        expect(result.code).not.toBe(0);
-        expect(text(result.stderr)).toContain(
-          "overlaps the live store directory",
-        );
-      });
+      const result = await cf(
+        `space clone ${SPACE} --from ${snapshot} --to ${live}/clone`,
+        { env: { DB_PATH: `${live}/store.sqlite` } },
+      );
+      expect(result.code).not.toBe(0);
+      expect(text(result.stderr)).toContain(
+        "overlaps the live store directory",
+      );
     });
   });
 
@@ -588,12 +585,11 @@ describe("cf space", () => {
     // MEMORY_DIR comes from the environment and may be junk; that must not
     // stop an operator from making a clone somewhere harmless.
     await withFixture(async ({ snapshot, clone }) => {
-      await withEnv("MEMORY_DIR", "file://[not-a-url", async () => {
-        const result = await cf(
-          `space clone ${SPACE} --from ${snapshot} --to ${clone}`,
-        );
-        expect(result.code).toBe(0);
-      });
+      const result = await cf(
+        `space clone ${SPACE} --from ${snapshot} --to ${clone}`,
+        { env: { MEMORY_DIR: "file://[not-a-url" } },
+      );
+      expect(result.code).toBe(0);
     });
   });
 

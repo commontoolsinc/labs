@@ -64,11 +64,37 @@ export const assertPromptCacheModeSupported = (
  */
 export type ContinuationModelMismatch = "throw" | "drop";
 
+/**
+ * Opaque items the provider returns for replay on later turns.
+ *
+ * `reasoning` carries the model's thinking for the turn that produced it.
+ * `compaction` carries *everything before it* — server-side compaction folds
+ * the prior context into one encrypted item — which is why a compaction item
+ * lets the transcript ahead of it be dropped.
+ */
+const REPLAYABLE_ITEM_TYPES = ["reasoning", "compaction"] as const;
+
+const isReplayableItem = (item: unknown): item is ResponsesInputItem => {
+  if (typeof item !== "object" || item === null) return false;
+  const record = item as Record<string, unknown>;
+  return (REPLAYABLE_ITEM_TYPES as readonly string[]).includes(
+    record.type as string,
+  ) && typeof record.id === "string" &&
+    typeof record.encrypted_content === "string";
+};
+
+const isCompactionItem = (item: unknown): boolean =>
+  isReplayableItem(item) &&
+  (item as Record<string, unknown>).type === "compaction";
+
 export const continuationOutput = (
   continuation: HarnessProviderContinuation | undefined,
   model: string,
   providerId: string,
   onModelMismatch: ContinuationModelMismatch = "throw",
+  // Compaction items are emitted once at the pruning boundary, so replaying
+  // them again with their own message would duplicate them.
+  include: "all" | "reasoning-only" = "all",
 ): ResponsesInputItem[] => {
   if (continuation?.providerId !== providerId) return [];
   const state = continuation.state;
@@ -88,13 +114,26 @@ export const continuationOutput = (
   const output = record.output;
   if (!Array.isArray(output)) return [];
   return output.flatMap((item) =>
-    typeof item === "object" && item !== null &&
-      (item as Record<string, unknown>).type === "reasoning" &&
-      typeof (item as Record<string, unknown>).id === "string" &&
-      typeof (item as Record<string, unknown>).encrypted_content === "string"
-      ? [structuredClone(item as ResponsesInputItem)]
+    isReplayableItem(item) &&
+      !(include === "reasoning-only" && isCompactionItem(item))
+      ? [structuredClone(item)]
       : []
   );
+};
+
+/**
+ * Compaction items recorded on an assistant message, if any.
+ *
+ * Used to find the pruning boundary: the newest assistant turn whose
+ * continuation carries compaction supersedes everything before it.
+ */
+export const continuationCompaction = (
+  continuation: HarnessProviderContinuation | undefined,
+  model: string,
+  providerId: string,
+): ResponsesInputItem[] => {
+  const items = continuationOutput(continuation, model, providerId, "drop");
+  return items.filter(isCompactionItem);
 };
 
 export const continuationFunctionCallItemId = (
@@ -155,11 +194,34 @@ export const toResponsesInput = async (
 ): Promise<
   { instructions: string | undefined; input: ResponsesInputItem[] }
 > => {
+  // Instructions always come from the whole transcript: pruning drops earlier
+  // turns from `input`, and the system prompt must survive that.
   const systemText = transcript.filter((message) => message.role === "system")
     .map((message) => message.content).join("\n\n");
   const instructions = systemText.length > 0 ? systemText : defaultInstructions;
-  const input: ResponsesInputItem[] = [];
+
+  // Prune at the newest assistant turn carrying compaction: that item already
+  // encodes everything before it. Starting at an assistant message keeps
+  // `function_call`/`function_call_output` pairs intact — slicing anywhere
+  // else could orphan a tool result from the call that produced it.
+  let boundary = 0;
+  let carried: ResponsesInputItem[] = [];
   for (const [index, message] of transcript.entries()) {
+    if (message.role !== "assistant") continue;
+    const compaction = continuationCompaction(
+      message.providerContinuation,
+      model,
+      providerId,
+    );
+    if (compaction.length > 0) {
+      boundary = index;
+      carried = compaction;
+    }
+  }
+
+  const input: ResponsesInputItem[] = [...carried];
+  for (const [index, message] of transcript.entries()) {
+    if (index < boundary) continue;
     switch (message.role) {
       case "system":
         break;
@@ -175,6 +237,7 @@ export const toResponsesInput = async (
             model,
             providerId,
             onModelMismatch,
+            index === boundary && carried.length > 0 ? "reasoning-only" : "all",
           ),
         );
         if (message.content.length > 0) {
@@ -338,10 +401,10 @@ export const normalizeTerminalResponse = (
       }
       toolCallById.set(call.id, call);
       toolCalls.push(call);
-    } else if (
-      item.type === "reasoning" && typeof item.id === "string" &&
-      typeof item.encrypted_content === "string"
-    ) {
+    } else if (isReplayableItem(item)) {
+      // Both reasoning and compaction items are retained: dropping a
+      // compaction item would mean paying to produce it and then discarding
+      // the only thing that lets the transcript ahead of it be pruned.
       continuation.push(structuredClone(item));
     }
   }

@@ -342,10 +342,14 @@ well-known symbols:
 
 ```typescript
 // Shown inside a pattern body.
-const CODEC = Symbol.for('data-model.codec');
-const DEEP_FREEZE = Symbol.for('data-model.deepFreeze');
-const IS_DEEP_FROZEN = Symbol.for('data-model.isDeepFrozen');
-// If protocol evolution is needed: Symbol.for('data-model.codec@2')
+// Unique symbols, not registry-interned ones: a member keyed by one is
+// reachable only by importing the symbol, and the string is a description
+// rather than a lookup key.
+const CODEC: unique symbol = Symbol('data-model.codec');
+const DEEP_FREEZE: unique symbol = Symbol('data-model.deepFreeze');
+const IS_DEEP_FROZEN: unique symbol = Symbol('data-model.isDeepFrozen');
+// If protocol evolution is needed: a further symbol,
+// e.g. `Symbol('data-model.codec@2')`.
 
 // Instance protocol: "here's how to freeze me deeply, and here's how to
 // clone me." (In-process lifecycle only -- serialization is class-level.)
@@ -575,7 +579,7 @@ internal walkers):
 ```typescript
 // Shown inside a pattern body.
 // At boundary exit (inside the context's encode walk)
-function encodeValue(value: FabricValue): JsonWireValue {
+function encodeValue(value: FabricValue): JsonCodecValue {
   const codec = registry.codecFromValue(value);
   if (codec) {
     const state = encodeValue(codec.encode(value)); // context recurses
@@ -586,7 +590,7 @@ function encodeValue(value: FabricValue): JsonWireValue {
 
 // At boundary entry (inside the context's decode walk)
 function decodeValue(
-  data: JsonWireValue,
+  data: JsonCodecValue,
   ctx: ReconstructionContext,
 ): FabricValue {
   const unwrapped = unwrapTag(data);

@@ -45,7 +45,7 @@ Deno.test("diffedit gate: save skips a verified hunk whose path parsed but has n
     "a non-empty lines map is the editable source",
   );
   assertEquals(
-    src.save(text),
+    src.save(text, src.lineEndingProvenance!(text)),
     "Saved 0 files",
     "a path with no captured base content is skipped, leaving nothing written",
   );

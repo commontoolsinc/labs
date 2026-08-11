@@ -1,7 +1,7 @@
 import { Command } from "@cliffy/command";
 import { dirname, join } from "@std/path";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
-import { loadManager } from "../lib/piece.ts";
+import { loadPieces } from "../lib/piece.ts";
 import { collectLocalProgram } from "../lib/dev.ts";
 import { parseSpaceOptions } from "./piece.ts";
 import {
@@ -44,7 +44,7 @@ export const deps: Command<any> = new Command()
   )
   .action(async (options, file) => {
     const config = parseSpaceOptions(options);
-    const manager = await loadManager(config);
+    const pieces = await loadPieces(config);
     const filePath = absPath(file);
     // Walk the whole local program (the same walk cf check uses), so pins
     // in sibling files the entry imports are updated too, not just the entry.
@@ -57,8 +57,8 @@ export const deps: Command<any> = new Command()
       program.files.map(({ name, contents }) => [name, contents]),
     );
     const result = await pinProgramFabricImports(
-      manager.runtime,
-      manager.getSpace(),
+      pieces.runtime,
+      pieces.getSpace(),
       program,
       { importSpecifier: options.import },
     );

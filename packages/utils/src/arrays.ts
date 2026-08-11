@@ -3,9 +3,7 @@
  * array index-only-ness.
  */
 
-/**
- * Character code for digit `0`.
- */
+/** Character code for digit `0`. */
 const CHAR_CODE_0 = "0".charCodeAt(0);
 
 /**
@@ -89,10 +87,11 @@ export function isArrayIndexPropertyName(name: string): boolean {
  * throw from `ownKeys()`. Reporting `false` there would mean reading "this is
  * not an index-only array" into what is actually a failure to find out.
  *
- * **Note:** This function relies on the given array producing `Reflect.ownKeys()`
- * output which agrees with the JavaScript spec with regards to key ordering,
- * namely index keys in ascending numeric order, then the remaining string keys
- * in property-creation order, then symbol keys in property-creation order.
+ * **Note:** This function relies on the given array producing
+ * `Reflect.ownKeys()` output which agrees with the JavaScript spec with
+ * regards to key ordering, namely index keys in ascending numeric order, then
+ * the remaining string keys in property-creation order, then symbol keys in
+ * property-creation order.
  * Built-in arrays of course do this, but it's possible for a `Proxy` to (a)
  * effectively purport to be an array, and yet (b) have an `ownKeys()` trap that
  * diverges from the behavior of built-in arrays. In such cases, this function
