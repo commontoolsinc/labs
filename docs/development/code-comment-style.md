@@ -404,7 +404,8 @@ a `//` block; see [Section markers](#section-markers) above.
 
 ### What gets one
 
-- Every file, as a header; see [File headers](#file-headers) below.
+- Every file with logic or type declarations in it, as a header; see
+  [File headers](#file-headers) below.
 - Every exported symbol: variable, function, class, type.
 - Every class and every public member of one, including the constructor,
   whether or not the class is exported.
