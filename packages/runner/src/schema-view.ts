@@ -289,6 +289,20 @@ const declaredDefault = (schema: JSONSchema): FabricValue | undefined => {
 };
 
 /**
+ * The default that stands in for a value which is not there.
+ *
+ * Only one the schema declares at its own top level, which is the rule an eager
+ * read applies: a default sitting inside a branch of a union is reached by
+ * evaluating that branch against a value, and an absent value gets no branch
+ * evaluated. Reading one out anyway would answer where an eager read leaves the
+ * value absent.
+ */
+const defaultForAbsentValue = (
+  schema: JSONSchema | undefined,
+): FabricValue | undefined =>
+  isRecord(schema) ? declaredDefault(schema) : undefined;
+
+/**
  * Build a view over `value` at `link`, or report that the data does not match.
  *
  * `link.schema` is the effective schema the caller has already combined from
@@ -320,6 +334,31 @@ export function materializeSchemaView(
     tx.noteSchemaRefusal(refusal);
     throw refusal;
   };
+
+  // A value that is not there takes the schema's declared default, which an
+  // eager read applies before it decides whether the type matches. Decided
+  // ahead of the narrowing verdict below: an absent value matches no branch of a
+  // union, so narrowing would refuse where the schema says what to read instead.
+  if (value === undefined) {
+    const fallback = defaultForAbsentValue(link.schema);
+    if (fallback !== undefined) {
+      // Register the read the default is standing in for. The value was taken
+      // without telling the scheduler, so without this the reader holds no
+      // dependency on the path it just found empty and never runs again when it
+      // fills — a computed that has not produced yet would read as its default
+      // forever. Recursive: anything arriving at or below this path changes the
+      // answer.
+      tx.readValueOrThrow(link);
+      return processDefaultValue(
+        runtime,
+        tx,
+        link,
+        fallback,
+        synced,
+        cfcLabelView,
+      );
+    }
+  }
 
   const schema = narrowForValue(link.schema, value);
   if (schema === false) {

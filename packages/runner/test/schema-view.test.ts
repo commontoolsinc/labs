@@ -59,6 +59,18 @@ describe("schema-view", () => {
       activity.path.join("/")
     );
 
+  /** `<id>/<path>` for plain recursive content reads — no probe, verifier or
+   * ignore marker on them. Link resolution's own probes are marked and answer a
+   * different question ("is there a link here?"), so this is the set that says
+   * what the reader took a dependency on. */
+  const contentReads = (tx: IExtendedStorageTransaction): string[] =>
+    [...getTransactionReadActivities(tx) ?? []]
+      .filter((activity) =>
+        activity.nonRecursive !== true &&
+        Object.getOwnPropertySymbols(activity.meta ?? {}).length === 0
+      )
+      .map((activity) => `${activity.id}/${activity.path.join("/")}`);
+
   describe("agreement with an eager read", () => {
     const cases: Array<[string, unknown, JSONSchema]> = [
       [
@@ -507,6 +519,79 @@ describe("schema-view", () => {
 
       expect(await readBack(true)).toBe(42);
       expect(await readBack(false)).toBe(42);
+    });
+  });
+
+  describe("a value that is not there", () => {
+    it("takes the schema's declared default", async () => {
+      const read = await seeded(
+        "declared-default",
+        undefined,
+        {
+          type: ["array", "undefined"],
+          items: { type: "number" },
+          default: [],
+        },
+      );
+
+      const eager = read(false);
+      const lazy = read(true);
+      try {
+        expect(eager.get()).toEqual([]);
+        expect(lazy.get()).toEqual([]);
+      } finally {
+        await eager.tx.commit();
+        await lazy.tx.commit();
+      }
+    });
+
+    it("registers the read the default stands in for", async () => {
+      // The value that will fill this slot arrives in a document of its own —
+      // a computed's result — so resolving the link leaves no dependency on it.
+      // Without one the reader keeps reading the default however late the
+      // value arrives.
+      const write = runtime.edit();
+      const target = runtime.getCell<number>(
+        space,
+        "default-dependency-target",
+        undefined,
+        write,
+      );
+      const holder = runtime.getCell<Record<string, unknown>>(
+        space,
+        "default-dependency-holder",
+        undefined,
+        write,
+      );
+      holder.setRaw({ x: target.getAsLink() });
+      const arg = runtime.getCell<Record<string, unknown>>(
+        space,
+        "default-dependency",
+        undefined,
+        write,
+      );
+      arg.setRaw({ n: holder.key("x").getAsLink() });
+      await write.commit();
+
+      const tx = runtime.edit();
+      tx.markLazyMaterialize(true);
+      try {
+        const value = runtime.getCell(
+          space,
+          "default-dependency",
+          {
+            type: "object",
+            properties: { n: { type: ["number", "undefined"], default: 7 } },
+          } as const,
+          tx,
+        ).get() as { n: number };
+        expect(value.n).toBe(7);
+        const targetId = target.getAsNormalizedFullLink().id;
+        expect(contentReads(tx).filter((read) => read.startsWith(targetId)))
+          .toContain(`${targetId}/value`);
+      } finally {
+        await tx.commit();
+      }
     });
   });
 
