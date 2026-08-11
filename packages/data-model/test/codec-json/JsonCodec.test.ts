@@ -1298,6 +1298,32 @@ describe("JsonCodec", () => {
       expect(prob.wireTypeTag).toBe("BigInt@1");
     });
 
+    it("wraps a throw from a terminal codec, over the wire-form state", () => {
+      // The two lenient cases around this one drive codecs that never reach
+      // the lenient catch at all (`BigInt@1` reports by returning) or that
+      // reach it from the nonterminal arm (`Map@1`). `Undefined@1` is
+      // terminal and throws, which is the remaining combination.
+      //
+      // What the state assertion pins is what the *report* carries, which is
+      // the wire form. That the *codec* is handed the wire form is a separate
+      // fact, pinned separately above.
+      const jsonCodec = newDefaultJsonCodec({ lenient: true });
+      const data = { "/Undefined@1": { "/Bytes@1": "AQID" } } as JsonCodecValue;
+
+      const result = jsonCodec.decode(
+        JsonCodec.wrapEncodedValueForTesting(
+          JSON.stringify(data),
+          true, // Undecodable on purpose; that is what this test is about.
+        ),
+        new TestReconstructionContext(),
+      );
+
+      expect(result).toBeInstanceOf(ProblematicValue);
+      const prob = result as unknown as ProblematicValue;
+      expect(prob.wireTypeTag).toBe("Undefined@1");
+      expect(prob.state).toEqual({ "/Bytes@1": "AQID" });
+    });
+
     it("lenient mode wraps failed class-registry reconstruction", () => {
       const jsonCodec = newDefaultJsonCodec({ lenient: true });
       const runtime = new TestReconstructionContext();

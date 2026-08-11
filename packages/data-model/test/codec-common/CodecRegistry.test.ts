@@ -6,6 +6,7 @@ import type { Constructor } from "@commonfabric/utils/types";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { CodecRegistry, SELF_REP } from "@/codec-common/CodecRegistry.ts";
 import { BaseNonterminalCodec } from "@/codec-common/BaseNonterminalCodec.ts";
+import { BaseTerminalCodec } from "@/codec-common/BaseTerminalCodec.ts";
 import type { ReconstructionContext } from "@/codec-common/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
@@ -66,7 +67,89 @@ function buildRegistry(
   return { first, handler, last, registry };
 }
 
+/**
+ * Terminal counterpart to {@link TestCodec}, for the cases that turn on which
+ * kind of codec was registered. Its members are never reached; extending
+ * `BaseTerminalCodec` is the whole of what it contributes.
+ */
+class TestTerminalCodec extends BaseTerminalCodec<string> {
+  constructor(recognizedTypeTag: string, uniqueHandledClass?: Constructor) {
+    super(recognizedTypeTag, uniqueHandledClass);
+  }
+
+  /**
+   * @inheritDoc
+   *
+   * Accepts anything, so that a case can register this by primitive `type`
+   * and reach it without a class to match on.
+   */
+  override canEncode(_value: FabricValue): boolean {
+    return true;
+  }
+
+  encode(_value: FabricValue): string {
+    throw new Error("Unimplemented.");
+  }
+
+  decode(
+    _typeTag: string,
+    _state: string,
+    _context: ReconstructionContext,
+  ): FabricValue {
+    throw new Error("Unimplemented.");
+  }
+}
+
 describe("CodecRegistry", () => {
+  describe("codec-kind classification", () => {
+    // Which kind a codec is comes from the base class it extends, and this is
+    // the only place that is decided. Everything downstream -- which
+    // `encode()` signature applies, whether a walker expands the state --
+    // follows from the key the registry puts a codec under here.
+
+    it("files a `BaseNonterminalCodec` subclass under `nonterminal`", () => {
+      const codec = new TestCodec("nonterm@1", FabricRegExp);
+      const registry = new CodecRegistry<string>();
+      registry.register(codec);
+
+      expect(registry.codecFromTag("nonterm@1")).toEqual({
+        nonterminal: codec,
+      });
+    });
+
+    it("files a `BaseTerminalCodec` subclass under `terminal`", () => {
+      const codec = new TestTerminalCodec("term@1", FabricRegExp);
+      const registry = new CodecRegistry<string>();
+      registry.register(codec);
+
+      expect(registry.codecFromTag("term@1")).toEqual({ terminal: codec });
+    });
+
+    it("files a primitive-registered terminal codec under `terminal`", () => {
+      // `registerPrimitive()` indexes a codec by `typeof` as well as by tag,
+      // and classifies on its own; a codec reached either way is the same
+      // match.
+      const codec = new TestTerminalCodec("termPrim@1");
+      const registry = new CodecRegistry<string>();
+      registry.registerPrimitive("bigint", codec);
+
+      expect(registry.codecFromValue(914n)).toEqual({ terminal: codec });
+      expect(registry.codecFromTag("termPrim@1")).toEqual({ terminal: codec });
+    });
+
+    it("carries a codec's kind through `extend()`", () => {
+      const nonterminal = new TestCodec("nonterm@1", FabricRegExp);
+      const terminal = new TestTerminalCodec("term@1");
+      const registry = new CodecRegistry<string>().extend(
+        nonterminal,
+        terminal,
+      );
+
+      expect(registry.codecFromTag("nonterm@1")).toEqual({ nonterminal });
+      expect(registry.codecFromTag("term@1")).toEqual({ terminal });
+    });
+  });
+
   describe("codecFromValue()", () => {
     for (
       const { classSource, example, counter } of [

@@ -4,6 +4,7 @@ import { expect } from "@std/expect";
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
 import type { ReconstructionContext } from "@/codec-common/interface.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
 /**
  * Minimal concrete `BaseFabricCodec` for exercising the base class's own behavior.
@@ -36,6 +37,43 @@ describe("BaseFabricCodec", () => {
         expect(new TestCodec(undefined, undefined).recognizedTypeTag).toBe(
           undefined,
         );
+      });
+    });
+
+    describe("uniqueHandledClass", () => {
+      it("returns the class passed to the constructor", () => {
+        const codec = new TestCodec("Test@1", FabricRegExp);
+
+        expect(codec.uniqueHandledClass).toBe(FabricRegExp);
+      });
+
+      it("is `undefined` when constructed with no handled class", () => {
+        const codec = new TestCodec("Test@1", undefined);
+
+        expect(codec.uniqueHandledClass).toBeUndefined();
+      });
+    });
+
+    describe("canEncode()", () => {
+      it("returns `true` for an instance of the handled class", () => {
+        const codec = new TestCodec("Test@1", FabricRegExp);
+
+        expect(codec.canEncode(new FabricRegExp(/x/))).toBe(true);
+      });
+
+      it("returns `false` for a value of another class", () => {
+        const codec = new TestCodec("Test@1", FabricRegExp);
+
+        expect(codec.canEncode("not a regexp")).toBe(false);
+      });
+
+      it("returns `false` when there is no handled class", () => {
+        // A codec with no class to match on encodes nothing by this
+        // implementation; one that means to match by some other test
+        // overrides.
+        const codec = new TestCodec("Test@1", undefined);
+
+        expect(codec.canEncode(new FabricRegExp(/x/))).toBe(false);
       });
     });
 
