@@ -234,8 +234,7 @@ caller:
 Usage:
   cf piece call --piece board addItem -- --title <string>
 
-File a new root item. Takes its title; returns the item it created as a
-reference, which is the address every later command in a session uses.
+File a new root item on the board.
 
 JSON input:
   { title: string }
@@ -247,18 +246,31 @@ Output:
   item     The root item this call created.
 ```
 
-Where each line comes from, and what stands between it and the page:
+**Three levels of documentation, three different fates.** An author writes each
+one where the thing it describes is declared — the verb says what it does, and
+each parameter describes itself:
 
-| Line | Its source in `tracker.tsx` | What is in the way |
-| --- | --- | --- |
-| the summary | the comment on the **verb** — `addItem: Stream<…>` | it is emitted, beside the `$ref`, and lost when that ref is resolved for the CLI; the page also has no summary line to print it on |
-| the prose beside `--title` | the comment on the **event field** — `AddItemEvent.title` | the same resolution loss; the renderer is already ready for it |
-| the `Output:` field | the comment on the **result field** — `AddItemResult.item` | no declared result reaches the runtime yet, so there is nowhere for it to travel (verbs plan item 1) |
+| Level | Written on | Compiled? | Reaches `cf`? |
+| --- | --- | --- | --- |
+| the verb — *what it does* | the `Stream` property | **yes**, beside the `$ref` | no |
+| an **input** parameter | a field of the event interface | **yes**, in `$defs.<Event>.properties` | no |
+| an **output** parameter | a field of the result interface | **no** | no |
 
-Two of the three are the same loss and would come back together. The third
-waits on item 1 — a handler has no declared result on the wire at all, so the
-comment has nothing to ride on
+The first two are the same loss: emitted, then absent from the resolved schema
+the CLI is served, so they come back together
 ([#5637](https://github.com/commontoolsinc/labs/issues/5637)).
+
+The third is different in kind, and it is the one worth understanding. There is
+no structured description of an output parameter *anywhere*, no matter what the
+author writes — because the result type is not compiled at all. `Stream<E, R>`
+compiles `E` and drops `R`, so `$defs` on this pattern holds
+`AddItemEvent`, `AddChildEvent`, `BlockOnEvent`, `FinishEvent`,
+`RecordNoteEvent` and no `Result` interface of any kind. A comment on
+`AddItemResult.item` has nothing to be attached to.
+
+That is verbs plan item 1 — a verb's declared result reaching the runtime —
+and until it lands, output documentation has no home rather than a broken
+pipe.
 
 The summary is worth one more note. An event *interface's* comment would be the
 other candidate for that line, and it is the one thing here that genuinely
