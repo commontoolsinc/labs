@@ -26,9 +26,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
-import { SessionRegistry } from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
   IExtendedStorageTransaction,
@@ -36,44 +34,12 @@ import type {
 } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { waitForSettled } from "../src/executor/watermark.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 import {
   SpeculationOverlayDestination,
   stampSpeculationRunContext,
 } from "../src/speculation/overlay-destination.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
-
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager._sharedServer = server;
-    return manager;
-  }
-
-  private _sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this._sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    sessions: new SessionRegistry({}),
-    subscriptionRefreshDelayMs: 0,
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
 
 const spaceSigner = await Identity.fromPassphrase("speculation overlay space");
 const space = spaceSigner.did() as MemorySpace;
@@ -100,7 +66,7 @@ describe("Phase 2 speculation overlay", () => {
   let server: MemoryV2Server.Server;
   let host: ExecutorHost | undefined;
   let _servingRuntime: Runtime | undefined;
-  let clientManager: SharedServerStorageManager;
+  let clientManager: EmulatedStorageManager;
   let clientRuntime: Runtime;
 
   const newHost = (): ExecutorHost =>
@@ -108,7 +74,7 @@ describe("Phase 2 speculation overlay", () => {
       server,
       serviceIdentity: serviceSigner.did(),
       createRuntime: async () => {
-        const manager = SharedServerStorageManager.connectTo(server, {
+        const manager = EmulatedStorageManager.connectTo(server, {
           as: serviceSigner,
         });
         const runtime = new Runtime({
@@ -136,7 +102,7 @@ describe("Phase 2 speculation overlay", () => {
   let onServingRuntime: ((runtime: Runtime) => Promise<void>) | undefined;
 
   beforeEach(() => {
-    server = newSharedServer();
+    server = newSharedServer({ subscriptionRefreshDelayMs: 0 });
     _servingRuntime = undefined;
     onServingRuntime = undefined;
   });
@@ -150,7 +116,7 @@ describe("Phase 2 speculation overlay", () => {
   });
 
   const openClient = () => {
-    clientManager = SharedServerStorageManager.connectTo(server, {
+    clientManager = EmulatedStorageManager.connectTo(server, {
       as: aliceSigner,
     });
     // The ambient flag is ON (the host pinned it), so this runtime is a
@@ -173,7 +139,7 @@ describe("Phase 2 speculation overlay", () => {
     // the client runs the graph locally under the flag; the result
     // renders from the overlay and the store receives no derivation
     // commit at all (there is no code path for one).
-    clientManager = SharedServerStorageManager.connectTo(server, {
+    clientManager = EmulatedStorageManager.connectTo(server, {
       as: aliceSigner,
     });
     clientRuntime = new Runtime({
@@ -451,7 +417,7 @@ describe("Phase 2 speculation overlay", () => {
     // Client-only bring-up posture (no serving host): the flag is set
     // explicitly, and the client's fetch stub must never be called.
     const calls: string[] = [];
-    clientManager = SharedServerStorageManager.connectTo(server, {
+    clientManager = EmulatedStorageManager.connectTo(server, {
       as: aliceSigner,
     });
     clientRuntime = new Runtime({

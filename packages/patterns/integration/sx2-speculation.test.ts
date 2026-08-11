@@ -57,12 +57,12 @@ describe("sx2 speculation (Phase 2 gates)", () => {
       "counter",
       "counter.tsx",
     );
-    const program = await cc.manager().runtime.harness.resolve(
+    const program = await cc.runtime.harness.resolve(
       new FileSystemProgramResolver(sourcePath),
     );
     piece = await cc.create(program, { start: true });
-    const resultCell = cc.manager().getResult(piece.getCell());
-    sinkCancel = resultCell.sink((value) => {
+    const resultCell = cc.getResult(piece.getCell());
+    sinkCancel = resultCell.sink((value: unknown) => {
       latestValue = (value as { value?: number } | undefined)?.value;
     });
   });
@@ -73,7 +73,7 @@ describe("sx2 speculation (Phase 2 gates)", () => {
   });
 
   it("echoes locally, retires the overlay on watermark coverage, and never holds a derivation commit (speculation.md §1, §3, §4)", async () => {
-    const runtime = cc.manager().runtime;
+    const runtime = cc.runtime;
     if (!FLAG_ON) {
       // OFF arm, byte-identical: no overlay exists — the client derives
       // and commits as today.
@@ -105,7 +105,7 @@ describe("sx2 speculation (Phase 2 gates)", () => {
     // in the creation window can fail on the server-derived-late
     // producer — the escalated fork's remaining surface, noted in the
     // PR's Flags.
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     await resultCell.pull();
 
     // The ECHO: the authored edit's local render does not gate on the

@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { JSONSchema } from "@commonfabric/api";
-import { listPieceCallables } from "../lib/piece.ts";
+import { listPieceCallables, partitionVerbListing } from "../lib/piece.ts";
 
 const TEST_PATTERN_REF = {
   source: {
@@ -141,7 +141,7 @@ describe("listPieceCallables", () => {
         space: "home",
       },
       {
-        loadManager: () => Promise.resolve(manager as never),
+        loadPieces: () => Promise.resolve(manager as never),
         loadPiece: () => Promise.resolve(piece as never),
       },
     );
@@ -200,12 +200,64 @@ describe("listPieceCallables", () => {
         space: "home",
       },
       {
-        loadManager: () => Promise.resolve({ getSpace: () => "home" } as never),
+        loadPieces: () => Promise.resolve({ getSpace: () => "home" } as never),
         loadPiece: () => Promise.resolve(piece as never),
       },
     );
     // No getPatternRef on the double: identity degrades to null, honestly.
     expect(listing.pattern).toBeNull();
     expect(listing.verbs).toEqual([]);
+  });
+
+  it("carries the listing marks off the durable schema", async () => {
+    // The generator emits `tier: "wrapper"` (session-scope inference) and
+    // `deprecated: true` (@deprecated JSDoc) onto stream properties; the
+    // listing surfaces them so the verbs command can hide marked rows by
+    // default. `cf piece call` never consults them — everything stays
+    // callable, which is why the marks ride the LISTING rather than the
+    // dispatcher.
+    const resultRoot = cell(
+      {
+        addTopic: { $stream: true },
+        submitTopic: { $stream: true },
+        setMyName: { $stream: true },
+      },
+      {
+        type: "object",
+        properties: {
+          addTopic: ADD_TOPIC_EVENT,
+          submitTopic: { type: "object", tier: "wrapper" },
+          setMyName: { type: "object", deprecated: true },
+        },
+      },
+    );
+    const piece = {
+      result: { getCell: () => Promise.resolve(resultRoot) },
+      input: { getCell: () => Promise.resolve(cell(undefined, undefined)) },
+    };
+    const listing = await listPieceCallables(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      {
+        loadPieces: () => Promise.resolve({} as never),
+        loadPiece: () => Promise.resolve(piece as never),
+      },
+    );
+    const byName = new Map(listing.verbs.map((verb) => [verb.name, verb]));
+    expect(byName.get("addTopic")?.tier).toBeUndefined();
+    expect(byName.get("addTopic")?.deprecated).toBeUndefined();
+    expect(byName.get("submitTopic")?.tier).toBe("wrapper");
+    expect(byName.get("setMyName")?.deprecated).toBe(true);
+
+    // The default partition: marked rows hide, counted per axis; the shown
+    // set keeps its order and the marks stay on the hidden rows.
+    const partition = partitionVerbListing(listing.verbs);
+    expect(partition.shown.map((verb) => verb.name)).toEqual(["addTopic"]);
+    expect(partition.wrapper).toBe(1);
+    expect(partition.deprecated).toBe(1);
   });
 });

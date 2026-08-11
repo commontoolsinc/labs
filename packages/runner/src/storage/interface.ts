@@ -674,6 +674,32 @@ export type StorageTransactionStatus =
  * will send it to an upstream storage provider which will either accept, if no
  * invariants have being invalidated, or reject and fail commit.
  */
+
+/**
+ * Options for {@link IStorageTransaction.commit}.
+ */
+export interface TransactionCommitOptions {
+  /**
+   * When the returned promise resolves.
+   *
+   * - `"coverage"` (default): on accept, once the caller's subscribed view
+   *   reflects the committed write, its watch-set consequences, and the
+   *   foreign novelty it was applied on top of (marker coverage, spec
+   *   §4.11.2); on rejection, after the read-repair gate, so a retry runs
+   *   against the repaired base.
+   * - `"verdict"`: as soon as the commit's fate is sealed — the accept
+   *   verdict or the rejection receipt — without the coverage wait, the
+   *   read-repair wait, the synced() hold, or the post-commit effect run
+   *   (still tracked via postCommitEffectsSettled()). For callers whose
+   *   premise is "durably decided but not yet fanned out":
+   *   controlled-staleness test fixtures foremost. Only the RETURNED
+   *   promise changes: state application still parks, and commit
+   *   callbacks and the pending-commit barrier remain on the full
+   *   settlement timeline (coverage on accept, read repair on rejection).
+   */
+  resolveAt?: "coverage" | "verdict";
+}
+
 export interface IStorageTransaction {
   /**
    * Optional change group used to associate commits with scheduler actions.
@@ -1011,10 +1037,33 @@ export interface IStorageTransaction {
    * error. Commit is NOT idempotent — it does not replay the original result.
    *
    * When this method returns, the changes will have been committed locally,
-   * but may not be visible to another runtime. When the returned promise
-   * resolves, the data is fully committed and available to other processes.
+   * but may not be visible to another runtime. The commit is fully durable
+   * and available to other processes at the VERDICT; the returned promise
+   * (by default) resolves later, at coverage — once the server's first
+   * subscription update after the write has been integrated, so the
+   * caller's view reflects the write, any docs it made newly reachable,
+   * and the foreign novelty it was applied on top of. On rejection the
+   * promise resolves after the read-repair gate, so a retry runs against
+   * the repaired base. {@link TransactionCommitOptions.resolveAt}
+   * `"verdict"` resolves at fate-sealing instead; effects gated on
+   * durability alone hook {@link IExtendedStorageTransaction.addVerdictCallback}
+   * or {@link commitVerdict} rather than this promise.
    */
-  commit(): Promise<Result<Unit, CommitError>>;
+  commit(
+    options?: TransactionCommitOptions,
+  ): Promise<Result<Unit, CommitError>>;
+
+  /**
+   * Resolves with the same result as {@link commit}, but no later than the
+   * moment the commit's fate is known — the server verdict or a local
+   * rejection. The commit promise itself may resolve later: it additionally
+   * waits for the subscribed view to reflect the committed write (or the
+   * read-repair gate on rejection). Effects gated on durability alone
+   * (verdict callbacks, the outbox flush) hook this instead of the commit
+   * promise. Optional: backends without the split fall back to the commit
+   * promise.
+   */
+  commitVerdict?(): Promise<Result<Unit, CommitError>>;
 
   /**
    * Optional native commit draft hook for storage backends that can consume a
@@ -1401,6 +1450,19 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   hasPendingPostCommitEffects(): boolean;
 
   /**
+   * Resolves once the current commit's post-commit effect layer — verdict
+   * callbacks and the CFC outbox flush — has run. The effects run at the
+   * verdict, so this may resolve before the commit promise itself, which
+   * additionally waits for the subscribed view to reflect the write.
+   * Barriers that wait for a fire-and-forget commit's effects (work
+   * registration, the sqlite query RPC + writeback) wait on this rather
+   * than the commit promise: the promise's extra wait is on incoming watch
+   * frames, which quiescence must not depend on. Resolved when no commit
+   * is in flight.
+   */
+  postCommitEffectsSettled(): Promise<void>;
+
+  /**
    * Add a callback to be called when the transaction settles. The callback
    * receives the transaction as a parameter and is called regardless of
    * whether the commit succeeded or failed. `abort()` settles the transaction
@@ -1424,6 +1486,24 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * @param callback - Function to call when the transaction settles
    */
   addCommitCallback(
+    callback: (
+      tx: IExtendedStorageTransaction,
+      result: Result<Unit, CommitError>,
+    ) => void,
+  ): void;
+
+  /**
+   * Add a callback that fires when the commit's fate is sealed — the
+   * accept verdict or the rejection receipt — BEFORE the waits the commit
+   * promise (and commit callbacks) additionally sit out: view coverage on
+   * accept, the read-repair gate on rejection. For work gated on
+   * durability alone; a consumer that acts on the post-commit view (a
+   * compensation reading the repaired base, a retry) belongs on
+   * {@link addCommitCallback}. Same once-only dispatch and error isolation
+   * as commit callbacks; on synchronous fates (abort, pre-storage
+   * rejection) both layers fire together, verdict first.
+   */
+  addVerdictCallback(
     callback: (
       tx: IExtendedStorageTransaction,
       result: Result<Unit, CommitError>,
@@ -1755,6 +1835,7 @@ export interface ISpaceReplica extends ISpace {
   commitNative?(
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
+    options?: TransactionCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>>;
 
   /**

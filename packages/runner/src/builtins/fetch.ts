@@ -154,7 +154,14 @@ async function processJsonResponse(
 async function processBinaryResponse(
   response: Response,
 ): Promise<FetchBinaryResult> {
-  const bytes = new FabricBytes(new Uint8Array(await response.arrayBuffer()));
+  // The `true` below cedes the array to the `FabricBytes` rather than having
+  // it copied. `arrayBuffer()` yields a buffer nobody else holds, and the view
+  // over it is a temporary, so there is nothing left to protect. A response
+  // body is unbounded, which is what makes the copy worth avoiding.
+  const bytes = new FabricBytes(
+    new Uint8Array(await response.arrayBuffer()),
+    true,
+  );
   const contentType = response.headers.get("content-type");
   const mediaType = contentType?.split(";")[0].trim().toLowerCase() ||
     "application/octet-stream";
@@ -243,6 +250,11 @@ function snapshotInputsFor(
     const { mutexTimeoutMs: _mutexTimeoutMs, ...rawOptions } =
       snapshot.options ?? {};
     const body = rawOptions.body;
+    // TODO(danfuzz): the `body` schema is open (`{}`), and `JSON.stringify`
+    // renders a `FabricSpecialObject` body — a `FabricBytes`, say, the very
+    // type this file mints for binary responses — as `"{}"`, both on the
+    // wire and in the request hash, so two distinct bodies collapse to one
+    // request identity.
     const options = snapshot.options && Object.keys(rawOptions).length > 0
       ? {
         ...rawOptions,

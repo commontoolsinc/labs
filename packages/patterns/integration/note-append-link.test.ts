@@ -41,7 +41,7 @@ describe("note appendLink integration", () => {
       identity,
     });
     const sourcePath = join(import.meta.dirname!, "..", "notes", "note.tsx");
-    const program = await cc.manager().runtime.harness.resolve(
+    const program = await cc.runtime.harness.resolve(
       new FileSystemProgramResolver(sourcePath),
     );
     host = await cc.create(program, {
@@ -53,8 +53,8 @@ describe("note appendLink integration", () => {
       start: true,
     });
     // Keep both pieces reactive (pull mode) so handlers run on send.
-    cancels.push(cc.manager().getResult(host.getCell()).sink(() => {}));
-    cancels.push(cc.manager().getResult(target.getCell()).sink(() => {}));
+    cancels.push(cc.getResult(host.getCell()).sink(() => {}));
+    cancels.push(cc.getResult(target.getCell()).sink(() => {}));
   });
 
   afterAll(async () => {
@@ -69,8 +69,8 @@ describe("note appendLink integration", () => {
       { piece: target.getCell() },
       ["appendLink"],
     );
-    await cc.manager().runtime.idle();
-    await cc.manager().synced();
+    await cc.runtime.idle();
+    await cc.synced();
 
     const content = await host.result.get(["content"]) as string;
     assert(typeof content === "string", "content is not a string");

@@ -109,9 +109,6 @@ follow: `address.tsx`, `age-category.tsx`, `birthday.tsx`, `custom-field.tsx`,
 `rating.tsx`, `relationship.tsx`, `social.tsx`, `status.tsx`, `tags.tsx`,
 `text-import.tsx`, `timeline.tsx`, `timing.tsx`, `type-picker.tsx`.
 
-**`deprecated/`** — already explicitly deprecated; ignored by tooling and agents
-(see AGENTS.md).
-
 **`factory-outputs/`** (+ its support files `vehicles.ts`, `vehicles.test.ts`) —
 machine-generated pattern-factory outputs kept with their eval scores; never
 intended as style references.
@@ -120,10 +117,10 @@ intended as style references.
 `google/core/`.
 
 Support files with no tier (not patterns): `deno.jsonc`, `mod.ts`, `index.md`,
-`README.md`, `DEPRECATED_IDIOMS.md`, `test-ui-helpers.ts`, `tools/` (codegen
-tooling). The December 2025 bug survey formerly kept here as
-`PREEXISTING_BUGS.md` is archived at
-`docs/history/packages/patterns/PREEXISTING_BUGS.md`.
+`README.md`, `DEPRECATED_IDIOMS.md`, `test/vnode-helpers.ts` (the shared
+rendered-tree helpers for pattern tests), `tools/` (codegen tooling). The
+December 2025 bug survey formerly kept here as `PREEXISTING_BUGS.md` is archived
+at `docs/history/packages/patterns/PREEXISTING_BUGS.md`.
 
 ---
 

@@ -352,6 +352,13 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       }
       return byContent;
     }
+    // TODO(danfuzz): this rebuild filters by key name only, so it also
+    // rebuilds `default`/`examples` VALUES: `isRecord` admits a
+    // `FabricSpecialObject` and `Object.entries` sees none of its state, so
+    // a fabric-valued default standardizes to `{}` — losing the value in the
+    // interned schema and making two schemas that differ only in such a
+    // default intern identically. Value-bearing keys want to pass through by
+    // reference.
     const traverse = (
       value: Readonly<any>,
     ): FabricValue => {

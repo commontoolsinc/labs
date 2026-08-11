@@ -5,10 +5,9 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { fromFileUrl } from "@std/path";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 // GOLD-STANDARD end-to-end repro of the profile card-add flow using the REAL
 // shipped patterns (profile-create.tsx + profile-home.tsx) — no synthetic
@@ -25,34 +24,6 @@ import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 // the injected-form stamp) is a migration boundary, not exercised here.
 const signer = await Identity.fromPassphrase("profile-create-real-card-add");
 const spaceA = signer.did();
-
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-  private sharedServer!: MemoryV2Server.Server;
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
 
 const sysDir = fromFileUrl(
   new URL("../../patterns/system/", import.meta.url),
@@ -100,13 +71,13 @@ const elementsListSchema = {
 
 describe("profile-create real card-add (REAL patterns, cross-space)", () => {
   let server: MemoryV2Server.Server;
-  let managerA: SharedServerStorageManager;
-  let managerB: SharedServerStorageManager;
+  let managerA: EmulatedStorageManager;
+  let managerB: EmulatedStorageManager;
 
   beforeEach(() => {
     server = newSharedServer();
-    managerA = SharedServerStorageManager.connectTo(server, { as: signer });
-    managerB = SharedServerStorageManager.connectTo(server, { as: signer });
+    managerA = EmulatedStorageManager.connectTo(server, { as: signer });
+    managerB = EmulatedStorageManager.connectTo(server, { as: signer });
   });
   afterEach(async () => {
     await managerA?.close();

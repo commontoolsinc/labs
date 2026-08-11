@@ -17,6 +17,7 @@ import {
   type EntityIdLookupRequest,
   type EntityIdLookupResult,
   type EntitySnapshot,
+  getOwnWriteEchoConfig,
   getServerExecutionConfig,
   type GraphQuery,
   type GraphQueryRequest,
@@ -305,6 +306,15 @@ const sessionKey = (space: string, sessionId: string): string =>
 
 type Send = (message: ServerMessage) => void;
 
+type PublishTransactVerdict = (
+  response: ResponseMessage<Engine.AppliedCommit>,
+) => void;
+
+type TransactDecision = {
+  response: ResponseMessage<Engine.AppliedCommit>;
+  postCommit?: () => Promise<void>;
+};
+
 type SessionOpenAuthContext = {
   audience: string;
   challenge: SessionOpenChallenge;
@@ -319,9 +329,16 @@ type SessionHandle = {
   sessionId: string;
 };
 
+/** Kind of the LAST operation an origin commit applied to a doc — decides the
+ * own-write echo shape at flush (CT-1965): `set`/`delete` heads are elided
+ * (the writer provably holds their outcome), `patch` heads ride the frame as
+ * full post-apply documents. */
+type DirtyOp = "set" | "patch" | "delete";
+
 type DirtyOrigin = {
   sessionId: string;
   seq: number;
+  op: DirtyOp;
 };
 
 /**
@@ -633,16 +650,11 @@ class Connection {
         ) {
           return;
         }
-        // CT-1927: the verdict returns inline — batching amortization is
-        // the point of the fan-out timer (N commits apply, ONE watch-union
-        // recompute covers the batch). The ordering contract is enforced
-        // client-side instead: accepts and conflict rejections stage a
-        // catch-up obligation (`pendingCaughtUpLocalSeq`), the batched
-        // fan-out stamps `caughtUpLocalSeq` on the frame that reflects the
-        // decided outcomes, and the CLIENT parks each verdict's state
-        // application (accept promotion / rejection drop) until that marker
-        // covers it. See 04-protocol.md §4.11.2.
-        this.send(await this.server.transact(parsed));
+        // Publishing inside the per-space transaction lock makes the verdict
+        // visible before any fan-out for the same space can acquire that lock.
+        await this.server.transact(parsed, (verdict) => {
+          this.send(verdict);
+        });
         // A self-deauthorizing ACL commit defers the writer's terminal
         // session/revoked until after its verdict; deliver it now.
         this.server.deliverDeferredSelfRevocation(
@@ -892,6 +904,10 @@ export class Server {
   #dirtyOriginsBySpace = new Map<string, Map<string, DirtyOrigin>>();
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
   #refreshing: Promise<void> | null = null;
+  // Transactions and fan-out share one publication turn per space. A verdict
+  // is sent while its transaction owns the turn, so a sync frame cannot expose
+  // the decision first. Different spaces retain independent turns.
+  #publicationBySpace = new Map<string, Promise<void>>();
   #lastRefreshDurationMs = 0;
   // The ExecutorHost's in-process observer (serving-loop.md §1 planes
   // (b)/(d)); undefined until a host attaches. One observer: there is one
@@ -930,7 +946,18 @@ export class Server {
     readonly options: {
       sessions?: SessionRegistry;
       store?: URL;
-      subscriptionRefreshDelayMs?: number;
+      /**
+       * Coalescing delay for the batched subscription fan-out, in
+       * milliseconds. `"manual"` never arms the refresh timer: dirty spaces
+       * accumulate and fan out only through the explicit synchronization
+       * points — `flushSessions()`, or `idle()`, which drains held fan-out
+       * to keep its quiescence contract. This is the fan-out gate for
+       * controlled-staleness tests, immune to fake-clock auto-advance,
+       * which fires any armed timer regardless of its nominal delay. A
+       * partial `flushSessions(spaces)` in manual mode leaves the other
+       * dirty spaces held for the next explicit call.
+       */
+      subscriptionRefreshDelayMs?: number | "manual";
       authorizeSessionOpen: (
         message: SessionOpenRequest,
         context: SessionOpenAuthContext,
@@ -1327,6 +1354,7 @@ export class Server {
   async close(): Promise<void> {
     this.cancelScheduledRefresh();
     await this.#refreshing;
+    await this.drainSpacePublicationLocks();
     for (const engine of this.#engines.values()) {
       Engine.close(await engine);
     }
@@ -1336,18 +1364,28 @@ export class Server {
   }
 
   /**
-   * Drains any in-flight or scheduled subscription refresh, returning when
-   * the server has no pending work. Tests use this to drain the
-   * module-level singleton's `#refreshTimer` between cases so it doesn't
-   * leak across the Deno test boundary -- the singleton survives across
-   * tests but its pending timer must not.
+   * Drains per-space publication turns and any in-flight or scheduled
+   * subscription refresh, returning when the server has no pending work.
+   * Tests use this to prevent the module-level singleton's work from
+   * leaking across Deno test boundaries.
+   *
+   * Callers stop submitting work before awaiting this method. A sustained
+   * stream of new work can extend the drain indefinitely.
    *
    * `flushSessions()` (called with no `spaces` argument) cancels any
    * pending timer, runs the refresh loop to completion, and intentionally
    * does not reschedule, so a single call is sufficient.
    */
   async idle(): Promise<void> {
-    if (this.#refreshTimer !== null || this.#refreshing !== null) {
+    await this.drainSpacePublicationLocks();
+    // Dirty spaces with no timer armed are manual mode's held fan-out.
+    // idle() is an explicit synchronization point exactly like
+    // flushSessions(), so it drains them rather than returning with
+    // pending work — "manual" gates the TIMER, not the explicit calls.
+    if (
+      this.#refreshTimer !== null || this.#refreshing !== null ||
+      this.#dirtySpaces.size > 0
+    ) {
       await this.flushSessions();
     }
   }
@@ -1365,56 +1403,58 @@ export class Server {
     id: string,
     value: EntityDocument["value"],
   ): Promise<Engine.AppliedCommit> {
-    const engine = await this.openEngine(space);
-    if (this.#aclMode() !== "off") {
-      if (id === aclDocId(space)) {
-        throw new Engine.ProtocolError(
-          "direct writes may not mutate the ACL document",
-        );
+    return await this.withSpacePublicationLock(space, async () => {
+      const engine = await this.openEngine(space);
+      if (this.#aclMode() !== "off") {
+        if (id === aclDocId(space)) {
+          throw new Engine.ProtocolError(
+            "direct writes may not mutate the ACL document",
+          );
+        }
+        const aclState = this.#aclState(engine, space);
+        if (aclState.kind === "invalid") {
+          throw new Engine.ProtocolError(
+            `space ${space} has invalid ACL state`,
+          );
+        }
+        if (
+          aclState.kind === "missing" &&
+          Engine.serverSeq(engine) === 0
+        ) {
+          throw new Engine.ProtocolError(
+            `space ${space} requires an ACL genesis commit before direct writes`,
+          );
+        }
       }
-      const aclState = this.#aclState(engine, space);
-      if (aclState.kind === "invalid") {
-        throw new Engine.ProtocolError(
-          `space ${space} has invalid ACL state`,
-        );
-      }
-      if (
-        aclState.kind === "missing" &&
-        Engine.serverSeq(engine) === 0
-      ) {
-        throw new Engine.ProtocolError(
-          `space ${space} requires an ACL genesis commit before direct writes`,
-        );
-      }
-    }
-    const commit = Engine.applyCommit(engine, {
-      sessionId: this.#directSessionId,
-      space,
-      commit: {
-        localSeq: ++this.#directLocalSeq,
-        reads: { confirmed: [], pending: [] },
-        operations: [{
-          op: "set",
-          id,
-          value: { value },
-        }],
-      },
-      // The memory server's own direct-write path: `system` class
-      // (protocol.md §1's third row — the memory server itself as producer).
-      commitClass: "system",
+      const commit = Engine.applyCommit(engine, {
+        sessionId: this.#directSessionId,
+        space,
+        commit: {
+          localSeq: ++this.#directLocalSeq,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id,
+            value: { value },
+          }],
+        },
+        // The memory server's own direct-write path: `system` class
+        // (protocol.md §1's third row — the memory server itself as producer).
+        commitClass: "system",
+      });
+      this.markSpaceDirty(space, [toDirtyKey(id)]);
+      // The feed carries system commits too (the loop classifies by class;
+      // a system write is ordinary non-authored input — it does not trigger
+      // plane (b)'s AUTHORED activation rule, which the host enforces).
+      this.#notifyCommitAdmitted({
+        space,
+        seq: commit.seq,
+        class: "system",
+        sessionId: this.#directSessionId,
+        writes: [{ id, scopeKey: "space" }],
+      });
+      return commit;
     });
-    this.markSpaceDirty(space, [toDirtyKey(id)]);
-    // The feed carries system commits too (the loop classifies by class;
-    // a system write is ordinary non-authored input — it does not trigger
-    // plane (b)'s AUTHORED activation rule, which the host enforces).
-    this.#notifyCommitAdmitted({
-      space,
-      seq: commit.seq,
-      class: "system",
-      sessionId: this.#directSessionId,
-      writes: [{ id, scopeKey: "space" }],
-    });
-    return commit;
   }
 
   /**
@@ -1884,9 +1924,13 @@ export class Server {
     // observer: push dirtiness (M4 instance keys — the stream doc is
     // space-scoped) and the plane-(b) hook fire exactly as a transact
     // would have fired them.
-    this.markSpaceDirty(entry.targetSpace, [toDirtyKey(entry.targetStream)], {
+    const streamDirtyKey = toDirtyKey(entry.targetStream);
+    this.markSpaceDirty(entry.targetSpace, [streamDirtyKey], {
       sessionId: entry.sessionId,
       seq: applied.seq,
+      // One set-produced head (CT-1965): classified exactly as the transact
+      // path classifies a `set`, so flush-time echo shaping matches.
+      ops: new Map([[streamDirtyKey, "set"]]),
     });
     this.#notifyCommitAdmitted({
       space: entry.targetSpace,
@@ -2224,18 +2268,57 @@ export class Server {
     }
   }
 
-  transact(
+  /**
+   * Decides a transaction under its space's publication lock.
+   *
+   * `publishVerdict`, when provided by a live connection, runs while the lock
+   * is held and before any post-commit bookkeeping. Fan-out for the space
+   * begins only after both steps finish and the lock is released.
+   */
+  async transact(
     message: TransactRequest,
+    publishVerdict?: PublishTransactVerdict,
   ): Promise<ResponseMessage<Engine.AppliedCommit>> {
+    return await this.withSpacePublicationLock(message.space, async () => {
+      const decision = await this.decideTransaction(message);
+      let verdictError: { value: unknown } | undefined;
+      try {
+        publishVerdict?.(decision.response);
+      } catch (error) {
+        verdictError = { value: error };
+      }
+      try {
+        await decision.postCommit?.();
+      } catch (postCommitError) {
+        if (verdictError !== undefined) {
+          throw new AggregateError(
+            [verdictError.value, postCommitError],
+            "Verdict publication and post-commit bookkeeping both failed",
+          );
+        }
+        throw postCommitError;
+      }
+      if (verdictError !== undefined) {
+        throw verdictError.value;
+      }
+      return decision.response;
+    });
+  }
+
+  private async decideTransaction(
+    message: TransactRequest,
+  ): Promise<TransactDecision> {
     const session = this.#sessions.get(message.space, message.sessionId);
     if (session === null) {
-      return Promise.resolve(respondTypedError<Engine.AppliedCommit>(
-        message.requestId,
-        toError("SessionError", "Unknown session for space"),
-      ));
+      return {
+        response: respondTypedError<Engine.AppliedCommit>(
+          message.requestId,
+          toError("SessionError", "Unknown session for space"),
+        ),
+      };
     }
-
-    return tracer.startActiveSpan(
+    let postCommit: (() => Promise<void>) | undefined;
+    const response = await tracer.startActiveSpan(
       "memory.transact",
       async (span): Promise<ResponseMessage<Engine.AppliedCommit>> => {
         span.setAttribute("space.did", message.space);
@@ -2272,7 +2355,10 @@ export class Server {
           ) {
             return respondTypedError<Engine.AppliedCommit>(
               message.requestId,
-              toError("SessionError", "Unknown or replaced session for space"),
+              toError(
+                "SessionError",
+                "Unknown or replaced session for space",
+              ),
             );
           }
           const invalid = this.#validateAclCommit(
@@ -2346,33 +2432,31 @@ export class Server {
               detachDatabase(engine.database, alias);
             }
           }
-          // Mark dirty IMMEDIATELY after the durable apply, before any
-          // later await (CT-1927): a batch pass running during a
-          // subsequent await must see this durable write's dirty ids —
-          // otherwise a frame whose marker claims to reflect decided
-          // outcomes could miss earlier durable watched novelty. Keys are
-          // per scope INSTANCE (M4): resolved from the committing
-          // session's identity — the same resolution admission keyed the
-          // rows with, so the dirty key names exactly the row written.
-          const committedWrites = message.commit.operations
-            .filter((operation) => operation.op !== "sqlite")
-            .map((operation) => ({
-              id: operation.id,
-              scopeKey: resolveScopeKey(operation.scope, {
-                principal: session.principal,
-                sessionId: message.sessionId,
-              }),
-            }));
-          this.markSpaceDirty(
-            message.space,
-            committedWrites.map((write) =>
-              toDirtyKey(write.id, write.scopeKey)
-            ),
-            {
+          // Mark dirty immediately after the durable apply so the next batch
+          // reflects this write and can carry its catch-up marker. Keys are
+          // per scope INSTANCE (M4): resolved from the committing session's
+          // identity — the same resolution admission keyed the rows with, so
+          // the dirty key names exactly the row written. Each dirty key is
+          // classified by the LAST op this commit applied to it: that op
+          // produced the head this commit leaves behind, so it alone
+          // decides the flush-time echo shape.
+          const committedWrites: Array<{ id: string; scopeKey: ScopeKey }> =
+            [];
+          const dirtyOps = new Map<string, DirtyOp>();
+          for (const operation of message.commit.operations) {
+            if (operation.op === "sqlite") continue;
+            const scopeKey = resolveScopeKey(operation.scope, {
+              principal: session.principal,
               sessionId: message.sessionId,
-              seq: commit.seq,
-            },
-          );
+            });
+            committedWrites.push({ id: operation.id, scopeKey });
+            dirtyOps.set(toDirtyKey(operation.id, scopeKey), operation.op);
+          }
+          this.markSpaceDirty(message.space, dirtyOps.keys(), {
+            sessionId: message.sessionId,
+            seq: commit.seq,
+            ops: dirtyOps,
+          });
           // Plane (b): the admission-side activation hook — synchronous
           // with the dirty marking, observer errors shielded.
           this.#notifyCommitAdmitted({
@@ -2382,28 +2466,23 @@ export class Server {
             sessionId: message.sessionId,
             writes: committedWrites,
           });
-          // CT-1927: stage the accept's catch-up obligation SYNCHRONOUSLY
-          // with the dirty-marking above — before any await. A flush pass
-          // running during a later await consumes the dirty batch; an
-          // obligation staged only afterwards would ride nothing and
-          // schedule nothing, stranding the client's parked promotion
-          // forever (CT-1927 review, round 5). Staged
-          // here, the obligation either rides that concurrent pass (the
-          // marker may then precede the verdict on the socket — the client
-          // handles both orders) or the still-scheduled batch timer. The
-          // batched fan-out stamps `caughtUpLocalSeq >= this localSeq` on
-          // the next frame to this session (an otherwise-empty frame if
-          // nothing it watches is dirty), and the CLIENT holds the
-          // accepted commit's promotion — pending overlay to confirmed
-          // mirror — until that marker arrives, so promotion always
-          // extrapolates over a base that reflects the foreign novelty the
-          // accept was applied on top of. The stamping contract: the frame
-          // reflects every decided outcome ≤ W for the docs it COVERS.
-          // The session's own accepted writes are echo-suppressed by
-          // dirty-origin tracking (the parked verdict carries their truth
-          // — with CT-1926's post-apply document where the server provides
-          // it); REJECTED commits' docs are staged origin-less
-          // (stageConflictRefreshDirtyIds), so repair frames DO cover them.
+          // Stage the accept's catch-up obligation with the dirty mark. The
+          // verdict response leaves this request before the independently
+          // scheduled batch can send its covering frame. The batched fan-out
+          // stamps `caughtUpLocalSeq >= this localSeq` on the next frame to
+          // this session (an otherwise-empty frame if nothing it watches is
+          // dirty), and the CLIENT holds the accepted commit's promotion —
+          // pending overlay to confirmed mirror — until that marker arrives.
+          // The frame therefore reflects every decided outcome ≤ W for the
+          // docs it covers.
+          // Dirty-origin tracking decides the echo shape for the session's
+          // own accepted writes (CT-1965): set- and delete-produced heads are
+          // elided from the frame — the writer provably holds their outcome,
+          // and the verdict plus marker promote it — while patch-produced
+          // heads ride the frame as full post-apply documents, since merged
+          // state is truth the writer cannot extrapolate. REJECTED commits'
+          // docs are staged origin-less (stageConflictRefreshDirtyIds), so
+          // repair frames DO cover them.
           session.pendingCaughtUpLocalSeq = Math.max(
             session.pendingCaughtUpLocalSeq,
             message.commit.localSeq,
@@ -2479,7 +2558,10 @@ export class Server {
           span.recordException(
             error instanceof Error ? error : new Error(messageText),
           );
-          span.setStatus({ code: SpanStatusCode.ERROR, message: messageText });
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: messageText,
+          });
           return respondTypedError<Engine.AppliedCommit>(
             message.requestId,
             responseError,
@@ -2489,6 +2571,7 @@ export class Server {
         }
       },
     );
+    return { response, postCommit };
   }
 
   async graphQuery(
@@ -3314,11 +3397,21 @@ export class Server {
                 }
                 const dirtyKey = toDirtyKey(entry.id, entry.scopeKey);
                 const origin = dirtyOrigins?.get(dirtyKey);
-                if (
-                  origin === undefined ||
-                  origin.sessionId !== sessionId ||
-                  origin.seq !== entry.seq
-                ) {
+                // Include the doc unless the writer provably holds it
+                // (CT-1965). An origin matching this session AND the head seq
+                // means the head is exactly this session's own accepted
+                // write; under the per-space publication lock nothing can
+                // have moved it since, so `entry.doc` IS that commit's
+                // post-apply document. A `set`/`delete` head is then elided —
+                // the client supplied the bytes (or the absence) and the
+                // verdict + marker promote them — while a `patch` head is
+                // delivered in full: its post-apply state can contain merged
+                // foreign content the writer's own ops cannot reproduce.
+                const held = origin !== undefined &&
+                  origin.sessionId === sessionId &&
+                  origin.seq === entry.seq &&
+                  (origin.op !== "patch" || !getOwnWriteEchoConfig());
+                if (!held) {
                   upserts.push(entry);
                 }
               }
@@ -3428,7 +3521,14 @@ export class Server {
   markSpaceDirty(
     space: string,
     dirtyIds?: Iterable<string>,
-    origin?: DirtyOrigin,
+    // Op kinds are per-doc (one commit can set A and patch B), so the origin
+    // carries a per-dirty-key map; absent keys classify as "patch" — the
+    // never-elide shape.
+    origin?: {
+      sessionId: string;
+      seq: number;
+      ops: ReadonlyMap<string, DirtyOp>;
+    },
   ): void {
     if (dirtyIds !== undefined) {
       let ids = this.#dirtyDocsBySpace.get(space);
@@ -3459,7 +3559,11 @@ export class Server {
           // every session, the writer included.
           origins?.delete(id);
         } else {
-          origins?.set(id, origin);
+          origins?.set(id, {
+            sessionId: origin.sessionId,
+            seq: origin.seq,
+            op: origin.ops.get(id) ?? "patch",
+          });
         }
       }
       if (origins?.size === 0) {
@@ -3777,7 +3881,10 @@ export class Server {
   }
 
   private scheduleRefresh(): void {
-    if (this.#dirtySpaces.size === 0 || this.#refreshTimer !== null) {
+    if (
+      this.options.subscriptionRefreshDelayMs === "manual" ||
+      this.#dirtySpaces.size === 0 || this.#refreshTimer !== null
+    ) {
       return;
     }
     this.#refreshTimer = setTimeout(
@@ -3846,6 +3953,40 @@ export class Server {
     }
   }
 
+  /**
+   * Runs one transaction or fan-out turn at a time for `space`.
+   *
+   * A transaction arriving during fan-out waits for that turn to finish. Locks
+   * for other spaces remain independent, so the latency coupling is local to
+   * one space.
+   */
+  private async withSpacePublicationLock<T>(
+    space: string,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.#publicationBySpace.get(space) ?? Promise.resolve();
+    const release = Promise.withResolvers<void>();
+    const queued = previous.then(() => release.promise);
+    this.#publicationBySpace.set(space, queued);
+
+    await previous;
+    try {
+      return await run();
+    } finally {
+      release.resolve();
+      if (this.#publicationBySpace.get(space) === queued) {
+        this.#publicationBySpace.delete(space);
+      }
+    }
+  }
+
+  /** Waits until every queued per-space publication turn has settled. */
+  private async drainSpacePublicationLocks(): Promise<void> {
+    while (this.#publicationBySpace.size > 0) {
+      await Promise.all(this.#publicationBySpace.values());
+    }
+  }
+
   private async refreshLoop(initial?: Set<string>): Promise<void> {
     let pending = initial;
     while (true) {
@@ -3865,89 +4006,95 @@ export class Server {
       pending = undefined;
 
       for (const space of spaces) {
-        // Removed at its own processing turn (CT-1927): pre-deleting the
-        // whole selection meant a failure mid-batch stranded every
-        // not-yet-processed space — dirty maps intact but the space no
-        // longer discoverable.
-        this.#dirtySpaces.delete(space);
-        const dirtyIds = this.#dirtyDocsBySpace.get(space);
-        if (dirtyIds !== undefined) {
-          this.#dirtyDocsBySpace.delete(space);
-        }
-        const dirtyOrigins = this.#dirtyOriginsBySpace.get(space);
-        if (dirtyOrigins !== undefined) {
-          this.#dirtyOriginsBySpace.delete(space);
-        }
-        // Fan-out is a scheduled/batched timer decoupled from transact, so it
-        // must be its own root span. `root: true` makes that explicit — the
-        // context manager propagates the active context into timer callbacks,
-        // so without it this span could parent under whichever memory.transact
-        // happened to schedule the refresh.
-        try {
-          await tracer.startActiveSpan(
-            "memory.fanout",
-            { root: true },
-            async (span) => {
-              span.setAttribute("space.did", space);
-              span.setAttribute("subscriber.count", this.#connections.size);
-              span.setAttribute("dirty.count", dirtyIds?.size ?? 0);
-              try {
-                for (const connection of this.#connections.values()) {
-                  await connection.refreshDirty(space, dirtyIds, dirtyOrigins);
-                }
-              } finally {
-                span.end();
-              }
-            },
-          );
-        } catch (error) {
-          // Requeue the consumed batch (CT-1927): the dirty state was taken
-          // before fan-out, so a failure here would otherwise orphan it —
-          // no later refresh fires unless another write happens, and the
-          // batched refresh is the delivery path the staged catch-up
-          // markers rely on. Merge UNDER anything that accrued meanwhile
-          // (newer provenance wins), reschedule, and rethrow so callers
-          // see the failure.
-          this.#dirtySpaces.add(space);
+        await this.withSpacePublicationLock(space, async () => {
+          // Removed at its own processing turn (CT-1927): pre-deleting the
+          // whole selection meant a failure mid-batch stranded every
+          // not-yet-processed space — dirty maps intact but the space no
+          // longer discoverable.
+          this.#dirtySpaces.delete(space);
+          const dirtyIds = this.#dirtyDocsBySpace.get(space);
           if (dirtyIds !== undefined) {
-            let current = this.#dirtyDocsBySpace.get(space);
-            if (current === undefined) {
-              current = new Set();
-              this.#dirtyDocsBySpace.set(space, current);
-            }
-            let currentOrigins = this.#dirtyOriginsBySpace.get(space);
-            for (const id of dirtyIds) {
-              if (current.has(id)) {
-                // The id was re-dirtied while the failed batch was in
-                // flight. Provenance survives only when BOTH batches agree
-                // on the same session; otherwise the merged novelty is
-                // mixed and must fan out authoritatively — restoring the
-                // newer origin alone would echo-suppress the consumed
-                // batch's foreign/unattributed novelty (CT-1927 review).
-                const restoredOrigin = dirtyOrigins?.get(id);
-                const currentOrigin = currentOrigins?.get(id);
-                if (
-                  currentOrigin !== undefined &&
-                  restoredOrigin?.sessionId !== currentOrigin.sessionId
-                ) {
-                  currentOrigins?.delete(id);
-                }
-                continue;
-              }
-              current.add(id);
-              const origin = dirtyOrigins?.get(id);
-              if (origin !== undefined) {
-                if (currentOrigins === undefined) {
-                  currentOrigins = new Map();
-                  this.#dirtyOriginsBySpace.set(space, currentOrigins);
-                }
-                currentOrigins.set(id, origin);
-              }
-            }
+            this.#dirtyDocsBySpace.delete(space);
           }
-          this.scheduleRefresh();
-          throw error;
-        }
+          const dirtyOrigins = this.#dirtyOriginsBySpace.get(space);
+          if (dirtyOrigins !== undefined) {
+            this.#dirtyOriginsBySpace.delete(space);
+          }
+          // Fan-out is a scheduled/batched timer decoupled from transact, so it
+          // must be its own root span. `root: true` makes that explicit — the
+          // context manager propagates the active context into timer callbacks,
+          // so without it this span could parent under whichever memory.transact
+          // happened to schedule the refresh.
+          try {
+            await tracer.startActiveSpan(
+              "memory.fanout",
+              { root: true },
+              async (span) => {
+                span.setAttribute("space.did", space);
+                span.setAttribute("subscriber.count", this.#connections.size);
+                span.setAttribute("dirty.count", dirtyIds?.size ?? 0);
+                try {
+                  for (const connection of this.#connections.values()) {
+                    await connection.refreshDirty(
+                      space,
+                      dirtyIds,
+                      dirtyOrigins,
+                    );
+                  }
+                } finally {
+                  span.end();
+                }
+              },
+            );
+          } catch (error) {
+            // Requeue the consumed batch (CT-1927): the dirty state was taken
+            // before fan-out, so a failure here would otherwise orphan it —
+            // no later refresh fires unless another write happens, and the
+            // batched refresh is the delivery path the staged catch-up
+            // markers rely on. Merge UNDER anything that accrued meanwhile
+            // (newer provenance wins), reschedule, and rethrow so callers
+            // see the failure.
+            this.#dirtySpaces.add(space);
+            if (dirtyIds !== undefined) {
+              let current = this.#dirtyDocsBySpace.get(space);
+              if (current === undefined) {
+                current = new Set();
+                this.#dirtyDocsBySpace.set(space, current);
+              }
+              let currentOrigins = this.#dirtyOriginsBySpace.get(space);
+              for (const id of dirtyIds) {
+                if (current.has(id)) {
+                  // The id was re-dirtied while the failed batch was in
+                  // flight. Provenance survives only when BOTH batches agree
+                  // on the same session; otherwise the merged novelty is
+                  // mixed and must fan out authoritatively — restoring the
+                  // newer origin alone would echo-suppress the consumed
+                  // batch's foreign/unattributed novelty (CT-1927 review).
+                  const restoredOrigin = dirtyOrigins?.get(id);
+                  const currentOrigin = currentOrigins?.get(id);
+                  if (
+                    currentOrigin !== undefined &&
+                    restoredOrigin?.sessionId !== currentOrigin.sessionId
+                  ) {
+                    currentOrigins?.delete(id);
+                  }
+                  continue;
+                }
+                current.add(id);
+                const origin = dirtyOrigins?.get(id);
+                if (origin !== undefined) {
+                  if (currentOrigins === undefined) {
+                    currentOrigins = new Map();
+                    this.#dirtyOriginsBySpace.set(space, currentOrigins);
+                  }
+                  currentOrigins.set(id, origin);
+                }
+              }
+            }
+            this.scheduleRefresh();
+            throw error;
+          }
+        });
       }
 
       if (initial !== undefined) {

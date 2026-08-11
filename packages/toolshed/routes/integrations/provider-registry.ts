@@ -8,9 +8,9 @@
  * (see airtable.descriptor.ts or google.descriptor.ts for examples) and
  * add it to the DESCRIPTORS array below.
  *
- * Note: Plaid and Discord use non-standard OAuth flows and remain as
- * manual imports in app.ts. The shared /api/integrations/bg route is
- * registered on the first provider router with valid credentials.
+ * Note: Plaid uses a non-standard OAuth flow and remains a manual import
+ * in app.ts. The shared /api/integrations/bg route is registered on the
+ * first provider router with valid credentials.
  */
 
 import { createRouter } from "@/lib/create-app.ts";

@@ -1,10 +1,10 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { valueEqual } from "@commonfabric/data-model/fabric-value";
 import {
   FabricInstance,
   FabricPrimitive,
-} from "@commonfabric/data-model/interface";
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import {
   type FabricExecValue,
   isPattern,
@@ -460,20 +460,22 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
    * point the throw becomes a rebind. The two sibling walks in this file carry
    * `Latent` markers for the same hazard.
    *
-   * The container branches then hand back the original when nothing under one
-   * rebound, without checking whether a rebuild would have reproduced it. For
-   * the shapes those branches actually see, it would: an array and a plain
-   * object reaching them are the *inert* ones of `isInertArray()` /
-   * `isInertPlainObject()`, and every shape a name-driven rebuild silently
-   * alters — a foreign prototype, a symbol key, a non-enumerable or
-   * accessor-backed property — is non-inert. That is a claim about the
-   * CONTAINERS, not about `FabricExecValue` as a whole: the special objects
-   * handled above are non-inert too, which is exactly why they leave first.
+   * The container branches hand back the original when nothing under one
+   * rebound, so a container nothing touched survives exactly as it arrived,
+   * whatever shape it has. Once something does rebind, the copy carries only
+   * what its rebuild carries, and the two branches differ. `slice()` honors
+   * `Symbol.species`, so an `Array` subclass comes back a subclass instance,
+   * still carrying its prototype; that is deliberate, and
+   * `pattern-binding.test.ts` pins the length handed to that species. The
+   * object spread keeps enumerable string and symbol keys and nothing else: a
+   * foreign prototype is dropped, a non-enumerable property is dropped, and an
+   * accessor-backed property is read and stored on as a data property. That
+   * last one costs a getter two firings on the rebuild path — one for the
+   * keyed read, one for the spread.
    *
-   * Sharing is quieter than rebuilding for an accessor in one respect only. It
-   * is not frozen *into* a data property, as `Object.fromEntries()` would do;
-   * but `Object.entries()` still reads it on the way past, so a getter's side
-   * effect fires either way.
+   * So a container arriving here is not assumed to be inert, and a rebuild is
+   * not assumed to reproduce it. The special objects handled above leave first
+   * because a rebuild could not reproduce them at all.
    */
   function convert(
     binding: FabricExecValue,

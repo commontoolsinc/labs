@@ -18,7 +18,7 @@
  * Shape mirrors Loom's sqlite-injection reconciler:
  *   deriveDiskHandleId(space, realPath) -> seed handle cell at that id ->
  *   provider.registerSqliteDiskSource(handleId, path) ->
- *   manager.link(handleId, [], pieceId, ["db"])
+ *   pieces.link(handleId, [], pieceId, ["db"])
  * then `PieceController.setPattern(<different program>)`, which is exactly
  * what `cf piece setsrc` drives.
  */
@@ -39,7 +39,6 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 // Test-only dependency; pinned in this package's deno.jsonc (see the comment
 // on the entry there).
 import { Database } from "@db/sqlite";
-import { PieceManager } from "../src/manager.ts";
 import { PieceController } from "../src/ops/piece-controller.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
@@ -108,7 +107,7 @@ function panelProgram(version: string, limit: number): RuntimeProgram {
 describe("setsrc over a retained injected sqlite capability link", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
+  let pieces: PiecesController;
   let diskPath: string;
 
   beforeEach(async () => {
@@ -123,8 +122,8 @@ describe("setsrc over a retained injected sqlite capability link", () => {
       identity: signer,
       spaceName: "setsrc-e2e-" + crypto.randomUUID(),
     });
-    manager = new PieceManager(session, runtime);
-    await manager.synced();
+    pieces = new PiecesController(session, runtime);
+    await pieces.synced();
   });
 
   afterEach(async () => {
@@ -136,7 +135,7 @@ describe("setsrc over a retained injected sqlite capability link", () => {
   });
 
   it("updates the source and keeps reading through the capability", async () => {
-    const space = manager.getSpace();
+    const space = pieces.getSpace();
     const realPath = Deno.realPathSync(diskPath);
 
     // 1. Deploy the piece from v1 (LIMIT 2). No `db` argument yet — the
@@ -145,7 +144,7 @@ describe("setsrc over a retained injected sqlite capability link", () => {
       panelProgram("v1", 2),
       { space },
     );
-    const piece = await manager.runPersistent(
+    const piece = await pieces.runPersistent(
       v1,
       {},
       "setsrc-e2e-piece-" + crypto.randomUUID(),
@@ -171,12 +170,12 @@ describe("setsrc over a retained injected sqlite capability link", () => {
     await provider.registerSqliteDiskSource!(handleId, realPath);
 
     // 3. Link the handle into the piece's `db` input (sqlite-injection.ts
-    //    step 3: `pieceManager.link(handleId, [], pieceId, [dbField])`).
-    await manager.link(handleId, [], pieceId, ["db"]);
+    //    step 3: `PiecesController.link(handleId, [], pieceId, [dbField])`).
+    await pieces.link(handleId, [], pieceId, ["db"]);
     await runtime.idle();
-    await manager.synced();
+    await pieces.synced();
 
-    const result = manager.getResult(piece) as Cell<PanelResult>;
+    const result = pieces.getResult(piece) as Cell<PanelResult>;
     const cancel = result.sink(() => {});
     try {
       const rowsOf = () => result.key("rows").key("result").get();
@@ -217,15 +216,15 @@ describe("setsrc over a retained injected sqlite capability link", () => {
       // The `db` argument really is a SERIALIZED link in raw storage (the
       // premise of the bug: the restore path never sees a live Cell).
       const rawArgument = () =>
-        manager.getArgument(piece)!.getRaw() as { db?: unknown };
+        pieces.getArgument(piece)!.getRaw() as { db?: unknown };
       const rawArgumentBefore = rawArgument();
       expect(isLink(rawArgumentBefore.db)).toBe(true);
 
       // 5. THE ACT UNDER TEST: `cf piece setsrc` with a CHANGED program.
-      const controller = new PieceController(manager, piece);
+      const controller = new PieceController(pieces, piece);
       await controller.setPattern(panelProgram("v2", 3));
       await runtime.idle();
-      await manager.synced();
+      await pieces.synced();
 
       // 6. The link survived, and still points at the SAME handle.
       const rawArgumentAfter = rawArgument();
@@ -252,7 +251,7 @@ describe("setsrc over a retained injected sqlite capability link", () => {
       //    consecutive update over the (now once-restored) link must work too.
       await controller.setPattern(panelProgram("v3", 1));
       await runtime.idle();
-      await manager.synced();
+      await pieces.synced();
       const rawArgumentThird = rawArgument();
       expect(JSON.stringify(rawArgumentThird.db)).toBe(
         JSON.stringify(rawArgumentBefore.db),
@@ -274,18 +273,17 @@ describe("setsrc over a retained injected sqlite capability link", () => {
     //    coherent, not just the in-memory one.
     const freshSession = await createSession({
       identity: signer,
-      spaceName: manager.getSpaceName()!,
+      spaceName: pieces.getSpaceName()!,
     });
     const freshRuntime = new Runtime({
       apiUrl: new URL("http://localhost:9999"),
       storageManager,
     });
-    const freshManager = new PieceManager(freshSession, freshRuntime);
+    const freshPieces = new PiecesController(freshSession, freshRuntime);
     try {
-      await freshManager.synced();
-      const freshPieces = new PiecesController(freshManager);
+      await freshPieces.synced();
       const freshPiece = await freshPieces.get(pieceId, true);
-      const freshResult = freshManager.getResult(
+      const freshResult = freshPieces.getResult(
         freshPiece.getCell(),
       ) as Cell<PanelResult>;
       const stop = freshResult.sink(() => {});

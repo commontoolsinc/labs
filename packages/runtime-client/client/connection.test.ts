@@ -27,7 +27,10 @@ class FakeTransport extends EventEmitter<RuntimeTransportEvents>
     super();
   }
 
-  send(message: IPCClientMessage | IPCClientNotification): void {
+  send(original: IPCClientMessage | IPCClientNotification): void {
+    // Cloned, as a real transport delivers it, so what is captured cannot
+    // change under later mutation by the sender.
+    const message = structuredClone(original);
     this.sent.push(message);
     // Notifications carry no msgId and get no reply.
     if (!("msgId" in message)) return;
@@ -470,5 +473,40 @@ describe("RuntimeConnection loop-lag probe", () => {
     } finally {
       globalThis.clearInterval = originalClearInterval;
     }
+  });
+});
+
+describe("FakeTransport", () => {
+  it("delivers a message unshared with the sender", () => {
+    // `RuntimeTransport.send()` requires the far end to receive a value it
+    // owns, which is what lets a handler cede a byte payload rather than copy
+    // it. A double that passed the sender's object through would model
+    // something no real transport does.
+    const transport = new FakeTransport();
+    const body = new Uint8Array([1, 2, 3]);
+    const message: IPCClientMessage = {
+      msgId: 1,
+      data: {
+        type: RequestType.UploadBlob,
+        space: "did:key:test-space",
+        contentType: "image/png",
+        body,
+      },
+    };
+
+    transport.send(message);
+
+    const captured = transport.sent[0];
+    expect(captured).not.toBe(message);
+    if (
+      !("msgId" in captured) || captured.data.type !== RequestType.UploadBlob
+    ) {
+      throw new Error("Expected the upload request to have been captured.");
+    }
+    expect(captured.data.body).not.toBe(body);
+    // Mutate and re-read, rather than compare identity alone: a shallow copy
+    // differs by identity while still sharing the array.
+    body[0] = 0xff;
+    expect(captured.data.body[0]).toBe(1);
   });
 });

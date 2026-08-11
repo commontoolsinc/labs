@@ -45,10 +45,10 @@ describe("plain-data sandbox helper", () => {
     expect((nested as ReadonlySet<number>).has(2)).toBe(true);
 
     expect(() => (result as Map<unknown, unknown>).set("next", true)).toThrow(
-      "Cannot mutate a FrozenMap",
+      "Cannot mutate a `FrozenMap`",
     );
     expect(() => (nested as Set<number>).add(3)).toThrow(
-      "Cannot mutate a FrozenSet",
+      "Cannot mutate a `FrozenSet`",
     );
     expect(() =>
       Map.prototype.set.call(result as Map<unknown, unknown>, "next", true)

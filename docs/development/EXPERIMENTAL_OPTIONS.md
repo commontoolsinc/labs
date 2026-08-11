@@ -44,6 +44,7 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237); `hold` removed CT-1925 (#5110) | keep `preempt` as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
+| [`ownWriteEcho`](#ownwriteecho) | `setOwnWriteEchoConfig()` (server-side only, not negotiated) | on | Robin McCollum (CT-1965) | remove the switch once the echo has field-soaked | implemented, on by default |
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off | Ben Follington (#4937; shell toggle #4974) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default, not yet measured over real latency |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
@@ -118,7 +119,7 @@ propagate](#how-flags-propagate).
   default in place), so the opt-out while the flag exists is an explicit
   `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false`.
 - **Added by.** Mike Salisbury, verb-contract WS-C
-  (`docs/plans/pattern-verb-contract-implementation.md`).
+  (`docs/history/plans/pattern-verb-contract-implementation.md`).
 - **Purpose.** A handler's return value containing reactives/cells projects
   into its per-event receipt cell via the result-pattern path, but a **plain
   JSON return is discarded** — the receipt-only branch writes `{}`. Under this
@@ -683,6 +684,25 @@ the per-epic implementation notes).
   graduates into a documented tuning knob, or it is removed once the underlying
   conflict-retry behavior is settled and the experiment is closed.
 
+### `ownWriteEcho`
+
+- **Toggle via.** `setOwnWriteEchoConfig()` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts). Server-side only; not
+  a hello capability — every client generation handles the echoed frames, so
+  there is nothing to negotiate.
+- **Added by.** Robin McCollum, for CT-1965.
+- **Purpose.** A sync frame includes a doc unless the writing session provably
+  holds it: own accepted `patch`-produced heads ride the covering frame as full
+  post-apply documents (merged state the writer cannot extrapolate), while own
+  `set`- and `delete`-produced heads stay elided. Off restores full echo
+  suppression — the pre-CT-1965 behavior, where promotion extrapolates every
+  own write from the client's own ops.
+- **Current default and planned end state.** On by default. The switch exists
+  as an operational backstop while the echo field-soaks.
+- **Status on 2026-08-08.** Implemented and on by default.
+- **Path to removal.** After the echo has soaked in production, delete the
+  config trio and the suppression branch it re-enables.
+
 ### `syncSchemaTableV2`
 
 - **Toggle via.** `setSyncSchemaTableConfig()` in
@@ -888,24 +908,52 @@ otherwise hand it back whole, leaving a binding nested inside it silently
 unresolved.
 
 These throws are **discovery instruments**. Each one that fires names a site
-that owes work before the relevant flag can graduate, which is more useful than
-a quiet wrong answer that surfaces later as corrupted data.
+that owes work — for a flag-gated site, work the flag needs before it can
+graduate — which is more useful than a quiet wrong answer that surfaces later
+as corrupted data.
 
-**The invariant that makes this safe rather than merely lucky:** anything
-introduced that would reach one of these throws is itself gated on an experiment
-flag. A default configuration therefore never arrives at one, and any arrival is
-something a flag was deliberately turned on to reach.
+**The invariant that makes this safe rather than merely lucky:** nothing that
+reaches one of these throws is believed to be in production use. That is what a
+tripwire asserts, and it is what makes refusing the right answer — refusing
+costs nothing if nobody is doing the thing, and says so immediately if somebody
+is.
 
-Two obligations follow, and they are the reason this is recorded here rather
+The invariant holds in two strengths, and it is worth knowing which one a given
+site has:
+
+- **By construction**, where an experiment flag gates the only path that
+  arrives. A default configuration never reaches the throw, and any arrival is
+  something a flag was deliberately turned on to reach.
+- **De facto**, where the value is shipped and ungated and simply has no
+  production caller yet. A `FabricError` is exposed to pattern authors
+  (`builder/factory.ts`) and reaches these throws with every flag off; a
+  `FabricBytes` written from the client reaches `CellHandle.serialize()`'s
+  refusal the same way. Nothing stops such a call being written tomorrow. What
+  makes the tripwire safe today is that none exists.
+
+The second is the weaker claim, but it does not fail quietly, and that is the
+point. Add a production use of one of these values and the throw fires — at the
+moment the use is added, in the change that added it — leaving exactly two
+honest ways forward: implement the handling the throw names, or back the use
+out. So the tripwire is its own enforcement, which is why an ungated site is
+legitimate. What it is not is a flag, so do not cite this section as though one
+stood behind every throw.
+
+Three obligations follow, and they are the reason this is recorded here rather
 than at any one of the sites:
 
 - **Adding a feature.** If your change would let a value reach one of these
-  throws in a default configuration, gate the change on an experiment flag. That
-  is what keeps the default path clear and the tripwire honest.
-- **Meeting one.** A throw firing under a flag is the instrument working, not a
-  defect in it. The answer is to implement the missing handling at the site it
-  names — that work *is* the flag's graduation work — rather than to exempt the
-  value so the walk stays quiet.
+  throws in a default configuration, you have three options and they are all
+  fine: gate the change on an experiment flag, implement the handling the throw
+  names first, or do not add the use. What is not an option is shipping the use
+  and leaving the throw reachable in production.
+- **Adding a throw.** Say which strength it has. A de-facto one is legitimate —
+  several exist — but it is a claim about the callers that exist today, so it
+  should be made deliberately rather than assumed from this section.
+- **Meeting one.** A throw firing is the instrument working, not a defect in it.
+  Implement the missing handling at the site it names — for a flag-gated site
+  that work *is* the flag's graduation work — or back out the use that reached
+  it. What is not on the list is exempting the value so the walk stays quiet.
 
 Worked example: with [`modernCellRep`](#moderncellrep) on, a link is a
 `FabricLink` and therefore a `FabricInstance`, so ordinary links reach these

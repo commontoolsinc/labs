@@ -18,6 +18,7 @@ import {
   listPieces,
   MapFormat,
   newPiece,
+  partitionVerbListing,
   PieceConfig,
   PieceResultProjectionError,
   PieceVerbReadError,
@@ -49,11 +50,9 @@ import ports from "@commonfabric/ports" with { type: "json" };
 import type { PiecePatternRef } from "@commonfabric/piece/ops";
 import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
 import {
-  parsePieceGetFilter,
-  parsePieceGetProjection,
-  type PieceGetTransform,
-  PieceGetTransformError,
-} from "../lib/piece-get-transform.ts";
+  CellSelectionError,
+  parseCellSelectionOptions,
+} from "../lib/cell-selection.ts";
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -78,21 +77,6 @@ export function normalizeApiUrl(apiUrl: string): string {
   normalized.hash = "";
   const href = normalized.toString();
   return basePath ? href : href.slice(0, -1);
-}
-
-export async function parsePieceGetTransformOptions(options: {
-  filter?: string;
-  schema?: string;
-}): Promise<PieceGetTransform | undefined> {
-  const filter = options.filter === undefined
-    ? undefined
-    : parsePieceGetFilter(options.filter);
-  const projection = options.schema === undefined
-    ? undefined
-    : await parsePieceGetProjection(options.schema);
-  return filter === undefined && projection === undefined
-    ? undefined
-    : { filter, projection };
 }
 
 function summarizeForDisplay(value: unknown): unknown {
@@ -184,7 +168,7 @@ export function localPatternEntry(
  * A `piece get` failure caused by a data condition rather than bad arguments:
  * a path that doesn't resolve, a result schema that can't project stored data
  * (PieceResultProjectionError), a filter/projection that doesn't fit the
- * selected value (PieceGetTransformError), or a path that lands on a verb
+ * selected value (CellSelectionError), or a path that lands on a verb
  * (PieceVerbReadError — the read-path guard's redirect at `cf piece call`).
  * Reported as a plain error on stderr with exit 1, never as a Cliffy
  * ValidationError (which would dump the usage screen and read as an arg-parse
@@ -192,7 +176,7 @@ export function localPatternEntry(
  */
 export function isPieceGetDataError(error: unknown): error is Error {
   return error instanceof PieceResultProjectionError ||
-    error instanceof PieceGetTransformError ||
+    error instanceof CellSelectionError ||
     error instanceof PieceVerbReadError ||
     (error instanceof Error &&
       error.message.startsWith("Cannot access path"));
@@ -202,7 +186,7 @@ export function isPieceGetDataError(error: unknown): error is Error {
  * Build the stderr report for a `piece get` failure. Returns null when the
  * error is not a data error (the caller should rethrow). `message` is the
  * one-line error; `hint` is an optional next-step tip. A projection error
- * already carries its own `--step` guidance, transform errors stand alone,
+ * already carries its own `--step` guidance, selection errors stand alone,
  * a verb refusal already carries its `cf piece call` redirect, and an
  * input-mode read has nothing more to suggest — only a result-mode
  * unresolved path gets the `--input` tip.
@@ -214,7 +198,7 @@ export function pieceGetDataErrorReport(
   if (!isPieceGetDataError(error)) return null;
   if (
     error instanceof PieceResultProjectionError ||
-    error instanceof PieceGetTransformError ||
+    error instanceof CellSelectionError ||
     error instanceof PieceVerbReadError ||
     opts.input
   ) {
@@ -1425,9 +1409,16 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
   )
   .example(
     cliText(
-      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items --schema id,title`,
+      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items --select id,title`,
     ),
     "Project each returned item to selected fields.",
+  )
+  .example(
+    cliText(
+      `cf piece get ${EX_ID} ${EX_COMP_PIECE} items ` +
+        `--schema '{"type":"array","items":{"$link":true}}'`,
+    ),
+    "Return each item's address instead of its contents.",
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option("--input", "Read from the piece's input cell instead of result cell")
@@ -1444,8 +1435,16 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     "Filter an array with a jq-inspired predicate",
   )
   .option(
+    "--select <fields:string>",
+    "Project output to comma-separated field paths",
+  )
+  .option(
     "--schema <schema:string>",
-    "Project output with comma-separated fields, inline JSON Schema, or @file",
+    "Project output with an inline JSON Schema, @file, or the --select " +
+      "field list",
+    // Both flags carry the one projection, so a command naming both has not
+    // said which shape it wants. Refuse before the read rather than pick.
+    { conflicts: ["select"] },
   )
   .arguments("[path:string]")
   .action(async (options, pathString) => {
@@ -1456,11 +1455,11 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     };
     const pathSegments = pathString ? parseCellPath(pathString) : [];
     try {
-      const transform = await parsePieceGetTransformOptions(options);
+      const selection = await parseCellSelectionOptions(options);
       const value = await getCellValue(pieceConfig, pathSegments, {
         input: options.input,
         step: options.step,
-        ...(transform === undefined ? {} : { transform }),
+        ...(selection === undefined ? {} : { selection }),
       });
       render(value, { json: true });
     } catch (error) {
@@ -1724,16 +1723,46 @@ after --. Handlers interpret piped input when no input argument is present.`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option("--json", "Output machine-readable JSON.")
+  .option(
+    "--all",
+    "Include wrapper-tier and deprecated verbs the default listing hides. " +
+      "Hidden verbs stay callable either way.",
+  )
   .action(async (options) => {
     setQuietMode(!!options.quiet);
     const pieceConfig = parsePieceOptions(options);
     const listing = await listPieceCallables(pieceConfig);
+    // Default view: wrapper-tier (session-UI affordances) and deprecated
+    // verbs are omitted, LOUDLY — the hidden counts always print, so nothing
+    // is silently invisible. Rows carry their marks in both views, and
+    // `cf piece call` never consults them.
+    const partition = partitionVerbListing(listing.verbs);
+    const hiddenCount = partition.wrapper + partition.deprecated;
+    const shown = options.all ? listing.verbs : partition.shown;
+    const omission = hiddenCount > 0 && !options.all
+      ? `${partition.wrapper} wrapper, ${partition.deprecated} deprecated hidden; --all lists them`
+      : undefined;
     if (options.json) {
-      render(listing, { json: true });
+      render({
+        ...listing,
+        verbs: shown,
+        ...(omission !== undefined
+          ? {
+            hidden: {
+              wrapper: partition.wrapper,
+              deprecated: partition.deprecated,
+            },
+          }
+          : {}),
+      }, { json: true });
       return;
     }
-    if (listing.verbs.length === 0) {
-      render("<no callable verbs>");
+    if (shown.length === 0) {
+      render(
+        omission !== undefined
+          ? `<no callable verbs shown> (${omission})`
+          : "<no callable verbs>",
+      );
       return;
     }
     if (listing.pattern) {
@@ -1741,10 +1770,19 @@ after --. Handlers interpret piped input when no input argument is present.`,
     }
     render(
       Table.from([
-        ["NAME", "KIND", "ON"],
-        ...listing.verbs.map((v) => [v.name, v.kind, v.on]),
+        ["NAME", "KIND", "ON", "MARKS"],
+        ...shown.map((v) => [
+          v.name,
+          v.kind,
+          v.on,
+          [
+            ...(v.tier === "wrapper" ? ["wrapper"] : []),
+            ...(v.deprecated ? ["deprecated"] : []),
+          ].join(","),
+        ]),
       ]).toString(),
     );
+    if (omission !== undefined) render(`(${omission})`);
     hint(
       cliText(
         `TIP: --json includes each verb's input schema; 'cf piece call --piece ${pieceConfig.piece} <verb> --help --json' has the full command spec.`,

@@ -245,6 +245,43 @@ describe("to-encodable-form", () => {
       expect(withAliasBindings({ a: 1 } as any)).toEqual({ a: 1 });
     });
 
+    it("throws given an array that is not inert, rather than laundering it", () => {
+      // The array analogue of the plain-object case above, and it matters for
+      // the same reason: `.map()` rebuilds by index, so a named property is
+      // dropped and an accessor-backed index is EVALUATED into a data
+      // property, each yielding an array that satisfies `isFabricValue()`
+      // while meaning something else. An `Array` subclass is worse than
+      // laundered -- `.map()` honors `Symbol.species`, so the result is still
+      // a subclass instance, carrying a live prototype that `isInertArray()`
+      // exists to reject.
+      // Each names the ARRAY refusal specifically. "Not representable" alone is
+      // shared with the plain-object refusal, so it would still pass if one of
+      // these were classified as an object instead -- which is exactly the
+      // regression that would make the reported reason wrong.
+      expect(() =>
+        withAliasBindings(Object.assign([1, 2], { extra: "x" }) as any)
+      ).toThrow("array that is not an inert array");
+      const accessorIndexed = [1, 2];
+      Object.defineProperty(accessorIndexed, 0, {
+        get: () => 42,
+        enumerable: true,
+        configurable: true,
+      });
+      expect(() => withAliasBindings(accessorIndexed as any)).toThrow(
+        "array that is not an inert array",
+      );
+      class Subclassed extends Array {}
+      expect(() => withAliasBindings(Subclassed.from([1, 2]) as any)).toThrow(
+        "array that is not an inert array",
+      );
+      expect(() =>
+        withAliasBindings(Object.setPrototypeOf([1, 2], null) as any)
+      ).toThrow("array that is not an inert array");
+
+      // ...while an ordinary inert array still walks through untouched.
+      expect(withAliasBindings([1, 2] as any)).toEqual([1, 2]);
+    });
+
     it("leaves ordinary containers alone", () => {
       // The conversion above must not reach an inert plain object or an array;
       // those are already fabric values and are walked, not converted.

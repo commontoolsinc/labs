@@ -19,7 +19,7 @@ The following surfaces show registered pieces:
 | `cf piece search` | Searches the readable input and result data of registered pieces only |
 | `cf piece map` | Compares links among registered pieces only |
 | `wish({ query: "#pieceRegistry" })` | Resolves the piece registry directly rather than running a hashtag search |
-| `PieceManager.getPieceRegistry()` and `PiecesController.getRegisteredPieces()` | Return the piece registry |
+| `PiecesController.getPieceRegistry()` and `PiecesController.getRegisteredPieces()` | Return the piece registry |
 | `RuntimeClient.getPiecesListCell()` | Returns a reactive handle to the piece registry |
 | The FUSE `pieces/` directory | Projects the piece registry as named directories |
 

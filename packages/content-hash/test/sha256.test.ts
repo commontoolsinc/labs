@@ -30,9 +30,9 @@ for (const shaFunc of sha256Funcs) {
   describe(`${shaFunc.name}()`, () => {
     let i = 1;
     for (const { bytes, sha256: hashStr } of FIXTURES) {
-      const hashMsg = `${hashStr.slice(0, 8)}...`;
+      const hashMsg = `\`${hashStr.slice(0, 8)}...\``;
       const hashBytes = fromBase64url(hashStr);
-      it(`produces expected byte-array hash #${i++}: \`${hashMsg}...\``, () => {
+      it(`produces the expected byte-array hash #${i++}: ${hashMsg}`, () => {
         const got = shaFunc(bytes);
         expect(got).toEqual(hashBytes);
       });

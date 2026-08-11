@@ -3339,7 +3339,7 @@ async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
       currentKeys: current && typeof current === "object"
         ? Object.keys(current).slice(0, 30)
         : [],
-      runtimeSpace: globalThis.app.element().getRuntimeSpaceDID(),
+      runtimeSpace: globalThis.app.getRuntimeSpaceDID(),
       buttonTexts: buttonTexts.slice(0, 40),
       renderedButtonTexts: renderedButtonTexts.slice(0, 40),
     };

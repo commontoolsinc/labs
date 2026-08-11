@@ -103,6 +103,10 @@ describe("inSpace child piece reload from its own space (CT-1687)", () => {
       r1.key("create").send({ label: "hi" });
       await r1.pull();
       await rt1.idle();
+      // The cross-space child creation rides server->client delivery turns;
+      // drain them before reading the freshly pushed link.
+      await clock.settle();
+      await r1.pull();
 
       // The child materialized in space B (link identity, no deep resolve).
       const links = r1.key("items").asSchema(childLinkListSchema)

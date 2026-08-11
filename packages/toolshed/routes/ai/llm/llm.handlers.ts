@@ -1,19 +1,17 @@
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
-  FeedbackRoute,
   GenerateObjectRoute,
   GenerateTextRoute,
   GetModelsRoute,
 } from "./llm.routes.ts";
-import { httpStatusForError, LLMUpstreamError } from "./errors.ts";
+import { httpStatusForError } from "./errors.ts";
 import { ALIAS_NAMES, ModelList, MODELS, TASK_MODELS } from "./models.ts";
 import { CacheItem, hashKey, loadFromCache, saveToCache } from "./cache.ts";
 import type { Context } from "@hono/hono";
 import { generateText as generateTextCore } from "./generateText.ts";
 import { generateObject as generateObjectCore } from "./generateObject.ts";
 import { findModel } from "./models.ts";
-import env from "@/env.ts";
 import { isLLMRequest } from "@commonfabric/llm/types";
 import { type BuiltInLLMMessage } from "@commonfabric/api";
 
@@ -250,71 +248,6 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
     });
   } catch (error) {
     console.error("Error in generateText:", error);
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return c.json({ error: message }, httpStatusForError(error));
-  }
-};
-
-/**
- * Handler for POST /feedback endpoint
- * Submits user feedback on an LLM response to Phoenix
- */
-export const submitFeedback: AppRouteHandler<FeedbackRoute> = async (c) => {
-  const body = await readJsonBody(c);
-  if (!body.ok) {
-    return c.json({ error: body.error }, HttpStatusCodes.BAD_REQUEST);
-  }
-  const payload = body.payload;
-
-  try {
-    const phoenixPayload = {
-      data: [
-        {
-          span_id: payload.span_id,
-          name: payload.name || "user feedback",
-          annotator_kind: payload.annotator_kind || "HUMAN",
-          result: payload.result,
-          metadata: payload.metadata || {},
-        },
-      ],
-    };
-
-    const phoenixAnnotationPayload = {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Authorization": `Bearer ${env.CFTS_AI_LLM_PHOENIX_API_KEY}`,
-      },
-      body: JSON.stringify(phoenixPayload),
-    };
-
-    let response: Response;
-    try {
-      response = await fetch(
-        `${env.CFTS_AI_LLM_PHOENIX_API_URL}/span_annotations?sync=false`,
-        phoenixAnnotationPayload,
-      );
-    } catch (error) {
-      throw new LLMUpstreamError(
-        `Phoenix API unreachable: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        { cause: error },
-      );
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
-      throw new LLMUpstreamError(
-        `Phoenix API error: ${response.status} ${errorText}`,
-        { upstreamStatus: response.status },
-      );
-    }
-
-    return c.json({ success: true }, HttpStatusCodes.OK);
-  } catch (error) {
-    console.error("Error submitting feedback:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
     return c.json({ error: message }, httpStatusForError(error));
   }

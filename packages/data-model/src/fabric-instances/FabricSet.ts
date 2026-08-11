@@ -20,19 +20,20 @@ import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
  * beyond the wrapped collection are not supported on non-`Error` wrappers.
  */
 export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
+  /** Constructs an instance wrapping `set`. */
   constructor(readonly set: Set<FabricValue>) {
     super();
   }
 
   /**
-   * Stub -- throws until `Set` support is fully implemented. `FabricSet` is
-   * not yet used and is being reworked separately; the protocol methods are
-   * deliberately left as throwing stubs (per Dan's PR #3612 review).
+   * Stub -- throws until `Set` support is fully implemented. The protocol
+   * methods throw rather than approximate, so that no caller can come to depend
+   * on an answer that would have to be taken back.
    */
   [DEEP_FREEZE](
     _subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
-    throw new Error("FabricSet: not yet implemented");
+    throw new Error("`FabricSet`: not yet implemented");
   }
 
   /**
@@ -42,7 +43,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
   [IS_DEEP_FROZEN](
     _subIsDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
-    throw new Error("FabricSet: not yet implemented");
+    throw new Error("`FabricSet`: not yet implemented");
   }
 
   /** @inheritDoc */
@@ -67,6 +68,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
 
   static #codec = Object.freeze(
     new (class FabricSetCodec extends BaseFabricCodec {
+      /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Set, FabricSet);
       }
@@ -77,7 +79,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
        * Stub -- throws until `Set` support is implemented.
        */
       encode(_value: FabricSet): FabricValue {
-        throw new Error("FabricSet: not yet implemented");
+        throw new Error("`FabricSet`: not yet implemented");
       }
 
       /**
@@ -90,7 +92,7 @@ export class FabricSet extends FabricNativeWrapper<Set<FabricValue>> {
         _state: FabricValue,
         _context: ReconstructionContext,
       ): FabricValue {
-        throw new Error("FabricSet: not yet implemented");
+        throw new Error("`FabricSet`: not yet implemented");
       }
     })(),
   );

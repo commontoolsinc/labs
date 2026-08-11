@@ -178,10 +178,28 @@ Regardless of cell type, all cells share:
 - `schema` — optional type information
 - `getAsLink()` — serialization to `SigilLink`
 
-The `toJSON()` method exists so a cell answers the JSON protocol's name; the
-runtime reads it through `hasEncodableForm()` / `encodableFormOf()`
-(`packages/runner/src/encodable-form.ts`), which is how a cell becomes a link
-on the way to storage. The data model gives the name no standing of its own.
+A cell has no representation of its own in stored data; the link naming it
+stands in wherever one is reached. Two mechanisms produce that link, and they
+differ in what they already know about the value in hand:
+
+- The write path recognizes a cell **by class**, then asks the cell for its own
+  link. Which accessor it uses varies by caller, and the choice is theirs: a
+  write may want the link relative to a base, a reconciler may not.
+- A walk over an arbitrary graph — deriving a content-addressed id, or a
+  pattern-authored schema default — has recognized nothing, so it asks **by
+  member name**: `toEncodableForm()`, read via `hasEncodableForm()` /
+  `encodableFormOf()` (`packages/runner/src/encodable-form.ts`). That name is
+  the runtime's own, shared with the builder artifacts the same walk serializes.
+
+`toJSON()` returns the same link under the JSON protocol's name, so a cell reads
+as what it names in any renderer that honors the protocol — `toCompactDebugString()`
+among them. The data model gives that name no standing of its own, and neither
+mechanism above consults it.
+
+`toSigilLinkOrNull()`, `toEncodableForm()` and `toJSON()` return one link under
+three names: the latter two delegate, so they cannot disagree. `getAsLink()` is
+not among them — it builds a link from the options its caller passes, so asking
+it for one relative to a base deliberately returns a different link.
 
 ---
 
@@ -307,7 +325,7 @@ to pretend that state and events have identical execution semantics.
 
 The current system does **not** add timestamps or unique IDs to event payloads:
 - `stream.send(event)` passes the payload directly to the scheduler
-- DOM events have a `timeStamp` property, but `sanitizeEvent()` does not
+- DOM events have a `timeStamp` property, but `serializeEvent()` does not
   include it in the allowlist of properties passed through
 
 However, each handler **invocation** does receive a unique identity. When an
@@ -322,7 +340,7 @@ context, not in the event data itself.
 
 For unification, timestamps or IDs would need to be part of the **event payload
 or cell value** (not just the invocation context) — either injected at the
-`send()` layer, in `sanitizeEvent()`, or by event producers explicitly.
+`send()` layer, in `serializeEvent()`, or by event producers explicitly.
 
 #### Event Replay Consideration
 

@@ -41,7 +41,6 @@ import {
 import { table } from "@commonfabric/memory/sqlite/schema";
 import { runQuery } from "@commonfabric/memory/sqlite/exec";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
   IExtendedStorageTransaction,
@@ -58,37 +57,7 @@ import { EngineWaveCommitSink } from "../src/executor/engine-wave-sink.ts";
 import { SpaceOutbox } from "../src/executor/outbox.ts";
 import { sqliteQueryMemoDecision } from "../src/builtins/sqlite-builtins.ts";
 import { emptyServingLoopStats } from "../src/executor/stats.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
-
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager._sharedServer = server;
-    return manager;
-  }
-
-  private _sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this._sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("executor outbox test");
 const space = signer.did() as MemorySpace;
@@ -97,7 +66,7 @@ const targetSpace = targetSigner.did() as MemorySpace;
 
 describe("stage G outbox + sqlite discharge", () => {
   let server: MemoryV2Server.Server;
-  let storageManager: SharedServerStorageManager;
+  let storageManager: EmulatedStorageManager;
   let runtime: Runtime;
   let engine: Engine.Engine;
   /** One process-lifetime counter per test, shared by every sink and
@@ -161,7 +130,7 @@ describe("stage G outbox + sqlite discharge", () => {
   beforeEach(async () => {
     localSeqRef = { value: 0 };
     server = newSharedServer();
-    storageManager = SharedServerStorageManager.connectTo(server, {
+    storageManager = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     runtime = new Runtime({

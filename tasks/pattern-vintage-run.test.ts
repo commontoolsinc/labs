@@ -2049,10 +2049,13 @@ describe("the vintage gate, end to end", () => {
       const { failures } = await replayAll(roots);
 
       const childFailure = failures.find((f) => f.detail.includes("#Child"));
-      // Names the EVIDENCE the control looked for, so a doc that is present but
-      // unstamped — the one shape a false red could take — reads differently
-      // from a doc that is not there at all.
-      expect(childFailure?.detail).toContain("no pattern setup marker");
+      // Names the EVIDENCE the control looked for — both markers, since the
+      // predicate accepts either — so a doc that is present but unstamped, the
+      // one shape a false red could take, reads differently from a doc that is
+      // not there at all.
+      expect(childFailure?.detail).toContain(
+        "neither a pattern identity nor a setup marker",
+      );
       expect(childFailure?.detail).toContain("recorded but NOT validated");
       // NOT the missing-space diagnosis: the space is right there, empty. A
       // message that blamed the space would send the reader after the wrong
@@ -2158,7 +2161,7 @@ describe("deciding when the next generation is due", () => {
     ])).toEqual([]);
   });
 
-  it("answers per test key", () => {
+  it("returns per test key", () => {
     expect(staleTestKeys([
       outcome("a/a.test.tsx", 0),
       outcome("b/b.test.tsx", 2),

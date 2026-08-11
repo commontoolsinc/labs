@@ -1,8 +1,14 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { type CellHandle } from "@commonfabric/runtime-client";
+import { $conn, type CellHandle } from "@commonfabric/runtime-client";
 import { createMockCellHandle } from "../test-utils/mock-cell-handle.ts";
 import {
+  installMockDocument,
+  type MockElement,
+} from "../test-utils/mock-document.ts";
+import { createRenderableCellHandle } from "../test-utils/mock-vdom-connection.ts";
+import {
+  createDragPreview,
   type DragState,
   endDrag,
   getCurrentDrag,
@@ -213,5 +219,148 @@ describe("drag-state — subscribeToEndDrag", () => {
     startDrag(createMockDragState());
     endDrag();
     expect(endStates).toEqual([]);
+  });
+});
+
+describe("drag-state — createDragPreview", () => {
+  let mockDocument: ReturnType<typeof installMockDocument>;
+
+  /** The preview is built by the mock document, so read it back as one. */
+  const asMock = (element: HTMLElement) => element as unknown as MockElement;
+
+  beforeEach(() => {
+    mockDocument = installMockDocument();
+  });
+
+  afterEach(() => {
+    mockDocument.restore();
+    cleanup();
+  });
+
+  it("falls back to a static pill when the cell has no cached value", () => {
+    const { cell } = createRenderableCellHandle(undefined);
+
+    const { preview, cleanup: teardown } = createDragPreview(
+      cell as CellHandle,
+    );
+
+    expect(teardown).toBeUndefined();
+    expect(asMock(preview).children.length).toBe(1);
+    const pill = asMock(preview).children[0]!;
+    expect(pill.tagName).toBe("cf-cell-link");
+    expect(pill.cell).toBe(cell);
+    expect(pill.isStatic).toBe(true);
+  });
+
+  it("falls back to a static pill when the cached value carries no `[UI]`", () => {
+    const { cell } = createRenderableCellHandle({ title: "no ui here" });
+
+    const { preview, cleanup: teardown } = createDragPreview(
+      cell as CellHandle,
+    );
+
+    expect(teardown).toBeUndefined();
+    expect(asMock(preview).children.map((child) => child.tagName)).toEqual([
+      "cf-cell-link",
+    ]);
+  });
+
+  it("falls back to a static pill for a primitive cached value", () => {
+    const { cell } = createRenderableCellHandle("just a string");
+
+    const { preview, cleanup: teardown } = createDragPreview(
+      cell as CellHandle,
+    );
+
+    expect(teardown).toBeUndefined();
+    expect(asMock(preview).children.map((child) => child.tagName)).toEqual([
+      "cf-cell-link",
+    ]);
+  });
+
+  it("gives the preview element its fixed, click-through styling", () => {
+    const { cell } = createRenderableCellHandle(undefined);
+
+    const { preview } = createDragPreview(cell as CellHandle);
+
+    expect(asMock(preview).tagName).toBe("div");
+    expect(preview.style.cssText).toContain("position: fixed");
+    expect(preview.style.cssText).toContain("pointer-events: none");
+  });
+
+  it("mounts the piece's `[UI]` cell rather than the piece root", async () => {
+    const { cell, log } = createRenderableCellHandle({
+      $UI: { type: "vnode", name: "div", props: {}, children: [] },
+      secret: "not the thing being rendered",
+    });
+
+    const { preview, cleanup: teardown } = createDragPreview(
+      cell as CellHandle,
+    );
+
+    // No pill: this took the render path.
+    expect(asMock(preview).children.length).toBe(0);
+    expect(teardown).toBeDefined();
+
+    // The mount is asynchronous; it is in flight as soon as render() returns.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(log.attached).toBe(true);
+    expect(log.mounted.length).toBe(1);
+    // The mounted reference addresses the [UI] key, not the piece root, so the
+    // renderer subscribes to the rendering rather than to the piece's state.
+    expect(log.mounted[0]!.path).toEqual(["$UI"]);
+    expect(log.mounted[0]!.id).toBe(cell.ref().id);
+
+    teardown!();
+  });
+
+  it("unmounts the render it started when `cleanup` runs", async () => {
+    const { cell, log } = createRenderableCellHandle({
+      $UI: { type: "vnode", name: "div", props: {}, children: [] },
+    });
+
+    const { cleanup: teardown } = createDragPreview(cell as CellHandle);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(log.mounted.length).toBe(1);
+
+    teardown!();
+    // Teardown is asynchronous behind the synchronous cancel.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(log.unmounted.length).toBeGreaterThan(0);
+  });
+
+  it("falls back to a static pill when the render throws", () => {
+    const { cell } = createRenderableCellHandle({
+      $UI: { type: "vnode", name: "div", props: {}, children: [] },
+    });
+    // Addressing the [UI] key builds a new handle, and that constructor reaches
+    // for the runtime's connection. A piece torn down between the pointer press
+    // and the drag makes that reach fail; the preview must still be something
+    // rather than throwing out of the pointer handler that asked for it.
+    const runtimeClient = cell.runtime() as unknown as Record<symbol, unknown>;
+    runtimeClient[$conn] = () => {
+      throw new Error("connection is gone");
+    };
+
+    const warnings: unknown[][] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => warnings.push(args);
+    let preview;
+    try {
+      ({ preview } = createDragPreview(cell as CellHandle));
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(asMock(preview).children.map((child) => child.tagName)).toEqual([
+      "cf-cell-link",
+    ]);
+    expect(warnings.length).toBe(1);
   });
 });

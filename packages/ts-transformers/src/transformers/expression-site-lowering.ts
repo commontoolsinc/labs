@@ -3,6 +3,7 @@ import {
   detectCallKind,
   isCollectionType,
   isFunctionLikeExpression,
+  isSyntheticNode,
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import type { TransformationContext } from "../core/mod.ts";
@@ -77,7 +78,8 @@ export function isSyntheticHelperWrapperInArrayMethodCallback(
   context: TransformationContext,
 ): boolean {
   if (
-    expression.pos >= 0 || !isReactiveHelperWrapperCall(expression, context)
+    !isSyntheticNode(expression) ||
+    !isReactiveHelperWrapperCall(expression, context)
   ) {
     return false;
   }
@@ -112,7 +114,7 @@ function markSyntheticReactiveCollectionDeclarationIfNeeded(
     !rewritten.initializer ||
     (
       rewrittenOriginal === rewritten.initializer &&
-      rewritten.initializer.pos >= 0
+      !isSyntheticNode(rewritten.initializer)
     ) ||
     !isReactiveHelperWrapperCall(
       rewritten.initializer,
@@ -287,18 +289,6 @@ export function rewriteExpressionSite(
     return undefined;
   }
 
-  if (context.options.mode === "error") {
-    if (containerKind === "jsx-expression") {
-      context.reportDiagnostic({
-        type: "reactive:jsx-expression",
-        message:
-          "JSX expression with Reactive computation should use computed()",
-        node: expression,
-      });
-    }
-    return expression;
-  }
-
   const result = rewriteExpression({
     expression,
     analysis,
@@ -364,15 +354,6 @@ export function rewriteOwnedPreClosureJsxExpressionSite(
     shouldDeferToLateInPlaceLowering(context, expression, relevantDataFlows)
   ) {
     return undefined;
-  }
-
-  if (context.options.mode === "error") {
-    context.reportDiagnostic({
-      type: "reactive:jsx-expression",
-      message: "JSX expression with Reactive computation should use computed()",
-      node: expression,
-    });
-    return expression;
   }
 
   const result = rewriteExpression({
