@@ -90,6 +90,42 @@ matter here — the same item can sit under one item's `children` and in
 another's `blockedOn`, and only an address tells a reader those are one item
 rather than two.
 
+### How a holder of an `ItemOutput` knows it can call these
+
+It does not — not from the type. `children` is declared `ItemOutput[]`, which
+carries no verbs, so a consumer holding an element cannot statically call
+`addChild` on it. That narrowing is deliberate: a receiving contract is kept to
+what it actually reads, because importing a producer's full shape couples far
+more than the relationship needs
+([composition](patterns/composition.md#keep-external-data-contracts-narrow)).
+
+**Over the CLI the question dissolves, because a caller holds an address and
+asks the piece.** Discovery is against the deployed pattern, not inferred from
+whatever type the parent used to declare the field:
+
+```bash
+cf piece verbs --piece <a child's address>
+```
+
+```text
+PATTERN cf:module/U7iaSZ…#Item
+NAME        KIND     ON
+addChild    handler  result
+archive     handler  result
+blockOn     handler  result
+finish      handler  result
+recordNote  handler  result
+```
+
+Every verb is there, and the listing names the pattern the piece is running so
+a caller can tell which version it is talking to. This is the whole reason the
+session below never needs to know a pattern's types in advance: it asks.
+
+One wrinkle a reader will hit running that command — the real listing also
+reports `$NAME`, `children`, `notes`, `parent` and `blockedOn` as handlers.
+They are data, not callables; the listing over-reports
+([#5576](https://github.com/commontoolsinc/labs/issues/5576)).
+
 The verbs, and what each one is for:
 
 | On | Verb | Changes | Hands back |
