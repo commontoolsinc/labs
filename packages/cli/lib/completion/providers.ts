@@ -334,6 +334,7 @@ const OPTION_VALUE_PROVIDERS: Readonly<
   "api-url": () => apiUrlCandidates(),
   identity: () => Promise.resolve(directive({ kind: "files", glob: "*.key" })),
   root: () => Promise.resolve(directive({ kind: "dirs" })),
+  test: patternFiles,
   // `cf space clone --to <dir>` builds a clone directory.
   to: () => Promise.resolve(directive({ kind: "dirs" })),
   "log-file": () => Promise.resolve(directive({ kind: "files" })),

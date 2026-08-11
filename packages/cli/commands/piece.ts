@@ -160,6 +160,7 @@ export function localPatternEntry(
     mainExport?: string;
     repository?: string;
     root?: string;
+    test?: string[];
   },
 ): EntryConfig {
   return {
@@ -167,6 +168,7 @@ export function localPatternEntry(
     mainExport: options.mainExport,
     repository: options.repository,
     rootPath: options.root ? absPath(options.root) : undefined,
+    testPaths: options.test?.map((path) => absPath(path)),
   };
 }
 
@@ -997,6 +999,11 @@ export const piece = new Command()
     "--repository <repository:string>",
     "Repository locator associated with the authored source (stored exactly as supplied).",
   )
+  .option(
+    "--test <path:string>",
+    "Attach a test pattern source file to the deployed source package. Repeatable.",
+    { collect: true },
+  )
   .option("--slug <slug:string>", "Slug URL/address for this piece.")
   .option(
     "--dangerously-allow-incompatible-schema",
@@ -1127,6 +1134,11 @@ export const piece = new Command()
   .option(
     "--repository <repository:string>",
     "Repository locator associated with the authored source (stored exactly as supplied).",
+  )
+  .option(
+    "--test <path:string>",
+    "Attach a test pattern source file to the deployed source package. Repeatable.",
+    { collect: true },
   )
   .option(
     "--dangerously-allow-incompatible-schema",
@@ -2048,6 +2060,11 @@ after --. Handlers interpret piped input when no input argument is present.`,
     "--repository <repository:string>",
     "Repository locator associated with the authored source (stored exactly as supplied).",
   )
+  .option(
+    "--test <path:string>",
+    "Attach a test pattern source file to the deployed source package. Repeatable.",
+    { collect: true },
+  )
   .arguments("[main:string]")
   .action(async (options, main?: string) => {
     setQuietMode(!!options.quiet);
@@ -2067,6 +2084,12 @@ after --. Handlers interpret piped input when no input argument is present.`,
     if (options.reset && options.repository !== undefined) {
       throw new ValidationError(
         "Cannot use --repository with --reset.",
+        { exitCode: 1 },
+      );
+    }
+    if (options.reset && options.test !== undefined) {
+      throw new ValidationError(
+        "Cannot use --test with --reset.",
         { exitCode: 1 },
       );
     }
@@ -2096,6 +2119,7 @@ export interface PieceCLIOptions {
   mainExport?: string;
   repository?: string;
   root?: string;
+  test?: string[];
   dangerouslyAllowIncompatibleSchema?: boolean;
   json?: boolean;
 }

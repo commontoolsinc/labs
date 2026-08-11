@@ -5,7 +5,10 @@ import type { PatternCoverageSpan } from "@commonfabric/ts-transformers";
 import { normalize } from "@std/path/posix";
 import { computeModuleHashes } from "../harness/module-identity.ts";
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
-import { deriveModuleRecordFields } from "../sandbox/module-record-compiler.ts";
+import {
+  deriveModuleRecordFields,
+  SOURCE_ROOT_SPECIFIER,
+} from "../sandbox/module-record-compiler.ts";
 import type { CacheableModule } from "../harness/types.ts";
 import type { MemorySpace, Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -354,6 +357,8 @@ export function compiledDocKey(
  * warm closure would always be incomplete. These links carry no authored
  * specifier, so they are ignored by the Merkle identity recompute (which
  * resolves a module's edges from its own source, not its stored links).
+ * Explicit source-package roots use {@link SOURCE_ROOT_SPECIFIER} instead and
+ * participate in the entry module's identity.
  */
 export const ROOT_LINK_SPECIFIER = "cf:cache-root/";
 
@@ -493,7 +498,8 @@ export interface SourceDocVerification {
  * an import link, makes the recomputed identity diverge from the key.
  *
  * Each document is verified against **its own view**: the documents reachable
- * from it over authored-import edges (root links excluded — a
+ * from it over authored-import and source-package edges (cache root links
+ * excluded — a
  * {@link ROOT_LINK_SPECIFIER} edge is never part of any module's Merkle
  * preimage). One closure may legally hold several generations of the same
  * ambient filename (e.g. two seals' injected `cfc.ts`, each root-linked by a
@@ -564,9 +570,32 @@ export function verifySourceDocs(
       continue;
     }
 
+    const additionalInternalDeps = new Map<
+      string,
+      { specifier: string; target: string }[]
+    >();
+    for (const id of viewIds) {
+      const doc = docsByIdentity.get(id)!;
+      const sourceRoots = doc.imports
+        .filter((imp) => imp.specifier.startsWith(SOURCE_ROOT_SPECIFIER))
+        .flatMap((imp) => {
+          const target = docsByIdentity.get(imp.identity);
+          return target === undefined
+            ? []
+            : [{ specifier: imp.specifier, target: target.filename }];
+        });
+      if (sourceRoots.length > 0) {
+        additionalInternalDeps.set(doc.filename, sourceRoots);
+      }
+    }
     const recomputed = computeModuleHashes(
       { main: rootDoc.filename, files },
-      { runtimeFingerprint },
+      {
+        runtimeFingerprint,
+        ...(additionalInternalDeps.size === 0
+          ? {}
+          : { additionalInternalDeps }),
+      },
     );
     for (const id of viewIds) {
       if (!verdicts.has(id)) {
