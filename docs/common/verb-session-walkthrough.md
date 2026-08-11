@@ -226,9 +226,9 @@ So the help page shows `--title <string>  Required.` and stops.
 
 ### What the page becomes **[blocked]**
 
-Nothing here needs a mechanism that does not exist — only the emitter reaching
-the sites it skips, and a verb declaring its result. Written out, because a
-surface worth building is worth being able to picture:
+Every line below already exists as a doc comment in `tracker.tsx`. Nothing here
+is invented for the illustration — this is that file's own prose, reaching a
+caller:
 
 ```text
 Usage:
@@ -244,21 +244,27 @@ Flags after `--`:
   --title <string>    Required. One line naming the work.
 
 Output:
-  item     the item this call created, as an address you can call verbs on
+  item     The root item this call created.
 ```
 
-Three changes get there, and they are not one piece of work:
+Where each line comes from, and what stands between it and the page:
 
-| Line | Needs |
-| --- | --- |
-| the summary under Usage | emission of the event interface's comment, **and** a summary line in `renderPieceCallHelp` |
-| the prose beside `--title` | emission only — the renderer already prints a `description` |
-| the `Output:` fields | a verb's declared result reaching the runtime (verbs plan item 1), then emission of the result fields' comments |
+| Line | Its source in `tracker.tsx` | What is in the way |
+| --- | --- | --- |
+| the summary | the comment on the **verb** — `addItem: Stream<…>` | it is emitted, beside the `$ref`, and lost when that ref is resolved for the CLI; the page also has no summary line to print it on |
+| the prose beside `--title` | the comment on the **event field** — `AddItemEvent.title` | the same resolution loss; the renderer is already ready for it |
+| the `Output:` field | the comment on the **result field** — `AddItemResult.item` | no declared result reaches the runtime yet, so there is nowhere for it to travel (verbs plan item 1) |
 
-The first two are unblocked. The third has a prerequisite: a handler has no
-declared result on the wire at all yet, so there is nowhere to hang a result
-field's description even if the emitter kept one
+Two of the three are the same loss and would come back together. The third
+waits on item 1 — a handler has no declared result on the wire at all, so the
+comment has nothing to ride on
 ([#5637](https://github.com/commontoolsinc/labs/issues/5637)).
+
+The summary is worth one more note. An event *interface's* comment would be the
+other candidate for that line, and it is the one thing here that genuinely
+never compiles — so sourcing the summary from the verb's own comment, which is
+already emitted, is both the smaller change and the better place for an author
+to write it.
 
 Three things are wrong with that page rather than missing from it.
 
@@ -267,12 +273,12 @@ arrives on `invocation.result`. The handler branch of `renderPieceCallHelp`
 prints the fixed string regardless.
 
 **A flag's prose never arrives**, per the measurement above — the renderer is
-ready for it and the generator does not supply it.
+ready for it and the resolution does not carry it.
 
-**The verb's purpose is absent**, and unlike the other two it never reaches the
-compiled pattern at all, so there is nothing downstream to render even once the
-resolution is fixed. `cf` can say what `addItem` takes and not what it is
-for.
+**The verb's purpose is absent** for the same reason, not a different one: its
+comment is emitted and lost in the same step, and the page has no summary line
+to print it on even once it survives. `cf` can say what `addItem` takes and not
+what it is for.
 
 ## 3. Complete against the live piece **[today]**
 
