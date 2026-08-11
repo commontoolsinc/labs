@@ -11,7 +11,8 @@ import {
 } from "./workspace-tests.ts";
 import { WORKSPACE_TEST_WEIGHTS } from "./test-timing-weights.ts";
 
-const TOTAL_SHARDS = 10;
+const WORKSPACE_SHARDS = 8;
+const CLI_SHARDS = 10;
 
 // Write a minimal workspace under `dir`: a root deno.jsonc listing the
 // members, and one directory per package whose `test` task records that it
@@ -126,20 +127,13 @@ Deno.test("selectShardMembers expands the cli package into internal shards when 
   ]);
 
   const selections = Array.from(
-    { length: TOTAL_SHARDS },
+    { length: WORKSPACE_SHARDS },
     (_, offset) =>
       selectShardMembers(members, [], {
         index: offset + 1,
-        total: TOTAL_SHARDS,
+        total: WORKSPACE_SHARDS,
       }),
   );
-  for (const [offset, selection] of selections.entries()) {
-    assertEquals(
-      selection.filter((unit) => unit.packageName.startsWith("cli ")).length,
-      1,
-      `workspace shard ${offset + 1} should contain one CLI slice`,
-    );
-  }
   const units = selections.flat();
   const cliUnits = units.filter((unit) => unit.packageName.startsWith("cli "))
     .toSorted((a, b) => {
@@ -148,10 +142,10 @@ Deno.test("selectShardMembers expands the cli package into internal shards when 
     });
   assertEquals(
     cliUnits,
-    Array.from({ length: TOTAL_SHARDS }, (_, offset) => ({
+    Array.from({ length: CLI_SHARDS }, (_, offset) => ({
       memberPath: "./packages/cli",
-      packageName: `cli (${offset + 1}/${TOTAL_SHARDS})`,
-      env: { CLI_TEST_SHARD: `${offset + 1}/${TOTAL_SHARDS}` },
+      packageName: `cli (${offset + 1}/${CLI_SHARDS})`,
+      env: { CLI_TEST_SHARD: `${offset + 1}/${CLI_SHARDS}` },
     })),
   );
   assertEquals(unitNames(units).filter((name) => name === "a"), ["a"]);
@@ -181,8 +175,8 @@ Deno.test("selectShardMembers expands piece and tasks into internal shards", () 
 
 Deno.test("real workspace timing weights limit two-worker makespans", async () => {
   const expectedCliUnits = Array.from(
-    { length: TOTAL_SHARDS },
-    (_, offset) => `cli (${offset + 1}/${TOTAL_SHARDS})`,
+    { length: CLI_SHARDS },
+    (_, offset) => `cli (${offset + 1}/${CLI_SHARDS})`,
   );
   const profiledCliUnits = Object.keys(WORKSPACE_TEST_WEIGHTS)
     .filter((name) => name.startsWith("cli ("))
@@ -196,12 +190,12 @@ Deno.test("real workspace timing weights limit two-worker makespans", async () =
     new URL("../deno.jsonc", import.meta.url),
   );
   const makespans = Array.from(
-    { length: TOTAL_SHARDS },
+    { length: WORKSPACE_SHARDS },
     (_, offset) => {
       const workerLoads = [0, 0];
       const units = selectShardMembers(members, ["runner"], {
         index: offset + 1,
-        total: TOTAL_SHARDS,
+        total: WORKSPACE_SHARDS,
       });
       for (const unit of units) {
         const worker = workerLoads[0] <= workerLoads[1] ? 0 : 1;
@@ -381,7 +375,7 @@ Deno.test("runTests passes internal shard environment to expanded packages", asy
         tasks: { test: "echo shard=$CLI_TEST_SHARD > ran.txt" },
       }),
     );
-    const shard = { index: 1, total: TOTAL_SHARDS };
+    const shard = { index: 1, total: WORKSPACE_SHARDS };
     const expected = selectShardMembers(
       ["./packages/a", "./packages/cli", "./packages/z"],
       [],

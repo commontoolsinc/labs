@@ -16,17 +16,19 @@ const INTERNALLY_SHARDED_FILE_SET = new Set<string>(
   INTERNALLY_SHARDED_PATTERN_INTEGRATION_FILES,
 );
 
-// Measured work from the files that run in every job and divide their cases by
-// shard. Ordinary files are placed on top of these existing loads.
+// Measured case timings from the files that run in every job, arranged by their
+// current shard selectors. Ordinary files are placed on top of these loads.
 export const PATTERN_INTEGRATION_INITIAL_SHARD_LOADS = [
-  113.1,
-  97.0,
-  58.8,
-  174.0,
-  112.8,
-  49.5,
-  61.1,
-  118.6,
+  109.8,
+  50.4,
+  176.8,
+  45.5,
+  78.0,
+  54.5,
+  47.0,
+  71.4,
+  65.8,
+  85.3,
 ] as const;
 export const PATTERN_INTEGRATION_SHARD_COUNT =
   PATTERN_INTEGRATION_INITIAL_SHARD_LOADS.length;

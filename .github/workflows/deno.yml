@@ -83,8 +83,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
-        total: [3]
+        shard: [1, 2]
+        total: [2]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -107,8 +107,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
-        total: [4]
+        shard: [1, 2, 3]
+        total: [3]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -207,8 +207,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        total: [10]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        total: [8]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -264,8 +264,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        total: [10]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        total: [8]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
@@ -759,8 +759,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
-        total: [8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        total: [10]
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7

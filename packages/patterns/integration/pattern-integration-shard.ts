@@ -6,7 +6,7 @@ export interface PatternIntegrationShard {
 export const COMPILE_ALL_PATTERN_SHARD_ASSIGNMENTS: Readonly<
   Record<string, number>
 > = {
-  "emoji-picker.tsx": 4,
+  "emoji-picker.tsx": 3,
 };
 
 export function parsePatternIntegrationShard(

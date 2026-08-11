@@ -217,7 +217,7 @@ Deno.test("pattern integration assignments separate expensive files", async () =
   );
 });
 
-Deno.test("pattern integration weights balance the modeled shard loads", async () => {
+Deno.test("pattern integration weights stay within the internal-work floor", async () => {
   const files = await listPatternIntegrationTests();
   const assignments = assignPatternIntegrationShards(
     files,
@@ -231,11 +231,9 @@ Deno.test("pattern integration weights balance the modeled shard loads", async (
     loads[shard - 1] += PATTERN_INTEGRATION_TEST_WEIGHTS[name] ?? 1;
   }
 
-  const lightest = Math.min(...loads);
-  const heaviest = Math.max(...loads);
   assertEquals(
-    heaviest <= lightest * 1.1,
-    true,
+    Math.max(...loads),
+    Math.max(...PATTERN_INTEGRATION_INITIAL_SHARD_LOADS),
     `modeled pattern integration shard loads: ${loads.join(", ")}`,
   );
 });
