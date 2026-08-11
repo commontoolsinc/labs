@@ -48,9 +48,21 @@ interface BoardInput {
  *  item's `children`. */
 interface BoardOutput {
   items: ItemOutput[];
-  /** File a new root item. Takes its title; returns the item it created as a
-   *  reference, which is the address every later command in a session uses. */
-  addItem: Stream<{ title: string }, { item: ItemOutput }>;
+  /** File a new root item on the board. */
+  addItem: Stream<AddItemEvent, AddItemResult>;
+}
+
+/** A verb's event and result are named interfaces, not inline shapes, so each
+ *  parameter has somewhere to be documented. This is the only pair spelled out
+ *  here; the rest follow it. */
+interface AddItemEvent {
+  /** One line naming the work. */
+  title: string;
+}
+
+interface AddItemResult {
+  /** The root item this call created. */
+  item: ItemOutput;
 }
 
 /** What a caller supplies. `status`, `notes`, `children` and `blockedOn` are
@@ -76,30 +88,27 @@ interface ItemOutput {
    *  descendant — which is what makes one item reachable by two paths. */
   blockedOn: ItemOutput[];
 
-  /** File a new item beneath this one. Takes the child's title; returns the
-   *  child it created as a reference, so the caller can call verbs on it
-   *  without looking it up. */
-  addChild: Stream<{ title: string }, { item: ItemOutput }>;
-  /** Append a progress note. Takes the note's body; returns the note as
-   *  persisted — carrying a time the caller did not supply and could not —
-   *  and the number of notes this item holds after the append. */
-  recordNote: Stream<{ body: string }, { note: Note; noteCount: number }>;
-  /** Mark this item done. Takes an optional closing note, stamped with the
-   *  same time as the finish; returns that time and how many descendants are
-   *  still open, which takes a walk of the whole subtree to answer. */
-  finish: Stream<{ body?: string }, { at: number; openBelow: number }>;
-  /** Record that this item waits on another. Takes the blocker as a
-   *  reference, not a copy of it; returns both endpoints of the edge and how
-   *  many blockers this item now has. */
-  blockOn: Stream<
-    { on: Writable<ItemOutput> },
-    { blocked: ItemOutput; on: Writable<ItemOutput>; blockedOnCount: number }
-  >;
-  /** Mark this item archived. Takes nothing and returns nothing — the
-   *  value-less shape, for contrast with every verb above. */
+  /** File a new item beneath this one. */
+  addChild: Stream<AddChildEvent, AddChildResult>;
+  /** Append a progress note. Notes are append-only; nothing rewrites one. */
+  recordNote: Stream<RecordNoteEvent, RecordNoteResult>;
+  /** Mark this item done. Descendants are left alone — finishing a parent says
+   *  nothing about its children, which is what `openBelow` reports. */
+  finish: Stream<FinishEvent, FinishResult>;
+  /** Record that this item waits on another. The blocker may be anywhere on
+   *  the board — this is the edge that makes the tree a graph. */
+  blockOn: Stream<BlockOnEvent, BlockOnResult>;
+  /** Mark this item archived. Declares no result — the value-less shape. */
   archive: Stream<void>;
 }
 ```
+
+**A verb says what it does; its parameters describe themselves.** The comment
+on `addItem` does not restate what it takes or returns, because
+`AddItemEvent.title` and `AddItemResult.item` already say so where they are
+declared — which is also where `--help` would source a flag's prose and an
+`Output:` line. Restating it in the verb comment would be the same content
+twice, and the copy that goes stale when a parameter changes.
 
 **One interface, holding both.** An item's fields and its verbs sit together
 because that is what an item *is*: a child in `children` is a full item, and
