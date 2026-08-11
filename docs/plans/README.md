@@ -59,14 +59,14 @@ a record: archive it to `docs/history/plans/` following the procedure in
   calling a verb adds — and at
   [CLI surface shape](cli-surface-shape.md) for the command surface and an
   additive path to it. Start here rather than at either part.
-- [References as arguments](references-as-arguments.md) asks the write-side
-  counterpart of the question the read model answered: a reader can say "an
-  address here, not the contents", and a caller supplying an event has no way to
-  say the same thing. It records what that costs today — a shipped pattern
-  recovering references by scanning prose, and a verb that stores a detached
-  copy without reporting an error — and holds the obvious fix behind one
-  question, whether the argument path lacks a reference vocabulary or refuses
-  one on purpose.
+- [References as arguments](references-as-arguments.md) asks approval for one
+  change: carry a declared reference into the emitted event schema so the two
+  boundary sites that read one can honor it. A verb whose event declares
+  `Writable<T>` is uncallable from outside the runtime — including the root
+  pattern's `addPiece` — and the payload the boundary does accept stores a
+  detached copy without reporting an error. It carries the measurement, the
+  size, and the confinement question that has to be answered before the work
+  starts.
 - [Verb calls: working notes](verb-result-selection.md) holds the call-specific
   investigation those documents do not carry: what produces a receipt and what
   its existence proves, how a receipt's address is derived, and the error and
