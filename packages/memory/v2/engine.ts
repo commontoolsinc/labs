@@ -2903,6 +2903,23 @@ const applyCommitTransaction = (
 
   validateStoredSyncSchemaRefs(engine, branch, revisions, original);
 
+  // Per-stream `eventWatermark` maintenance (Phase 3; events.md §4): a
+  // DERIVED commit that touched a stream sidecar has its watermark
+  // recomputed HERE, inside the commit's own transaction — the
+  // consequence marks and the advance are atomic by construction, and a
+  // requeued entry (whose mark rolled back with its contribution) holds
+  // the frontier. The frontier is the model's rule verbatim: the
+  // highest seq S such that EVERY entry at or below S is consequenced;
+  // entries sharing one commit seq advance only together. Seq-less
+  // entries (the stage-G interim arm) hold no frontier position — their
+  // dedupe rides the consequenced flag alone. The recompute OVERRIDES
+  // any watermark value the commit body carried: the frontier is
+  // derived state, and admission owns it (a producer-supplied value
+  // that disagrees is a bug corrected, never trusted).
+  if (commitClass === "derived") {
+    maintainStreamEventWatermarks(engine, branch, seq, sessionId, revisions);
+  }
+
   engine.statements.updateBranchHead.run({ branch, seq });
   materializeSnapshots(engine, branch, revisions);
 
@@ -2911,6 +2928,93 @@ const applyCommitTransaction = (
     branch,
     revisions,
   };
+};
+
+/** The events.md §4 frontier recompute (see the call site above): runs
+ * once per touched sidecar doc, reading the post-apply state within the
+ * same transaction. */
+const maintainStreamEventWatermarks = (
+  engine: Engine,
+  branch: BranchName,
+  seq: number,
+  sessionId: SessionId,
+  revisions: AppliedRevision[],
+): void => {
+  const touched = new Map<string, AppliedRevision>();
+  for (const revision of revisions) {
+    if (isStreamEntriesDocId(revision.id)) {
+      touched.set(`${revision.id}\0${revision.scopeKey}`, revision);
+    }
+  }
+  for (const revision of touched.values()) {
+    const state = readStateForScopeKey(engine, {
+      id: revision.id,
+      branch,
+      scope: normalizeScope(revision.scope),
+      scopeKey: revision.scopeKey,
+    });
+    const document = state?.document;
+    const value = document?.value as StreamEventsDocValue | undefined;
+    if (value === undefined || document === null) continue;
+    const entries = (value.entries ?? []).filter(
+      (entry): entry is StreamEventEntry =>
+        entry !== null && typeof entry === "object",
+    );
+    const stored = typeof value.eventWatermark === "number"
+      ? value.eventWatermark
+      : 0;
+    const seqs = [
+      ...new Set(
+        entries
+          .map((entry) => entry.seq)
+          .filter((entrySeq): entrySeq is number =>
+            typeof entrySeq === "number"
+          ),
+      ),
+    ].sort((a, b) => a - b);
+    let frontier = stored;
+    for (const entrySeq of seqs) {
+      if (entrySeq <= frontier) continue;
+      if (
+        entries
+          .filter((entry) => entry.seq === entrySeq)
+          .every((entry) => entry.consequenced === true)
+      ) {
+        frontier = entrySeq;
+      } else {
+        break;
+      }
+    }
+    if (
+      frontier === (typeof value.eventWatermark === "number"
+        ? value.eventWatermark
+        : undefined)
+    ) {
+      continue;
+    }
+    // A synthetic op BEYOND the commit's own operations (op_index is
+    // unique per (seq, opIndex), and revisions.length grows with each
+    // frontier write, so slots never collide). The returned revision
+    // JOINS the commit's revision list: snapshot materialization, head
+    // maintenance, and subscriber push all ride it.
+    revisions.push(writeOperation(engine, {
+      branch,
+      seq,
+      opIndex: revisions.length,
+      operation: {
+        op: "patch",
+        id: revision.id as never,
+        ...(revision.scope !== undefined ? { scope: revision.scope } : {}),
+        patches: [{
+          op: "replace",
+          path: "/value/eventWatermark",
+          value: frontier as never,
+        }],
+      },
+      sessionId,
+      scopeKeyOverride: revision.scopeKey,
+    }));
+  }
 };
 
 /**

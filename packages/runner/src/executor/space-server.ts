@@ -40,6 +40,12 @@ import {
   type Server as MemoryServer,
 } from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
+import type {
+  StreamEventEntry,
+  StreamEventsDocValue,
+} from "@commonfabric/memory/v2";
+import { markRuntimeInjectedEventKeys } from "../cell.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
 import {
   EXECUTION_LEASE_RENEW_INTERVAL_MS,
   ExecutionLeaseCycle,
@@ -201,6 +207,14 @@ export class SpaceServer implements TransactionSealDestination {
   /** A drain left undelivered rows behind (transport-class failure):
    * the next wave cycle re-drains even without fresh appends. */
   #outboxDrainOwed = false;
+  /** Phase 3 (events-down): an event-append admission (or a wave's
+   * requeue) owes the next wave a stream-sidecar scan — the drain
+   * input (serving-loop.md §3's event-append classification; §6
+   * step 4's reprocess scan is the same move at activation). */
+  #eventScanOwed = false;
+  /** Consequence-notice seals in flight (the error/drop/skip arms):
+   * awaited before the wave closes so their marks ride THIS wave. */
+  readonly #eventNoticeWork = new Set<Promise<unknown>>();
   /** Post-commit effects of sealed transactions, deferred per wave
    * (serving-loop.md §3: effects hand to the outbox POST-commit, never
    * at seal). Admitted to the outbox after the wave's commit step;
@@ -377,6 +391,24 @@ export class SpaceServer implements TransactionSealDestination {
       `space ${space} activated: W=${this.#watermark} scanHead=${scanHead} ` +
       `staleInstances=${stale.length}`,
     ]);
+    // §6 step 4 (Phase 3): undelivered events — stream head past the
+    // per-stream eventWatermark — reprocess. The scan is the same
+    // discovery the per-wave drain runs; activation only ARMS it.
+    const pendingEventDocs = Engine.selectPendingStreamEventDocs(engine);
+    if (pendingEventDocs.length > 0) {
+      this.#eventScanOwed = true;
+      // Scan-covered appends never reach #drainFeed (the subscribe-from-
+      // scan-head filter drops their notices), so §7's `appended` counts
+      // them here.
+      this.#options.stats.events.appended += pendingEventDocs.reduce(
+        (total, doc) => total + doc.entries.length,
+        0,
+      );
+      logger.info?.("activate-events", () => [
+        `space ${space}: ${pendingEventDocs.length} stream(s) hold ` +
+        "undelivered events; reprocess armed (serving-loop.md §6 step 4)",
+      ]);
+    }
     // Subscribe from the scan head: drop queued records the scan covers.
     this.#feed = this.#feed.filter((record) => record.seq > scanHead);
     this.#inputHead = Math.max(this.#inputHead, scanHead, this.#watermark);
@@ -565,7 +597,39 @@ export class SpaceServer implements TransactionSealDestination {
       ...(info.actionScopeKey !== undefined
         ? { actionScopeKey: info.actionScopeKey }
         : {}),
+      ...(info.acting !== undefined ? { acting: info.acting } : {}),
     });
+    if (info.streamEntry !== undefined) {
+      // Phase 3 (events.md §4): the entry's `consequenced` mark rides
+      // the handler's OWN transaction — sealed with its consequences,
+      // rolled back with them (a thrown handler aborts the tx; a
+      // requeued contribution withdraws whole), so the mark can never
+      // outlive or precede the consequences it stands for. Written
+      // BEFORE the handler runs; order within one tx is immaterial.
+      // The per-stream `eventWatermark` is NOT written here: the
+      // engine recomputes it from the contiguous consequenced frontier
+      // inside the wave commit's own transaction (applyCommitTransaction
+      // — a requeued entry holds it back, matching the model).
+      try {
+        this.#runtime!.getCellFromLink<boolean>({
+          space: this.space,
+          id: info.streamEntry.sidecarId as never,
+          scope: "space",
+          path: [
+            "entries",
+            String(info.streamEntry.index),
+            "consequenced",
+          ],
+        }).withTx(tx).set(true);
+      } catch (error) {
+        logger.warn("event-mark-failed", () => [
+          `consequenced mark for ${info.eventId} failed at stamp time; ` +
+            "the event will reprocess (exactly-once still holds — the " +
+            "unmarked entry stays above the watermark)",
+          error,
+        ]);
+      }
+    }
   }
 
   /**
@@ -829,12 +893,17 @@ export class SpaceServer implements TransactionSealDestination {
               // The loop's own loopback session is not client demand.
               { excludePrincipal: this.#options.serviceIdentity },
             ) &&
-            this.#runtime?.scheduler.hasArmedGateWake() !== true
+            this.#runtime?.scheduler.hasArmedGateWake() !== true &&
+            // Phase 3: undelivered events keep the space ACTIVE
+            // (serving-loop.md §1's criterion) — the direct-engine
+            // check is bounded by the sidecar head prefix.
+            Engine.selectPendingStreamEventDocs(this.#options.engine)
+                .length === 0
           ) {
             // Park per the activation policy (serving-loop.md §1): no
-            // live client session, no undelivered events (none exist in
-            // Phase 1), idle past IDLE_PARK_MS, and no armed gate wake
-            // (runtime-mapping N9: a pending gate wake is "not idle").
+            // live client session, no undelivered events, idle past
+            // IDLE_PARK_MS, and no armed gate wake (runtime-mapping N9:
+            // a pending gate wake is "not idle").
             void this.park("idle");
             break;
           }
@@ -852,7 +921,8 @@ export class SpaceServer implements TransactionSealDestination {
 
   #hasWork(): boolean {
     return this.#feed.length > 0 ||
-      (this.#currentWave?.contributionCount ?? 0) > 0;
+      (this.#currentWave?.contributionCount ?? 0) > 0 ||
+      this.#eventScanOwed;
   }
 
   async #waitForInput(maxMs: number): Promise<void> {
@@ -885,9 +955,279 @@ export class SpaceServer implements TransactionSealDestination {
       if (record.class === "authored") {
         this.#options.stats.authoredSeen += 1;
       }
+      // serving-loop.md §3: "if c.class == event-append: enqueue for
+      // handler processing". The notice carries ids only; the drain
+      // reads the STAMPED entries from the store (the scan below), so
+      // the flag is the whole classification state.
+      if (record.eventAppends !== undefined && record.eventAppends.length > 0) {
+        this.#eventScanOwed = true;
+        this.#options.stats.events.appended += record.eventAppends.length;
+      }
     }
     this.#feed = [];
     return { batchHead: this.#coverageHead };
+  }
+
+  /**
+   * Drain undelivered stream events into the scheduler (Phase 3,
+   * events-down; serving-loop.md §3's event-append classification, §6
+   * step 4's reprocess). The STORE is the drain input — the admission
+   * notices only armed the scan — so client-fired, delegated-delivered,
+   * and crash-recovered entries all enter through one path
+   * (events.md §2's "one path, two producers"). Entries queue per
+   * stream in seq order via `facade.queueEvent` (the wake-shaping
+   * entry point events.md §2 mandates); the settle loop that follows
+   * runs them to quiescence inside this wave.
+   *
+   * Per-entry arms:
+   * - runnable → queued; the dispatch stamps the run with the entry's
+   *   acting identity (LD1) and its durable location, and the stamper
+   *   writes the `consequenced` mark into the handler's own tx
+   *   (events.md §4's same-transaction atomicity);
+   * - duplicate of an already-consequenced eventId (an
+   *   at-or-below-horizon re-admission — events.md §4's dedupe-horizon
+   *   allowance) → SKIPPED, counted `skippedIdempotent`, its entry
+   *   marked consequenced so the stream's frontier passes it
+   *   (non-wedging — the model's C2-dedupe pin);
+   * - handler THREW → the error is the consequence (events.md §5): a
+   *   notice tx marks the entry consequenced + `error`;
+   * - unrunnable (no handler after piece start — events.md §5's drop
+   *   predicate) → the dropped-event notice `{status, reason}` +
+   *   consequenced.
+   *
+   * Returns the number of events queued (the re-arm belt keys on it).
+   */
+  async #drainStreamEvents(runtime: Runtime): Promise<number> {
+    if (!this.#eventScanOwed) return 0;
+    this.#eventScanOwed = false;
+    const { engine, space } = this.#options;
+    const pendingDocs = Engine.selectPendingStreamEventDocs(engine);
+    if (pendingDocs.length === 0) return 0;
+    let queued = 0;
+    for (const doc of pendingDocs) {
+      // Materialize the sidecar into the SERVING replica before any
+      // index-addressed mark can be written against it: a cold view
+      // would materialize ghost entries (the engine's admission guard
+      // refuses the resulting wave — the failure mode this sync
+      // exists to prevent). The stream's own doc is synced too so the
+      // no-handler auto-load's meta chain reads a warm view.
+      try {
+        await runtime.getCellFromLink({
+          space,
+          id: doc.id as never,
+          scope: "space",
+          path: [],
+        }).sync();
+      } catch (error) {
+        logger.warn("event-sidecar-sync-failed", () => [
+          `sidecar sync for ${doc.id} failed; its events defer to the ` +
+            "next wave",
+          error,
+        ]);
+        this.#eventScanOwed = true;
+        continue;
+      }
+      // The FULL stored log — mark indices address positions in it.
+      const stored =
+        ((Engine.read(engine, { id: doc.id })?.value ?? {}) as
+          StreamEventsDocValue).entries ?? [];
+      const runnable = [...doc.entries].sort(
+        (a, b) => (a.seq ?? Number.MAX_SAFE_INTEGER) -
+          (b.seq ?? Number.MAX_SAFE_INTEGER),
+      );
+      for (const entry of runnable) {
+        const index = stored.findIndex((candidate) =>
+          candidate?.eventId === entry.eventId &&
+          candidate?.seq === entry.seq
+        );
+        if (index < 0) continue;
+        const streamEntry = {
+          sidecarId: doc.id,
+          index,
+          seq: entry.seq ?? 0,
+        };
+        const duplicateOfConsequenced = stored.some((candidate) =>
+          candidate?.eventId === entry.eventId &&
+          candidate.consequenced === true &&
+          candidate.seq !== entry.seq
+        );
+        if (duplicateOfConsequenced) {
+          // events.md §4/§5: processing skips it; the entry is passed
+          // by the frontier rather than wedging the stream.
+          this.#options.stats.events.skippedIdempotent += 1;
+          this.#sealEventConsequenceNotice(runtime, entry, streamEntry);
+          continue;
+        }
+        const link: NormalizedFullLink = {
+          space,
+          id: entry.stream.id as NormalizedFullLink["id"],
+          path: [...entry.stream.path],
+          scope: (entry.stream.scope ?? "space") as
+            NormalizedFullLink["scope"],
+        };
+        try {
+          await runtime.getCellFromLink({
+            space,
+            id: entry.stream.id as never,
+            scope: (entry.stream.scope ?? "space") as never,
+            path: [],
+          }).sync();
+        } catch {
+          // A cold stream doc defers like a cold piece load below.
+        }
+        try {
+        // The mark the stamper will write is index-addressed against
+        // the REPLICA view: verify the view holds this entry at this
+        // index before dispatch (a lagging view defers — never a ghost
+        // write).
+        const viewEntry = runtime.getCellFromLink<
+          { eventId?: string } | undefined
+        >({
+          space,
+          id: doc.id as never,
+          scope: "space",
+          path: ["entries", String(index)],
+        }).get();
+        if (viewEntry?.eventId !== entry.eventId) {
+          logger.warn("event-view-lag", () => [
+            `drain deferring ${entry.eventId}: replica view holds ` +
+              `${JSON.stringify(viewEntry)} at index ${index}`,
+          ]);
+          this.#eventScanOwed = true;
+          continue;
+        }
+        runtime.scheduler.queueEvent(
+          link,
+          entry.payload,
+          // No scheduler-side backoff: a transiently-failed seal leaves
+          // the entry unconsequenced and durable, and the post-wave
+          // re-arm rescans it — the wave IS the retry cadence.
+          false,
+          undefined,
+          false,
+          {
+            eventId: entry.eventId,
+            ...(entry.runtimeInjectedEventKeys !== undefined
+              ? {
+                // Re-mint the carried provenance in THIS runtime (the
+                // mint is a process-local trust mark): the entry's keys
+                // were committed under the firing client's own
+                // admission, the same in-process trust the client-side
+                // gate ran under.
+                runtimeInjectedEventKeys: markRuntimeInjectedEventKeys(
+                  entry.runtimeInjectedEventKeys,
+                ),
+              }
+              : {}),
+            served: {
+              ...(entry.firedAt !== undefined
+                ? {
+                  firedAt: {
+                    ...(entry.firedAt.user !== undefined
+                      ? { user: entry.firedAt.user }
+                      : {}),
+                    ...(entry.firedAt.session !== undefined
+                      ? { session: entry.firedAt.session }
+                      : {}),
+                  },
+                }
+                : {}),
+              streamEntry,
+              onFailure: (outcome) => {
+                if (outcome.kind === "deferred") {
+                  // No consequence: the entry stays pending and the
+                  // next wave re-drains it (the cold-view creation
+                  // race — OW19's conflation caution).
+                  this.#eventScanOwed = true;
+                  return;
+                }
+                this.#sealEventConsequenceNotice(
+                  runtime,
+                  entry,
+                  streamEntry,
+                  { kind: outcome.kind, message: outcome.message },
+                );
+              },
+            },
+          },
+        );
+        queued += 1;
+        } catch (drainError) {
+          logger.warn("drain-debug", () => ["per-entry threw", drainError]);
+          this.#eventScanOwed = true;
+        }
+      }
+    }
+    this.#options.stats.events.processed += queued;
+    if (queued > this.#options.stats.events.coalescedPerWaveMax) {
+      this.#options.stats.events.coalescedPerWaveMax = queued;
+    }
+    return queued;
+  }
+
+  /**
+   * Seal one event's consequence OUTSIDE a handler tx (the skip, error,
+   * and drop arms — the handler tx either never ran or aborted): an
+   * event-handler-class tx carrying the entry's `consequenced` mark
+   * (written by the stamper) plus the arm's notice fields
+   * (events.md §5: the error — or the `{status: "dropped", reason}`
+   * notice — IS the consequence, and the frontier advances past it).
+   * The seal rides the CURRENT wave; the wave close awaits it.
+   */
+  #sealEventConsequenceNotice(
+    runtime: Runtime,
+    entry: StreamEventEntry,
+    streamEntry: { sidecarId: string; index: number; seq: number },
+    outcome?: { kind: "error" | "dropped" | "deferred"; message: string },
+  ): void {
+    try {
+      const tx = runtime.edit();
+      runtime.stampServerRun(tx, {
+        actionId: `server-execution/event-consequence:${entry.eventId}`,
+        kind: "event-handler",
+        eventId: entry.eventId,
+        streamEntry,
+      });
+      if (outcome !== undefined) {
+        const base = {
+          space: this.#options.space,
+          id: streamEntry.sidecarId as never,
+          scope: "space" as const,
+        };
+        if (outcome.kind === "error") {
+          runtime.getCellFromLink<string>({
+            ...base,
+            path: ["entries", String(streamEntry.index), "error"],
+          }).withTx(tx).set(outcome.message);
+        } else {
+          runtime.getCellFromLink<string>({
+            ...base,
+            path: ["entries", String(streamEntry.index), "status"],
+          }).withTx(tx).set("dropped");
+          runtime.getCellFromLink<string>({
+            ...base,
+            path: ["entries", String(streamEntry.index), "reason"],
+          }).withTx(tx).set(outcome.message);
+        }
+      }
+      const sealed = tx.commit().catch((error) => {
+        logger.warn("event-notice-seal-failed", () => [
+          `consequence notice for ${entry.eventId} failed to seal; the ` +
+            "entry stays pending and the next wave re-drains it",
+          error,
+        ]);
+      });
+      this.#eventNoticeWork.add(sealed as Promise<unknown>);
+      (sealed as Promise<unknown>).finally(() => {
+        this.#eventNoticeWork.delete(sealed as Promise<unknown>);
+      });
+    } catch (error) {
+      logger.warn("event-notice-failed", () => [
+        `consequence notice for ${entry.eventId} could not be staged; ` +
+          "the entry stays pending and the next wave re-drains it",
+        error,
+      ]);
+    }
   }
 
   /** Load graph structure for the demanded values (serving-loop.md §1):
@@ -1078,6 +1418,7 @@ export class SpaceServer implements TransactionSealDestination {
     if (runtime === undefined || !this.#active) return;
     const { batchHead } = this.#drainFeed();
     await this.#loadDemandedStructure();
+    const drainedEvents = await this.#drainStreamEvents(runtime);
 
     // Settle to quiescence under the flush deadline: idle() is the wave
     // boundary; synced() lets the loopback session's frames land so the
@@ -1279,6 +1620,15 @@ export class SpaceServer implements TransactionSealDestination {
       }
     }
 
+    // The consequence-notice seals (error/drop/skip arms) must land in
+    // THIS wave: their marks are the events' consequences
+    // (events.md §5), and the first flush carries them
+    // (serving-loop.md §3's sealing order).
+    if (this.#eventNoticeWork.size > 0) {
+      await Promise.allSettled([...this.#eventNoticeWork]);
+      this.#eventNoticeWork.clear();
+    }
+
     const closing = this.#currentWave;
     if (closing === undefined) return;
     this.#currentWave = undefined;
@@ -1308,6 +1658,18 @@ export class SpaceServer implements TransactionSealDestination {
       ]);
     }
     stats.supersededWrites += outcome.supersededWrites;
+    // Phase 3: a REQUEUED event's consequence contribution was rolled
+    // back whole — its entry stays unconsequenced and durable, so the
+    // next wave's scan re-finds and re-runs it (serving-loop.md §3d's
+    // requeue arm; C8b). The same re-arm covers any drained event whose
+    // seal failed transiently: its entry, too, is still pending.
+    if (
+      (outcome.requeuedEventIds?.length ?? 0) > 0 ||
+      (drainedEvents > 0 &&
+        Engine.selectPendingStreamEventDocs(this.#options.engine).length > 0)
+    ) {
+      this.#eventScanOwed = true;
+    }
     // Stage G, post-commit: hand the wave's sealed effects to the
     // outbox BEFORE anything below can throw (a failed commit-record
     // fetch must not leak effects with the runtime still alive) — but

@@ -365,6 +365,20 @@ export type ServerRunInfo = {
    * `scopeKeyIdentity` over the demanded root's scope), for basis-row
    * keying (serving-loop.md §3b's `action_scope_key`). */
   actionScopeKey?: ScopeKey;
+  /** The ACTING identity of an event-handler run (Phase 3, LD1;
+   * events.md §2, protocol.md §2): the server-stamped `firedAt` actor
+   * the drain resolved from the stream entry — handlers keep the
+   * event's actor (scopes.md §5). Carried into the wave run context's
+   * attribution annotations. `session` is absent for a sessionless
+   * chain (`firedAt.session = "server"`). */
+  acting?: { user: string; session?: string };
+  /** The durable stream entry a drained event-handler run consequences
+   * (Phase 3; events.md §4): the serving stamper writes the entry's
+   * `consequenced` mark INTO the run's own transaction, so the mark and
+   * the handler's consequences commit — and roll back — together (the
+   * same-transaction atomicity events.md §4 requires; a requeued
+   * contribution takes its mark with it). */
+  streamEntry?: { sidecarId: string; index: number; seq: number };
 };
 
 export interface RuntimeOptions {

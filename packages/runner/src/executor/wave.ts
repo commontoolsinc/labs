@@ -35,6 +35,7 @@ import {
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
+  STREAM_ENTRIES_DOC_PREFIX,
 } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import type {
@@ -1309,7 +1310,30 @@ export class WaveAccumulator
       for (const patch of operation.patches) {
         const patchPath = parsePointer(patch.path);
         for (const concurrent of concurrentPaths) {
-          if (pathsOverlap(patchPath, concurrent)) return false;
+          if (!pathsOverlap(patchPath, concurrent)) continue;
+          // Stream-sidecar refinement (Phase 3; events.md §4): the ONLY
+          // concurrent writers a sidecar doc admits at `/value/entries`
+          // are tail APPENDS — the authored shape guard refuses deeper
+          // authored writes, whole-array rewrites, and deletes
+          // (engine.ts validateEventAppends), and the loop's own derived
+          // commits are self-echo-skipped. A tail append creates only
+          // NEW indices, so an index-addressed consequence mark
+          // (`/value/entries/<i>/...` for an entry that existed at the
+          // wave basis) commutes with it — the general prefix-overlap
+          // rule would requeue every event whose stream took a
+          // concurrent fire, which the field-level merge exists to
+          // avoid (serving-loop.md §3d).
+          if (
+            doc.id.startsWith(STREAM_ENTRIES_DOC_PREFIX) &&
+            concurrent.length === 2 &&
+            concurrent[0] === "value" &&
+            concurrent[1] === "entries" &&
+            patchPath.length > 2 &&
+            String(Number(patchPath[2])) === String(patchPath[2])
+          ) {
+            continue;
+          }
+          return false;
         }
       }
     }

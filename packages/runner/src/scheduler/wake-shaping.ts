@@ -273,6 +273,11 @@ export interface DeliverOpts {
    * events (the only shapable class) are never injection sites, so this is
    * defensive plumbing, not a live path. */
   runtimeInjectedEventKeys?: readonly string[];
+  /** The serving drain's per-event carriage (Phase 3), carried through a
+   * held delivery unchanged — same defensive plumbing as above (drained
+   * store entries are never renderer-trusted, so shaping never holds
+   * them in practice). */
+  served?: import("./types.ts").ServedEventDispatch;
 }
 
 export type DeliverFn = (

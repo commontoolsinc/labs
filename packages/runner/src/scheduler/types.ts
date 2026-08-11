@@ -170,6 +170,26 @@ export interface TriggerTraceEntry {
   triggered: TriggerTraceActionRecord[];
 }
 
+/** The serving drain's per-event carriage (see QueuedEvent.served). */
+export type ServedEventDispatch = {
+  firedAt?: { user?: string; session?: string };
+  streamEntry?: { sidecarId: string; index: number; seq: number };
+  onFailure?: (
+    outcome: {
+      /** `error`: the handler THREW — the error is the consequence
+       * (events.md §5). `dropped`: no runnable handler exists — §5's
+       * drop predicate, the notice is the consequence. `deferred`: the
+       * handler could not be REACHED yet (a cold-view piece load — the
+       * creation-race shape OW19 warns about): no consequence is
+       * written, the entry stays pending, and a later wave re-drains
+       * it. Deferral is NOT the drop predicate — "the test is 'no
+       * runnable handler', never 'the run raced'". */
+      kind: "error" | "dropped" | "deferred";
+      message: string;
+    },
+  ) => void;
+};
+
 export type QueuedEvent = {
   /** Durable event id minted at send (spec §7.5). */
   readonly id: string;
@@ -228,6 +248,18 @@ export type QueuedEvent = {
    */
   retry: boolean;
   onCommit?: (tx: IExtendedStorageTransaction) => void;
+  /**
+   * Server-execution v2 Phase 3 (events-down): the serving drain's
+   * per-event carriage. `firedAt` is the server-stamped acting identity
+   * the handler runs as (LD1); `streamEntry` locates the durable entry
+   * whose `consequenced` mark rides the handler's own transaction; and
+   * `onFailure` is the drain's hook for the two arms that need a
+   * consequence written OUTSIDE the handler tx — the handler THREW (the
+   * error is the consequence, events.md §5) or the event DROPPED (no
+   * runnable handler — the §5 drop predicate). Success needs no
+   * callback: the mark rode the tx. Absent on every client-side event.
+   */
+  served?: ServedEventDispatch;
   notBefore?: number;
   /**
    * Number of transient commit failures this intent has hit. Drives the

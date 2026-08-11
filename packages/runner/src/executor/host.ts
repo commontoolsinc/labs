@@ -141,12 +141,19 @@ export class ExecutorHost {
     // The admission-side activation hook (serving-loop.md §1 plane (b)):
     // an AUTHORED admission into a space with no live SpaceServer. The
     // ACTIVE criteria then gate activation: ≥1 live session (an authored
-    // transact implies its committing session) or undelivered events
-    // (none until Phase 3). System/direct writes alone activate nothing
-    // — a provisioning write into a lease-less space stays parked until
-    // its first session or event (trace finding T11.Q7).
+    // transact implies its committing session) or undelivered events —
+    // an event-append admission is BOTH the event's arrival and the
+    // criterion, so it activates even with no live session (Phase 3: a
+    // delegated cross-space delivery lands under the DELIVERING
+    // server's service session, and the target may have no client).
+    // System/direct writes alone activate nothing — a provisioning
+    // write into a lease-less space stays parked until its first
+    // session or event (trace finding T11.Q7).
     if (notice.class !== "authored") return;
+    const carriesEvents = notice.eventAppends !== undefined &&
+      notice.eventAppends.length > 0;
     if (
+      !carriesEvents &&
       !this.#options.server.hasLiveSessionsForSpace(notice.space, {
         excludePrincipal: this.#options.serviceIdentity,
       })

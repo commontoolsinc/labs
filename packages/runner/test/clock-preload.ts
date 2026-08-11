@@ -49,5 +49,8 @@ installFakeClock({
     // wall-clock policy, and the tests wait on transport edges with
     // bounded timeouts — the same class as the serving-loop suites).
     "event-append-client",
+    // The Phase-3 serving-side events-down suite drives a live
+    // ExecutorHost under the same wall-clock policies.
+    "executor-events-down",
   ],
 });

@@ -856,6 +856,11 @@ export class Scheduler {
        * `StreamSendOptions` (cell.ts).
        */
       runtimeInjectedEventKeys?: readonly string[];
+      /** Server-execution v2 Phase 3: the serving drain's per-event
+       * carriage — acting identity, the durable stream entry, and the
+       * failure hook (QueuedEvent.served). Passed only by the
+       * SpaceServer's drain; absent everywhere client-side. */
+      served?: import("./types.ts").ServedEventDispatch;
     } = {},
   ): void {
     // Bind the event's wall-clock time at its causal origin. A pre-supplied time
@@ -890,6 +895,7 @@ export class Scheduler {
           originTx: opts.originTx,
           time,
           runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
+          served: opts.served,
         },
       );
       return;
@@ -904,6 +910,7 @@ export class Scheduler {
       originTx: opts.originTx,
       time,
       runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
+      served: opts.served,
     });
   }
 
@@ -926,6 +933,7 @@ export class Scheduler {
       originTx: opts.originTx,
       time: opts.time,
       runtimeInjectedEventKeys: opts.runtimeInjectedEventKeys,
+      served: opts.served,
     });
 
   // The owning pattern instance for an input stream, used to group a pattern's

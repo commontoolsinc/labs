@@ -163,10 +163,26 @@ function notifyEventDropped(
   args: {
     readonly eventLink: NormalizedFullLink;
     readonly onCommit?: QueuedEvent["onCommit"];
+    readonly served?: QueuedEvent["served"];
   },
   reason: string,
+  servedKind: "dropped" | "deferred" = "dropped",
 ): void {
   logger.warn("scheduler", reason, { eventLink: args.eventLink });
+  // The serving drain's terminal arms (events.md §5): `dropped` — no
+  // runnable handler, the drain writes the dropped-event notice as the
+  // event's consequence and advances the stream past it (non-wedging);
+  // `deferred` — the handler was UNREACHABLE (a cold-view load), no
+  // consequence is written and a later wave re-drains the entry.
+  try {
+    args.served?.onFailure?.({ kind: servedKind, message: reason });
+  } catch (callbackError) {
+    logger.error(
+      "schedule-error",
+      "Error in served event drop callback:",
+      callbackError,
+    );
+  }
   if (!args.onCommit) return;
   const tx = state.runtime.edit();
   tx.abort(new Error(reason));
@@ -193,6 +209,7 @@ export function dropQueuedEvent(
     & Partial<Pick<SchedulerEventQueueState, "releaseLineageEvent">>,
   event: QueuedEvent,
   reason: string,
+  servedKind: "dropped" | "deferred" = "dropped",
 ): void {
   const index = state.eventQueue.indexOf(event);
   if (index >= 0) state.eventQueue.splice(index, 1);
@@ -201,7 +218,7 @@ export function dropQueuedEvent(
   }
   if (event.finalOutcomeNotified) return;
   event.finalOutcomeNotified = true;
-  notifyEventDropped(state, event, reason);
+  notifyEventDropped(state, event, reason, servedKind);
 }
 
 function findEventHandler(
@@ -245,6 +262,7 @@ function readyQueuedEvent(args: {
   readonly originTx?: IExtendedStorageTransaction;
   readonly time?: number;
   readonly runtimeInjectedEventKeys?: readonly string[];
+  readonly served?: QueuedEvent["served"];
 }): QueuedEvent {
   return {
     id: args.id,
@@ -258,6 +276,7 @@ function readyQueuedEvent(args: {
     runtimeInjectedEventKeys: args.runtimeInjectedEventKeys,
     retry: args.retries,
     onCommit: args.onCommit,
+    served: args.served,
   };
 }
 
@@ -314,6 +333,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly originTx?: IExtendedStorageTransaction;
   readonly time?: number;
   readonly runtimeInjectedEventKeys?: readonly string[];
+  readonly served?: QueuedEvent["served"];
 }): void {
   // `eventId` here is an already-durable delivery id, used verbatim — an
   // ingress caller's opaque idempotency key is bound to its stream earlier,
@@ -436,13 +456,26 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           queuedEvent.handler = loadedHandler;
           queuedEvent.action = (tx) => loadedHandler(tx, args.event);
           delete queuedEvent.handlerLoadPending;
-        } else {
+        } else if (started) {
+          // The piece ran and registered NOTHING for this stream —
+          // events.md §5's drop predicate ("no runnable handler").
           dropQueuedEvent(
             state,
             queuedEvent,
-            started
-              ? `Event dropped: no handler registered for ${args.eventLink.id} after starting its piece`
-              : `Event dropped: no handler registered for ${args.eventLink.id} and its piece could not be started`,
+            `Event dropped: no handler registered for ${args.eventLink.id} after starting its piece`,
+          );
+        } else {
+          // The piece could not be STARTED — for a served (drained)
+          // event this is a cold-view deferral (the creation-race
+          // shape), never the drop predicate: the durable entry stays
+          // pending and a later wave re-drains it. Client-side the
+          // distinction is moot (no durable entry to re-drain) and the
+          // drop keeps its existing shape.
+          dropQueuedEvent(
+            state,
+            queuedEvent,
+            `Event dropped: no handler registered for ${args.eventLink.id} and its piece could not be started`,
+            queuedEvent.served !== undefined ? "deferred" : "dropped",
           );
         }
       } catch (error) {
@@ -452,6 +485,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           `Event dropped: starting the piece for ${args.eventLink.id} failed: ${
             error instanceof Error ? error.message : String(error)
           }`,
+          queuedEvent.served !== undefined ? "deferred" : "dropped",
         );
       } finally {
         state.queueExecution();
@@ -1006,10 +1040,43 @@ export async function dispatchQueuedEvent(state: {
   // choke point — a serving runtime's installed stamper attaches the wave
   // run context (kind event-handler, the durable event id) before the
   // handler runs. A no-op everywhere else.
+  const served = queuedEvent.served;
   state.runtime.stampServerRun(tx, {
     actionId: state.getActionId(action),
     kind: "event-handler",
     eventId: queuedEvent.id,
+    ...(served?.firedAt !== undefined
+      ? {
+        // LD1 (protocol.md §2, scopes.md §5): the handler runs AS the
+        // event's server-stamped actor — its scoped reads and writes
+        // resolve against the acting identity, and the attribution
+        // annotations carry it. A run with NO acting user carries no
+        // attribution at all (protocol.md §1); a sessionless chain
+        // supplies no session component, so a session-scoped write
+        // fails closed in resolveScopeKey (events.md §2's
+        // sessionless-actor error).
+        ...(served.firedAt.user !== undefined
+          ? {
+            acting: {
+              user: served.firedAt.user,
+              ...(served.firedAt.session !== undefined &&
+                  served.firedAt.session !== "server"
+                ? { session: served.firedAt.session }
+                : {}),
+            },
+          }
+          : {}),
+        scopeKeyIdentity: {
+          principal: served.firedAt.user,
+          sessionId: served.firedAt.session === "server"
+            ? undefined
+            : served.firedAt.session,
+        } as never,
+      }
+      : {}),
+    ...(served?.streamEntry !== undefined
+      ? { streamEntry: served.streamEntry }
+      : {}),
   });
   if (queuedEvent.originTx !== undefined) {
     const originLocalSeq = state.getOriginLocalSeq(
@@ -1149,6 +1216,24 @@ export async function dispatchQueuedEvent(state: {
         if (tx.status().status === "ready") {
           tx.abort(error);
         }
+        // The serving drain's ERROR arm (events.md §5): the handler
+        // threw server-side — the error IS the consequence. The
+        // handler tx (with its consequenced mark) aborted above; the
+        // drain seals the error consequence in its own transaction.
+        try {
+          served?.onFailure?.({
+            kind: "error",
+            message: error instanceof Error
+              ? error.message
+              : String(error),
+          });
+        } catch (callbackError) {
+          logger.error(
+            "schedule-error",
+            "Error in served event failure callback:",
+            callbackError,
+          );
+        }
         // A throwing handler is a final outcome for this event — settle the
         // commit callback (with the aborted tx) instead of leaving callers
         // that await it hanging.
@@ -1173,6 +1258,12 @@ export async function dispatchQueuedEvent(state: {
     // barrier, which the client-facing idle (Scheduler.idleWithPendingCommits)
     // waits on without blocking the scheduler loop here.
     const handleCommitResult = (error: EventCommitError | undefined): void => {
+      if (served !== undefined && error !== undefined) {
+        logger.warn("served-event-commit-failed", () => [
+          `served event ${queuedEvent.id} commit failed`,
+          error,
+        ]);
+      }
       const permanentRejection = error && isPermanentRejection(error)
         ? error.precondition
         : undefined;
