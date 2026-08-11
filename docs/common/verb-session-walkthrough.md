@@ -209,6 +209,42 @@ and `schemaDescription` is consulted only from the per-property loop.
 
 So the help page shows `--title <string>  Required.` and stops.
 
+### What the page becomes **[blocked]**
+
+Nothing here needs a mechanism that does not exist — only the emitter reaching
+the sites it skips, and a verb declaring its result. Written out, because a
+surface worth building is worth being able to picture:
+
+```text
+Usage:
+  cf piece call --piece board addItem -- --title <string>
+
+File a new root item. Takes its title; returns the item it created as a
+reference, which is the address every later command in a session uses.
+
+JSON input:
+  { title: string }
+
+Flags after `--`:
+  --title <string>    Required. One line naming the work.
+
+Output:
+  item     the item this call created, as an address you can call verbs on
+```
+
+Three changes get there, and they are not one piece of work:
+
+| Line | Needs |
+| --- | --- |
+| the summary under Usage | emission of the event interface's comment, **and** a summary line in `renderPieceCallHelp` |
+| the prose beside `--title` | emission only — the renderer already prints a `description` |
+| the `Output:` fields | a verb's declared result reaching the runtime (verbs plan item 1), then emission of the result fields' comments |
+
+The first two are unblocked. The third has a prerequisite: a handler has no
+declared result on the wire at all yet, so there is nowhere to hang a result
+field's description even if the emitter kept one
+([#5637](https://github.com/commontoolsinc/labs/issues/5637)).
+
 Three things are wrong with that page rather than missing from it.
 
 **`Output:` is false.** `addItem` declares a result and returns one; the value
@@ -322,8 +358,9 @@ Declared results make an **output** self-describing; this is about what an
 | --- | --- |
 | `Output:` claims a handler returns nothing | Nothing — it is wrong, not missing |
 | A flag's prose absent from its help page | An emission fix — the renderer already reads a `description`; the schema the CLI is served has none |
-| A verb's purpose absent from its help page | An emission fix, then a renderer one — an event interface's doc comment reaches neither |
+| A verb's purpose absent from its help page | An emission fix, then a renderer one — an event interface's doc comment reaches neither, and the page has no summary line |
 | A verb's own doc comment absent everywhere | An emission fix — JSDoc survives on a data property and is dropped on a `Stream` one |
+| A result field's prose | Item 1 first — there is no declared result on the wire to hang it on |
 | Result fields listed in help | A declared result |
 | `--select` completion, and refusal before the call | A declared result |
 | An address accepted as an argument | The round-trip property above |
