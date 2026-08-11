@@ -1,5 +1,5 @@
 import { createSession, DID, Identity, Session } from "@commonfabric/identity";
-import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc-atoms";
+import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc";
 import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
 import { slugIdForSpace } from "@commonfabric/runner/slugs";
 import { NameSchema } from "@commonfabric/runner/schemas";

@@ -9,7 +9,7 @@ import {
 import { _internal } from "../lib/view/render.ts";
 import { stripAnsi, visibleWidth } from "../lib/view/ansi.ts";
 import { renderLineColored } from "../lib/view/highlight.ts";
-import { lineBg, ui } from "../lib/view/theme.ts";
+import { lineBg, styleFor, ui } from "../lib/view/theme.ts";
 
 function baseView(over: Partial<ViewState> = {}): ViewState {
   return {
@@ -555,6 +555,144 @@ Deno.test("renderFrame: wrapped metadata keeps its label beside the backslash", 
     "ij    █",
     " ☙ ❦ ❧ ",
   ]);
+});
+
+Deno.test("renderFrame: draws the whole-diff totals in the first line's corner", () => {
+  const doc = parseDocument("meta\nbody");
+  const view = diffView({
+    width: 16,
+    height: 4,
+    color: false,
+    diffTotals: { adds: 456, dels: 123 },
+  });
+  const rows = renderFrame(doc, view);
+  assertEquals(rows[0], "meta   +456 −123");
+  assertEquals(rows[1], "body            ");
+  // The label belongs to the first line: scrolling down takes it off screen.
+  const scrolled = renderFrame(doc, { ...view, top: 1 });
+  assertEquals(scrolled[0], "body            ");
+  assert(!scrolled.some((row) => row.includes("+456")));
+});
+
+Deno.test("renderFrame: colours the totals as removals and additions", () => {
+  const doc = parseDocument("meta");
+  const rows = renderFrame(
+    doc,
+    diffView({ width: 12, height: 3, diffTotals: { adds: 2, dels: 1 } }),
+  );
+  assertEquals(stripAnsi(rows[0]), "meta   +2 −1");
+  const del = styleFor("diffDel").fg!.join(",");
+  const add = styleFor("diffAdd").fg!.join(",");
+  assertEquals(fgAtColumn(rows[0], 7), add, "the + sign");
+  assertEquals(fgAtColumn(rows[0], 8), add, "the added count");
+  assertEquals(fgAtColumn(rows[0], 10), del, "the − sign");
+  assertEquals(fgAtColumn(rows[0], 11), del, "the removed count");
+  assertEquals(bgAtColumn(rows[0], 8), ui.editorBg.join(","));
+});
+
+Deno.test("renderFrame: the totals reserve wrapped width on the first line", () => {
+  const doc = parseDocument("abcdefghijklmnop");
+  const rows = renderFrame(
+    doc,
+    diffView({
+      width: 12,
+      height: 4,
+      color: false,
+      wrapMode: "hard",
+      diffTotals: { adds: 2, dels: 1 },
+    }),
+  );
+  assertEquals(rows[0], "abcdef\\+2 −1");
+  assertEquals(rows[1], "ghijklmnop  ");
+});
+
+Deno.test("renderFrame: the totals sit before a first-line Ctrl-L label", () => {
+  const doc = parseDocument("meta\nbody");
+  const rows = renderFrame(
+    doc,
+    diffView({
+      width: 16,
+      height: 4,
+      color: false,
+      expandMargin: true,
+      diffAnnotations: [
+        { line: 1, kind: "expandUp" },
+        { line: 0, kind: "diffMetadata" },
+      ],
+      diffTotals: { adds: 2, dels: 1 },
+    }),
+  );
+  assertEquals(rows[0], "meta    +2 −1^L█");
+  assertEquals(rows[1], "body           ◥");
+});
+
+Deno.test("renderFrame: wrapped totals layer over a first-line annotation", () => {
+  const doc = parseDocument("metadatax\nabc");
+  const rows = renderFrame(
+    doc,
+    diffView({
+      width: 12,
+      height: 4,
+      color: false,
+      expandMargin: true,
+      wrapMode: "hard",
+      diffAnnotations: [
+        { line: 1, kind: "expandUp" },
+        { line: 0, kind: "diffMetadata" },
+      ],
+      diffTotals: { adds: 2, dels: 1 },
+    }),
+  );
+  assertEquals(rows[0], "met\\+2 −1^L█");
+  assertEquals(rows[1], "adatax     █");
+  assertEquals(rows[2], "abc        ◥");
+});
+
+Deno.test("renderFrame: totals reflow moves the Ctrl-L label, not copies it", () => {
+  // Without the totals, the 16-column first line fits beside its expansion
+  // triangle, so the metadata line below would carry the ^L label. The totals
+  // reservation wraps the first line, and the label must follow it onto the
+  // wrapped row rather than appear in both places.
+  const doc = parseDocument("abcdefghijklmnop\nmeta");
+  const rows = renderFrame(
+    doc,
+    diffView({
+      width: 20,
+      height: 5,
+      color: false,
+      expandMargin: true,
+      wrapMode: "hard",
+      diffAnnotations: [
+        { line: 0, kind: "expandDown" },
+        { line: 1, kind: "diffMetadata" },
+      ],
+      diffTotals: { adds: 2, dels: 1 },
+    }),
+  );
+  assertEquals(rows.slice(0, 3), [
+    "abcdefghijklm\\+2 −1◢",
+    "nop              ^L█",
+    "meta               █",
+  ]);
+  assertEquals(
+    rows.filter((row) => row.includes("^L")).length,
+    1,
+    "exactly one Ctrl-L label",
+  );
+});
+
+Deno.test("renderFrame: narrow totals keep at least one source cell", () => {
+  const doc = parseDocument("abcdef");
+  const rows = renderFrame(
+    doc,
+    diffView({
+      width: 4,
+      height: 3,
+      color: false,
+      diffTotals: { adds: 345, dels: 12 },
+    }),
+  );
+  assertEquals(rows[0], "a−12");
 });
 
 Deno.test("renderFrame: a diff without a final triangle omits the end connector", () => {

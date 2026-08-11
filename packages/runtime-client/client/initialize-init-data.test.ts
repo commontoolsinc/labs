@@ -19,7 +19,10 @@ import type { RuntimeTransport, RuntimeTransportEvents } from "./transport.ts";
 class CapturingTransport extends EventEmitter<RuntimeTransportEvents>
   implements RuntimeTransport {
   readonly sent: Array<IPCClientMessage | IPCClientNotification> = [];
-  send(message: IPCClientMessage | IPCClientNotification): void {
+  send(original: IPCClientMessage | IPCClientNotification): void {
+    // Cloned, as a real transport delivers it, so what is captured cannot
+    // change under later mutation by the sender.
+    const message = structuredClone(original);
     this.sent.push(message);
     if (!("msgId" in message)) return;
     queueMicrotask(() => {

@@ -197,8 +197,7 @@ export const bashTool: HarnessToolDefinition<BashToolInput, BashToolOutput> = {
       ? parsedCwd.stdout
       : result.stdout;
     const isAllowedCurrentDir = parsedCwd?.cwd !== undefined &&
-      (context.sandbox.isPathWithinAllowedRoots?.(parsedCwd.cwd) ??
-        context.sandbox.isPathWithinWorkspace(parsedCwd.cwd));
+      context.sandbox.isPathWithinAllowedRoots(parsedCwd.cwd);
     const nextCurrentDir = parsedCwd?.cwd !== undefined &&
         isAllowedCurrentDir
       ? parsedCwd.cwd

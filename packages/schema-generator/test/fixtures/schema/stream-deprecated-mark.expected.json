@@ -1,0 +1,27 @@
+{
+  "properties": {
+    "legacyName": {
+      "type": "string"
+    },
+    "rename": {
+      "asCell": [
+        "stream"
+      ],
+      "description": "Current verb beside it, unmarked.",
+      "type": "string"
+    },
+    "setLegacyName": {
+      "asCell": [
+        "stream"
+      ],
+      "deprecated": true,
+      "type": "string"
+    }
+  },
+  "required": [
+    "legacyName",
+    "rename",
+    "setLegacyName"
+  ],
+  "type": "object"
+}

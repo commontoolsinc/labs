@@ -4,7 +4,6 @@ import { createSession, Identity } from "@commonfabric/identity";
 import { getPatternIdentityRef, Pattern, Runtime } from "@commonfabric/runner";
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { PieceManager } from "../src/manager.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("piece step slot");
@@ -37,7 +36,7 @@ function doublePattern(): Pattern {
 describe("piece run/step through a value-link slot", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
+  let pieces: PiecesController;
 
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -49,8 +48,8 @@ describe("piece run/step through a value-link slot", () => {
       identity: signer,
       spaceName: "piece-step-slot-" + crypto.randomUUID(),
     });
-    manager = new PieceManager(session, runtime);
-    await manager.synced();
+    pieces = new PiecesController(session, runtime);
+    await pieces.synced();
   });
 
   afterEach(async () => {
@@ -61,7 +60,7 @@ describe("piece run/step through a value-link slot", () => {
   it("starts a piece addressed through a value-link slot (the cf piece step path)", async () => {
     // Canonical piece K carries patternIdentity; the value-link slot R -> K (the
     // shape a piece pushed into a list/object gets addressed by) carries none.
-    const k = await manager.runPersistent(
+    const k = await pieces.runPersistent(
       runtime.unsafeTrustPattern(doublePattern(), {
         reason: "piece step slot test fixture",
       }),
@@ -70,19 +69,18 @@ describe("piece run/step through a value-link slot", () => {
       { start: true },
     );
     const r = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "step-slot-" + crypto.randomUUID(),
     );
     await runtime.editWithRetry((tx) => {
       r.withTx(tx).set(k.getAsLink());
     });
-    await manager.synced();
+    await pieces.synced();
     const slotId = entityRefToString(r.entityId);
 
     // Before this fix, `get(slotId, runIt=true)` -> `runtime.start(R)` threw
-    // "Cannot start: no pattern identity" (R has none). `manager.get` now
+    // "Cannot start: no pattern identity" (R has none). `pieces.get` now
     // canonicalizes R -> K, so start / read / stop operate on the real piece.
-    const pieces = new PiecesController(manager);
     const started = await pieces.get(slotId, true);
     expect(getPatternIdentityRef(started.getCell())).toBeDefined();
     expect(await started.result.get(["output"])).toBe(10);

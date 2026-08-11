@@ -5,7 +5,7 @@
 
 import { assert, assertEquals } from "@std/assert";
 import { Database } from "@db/sqlite";
-import { jsonFromValue } from "@commonfabric/data-model/codec-json";
+import { jsonFromValue } from "@commonfabric/data-model/codecs";
 
 import { openSpace } from "../db.ts";
 import { listCommits } from "../queries.ts";

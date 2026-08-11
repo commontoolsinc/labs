@@ -8,7 +8,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { convertCellsToLinks } from "../src/cell.ts";
+import { type CellLinkInput, convertCellsToLinks } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -74,8 +74,11 @@ describe("convertCellsToLinks() with runtime-annotated arrays", () => {
     const arr = [1, 2] as unknown[] & { foo?: string };
     arr.foo = "bar";
 
+    // The cast is the point of the test: `CellLinkInput` already refuses this
+    // array, and what is being pinned is that the runtime refuses it too,
+    // rather than dropping the named property on the way through.
     expect(() =>
-      convertCellsToLinks(arr, {
+      convertCellsToLinks(arr as CellLinkInput, {
         doNotConvertCellResults: true,
         includeSchema: true,
       })

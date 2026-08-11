@@ -39,10 +39,12 @@
 (*                   overlaps p, plus always the top-of-stack layer.       *)
 (*                                                                         *)
 (*   BasisMode - where the staleness scan for a pending read starts:       *)
-(*       "maxdep"    shipped semantics: the resolution seq of the highest  *)
-(*                   recorded dependency (CT-1910's over-advance).         *)
-(*       "confirmed" planned repair: the reader's confirmed basis, with    *)
-(*                   the reader's own session excluded from the scan.      *)
+(*       "maxdep"    legacy: served only to pending reads that carry no    *)
+(*                   basisSeq; scans from the resolution seq of the        *)
+(*                   highest recorded dependency (CT-1910's over-advance). *)
+(*       "confirmed" CT-1910 repair, shipped: clients declare basisSeq     *)
+(*                   and the scan runs from that confirmed basis with the  *)
+(*                   reader's own session excluded.                        *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences, FiniteSets
 

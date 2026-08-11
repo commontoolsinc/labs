@@ -86,8 +86,8 @@ export abstract class BaseFabricInstance extends FabricInstance {
    * which have no enumerable own properties for an inspector to find.
    *
    * Delegates to the canonical debug renderer rather than formatting here, so
-   * that this surface improves whenever that one does -- including the state
-   * rendering its own `TODO` describes, currently elided as `(...)`.
+   * that this surface improves whenever that one does. Instance state is
+   * elided as `(...)`.
    *
    * Duplicated on `BaseFabricPrimitive`, unavoidably. There is no shared base
    * class below `FabricSpecialObject`, and `FabricSpecialObject` itself is the
@@ -113,28 +113,28 @@ export abstract class BaseFabricInstance extends FabricInstance {
   ): FabricValue;
 
   /**
-   * Indicates whether this instance is already deeply frozen, without
-   * mutating it. Checks this instance's own internal slot(s) are in
-   * canonical deep-frozen form and recurses into each nested `FabricValue`
-   * via the provided `subIsDeepFrozen` callback, returning the boolean
-   * conjunction. Implementations must NOT import or call the deep-frozen
-   * type guard directly -- recursion is handed through the callback,
-   * mirroring `[DEEP_FREEZE]`'s callback shape and avoiding an import cycle.
+   * Indicates whether this instance is already deeply frozen, without mutating
+   * it. Checks this instance's own internal slot(s) are in canonical
+   * deep-frozen form and recurses into each nested `FabricValue` via the
+   * provided `subIsDeepFrozen` callback, returning the boolean conjunction.
+   * Implementations must NOT import or call the deep-frozen type guard directly
+   * -- recursion is handed through the callback, mirroring `[DEEP_FREEZE]`'s
+   * callback shape and avoiding an import cycle.
    *
-   * Side-effect-free and must not throw: an instance that is not in
-   * canonical deep-frozen form returns `false`.
+   * Side-effect-free and must not throw: an instance that is not in canonical
+   * deep-frozen form returns `false`.
    *
    * **Deep-frozen honesty (mandatory).** This report must be truthful and
    * permanent: an implementation must not return `true` unless the instance is,
    * and will remain, deeply immutable (including its private slots). Once it
-   * reports deep-frozen, that is permanent for the life of the instance.
-   * The rest of the system -- the data model in general and `isDeepFrozen()`
+   * reports deep-frozen, that is permanent for the life of the instance. The
+   * rest of the system -- the data model in general and `isDeepFrozen()`
    * specifically, but also the entire codebase that _uses_ the data model -- is
-   * entitled to rely on this: a deep-frozen proof is cached by root identity and
-   * not re-validated, so an instance that lies here (reports deep-frozen while
-   * still mutable) can corrupt data-model invariants, exactly as any other
-   * broken class contract can. Making this correct is the implementing class's
-   * responsibility, not something the freeze-checking code papers over.
+   * entitled to rely on this: a deep-frozen proof is cached by root identity
+   * and not re-validated, so an instance that lies here (reports deep-frozen
+   * while still mutable) can corrupt data-model invariants, exactly as any
+   * other broken class contract can. Making this correct is the implementing
+   * class's responsibility, not something the freeze-checking code papers over.
    */
   abstract [IS_DEEP_FROZEN](
     subIsDeepFrozen: (value: FabricValue) => boolean,

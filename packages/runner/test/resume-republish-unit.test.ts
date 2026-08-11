@@ -8,6 +8,7 @@ import {
   createResumeRepublisher,
   type ElementContribution,
 } from "../src/builtins/resume-republish.ts";
+import type { ElementRun } from "../src/builtins/list-element-rollback.ts";
 import { flatMapContribution } from "../src/builtins/flatmap.ts";
 
 // Focused coverage for the shared resume-republish machinery
@@ -144,13 +145,14 @@ const filterContribution: ElementContribution = (value, inputElement, out) => {
 function makeRepublisher(opts: {
   result: FakeCell | undefined;
   inputsList: unknown;
-  elementRuns: Map<string, { resultCell: Cell<any>; lastIndex: number }>;
+  elementRuns: Map<string, ElementRun>;
   runtime: Runtime;
   contribute?: ElementContribution;
 }) {
   return createResumeRepublisher({
     runtime: opts.runtime,
     logger,
+    isActive: () => true,
     getResult: () => opts.result as unknown as Cell<any[]> | undefined,
     inputsCell: new FakeInputsCell(opts.inputsList) as unknown as Cell<any>,
     inputSchema: SCHEMA,
@@ -159,6 +161,10 @@ function makeRepublisher(opts: {
     contribute: opts.contribute ?? filterContribution,
     aggregateNoun: "filtered list",
     elementNoun: "predicate",
+    // The owed-setup re-arm path is pinned by the integration suites
+    // (resume-append-exclusion*); these unit cases exercise the republish
+    // fold only.
+    rearmReconcile: () => {},
   });
 }
 
@@ -167,8 +173,8 @@ function makeRepublisher(opts: {
 function runsFor(
   inputCells: FakeCell[],
   resultCells: FakeCell[],
-): Map<string, { resultCell: Cell<any>; lastIndex: number }> {
-  const runs = new Map<string, { resultCell: Cell<any>; lastIndex: number }>();
+): Map<string, ElementRun> {
+  const runs = new Map<string, ElementRun>();
   const keyCounts = new Map<string, number>();
   for (let i = 0; i < inputCells.length; i++) {
     if (inputCells[i] === undefined) continue;
@@ -181,12 +187,67 @@ function runsFor(
     runs.set(elementKey, {
       resultCell: resultCells[i] as unknown as Cell<any>,
       lastIndex: i,
+      needsSetup: false,
     });
   }
   return runs;
 }
 
 describe("resume-republish unit", () => {
+  it("reports an element result as awaited only while its sync runs", async () => {
+    const inputs = [new FakeCell("e0", null)];
+    let arrive = () => {};
+    const held = new Promise<void>((resolve) => {
+      arrive = resolve;
+    });
+    const r0 = new FakeCell("r0", undefined, () => held);
+    const other = new FakeCell("r1", undefined);
+    const { runtime, tracked } = makeRuntime();
+    const rr = makeRepublisher({
+      result: new FakeCell("container", [0]),
+      inputsList: inputs,
+      elementRuns: runsFor(inputs, [r0]),
+      runtime,
+    });
+
+    expect(rr.awaitingResult(r0 as unknown as Cell<any>)).toBe(false);
+
+    rr.awaitPendingThenRepublish([r0] as unknown as Cell<any>[]);
+
+    expect(rr.awaitingResult(r0 as unknown as Cell<any>)).toBe(true);
+    // Only the awaited document counts; a sibling nobody is waiting for is
+    // free to have its setup written.
+    expect(rr.awaitingResult(other as unknown as Cell<any>)).toBe(false);
+
+    arrive();
+    await drain(tracked);
+
+    expect(rr.awaitingResult(r0 as unknown as Cell<any>)).toBe(false);
+  });
+
+  it("syncs an element once while a wait for it is already running", () => {
+    const inputs = [new FakeCell("e0", null)];
+    let syncs = 0;
+    const r0 = new FakeCell("r0", undefined, () => {
+      syncs++;
+      return new Promise<void>(() => {});
+    });
+    const { runtime } = makeRuntime();
+    const rr = makeRepublisher({
+      result: new FakeCell("container", [0]),
+      inputsList: inputs,
+      elementRuns: runsFor(inputs, [r0]),
+      runtime,
+    });
+
+    rr.awaitPendingThenRepublish([r0] as unknown as Cell<any>[]);
+    rr.awaitPendingThenRepublish([r0] as unknown as Cell<any>[]);
+
+    // Two waits racing to clear one document id would let the first to settle
+    // drop a record the second still needs.
+    expect(syncs).toBe(1);
+  });
+
   it("rebuilds the aggregate from confirmed per-element results", async () => {
     const inputs = [new FakeCell("e0", null), new FakeCell("e1", null)];
     // Both predicates settled truthy, so both elements are included.

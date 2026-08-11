@@ -764,7 +764,9 @@ correctness comes from cancellation, not staging:
    Ownership of a commit-gated start begins when the start is scheduled, not
    when its post-commit callback installs it. Cancelling the parent or lineage
    before that commit tombstones the pending start, so the callback must not
-   install it. After installation, cancellation may stop only the exact local
+   install it; stopping the result key does the same, so a piece the user
+   stopped before the origin commit does not start afterwards. After
+   installation, cancellation may stop only the exact local
    registration installed by that attempt; if another attempt has replaced or
    won the same result key, its registration remains live. This prevents a
    receipt-losing duplicate from stopping the winner.
@@ -809,6 +811,23 @@ written through the receipt cell's standard write conversion — plain JSON
 persists as-is, a live cell handle converts to a link, so a one-line setter
 verb's receipt links to the cell it mutated. The create-only witness
 semantics are unchanged either way.
+
+A receipt-only handling also describes what it wrote, in the same transaction,
+on the cell's durable `schema` metadata — so a receipt says what it holds the
+way any other cell does, which is what lets a reader's selection narrow the
+fetch instead of filtering an already-loaded value. The description is
+structural and nothing more: the root container kind, plus the property names
+when that kind is a record. Every property is left admissible, which is what
+keeps a link position honest, since the spelling that would name one is
+`asCell` and `["cell"]` asserts a writable handle on a document nothing can be
+written through. A value with no container kind of its own — a scalar, or a
+link, whose kind is its target's — goes undeclared. A `data:` link is the one
+link that is described: it carries its value inside its own identifier and the
+write inlines it, so the receipt holds that value rather than a link to it, and
+the description is taken after the same inlining. None of this constrains a
+later write: the create-only mark means the value the schema describes is the
+only value that document ever holds. A verb's *declared* result type is a
+separate question, settled at the type layer and never reaching the runtime.
 
 For an inline, non-navigation handler result, an `inSpace` child does not move
 that canonical handler-result wrapper into the child space. The result/receipt
@@ -879,7 +898,12 @@ phase E).
 **Computation-launched children are outside I10.** Computations are
 idempotent and re-runnable; their children converge through deterministic
 ids and normal re-runs, and orphaned registrations are bounded by the same
-retry budget. (The exhausted-retry zombie is accepted as pre-existing; the
+retry budget. The runner is nonetheless stricter for the launches it can tie
+to a transaction: a child whose setup transaction does not become durable has
+its registration stopped rather than left for a re-run to converge over, since
+the bookkeeping a coordinator keeps would otherwise make that re-run skip the
+staging the child needs. [Runner child-run
+ownership](../runner-child-run-ownership.md) states the rules. (The exhausted-retry zombie is accepted as pre-existing; the
 implementation should leave a watch-this comment at the retry-exhaustion
 sites.)
 

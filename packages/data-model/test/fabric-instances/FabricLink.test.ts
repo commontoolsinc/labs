@@ -18,7 +18,7 @@ import { CODEC } from "@/codec-common/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { jsonFromValue, valueFromJson } from "@/codec-json/index.ts";
+import { jsonFromValue, valueFromJson } from "@/codecs.ts";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricLink", () => {

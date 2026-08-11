@@ -7,7 +7,11 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type FactoryInput, type JSONSchema } from "../src/builder/types.ts";
+import {
+  type FactoryInput,
+  type JSONSchema,
+  type PatternFactory,
+} from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -205,6 +209,174 @@ describe("Pattern Runner - Core", () => {
     });
   });
 
+  async function verifyListElementPruning(
+    name: string,
+    inspectArray: PatternFactory<
+      { values: number[] },
+      { values: number[]; output: number[] }
+    >,
+    expected: (values: number[]) => unknown[],
+  ): Promise<void> {
+    const expandedValues = Array.from({ length: 20 }, (_, index) => index);
+    const result = runtime.run(
+      tx,
+      inspectArray,
+      { values: expandedValues },
+      runtime.getCell(space, name, undefined, tx),
+    );
+    await commitTx();
+    await runtime.settled();
+    await result.pull();
+
+    expect(result.key("output").get()).toEqual(expected(expandedValues));
+    const expandedRunnerCount = runtime.runner.cancels.size;
+
+    tx = runtime.edit();
+    result.withTx(tx).key("values").set(expandedValues.slice(0, 5));
+    await commitTx();
+    await runtime.settled();
+    await result.pull();
+
+    expect(result.key("output").get()).toEqual(
+      expected(expandedValues.slice(0, 5)),
+    );
+    // A released child leaves no trace on the pattern's own surface — its
+    // element is gone from the list and its result document keeps its last
+    // value — so the runner's registration map is where the release shows.
+    // The count falls by exactly the fifteen elements that left, which one
+    // release out of fifteen would not satisfy. Only this runtime registers
+    // into that map, and the two readings bracket a single edit, so the
+    // difference is the coordinator's alone.
+    expect(runtime.runner.cancels.size).toBe(expandedRunnerCount - 15);
+
+    tx = runtime.edit();
+    result.withTx(tx).key("values").set(expandedValues);
+    await commitTx();
+    await runtime.settled();
+    await result.pull();
+
+    expect(result.key("output").get()).toEqual(expected(expandedValues));
+    expect(runtime.runner.cancels.size).toBe(expandedRunnerCount);
+  }
+
+  it("stops map element patterns when an input array shrinks", async () => {
+    const inspectArray = pattern<{ values: number[] }>(({ values }) => ({
+      values,
+      output: (values as any).mapWithPattern(
+        pattern(({ element }: FactoryInput<any>) =>
+          lift((value: number) => value * 2)(element)
+        ),
+        {},
+      ),
+    }));
+    await verifyListElementPruning(
+      "map-element-pattern-pruning",
+      inspectArray,
+      (values) => values.map((value) => value * 2),
+    );
+  });
+
+  it("stops filter element patterns when an input array shrinks", async () => {
+    const inspectArray = pattern<{ values: number[] }>(({ values }) => ({
+      values,
+      output: (values as any).filterWithPattern(
+        pattern(({ element }: FactoryInput<any>) =>
+          lift((value: number) => value % 2 === 0)(element)
+        ),
+        {},
+      ),
+    }));
+    await verifyListElementPruning(
+      "filter-element-pattern-pruning",
+      inspectArray,
+      (values) => values.filter((value) => value % 2 === 0),
+    );
+  });
+
+  it("stops flatMap element patterns when an input array shrinks", async () => {
+    const inspectArray = pattern<{ values: number[] }>(({ values }) => ({
+      values,
+      output: (values as any).flatMapWithPattern(
+        pattern(({ element }: FactoryInput<any>) =>
+          lift((value: number) => [value, -value])(element)
+        ),
+        {},
+      ),
+    }));
+    await verifyListElementPruning(
+      "flatmap-element-pattern-pruning",
+      inspectArray,
+      (values) => values.flatMap((value) => [value, -value]),
+    );
+  });
+
+  it("stops the element patterns a list still holds when it is stopped", async () => {
+    const inspectArray = pattern<{ values: number[] }>(({ values }) => ({
+      values,
+      output: (values as any).mapWithPattern(
+        pattern(({ element }: FactoryInput<any>) =>
+          lift((value: number) => value * 2)(element)
+        ),
+        {},
+      ),
+    }));
+    const before = runtime.runner.cancels.size;
+    const resultCell = runtime.getCell(space, "map-teardown", undefined, tx);
+    const result = runtime.run(
+      tx,
+      inspectArray,
+      { values: [1, 2, 3, 4, 5] },
+      resultCell,
+    );
+    await commitTx();
+    await runtime.settled();
+    await result.pull();
+    expect(runtime.runner.cancels.size).toBeGreaterThan(before + 5);
+
+    runtime.runner.stop(resultCell);
+    await runtime.settled();
+
+    // The coordinator releases every element pattern it still holds, so
+    // stopping it leaves nothing of the list behind.
+    expect(runtime.runner.cancels.size).toBe(before);
+  });
+
+  it("keeps a directly started map element running after removal", async () => {
+    const inspectArray = pattern<{ values: number[] }>(({ values }) => ({
+      values,
+      output: (values as any).mapWithPattern(
+        pattern(({ element }: FactoryInput<any>) => ({
+          doubled: lift((value: number) => value * 2)(element),
+        })),
+        {},
+      ),
+    }));
+    const values = [1, 2];
+    const result = runtime.run(
+      tx,
+      inspectArray,
+      { values },
+      runtime.getCell(space, "independent-map-element", undefined, tx),
+    );
+    await commitTx();
+    await runtime.settled();
+    await result.pull();
+
+    const openedElement = result.key("output").key(1).resolveAsCell();
+    expect(await runtime.start(openedElement)).toBe(true);
+    expect(await openedElement.pull()).toEqual({ doubled: 4 });
+    const link = openedElement.getAsNormalizedFullLink();
+    const resultKey = `${link.space}/${link.scope}/${link.id}` as const;
+
+    tx = runtime.edit();
+    result.withTx(tx).key("values").set([1]);
+    await commitTx();
+    await runtime.settled();
+
+    expect(runtime.runner.cancels.has(resultKey)).toBe(true);
+    runtime.runner.stop(openedElement);
+  });
+
   it("should handle map nodes with undefined input", async () => {
     const double = lift((x: number) => x * 2);
 
@@ -280,5 +452,48 @@ describe("Pattern Runner - Core", () => {
     expect(doubled[0]).toBe(20);
     expect(1 in doubled).toBe(false); // hole preserved
     expect(doubled[2]).toBe(60);
+  });
+
+  it("restores a mapped value that became a hole and came back", async () => {
+    const doubleArray = pattern<{ values: number[] }>(({ values }) => ({
+      values,
+      doubled: (values as any).mapWithPattern(
+        pattern(({ element }: FactoryInput<any>) =>
+          lift((value: number) => value * 2)(element)
+        ),
+        {},
+      ),
+    }));
+
+    const result = runtime.run(
+      tx,
+      doubleArray,
+      { values: [10, 20, 30] },
+      runtime.getCell(space, "hole-round-trip", undefined, tx),
+    );
+    await commitTx();
+    await runtime.settled();
+    await result.pull();
+    expect(result.key("doubled").get()).toEqual([20, 40, 60]);
+
+    // The middle value becomes a hole, so the list no longer holds that
+    // element and its pattern run is released.
+    tx = runtime.edit();
+    // deno-lint-ignore no-sparse-arrays
+    result.withTx(tx).key("values").set([10, , 30]);
+    await commitTx();
+    await runtime.settled();
+    await result.pull();
+    const withHole = result.key("doubled").get() as number[];
+    expect(1 in withHole).toBe(false);
+
+    // The value returns to the same position, which addresses the same result
+    // cell, so the element is set up again and reads its value once more.
+    tx = runtime.edit();
+    result.withTx(tx).key("values").set([10, 20, 30]);
+    await commitTx();
+    await runtime.settled();
+    await result.pull();
+    expect(result.key("doubled").get()).toEqual([20, 40, 60]);
   });
 });

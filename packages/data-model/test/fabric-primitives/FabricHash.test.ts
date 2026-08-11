@@ -16,6 +16,38 @@ const SAMPLE_HASH_17 = new Uint8Array(17);
 for (let i = 0; i < 17; i++) SAMPLE_HASH_17[i] = ((i * 17) + 177) & 0xff;
 
 describe("FabricHash", () => {
+  describe("constructor()", () => {
+    it("leaves the source array readable, by default", () => {
+      const source = new Uint8Array([1, 2, 3]);
+      const cid = new FabricHash(source, "fid1");
+
+      expect(source.length).toBe(3);
+      source[0] = 99;
+      expect(cid.bytes[0]).toBe(1);
+    });
+
+    it("consumes the source array, given `transfer` as `true`", () => {
+      const source = new Uint8Array([1, 2, 3]);
+      const cid = new FabricHash(source, "fid1", true);
+
+      expect(source.length).toBe(0); // Its buffer was detached.
+      expect(cid.bytes).toEqual(new Uint8Array([1, 2, 3]));
+      expect(cid.length).toBe(3);
+    });
+
+    it("caches a string form agreeing with `.bytes`, given `transfer` as `true`", () => {
+      const transferred = new FabricHash(
+        new Uint8Array([1, 2, 3]),
+        "fid1",
+        true,
+      );
+      const copied = new FabricHash(new Uint8Array([1, 2, 3]), "fid1");
+
+      expect(transferred.hashString).toBe(copied.hashString);
+      expect(transferred.taggedHashString).toBe(copied.taggedHashString);
+    });
+  });
+
   describe("instance members", () => {
     describe("toString()", () => {
       it("produces `fid1:<base64>` format", () => {

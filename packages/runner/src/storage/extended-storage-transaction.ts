@@ -28,6 +28,7 @@ import type {
   Result,
   StorageTransactionFailed,
   StorageTransactionStatus,
+  TransactionCommitOptions,
   TransactionReactivityLog,
   TransactionSealDestination,
   TransactionWriteDetail,
@@ -268,6 +269,26 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   >();
   private statusOverride?: StorageTransactionStatus;
   private commitCallbacksDispatched = false;
+  // Verdict callbacks fire when the commit's fate is sealed — the accept
+  // verdict or the rejection receipt — BEFORE the coverage / read-repair
+  // waits the commit promise (and commit callbacks) additionally sit out.
+  private verdictCallbacks = new Set<
+    (
+      tx: IExtendedStorageTransaction,
+      result: Result<Unit, CommitError>,
+    ) => void
+  >();
+  private verdictCallbacksDispatched = false;
+  // The verdict-time effect run of the current commit(): verdict callbacks
+  // plus the CFC outbox flush. What settled()-style barriers wait on in
+  // place of the commit promise, whose resolution additionally waits for
+  // view coverage.
+  #postCommitEffects?: Promise<void>;
+  // The transaction's fate, resolved exactly when the verdict callbacks
+  // dispatch — every fate path (commit verdict, rejection receipt, abort,
+  // pre-storage rejection, internal commit rejection) funnels through that
+  // dispatch.
+  readonly #verdict = Promise.withResolvers<Result<Unit, CommitError>>();
   private commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
   private createOnlyMarks = new Map<MemorySpace, Set<string>>();
   private outboxIdempotencyKeys = new Set<string>();
@@ -1186,6 +1207,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.#cfcState.outbox.length > 0;
   }
 
+  postCommitEffectsSettled(): Promise<void> {
+    // Resolved before commit() reaches storage (pre-storage rejections
+    // dispatch callbacks synchronously and clear the outbox), pending
+    // between commit() entry and the verdict-time effect run.
+    return this.#postCommitEffects ?? Promise.resolve();
+  }
+
+  commitVerdict(): Promise<Result<Unit, CommitError>> {
+    return this.#verdict.promise;
+  }
+
   private buildPreparedDigestInput(): PreparedDigestInput {
     // Each pushed record is deepFrozen so that every CfcAddress (and every
     // path inside one) that flows into the digest input is immutable from
@@ -1789,6 +1821,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (this.commitCallbacksDispatched) {
       return;
     }
+    // Verdict callbacks never fire after commit callbacks: on the async
+    // path the effect chain dispatched them at the verdict already (this is
+    // a no-op then); on synchronous fates (abort, pre-storage rejection)
+    // both layers learn the fate here, verdict first.
+    this.runVerdictCallbacks(result);
     this.commitCallbacksDispatched = true;
     // Call all callbacks, wrapping each in try/catch to prevent one
     // failing callback from breaking others.
@@ -1804,6 +1841,22 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // callback's closure, and through those closures the cells and registries
     // of the action that committed it.
     this.commitCallbacks.clear();
+  }
+
+  private runVerdictCallbacks(result: Result<Unit, CommitError>): void {
+    if (this.verdictCallbacksDispatched) {
+      return;
+    }
+    this.verdictCallbacksDispatched = true;
+    this.#verdict.resolve(result);
+    for (const callback of this.verdictCallbacks) {
+      try {
+        callback(this, result);
+      } catch (error) {
+        logger.error("storage-error", "Error in verdict callback:", error);
+      }
+    }
+    this.verdictCallbacks.clear();
   }
 
   private clearPostCommitOutbox(): void {
@@ -1827,7 +1880,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return result;
   }
 
-  async commit(): Promise<Result<Unit, CommitError>> {
+  async commit(
+    options?: TransactionCommitOptions,
+  ): Promise<Result<Unit, CommitError>> {
     if (this.statusOverride?.status === "error") {
       return { error: this.statusOverride.error };
     }
@@ -1931,12 +1986,55 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // consume dispositions from the wave outcome, never from this result.
     const promise = this.#sealDestination !== undefined
       ? this.#sealDestination.seal(this)
-      : this.tx.commit();
+      : this.tx.commit(options);
 
-    // Call commit callbacks after commit completes (success or failure) Note
-    // that promise always resolves, even if the commit fails, in which case it
-    // passes an error message as result. An exception here would be an internal
-    // error that should propagate.
+    // Two callback layers with two timelines (CT-1950):
+    //
+    // - VERDICT callbacks and the CFC outbox flush run once the commit's
+    //   fate is sealed — the accept verdict or the rejection receipt.
+    //   They guard on durability alone (start the LLM request, register
+    //   background work), so holding them out for the fan-out or the
+    //   read-repair round trip would cost a window for nothing.
+    // - COMMIT callbacks run when the commit promise settles: after
+    //   coverage on accept, after the read-repair gate on rejection.
+    //   Their consumers act on the post-commit view — a compensation or
+    //   retry that runs before the repair frame would read the very state
+    //   the rejection just invalidated.
+    //
+    // Both promises always resolve, even when the commit fails (the result
+    // then carries the error); an exception is an internal error handled
+    // below. The verdict is raced with the promise, not taken alone: in
+    // the real flow the verdict settles first, but a wrapped commit whose
+    // inner commit() was replaced or bypassed (test stubs) never resolves
+    // the inner verdict, and the effect run — and with it this commit()'s
+    // own completion — must not hang on it.
+    const verdict = this.tx.commitVerdict !== undefined
+      ? Promise.race([this.tx.commitVerdict(), promise])
+      : promise;
+    const effects = verdict.then(
+      async (result) => {
+        this.runVerdictCallbacks(result);
+        if (result.ok && !readOnly) {
+          for (const effect of this.#cfcState.outbox) {
+            try {
+              await effect.flush(this);
+              this.cfcInstrumentation.onOutboxFlush?.(effect);
+            } catch (error) {
+              logger.error(
+                "storage-error",
+                "Post-commit side effect failed:",
+                { effect, error },
+              );
+            }
+          }
+          this.outboxIdempotencyKeys.clear();
+        } else {
+          this.clearPostCommitOutbox();
+        }
+      },
+      () => {},
+    );
+    this.#postCommitEffects = effects;
     promise.then(
       (result) => {
         this.runCommitCallbacks(result);
@@ -1962,24 +2060,21 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       },
     );
 
-    const result = await promise;
-    if (result.ok && !readOnly) {
-      for (const effect of this.#cfcState.outbox) {
-        try {
-          await effect.flush(this);
-          this.cfcInstrumentation.onOutboxFlush?.(effect);
-        } catch (error) {
-          logger.error(
-            "storage-error",
-            "Post-commit side effect failed:",
-            { effect, error },
-          );
-        }
-      }
-      this.outboxIdempotencyKeys.clear();
-    } else {
-      this.clearPostCommitOutbox();
+    // resolveAt "verdict" returns at fate-sealing on BOTH paths: the
+    // verdict race resolves at the accept verdict or the rejection
+    // receipt, ahead of the coverage / read-repair waits the settlement
+    // promise sits out — and ahead of the effect run, which a slow outbox
+    // effect must not stretch (it stays tracked via
+    // postCommitEffectsSettled()). Commit callbacks and the
+    // pending-commit barrier stay on the settlement promise either way.
+    // Otherwise commit() spans the full settlement plus the effect layer:
+    // callers that await the commit observe the outbox flushed, exactly
+    // as when the flush ran inline here.
+    if (options?.resolveAt === "verdict") {
+      return await verdict;
     }
+    const result = await promise;
+    await effects;
 
     return result;
   }
@@ -2002,6 +2097,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   ): void {
     this.assertWritable("addCommitCallback()");
     this.commitCallbacks.add(callback);
+  }
+
+  addVerdictCallback(
+    callback: (
+      tx: IExtendedStorageTransaction,
+      result: Result<Unit, CommitError>,
+    ) => void,
+  ): void {
+    this.assertWritable("addVerdictCallback()");
+    this.verdictCallbacks.add(callback);
   }
 }
 
@@ -2206,6 +2311,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.wrapped.hasPendingPostCommitEffects();
   }
 
+  postCommitEffectsSettled(): Promise<void> {
+    return this.wrapped.postCommitEffectsSettled();
+  }
+
   enableMultiSpaceWrites(order?: readonly MemorySpace[]): void {
     this.wrapped.enableMultiSpaceWrites?.(order);
   }
@@ -2381,8 +2490,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.wrapped.abort(reason);
   }
 
-  commit(): Promise<Result<Unit, CommitError>> {
-    return this.wrapped.commit();
+  commit(
+    options?: TransactionCommitOptions,
+  ): Promise<Result<Unit, CommitError>> {
+    return this.wrapped.commit(options);
   }
 
   addCommitCallback(
@@ -2393,6 +2504,16 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   ): void {
     if (this.options.discardSettleCallbacks === true) return;
     return this.wrapped.addCommitCallback(callback);
+  }
+
+  addVerdictCallback(
+    callback: (
+      tx: IExtendedStorageTransaction,
+      result: Result<Unit, CommitError>,
+    ) => void,
+  ): void {
+    if (this.options.discardSettleCallbacks === true) return;
+    return this.wrapped.addVerdictCallback(callback);
   }
 }
 

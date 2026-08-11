@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { StaticCacheFS } from "@commonfabric/static";
+import { StaticCache } from "@commonfabric/static";
 import {
   FabricInstance,
   FabricPrimitive,
@@ -31,7 +31,7 @@ import { getRuntimeModuleExports } from "../src/sandbox/runtime-modules.ts";
 // artifact the sandbox hands a pattern as its view of `commonfabric`. Deriving
 // the expected names from it means this test tracks the real declarations
 // rather than a hand-copied list that someone has to remember to extend.
-const patternVisibleTypes = await new StaticCacheFS().getText(
+const patternVisibleTypes = await StaticCache.fromFileSystem().getText(
   "types/commonfabric.d.ts",
 );
 const declaredClasses = [

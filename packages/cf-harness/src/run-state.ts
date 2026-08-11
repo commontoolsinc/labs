@@ -240,80 +240,61 @@ export const createHarnessRunState = (
   };
 };
 
+// Applies an immutable update to a run state and stamps `updatedAt`. A key
+// whose value is undefined is left out of the result instead of being written
+// as an explicit undefined, so a caller can pass an optional artifact path
+// through without testing it first.
+export const patchHarnessRunState = (
+  state: HarnessRunState,
+  patch: Partial<HarnessRunState>,
+  now = new Date().toISOString(),
+): HarnessRunState => {
+  const defined = Object.fromEntries(
+    Object.entries(patch).filter(([, value]) => value !== undefined),
+  );
+  return Object.assign({ ...state }, defined, { updatedAt: now });
+};
+
+type HarnessRunStateListField = {
+  [K in keyof HarnessRunState]-?: NonNullable<HarnessRunState[K]> extends
+    readonly unknown[] ? K : never;
+}[keyof HarnessRunState];
+
+type HarnessRunStateListEntry<K extends HarnessRunStateListField> =
+  NonNullable<HarnessRunState[K]> extends readonly (infer TEntry)[] ? TEntry
+    : never;
+
+// Appends one entry to a list-valued run state field, treating an absent list
+// as empty.
+export const appendToHarnessRunState = <K extends HarnessRunStateListField>(
+  state: HarnessRunState,
+  field: K,
+  entry: HarnessRunStateListEntry<K>,
+  now = new Date().toISOString(),
+): HarnessRunState =>
+  patchHarnessRunState(
+    state,
+    { [field]: [...(state[field] ?? []), entry] } as Partial<HarnessRunState>,
+    now,
+  );
+
 export const setHarnessRunStatus = (
   state: HarnessRunState,
   status: HarnessRunStatus,
   now = new Date().toISOString(),
   terminalReason?: HarnessRunTerminalReason,
 ): HarnessRunState => {
-  const base = {
-    ...state,
-    status,
-    updatedAt: now,
-  };
   if (status === "completed" || status === "failed") {
-    return {
-      ...base,
-      endedAt: now,
-      ...(terminalReason !== undefined ? { terminalReason } : {}),
-    };
+    return patchHarnessRunState(
+      state,
+      { status, endedAt: now, terminalReason },
+      now,
+    );
   }
   const { endedAt: _endedAt, terminalReason: _terminalReason, ...nonTerminal } =
-    base;
-  return {
-    ...nonTerminal,
-  };
+    state;
+  return patchHarnessRunState(nonTerminal, { status }, now);
 };
-
-export const setHarnessRunModel = (
-  state: HarnessRunState,
-  model: string,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  model,
-  updatedAt: now,
-});
-
-export const appendHarnessToolOutput = (
-  state: HarnessRunState,
-  output: ToolResultRef,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  updatedAt: now,
-  toolOutputs: [...state.toolOutputs, output],
-});
-
-export const appendHarnessPolicyEvent = (
-  state: HarnessRunState,
-  event: HarnessPolicyEvent,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  updatedAt: now,
-  policyEvents: [...state.policyEvents, event],
-});
-
-export const appendHarnessPolicyDecision = (
-  state: HarnessRunState,
-  decision: HarnessPolicyDecisionRecord,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  updatedAt: now,
-  policyDecisions: [...(state.policyDecisions ?? []), decision],
-});
-
-export const appendHarnessCfcInvocationContext = (
-  state: HarnessRunState,
-  context: HarnessCfcInvocationContext,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  updatedAt: now,
-  cfcInvocationContexts: [...(state.cfcInvocationContexts ?? []), context],
-});
 
 export const appendHarnessCfcModelContextObservations = (
   state: HarnessRunState,
@@ -328,11 +309,7 @@ export const appendHarnessCfcModelContextObservations = (
   if (cfcModelContext === state.cfcModelContext) {
     return state;
   }
-  return {
-    ...state,
-    updatedAt: now,
-    ...(cfcModelContext !== undefined ? { cfcModelContext } : {}),
-  };
+  return patchHarnessRunState(state, { cfcModelContext }, now);
 };
 
 export const setHarnessSubagentRun = (
@@ -350,22 +327,8 @@ export const setHarnessSubagentRun = (
   } else {
     subagentRuns.push(subagentRun);
   }
-  return {
-    ...state,
-    updatedAt: now,
-    subagentRuns,
-  };
+  return patchHarnessRunState(state, { subagentRuns }, now);
 };
-
-export const setHarnessPromptSlotBinding = (
-  state: HarnessRunState,
-  promptSlotBinding: PromptSlotBinding,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  promptSlotBinding,
-  updatedAt: now,
-});
 
 export const appendHarnessFailureRecord = (
   state: HarnessRunState,
@@ -373,137 +336,12 @@ export const appendHarnessFailureRecord = (
   now = new Date().toISOString(),
 ): HarnessRunState => {
   const failureRecords = [...(state.failureRecords ?? []), failure];
-  const primaryFailure = selectPrimaryHarnessFailure(failureRecords);
-  return {
-    ...state,
-    updatedAt: now,
-    failureRecords,
-    ...(primaryFailure !== undefined ? { primaryFailure } : {}),
-  };
+  return patchHarnessRunState(
+    state,
+    {
+      failureRecords,
+      primaryFailure: selectPrimaryHarnessFailure(failureRecords),
+    },
+    now,
+  );
 };
-
-export const setHarnessRunCurrentDir = (
-  state: HarnessRunState,
-  currentDir: string,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  currentDir,
-  updatedAt: now,
-});
-
-export const setHarnessTranscriptPath = (
-  state: HarnessRunState,
-  transcriptPath: string,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  transcriptPath,
-  updatedAt: now,
-});
-
-export const setHarnessRunReportPath = (
-  state: HarnessRunState,
-  runReportPath: string,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  runReportPath,
-  updatedAt: now,
-});
-
-export const setHarnessRunManifestPath = (
-  state: HarnessRunState,
-  runManifestPath: string,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  runManifestPath,
-  updatedAt: now,
-});
-
-export const setHarnessSkillRegistry = (
-  state: HarnessRunState,
-  skillRegistry: HarnessSkillRegistry,
-  skillRegistryPath?: string,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  skillRegistry,
-  ...(skillRegistryPath !== undefined ? { skillRegistryPath } : {}),
-  updatedAt: now,
-});
-
-export const setHarnessSkillActivations = (
-  state: HarnessRunState,
-  skillActivations: HarnessSkillActivations,
-  skillActivationsPath?: string,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  skillActivations,
-  ...(skillActivationsPath !== undefined ? { skillActivationsPath } : {}),
-  updatedAt: now,
-});
-
-export const setHarnessSkillResourceReads = (
-  state: HarnessRunState,
-  skillResourceReads: HarnessSkillResourceReads,
-  skillResourceReadsPath?: string,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  skillResourceReads,
-  ...(skillResourceReadsPath !== undefined ? { skillResourceReadsPath } : {}),
-  updatedAt: now,
-});
-
-export const setHarnessSkillScriptExecutions = (
-  state: HarnessRunState,
-  skillScriptExecutions: HarnessSkillScriptExecutions,
-  skillScriptExecutionsPath?: string,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  skillScriptExecutions,
-  ...(skillScriptExecutionsPath !== undefined
-    ? { skillScriptExecutionsPath }
-    : {}),
-  updatedAt: now,
-});
-
-export const setHarnessCapabilitySnapshot = (
-  state: HarnessRunState,
-  capabilitySnapshot: HarnessCapabilitySnapshot,
-  capabilitiesPath?: string,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  capabilitySnapshot,
-  ...(capabilitiesPath !== undefined ? { capabilitiesPath } : {}),
-  updatedAt: now,
-});
-
-export const setHarnessCfcPolicySnapshot = (
-  state: HarnessRunState,
-  cfcPolicySnapshot: HarnessCfcPolicySnapshot,
-  cfcPolicySnapshotPath?: string,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  cfcPolicySnapshot,
-  ...(cfcPolicySnapshotPath !== undefined ? { cfcPolicySnapshotPath } : {}),
-  updatedAt: now,
-});
-
-export const setHarnessPolicyTrace = (
-  state: HarnessRunState,
-  policyTrace: HarnessPolicyTrace,
-  policyTracePath?: string,
-  now = new Date().toISOString(),
-): HarnessRunState => ({
-  ...state,
-  policyTrace,
-  ...(policyTracePath !== undefined ? { policyTracePath } : {}),
-  updatedAt: now,
-});

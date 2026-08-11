@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { assert, assertEquals } from "@std/assert";
-import { StaticCacheFS } from "@commonfabric/static";
+import { StaticCache } from "@commonfabric/static";
 
 import { TransformationContext } from "../src/core/context.ts";
 import { transformCfDirective } from "../src/mod.ts";
@@ -21,7 +21,7 @@ import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 // value the branch produces (a decision, a returned node/undefined, a resolved
 // type, or a diagnostic-free classification), not merely that the line ran.
 
-const cache = new StaticCacheFS();
+const cache = StaticCache.fromFileSystem();
 const es2023 = await cache.getText("types/es2023.d.ts");
 const dom = await cache.getText("types/dom.d.ts");
 const jsx = await cache.getText("types/jsx.d.ts");

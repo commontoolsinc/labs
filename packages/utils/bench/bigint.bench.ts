@@ -64,7 +64,7 @@ function makeRng(seed: number): () => number {
 }
 
 /**
- * Build a positive bigint that requires exactly `bytes` bytes when encoded
+ * Returns a positive bigint that requires exactly `bytes` bytes when encoded
  * as minimal two's complement. Forces bit (8*bytes - 2) so the value lies in
  * the upper half of the band, then fills the remaining magnitude bits from
  * `rng`.

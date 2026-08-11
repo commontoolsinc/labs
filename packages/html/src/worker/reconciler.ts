@@ -5,26 +5,25 @@
  * accessed synchronously. It emits VDomOp operations that are batched
  * and sent to the main thread for DOM application.
  *
- * Key differences from main-thread render.ts:
- * - Uses Cell directly instead of CellHandle
- * - Uses cell.sink() instead of effect() for subscriptions
- * - Emits VDomOp operations instead of DOM mutations
- * - Batches operations using queueMicrotask()
+ * It works with a `Cell` rather than a `CellHandle`, subscribes through
+ * `cell.sink()`, and batches the operations it produces onto a microtask rather
+ * than touching the DOM itself.
  *
  * Sub-piece cell regions: the retired cf-cell-context overlay could outline
- * the region of the page each cell rendered, because the legacy main-thread
- * renderer held the cells while it built the DOM. This reconciler is the
- * place that knowledge crosses the worker boundary, so restoring that kind
- * of inspection (e.g. routing a region to cf-piece-menu's Data/Actions
- * panels) means tagging emitted VDomOps with the cell identity whenever
- * reconciliation crosses a cell boundary, and letting the main thread mark
- * the applied DOM ranges. Nothing does that yet; this note is the marker.
+ * the region of the page each cell rendered, because the renderer that held
+ * the cells also built the DOM. This reconciler is the place that knowledge
+ * crosses the worker boundary, so restoring that kind of inspection (e.g.
+ * routing a region to cf-piece-menu's Data/Actions panels) means tagging
+ * emitted VDomOps with the cell identity whenever reconciliation crosses a
+ * cell boundary, and letting the main thread mark the applied DOM ranges.
+ * Nothing does that yet; this note is the marker.
  */
 
 import {
   areLinksSame,
   type Cancel,
   type Cell,
+  type CellLinkInput,
   ContextualFlowControl,
   convertCellsToLinks,
   isCell,
@@ -364,6 +363,16 @@ export class WorkerReconciler {
       this.queueOps([{ op: "remove-node", nodeId: this.rootChildId }]);
       this.rootChildId = null;
     }
+    this.flushOps();
+  }
+
+  /**
+   * Deliver operations that reconciliation has queued but not yet handed to
+   * `onOps`. Queued operations otherwise leave on a microtask, so a host that
+   * reads the applied result at a chosen moment — the CLI turning a piece's UI
+   * into HTML — calls this first to make that moment definite.
+   */
+  flush(): void {
     this.flushOps();
   }
 
@@ -3046,6 +3055,11 @@ export class WorkerReconciler {
    */
   // deno-lint-ignore no-explicit-any
   private transformPropValue(key: string, value: unknown): any {
+    // TODO(danfuzz): the `typeof` gate admits a `FabricSpecialObject`, so a
+    // fabric-valued `style` prop is routed into the `Object.entries` walk of
+    // `styleObjectToCssString` — yielding an empty CSS string, silently —
+    // before it can reach `convertCellsToLinks` below, the one conversion
+    // here that knows the fabric types.
     if (
       key === "style" && value && typeof value === "object" &&
       !Array.isArray(value)
@@ -3055,7 +3069,11 @@ export class WorkerReconciler {
     // Use convertCellsToLinks to handle Cells, circular refs, and non-JSON values.
     // Pass doNotConvertCellResults to prevent already-resolved values (from .sink())
     // from being converted back to links - we want the actual data for props.
-    return convertCellsToLinks(value, {
+    //
+    // A prop is whatever a pattern put on a render node, which is `unknown` at
+    // this seam and a `CellLinkInput` in fact; the conversion rejects what is
+    // neither fabric nor convertible.
+    return convertCellsToLinks(value as CellLinkInput, {
       doNotConvertCellResults: true,
       includeSchema: true,
       keepAsCell: KeepAsCell.OnlyStream,
@@ -3847,6 +3865,14 @@ export class WorkerReconciler {
       return "";
     } else if (typeof value === "object") {
       // Objects are not expected here - warn and render their JSON as a fallback
+      //
+      // TODO(danfuzz): this is an unsafe use of `stringify()`: a
+      // `FabricSpecialObject` child (a `FabricEpochNsec` timestamp placed in
+      // `children`, say) renders as the literal text `{}` — the warn fires
+      // but nothing throws. Wants a `FabricSpecialObject` test ahead of this
+      // point, rendered via `toCompactDebugString()` from
+      // `@commonfabric/data-model/value-debug` (or the primitive's own
+      // string form).
       console.warn("unexpected object when value was expected", value);
       return JSON.stringify(value);
     }

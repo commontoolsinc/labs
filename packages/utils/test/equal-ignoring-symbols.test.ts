@@ -6,8 +6,8 @@ import "../src/equal-ignoring-symbols.ts"; // Import to register the custom matc
 const testSymbol1 = Symbol("test1");
 const testSymbol2 = Symbol("test2");
 
-describe("stripSymbols", () => {
-  it("should strip symbols from objects", () => {
+describe("stripSymbols()", () => {
+  it("strips symbols from objects", () => {
     const obj = {
       name: "test",
       [testSymbol1]: "should be removed",
@@ -20,7 +20,7 @@ describe("stripSymbols", () => {
     });
   });
 
-  it("should strip symbols from nested objects", () => {
+  it("strips symbols from nested objects", () => {
     const obj = {
       user: {
         name: "John",
@@ -42,7 +42,7 @@ describe("stripSymbols", () => {
     });
   });
 
-  it("should handle arrays", () => {
+  it("strips symbols from objects inside an array", () => {
     const arr = [
       { name: "a", [testSymbol1]: "removed" },
       { name: "b", [testSymbol2]: "removed" },
@@ -54,7 +54,7 @@ describe("stripSymbols", () => {
     ]);
   });
 
-  it("should handle primitives", () => {
+  it("returns a primitive unchanged", () => {
     expect(stripSymbols(42)).toBe(42);
     expect(stripSymbols("string")).toBe("string");
     expect(stripSymbols(true)).toBe(true);
@@ -63,8 +63,8 @@ describe("stripSymbols", () => {
   });
 });
 
-describe("toEqualIgnoringSymbols matcher", () => {
-  it("should match objects ignoring symbols", () => {
+describe("`toEqualIgnoringSymbols()` matcher", () => {
+  it("matches objects that differ only in symbol keys", () => {
     const obj1 = {
       name: "test",
       [testSymbol1]: "ignored",
@@ -79,7 +79,7 @@ describe("toEqualIgnoringSymbols matcher", () => {
     expect(obj1).toEqualIgnoringSymbols(obj2);
   });
 
-  it("should match nested objects ignoring symbols", () => {
+  it("matches nested objects that differ only in symbol keys", () => {
     const obj1 = {
       user: {
         name: "John",
@@ -103,7 +103,7 @@ describe("toEqualIgnoringSymbols matcher", () => {
     expect(obj1).toEqualIgnoringSymbols(obj2);
   });
 
-  it("should fail when objects differ in non-symbol properties", () => {
+  it("throws when objects differ in a non-symbol property", () => {
     const obj1 = {
       name: "test1",
       [testSymbol1]: "ignored",
@@ -118,7 +118,7 @@ describe("toEqualIgnoringSymbols matcher", () => {
     }).toThrow();
   });
 
-  it("should include custom failure messages", () => {
+  it("includes the caller's custom message in the failure", () => {
     let message: string | undefined;
     try {
       expect(
@@ -137,7 +137,7 @@ describe("toEqualIgnoringSymbols matcher", () => {
     );
   });
 
-  it("should handle arrays with symbols", () => {
+  it("matches arrays whose elements differ only in symbol keys", () => {
     const arr1 = [
       { name: "a", [testSymbol1]: "ignored" },
       { name: "b", [testSymbol2]: "ignored" },
@@ -152,8 +152,8 @@ describe("toEqualIgnoringSymbols matcher", () => {
   });
 });
 
-describe("toMatchObjectIgnoringSymbols matcher", () => {
-  it("should match objects partially ignoring symbols", () => {
+describe("`toMatchObjectIgnoringSymbols()` matcher", () => {
+  it("matches a subset of the properties, ignoring symbol keys", () => {
     const obj1 = {
       name: "test",
       [testSymbol1]: "ignored",
@@ -169,7 +169,7 @@ describe("toMatchObjectIgnoringSymbols matcher", () => {
     expect(obj1).toMatchObjectIgnoringSymbols(obj2);
   });
 
-  it("should match nested objects partially ignoring symbols", () => {
+  it("matches a nested subset of the properties, ignoring symbol keys", () => {
     const obj1 = {
       user: {
         name: "John",
@@ -196,7 +196,7 @@ describe("toMatchObjectIgnoringSymbols matcher", () => {
     expect(obj1).toMatchObjectIgnoringSymbols(obj2);
   });
 
-  it("should fail when required properties are missing", () => {
+  it("throws when an expected property is missing", () => {
     const obj1 = {
       name: "test",
       [testSymbol1]: "ignored",
@@ -212,7 +212,7 @@ describe("toMatchObjectIgnoringSymbols matcher", () => {
     }).toThrow();
   });
 
-  it("should fail when a property value differs", () => {
+  it("throws when a property value differs", () => {
     const obj1 = {
       name: "test1",
       [testSymbol1]: "ignored",
@@ -227,7 +227,7 @@ describe("toMatchObjectIgnoringSymbols matcher", () => {
     }).toThrow();
   });
 
-  it("should fail when a nested property value differs", () => {
+  it("throws when a nested property value differs", () => {
     const obj1 = {
       user: {
         name: "John",
@@ -252,18 +252,18 @@ describe("toMatchObjectIgnoringSymbols matcher", () => {
     }).toThrow();
   });
 
-  it("should fail when a number value differs", () => {
+  it("throws when a number value differs", () => {
     expect(() => {
       expect({ value: 1 }).toMatchObjectIgnoringSymbols({ value: 2 });
     }).toThrow();
   });
 
-  it("should treat a NaN value as matching NaN", () => {
+  it("matches `NaN` against `NaN`", () => {
     expect({ value: NaN, [testSymbol1]: "ignored" })
       .toMatchObjectIgnoringSymbols({ value: NaN });
   });
 
-  it("should include custom failure messages for partial matches", () => {
+  it("includes the caller's custom message in a partial-match failure", () => {
     let message: string | undefined;
     try {
       expect(

@@ -54,7 +54,7 @@ describe("nested counter integration test", () => {
       "nested-counter.tsx",
     );
     const rootPath = join(import.meta.dirname!, "..");
-    const program = await cc.manager().runtime.harness
+    const program = await cc.runtime.harness
       .resolve(
         new FileSystemProgramResolver(sourcePath, rootPath),
       );
@@ -67,7 +67,7 @@ describe("nested counter integration test", () => {
     // In pull mode, create a sink to keep the piece reactive when inputs change.
     // The sink also drives awaitResultValue: it records the latest committed
     // value and resolves a pending waiter when its target is reached.
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink((value) => {
       latestResultValue = (value as { value?: number } | undefined)?.value;
       if (resultWaiter && latestResultValue === resultWaiter.target) {

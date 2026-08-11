@@ -100,7 +100,6 @@ Deno.test("Status waits for every pull request validation job", async () => {
   const gate = jobBlock(contents, "status");
   const pushOnlyJobs = new Set([
     "attest-binaries",
-    "deploy-toolshed",
     "deploy-rapids",
     "deploy-shell-staging",
   ]);
@@ -200,7 +199,7 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
   // prints its usage and exits 1, failing the deploy job. That script belongs
   // to the infra repository, so nothing else here sees it and the call sites
   // are checked instead. docs/development/deploying.md covers the seam.
-  const environments = ["estuary", "toolshed", "rapids"];
+  const environments = ["estuary", "rapids"];
   // The revision has to expand to a full SHA, which is a property of what the
   // expression reads rather than of the expression itself. `github.ref_name`
   // would look just as much like a revision here and fail on the bastion, so

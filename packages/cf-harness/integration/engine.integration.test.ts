@@ -883,7 +883,7 @@ Deno.test({
         "integration-read-file-cfc-prompt-loop",
         async (engine, hostPath) => {
           assertEquals(
-            engine.sandbox.describe?.().cfc?.invocationContextTransport,
+            engine.sandbox.describe().cfc?.invocationContextTransport,
             "sidecar",
           );
           await Deno.mkdir(`${hostPath}/notes`, { recursive: true });

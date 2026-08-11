@@ -2,7 +2,8 @@ import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
-  applyPatch,
+  applyPatchToDocument,
+  emptyEntityDocument,
   patchOpChangesParentKeySet,
   touchedPointerPaths,
 } from "./patch.ts";
@@ -2748,7 +2749,7 @@ const validateStatefulEntityRevisions = (
         seq: revision.seq,
         opIndex: revision.opIndex,
       })
-      : applyPatchDocument(document, revision.patches ?? []);
+      : applyPatchToDocument(document, revision.patches ?? []);
     rejectStoredSyncSchemaRef(document);
   }
 };
@@ -2943,7 +2944,7 @@ const reconstructPatchedDocument = (
   }) as Array<{ data: string; seq: number; op_index: number }>;
 
   for (const patch of patches) {
-    document = applyPatchDocument(
+    document = applyPatchToDocument(
       document,
       decodeStoredPatchList(patch.data),
     );
@@ -3046,8 +3047,6 @@ const ensureActiveBranch = (engine: Engine, branch: BranchName): void => {
   }
 };
 
-const emptyEntityDocument = (): EntityDocument => ({});
-
 const decodeStoredDocument = (data: string | null): EntityDocument => {
   const parsed = decodeMemoryBoundary(data ?? "null");
   if (!isEntityDocument(parsed)) {
@@ -3063,11 +3062,6 @@ const decodeStoredPatchList = (data: string | null): PatchOp[] => {
   }
   return parsed as PatchOp[];
 };
-
-const applyPatchDocument = (
-  document: EntityDocument,
-  patches: PatchOp[],
-): EntityDocument => applyPatch(document, patches) as EntityDocument;
 
 const sameStoredOriginal = (
   stored: string,

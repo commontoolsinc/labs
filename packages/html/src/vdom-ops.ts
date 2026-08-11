@@ -105,31 +105,11 @@ export interface InsertChildOp {
 }
 
 /**
- * Move an existing child to a new position.
- * If beforeId is null, moves to the end.
- */
-export interface MoveChildOp {
-  op: "move-child";
-  parentId: number;
-  childId: number;
-  beforeId: number | null;
-}
-
-/**
  * Remove a node from the DOM.
  */
 export interface RemoveNodeOp {
   op: "remove-node";
   nodeId: number;
-}
-
-/**
- * Set multiple attributes at once (optimization for initial render).
- */
-export interface SetAttrsOp {
-  op: "set-attrs";
-  nodeId: number;
-  attrs: Record<string, JSONValue>;
 }
 
 /**
@@ -145,9 +125,7 @@ export type VDomOp =
   | RemoveEventOp
   | SetBindingOp
   | InsertChildOp
-  | MoveChildOp
-  | RemoveNodeOp
-  | SetAttrsOp;
+  | RemoveNodeOp;
 
 /**
  * A batch of VDOM operations to be applied atomically.
@@ -161,43 +139,4 @@ export interface VDomBatch {
 
   /** Optional: the root node ID for this render tree */
   rootId?: number;
-}
-
-/**
- * Type guard for VDomOp.
- */
-export function isVDomOp(value: unknown): value is VDomOp {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const op = (value as VDomOp).op;
-  return (
-    op === "create-element" ||
-    op === "create-text" ||
-    op === "update-text" ||
-    op === "set-prop" ||
-    op === "remove-prop" ||
-    op === "set-event" ||
-    op === "remove-event" ||
-    op === "set-binding" ||
-    op === "insert-child" ||
-    op === "move-child" ||
-    op === "remove-node" ||
-    op === "set-attrs"
-  );
-}
-
-/**
- * Type guard for VDomBatch.
- */
-export function isVDomBatch(value: unknown): value is VDomBatch {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const batch = value as VDomBatch;
-  return (
-    typeof batch.batchId === "number" &&
-    Array.isArray(batch.ops) &&
-    batch.ops.every(isVDomOp)
-  );
 }

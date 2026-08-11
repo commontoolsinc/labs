@@ -10,13 +10,22 @@ import { BaseFabricInstance, DEEP_CLONE_CORE } from "./BaseFabricInstance.ts";
  */
 export abstract class FabricNativeWrapper<T extends object>
   extends BaseFabricInstance {
-  /** The wrapped native value, used by `toNativeValue` for freeze-state checks. */
+  /**
+   * The wrapped native value, used by `toNativeValue()` for freeze-state
+   * checks.
+   */
   protected abstract get wrappedValue(): T;
 
-  /** Converts the wrapped value to frozen form (only called on state mismatch). */
+  /**
+   * Converts the wrapped value to frozen form. Only called on a state
+   * mismatch.
+   */
   protected abstract toNativeFrozen(): T;
 
-  /** Converts the wrapped value to thawed form (only called on state mismatch). */
+  /**
+   * Converts the wrapped value to thawed form. Only called on a state
+   * mismatch.
+   */
   protected abstract toNativeThawed(): T;
 
   /** Returns the underlying native value, optionally frozen. */

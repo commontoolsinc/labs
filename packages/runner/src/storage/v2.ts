@@ -1,8 +1,4 @@
-import {
-  cloneIfNecessary,
-  cloneWithoutValueAtPath,
-  cloneWithValueAtPath,
-} from "@commonfabric/data-model/fabric-value";
+import { cloneIfNecessary } from "@commonfabric/data-model/fabric-value";
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import type { Entity } from "@commonfabric/memory/interface";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
@@ -37,19 +33,14 @@ import {
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
 } from "@commonfabric/memory/v2";
-import { parentPath } from "../../../memory/v2/path.ts";
 import {
-  patchOpIsStructural,
-  touchedPointerPaths,
+  applyPatchToDocument,
+  PatchApplyError,
 } from "../../../memory/v2/patch.ts";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
-import {
-  isObject,
-  isPlainContainer,
-  isRecord,
-} from "@commonfabric/utils/types";
+import { isObject, isRecord } from "@commonfabric/utils/types";
 import type { Cell } from "../cell.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -85,6 +76,7 @@ import type {
   State,
   StorageNotification,
   StorageTransactionRejected,
+  TransactionCommitOptions,
   Unit,
 } from "./interface.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
@@ -99,6 +91,8 @@ import {
   isReadExcludedFromConflict,
   isReadIgnoredForCommit,
   isReadMarkedAsAttemptedWrite,
+  notifyCommitRejected,
+  recordCoverageWait,
 } from "./reactivity-log.ts";
 
 // A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
@@ -131,11 +125,6 @@ const isArrayLengthChildPath = (
   path[arrayPath.length] === "length" &&
   arrayPath.every((segment, index) => path[index] === segment);
 import { toTransactionDocumentValue } from "./v2-document.ts";
-import {
-  hasValueAtPath,
-  isArrayIndexSegment,
-  readValueAtPath,
-} from "./v2-path.ts";
 import {
   compactWatchEntries,
   normalizeSyncEntries,
@@ -398,98 +387,6 @@ const transactionValueForVersion = (
   return version.transactionValue;
 };
 
-const isPathPrefix = (
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean =>
-  prefix.length <= path.length &&
-  prefix.every((segment, index) => segment === path[index]);
-
-const replayPathForPendingPatchTarget = (
-  base: EntityDocument | undefined,
-  pendingValue: EntityDocument,
-  path: readonly string[],
-): string[] => {
-  if (path.length === 0) {
-    return [...path];
-  }
-  const parent = parentPath(path);
-  if (
-    Array.isArray(readValueAtPath(base, parent)) ||
-    Array.isArray(readValueAtPath(pendingValue, parent))
-  ) {
-    return parent;
-  }
-  return [...path];
-};
-
-const changedPathsForPendingPatch = (
-  base: EntityDocument | undefined,
-  pendingValue: EntityDocument,
-  patches: readonly PatchOp[],
-): string[][] =>
-  patches.flatMap((patch) => {
-    const leaves = touchedPointerPaths(patch);
-    // Structural ops (add/remove/move) may target a slot whose position shifts
-    // as the pending value is rebuilt from `base`, so resolve each against live
-    // state; value-only ops keep their exact leaf path.
-    return patchOpIsStructural(patch)
-      ? leaves.map((path) =>
-        replayPathForPendingPatchTarget(base, pendingValue, path)
-      )
-      : leaves;
-  });
-
-// Finds the first existing prefix in `base` that blocks a pending nested write.
-// cloneWithValueAtPath can create missing containers when applying the selected
-// write path.
-const firstExistingPrefixThatBlocksPendingPath = (
-  base: EntityDocument | undefined,
-  path: readonly string[],
-): string[] | undefined => {
-  for (let length = 1; length < path.length; length += 1) {
-    const prefix = path.slice(0, length);
-    if (!hasValueAtPath(base, prefix)) {
-      // Once a prefix is missing, by definition everything else in the path
-      // can be written, so nothing is blocking it.
-      return undefined;
-    }
-    const value = readValueAtPath(base, prefix);
-    const nextSegment = path[length]!;
-    if (
-      !isPlainContainer(value) ||
-      (Array.isArray(value) && !isArrayIndexSegment(nextSegment))
-    ) {
-      return prefix;
-    }
-  }
-  return undefined;
-};
-
-const pendingSetPathForBase = (
-  base: EntityDocument | undefined,
-  pendingValue: EntityDocument,
-  path: readonly string[],
-): readonly string[] => {
-  const prefix = firstExistingPrefixThatBlocksPendingPath(base, path);
-  if (!prefix || !hasValueAtPath(pendingValue, prefix)) {
-    return path;
-  }
-  return prefix;
-};
-
-const compactChangedPaths = (paths: readonly string[][]): string[][] => {
-  const sorted = [...paths].sort((left, right) => left.length - right.length);
-  const retained: string[][] = [];
-  for (const path of sorted) {
-    if (retained.some((existing) => isPathPrefix(existing, path))) {
-      continue;
-    }
-    retained.push(path);
-  }
-  return retained;
-};
-
 const applyPendingVersion = (
   base: EntityDocument | undefined,
   pending: PendingVersion,
@@ -501,39 +398,43 @@ const applyPendingVersion = (
     case "set":
       return cloneIfNecessary(pending.value) as EntityDocument;
     case "patch": {
-      let next = base;
-      for (
-        const path of compactChangedPaths(
-          changedPathsForPendingPatch(base, pending.value, pending.patches),
-        )
-      ) {
-        if (hasValueAtPath(pending.value, path)) {
-          const setPath = pendingSetPathForBase(next, pending.value, path);
-          if (!isSamePath(setPath, path)) {
-            pendingPatchLogger.warn("pending-branch-replace", () => [
-              "pending patch visibility replaced data at an existing branch that blocked the nested write",
-              {
-                space: logContext.space,
-                id: logContext.id,
-                scope: normalizeCellScope(logContext.scope),
-                localSeq: pending.localSeq,
-                path,
-                replacementPath: setPath,
-              },
-            ]);
-          }
-          next = cloneWithValueAtPath(
-            next,
-            setPath,
-            readValueAtPath(pending.value, setPath),
-          ) as EntityDocument;
-          continue;
+      // Replay the layer's OPS over the base — never combine values. The
+      // patch vocabulary is semantic (append / add-unique / increment /
+      // splice / ...), so replaying re-folds the layer against whatever
+      // base the server delivered, exactly as the server folds it on
+      // accept — the client and the server share this applyPatch. Spine
+      // materialization comes from the ops that allow it (createMissing),
+      // mirroring the server's mergeable disposition, and the ops can only
+      // express this layer's own writes, so a dropped sibling's data is
+      // unrepresentable in the result (CT-1872 1a).
+      try {
+        return applyPatchToDocument(
+          base,
+          pending.patches as PatchOp[],
+        ) as EntityDocument;
+      } catch (error) {
+        if (!(error instanceof PatchApplyError)) {
+          // Only genuine inapplicability renders as a skipped layer; an
+          // unexpected implementation failure must propagate.
+          throw error;
         }
-        next = cloneWithoutValueAtPath(next, path) as
-          | EntityDocument
-          | undefined;
+        // An op that cannot apply to this base (e.g. an append onto a
+        // scalar a winner wrote) renders WITHOUT this layer: transiently
+        // honest — the server rejects the same ops against the same base,
+        // or a covering frame retires the layer with server truth. Under
+        // strict semantics (CT-1875) this becomes a terminal rejection.
+        pendingPatchLogger.debug("pending-replay-skip", () => [
+          "pending patch layer skipped: ops do not apply to the current base",
+          {
+            space: logContext.space,
+            id: logContext.id,
+            scope: normalizeCellScope(logContext.scope),
+            localSeq: pending.localSeq,
+            error: String(error),
+          },
+        ]);
+        return base;
       }
-      return next;
     }
   }
 };
@@ -859,8 +760,15 @@ export class StorageManager implements IStorageManager {
   #seedHosts: Record<string, string>;
   /** Late-bound host hints; see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
-  /** WebSocket storage endpoint used by an unseeded, unhinted space. */
+  /** Base URL the default storage route is resolved from, held as text so a
+   *  caller mutating their URL object cannot move the route. */
+  #memoryHost: string;
+  /** WebSocket storage endpoint used by an unseeded, unhinted space; read it
+   *  through #resolveDefaultStorageRoute(). */
   #defaultStorageRoute?: string;
+  /** Whether #defaultStorageRoute holds the result of a resolution attempt.
+   *  Separate from the value, which is undefined when resolution failed. */
+  #defaultStorageRouteResolved = false;
   /** Late-bound marker sink (the Runtime's telemetry bus); see setTelemetry. */
   #telemetry?: TelemetrySink;
 
@@ -907,14 +815,31 @@ export class StorageManager implements IStorageManager {
     // open(), so refusal logic must see the same fixed facts — a
     // caller mutating their map object must not desynchronize them.
     this.#seedHosts = Object.freeze({ ...(options.spaceHostMap ?? {}) });
-    try {
-      const resolveDefault = createStorageAddressResolver(options.memoryHost);
-      this.#defaultStorageRoute = toWebSocketAddress(
-        resolveDefault("did:key:route-comparison" as MemorySpace),
-      ).toString();
-    } catch {
-      // A custom session factory may use a non-network memoryHost placeholder.
+    this.#memoryHost = String(options.memoryHost);
+  }
+
+  /**
+   * The WebSocket storage endpoint an unseeded, unhinted space opens against,
+   * resolved from the memory host on the first read and kept from then on.
+   * registerSpaceHost() is its only reader. A failed resolution is kept as
+   * well: a custom session factory may use a non-network memoryHost
+   * placeholder, and such a manager has no default route.
+   */
+  #resolveDefaultStorageRoute(): string | undefined {
+    if (!this.#defaultStorageRouteResolved) {
+      this.#defaultStorageRouteResolved = true;
+      try {
+        const resolveDefault = createStorageAddressResolver(
+          new URL(this.#memoryHost),
+        );
+        this.#defaultStorageRoute = toWebSocketAddress(
+          resolveDefault("did:key:route-comparison" as MemorySpace),
+        ).toString();
+      } catch {
+        // The route stays undefined; the flag above stops the retry.
+      }
     }
+    return this.#defaultStorageRoute;
   }
 
   /**
@@ -954,7 +879,7 @@ export class StorageManager implements IStorageManager {
     }
     const provider = this.#providers.get(space);
     const replacesDefaultRoute = provider !== undefined &&
-      this.#defaultStorageRoute !==
+      this.#resolveDefaultStorageRoute() !==
         toWebSocketAddress(storageAddressForHost(normalized)).toString();
     if (replacesDefaultRoute && !provider.canReplaceProvisionalReplica()) {
       return false;
@@ -1674,6 +1599,11 @@ export class StorageManager implements IStorageManager {
       return;
     }
 
+    // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, whose
+    // `Object.keys` are empty, so a cell link held inside a `FabricInstance`
+    // reconstructed from the data URI is never found here and its target
+    // document is never synced — the later read finds it absent. (A
+    // `FabricPrimitive` ends the walk harmlessly; it is a leaf.)
     if (isRecord(value)) {
       for (const key of Object.keys(value)) {
         const child = value[key];
@@ -2093,6 +2023,10 @@ class SpaceReplica implements ISpaceReplica {
   #parkedAccepts = new Map<number, {
     operations: NativeCommitOperation[];
     applied: AppliedCommit;
+    /** Resolves when the parked application runs — the commit promise's
+     * resolution point (CT-1950): the caller may then act on its
+     * subscribed view as one reflecting the committed write. */
+    settled: PromiseWithResolvers<void>;
   }>();
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
@@ -2426,7 +2360,12 @@ class SpaceReplica implements ISpaceReplica {
     this.#staleFloor.clear();
     // Parked accepts die with the marker space: on reset the re-pull
     // re-derives durable state (which contains the accepted writes), and on
-    // close there is nothing left to promote into.
+    // close there is nothing left to promote into. Their promises RESOLVE —
+    // the commits succeeded durably; a caller must never see a durable
+    // success reported as failure (CT-1950).
+    for (const entry of this.#parkedAccepts.values()) {
+      entry.settled.resolve();
+    }
     this.#parkedAccepts.clear();
   }
 
@@ -2437,7 +2376,11 @@ class SpaceReplica implements ISpaceReplica {
     this.#caughtUpLocalSeq = Math.max(this.#caughtUpLocalSeq, localSeq);
     // Apply parked accepts the marker now covers, ascending, BEFORE waking
     // marker waiters: gated code (readyToRetry retries) resumes against a
-    // replica whose decided promotions are already settled.
+    // replica where every promotion COVERED BY THIS MARKER is settled.
+    // Accepts decided but not yet covered — verdict received, coverage
+    // still outstanding (the two moments CT-1950 splits) — remain parked
+    // past this wake: their pending overlays stay visible and their
+    // settlement promises unresolved until their own marker arrives.
     if (this.#parkedAccepts.size > 0) {
       const due = [...this.#parkedAccepts.keys()]
         .filter((parked) => parked <= this.#caughtUpLocalSeq)
@@ -2446,6 +2389,7 @@ class SpaceReplica implements ISpaceReplica {
         const entry = this.#parkedAccepts.get(parked)!;
         this.#parkedAccepts.delete(parked);
         this.confirmPending(parked, entry.operations, entry.applied);
+        entry.settled.resolve();
       }
     }
     const ready: PromiseWithResolvers<void>[] = [];
@@ -2665,6 +2609,7 @@ class SpaceReplica implements ISpaceReplica {
   async commitNative(
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
+    options?: TransactionCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const preconditions = activeCommitPreconditions(transaction.preconditions);
     const operations = withCommitTiming(
@@ -2714,6 +2659,7 @@ class SpaceReplica implements ISpaceReplica {
           source,
           preconditions,
           sqliteOps,
+          options,
         ),
     );
   }
@@ -3154,6 +3100,7 @@ class SpaceReplica implements ISpaceReplica {
     source?: IStorageTransaction,
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
+    commitOptions?: TransactionCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const activePreconditions = activeCommitPreconditions(preconditions);
     if (
@@ -3253,6 +3200,7 @@ class SpaceReplica implements ISpaceReplica {
           operations,
           commit,
           source,
+          { commitOptions },
         ),
     );
     this.#commitPromises.add(promise);
@@ -3385,10 +3333,22 @@ class SpaceReplica implements ISpaceReplica {
     options: {
       routeSources?: readonly IStorageTransaction[];
       prepareIssue?: (commit: ClientCommit) => boolean;
+      commitOptions?: TransactionCommitOptions;
     } = {},
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const routeSources = options.routeSources ??
       (source === undefined ? [] : [source]);
+    const resolveAtVerdict = options.commitOptions?.resolveAt === "verdict";
+    // Rejection receipt seals the fate for EVERY contributing transaction.
+    // finalizeRejection's own notify covers the cascade paths that do not
+    // come through here; the once-guard makes the overlap free.
+    const notifyRejectionSources = (
+      rejection: StorageTransactionRejected,
+    ): void => {
+      for (const routeSource of routeSources) {
+        notifyCommitRejected(routeSource, rejection);
+      }
+    };
     // Register BEFORE any await: commitOperations calls pushCommit
     // synchronously after applyPending, so registration is atomic with the
     // optimistic write — a dependency drop can never slip between the two.
@@ -3410,6 +3370,7 @@ class SpaceReplica implements ISpaceReplica {
             `commit preempted: stale until caughtUpLocalSeq>=${threshold}`,
             { localSeq, operations: operations.length },
           ]);
+          notifyRejectionSources(rejection);
           return await this.finalizeRejection(
             localSeq,
             operations,
@@ -3481,6 +3442,7 @@ class SpaceReplica implements ISpaceReplica {
             sessionId: session.sessionId,
             error: inFlight.localRejectionValue.name ?? "TransactionError",
           });
+          notifyRejectionSources(inFlight.localRejectionValue);
           return await this.finalizeRejection(
             localSeq,
             operations,
@@ -3495,7 +3457,23 @@ class SpaceReplica implements ISpaceReplica {
             wireCommit,
             () => this.markRouteWriteIssued(routeSources),
           );
-          this.settleAccept(localSeq, operations, applied);
+          const settled = this.settleAccept(
+            localSeq,
+            operations,
+            applied,
+            resolveAtVerdict,
+          );
+          // Tx-sourced commits ALWAYS record the coverage wait: the inner
+          // settlement promise carries commit callbacks and the
+          // pending-commit barrier, which stay on the full timeline even
+          // when the caller opted its returned promise into verdict timing.
+          // Only the direct path — where the promise returned here IS the
+          // caller's promise — honors the verdict opt-out inline.
+          if (source !== undefined) {
+            recordCoverageWait(source, settled);
+          } else if (!resolveAtVerdict) {
+            await settled;
+          }
           telemetry?.submit({
             type: "storage.push.complete",
             id: pushOpId,
@@ -3525,6 +3503,7 @@ class SpaceReplica implements ISpaceReplica {
             sessionId: session.sessionId,
             error: outcome.rejection.name ?? "TransactionError",
           });
+          notifyRejectionSources(outcome.rejection);
           return await this.finalizeRejection(
             localSeq,
             operations,
@@ -3532,7 +3511,19 @@ class SpaceReplica implements ISpaceReplica {
             outcome.rejection,
           );
         }
-        this.settleAccept(localSeq, operations, outcome.applied);
+        const settledRace = this.settleAccept(
+          localSeq,
+          operations,
+          outcome.applied,
+          resolveAtVerdict,
+        );
+        // Same rule as the direct-await branch above: tx-sourced commits
+        // always record; only the direct path honors the verdict opt-out.
+        if (source !== undefined) {
+          recordCoverageWait(source, settledRace);
+        } else if (!resolveAtVerdict) {
+          await settledRace;
+        }
         telemetry?.submit({
           type: "storage.push.complete",
           id: pushOpId,
@@ -3576,6 +3567,7 @@ class SpaceReplica implements ISpaceReplica {
             { localSeq, operations: operations.length },
           ],
         );
+        notifyRejectionSources(rejection);
         return await this.finalizeRejection(
           localSeq,
           operations,
@@ -3649,6 +3641,13 @@ class SpaceReplica implements ISpaceReplica {
     source: IStorageTransaction | undefined,
     rejection: StorageTransactionRejected,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    // The fate is sealed here. The verdict-gated effect layer (verdict
+    // callbacks, outbox clearing) fires on this notification; the
+    // settlement promise and commit callbacks wait out the read-repair
+    // gate below, because a retry needs the repaired base.
+    if (source !== undefined) {
+      notifyCommitRejected(source, rejection);
+    }
     const touched = operations.map((operation) => ({
       id: operation.id,
       scope: operation.scope,
@@ -4203,15 +4202,16 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   // CT-1927 client half: an accept's promotion waits for marker coverage.
-  // Immediate application remains for markers already observed (the frame
-  // can outrun the verdict handler on the same socket) and for servers that
-  // predate per-verdict markers (verdictCatchUpMarkers absent: an older
-  // server stamps markers only for conflicts, so parking would hang).
+  // Immediate application remains for a marker already observed before this
+  // replica begins settlement and for servers that predate per-verdict markers
+  // (verdictCatchUpMarkers absent: an older server stamps markers only for
+  // conflicts, so parking would hang).
   private settleAccept(
     localSeq: number,
     operations: NativeCommitOperation[],
     applied: AppliedCommit,
-  ): void {
+    resolveAtVerdict = false,
+  ): Promise<void> {
     // Parking requires a live marker channel: a server that stages
     // per-verdict markers AND an active sync consumer to deliver them. With
     // no subscribed watch view, no frames arrive at all — there is no
@@ -4220,11 +4220,42 @@ class SpaceReplica implements ISpaceReplica {
     const parkable =
       this.#sessionClient?.serverFlags?.verdictCatchUpMarkers === true &&
       this.#subscribedWatchView !== null;
-    if (!parkable || this.#caughtUpLocalSeq >= localSeq) {
+    // Zero-operation commits (scheduler observation batches) carry no state
+    // to apply and no view consequences — parking them would only stall
+    // synced() on the batch window for nothing.
+    //
+    // The already-caught-up check is NOT wire-reordering tolerance: since
+    // the per-space publication lock (#5529) the marker frame always
+    // FOLLOWS its verdict on the socket. It survives for intra-client
+    // interleaving — the transact awaiter resumes several microtask hops
+    // after its response resolves (request()'s internal awaits), and the
+    // marker frame's processing can integrate in that gap — so by the time
+    // this runs, the marker may already cover this commit and parking
+    // would wait on a frame that has already been consumed.
+    if (
+      !parkable || operations.length === 0 ||
+      this.#caughtUpLocalSeq >= localSeq
+    ) {
       this.confirmPending(localSeq, operations, applied);
-      return;
+      return Promise.resolve();
     }
-    this.#parkedAccepts.set(localSeq, { operations, applied });
+    const settled = Promise.withResolvers<void>();
+    this.#parkedAccepts.set(localSeq, { operations, applied, settled });
+    // synced() holds on the parked application, not just the verdict: its
+    // contract is "storage fully settled", which under parking includes the
+    // fan-out of this replica's own accepted writes (CT-1950). The push
+    // promise resolves at the verdict, so the barrier needs its own hold.
+    // A verdict-resolving commit opts out of the hold — its premise is
+    // "accepted but not fanned out", which a synced() that forces the
+    // fan-out through would destroy — while its SETTLEMENT timeline still
+    // drains coverage; only the caller's returned promise resolves early.
+    if (!resolveAtVerdict) {
+      const hold: Promise<Result<Unit, StorageTransactionRejected>> = settled
+        .promise.then(() => ({ ok: {} }));
+      this.#commitPromises.add(hold);
+      hold.then(() => this.#commitPromises.delete(hold));
+    }
+    return settled.promise;
   }
 
   // The marker channel died (the subscribed view closed): apply everything
@@ -4241,6 +4272,7 @@ class SpaceReplica implements ISpaceReplica {
       const entry = this.#parkedAccepts.get(parked)!;
       this.#parkedAccepts.delete(parked);
       this.confirmPending(parked, entry.operations, entry.applied);
+      entry.settled.resolve();
     }
   }
 

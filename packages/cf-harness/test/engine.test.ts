@@ -21,11 +21,11 @@ import type {
   SandboxCommandRequest,
   SandboxCommandResult,
   SandboxRuntime,
+  SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
 
 class FakeSandboxRuntime implements SandboxRuntime {
-  readonly kind = "docker-runsc-cfc" as const;
   readonly shellRequests: SandboxShellRequest[] = [];
 
   constructor(
@@ -33,12 +33,24 @@ class FakeSandboxRuntime implements SandboxRuntime {
     private readonly shellError?: Error,
   ) {}
 
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: this.defaultWorkingDirectory(),
+      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+    };
+  }
+
   resolvePath(path: string, cwd = this.defaultWorkingDirectory()): string {
     return normalize(path.startsWith("/") ? path : `${cwd}/${path}`);
   }
 
   isPathWithinWorkspace(path: string): boolean {
     return path === "/workspace" || path.startsWith("/workspace/");
+  }
+
+  isPathWithinAllowedRoots(path: string): boolean {
+    return this.isPathWithinWorkspace(path);
   }
 
   defaultWorkingDirectory(): string {
@@ -101,7 +113,7 @@ Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a wo
   });
 
   assertEquals(engine.config.sandbox, undefined);
-  assertEquals(engine.sandbox.kind, "docker-runsc-cfc");
+  assertEquals(engine.sandbox.describe().kind, "docker-runsc-cfc");
   assertEquals(engine.getRunState(), {
     runId: engine.getRunState().runId,
     status: "pending",
@@ -124,7 +136,7 @@ Deno.test("CfHarnessEngine accepts a default sandbox image override", () => {
   });
 
   assertEquals(
-    engine.sandbox.describe?.()?.cfc?.image,
+    engine.sandbox.describe().cfc?.image,
     "registry.example/cf:deno2",
   );
 });

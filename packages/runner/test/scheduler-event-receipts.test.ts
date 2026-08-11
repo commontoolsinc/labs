@@ -32,8 +32,12 @@ type TransactResponse = {
   ok?: unknown;
   error?: { name: string; message: string };
 };
+type PublishTransactVerdict = (response: TransactResponse) => void;
 type TestMemoryServer = {
-  transact(message: TransactMessage): Promise<TransactResponse>;
+  transact(
+    message: TransactMessage,
+    publishVerdict?: PublishTransactVerdict,
+  ): Promise<TransactResponse>;
 };
 
 function emulatedServer(
@@ -48,10 +52,10 @@ function rejectNextServerTransact(
   const server = emulatedServer(storageManager);
   const original = server.transact.bind(server);
   let shouldReject = true;
-  server.transact = async (message) => {
+  server.transact = async (message, publishVerdict) => {
     if (shouldReject) {
       shouldReject = false;
-      return {
+      const response: TransactResponse = {
         type: "response",
         requestId: message.requestId,
         error: {
@@ -59,8 +63,10 @@ function rejectNextServerTransact(
           message: "forced scheduler receipt test conflict",
         },
       };
+      publishVerdict?.(response);
+      return response;
     }
-    return await original(message);
+    return await original(message, publishVerdict);
   };
 
   return () => {
@@ -77,12 +83,12 @@ function delayNextServerTransact(
   const release = Promise.withResolvers<void>();
   let shouldDelay = true;
 
-  server.transact = async (message) => {
-    if (!shouldDelay) return await original(message);
+  server.transact = async (message, publishVerdict) => {
+    if (!shouldDelay) return await original(message, publishVerdict);
     shouldDelay = false;
     started.resolve();
     await release.promise;
-    return await original(message);
+    return await original(message, publishVerdict);
   };
 
   return {
@@ -119,6 +125,11 @@ async function waitForSchedulerCondition(
   const deadline = performance.now() + 1_000;
   while (!condition() && performance.now() < deadline) {
     await runtime.idle();
+    // Yield a zero-delay timer turn: an idle() that resolves through
+    // microtasks alone would otherwise starve the timer queue, and the
+    // emulated server's fan-out flush — which resolves awaited commits at
+    // marker coverage (CT-1950) — rides a zero-delay timer.
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
   if (!condition()) {
     throw new Error(message);

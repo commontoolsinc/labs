@@ -7,7 +7,7 @@ import {
   type MemorySpace,
   type Runtime,
 } from "@commonfabric/runner";
-import { loadManager, type SpaceConfig } from "./piece.ts";
+import { loadPieces, type SpaceConfig } from "./piece.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 
 /**
@@ -126,7 +126,7 @@ export async function resolveWish(
   };
 }
 
-/** What {@link readWish} needs from a connected manager. */
+/** What {@link readWish} needs from a connected pieces controller. */
 export interface WishRuntimeHost {
   runtime: Runtime;
   getSpace(): MemorySpace;
@@ -134,19 +134,19 @@ export interface WishRuntimeHost {
 
 /** Injectable connection dep, mirroring lib/piece.ts's `RootPatternDeps`. */
 export interface ReadWishDeps {
-  loadManager?: (config: SpaceConfig) => Promise<WishRuntimeHost>;
+  loadPieces?: (config: SpaceConfig) => Promise<WishRuntimeHost>;
 }
 
 /**
  * The blessed, headless read: connect a real identity/session-backed runtime via
- * {@link loadManager}, then {@link resolveWish}. See {@link WishReadConfig}.
+ * {@link loadPieces}, then {@link resolveWish}. See {@link WishReadConfig}.
  */
 export async function readWish(
   config: WishReadConfig,
   deps: ReadWishDeps = {},
 ): Promise<WishReadResult> {
-  const manager = await (deps.loadManager ?? loadManager)(config);
-  return await resolveWish(manager.runtime, manager.getSpace(), {
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
+  return await resolveWish(pieces.runtime, pieces.getSpace(), {
     query: config.query,
     path: config.path,
     schema: config.schema,
@@ -203,6 +203,13 @@ function projectNode(
   }
   if (value === null || typeof value !== "object") return value;
 
+  // TODO(danfuzz): the `typeof` gate admits a `FabricSpecialObject`, so the
+  // `Object.entries` rebuild below renders one — a `FabricBytes` in a
+  // materialized wish result, which the binary fetch builtin mints today —
+  // as `{}` in the projected output. Wants a `FabricSpecialObject` test
+  // returning the value whole, plus a fabric-aware rendering in the
+  // downstream `render()`/`safeStringify` step, whose own marker in
+  // `render.ts` predates this traffic and calls the path latent.
   const cached = memo.get(value);
   if (cached === IN_PROGRESS) {
     // A genuine cycle: this node is an ancestor of itself. Break it so the walk

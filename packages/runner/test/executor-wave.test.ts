@@ -44,7 +44,6 @@ import {
 import { selectSchedulerBasisRows } from "@commonfabric/memory/v2/scheduler-basis";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace, Result } from "../src/storage/interface.ts";
 import {
@@ -54,47 +53,14 @@ import {
   type WaveCommitSink,
 } from "../src/executor/wave.ts";
 import { EngineWaveCommitSink } from "../src/executor/engine-wave-sink.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
-
-// Shared-server helper (modelled after cell-cache.test.ts): the test needs
-// the SERVER's engines — the wave commit sink runs against the co-hosted
-// engine — so the server is constructed outside the manager.
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager._sharedServer = server;
-    return manager;
-  }
-
-  private _sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this._sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("executor wave test");
 const space = signer.did() as MemorySpace;
 
 describe("stage D seal-into-wave", () => {
   let server: MemoryV2Server.Server;
-  let storageManager: SharedServerStorageManager;
+  let storageManager: EmulatedStorageManager;
   let runtime: Runtime;
   let engine: Engine.Engine;
 
@@ -133,7 +99,7 @@ describe("stage D seal-into-wave", () => {
 
   beforeEach(async () => {
     server = newSharedServer();
-    storageManager = SharedServerStorageManager.connectTo(server, {
+    storageManager = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     runtime = new Runtime({
@@ -151,7 +117,7 @@ describe("stage D seal-into-wave", () => {
   });
 
   it("refuses a seal destination off the flag", async () => {
-    const offManager = SharedServerStorageManager.connectTo(server, {
+    const offManager = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     const offRuntime = new Runtime({

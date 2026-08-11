@@ -1,0 +1,31 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "selectedEmoji": {
+        "default": "",
+        "type": "string"
+      }
+    },
+    "required": [
+      "selectedEmoji"
+    ],
+    "type": "object"
+  },
+  "pattern": "emoji-picker.tsx",
+  "resultSchema": {
+    "properties": {
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "selectedEmoji": {
+        "default": "",
+        "type": "string"
+      }
+    },
+    "required": [
+      "selectedEmoji",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

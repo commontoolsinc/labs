@@ -53,7 +53,7 @@ describe("counter direct operations test", () => {
       "counter",
       "counter.tsx",
     );
-    const program = await cc.manager().runtime.harness
+    const program = await cc.runtime.harness
       .resolve(
         new FileSystemProgramResolver(sourcePath),
       );
@@ -66,7 +66,7 @@ describe("counter direct operations test", () => {
     // Without this, setting values won't trigger pattern re-computation. The
     // sink also drives awaitResultValue: it records the latest committed value
     // and resolves a pending waiter when its target is reached.
-    const resultCell = cc.manager().getResult(piece.getCell());
+    const resultCell = cc.getResult(piece.getCell());
     pieceSinkCancel = resultCell.sink((value) => {
       latestResultValue = (value as { value?: number } | undefined)?.value;
       if (resultWaiter && latestResultValue === resultWaiter.target) {

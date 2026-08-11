@@ -9,6 +9,8 @@ import {
   type SessionSync,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { newLoopbackServer } from "../src/storage/v2-emulate.ts";
 import type {
   IStorageNotification,
   StorageNotification,
@@ -46,6 +48,23 @@ export const TEST_MEMORY_SERVER_AUTH = {
     audience: TEST_SESSION_OPEN_AUDIENCE,
   },
 } as const;
+
+/**
+ * A shared in-process memory server for multi-manager harnesses (pair with
+ * `EmulatedStorageManager.connectTo`), pinned to the runner test audience.
+ * `subscriptionRefreshDelayMs: "manual"` disables timer-driven fan-out
+ * entirely; either explicit synchronization point — `flushSessions()`, or
+ * `idle()`, which drains held fan-out to keep its quiescence contract —
+ * delivers it. The controlled-staleness shape.
+ */
+export const newSharedServer = (options?: {
+  subscriptionRefreshDelayMs?: number | "manual";
+  store?: URL;
+}): MemoryV2Server.Server =>
+  newLoopbackServer({
+    ...options,
+    audience: TEST_SESSION_OPEN_AUDIENCE,
+  });
 
 export const testSessionOpenAuthFactory: MemoryV2Client.SessionOpenAuthFactory =
   (
