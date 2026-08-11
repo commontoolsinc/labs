@@ -17,6 +17,7 @@ import {
   type EntityIdLookupRequest,
   type EntityIdLookupResult,
   type EntitySnapshot,
+  EventAppendDuplicateError,
   getServerExecutionConfig,
   type GraphQuery,
   type GraphQueryRequest,
@@ -27,6 +28,9 @@ import {
   type Operation,
   parseMemoryProtocolFlags,
   resolveScopeKey,
+  type StreamEventEntry,
+  type StreamEventsDocValue,
+  type StreamLinkRef,
   type ResponseMessage,
   type ScopeKey,
   scopeKeyApplicableTo,
@@ -338,6 +342,12 @@ export type AdmittedCommitNotice = {
   holder?: string;
   sessionId: string;
   writes: Array<{ id: string; scopeKey: ScopeKey }>;
+  /** Phase 3 (events-down): the commit's admitted event appends —
+   * serving-loop.md §3's "if c.class == event-append: enqueue for
+   * handler processing" classification input. Ids only (the sidecar
+   * doc instance + the eventId); the SpaceServer's drain reads the
+   * stamped entries from the store, never from this record. */
+  eventAppends?: Array<{ id: string; scopeKey: ScopeKey; eventId: string }>;
 };
 
 /**
@@ -1788,28 +1798,33 @@ export class Server {
    * ABOVE the stream's `eventWatermark` is acked WITHOUT a commit (the
    * admission-uniqueness CAS); an at-or-below duplicate ADMITS as a new
    * entry and is skipped at processing time — admission must not bless
-   * a stronger, permanent dedupe than the contract. Entries this dark
-   * stage writes carry no `seq` (Phase 3 owns entry-seq semantics when
-   * event processing lands); a seq-less entry counts as above-horizon —
-   * conservative exactly where every stream's watermark is still 0.
-   * PHASE-3 OBLIGATION, stated so it cannot rot silently: when event
-   * processing stamps entry seqs and advances `eventWatermark`, this
-   * check must honor the horizon for seq-BEARING entries (it already
-   * does) AND the seq-less arm must retire with the last seq-less
-   * entries — otherwise stage-G-era entries would dedupe forever, a
-   * stronger permanent dedupe than events.md §4 permits.
+   * a stronger, permanent dedupe than the contract. Entry `seq`s are
+   * ENGINE-STAMPED at apply (Phase 3 — the stage-G obligation
+   * discharged): the seq-less arm below covers only stage-G-era rows,
+   * and it RETIRES as processing marks those entries consequenced —
+   * never a stronger, permanent dedupe than events.md §4 permits.
    *
    * Deterministic admission rejections THROW `Engine.ProtocolError`
-   * (LT4: the outbox does not retry those); the caller deletes the row
-   * either way it returns.
+   * (LT4: the outbox does not retry those; Phase 3's source-side notice
+   * is written BEFORE the row delete — OW14); the caller deletes the
+   * row either way it returns.
    */
   async commitDelegatedAppend(entry: {
     targetSpace: string;
+    /** The stream SIDECAR doc id (`streamEntriesDocId`). */
     targetStream: string;
+    /** The stream link for the delivered entry's self-describing
+     * `stream` field; stage-G-era rows fall back to a path-less link
+     * at the sidecar id. */
+    targetStreamLink?: StreamLinkRef;
     eventId: string;
     payload: unknown;
     actingPrincipal?: string;
     actingSession?: string;
+    /** The OW15 sessionless-space-scope declaration (protocol.md §2's
+     * Phase-3 floor carve-out): admits an ABSENT acting principal;
+     * the entry stamps `firedAt = { session: "server" }`. */
+    sessionlessSpaceScope?: boolean;
     capabilityRef: string;
     /** The delivering SpaceServer's service session — the commit's
      * envelope identity (LT5). */
@@ -1826,29 +1841,34 @@ export class Server {
     const engine = await this.openEngine(entry.targetSpace);
     // Read-check-append runs synchronously from here (no await), so the
     // horizon check and the commit are atomic on the single-threaded
-    // co-hosted engine.
+    // co-hosted engine. The engine's event-append admission re-runs the
+    // same check inside the apply transaction (the atomic backstop);
+    // this pre-check exists for the deduped-without-error fast path.
     const doc = Engine.read(engine, { id: entry.targetStream });
-    const value = (doc?.value ?? {}) as {
-      entries?: Array<{ eventId?: string; seq?: number }>;
-      eventWatermark?: number;
-    };
+    const value = (doc?.value ?? {}) as StreamEventsDocValue;
     const entries = Array.isArray(value.entries) ? value.entries : [];
     const horizon = typeof value.eventWatermark === "number"
       ? value.eventWatermark
       : 0;
     const duplicate = entries.some((existing) =>
       existing?.eventId === entry.eventId &&
-      (typeof existing.seq === "number" ? existing.seq > horizon : true)
+      (typeof existing.seq === "number"
+        ? existing.seq > horizon
+        : existing.consequenced !== true)
     );
     if (duplicate) {
       return { deduped: true };
     }
-    const streamEntry = {
+    const stream: StreamLinkRef = entry.targetStreamLink ??
+      { id: entry.targetStream, path: [] };
+    const streamEntry: StreamEventEntry = {
       eventId: entry.eventId,
-      payload: entry.payload,
+      stream,
+      payload: entry.payload as StreamEventEntry["payload"],
       // events.md §2: the inherited actor; a sessionless chain stamps
       // session "server". Derived from the SAME carriage the delegated
-      // admission below validates — one source, no mismatch possible.
+      // admission validates — the engine's stamp agrees by construction
+      // (a mismatch would be refused, never corrected).
       firedAt: {
         ...(entry.actingPrincipal === undefined
           ? {}
@@ -1856,30 +1876,53 @@ export class Server {
         session: entry.actingSession ?? "server",
       },
     };
-    const applied = Engine.applyCommit(engine, {
-      sessionId: entry.sessionId,
-      space: entry.targetSpace,
-      commit: {
-        localSeq: entry.localSeq,
-        reads: { confirmed: [], pending: [] },
-        operations: [{
-          op: "set",
-          id: entry.targetStream as never,
-          value: {
-            ...(doc ?? {}),
-            value: { ...value, entries: [...entries, streamEntry] },
-          } as never,
-        }],
-      },
-      commitClass: "authored",
-      delegated: {
-        actingPrincipal: entry.actingPrincipal ?? "",
-        ...(entry.actingSession === undefined
-          ? {}
-          : { actingSession: entry.actingSession }),
-        capabilityRef: entry.capabilityRef,
-      },
-    });
+    let applied: Engine.AppliedCommit;
+    try {
+      applied = Engine.applyCommit(engine, {
+        sessionId: entry.sessionId,
+        space: entry.targetSpace,
+        commit: {
+          localSeq: entry.localSeq,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "patch",
+            id: entry.targetStream as never,
+            patches: [{
+              // The tail-relative merge op (v2.ts's PatchOp): concurrent
+              // appends merge against durable state, and the array (and
+              // path) create if absent — no whole-doc set, so the
+              // engine's authored-shape guard (events.md §1) admits it.
+              op: "append",
+              path: "/value/entries",
+              values: [streamEntry as never],
+            }],
+          }],
+          eventAppends: [{ id: entry.targetStream, eventId: entry.eventId }],
+        },
+        commitClass: "authored",
+        delegated: {
+          // OW15: the acting principal passes through as carried —
+          // ABSENT for a declared sessionless-space-scope chain (the
+          // engine's floor carve-out admits it; the old `?? ""` mapping
+          // deterministically destroyed such entries at delivery).
+          actingPrincipal: entry.actingPrincipal ?? "",
+          ...(entry.actingSession === undefined
+            ? {}
+            : { actingSession: entry.actingSession }),
+          ...(entry.sessionlessSpaceScope === true
+            ? { sessionlessSpaceScope: true }
+            : {}),
+          capabilityRef: entry.capabilityRef,
+        },
+      });
+    } catch (error) {
+      if (error instanceof EventAppendDuplicateError) {
+        // The engine's atomic horizon check caught a duplicate the
+        // fast-path pre-check raced past: delivered, ack the row.
+        return { deduped: true };
+      }
+      throw error;
+    }
     // The delivered append is an ordinary authored admission for every
     // observer: push dirtiness (M4 instance keys — the stream doc is
     // space-scoped) and the plane-(b) hook fire exactly as a transact
@@ -1894,6 +1937,11 @@ export class Server {
       class: "authored",
       sessionId: entry.sessionId,
       writes: [{ id: entry.targetStream, scopeKey: "space" }],
+      eventAppends: [{
+        id: entry.targetStream,
+        scopeKey: "space",
+        eventId: entry.eventId,
+      }],
     });
     return { seq: applied.seq, deduped: false };
   }
@@ -2374,13 +2422,29 @@ export class Server {
             },
           );
           // Plane (b): the admission-side activation hook — synchronous
-          // with the dirty marking, observer errors shielded.
+          // with the dirty marking, observer errors shielded. An
+          // event-append commit carries its declarations so the serving
+          // loop classifies it (serving-loop.md §3) and the host's
+          // undelivered-events activation criterion fires even with no
+          // live session (serving-loop.md §1).
+          const admittedEventAppends =
+            (message.commit.eventAppends ?? []).map((decl) => ({
+              id: decl.id,
+              scopeKey: resolveScopeKey(decl.scope, {
+                principal: session.principal,
+                sessionId: message.sessionId,
+              }),
+              eventId: decl.eventId,
+            }));
           this.#notifyCommitAdmitted({
             space: message.space,
             seq: commit.seq,
             class: "authored",
             sessionId: message.sessionId,
             writes: committedWrites,
+            ...(admittedEventAppends.length > 0
+              ? { eventAppends: admittedEventAppends }
+              : {}),
           });
           // CT-1927: stage the accept's catch-up obligation SYNCHRONOUSLY
           // with the dirty-marking above — before any await. A flush pass

@@ -215,6 +215,25 @@ export const canResolveScopeKey = (
 };
 
 /**
+ * Protocol-level rejection of a DUPLICATE event append (events.md §4's
+ * dedupe horizon): the commit declared an `eventId` that already exists
+ * among the stream's entries above its `eventWatermark` (or in a not-yet-
+ * consequenced seq-less entry — the stage-G interim arm, which retires as
+ * processing marks entries consequenced). Distinguished by NAME from the
+ * generic {@link ProtocolError} so a client discharging its offline queue
+ * (events.md §5, LT9) can treat "already appended" as delivered rather
+ * than as a failure to surface: the first append landed, its consequences
+ * are (or will be) the authoritative outcome, and re-raising would
+ * re-discharge forever.
+ */
+export class EventAppendDuplicateError extends ProtocolError {
+  constructor(message: string) {
+    super(message);
+    this.name = "EventAppendDuplicateError";
+  }
+}
+
+/**
  * The commit classes of server-execution v2
  * (docs/specs/server-side-execution/protocol.md §1). A closed set of three:
  * `authored` (any authorized session's own writes and event appends),
@@ -248,6 +267,129 @@ export const SERVER_EXECUTION_WATERMARK_DOC_ID =
 /** The watermark doc's value shape (protocol.md §4): W is ONE integer per
  * space — not per doc, not per piece, never vectorized. */
 export type WatermarkDocValue = { seq: number };
+
+// ---------------------------------------------------------------------------
+// Events-down (server-execution v2 Phase 3, D-v2-1;
+// docs/specs/server-side-execution/events.md). The event is an AUTHORED
+// APPEND to a stream document — the client's only computational commit
+// under the flag. Protocol vocabulary, defined once here (protocol.md §7:
+// `eventId`/`firedAt` are commit-metadata additions for event appends).
+// ---------------------------------------------------------------------------
+
+/**
+ * The stream-entries SIDECAR doc id for one stream (events.md §1's "stream
+ * document", concretely). A pattern's stream VALUE lives at a path inside
+ * a piece's result doc, and that doc is derivation-owned — a result
+ * recompute writes it wholesale, so durable event entries could never
+ * live there. Each stream therefore gets ONE dedicated entries doc,
+ * derived DETERMINISTICALLY from the stream's link (id + path + scope) so
+ * every party — the firing client, the SpaceServer's drain, a foreign
+ * space's outbox delivery — addresses the same doc with no coordination.
+ * The sidecar IS the spec's stream document: `eventWatermark` is a field
+ * on it (events.md §4), the dropped-event notice annotates its entries
+ * (events.md §5 T7), and compaction trims it (§4's allowance).
+ *
+ * The id is content-derived (`hashStringOf` — type-tagged,
+ * length-prefixed, deterministic across processes), so distinct streams
+ * never collide and no component can impersonate another.
+ */
+export const STREAM_ENTRIES_DOC_PREFIX = "of:stream-events:";
+
+/** The stream link a sidecar doc (and each of its entries) names: enough
+ * to reconstruct the scheduler event link — `areNormalizedLinksSame`
+ * compares id + space + scope + path, and space is implicit (the sidecar
+ * lives in the stream's own space). */
+export type StreamLinkRef = {
+  id: EntityId;
+  path: readonly string[];
+  scope?: CellScope;
+};
+
+export const streamEntriesDocId = (stream: StreamLinkRef): EntityId =>
+  `${STREAM_ENTRIES_DOC_PREFIX}${
+    hashStringOf({
+      id: stream.id,
+      path: [...stream.path],
+      scope: stream.scope ?? "space",
+    })
+  }`;
+
+/**
+ * `firedAt` — SERVER-STAMPED at admission (events.md §1, protocol.md §2):
+ * `user` and `session` come from the authenticated commit envelope (or,
+ * for delegated appends, the validated carried actor; for wave-carried
+ * same-space entries, the inherited actor the one-trust-environment
+ * derived commit wrote — LT1). `session` is the literal `"server"` for a
+ * chain with no acting session. `clientSeq` is the ONLY client-minted
+ * part: it orders one client session's own appends and steers nothing;
+ * server-originated entries never carry it (LT7).
+ */
+export type StreamEventFiredAt = {
+  user?: string;
+  session: SessionId | "server";
+  clientSeq?: number;
+};
+
+/**
+ * One durable event entry on a stream's sidecar doc (`value.entries[i]`).
+ * `payload` is the only client-authored content field (events.md §1);
+ * `seq` is ENGINE-STAMPED at apply time with the appending commit's seq —
+ * the stream seq the idempotency rule keys on (events.md §4) — and
+ * `firedAt` is server-stamped per the class of the admitting commit.
+ * `consequenced`/`error`/`status`/`reason` are PROCESSING-side fields
+ * written only by the space's SpaceServer as the event's consequence
+ * (events.md §5: an error/drop IS the consequence); admission REFUSES an
+ * incoming append that pre-supplies any of them.
+ */
+export type StreamEventEntry = {
+  eventId: string;
+  /** The stream this entry targets — self-describing so the drain, the
+   * dropped-notice reader, and compaction never need a reverse map. */
+  stream: StreamLinkRef;
+  payload?: FabricValue;
+  firedAt?: StreamEventFiredAt;
+  /** Engine-stamped: the appending commit's seq. */
+  seq?: number;
+  /** Runtime-injection provenance for the payload's injected keys,
+   * carried so the server-side handler run's closed-world gate judges
+   * the payload as the firing client's runtime did (same in-process
+   * trust as today's client-side enforcement). */
+  runtimeInjectedEventKeys?: string[];
+  /** Processing-side (SpaceServer-written): consequences committed. */
+  consequenced?: boolean;
+  /** Processing-side: the handler threw — the error IS the consequence
+   * (events.md §5). */
+  error?: string;
+  /** Processing-side: the dropped-event notice (events.md §5 T7) —
+   * `{ status: "dropped", reason }` on the entry itself. */
+  status?: "dropped";
+  reason?: string;
+};
+
+/** The sidecar doc's value shape: the entry log plus the per-stream
+ * processing watermark (events.md §4 — written only in the same derived
+ * commit as the consequences it covers, never its own commit). */
+export type StreamEventsDocValue = {
+  entries?: StreamEventEntry[];
+  eventWatermark?: number;
+};
+
+/**
+ * One declared event append on a commit (protocol.md §2's authored
+ * event-append row; §7's `eventId` envelope classification): names the
+ * sidecar doc and the eventId so admission can locate the appended entry
+ * in the commit's operations, run the dedupe-horizon CAS, and stamp
+ * `firedAt` + `seq`. Carried on `ClientCommit` for client fires, on wave
+ * batches for LT1 same-space carriage, and constructed server-side for
+ * delegated deliveries — one stamping site, three identity sources
+ * (protocol.md §2's three rows).
+ */
+export type EventAppendDecl = {
+  /** The stream's sidecar doc ({@link streamEntriesDocId}). */
+  id: EntityId;
+  scope?: CellScope;
+  eventId: string;
+};
 /**
  * The identity annotation on one write WITHIN a derived-class commit's body
  * (protocol.md §1's transaction identity model, §7's closed metadata list).
@@ -498,6 +640,12 @@ export type ClientCommit = {
     baseBranch: BranchName;
     baseSeq: number;
   };
+  /** Server-execution v2 Phase 3 (events.md §1): the commit's declared
+   * event appends. Only flag-ON clients produce this; admission under
+   * the flag runs the dedupe-horizon CAS and stamps `firedAt` + `seq`
+   * into the appended entries ({@link EventAppendDecl}). Refused when
+   * the flag is off. */
+  eventAppends?: EventAppendDecl[];
 };
 
 export type SessionOpenResult = {

@@ -291,7 +291,10 @@ Deno.test("delegated admission: the engine refuses delegated carriage on derived
       "authored-class admission only",
     );
     // Partial carriage (a grant with no actor, an actor with no grant):
-    // refused loudly, never defaulted.
+    // refused loudly, never defaulted. Since Phase 3's OW15 carve-out
+    // the userless arm's refusal names the one declared exception --
+    // sessionless-space-scope -- that admits an absent principal; an
+    // UNDECLARED userless batch stays refused (the floor negative).
     assertThrows(
       () =>
         applyCommit(engine, {
@@ -304,7 +307,7 @@ Deno.test("delegated admission: the engine refuses delegated carriage on derived
           },
         }),
       ProtocolError,
-      "partial carriage is refused",
+      "admits only under the declared sessionless-space-scope carve-out",
     );
     assertThrows(
       () =>

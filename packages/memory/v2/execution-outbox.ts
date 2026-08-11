@@ -32,13 +32,20 @@
 // and is skipped at processing time).
 
 import type { Engine } from "./engine.ts";
+import type { StreamLinkRef } from "../v2.ts";
 
 /** One durable outbound append row (serving-loop.md §5, FP1). */
 export type OutboxAppendRow = {
   targetSpace: string;
-  /** The target stream doc id (events.md §1: an event is an authored
-   * append to a stream document). */
+  /** The target stream SIDECAR doc id (events.md §1: an event is an
+   * authored append to a stream document — `streamEntriesDocId`). */
   targetStream: string;
+  /** The stream link the sidecar stands for — carried into the delivered
+   * entry's self-describing `stream` field so the target's drain can
+   * reconstruct the scheduler event link (Phase 3; events.md §1).
+   * Absent on stage-G-era rows, which fall back to a path-less stream at
+   * the sidecar id. */
+  targetStreamLink?: StreamLinkRef;
   /** The client-durable event id (events.md §1); the target's dedupe
    * horizon keys on it. */
   eventId: string;
@@ -50,6 +57,14 @@ export type OutboxAppendRow = {
    * chain with no acting user (a space-scope derivation's emission). */
   actingPrincipal?: string;
   actingSession?: string;
+  /** The OW15 declaration (protocol.md §2's Phase-3 floor carve-out,
+   * SHAPE RULED 2026-08-05): the chain has NO actor anywhere — a
+   * space-scope derivation's emission, a timer — and the target stamps
+   * `firedAt = { session: "server" }` with no user key. Grant presence
+   * stays mandatory. Only a declared row may omit `actingPrincipal`;
+   * userless without the declaration is refused at the SOURCE
+   * (wave.ts's enqueueOutboundAppend) and at the target's floor alike. */
+  sessionlessSpaceScope?: boolean;
   /** The capability grant the target's admission validates —
    * delegation, never session-identity impersonation (protocol.md §2's
    * server-produced authored row). */
@@ -67,12 +82,14 @@ export type PendingOutboxRow = OutboxAppendRow & {
 
 const INSERT_ROW = `
 INSERT INTO execution_outbox (
-  branch, target_space, target_stream, event_id, payload,
-  acting_principal, acting_session, capability_ref, created_seq
+  branch, target_space, target_stream, target_stream_link, event_id,
+  payload, acting_principal, acting_session, sessionless_space_scope,
+  capability_ref, created_seq
 )
 VALUES (
-  :branch, :target_space, :target_stream, :event_id, :payload,
-  :acting_principal, :acting_session, :capability_ref, :created_seq
+  :branch, :target_space, :target_stream, :target_stream_link, :event_id,
+  :payload, :acting_principal, :acting_session, :sessionless_space_scope,
+  :capability_ref, :created_seq
 )
 `;
 
@@ -99,10 +116,14 @@ export const insertExecutionOutboxRows = (
       branch: options.branch,
       target_space: row.targetSpace,
       target_stream: row.targetStream,
+      target_stream_link: row.targetStreamLink === undefined
+        ? null
+        : JSON.stringify(row.targetStreamLink),
       event_id: row.eventId,
       payload: JSON.stringify(row.payload ?? null),
       acting_principal: row.actingPrincipal ?? null,
       acting_session: row.actingSession ?? null,
+      sessionless_space_scope: row.sessionlessSpaceScope === true ? 1 : null,
       capability_ref: row.capabilityRef,
       created_seq: options.createdSeq,
     });
@@ -120,8 +141,9 @@ export const selectPendingExecutionOutboxRows = (
   options: { branch: string },
 ): PendingOutboxRow[] => {
   const rows = engine.database.prepare(`
-SELECT rowid AS row_id, target_space, target_stream, event_id, payload,
-       acting_principal, acting_session, capability_ref, created_seq
+SELECT rowid AS row_id, target_space, target_stream, target_stream_link,
+       event_id, payload, acting_principal, acting_session,
+       sessionless_space_scope, capability_ref, created_seq
 FROM execution_outbox
 WHERE branch = :branch
 ORDER BY rowid ASC
@@ -129,10 +151,12 @@ ORDER BY rowid ASC
     row_id: number;
     target_space: string;
     target_stream: string;
+    target_stream_link: string | null;
     event_id: string;
     payload: string;
     acting_principal: string | null;
     acting_session: string | null;
+    sessionless_space_scope: number | null;
     capability_ref: string;
     created_seq: number;
   }>;
@@ -140,6 +164,9 @@ ORDER BY rowid ASC
     rowId: row.row_id,
     targetSpace: row.target_space,
     targetStream: row.target_stream,
+    ...(row.target_stream_link === null
+      ? {}
+      : { targetStreamLink: JSON.parse(row.target_stream_link) }),
     eventId: row.event_id,
     payload: JSON.parse(row.payload),
     ...(row.acting_principal === null
@@ -148,6 +175,9 @@ ORDER BY rowid ASC
     ...(row.acting_session === null
       ? {}
       : { actingSession: row.acting_session }),
+    ...(row.sessionless_space_scope === 1
+      ? { sessionlessSpaceScope: true }
+      : {}),
     capabilityRef: row.capability_ref,
     createdSeq: row.created_seq,
   }));

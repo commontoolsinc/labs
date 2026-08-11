@@ -34,11 +34,17 @@ import {
   encodeMemoryBoundary,
   type EntityDocument,
   type EntityId,
+  type EventAppendDecl,
+  EventAppendDuplicateError,
   getServerExecutionConfig,
   isEntityDocument,
   type Operation,
   type PatchOp,
   ProtocolError,
+  STREAM_ENTRIES_DOC_PREFIX,
+  type StreamEventEntry,
+  type StreamEventFiredAt,
+  type StreamEventsDocValue,
   type Reference,
   resolvePrincipalSessionKey,
   resolveScopeKey,
@@ -300,13 +306,23 @@ CREATE INDEX IF NOT EXISTS idx_scheduler_basis_entity
 CREATE TABLE IF NOT EXISTS execution_outbox (
   branch            TEXT    NOT NULL,
   target_space      TEXT    NOT NULL,
-  target_stream     TEXT    NOT NULL, -- the target stream doc id
+  target_stream     TEXT    NOT NULL, -- the target stream SIDECAR doc id
+  target_stream_link TEXT,            -- the stream link {id, path, scope?}
+                                      --   (JSON) — the delivered entry's
+                                      --   self-describing stream field
+                                      --   (Phase 3; events §1)
   event_id          TEXT    NOT NULL, -- durable id; the target's dedupe
                                       --   horizon keys on it (events §4)
   payload           TEXT    NOT NULL, -- the event payload, JSON —
                                       --   bounded by the event
   acting_principal  TEXT,             -- the originating chain actor
   acting_session    TEXT,             --   (absent for sessionless chains)
+  sessionless_space_scope INTEGER,    -- the OW15 declaration (protocol §2's
+                                      --   Phase-3 floor carve-out): 1 iff
+                                      --   the chain has NO actor and the
+                                      --   entry stamps firedAt
+                                      --   {session:"server"}; grant stays
+                                      --   mandatory
   capability_ref    TEXT    NOT NULL, -- validated at the target
   created_seq       INTEGER NOT NULL  -- the emitting wave's commit seq
 );
@@ -895,6 +911,16 @@ export type ApplyCommitOptions = {
     actingPrincipal: string;
     actingSession?: string;
     capabilityRef: string;
+    /** The Phase-3 floor carve-out for sessionless space-scope emissions
+     *  (SHAPE RULED 2026-08-05, protocol.md §2; implemented with Phase
+     *  3's events): the completeness floor admits an ABSENT acting
+     *  principal iff the entry is DECLARED sessionless-space-scope —
+     *  `firedAt` stamps `{ session: "server" }` with NO user key, and
+     *  grant presence stays mandatory. Userless WITHOUT the declaration
+     *  is still refused (the floor negative both ways). A declaration
+     *  alongside a present acting identity is a contradiction and is
+     *  refused too — the declaration names a chain with NO actor. */
+    sessionlessSpaceScope?: boolean;
   };
 };
 
@@ -1324,6 +1350,27 @@ ADD COLUMN ${column} TEXT;
   }
 };
 
+// Server-execution v2 Phase 3 (events-down): the outbox rows gain the
+// stream link carriage (the delivered entry's self-describing `stream`
+// field) and the OW15 sessionless-space-scope declaration. Stage-G-era
+// rows predate both: their NULL link falls back to a path-less stream at
+// the sidecar id, and NULL declaration means "not declared" — exactly the
+// fail-closed reading the carve-out requires.
+const migrateExecutionOutboxEventCarriage = (database: Database): void => {
+  if (!hasColumn(database, "execution_outbox", "target_stream_link")) {
+    database.exec(`
+ALTER TABLE execution_outbox
+ADD COLUMN target_stream_link TEXT;
+`);
+  }
+  if (!hasColumn(database, "execution_outbox", "sessionless_space_scope")) {
+    database.exec(`
+ALTER TABLE execution_outbox
+ADD COLUMN sessionless_space_scope INTEGER;
+`);
+  }
+};
+
 // Server-execution v2 Phase 1 stage C.2: the observation-payload tables are
 // REPLACED by the scheduler_basis index (serving-loop.md §3b). The drop list
 // is §3b's SEVEN tables, deliberately not a constant enumerating six (D6 —
@@ -1367,6 +1414,7 @@ export const open = async (
   migrateCommitWaveCarriage(database);
   migrateCommitDerivedThrough(database);
   migrateCommitDelegation(database);
+  migrateExecutionOutboxEventCarriage(database);
   migrateSchedulerObservationTablesToBasis(database);
   return {
     url,
@@ -1563,6 +1611,69 @@ const readStateForScopeKey = (
   };
 };
 
+/** One stream sidecar doc holding UNDELIVERED events (entries above the
+ * stream's `eventWatermark` — or seq-less — and not yet consequenced):
+ * the activation/boot discovery input (serving-loop.md §1's "stream head
+ * past `eventWatermark` means undelivered events" and §6 step 4's
+ * reprocess scan). */
+export type PendingStreamEventDoc = {
+  id: EntityId;
+  scopeKey: string;
+  entries: StreamEventEntry[];
+  eventWatermark: number;
+};
+
+/**
+ * Scan the space's stream sidecar docs for undelivered events (Phase 3;
+ * serving-loop.md §6 step 4). Bounded by the number of sidecar docs (the
+ * `of:stream-events:` id prefix keys the head lookup), not by doc count:
+ * activation-time cost, never per-wave. Entries at or below the watermark
+ * — and consequenced entries above it, which a budget-exhausted wave left
+ * durable but processed — are excluded by the idempotency rule
+ * (events.md §4).
+ */
+export const selectPendingStreamEventDocs = (
+  engine: Engine,
+  options: { branch?: BranchName } = {},
+): PendingStreamEventDoc[] => {
+  const branch = options.branch ?? DEFAULT_BRANCH;
+  const heads = engine.database.prepare(`
+SELECT id, scope_key
+FROM head
+WHERE branch = :branch AND id LIKE :prefix AND op != 'delete'
+`).all({
+    branch,
+    prefix: `${STREAM_ENTRIES_DOC_PREFIX}%`,
+  }) as Array<{ id: string; scope_key: string }>;
+  const pending: PendingStreamEventDoc[] = [];
+  for (const head of heads) {
+    const state = readState(engine, {
+      id: head.id,
+      branch,
+      scopeKey: head.scope_key,
+    });
+    const value = state?.document?.value as StreamEventsDocValue | undefined;
+    if (value === undefined) continue;
+    const eventWatermark = typeof value.eventWatermark === "number"
+      ? value.eventWatermark
+      : 0;
+    const entries = (value.entries ?? []).filter((entry) =>
+      entry !== null && typeof entry === "object" &&
+      typeof entry.eventId === "string" &&
+      entry.consequenced !== true &&
+      (typeof entry.seq === "number" ? entry.seq > eventWatermark : true)
+    );
+    if (entries.length === 0) continue;
+    pending.push({
+      id: head.id,
+      scopeKey: head.scope_key,
+      entries,
+      eventWatermark,
+    });
+  }
+  return pending;
+};
+
 export const headSeq = (
   engine: Engine,
   branch: BranchName = DEFAULT_BRANCH,
@@ -1575,6 +1686,447 @@ export const headSeq = (
 
 export const serverSeq = (engine: Engine): number => {
   return (engine.statements.selectServerSeq.get() as { seq: number }).seq;
+};
+
+// ---------------------------------------------------------------------------
+// Event-append admission (server-execution v2 Phase 3, D-v2-1;
+// events.md §1, §4; protocol.md §2's event-append rows). ONE stamping
+// site with three identity sources — the authenticated envelope for plain
+// authored commits, the validated carried actor for delegated ones, and
+// (LT1) the already-written inherited actor for derived wave carriage,
+// where producer and admitter are one trust environment and only the
+// entry's stream `seq` needs stamping.
+// ---------------------------------------------------------------------------
+
+/** Where one declared appended entry sits inside the commit's operations,
+ * plus the `firedAt` admission resolved for it. The stamp step clones the
+ * op (the caller's operation objects are shared with replica overlays —
+ * wave batches hold the sealed commits' own arrays) and writes `seq` +
+ * `firedAt` into the clone only. */
+type EventAppendStamp = {
+  opIndex: number;
+  /** Index into the op's `patches` array; absent for a whole-doc `set`. */
+  patchIndex?: number;
+  /** Index into the patch's `values` array (append/add-unique) or the
+   * written array value (add/replace/set). */
+  valueIndex: number;
+  firedAt: StreamEventFiredAt;
+};
+
+const isStreamEntriesDocId = (id: string): boolean =>
+  id.startsWith(STREAM_ENTRIES_DOC_PREFIX);
+
+const STREAM_ENTRIES_POINTER = "/value/entries";
+
+/** The entry arrays a patch WRITES into `/value/entries`, with locations.
+ * Returns null when the patch touches the sidecar doc some OTHER way —
+ * the caller refuses those for non-derived classes. */
+const appendedEntriesOfPatch = (
+  patch: PatchOp,
+): { values: unknown[]; creation: boolean } | null => {
+  if (patch.op === "append" || patch.op === "add-unique") {
+    if (patch.path !== STREAM_ENTRIES_POINTER) return null;
+    return { values: patch.values as unknown[], creation: false };
+  }
+  if (patch.op === "add" || patch.op === "replace") {
+    if (patch.path !== STREAM_ENTRIES_POINTER) return null;
+    return {
+      values: Array.isArray(patch.value) ? (patch.value as unknown[]) : [],
+      creation: true,
+    };
+  }
+  return null;
+};
+
+const entryFiredAtMatches = (
+  supplied: StreamEventFiredAt,
+  stamp: StreamEventFiredAt,
+): boolean =>
+  (supplied.user === undefined || supplied.user === stamp.user) &&
+  (supplied.session === undefined || supplied.session === stamp.session);
+
+/**
+ * Validate the commit's declared event appends against events.md §1/§4 and
+ * resolve the stamp plan. Runs INSIDE the apply transaction, before the
+ * commit seq is allocated; the returned plan is applied per-op in the
+ * write loop (each stamped op is a CLONE — caller-shared operation objects
+ * are never mutated). Throws {@link ProtocolError} on shape/identity
+ * violations and {@link EventAppendDuplicateError} on the dedupe-horizon
+ * CAS (events.md §4: uniqueness among entries above the stream's
+ * `eventWatermark`; the stage-G seq-less interim arm dedupes only while
+ * un-consequenced, so it retires as processing marks entries).
+ */
+const validateEventAppends = (
+  engine: Engine,
+  args: {
+    commit: ClientCommit;
+    commitClass: CommitClass;
+    branch: BranchName;
+    principal?: string;
+    sessionId: SessionId;
+    delegated?: NonNullable<ApplyCommitOptions["delegated"]>;
+    /** Derived-class scoped-op keys (the annotation ADDRESSING), for the
+     * dedupe read of scoped sidecars. */
+    scopeKeyByOpIndex: ReadonlyMap<number, string>;
+  },
+): Map<number, EventAppendStamp[]> => {
+  const { commit, commitClass, branch, principal, sessionId, delegated } =
+    args;
+  const decls = commit.eventAppends ?? [];
+  const plan = new Map<number, EventAppendStamp[]>();
+  const flagOn = getServerExecutionConfig();
+  if (decls.length > 0 && !flagOn) {
+    throw new ProtocolError(
+      "event appends require EXPERIMENTAL_SERVER_EXECUTION " +
+        "(events.md §1; the OFF arm has no event-append admission)",
+    );
+  }
+  if (!flagOn) return plan;
+
+  // Declarations index — one per (doc-instance, eventId); duplicates in
+  // one commit are a self-collision, refused before any store read.
+  const declKey = (id: string, scope: CellScope | undefined, eventId: string) =>
+    `${id}\0${normalizeScope(scope)}\0${eventId}`;
+  const unmatched = new Map<string, EventAppendDecl>();
+  for (const decl of decls) {
+    if (!isStreamEntriesDocId(decl.id)) {
+      throw new ProtocolError(
+        `event-append declaration targets a non-stream doc "${decl.id}" ` +
+          "(events.md §1: an event is an append to a stream document — " +
+          `the "${STREAM_ENTRIES_DOC_PREFIX}" sidecar)`,
+      );
+    }
+    const key = declKey(decl.id, decl.scope, decl.eventId);
+    if (unmatched.has(key)) {
+      throw new ProtocolError(
+        `duplicate event-append declaration for eventId ${decl.eventId} ` +
+          "in one commit (events.md §4)",
+      );
+    }
+    unmatched.set(key, decl);
+  }
+
+  for (const [opIndex, operation] of commit.operations.entries()) {
+    if (operation.op === "sqlite") continue;
+    if (!isStreamEntriesDocId(operation.id)) continue;
+    const opScope = normalizeScope(operation.scope);
+
+    // The sidecar-doc write guard (the stamping claim's other half —
+    // events.md §1's "a forged actor is UNREPRESENTABLE"): processing
+    // fields (`consequenced`/`error`/`status`/`reason`), the per-stream
+    // `eventWatermark`, and stored entries are SERVER-written state.
+    // Authored traffic (delegated included) may reach a sidecar doc ONLY
+    // as declared tail appends; anything else — deeper patches, watermark
+    // writes, whole-array rewrites of an existing log, deletes — is
+    // refused. Derived commits are exempt from the SHAPE restriction (one
+    // trust environment: the SpaceServer writes consequences and the
+    // watermark) but their appended entries must still be DECLARED, so
+    // seq stamping cannot be skipped by a plumbing bug. `system` writes
+    // never target sidecars and keep their unchanged posture.
+    const authoredShape = commitClass === "authored";
+
+    const located: Array<{
+      entry: StreamEventEntry;
+      stamp: Omit<EventAppendStamp, "firedAt">;
+    }> = [];
+    if (operation.op === "delete") {
+      if (authoredShape) {
+        throw new ProtocolError(
+          `authored deletion of stream doc "${operation.id}" refused ` +
+            "(events.md §4: compaction is the serving side's, below the " +
+            "watermark only)",
+        );
+      }
+      continue;
+    }
+    if (operation.op === "set") {
+      const value = (operation.value?.value ?? {}) as StreamEventsDocValue;
+      const entries = Array.isArray(value.entries) ? value.entries : [];
+      if (authoredShape) {
+        const current = readState(engine, {
+          id: operation.id,
+          branch,
+          scope: operation.scope,
+          principal: delegated?.actingPrincipal ?? principal,
+          sessionId: delegated?.actingSession ?? sessionId,
+          scopeKey: args.scopeKeyByOpIndex.get(opIndex),
+        });
+        if (current !== null && current.document !== null) {
+          throw new ProtocolError(
+            `authored whole-doc set of existing stream doc ` +
+              `"${operation.id}" refused — append entries with a ` +
+              "declared tail append (events.md §1)",
+          );
+        }
+        const extraKeys = Object.keys(operation.value?.value ?? {}).filter(
+          (key) => key !== "entries",
+        );
+        if (extraKeys.length > 0) {
+          throw new ProtocolError(
+            `authored stream-doc creation carries non-entry fields ` +
+              `(${extraKeys.join(", ")}) — the watermark and processing ` +
+              "state are server-written (events.md §4, §5)",
+          );
+        }
+      }
+      for (const [valueIndex, entry] of entries.entries()) {
+        located.push({
+          entry: entry as StreamEventEntry,
+          stamp: { opIndex, valueIndex },
+        });
+      }
+    } else {
+      for (const [patchIndex, patch] of operation.patches.entries()) {
+        const appended = appendedEntriesOfPatch(patch);
+        if (appended === null) {
+          if (authoredShape) {
+            throw new ProtocolError(
+              `authored write into stream doc "${operation.id}" at ` +
+                `"${patch.path}" refused — entries, the watermark, and ` +
+                "processing fields are server-written; events append " +
+                "via declared tail appends only (events.md §1, §4, §5)",
+            );
+          }
+          continue;
+        }
+        if (appended.creation && authoredShape) {
+          const current = readState(engine, {
+            id: operation.id,
+            branch,
+            scope: operation.scope,
+            principal: delegated?.actingPrincipal ?? principal,
+            sessionId: delegated?.actingSession ?? sessionId,
+            scopeKey: args.scopeKeyByOpIndex.get(opIndex),
+          });
+          const existing =
+            (current?.document?.value as StreamEventsDocValue | undefined)
+              ?.entries;
+          if (Array.isArray(existing) && existing.length > 0) {
+            throw new ProtocolError(
+              `authored whole-array write of stream doc ` +
+                `"${operation.id}" entries refused — the log already ` +
+                "holds entries; append via tail appends (events.md §1)",
+            );
+          }
+        }
+        for (const [valueIndex, entry] of appended.values.entries()) {
+          located.push({
+            entry: entry as StreamEventEntry,
+            stamp: { opIndex, patchIndex, valueIndex },
+          });
+        }
+      }
+    }
+
+    for (const { entry, stamp } of located) {
+      if (entry === null || typeof entry !== "object") {
+        throw new ProtocolError(
+          `stream doc "${operation.id}" appended a non-entry value ` +
+            "(events.md §1)",
+        );
+      }
+      if (typeof entry.eventId !== "string" || entry.eventId === "") {
+        throw new ProtocolError(
+          `stream doc "${operation.id}" appended an entry without an ` +
+            "eventId (events.md §1)",
+        );
+      }
+      const key = declKey(operation.id, operation.scope, entry.eventId);
+      const decl = unmatched.get(key);
+      if (decl === undefined) {
+        throw new ProtocolError(
+          `undeclared event append (eventId ${entry.eventId}) into ` +
+            `stream doc "${operation.id}" — every appended entry needs ` +
+            "its declaration for admission to stamp (events.md §1; " +
+            "protocol.md §2)",
+        );
+      }
+      unmatched.delete(key);
+      // Processing-side and engine-stamped fields must arrive ABSENT: a
+      // pre-supplied seq forges ordering, a pre-supplied
+      // consequenced/error/status forges the processing outcome.
+      if (entry.seq !== undefined) {
+        throw new ProtocolError(
+          `event append ${entry.eventId} pre-supplies the stream seq — ` +
+            "engine-stamped at apply (events.md §4)",
+        );
+      }
+      if (
+        entry.consequenced !== undefined || entry.error !== undefined ||
+        entry.status !== undefined || entry.reason !== undefined
+      ) {
+        throw new ProtocolError(
+          `event append ${entry.eventId} pre-supplies processing fields ` +
+            "— the SpaceServer writes consequences (events.md §5)",
+        );
+      }
+      if (
+        entry.stream === null || typeof entry.stream !== "object" ||
+        typeof entry.stream.id !== "string" ||
+        !Array.isArray(entry.stream.path)
+      ) {
+        throw new ProtocolError(
+          `event append ${entry.eventId} carries no stream link — ` +
+            "entries are self-describing (events.md §1)",
+        );
+      }
+
+      // The firedAt stamp, per admitting class (protocol.md §2).
+      let firedAt: StreamEventFiredAt;
+      if (commitClass === "derived") {
+        // LT1 same-space carriage: the SpaceServer wrote the inherited
+        // actor; producer and admitter are one trust environment, so the
+        // stamp needs no validation (events.md §2) — but it must EXIST,
+        // and it never carries a clientSeq (LT7).
+        const supplied = entry.firedAt;
+        if (
+          supplied === undefined || typeof supplied.session !== "string" ||
+          supplied.session === ""
+        ) {
+          throw new ProtocolError(
+            `derived-carried event append ${entry.eventId} carries no ` +
+              "inherited firedAt (events.md §2, LT1)",
+          );
+        }
+        if (supplied.clientSeq !== undefined) {
+          throw new ProtocolError(
+            `server-originated event append ${entry.eventId} carries a ` +
+              "clientSeq — client-minted only (events.md §2, LT7)",
+          );
+        }
+        firedAt = supplied;
+      } else if (delegated !== undefined) {
+        const userless = delegated.actingPrincipal === undefined ||
+          delegated.actingPrincipal === "";
+        firedAt = {
+          ...(userless ? {} : { user: delegated.actingPrincipal }),
+          session: delegated.actingSession === undefined ||
+              delegated.actingSession === ""
+            ? "server"
+            : delegated.actingSession,
+        };
+        if (entry.firedAt?.clientSeq !== undefined) {
+          throw new ProtocolError(
+            `delegated event append ${entry.eventId} carries a ` +
+              "clientSeq — client-minted only (events.md §2, LT7)",
+          );
+        }
+        if (
+          entry.firedAt !== undefined &&
+          !entryFiredAtMatches(entry.firedAt, firedAt)
+        ) {
+          throw new ProtocolError(
+            `event append ${entry.eventId} supplies a firedAt that ` +
+              "disagrees with the validated carried actor — REJECTED, " +
+              "never corrected (events.md §1, protocol.md §2)",
+          );
+        }
+      } else {
+        if (principal === undefined || principal === "") {
+          throw new ProtocolError(
+            `event append ${entry.eventId} requires an authenticated ` +
+              "principal to stamp firedAt from (events.md §1)",
+          );
+        }
+        firedAt = {
+          user: principal,
+          session: sessionId,
+          ...(entry.firedAt?.clientSeq !== undefined
+            ? { clientSeq: entry.firedAt.clientSeq }
+            : {}),
+        };
+        if (
+          entry.firedAt !== undefined &&
+          !entryFiredAtMatches(entry.firedAt, firedAt)
+        ) {
+          throw new ProtocolError(
+            `event append ${entry.eventId} supplies a firedAt that ` +
+              "disagrees with the authenticated envelope — REJECTED, " +
+              "never corrected (events.md §1, protocol.md §2)",
+          );
+        }
+      }
+
+      // The dedupe-horizon CAS (events.md §4): eventId unique among
+      // entries above the stream's eventWatermark. A seq-less entry (the
+      // stage-G interim arm) dedupes only while un-consequenced — it
+      // retires as processing marks it, never forever (the stage-G
+      // obligation comment in server.ts, discharged here).
+      const current = readState(engine, {
+        id: operation.id,
+        branch,
+        scope: operation.scope,
+        principal: delegated?.actingPrincipal ?? principal,
+        sessionId: delegated?.actingSession ?? sessionId,
+        scopeKey: args.scopeKeyByOpIndex.get(stamp.opIndex),
+      });
+      const value = current?.document?.value as
+        | StreamEventsDocValue
+        | undefined;
+      const horizon = typeof value?.eventWatermark === "number"
+        ? value.eventWatermark
+        : 0;
+      const duplicate = (value?.entries ?? []).some((existing) =>
+        existing?.eventId === entry.eventId &&
+        (typeof existing.seq === "number"
+          ? existing.seq > horizon
+          : existing.consequenced !== true)
+      );
+      if (duplicate) {
+        throw new EventAppendDuplicateError(
+          `event append ${entry.eventId} duplicates a stream entry ` +
+            "above the dedupe horizon (events.md §4)",
+        );
+      }
+
+      const stamps = plan.get(stamp.opIndex) ?? [];
+      stamps.push({ ...stamp, firedAt });
+      plan.set(stamp.opIndex, stamps);
+    }
+  }
+
+  if (unmatched.size > 0) {
+    const missing = [...unmatched.values()].map((decl) => decl.eventId);
+    throw new ProtocolError(
+      `event-append declaration(s) without a matching appended entry: ` +
+        `${missing.join(", ")} (events.md §1)`,
+    );
+  }
+  return plan;
+};
+
+/** Apply one op's stamp plan onto a CLONE (the input operation object is
+ * shared with replica overlays and must never be mutated). */
+const stampEventAppendOperation = <
+  Op extends Exclude<Operation, SqliteOperation>,
+>(
+  operation: Op,
+  stamps: readonly EventAppendStamp[],
+  seq: number,
+): Op => {
+  const cloned = structuredClone(operation) as Op;
+  for (const stamp of stamps) {
+    let entry: StreamEventEntry | undefined;
+    if (cloned.op === "set") {
+      const value = (cloned.value?.value ?? {}) as StreamEventsDocValue;
+      entry = value.entries?.[stamp.valueIndex];
+    } else if (cloned.op === "patch" && stamp.patchIndex !== undefined) {
+      const patch = cloned.patches[stamp.patchIndex];
+      const appended = appendedEntriesOfPatch(patch);
+      entry = appended?.values[stamp.valueIndex] as
+        | StreamEventEntry
+        | undefined;
+    }
+    if (entry === undefined) {
+      throw new ProtocolError(
+        "event-append stamp plan does not match the operation shape " +
+          "(engine bug — the plan and the clone diverged)",
+      );
+    }
+    entry.seq = seq;
+    entry.firedAt = stamp.firedAt;
+  }
+  return cloned;
 };
 
 export const applyCommit = (
@@ -2031,16 +2583,54 @@ const applyCommitTransaction = (
           "(protocol.md §2's delegated row)",
       );
     }
+    if (delegated.capabilityRef === undefined || delegated.capabilityRef === "") {
+      // Grant presence is MANDATORY on every delegated batch — the
+      // sessionless-space-scope carve-out below lifts only the acting
+      // PRINCIPAL, never the grant (protocol.md §2, SHAPE RULED
+      // 2026-08-05; verification-coverage OW15).
+      throw new ProtocolError(
+        "delegated admission requires the capability grant " +
+          "(protocol.md §2's server-produced authored row) — partial " +
+          "carriage is refused, never defaulted",
+      );
+    }
     if (
       delegated.actingPrincipal === undefined ||
-      delegated.actingPrincipal === "" ||
-      delegated.capabilityRef === undefined ||
-      delegated.capabilityRef === ""
+      delegated.actingPrincipal === ""
     ) {
+      // The Phase-3 floor carve-out (SHAPE RULED 2026-08-05, protocol.md
+      // §2; implemented here with Phase 3's events — OW15): an ABSENT
+      // acting principal is admissible IFF the batch is DECLARED
+      // sessionless-space-scope — a chain with NO actor anywhere
+      // (events.md §2: a space-scope derivation's emission, a timer),
+      // whose entries stamp `firedAt = { session: "server" }` with no
+      // user key. Userless WITHOUT the declaration stays refused — the
+      // floor negative both ways.
+      if (delegated.sessionlessSpaceScope !== true) {
+        throw new ProtocolError(
+          "delegated admission requires the acting principal " +
+            "(protocol.md §2's server-produced authored row) — a " +
+            "userless batch admits only under the declared " +
+            "sessionless-space-scope carve-out (SHAPE RULED 2026-08-05)",
+        );
+      }
+      if (
+        delegated.actingSession !== undefined &&
+        delegated.actingSession !== ""
+      ) {
+        throw new ProtocolError(
+          "delegated admission rejected: a sessionless-space-scope " +
+            "declaration alongside an acting session is a contradiction " +
+            "— the declaration names a chain with NO actor (events.md " +
+            "§2, protocol.md §2)",
+        );
+      }
+    } else if (delegated.sessionlessSpaceScope === true) {
       throw new ProtocolError(
-        "delegated admission requires the acting principal AND the " +
-          "capability grant (protocol.md §2's server-produced authored " +
-          "row) — partial carriage is refused, never defaulted",
+        "delegated admission rejected: a sessionless-space-scope " +
+          "declaration alongside an acting principal is a contradiction " +
+          "— the declaration names a chain with NO actor (events.md §2, " +
+          "protocol.md §2)",
       );
     }
     // A sessionless delegated chain has NO session instance (scopes.md
@@ -2053,14 +2643,30 @@ const applyCommitTransaction = (
     if (
       delegated.actingSession === undefined || delegated.actingSession === ""
     ) {
+      const userless = delegated.actingPrincipal === undefined ||
+        delegated.actingPrincipal === "";
       for (const operation of commit.operations) {
         if (operation.op === "sqlite") continue;
-        if (normalizeScope(operation.scope) === "session") {
+        const declared = normalizeScope(operation.scope);
+        if (declared === "session") {
           throw new ProtocolError(
             "delegated admission rejected: a sessionless delegated " +
               "batch (no actingSession) carries a session-scoped write " +
               "— a sessionless actor has no session instance " +
               "(scopes.md §5, protocol.md §2's delegated row)",
+          );
+        }
+        // The user-scope twin under the OW15 carve-out: a USERLESS batch
+        // (declared sessionless-space-scope) carrying a user-scoped write
+        // would key it from the DELEGATING envelope's principal below —
+        // the same chimera trap, user edition (events.md §2: user-scoped
+        // writes under a sessionless event are equally an error unless
+        // the event carries an acting user).
+        if (userless && declared === "user") {
+          throw new ProtocolError(
+            "delegated admission rejected: a userless delegated batch " +
+              "carries a user-scoped write — a sessionless-space-scope " +
+              "chain has no user instance (events.md §2, scopes.md §5)",
           );
         }
       }
@@ -2165,6 +2771,22 @@ const applyCommitTransaction = (
     commit,
   );
 
+  // Event-append admission (Phase 3, events.md §1/§4): the dedupe-horizon
+  // CAS, the firedAt validation-or-stamp, and the sidecar write guard.
+  // AFTER the replay short-circuit (a replayed append returns its stored
+  // result — the original admission stamped it; re-running the CAS here
+  // would wrongly reject the replay as its own duplicate) and before the
+  // seq allocation; the stamps apply per-op in the write loop below.
+  const eventAppendPlan = validateEventAppends(engine, {
+    commit,
+    commitClass,
+    branch,
+    principal,
+    sessionId,
+    delegated,
+    scopeKeyByOpIndex,
+  });
+
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
   const invocationRef = engine.legacyCommitMetadataRefsRequired
     ? LEGACY_EMPTY_INVOCATION_REF
@@ -2213,8 +2835,11 @@ const applyCommitTransaction = (
     derived_through: commitClass === "derived" && derivedThrough !== undefined
       ? derivedThrough
       : null,
-    acting_principal: delegated?.actingPrincipal ?? null,
-    acting_session: delegated?.actingSession ?? null,
+    // `|| null`, not `?? null`: a declared sessionless-space-scope batch
+    // arrives with an EMPTY acting principal (the delivery path's
+    // carriage normalization) and stores NULL — "no actor", never "".
+    acting_principal: delegated?.actingPrincipal || null,
+    acting_session: delegated?.actingSession || null,
     capability_ref: delegated?.capabilityRef ?? null,
   });
 
@@ -2230,11 +2855,21 @@ const applyCommitTransaction = (
       });
       continue;
     }
+    // Event-append stamping (Phase 3): a declared append's entry gets its
+    // stream `seq` (this commit's) and admission-resolved `firedAt`
+    // written into a CLONE of the op — the caller's operation objects are
+    // shared with replica overlays and stay pristine; `original` (encoded
+    // above, pre-stamp) records the as-received payload so replay
+    // comparison stays stable.
+    const stamps = eventAppendPlan.get(opIndex);
+    const effectiveOperation = stamps === undefined
+      ? operation
+      : stampEventAppendOperation(operation, stamps, seq);
     const revision = writeOperation(engine, {
       branch,
       seq,
       opIndex,
-      operation,
+      operation: effectiveOperation,
       // A delegated commit's scoped writes key from the validated CARRIED
       // identity (protocol.md §2's delegated row; scopes.md §5 —
       // consequences land in the ACTOR's instances, never the delegating
