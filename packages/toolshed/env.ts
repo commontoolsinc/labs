@@ -111,13 +111,7 @@ export const EnvSchema = z.object({
   // ===========================================================================
   JINA_API_KEY: z.string().default(""),
   // ===========================================================================
-  //
-  // ===========================================================================
-  // Alerting webhook
-  //   * /routes/health
-  // ===========================================================================
-  LLM_HEALTH_DISCORD_WEBHOOK: z.string().default(""),
-  HOSTNAME: z.string().default(""),
+
   // ===========================================================================
   // Memory Store
   //  - MEMORY_DIR is used by toolshed to access sqlite files for common-memory
