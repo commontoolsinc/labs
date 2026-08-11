@@ -393,16 +393,49 @@ export async function readPieceSourceState(
 ): Promise<PieceSourceState> {
   await piece.sync();
   const state = readPieceSourceMetadata(runtime, piece);
-  const pattern = state.pattern;
-  if (pattern !== undefined) {
+  if (state.pattern !== undefined) {
     const program = await runtime.patternManager
-      .getPatternSourceProgramByIdentity(pattern.identity, piece.space);
+      .getPatternSourceProgramByIdentity(
+        state.pattern.identity,
+        piece.space,
+      );
     if (program !== undefined) {
       state.entry = program.main;
       state.files = sortSourceFiles(program.files, program.main);
     }
   }
   return state;
+}
+
+export interface PieceSourceRevisionSource {
+  pattern: { identity: string; symbol: string };
+  files: { name: string; contents: string }[];
+}
+
+/** Read the retained authored files for one recorded source revision. */
+export async function readPieceSourceRevision(
+  runtime: Runtime,
+  piece: Cell<unknown>,
+  revisionId: string,
+): Promise<PieceSourceRevisionSource> {
+  await piece.sync();
+  const revision = getPieceSourceRevisions(piece).find((candidate) =>
+    candidate.revisionId === revisionId
+  );
+  if (revision === undefined) {
+    throw new PieceOriginError(`source revision ${revisionId} was not found`);
+  }
+  const program = await runtime.patternManager
+    .getPatternSourceProgramByIdentity(
+      revision.pattern.identity,
+      piece.space,
+    );
+  return {
+    pattern: revision.pattern,
+    files: program === undefined
+      ? []
+      : sortSourceFiles(program.files, program.main),
+  };
 }
 
 function tryClassifyOrigin(

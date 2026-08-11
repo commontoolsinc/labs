@@ -36,6 +36,7 @@ import {
   type PatternSourcesResponse,
   PendingWritesNotification,
   type PieceSourceAction,
+  type PieceSourceRevisionSourceView,
   type PieceSourceView,
   type PieceUpdateSourceResponse,
   RequestType,
@@ -317,6 +318,23 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.PieceGetSource,
       pieceId,
       space,
+    });
+    return response.source;
+  }
+
+  /** Read the retained authored files for one recorded source revision. */
+  async getPieceSourceRevision(
+    pieceId: string,
+    space: DID,
+    revisionId: string,
+  ): Promise<PieceSourceRevisionSourceView> {
+    const response = await this.#conn.request<
+      RequestType.PieceGetSourceRevision
+    >({
+      type: RequestType.PieceGetSourceRevision,
+      pieceId,
+      space,
+      revisionId,
     });
     return response.source;
   }

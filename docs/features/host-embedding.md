@@ -148,16 +148,18 @@ source**. That action keeps the exact current source and clears the active
 origin.
 
 Historical entries can restore an exact retained source version or resume
-following an earlier web or fabric origin. An incompatible pattern contract or
-retained link is shown before mutation and requires a second explicit
-confirmation. The runtime binds that confirmation to the exact reviewed code
-and source-state snapshot. If the piece's actual retained input does not satisfy
-the candidate's argument schema, the runtime rejects the transition instead.
-The input must be repaired before that source can be selected. Nothing is
-required of the host to get these controls. Importing `cf-render` registers the
-menu. The menu reads and changes the piece through
-`RuntimeClient.getPieceSource()` and `RuntimeClient.updatePieceSource()` on the
-runtime the piece already runs in.
+following an earlier web or fabric origin. Each entry can show its exact
+retained source. A mutable Fabric piece origin links to that piece in its own
+space, and the space fact links to the space's default piece. An incompatible
+pattern contract or retained link is shown before mutation and requires a
+second explicit confirmation. The runtime binds that confirmation to the exact
+reviewed code and source-state snapshot. If the piece's actual retained input
+does not satisfy the candidate's argument schema, the runtime rejects the
+transition instead. The input must be repaired before that source can be
+selected. Nothing is required of the host to get these controls. Importing
+`cf-render` registers the menu. The menu reads and changes the piece through
+`RuntimeClient.getPieceSource()`, `RuntimeClient.getPieceSourceRevision()`, and
+`RuntimeClient.updatePieceSource()` on the runtime the piece already runs in.
 
 After the piece-specific entries, a divider separates **Space access rights...**.
 The dialog reads the target space's ACL through `RuntimeClient.getSpaceAcl()`.

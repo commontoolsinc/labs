@@ -90,6 +90,7 @@ export enum RequestType {
   PageGetAll = "page:getAll",
   PageSynced = "page:synced",
   PieceGetSource = "piece:getSource",
+  PieceGetSourceRevision = "piece:getSourceRevision",
   PieceUpdateSource = "piece:updateSource",
   SpaceGetAcl = "space:getAcl",
   SpaceSetAclEntry = "space:setAclEntry",
@@ -695,6 +696,14 @@ export interface PieceGetSourceRequest extends BaseRequest {
   pieceId: string;
 }
 
+/** Read the authored files retained for one recorded source revision. */
+export interface PieceGetSourceRevisionRequest extends BaseRequest {
+  type: RequestType.PieceGetSourceRevision;
+  space: DID;
+  pieceId: string;
+  revisionId: string;
+}
+
 /** How a piece's origin URL resolves. */
 export type PieceOriginKind = "web" | "fabric-piece" | "fabric-pattern";
 
@@ -746,6 +755,15 @@ export interface PieceSourceView {
 
 export interface PieceSourceResponse {
   source: PieceSourceView;
+}
+
+export interface PieceSourceRevisionSourceView {
+  pattern: PiecePatternRefView;
+  files: PatternSourceFile[];
+}
+
+export interface PieceSourceRevisionResponse {
+  source: PieceSourceRevisionSourceView;
 }
 
 export type PieceSourceAction =
@@ -956,6 +974,7 @@ export type IPCClientRequest =
   | PageGetAllRequest
   | PageSyncedRequest
   | PieceGetSourceRequest
+  | PieceGetSourceRevisionRequest
   | PieceUpdateSourceRequest
   | SpaceGetAclRequest
   | SpaceSetAclEntryRequest
@@ -1125,6 +1144,7 @@ export type RemoteResponse =
   | WriteStackTraceResponse
   | PageResponse
   | PieceSourceResponse
+  | PieceSourceRevisionResponse
   | PieceUpdateSourceResponse
   | SpaceAclResponse
   | SlugResponse
@@ -1321,6 +1341,10 @@ export type Commands = {
   [RequestType.PieceGetSource]: {
     request: PieceGetSourceRequest;
     response: PieceSourceResponse;
+  };
+  [RequestType.PieceGetSourceRevision]: {
+    request: PieceGetSourceRevisionRequest;
+    response: PieceSourceRevisionResponse;
   };
   [RequestType.PieceUpdateSource]: {
     request: PieceUpdateSourceRequest;

@@ -451,9 +451,11 @@ shows the piece's retained authored files. **Origin and history** shows its
 active origin and recorded source revisions. A followed piece also has **Stop
 following source**, which keeps the exact current source and clears the origin.
 Historical entries can restore their retained source version or resume
-following their earlier origin. The menu warns before applying a structurally
-incompatible historical source. Its confirmation remains bound to the exact
-candidate that produced the warning.
+following their earlier origin. Each entry links to its exact retained source.
+A mutable Fabric piece origin links to that piece in its own space, and the
+space fact links to the space's default piece. The menu warns before applying a
+structurally incompatible historical source. Its confirmation remains bound to
+the exact candidate that produced the warning.
 
 **Data** shows the piece's argument and result values (both stay live while
 the menu is open; linked cells appear as `{"@cell": …}` stubs), and
