@@ -22,6 +22,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
 - [First-class serializable factories](first-class-serializable-factories.md)
   sequences the implementation of durable pattern, module, and handler
   factories.
+- [Hosted pattern authoring](hosted-pattern-authoring.md) sequences the shared
+  server operation and the piece menu, Home, and `cf` entry points for changing
+  a piece or creating a space from a request.
+- [Developer-tooling feedback for hosted authoring](hosted-pattern-authoring-tooling-feedback.md)
+  adds a separate, non-blocking way for an authoring agent to report missing or
+  defective development capabilities.
 - [Ingest channels and the journal sink](ingest-channels-journal-sink.md)
   proposes a minted, bearer-authed inbound endpoint that accumulates what it
   receives as a provenance-marked, append-only log — the shared capability
