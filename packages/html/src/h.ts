@@ -59,8 +59,10 @@ function bindingTargetLink(value: unknown): unknown {
  * @param props - Element properties
  * @param children - Child elements
  * @returns A virtual DOM node or JSX element (for component functions)
+ *
+ * Implementation uses broader types than overloads - assertion needed for TS
+ * compatibility.
  */
-// Implementation uses broader types than overloads - assertion needed for TS compatibility
 export const h: HFunction = Object.assign(
   function h(
     name: string | ((...args: any[]) => JSXElement),

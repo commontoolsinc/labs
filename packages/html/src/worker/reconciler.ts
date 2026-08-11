@@ -201,13 +201,6 @@ export class WorkerReconciler {
     };
   }
 
-  /**
-   * Mount a VDOM tree, starting the reconciliation process.
-   * Children are inserted directly into the container (CONTAINER_NODE_ID).
-   *
-   * @param vnode - The root VNode, Cell<VNode>, or Cell<unknown> to mount
-   * @returns A cancel function to unmount the tree
-   */
   /** Best-effort space of a cell; undefined when it can't name one. */
   private spaceOfCell(cell: Cell<unknown>): string | undefined {
     try {
@@ -217,6 +210,13 @@ export class WorkerReconciler {
     }
   }
 
+  /**
+   * Mount a VDOM tree, starting the reconciliation process.
+   * Children are inserted directly into the container (CONTAINER_NODE_ID).
+   *
+   * @param vnode - The root VNode, Cell<VNode>, or Cell<unknown> to mount
+   * @returns A cancel function to unmount the tree
+   */
   mount(vnode: WorkerVNode | Cell<WorkerVNode> | Cell<unknown>): Cancel {
     logger.debug(
       "mount",
@@ -1870,9 +1870,6 @@ export class WorkerReconciler {
   }
 
   /**
-   * Update an event prop.
-   */
-  /**
    * Helper to get a debug ID for a cell (space/id or similar).
    */
   private getCellDebugId(cell: Cell<unknown>): string {
@@ -1886,6 +1883,9 @@ export class WorkerReconciler {
     }
   }
 
+  /**
+   * Update an event prop.
+   */
   private updateEventProp(
     ctx: ReconcileContext,
     state: NodeState,

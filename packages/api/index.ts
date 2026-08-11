@@ -757,12 +757,13 @@ export interface IKeyable<out T, Wrap extends HKT> {
   /**
    * Navigate to nested properties by one or more keys.
    *
+   * Overloads to avoid recursive type evaluation which causes stack overflow.
+   *
    * @example
    * cell.key("user")                      // Cell<User>
    * cell.key("user", "profile")           // Cell<Profile>
    * cell.key("user", "profile", "name")   // Cell<string>
    */
-  // Overloads to avoid recursive type evaluation which causes stack overflow
   // Zero keys
   key(this: IsThisObject): Apply<Wrap, T>;
   // One key
@@ -982,8 +983,9 @@ export type KeyResultTypeOpaque<
 export interface IKeyableOpaque<T> {
   /**
    * Navigate to nested properties by one or more keys.
+   *
+   * Overloads to avoid recursive type evaluation which causes stack overflow.
    */
-  // Overloads to avoid recursive type evaluation which causes stack overflow
   key(this: IsThisObject): OpaqueCell<T>;
   key<K1 extends keyof UnwrapCell<T>>(
     this: IsThisObject,
@@ -1638,10 +1640,6 @@ export type FactoryInput<T> =
     : T extends object ? { [K in keyof T]: FactoryInput<T[K]> }
     : T);
 
-/**
- * Matches any non-opaque Cell type (Cell, Stream, ComparableCell, etc.) that may be
- * wrapped in any number of Reactive layers. Excludes OpaqueCell and AnyCell (since OpaqueCell extends AnyCell).
- */
 /**
  * Recursively unwraps AnyBrandedCell types at any nesting level.
  * UnwrapCell<AnyBrandedCell<AnyBrandedCell<string>>> = string
@@ -2611,8 +2609,7 @@ export interface HandlerFunction {
  * The transformer extracts closures and makes them explicit, just like how
  * computed(() => expr) becomes a lift-applied computation with closure
  * extraction.
- */
-/**
+ *
  * This is the surface a PATTERN sees — `commonfabric` resolves to this file, so
  * these overloads and `builder/module.ts`'s `action()` must carry the same
  * signatures. They are maintained by hand and drift silently: an overload
