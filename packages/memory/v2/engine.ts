@@ -1826,6 +1826,21 @@ const validateEventAppends = (
     // never target sidecars and keep their unchanged posture.
     const authoredShape = commitClass === "authored";
 
+    // One current-state read per op: the derived REWRITE check and the
+    // dedupe-horizon CAS below both judge against the stored log.
+    const currentState = readState(engine, {
+      id: operation.id,
+      branch,
+      scope: operation.scope,
+      principal: delegated?.actingPrincipal ?? principal,
+      sessionId: delegated?.actingSession ?? sessionId,
+      scopeKey: args.scopeKeyByOpIndex.get(opIndex),
+    });
+    const currentValue = currentState?.document?.value as
+      | StreamEventsDocValue
+      | undefined;
+    const storedEntries = currentValue?.entries ?? [];
+
     const located: Array<{
       entry: StreamEventEntry;
       stamp: Omit<EventAppendStamp, "firedAt">;
@@ -1844,15 +1859,7 @@ const validateEventAppends = (
       const value = (operation.value?.value ?? {}) as StreamEventsDocValue;
       const entries = Array.isArray(value.entries) ? value.entries : [];
       if (authoredShape) {
-        const current = readState(engine, {
-          id: operation.id,
-          branch,
-          scope: operation.scope,
-          principal: delegated?.actingPrincipal ?? principal,
-          sessionId: delegated?.actingSession ?? sessionId,
-          scopeKey: args.scopeKeyByOpIndex.get(opIndex),
-        });
-        if (current !== null && current.document !== null) {
+        if (currentState !== null && currentState.document !== null) {
           throw new ProtocolError(
             `authored whole-doc set of existing stream doc ` +
               `"${operation.id}" refused — append entries with a ` +
@@ -1891,18 +1898,7 @@ const validateEventAppends = (
           continue;
         }
         if (appended.creation && authoredShape) {
-          const current = readState(engine, {
-            id: operation.id,
-            branch,
-            scope: operation.scope,
-            principal: delegated?.actingPrincipal ?? principal,
-            sessionId: delegated?.actingSession ?? sessionId,
-            scopeKey: args.scopeKeyByOpIndex.get(opIndex),
-          });
-          const existing =
-            (current?.document?.value as StreamEventsDocValue | undefined)
-              ?.entries;
-          if (Array.isArray(existing) && existing.length > 0) {
+          if (storedEntries.length > 0) {
             throw new ProtocolError(
               `authored whole-array write of stream doc ` +
                 `"${operation.id}" entries refused — the log already ` +
@@ -1932,6 +1928,28 @@ const validateEventAppends = (
             "eventId (events.md §1)",
         );
       }
+      // The derived REWRITE arm: the SpaceServer's consequence marking,
+      // per-stream `eventWatermark` companion writes, and §4 compaction
+      // all re-write ALREADY-STAMPED entries (a wave's final-value set
+      // of a sidecar doc necessarily carries the whole log). An entry
+      // whose (eventId, seq) matches a STORED entry is such a rewrite —
+      // no declaration, no stamping, no CAS (its admission happened when
+      // it was appended). A seq-BEARING entry matching nothing stored is
+      // a forgery and is refused: seqs are engine-stamped, never minted
+      // by any producer (events.md §4).
+      if (commitClass === "derived" && entry.seq !== undefined) {
+        const matches = storedEntries.some((stored) =>
+          stored?.eventId === entry.eventId && stored.seq === entry.seq
+        );
+        if (!matches) {
+          throw new ProtocolError(
+            `derived rewrite of stream entry ${entry.eventId} names a ` +
+              `seq (${entry.seq}) no stored entry holds — entry seqs ` +
+              "are engine-stamped, never producer-minted (events.md §4)",
+          );
+        }
+        continue;
+      }
       const key = declKey(operation.id, operation.scope, entry.eventId);
       const decl = unmatched.get(key);
       if (decl === undefined) {
@@ -1943,9 +1961,14 @@ const validateEventAppends = (
         );
       }
       unmatched.delete(key);
-      // Processing-side and engine-stamped fields must arrive ABSENT: a
-      // pre-supplied seq forges ordering, a pre-supplied
-      // consequenced/error/status forges the processing outcome.
+      // Processing-side and engine-stamped fields must arrive ABSENT on
+      // authored traffic: a pre-supplied seq forges ordering, a
+      // pre-supplied consequenced/error/status forges the processing
+      // outcome. DERIVED new appends are exempt from the processing-field
+      // half: a same-wave-processed emitted event legitimately commits
+      // its entry together with its consequences — already
+      // `consequenced` (or errored) at birth (events.md §2's LT1
+      // carriage, §5) — and one trust environment writes both.
       if (entry.seq !== undefined) {
         throw new ProtocolError(
           `event append ${entry.eventId} pre-supplies the stream seq — ` +
@@ -1953,8 +1976,9 @@ const validateEventAppends = (
         );
       }
       if (
-        entry.consequenced !== undefined || entry.error !== undefined ||
-        entry.status !== undefined || entry.reason !== undefined
+        commitClass !== "derived" &&
+        (entry.consequenced !== undefined || entry.error !== undefined ||
+          entry.status !== undefined || entry.reason !== undefined)
       ) {
         throw new ProtocolError(
           `event append ${entry.eventId} pre-supplies processing fields ` +
@@ -2052,22 +2076,12 @@ const validateEventAppends = (
       // entries above the stream's eventWatermark. A seq-less entry (the
       // stage-G interim arm) dedupes only while un-consequenced — it
       // retires as processing marks it, never forever (the stage-G
-      // obligation comment in server.ts, discharged here).
-      const current = readState(engine, {
-        id: operation.id,
-        branch,
-        scope: operation.scope,
-        principal: delegated?.actingPrincipal ?? principal,
-        sessionId: delegated?.actingSession ?? sessionId,
-        scopeKey: args.scopeKeyByOpIndex.get(stamp.opIndex),
-      });
-      const value = current?.document?.value as
-        | StreamEventsDocValue
-        | undefined;
-      const horizon = typeof value?.eventWatermark === "number"
-        ? value.eventWatermark
+      // obligation comment in server.ts, discharged here). Judged
+      // against the per-op current-state read above.
+      const horizon = typeof currentValue?.eventWatermark === "number"
+        ? currentValue.eventWatermark
         : 0;
-      const duplicate = (value?.entries ?? []).some((existing) =>
+      const duplicate = storedEntries.some((existing) =>
         existing?.eventId === entry.eventId &&
         (typeof existing.seq === "number"
           ? existing.seq > horizon

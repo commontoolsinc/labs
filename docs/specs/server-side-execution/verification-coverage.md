@@ -81,7 +81,7 @@ Delta 2026-08-04/05 — stage D's carriage sentences and the
   per-op-indexed sidecar on the commit row — recorded, never wire,
   never pushed; admission consumes only the addressing half): +2
   rules, impl-gate, verification home = the stage-D PR's engine
-  tests (`packages/memory/test/v2-wave-commit-test.ts` pins the
+  tests (`packages/memory/test/v2-wave-commit.test.ts` pins the
   stored pair, the addressing-keyed rows, the
   space-scoped-annotation refusal, and the non-derived refusal).
 - §1's `system`-row widening (RULED 2026-08-05): the
@@ -166,7 +166,7 @@ Delta 2026-08-05 — stage F lands (the serving loop; this PR):
   The operand mapping landed (`resolveCommitSessionKey(sessionId,
   principal) == holder` — the sink commits under the holder's own
   service session) with negative tests
-  (`packages/memory/test/v2-wave-commit-test.ts`: a user session and
+  (`packages/memory/test/v2-wave-commit.test.ts`: a user session and
   a non-holder internal session naming the right holder are both
   refused; the holder's own session admits). protocol.md §2 records
   the landed mapping — a CHANGED sentence, same row.
@@ -189,7 +189,7 @@ Delta 2026-08-05 — stage F lands (the serving loop; this PR):
   authored-intrusion threat model; the code comments at the
   bookkeeping write and the WaveRunKind doc state the same.
 - §2's read row (LD5): the admission half is now impl-covered —
-  `packages/memory/test/v2-explicit-read-test.ts` pins
+  `packages/memory/test/v2-explicit-read.test.ts` pins
   holder-admitted / non-holder-refused / off-flag-refused on both
   the query and watch paths. The trace/model coverage stands
   unchanged. One recorded Phase-1 acceptance rides this row
@@ -257,7 +257,7 @@ Delta 2026-08-05 — stage F lands (the serving loop; this PR):
   completeness (authored class, non-empty actor + grant, the
   sessionless session-scope refusal) and carried-identity keying,
   pinned in `executor-wave.test.ts` and
-  `packages/memory/test/v2-wave-commit-test.ts` — while grant
+  `packages/memory/test/v2-wave-commit.test.ts` — while grant
   RESOLUTION against the target doc/stream remains OWED hardening
   (OW13 below; protocol §2's delegated row carries the same
   Phase-1-bound parenthetical). The read-only-read-set bound is
