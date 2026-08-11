@@ -829,15 +829,6 @@ export async function readStateUnder(
 }
 
 /**
- * A captured root's state, read the way the version that WROTE it saw it.
- *
- * Read under the root's OWN stored result schema, which it carries in meta — so
- * the writing version's view of its data is recoverable without its source, and
- * without this replay having to decide what that view should be. Relaxed at its
- * `unknown` positions first — see `schemaRelaxedForComparison` for what that
- * buys and why it is still the writer's own schema.
- */
-/**
  * The result schema a root carries in meta, or `undefined` if it carries none.
  *
  * Split out so a caller reporting a failed read can say WHICH half failed —
@@ -864,6 +855,15 @@ export async function readStoredResultSchema(
   }
 }
 
+/**
+ * A captured root's state, read the way the version that WROTE it saw it.
+ *
+ * Read under the root's OWN stored result schema, which it carries in meta — so
+ * the writing version's view of its data is recoverable without its source, and
+ * without this replay having to decide what that view should be. Relaxed at its
+ * `unknown` positions first — see `schemaRelaxedForComparison` for what that
+ * buys and why it is still the writer's own schema.
+ */
 export async function readVintageState(
   vintage: VintageRuntime,
   space: string,

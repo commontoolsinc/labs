@@ -668,8 +668,9 @@ export function selectCurrentContainerSchema(
  * This is deliberately a current-value proof, not a future-value link proof:
  * every currently matching anyOf branch remains a separate conjunct so an
  * overlapping ordinary alternative cannot erase a restricted Cell capability.
+ *
+ * @internal Exported for focused correlated-write contract tests.
  */
-/** @internal Exported for focused correlated-write contract tests. */
 export function currentValuePathContracts(
   unresolved: PathSchemaContract,
   segment: string | number,
@@ -856,8 +857,11 @@ function outerCellShapesMatch(
   return left.kind === right.kind && left.scope === right.scope;
 }
 
-/** Consume a uniform outer Cell wrapper through refs and compositions. */
-/** @internal Exported for focused Cell-capability contract tests. */
+/**
+ * Consume a uniform outer Cell wrapper through refs and compositions.
+ *
+ * @internal Exported for focused Cell-capability contract tests.
+ */
 export function localizeOuterCellContract(
   unresolved: PathSchemaContract,
   stored: StoredCellTopology | undefined = undefined,
@@ -1236,8 +1240,9 @@ function canFollowSourceScope(
  * Recover a producer contract from durable Piece metadata, ignoring any schema
  * carried by the supplied alias. A caller can narrow a Cell view before
  * serializing it, so the envelope itself is not evidence about future writes.
+ *
+ * @internal Exported for focused producer-topology contract tests.
  */
-/** @internal Exported for focused producer-topology contract tests. */
 export function durableSourceContract(
   linkedCell: Cell<unknown>,
   pieces: PiecesController,
