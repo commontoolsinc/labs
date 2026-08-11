@@ -1383,7 +1383,7 @@ export class RuntimeProcessor {
     };
   }
 
-  /** Clone a source piece into a fresh-state piece in another space. */
+  /** Clone a source piece into another space. */
   async handlePieceClone(request: PieceCloneRequest): Promise<PageResponse> {
     const sourcePieces = this.getSpaceCtx(request.sourceSpace);
     const sourceCell = this.runtime.getCellFromEntityId(
@@ -1393,6 +1393,7 @@ export class RuntimeProcessor {
     const source = new PieceController(sourcePieces, sourceCell);
     const clone = await source.cloneTo(
       this.getSpaceCtx(request.destinationSpace),
+      { copyData: request.copyData === true },
     );
     return { page: createPageRef(clone.getCell()) };
   }

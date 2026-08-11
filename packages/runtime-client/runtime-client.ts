@@ -339,17 +339,19 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return response.source;
   }
 
-  /** Create a fresh-state copy that follows the selected piece's source. */
+  /** Create a copy that follows the selected piece's source. */
   async clonePiece(
     pieceId: string,
     sourceSpace: DID,
     destinationSpace: DID,
+    options: { copyData?: boolean } = {},
   ): Promise<PageHandle> {
     const response = await this.#conn.request<RequestType.PieceClone>({
       type: RequestType.PieceClone,
       pieceId,
       sourceSpace,
       destinationSpace,
+      ...(options.copyData === true ? { copyData: true } : {}),
     });
     return new PageHandle(this, response.page);
   }

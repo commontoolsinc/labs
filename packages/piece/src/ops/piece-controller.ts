@@ -7,6 +7,7 @@ import {
   deepEqual,
   extractDefaultValues,
   formatFabricRef,
+  getCellOrThrow,
   getMetaLink,
   getPatternIdentityRef,
   getPatternRepository,
@@ -14,7 +15,9 @@ import {
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
   getValueAtPath,
+  type IExtendedStorageTransaction,
   isCell,
+  isCellResult,
   isLink,
   isStream,
   type JSONSchema,
@@ -36,6 +39,7 @@ import {
 } from "@commonfabric/runner";
 import type { CellKind, LinkScope } from "@commonfabric/api";
 import {
+  cfcLabelViewForCellFailClosed,
   cfcSchemaChildRoot,
   cfcSchemaMergeIssue,
   loadStoredCfcEnvelope,
@@ -58,11 +62,400 @@ import {
   resolvePieceOriginSource,
 } from "./piece-origin.ts";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import {
+  FabricInstance,
+  FabricPrimitive,
+} from "@commonfabric/data-model/fabric-value";
+import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
   set(value: unknown, path?: CellPath): Promise<void>;
   getCell(): Promise<Cell<unknown>>;
+}
+
+interface CloneInternalSnapshot {
+  partialCause: unknown;
+  kind?: unknown;
+  value: unknown;
+}
+
+function cloneCellKey(cell: Cell<unknown>): string {
+  const link = cell.getAsNormalizedFullLink();
+  return `${link.space}:${link.id}:${JSON.stringify(link.scope)}:${
+    JSON.stringify(link.path)
+  }`;
+}
+
+function cloneEntityKey(cell: Cell<unknown>): string {
+  const link = cell.getAsNormalizedFullLink();
+  return `${link.space}:${link.id}:${JSON.stringify(link.scope)}`;
+}
+
+/** Reject special values whose private state cannot be inspected for labels. */
+function assertNoCloneFabricInstance(
+  value: unknown,
+  seen = new WeakSet<object>(),
+): void {
+  if (value instanceof FabricInstance) {
+    throw new Error(
+      "piece data containing FabricInstance values cannot be copied",
+    );
+  }
+  if (
+    value === null || typeof value !== "object" ||
+    value instanceof FabricPrimitive || seen.has(value)
+  ) {
+    return;
+  }
+  seen.add(value);
+  for (const child of Array.isArray(value) ? value : Object.values(value)) {
+    assertNoCloneFabricInstance(child, seen);
+  }
+}
+
+/** Reject a value copy that would discard Common Fabric Control labels. */
+function assertCloneDataUnlabeled(carrier: unknown): void {
+  const view = cfcLabelViewForCellFailClosed(carrier);
+  const labeled = view?.entries.some((entry) =>
+    (entry.label.confidentiality?.length ?? 0) > 0 ||
+    (entry.label.integrity?.length ?? 0) > 0
+  );
+  if (labeled) {
+    throw new Error(
+      "piece data with confidentiality or integrity labels cannot be copied " +
+        "into another space",
+    );
+  }
+}
+
+/** The internal-cell manifest entries written during pattern setup. */
+function cloneInternalManifest(
+  piece: Cell<unknown>,
+): Record<string, unknown>[] {
+  const manifest = piece.getMetaRaw("internal");
+  if (manifest === undefined) return [];
+  if (!Array.isArray(manifest)) {
+    throw new Error("piece has invalid internal data metadata");
+  }
+  return manifest.map((entry) => {
+    if (
+      typeof entry !== "object" || entry === null ||
+      !("partialCause" in entry) || !("link" in entry)
+    ) {
+      throw new Error("piece has invalid internal data metadata");
+    }
+    return entry as Record<string, unknown>;
+  });
+}
+
+/** Copy materialized piece data into detached arrays and plain objects. */
+function snapshotCloneValue(
+  value: unknown,
+  sourceCell?: Cell<unknown>,
+  seen = new WeakMap<object, unknown>(),
+  cells = new Map<string, Cell<unknown>>(),
+  preloadedCells?: { has(key: string): boolean },
+): unknown {
+  let cell = sourceCell;
+  if (isCell(value)) {
+    cell = value;
+    if (
+      preloadedCells !== undefined && !preloadedCells.has(cloneCellKey(cell))
+    ) {
+      throw new Error("piece data changed while it was being cloned");
+    }
+    value = value.get();
+  } else if (isCellResult(value)) {
+    cell = getCellOrThrow(value);
+  }
+
+  if (cell !== undefined) {
+    const key = cloneCellKey(cell);
+    if (preloadedCells !== undefined && !preloadedCells.has(key)) {
+      throw new Error("piece data changed while it was being cloned");
+    }
+    cells.set(key, cell);
+  }
+  assertCloneDataUnlabeled(cell);
+  assertCloneDataUnlabeled(value);
+  const raw = cell?.getRawUntyped();
+  if (value instanceof FabricInstance || raw instanceof FabricInstance) {
+    throw new Error(
+      "piece data containing FabricInstance values cannot be copied",
+    );
+  }
+  if (
+    value === null || typeof value !== "object" ||
+    value instanceof FabricPrimitive
+  ) {
+    return value;
+  }
+
+  const existing = seen.get(value);
+  if (existing !== undefined) return existing;
+  if (Array.isArray(value)) {
+    const snapshot: unknown[] = [];
+    seen.set(value, snapshot);
+    for (let index = 0; index < value.length; index++) {
+      snapshot[index] = snapshotCloneValue(
+        value[index],
+        cell?.key(index),
+        seen,
+        cells,
+        preloadedCells,
+      );
+    }
+    return snapshot;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error(
+      "piece data containing unsupported object values cannot be copied",
+    );
+  }
+  const snapshot = Object.create(prototype) as Record<string, unknown>;
+  seen.set(value, snapshot);
+  for (const key of Object.keys(value)) {
+    Object.defineProperty(snapshot, key, {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: snapshotCloneValue(
+        (value as Record<string, unknown>)[key],
+        cell?.key(key),
+        seen,
+        cells,
+        preloadedCells,
+      ),
+    });
+  }
+  return snapshot;
+}
+
+/** Load every linked cell that a later synchronous transaction read can reach. */
+async function preloadCloneValue(
+  value: unknown,
+  sourceCell: Cell<unknown> | undefined,
+  cells: Map<string, Cell<unknown>>,
+  loadedEntities = new Set<string>(),
+  seen = new WeakSet<object>(),
+): Promise<void> {
+  let cell = sourceCell;
+  if (isCell(value)) {
+    cell = value;
+  } else if (isCellResult(value)) {
+    cell = getCellOrThrow(value);
+  }
+
+  if (cell !== undefined) {
+    const key = cloneCellKey(cell);
+    if (!cells.has(key)) {
+      cells.set(key, cell);
+      const entityKey = cloneEntityKey(cell);
+      if (!loadedEntities.has(entityKey)) {
+        if (isStream(cell)) {
+          throw new Error("piece input containing streams cannot be copied");
+        }
+        assertNoCloneFabricInstance(cell.getRawUntyped());
+        loadedEntities.add(entityKey);
+        value = await cell.pull();
+      } else if (isCell(value)) {
+        value = value.get();
+      }
+    }
+    if (isCell(value)) value = value.get();
+  }
+
+  assertNoCloneFabricInstance(value);
+  assertCloneDataUnlabeled(cell);
+  assertCloneDataUnlabeled(value);
+  if (
+    value === null || typeof value !== "object" ||
+    value instanceof FabricPrimitive || value instanceof FabricInstance ||
+    seen.has(value)
+  ) {
+    return;
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index++) {
+      await preloadCloneValue(
+        value[index],
+        cell?.key(index),
+        cells,
+        loadedEntities,
+        seen,
+      );
+    }
+    return;
+  }
+  for (const key of Object.keys(value)) {
+    await preloadCloneValue(
+      (value as Record<string, unknown>)[key],
+      cell?.key(key),
+      cells,
+      loadedEntities,
+      seen,
+    );
+  }
+}
+
+/** Require every source entity read by the snapshot to remain unchanged. */
+function pinCloneSnapshotCells(
+  tx: IExtendedStorageTransaction,
+  cells: Iterable<Cell<unknown>>,
+): void {
+  const linksByEntity = new Map<
+    string,
+    ReturnType<Cell<unknown>["getAsNormalizedFullLink"]>
+  >();
+  for (const cell of cells) {
+    linksByEntity.set(cloneEntityKey(cell), cell.getAsNormalizedFullLink());
+  }
+  const links = [...linksByEntity.values()];
+  const spaces = [...new Set(links.map((link) => link.space))];
+  if (spaces.length > 1) {
+    throw new Error(
+      "piece data linked from another space cannot be copied consistently",
+    );
+  }
+  if (!tx.addCommitPrecondition) {
+    throw new Error("storage cannot validate a piece data snapshot");
+  }
+  for (const link of links) {
+    const raw = tx.readOrThrow({
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+      type: "application/json",
+      path: ["value"],
+    });
+    tx.addCommitPrecondition(link.space, {
+      kind: "entity-value-hash",
+      id: link.id,
+      scope: link.scope,
+      valueHash: raw === undefined ? null : commitPreconditionValueHash(raw),
+    });
+  }
+}
+
+/** Read the input and stateful internal cells from one storage version. */
+async function snapshotCloneData(
+  piece: Cell<unknown>,
+  inputCell: Cell<unknown>,
+  expectedSource: PieceSourceSnapshot,
+): Promise<{ input: unknown; internals: CloneInternalSnapshot[] }> {
+  const preloadedCells = new Map<string, Cell<unknown>>();
+  await preloadCloneValue(inputCell, undefined, preloadedCells);
+  const initialManifest = cloneInternalManifest(piece);
+  for (const entry of initialManifest) {
+    if (entry.kind === "computed") continue;
+    const internal = piece.runtime.getCellFromLink(
+      parseLinkOrThrow(entry.link, piece),
+    );
+    if (!isStream(internal)) {
+      await preloadCloneValue(internal, undefined, preloadedCells);
+    }
+  }
+
+  const tx = piece.runtime.edit();
+  let commitStarted = false;
+  try {
+    const txPiece = piece.withTx(tx);
+    const currentSource = getPieceSourceSnapshot(txPiece);
+    if (
+      currentSource === undefined ||
+      !samePieceSourceSnapshot(expectedSource, currentSource)
+    ) {
+      throw new Error("piece source changed while it was being cloned");
+    }
+
+    const snapshotCells = new Map<string, Cell<unknown>>();
+    const txInput = inputCell.withTx(tx);
+    const input = snapshotCloneValue(
+      txInput.get(),
+      txInput,
+      new WeakMap(),
+      snapshotCells,
+      preloadedCells,
+    );
+    const internals: CloneInternalSnapshot[] = [];
+    const manifest = cloneInternalManifest(txPiece);
+    if (!deepEqual(initialManifest, manifest)) {
+      throw new Error("piece data changed while it was being cloned");
+    }
+    for (const entry of manifest) {
+      if (entry.kind === "computed") continue;
+      const link = parseLinkOrThrow(entry.link, txPiece);
+      const internal = piece.runtime.getCellFromLink(link, undefined, tx);
+      if (isStream(internal)) continue;
+      internals.push({
+        partialCause: entry.partialCause,
+        kind: entry.kind,
+        value: snapshotCloneValue(
+          internal.get(),
+          internal,
+          new WeakMap(),
+          snapshotCells,
+          preloadedCells,
+        ),
+      });
+    }
+
+    pinCloneSnapshotCells(tx, snapshotCells.values());
+    piece.runtime.prepareTxForCommit(tx);
+    commitStarted = true;
+    const { error } = await tx.commit();
+    if (error) {
+      if ("reason" in error && error.reason instanceof Error) {
+        throw error.reason;
+      }
+      throw error;
+    }
+    return { input, internals };
+  } catch (error) {
+    if (!commitStarted) tx.abort(error);
+    throw error;
+  }
+}
+
+/** Restore stateful internal-cell snapshots into a newly created piece. */
+async function restoreCloneInternals(
+  piece: Cell<unknown>,
+  snapshots: readonly CloneInternalSnapshot[],
+): Promise<void> {
+  const tx = piece.runtime.edit();
+  let commitStarted = false;
+  try {
+    const txPiece = piece.withTx(tx);
+    const manifest = cloneInternalManifest(txPiece);
+    for (const snapshot of snapshots) {
+      const entry = manifest.find((candidate) =>
+        candidate.kind === snapshot.kind &&
+        deepEqual(candidate.partialCause, snapshot.partialCause)
+      );
+      if (entry === undefined) {
+        throw new Error("cloned piece is missing a source data cell");
+      }
+      const link = parseLinkOrThrow(entry.link, txPiece);
+      piece.runtime.getCellFromLink(link, undefined, tx).set(snapshot.value);
+    }
+    piece.runtime.prepareTxForCommit(tx);
+    commitStarted = true;
+    const { error } = await tx.commit();
+    if (error) {
+      if ("reason" in error && error.reason instanceof Error) {
+        throw error.reason;
+      }
+      throw error;
+    }
+  } catch (error) {
+    if (!commitStarted) tx.abort(error);
+    throw error;
+  }
+  await piece.runtime.idle();
 }
 
 type PiecePropIoType = "result" | "input";
@@ -2849,12 +3242,17 @@ export class PieceController<T = unknown> {
   }
 
   /**
-   * Create a fresh-state copy in `destination` that tracks the same source.
-   * A detached piece becomes the copy's mutable fabric origin. A piece that
-   * already tracks an origin passes that origin through, so both copies point
-   * at the same update source.
+   * Create a copy in `destination` that tracks the same source. The copy starts
+   * with default data unless `copyData` requests detached snapshots of the
+   * selected piece's current input and stateful internal cells. A detached
+   * piece becomes the copy's mutable fabric origin. A piece that already tracks
+   * an origin passes that origin through, so both copies point at the same
+   * update source.
    */
-  async cloneTo(destination: PiecesController): Promise<PieceController<T>> {
+  async cloneTo(
+    destination: PiecesController,
+    options: { copyData?: boolean } = {},
+  ): Promise<PieceController<T>> {
     await this.#cell.sync();
     const snapshot = getPieceSourceSnapshot(this.#cell);
     if (snapshot === undefined) {
@@ -2877,14 +3275,59 @@ export class PieceController<T = unknown> {
     if (program === undefined) {
       throw new Error("piece source is not available");
     }
+    let input: unknown = undefined;
+    let internals: CloneInternalSnapshot[] = [];
+    if (options.copyData) {
+      const inputCell = await this.input.getCell();
+      const data = await snapshotCloneData(this.#cell, inputCell, snapshot);
+      input = data.input;
+      internals = data.internals;
+    }
     const current = getPieceSourceSnapshot(this.#cell);
     if (current === undefined || !samePieceSourceSnapshot(snapshot, current)) {
       throw new Error("piece source changed while it was being cloned");
     }
-    return await destination.create<T>(
+    const clone = await destination.create<T>(
       { ...program, mainExport: snapshot.pattern.symbol },
-      { origin },
+      {
+        origin,
+        ...(options.copyData ? { input: input as object } : {}),
+        start: false,
+      },
     );
+    try {
+      if (options.copyData) {
+        await restoreCloneInternals(clone.getCell(), internals);
+      }
+      await destination.startPiece(clone.getCell());
+    } catch (error) {
+      const cleanupErrors: unknown[] = [];
+      try {
+        await destination.stopPiece(clone.getCell());
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+      try {
+        const removed = await destination.remove(clone.getCell());
+        if (!removed) {
+          const stillRegistered = (await destination.getRegisteredPieces())
+            .some((piece) => piece.id === clone.id);
+          if (stillRegistered) {
+            throw new Error("the incomplete piece remained registered");
+          }
+        }
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(
+          [error, ...cleanupErrors],
+          "cloning failed and the incomplete piece could not be removed",
+        );
+      }
+      throw error;
+    }
+    return clone;
   }
 
   /** Return a stable reference to the pattern currently running this piece. */

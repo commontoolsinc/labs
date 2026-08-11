@@ -476,6 +476,32 @@ describe("RuntimeClient", () => {
       );
     });
 
+    it("clones a piece's input data through the runtime protocol", async () => {
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+      const sourcePage = await rt.createPage(TEMP_PATTERN, session.space, {
+        argument: { count: 7, label: "copied label" },
+        run: true,
+      });
+      const destinationName = `piece-clone-data-${crypto.randomUUID()}`;
+      const destinationSpace = await rt.resolveSpaceName(destinationName);
+
+      const clone = await rt.clonePiece(
+        sourcePage.id(),
+        session.space,
+        destinationSpace,
+        { copyData: true },
+      );
+      const response = await rt[$conn]().request<RequestType.CellGet>({
+        type: RequestType.CellGet,
+        cell: clone.cell().ref(),
+        meta: "argument",
+        includeRef: true,
+      });
+
+      assertEquals(response.value, { count: 7, label: "copied label" });
+    });
+
     it("detaches a followed root through the runtime-client protocol", async () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);

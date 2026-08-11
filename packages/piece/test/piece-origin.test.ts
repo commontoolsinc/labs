@@ -53,6 +53,57 @@ const FOLLOW_SOURCE = [
   "",
 ].join("\n");
 
+const CONFIDENTIAL_SOURCE = [
+  "import { pattern, type Confidential } from 'commonfabric';",
+  "const SECRET = {",
+  "  type: 'https://commonfabric.org/cfc/atom/Resource',",
+  "  class: 'CloneTestSecret',",
+  "  subject: 'did:example:clone-test',",
+  "} as const;",
+  "type Input = { secret: Confidential<string, readonly [typeof SECRET]> };",
+  "export default pattern<Input>(({ secret }) => ({ secret }));",
+  "",
+].join("\n");
+
+const CONFIDENTIAL_WRITABLE_SOURCE = [
+  "import { Confidential, pattern, Writable } from 'commonfabric';",
+  "const SECRET = {",
+  "  type: 'https://commonfabric.org/cfc/atom/Resource',",
+  "  class: 'CloneTestLinkedSecret',",
+  "  subject: 'did:example:clone-test-linked',",
+  "} as const;",
+  "type Output = {",
+  "  secret: Confidential<Writable<string>, readonly [typeof SECRET]>;",
+  "};",
+  "export default pattern<Record<string, never>, Output>(() => ({",
+  "  secret: new Writable('classified').for('secret'),",
+  "}));",
+  "",
+].join("\n");
+
+const LINK_INPUT_SOURCE = [
+  "import { pattern, Writable } from 'commonfabric';",
+  "type Input = { nested: { secret: Writable<string> } };",
+  "export default pattern<Input>(({ nested }) => ({ secret: nested.secret }));",
+  "",
+].join("\n");
+
+const WRITABLE_SOURCE = [
+  "import { pattern, Writable } from 'commonfabric';",
+  "export default pattern(() => ({",
+  "  value: new Writable('shared').for('value'),",
+  "}));",
+  "",
+].join("\n");
+
+const UNKNOWN_INPUT_SOURCE = [
+  "import { pattern } from 'commonfabric';",
+  "export default pattern<{ value: unknown }, { marker: number }>(() => ({",
+  "  marker: 1,",
+  "}));",
+  "",
+].join("\n");
+
 /**
  * Serve pattern source from memory, so the resolver and runtime.fetch need no
  * network. Mirrors the stub in pattern-source-provenance.test.ts.
@@ -767,6 +818,212 @@ describe("reading a piece's source state", () => {
       cloneState.pattern!.symbol,
     );
     expect(resolved.pattern).toEqual(sourceState.pattern);
+  });
+
+  it("copies a snapshot of the selected piece's input data when requested", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    }, { input: { label: "copied label" } });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-data-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+
+    await source.result.set(7, ["count"]);
+
+    const startPiece = destination.startPiece.bind(destination);
+    let countWhenStarted: unknown;
+    destination.startPiece = async (piece, options) => {
+      if (typeof piece === "string") throw new Error("expected clone cell");
+      countWhenStarted = destination.getResult(piece).key("count").get();
+      await startPiece(piece, options);
+    };
+
+    const clone = await source.cloneTo(destination, { copyData: true });
+
+    expect(countWhenStarted).toBe(7);
+    expect(await clone.input.get()).toEqual({ label: "copied label" });
+    expect(await clone.result.get(["count"])).toBe(7);
+    await source.input.set({ label: "changed later" });
+    await source.result.set(9, ["count"]);
+    expect(await clone.input.get()).toEqual({ label: "copied label" });
+    expect(await clone.result.get(["count"])).toBe(7);
+  });
+
+  it("rejects a data snapshot that changes before validation", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    }, { input: { label: "before" } });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-conflict-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+
+    const edit = runtime.edit.bind(runtime);
+    let injectedChange = false;
+    runtime.edit = () => {
+      const tx = edit();
+      const commit = tx.commit.bind(tx);
+      tx.commit = async (options) => {
+        const validatesSnapshot = tx.getCommitPreconditions?.(
+          controller.getSpace(),
+        )?.some((precondition) => precondition.kind === "entity-value-hash") ??
+          false;
+        if (validatesSnapshot && !injectedChange) {
+          injectedChange = true;
+          runtime.edit = edit;
+          await source.input.set({ label: "changed during clone" });
+        }
+        return await commit(options);
+      };
+      return tx;
+    };
+
+    let rejected = false;
+    try {
+      await source.cloneTo(destination, { copyData: true });
+    } catch {
+      rejected = true;
+    } finally {
+      runtime.edit = edit;
+    }
+
+    expect(injectedChange).toBe(true);
+    expect(rejected).toBe(true);
+  });
+
+  it("cleans up a fresh clone whose start fails", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-start-failure-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+
+    const remove = destination.remove.bind(destination);
+    let cleanedUp = false;
+    destination.startPiece = () => Promise.reject(new Error("start failed"));
+    destination.remove = async (piece) => {
+      cleanedUp = true;
+      return await remove(piece);
+    };
+
+    await expect(source.cloneTo(destination)).rejects.toThrow("start failed");
+    expect(cleanedUp).toBe(true);
+  });
+
+  it("rejects data copying when the snapshot carries CFC labels", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: CONFIDENTIAL_SOURCE }],
+    }, { input: { secret: "classified" } });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-labeled-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+
+    await expect(source.cloneTo(destination, { copyData: true })).rejects
+      .toThrow(
+        "piece data with confidentiality or integrity labels cannot be copied",
+      );
+  });
+
+  it("rejects labels reached through nested input links", async () => {
+    const secret = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: CONFIDENTIAL_WRITABLE_SOURCE }],
+    });
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: LINK_INPUT_SOURCE }],
+    }, {
+      input: { nested: { secret: secret.getCell().key("secret") } },
+    });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-linked-label-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+
+    await expect(source.cloneTo(destination, { copyData: true })).rejects
+      .toThrow(
+        "piece data with confidentiality or integrity labels cannot be copied",
+      );
+  });
+
+  it("rejects data linked from another space", async () => {
+    const external = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-external-data-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await external.synced();
+    const linked = await external.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: WRITABLE_SOURCE }],
+    });
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: LINK_INPUT_SOURCE }],
+    }, {
+      input: { nested: { secret: linked.getCell().key("value") } },
+    });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-external-destination-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+
+    await expect(source.cloneTo(destination, { copyData: true })).rejects
+      .toThrow(
+        "piece data linked from another space cannot be copied consistently",
+      );
+  });
+
+  it("rejects FabricInstance values instead of flattening them", async () => {
+    const source = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: UNKNOWN_INPUT_SOURCE }],
+    }, { input: { value: new Error("not cloneable") } });
+    const destination = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `source-clone-instance-${crypto.randomUUID()}`,
+      }),
+      runtime,
+    );
+    await destination.synced();
+
+    await expect(source.cloneTo(destination, { copyData: true })).rejects
+      .toThrow("piece data containing FabricInstance values cannot be copied");
   });
 
   it("passes an existing upstream origin through to a clone", async () => {

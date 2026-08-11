@@ -373,7 +373,8 @@ describe("piece menu entries", () => {
       "Origin and history",
       "Data",
       "Actions",
-      "Clone into new space",
+      "Clone fresh piece into new space",
+      "Clone piece and copy data into new space",
     ]);
   });
 
@@ -383,7 +384,8 @@ describe("piece menu entries", () => {
       "piece-menu-origin",
       "piece-menu-data",
       "piece-menu-actions",
-      "piece-menu-clone",
+      "piece-menu-clone-fresh",
+      "piece-menu-clone-copy-data",
     ]);
   });
 
@@ -393,7 +395,8 @@ describe("piece menu entries", () => {
       "Origin and history",
       "Data",
       "Actions",
-      "Clone into new space",
+      "Clone fresh piece into new space",
+      "Clone piece and copy data into new space",
       "Stop following source",
     ]);
     expect(pieceMenuEntries(true).at(-1)?.testId).toBe(
@@ -616,25 +619,27 @@ describe("the menu a right-click opens", () => {
         pieceId: string,
         sourceSpace: typeof SPACE,
         destinationSpace: typeof SPACE,
+        options: { copyData?: boolean },
       ): Promise<{ id(): string }>;
     };
     runtime.resolveSpaceName = (name) => {
       requests.push({ kind: "resolve", name });
       return Promise.resolve(SPACE);
     };
-    runtime.clonePiece = (pieceId, sourceSpace, destinationSpace) => {
+    runtime.clonePiece = (pieceId, sourceSpace, destinationSpace, options) => {
       requests.push({
         kind: "clone",
         pieceId,
         sourceSpace,
         destinationSpace,
+        options,
       });
       return Promise.resolve({ id: () => "fid1:clone" });
     };
     globalThis.addEventListener("cf-navigate", onNavigate);
     try {
       const menu = openMenu(cell);
-      await menu.cloneIntoFreshSpace("copied-piece");
+      await menu.cloneIntoNewSpace({ spaceName: "copied-piece" });
     } finally {
       globalThis.removeEventListener("cf-navigate", onNavigate);
     }
@@ -646,6 +651,7 @@ describe("the menu a right-click opens", () => {
         pieceId: "of:fid1:piece",
         sourceSpace: SPACE,
         destinationSpace: SPACE,
+        options: { copyData: false },
       },
     ]);
     expect(navigations).toEqual([{
@@ -675,7 +681,7 @@ describe("the menu a right-click opens", () => {
     globalThis.addEventListener("cf-navigate", onNavigate);
     try {
       const menu = openMenu(cell);
-      const cloning = menu.cloneIntoFreshSpace("copied-piece");
+      const cloning = menu.cloneIntoNewSpace({ spaceName: "copied-piece" });
       await entered.promise;
       menu.close();
       release.resolve();
@@ -689,6 +695,88 @@ describe("the menu a right-click opens", () => {
       spaceName: "copied-piece",
       pieceId: "fid1:clone",
     }]);
+  });
+
+  it("shows clone progress and failures in a dialog", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const cell = pieceCell();
+    const runtime = cell.runtime() as unknown as {
+      resolveSpaceName(name: string): Promise<typeof SPACE>;
+      clonePiece(): Promise<{ id(): string }>;
+    };
+    runtime.resolveSpaceName = () => Promise.resolve(SPACE);
+    runtime.clonePiece = async () => {
+      entered.resolve();
+      await release.promise;
+      throw new Error("source data could not be copied");
+    };
+    const menu = openMenu(cell);
+
+    const cloning = menu.cloneIntoNewSpace({ copyData: true });
+    await entered.promise;
+    const pending = shows(menu);
+    expect(pending).toContain("piece-clone-dialog");
+    expect(pending).toContain("Cloning piece into a new space…");
+    expect(pending).toContain("<progress");
+    expect(pending).not.toContain("Clone fresh piece into new space");
+
+    release.resolve();
+    await cloning;
+    const failed = shows(menu);
+    expect(failed).toContain("piece-clone-dialog");
+    expect(failed).toContain(
+      "Could not clone this piece: source data could not be copied",
+    );
+    expect(failed).toContain("Try again");
+    expect(failed).not.toContain("piece-menu-clone-copy-data");
+  });
+
+  it("requests a data snapshot from the copy-data action", async () => {
+    const calls: unknown[] = [];
+    const cell = pieceCell();
+    const runtime = cell.runtime() as unknown as {
+      resolveSpaceName(name: string): Promise<typeof SPACE>;
+      clonePiece(
+        pieceId: string,
+        sourceSpace: typeof SPACE,
+        destinationSpace: typeof SPACE,
+        options: { copyData?: boolean },
+      ): Promise<{ id(): string }>;
+    };
+    runtime.resolveSpaceName = () => Promise.resolve(SPACE);
+    runtime.clonePiece = (
+      _pieceId,
+      _sourceSpace,
+      _destinationSpace,
+      options,
+    ) => {
+      calls.push(options);
+      return Promise.reject(new Error("stop after request"));
+    };
+    const menu = openMenu(cell);
+
+    await clickTestId(menu, "piece-menu-clone-copy-data");
+
+    expect(calls).toEqual([{ copyData: true }]);
+    expect(shows(menu)).toContain("Clone piece and copy data");
+    expect(shows(menu)).not.toContain("piece-menu-clone-copy-data");
+  });
+
+  it("reports a runtime cancellation in the clone dialog", async () => {
+    const cell = pieceCell(undefined, { aborted: true });
+    const runtime = cell.runtime() as unknown as {
+      resolveSpaceName(name: string): Promise<typeof SPACE>;
+    };
+    runtime.resolveSpaceName = () => Promise.reject(new Error("disposed"));
+    const menu = openMenu(cell);
+
+    await menu.cloneIntoNewSpace();
+
+    expect(shows(menu)).toContain("piece-clone-dialog");
+    expect(shows(menu)).toContain(
+      "The clone was canceled because the runtime stopped.",
+    );
   });
 });
 

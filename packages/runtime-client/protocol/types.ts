@@ -705,12 +705,14 @@ export interface PieceGetSourceRevisionRequest extends BaseRequest {
   revisionId: string;
 }
 
-/** Create a fresh-state copy of a piece in another space. */
+/** Create a copy of a piece in another space. */
 export interface PieceCloneRequest extends BaseRequest {
   type: RequestType.PieceClone;
   sourceSpace: DID;
   pieceId: string;
   destinationSpace: DID;
+  /** Seed the clone with snapshots of the source piece's durable data. */
+  copyData?: boolean;
 }
 
 /** How a piece's origin URL resolves. */

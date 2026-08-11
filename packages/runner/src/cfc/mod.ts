@@ -25,6 +25,7 @@ export {
 } from "./label-representation.ts";
 export {
   cfcLabelViewForCell,
+  cfcLabelViewForCellFailClosed,
   cfcLabelViewForDereference,
   cfcLabelViewForDereferenceTraces,
   cfcLabelViewFromMetadata,

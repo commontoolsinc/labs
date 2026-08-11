@@ -448,11 +448,16 @@ See `packages/patterns/examples/ui-variants-demo.tsx` for a full example.
 
 Right-clicking a rendered piece opens `cf-piece-menu` for it. **View source**
 shows the piece's retained authored files. **Origin and history** shows its
-active origin and recorded source revisions. **Clone into new space** creates a
-fresh-state copy in a unique named space and opens it. A detached piece becomes
-the copy's origin. A piece that already follows an origin passes that origin to
-the copy. A followed piece also has **Stop following source**, which keeps the
-exact current source and clears the origin. Historical entries can restore
+active origin and recorded source revisions. **Clone fresh piece into new
+space** creates a copy with default input data in a unique named space and opens
+it. **Clone piece and copy data into new space** instead seeds the copy with
+detached snapshots of the selected piece's current input and stateful internal
+data. Computed values are recomputed in the new space. Data linked from another
+space is rejected because it cannot be captured atomically. Both actions show
+their progress and any failure in a dialog. A detached piece becomes the copy's
+origin. A piece that already follows an origin passes that origin to the copy.
+A followed piece also has **Stop following source**, which keeps the exact
+current source and clears the origin. Historical entries can restore
 their retained source version or resume following their earlier origin. Each
 entry links to its exact retained source. A mutable Fabric piece origin links
 to that piece in its own space, and the space fact links to the space's default
