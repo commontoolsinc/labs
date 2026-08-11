@@ -40,13 +40,32 @@ a driver needs to know what is already moving before scheduling anything new.
 | --- | --- | --- |
 | #5501 | a verb's declared result reaches its module | ready; the decision below is made, and the producer half is green |
 | #5504 | `@` marks a position in a field list | open; two `notes@` per-element walkthrough assertions fail against a live toolshed — the behaviour's first contact with a real server |
-| #5307 | closed-world verb event schemas | open; the emission is written and four Pattern Update Compatibility shards fail, so baselines want re-recording. Carries the item 11 question |
+| #5307 | closed-world verb event schemas | parked on #5589; the minting is built, and what stays red is a renderer-semantics ruling rather than an implementation gap |
 
-**The read layer has landed.** #5309, #5459, #5468, #5469, #5470, #5497, #5500
-and #5505 are merged, and #5504 is the last of it still open. #5458 is closed
-rather than merged because its rename was folded into #5470's squash; the shared
-read step it factored out is on main as `packages/cli/lib/cell-selection.ts`.
-A reader who goes looking for #5458 should not conclude the step was dropped.
+**Most of the read layer has landed.** #5309, #5459, #5468, #5470, #5497 and
+#5500 are on main. #5458 is closed rather than merged because its rename was
+folded into #5470's squash; the shared read step it factored out is on main as
+`packages/cli/lib/cell-selection.ts`. A reader who goes looking for #5458 should
+not conclude the step was dropped.
+
+**Two are back out: #5469 and #5505 were reverted by #5582.** They merged
+twenty-six seconds apart, each green on a base that did not contain the other,
+and the tree they made together type-failed — #5469 replaced `invocationId`
+with an `invocation: {id, session}` pair, and #5505 added nine `piece call`
+selection tests written against the old name. The revert restored the 22 files
+they touched byte-for-byte.
+
+Two consequences a driver has to carry:
+
+- **`piece call` has no `--select` / `--schema` / `--filter` again.** That is a
+  landed piece of item 6 going back out, not just a test fix.
+- **The address change is no longer underneath anything.** `scopeCallerEventId`
+  derives from `{caller, id, path, space}` with no identity in the address, so
+  two callers choosing the same word — `add-comment-1` is the word two agents
+  both pick — compute one address and read one receipt, and the second is told
+  its call settled when it never ran. Item 4 was sequenced after item 7
+  precisely so that a published address had stopped moving. **That precondition
+  is gone, and item 4 must not start until it returns.**
 
 ## The decision that was waiting, and the condition it carries
 
@@ -174,13 +193,16 @@ selection.
 ## Landed, and what consumes it
 
 **6. The read layer.** The shared read step, address markers with the
-deepest-link rule, container inference, the flag split, call selection, and
-entity-URI intake are on main. The `@` suffix (#5504) is the last piece still
-open.
+deepest-link rule, container inference, the flag split, and entity-URI intake
+are on main. Two pieces are not: the `@` suffix (#5504) is still open, and call
+selection went back out with #5505's revert.
 
-**7. Session-scoped invocation ids.** On main. The one address-changing commit,
-and it landed ahead of anything that publishes a receipt address, so no caller
-holds one that moves. That ordering is what item 4 was waiting for.
+**7. Session-scoped invocation ids.** **Reverted** — #5469 is out of main
+again. It is the one address-changing commit, and the whole plan is ordered
+around landing it before anything publishes a receipt address. Until it is
+back, a receipt address is derived without identity in it, so it is not yet
+something a caller can safely be handed. Item 4 depends on this; nothing else
+does.
 
 **8. Descriptive receipt schemas.** On main. Plain results only — a verb
 returning anything reactive gets none, which is what item 1 decides.
@@ -206,8 +228,8 @@ joins them.
 
 | Item | After | Why |
 | --- | --- | --- |
-| 6 | — | landed but for #5504, which merges whenever it is green |
-| 7 | — | landed, and it preceded 4 as required |
+| 6 | — | landed but for #5504, and for call selection, which #5582 reverted |
+| 7 | — | **reverted; must land again before 4 can start** |
 | 8, 9 | — | independent |
 | 2 | 6 | changes what the flags accept |
 | 3 | 6 | completes the suppression property |
@@ -242,6 +264,21 @@ handler-schema fixtures were compiled before event schemas closed, so once
 #5307 lands they gain `additionalProperties: false` on their event literals.
 Whichever merges second owes a golden regeneration. That is a note on the pair,
 not an edge in the table above.
+
+**Two PRs can each be green and still break main together.** CI judges a PR
+against a base, so a rename in one branch and a new caller of the old name in
+another are both green until they meet. #5469 and #5505 merged twenty-six
+seconds apart and #5582 reverted both. Nothing in the checks catches this; the
+only thing that does is a driver noticing that two open PRs touch one
+vocabulary, and merging them far enough apart that the second rebases onto the
+first. The tell is a green PR whose base is older than a merge that renamed
+something it uses.
+
+The cost is worse than a red gate, because a stale field name is an *unknown
+key* rather than an error: the nine tests #5505 added did not merely fail to
+compile, they ran with no invocation at all and asserted on a receipt that
+could never arrive. Type-checking is what caught it, and the package suites
+run `--no-check`, so a green package suite says nothing about this class.
 
 **A squash merge invalidates the fork point of everything stacked on it.**
 Rebasing a child with `git rebase <new-base>` then replays commits the base
