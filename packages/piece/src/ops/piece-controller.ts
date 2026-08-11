@@ -1927,7 +1927,32 @@ export function assertSuppliedLinkSchemasCompatible(
       !preservesDirectHandle || targetOuter.kind !== "writeonly" &&
         targetOuter.kind !== "stream"
     ) {
-      assertContractSubset(sourceContracts, targetContracts, label);
+      // Nested (non-stream) Cell wrappers are read-side projections, not part
+      // of the payload contract: a wrapper-declaring source may serve a plain
+      // slot, and a plain source may serve a wrapper-declaring slot (the
+      // destination materializes the handle through its own schema either
+      // way). The source contracts above are already sanitized on the
+      // non-preserving path; the proof must see the destination through the
+      // same lens, or a destination's nested `asCell` fails the exact-match
+      // comparison against the sanitized source — refusing, among others,
+      // every same-schema source update of a piece whose roster array stores
+      // elements with a Cell-typed `profile` field. Capability kinds such as
+      // `sqlite` strip here too: the payload proof deliberately ignores them
+      // at nested positions. Capability policing is the OUTER-level rules'
+      // job (a capability source refuses exposure as an ordinary alias
+      // above), and no supported flow places a connector wrapper below a
+      // link payload.
+      const proofTargets = preservesDirectHandle
+        ? targetContracts
+        : targetContracts.map((contract) => ({
+          ...contract,
+          schema: sanitizeSchemaForLinks(
+            contract.schema,
+            KeepAsCell.OnlyStream,
+          ),
+          root: sanitizeSchemaForLinks(contract.root, KeepAsCell.OnlyStream),
+        }));
+      assertContractSubset(sourceContracts, proofTargets, label);
     }
     if (preservesDirectHandle && cellKindCanWrite(targetOuter.kind)) {
       // A writable handle can send values back to the producer, so the

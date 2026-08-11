@@ -230,12 +230,17 @@ is not bound yet.
 Settling first also keeps a trusted click from missing its target. A trusted
 click resolves the element's layout box and then dispatches the mouse events at
 that point. On a cold load the page keeps reflowing for a few frames as content
-above the control fills in — a topic's markdown body renders, a form or card
-below it appears — so a control that has just become rendered is still moving.
-If the box moves between when the click resolves it and when the mouse events
-fire, the click lands on whatever shifted into that spot instead of the control,
-and nothing happens. Settling the view drains the pending reflow so the target
-is stationary when it is clicked.
+above the control fills in. A topic's markdown body may render, or a form or
+card below it may appear. A control that has just become rendered can therefore
+still be moving. If the box moves between measurement and dispatch, the click
+lands on whatever shifted into the old spot instead of the control. Nothing
+happens.
+
+`clickCfButton` waits for the marked control's box to remain unchanged across
+two consecutive rendering frames. It measures the marked control again just
+before dispatch. If that final measurement finds that the control moved or was
+replaced, the helper settles and marks the current control before dispatching
+one trusted click.
 
 **Use `awaitViewSettled(page)`** from `@commonfabric/integration` as the
 lower-level wait after navigation or a state change. When the next step

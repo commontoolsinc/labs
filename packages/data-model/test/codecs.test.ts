@@ -1,7 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { jsonFromValue, plainObjectFromJson, valueFromJson } from "@/codecs.ts";
+import {
+  createDefaultJsonRegistry,
+  jsonFromValue,
+  plainObjectFromJson,
+  valueFromJson,
+} from "@/codecs.ts";
 import { seemsLikeJsonEncodedFabricValue } from "@/codec-json/impl.ts";
 import { JsonCodec } from "@/codec-json/JsonCodec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
@@ -38,6 +43,21 @@ function expectWireFormat(value: FabricValue, expected: unknown): void {
 }
 
 describe("codecs", () => {
+  describe("`createDefaultJsonRegistry()`", () => {
+    it("returns a frozen registry", () => {
+      expect(Object.isFrozen(createDefaultJsonRegistry())).toBe(true);
+    });
+
+    it("registers this package's fabric classes on top of the base", () => {
+      const registry = createDefaultJsonRegistry();
+      const value = FabricError.fromNativeError(new Error("boom"));
+
+      // The base alone reports `undefined` here; see
+      // `createBaseJsonRegistry.test.ts`.
+      expect(registry.codecFromValue(value)).toBeDefined();
+    });
+  });
+
   it("round-trips `undefined`", () => {
     expect(roundTrip(undefined)).toBe(undefined);
   });

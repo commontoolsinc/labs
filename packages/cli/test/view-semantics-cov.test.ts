@@ -6,7 +6,9 @@
  * containment) that the canonical suite reaches only incidentally.
  */
 import { assert, assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
 import { join } from "@std/path";
+import { describe, it } from "@std/testing/bdd";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";
 import {
   createDiffSemantics,
@@ -456,6 +458,39 @@ const b = ext();`;
   }
 });
 
+describe("binary external sources", () => {
+  it("stays out of source programs and the file viewer", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.writeTextFileSync(
+        join(root, "deno.json"),
+        JSON.stringify({ imports: { asset: "./asset.png" } }),
+      );
+      Deno.writeTextFileSync(
+        join(root, "asset.png"),
+        "export const asset: number = 1;\n",
+      );
+      Deno.writeFileSync(
+        join(root, "asset.data"),
+        new Uint8Array([97, 0, 98]),
+      );
+      const blob = `// transformed: /main.ts
+import { asset } from "asset";
+const value = asset;`;
+      const doc = parseDocument(blob);
+      const sem = createSemantics(blob, { cwd: root })!;
+      expect(sem.typeAt(nameOffsetOf(doc, "value"))).toBeNull();
+      expect(
+        sem.definitionOf(blob.lastIndexOf("asset")).some((d) => d.filePath),
+      ).toBe(false);
+      expect(sem.fileLines(join(root, "asset.png"))).toBeNull();
+      expect(sem.fileLines(join(root, "asset.data"))).toBeNull();
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
+});
+
 // --- createDiffSemantics: full service over a real workspace ----------------
 
 const FILE_TEXT = `export function double(n: number): number {
@@ -591,6 +626,55 @@ Deno.test("diff semantics: a definition outside the diff opens as a file", () =>
   } finally {
     done();
   }
+});
+
+describe("binary diff external sources", () => {
+  it("stays out of diff programs and the file viewer", () => {
+    const root = Deno.makeTempDirSync();
+    try {
+      Deno.writeTextFileSync(join(root, "deno.json"), "{}");
+      Deno.writeTextFileSync(
+        join(root, "asset.png"),
+        "export const asset: number = 1;\n",
+      );
+      Deno.writeFileSync(
+        join(root, "asset.data"),
+        new Uint8Array([97, 0, 98]),
+      );
+      Deno.writeTextFileSync(
+        join(root, "m.ts"),
+        `import { asset } from "./asset.png";\nconst value = asset;\n`,
+      );
+      const diff = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,1 +1,2 @@
+ import { asset } from "./asset.png";
++const value = asset;
+`;
+      const ws: DiffWorkspace = {
+        resolve: (path) => join(root, path),
+        read: (path) => {
+          try {
+            return Deno.readTextFileSync(path);
+          } catch {
+            return null;
+          }
+        },
+      };
+      const model = parseDiff(diff)!;
+      const { doc, maps } = buildDiffDocument(diff, model, ws);
+      const sem = createDiffSemantics(diff, maps, { cwd: root })!;
+      expect(sem.typeAt(nameOffsetOf(doc, "value"))).toBeNull();
+      expect(
+        sem.definitionOf(diff.lastIndexOf("asset")).some((d) => d.filePath),
+      ).toBe(false);
+      expect(sem.fileLines(join(root, "asset.png"))).toBeNull();
+      expect(sem.fileLines(join(root, "asset.data"))).toBeNull();
+    } finally {
+      Deno.removeSync(root, { recursive: true });
+    }
+  });
 });
 
 Deno.test("diff semantics: returns null when no root file is in the workspace", () => {

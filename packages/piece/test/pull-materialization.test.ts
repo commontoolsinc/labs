@@ -1223,6 +1223,94 @@ describe("piece pull materialization", () => {
     ).toThrow(/sqlite capability cannot be exposed as an ordinary alias/);
   });
 
+  it("restores retained links whose payload nests a Cell-typed property", async () => {
+    // The roster shape: a plain array element whose `profile` field is a
+    // Cell (`asCell: ["cell"]`). The element link's contract carries the
+    // nested wrapper; the non-preserving path sanitizes it away from the
+    // SOURCE side only, and the exact-match `asCell` comparison then refused
+    // the destination's own wrapper — so a piece whose roster held one such
+    // element could never have its source updated in place, even with the
+    // byte-identical source (`asCell changed` at participants.0.profile).
+    // Nested non-stream wrappers are read-side projections, so the proof
+    // sees both sides through the same sanitizing lens.
+    const profileSchema: JSONSchema = {
+      type: "object",
+      properties: { name: { type: "string" }, avatar: { type: "string" } },
+    };
+    const elementSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        profile: { ...profileSchema, asCell: ["cell"] },
+      },
+      required: ["name", "profile"],
+    };
+    const argumentSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        participants: { type: "array", items: elementSchema },
+      },
+      required: ["participants"],
+    };
+
+    const profileDoc = runtime.getCell(
+      pieces.getSpace(),
+      "roster-profile-" + crypto.randomUUID(),
+    );
+    await runtime.editWithRetry((tx) => {
+      profileDoc.withTx(tx).set({ name: "Robin", avatar: "" });
+    });
+    const element = runtime.getCell(
+      pieces.getSpace(),
+      "roster-element-" + crypto.randomUUID(),
+    );
+    await runtime.editWithRetry((tx) => {
+      element.withTx(tx).set({ name: "Robin", profile: profileDoc });
+    });
+    const base = runtime.getCell(
+      pieces.getSpace(),
+      "roster-argument-" + crypto.randomUUID(),
+    );
+    await runtime.editWithRetry((tx) => {
+      base.withTx(tx).set({ participants: [element] });
+    });
+
+    const raw = base.getRaw() as { participants: unknown[] };
+    // Guard the premise: the restore path sees a SERIALIZED link.
+    expect(isLink(raw.participants[0])).toBe(true);
+    expect(isCell(raw.participants[0])).toBe(false);
+
+    // The source-update call-site shape: `setPattern` declares
+    // `linksPreservedVerbatim`, but the element's slot declares no outer Cell
+    // wrapper, so the preserve branch never engages and the link faces the
+    // sanitizing proof regardless — which is exactly how a source update
+    // reaches the asymmetry this test pins.
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        [{ path: ["participants", 0], value: raw.participants[0] }],
+        argumentSchema,
+        base,
+        pieces,
+        {
+          priorArgumentSchema: argumentSchema,
+          linksPreservedVerbatim: true,
+        },
+      )
+    ).not.toThrow();
+
+    // Without the flag the same proof runs: a nested wrapper the destination
+    // declares does not demand one from the source's payload contract.
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        [{ path: ["participants", 0], value: raw.participants[0] }],
+        argumentSchema,
+        base,
+        pieces,
+        { priorArgumentSchema: argumentSchema },
+      )
+    ).not.toThrow();
+  });
+
   it("refuses a preserved link whose carried wrapper widens its contract", async () => {
     // The envelope on a SERIALIZED link is caller-written bytes. Declaring
     // that links are preserved verbatim must not become a way to smuggle a

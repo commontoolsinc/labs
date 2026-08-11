@@ -13,6 +13,12 @@
 /** What a kill operation appends to: tracks consecutive kills for accretion. */
 type LastKill = "none" | "append" | "prepend";
 
+/** Exact file-ending information carried by a transformed editable row. */
+export interface LineEndingProvenance {
+  readonly ending: "" | "\n" | "\r\n";
+  readonly bodyCarriesCrlfEnding: boolean;
+}
+
 export class EditBuffer {
   lines: string[];
   /** 0-based cursor line. */
@@ -36,11 +42,16 @@ export class EditBuffer {
   private lastKill: LastKill = "none";
 
   private original: string;
+  private lineEndings: Array<LineEndingProvenance | undefined>;
 
-  constructor(text: string) {
+  constructor(
+    text: string,
+    lineEndings: readonly (LineEndingProvenance | undefined)[] = [],
+  ) {
     this.original = text;
     // split("\n") always yields at least one element (`""` for an empty string).
     this.lines = text.split("\n");
+    this.lineEndings = this.lines.map((_, index) => lineEndings[index]);
   }
 
   // --- state ----------------------------------------------------------------
@@ -71,16 +82,34 @@ export class EditBuffer {
     return this.original;
   }
 
+  /** File-ending information attached to the current physical rows. */
+  lineEndingProvenance(): readonly (LineEndingProvenance | undefined)[] {
+    return this.lineEndings;
+  }
+
+  /** Replace file-ending information after the backing source is saved. */
+  setLineEndingProvenance(
+    lineEndings: readonly (LineEndingProvenance | undefined)[] = [],
+  ): void {
+    this.lineEndings = this.lines.map((_, index) => lineEndings[index]);
+  }
+
   /** Replace the whole text and place the cursor, keeping the clean baseline —
    * so a revert that restores part of the text still measures dirtiness against
    * the true original. */
-  setText(text: string, row = 0, col = 0): void {
+  setText(
+    text: string,
+    row = 0,
+    col = 0,
+    lineEndings: readonly (LineEndingProvenance | undefined)[] = [],
+  ): void {
     this.resetGoal();
     this.endKill();
     this.endYank();
     this.mark = null;
     // split("\n") always yields at least one element.
     this.lines = text.split("\n");
+    this.lineEndings = this.lines.map((_, index) => lineEndings[index]);
     this.row = clamp(row, 0, this.lines.length - 1);
     this.col = clamp(col, 0, this.lineLen(this.row));
   }
@@ -99,8 +128,28 @@ export class EditBuffer {
     this.resetGoal();
     this.endKill();
     this.endYank();
+    const removedEndings = this.lineEndings.slice(row, row + count);
+    let replacementEndings: Array<LineEndingProvenance | undefined>;
+    if (count === replacement.length) {
+      replacementEndings = replacement.map((_, index) => removedEndings[index]);
+    } else if (count === 0) {
+      replacementEndings = replacement.map(() => undefined);
+    } else {
+      let inherited: LineEndingProvenance | undefined;
+      for (let index = removedEndings.length - 1; index >= 0; index--) {
+        if (removedEndings[index] !== undefined) {
+          inherited = removedEndings[index];
+          break;
+        }
+      }
+      replacementEndings = replacement.map(() => inherited);
+    }
     this.lines.splice(row, count, ...replacement);
-    if (this.lines.length === 0) this.lines = [""];
+    this.lineEndings.splice(row, count, ...replacementEndings);
+    if (this.lines.length === 0) {
+      this.lines = [""];
+      this.lineEndings = [undefined];
+    }
     this.row = clamp(row + cursorRow, 0, this.lines.length - 1);
     this.col = clamp(cursorCol, 0, this.lineLen(this.row));
   }
@@ -233,6 +282,16 @@ export class EditBuffer {
     this.col = pos.col;
   }
 
+  /** Destination of a forward word operation without moving the cursor. */
+  wordEndForward(): { row: number; col: number } {
+    return this.nextWordEnd(this.row, this.col);
+  }
+
+  /** Destination of a backward word operation without moving the cursor. */
+  wordStartBackward(): { row: number; col: number } {
+    return this.prevWordStart(this.row, this.col);
+  }
+
   setMark(): void { // C-Space
     this.mark = { row: this.row, col: this.col };
   }
@@ -261,25 +320,32 @@ export class EditBuffer {
     this.col += 1;
   }
 
-  insertNewline(): void {
+  insertNewline(endColumn?: number, newBoundarySuffix = ""): void {
     this.resetGoal();
     this.endKill();
     this.endYank();
-    this.splitLine();
+    this.splitLine(endColumn, newBoundarySuffix);
   }
 
-  private splitLine(): void {
+  /** Split before source-owned characters that terminate the physical row. */
+  private splitLine(endColumn?: number, newBoundarySuffix = ""): void {
     const cps = this.chars(this.row);
-    const before = cps.slice(0, this.col).join("");
-    const after = cps.slice(this.col).join("");
+    const end = clamp(endColumn ?? cps.length, 0, cps.length);
+    const split = Math.min(this.col, end);
+    const suffix = cps.slice(end);
+    const boundarySuffix = suffix.length > 0 ? suffix : [...newBoundarySuffix];
+    const before = [...cps.slice(0, split), ...boundarySuffix].join("");
+    const after = [...cps.slice(split, end), ...suffix].join("");
+    const ending = this.lineEndings[this.row];
     this.lines.splice(this.row, 1, before, after);
+    this.lineEndings.splice(this.row, 1, ending, ending);
     this.row += 1;
     this.col = 0;
   }
 
   // --- deletion -------------------------------------------------------------
 
-  deleteBackward(): void { // Backspace
+  deleteBackward(previousEndColumn?: number): void { // Backspace
     this.resetGoal();
     this.endKill();
     this.endYank();
@@ -289,43 +355,64 @@ export class EditBuffer {
       this.lines[this.row] = cps.join("");
       this.col -= 1;
     } else if (this.row > 0) {
-      const prevLen = this.lineLen(this.row - 1);
-      this.lines[this.row - 1] += this.lines[this.row];
+      const previous = this.chars(this.row - 1);
+      const previousEnd = clamp(
+        previousEndColumn ?? previous.length,
+        0,
+        previous.length,
+      );
+      this.lines[this.row - 1] = previous.slice(0, previousEnd).join("") +
+        this.lines[this.row];
+      this.lineEndings[this.row - 1] = this.lineEndings[this.row];
       this.lines.splice(this.row, 1);
+      this.lineEndings.splice(this.row, 1);
       this.row -= 1;
-      this.col = prevLen;
+      this.col = previousEnd;
     }
   }
 
-  deleteForward(): void { // Delete / C-d
+  deleteForward(endColumn?: number): void { // Delete / C-d
     this.resetGoal();
     this.endKill();
     this.endYank();
-    if (this.col < this.lineLen(this.row)) {
-      const cps = this.chars(this.row);
+    const cps = this.chars(this.row);
+    const end = clamp(endColumn ?? cps.length, 0, cps.length);
+    if (this.col < end) {
       cps.splice(this.col, 1);
       this.lines[this.row] = cps.join("");
-    } else if (this.row < this.lines.length - 1) {
-      this.lines[this.row] += this.lines[this.row + 1];
+    } else if (this.col === end && this.row < this.lines.length - 1) {
+      this.lines[this.row] = cps.slice(0, end).join("") +
+        this.lines[this.row + 1];
+      this.lineEndings[this.row] = this.lineEndings[this.row + 1];
       this.lines.splice(this.row + 1, 1);
+      this.lineEndings.splice(this.row + 1, 1);
     }
   }
 
   // --- kill / yank ----------------------------------------------------------
 
-  /** C-k: kill to end of line; at end of line, kill the newline (join next). */
-  killLine(): void {
+  /** C-k: kill to end of line; at end of line, kill the newline (join next).
+   * `endColumn` can keep source-owned transport after the editable text. */
+  killLine(endColumn?: number): void {
     this.resetGoal();
     this.endYank();
     const cps = this.chars(this.row);
-    if (this.col < cps.length) {
-      const killed = cps.slice(this.col).join("");
-      this.lines[this.row] = cps.slice(0, this.col).join("");
+    const end = clamp(endColumn ?? cps.length, 0, cps.length);
+    if (this.col < end) {
+      const killed = cps.slice(this.col, end).join("");
+      this.lines[this.row] = [
+        ...cps.slice(0, this.col),
+        ...cps.slice(end),
+      ].join("");
       this.pushKill(killed, "append");
-    } else if (this.row < this.lines.length - 1) {
-      this.lines[this.row] += this.lines[this.row + 1];
+    } else if (this.col === end && this.row < this.lines.length - 1) {
+      const transport = cps.slice(end).join("");
+      this.lines[this.row] = cps.slice(0, end).join("") +
+        this.lines[this.row + 1];
+      this.lineEndings[this.row] = this.lineEndings[this.row + 1];
       this.lines.splice(this.row + 1, 1);
-      this.pushKill("\n", "append");
+      this.lineEndings.splice(this.row + 1, 1);
+      this.pushKill(`${transport}\n`, "append");
     }
   }
 
@@ -341,7 +428,11 @@ export class EditBuffer {
     if (this.lines.length === 1) {
       this.lines[0] = "";
     } else {
+      if (this.row === this.lines.length - 1) {
+        this.lineEndings[this.row - 1] = this.lineEndings[this.row];
+      }
       this.lines.splice(this.row, 1);
+      this.lineEndings.splice(this.row, 1);
       if (this.row >= this.lines.length) this.row = this.lines.length - 1;
     }
     this.col = 0;
@@ -498,7 +589,9 @@ export class EditBuffer {
     parts.push(last.slice(0, bCol).join(""));
     const head = first.slice(0, aCol).join("");
     const tail = last.slice(bCol).join("");
+    this.lineEndings[aRow] = this.lineEndings[bRow];
     this.lines.splice(aRow, bRow - aRow + 1, head + tail);
+    this.lineEndings.splice(aRow + 1, bRow - aRow);
     return parts.join("\n");
   }
 

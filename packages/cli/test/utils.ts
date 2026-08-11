@@ -47,8 +47,8 @@ export interface CliResult {
 }
 
 export interface CliOptions {
-  // Text written to the command's standard input.
-  stdin?: string;
+  // Text or bytes written to the command's standard input.
+  stdin?: string | Uint8Array;
   // Names the command's environment holds. A name mapped to `undefined` is
   // absent from it. The CLI's own configuration comes from here and from
   // nowhere else, so a configuration name this map leaves out is absent too;
@@ -119,7 +119,7 @@ async function spawnCli(
 
   if (stdin !== undefined) {
     const writer = child.stdin.getWriter();
-    await writer.write(encode(stdin));
+    await writer.write(typeof stdin === "string" ? encode(stdin) : stdin);
     await writer.close();
   }
 
