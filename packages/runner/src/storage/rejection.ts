@@ -57,8 +57,13 @@ export function isTerminalRejection(
  * stale-basis guard (`isStorageTransactionInconsistent`) the same way — it too
  * converges by re-running, so it re-queues off the budget rather than stranding
  * a compute as a zombie under a contention burst. Only a non-permanent error
- * that re-running cannot resolve — a transport or malformed-store error — keeps
- * the bounded retry.
+ * that re-queueing cannot resolve — a transport or malformed-store error —
+ * keeps the bounded retry. (Not to be read as "a transport error can never
+ * converge": `editWithRetry` treats it as liveness and DOES retry it, for the
+ * reason given under `isTransientCommitRejection` below. The two paths differ
+ * because re-queueing a reactive compute is not the same act as re-running a
+ * transaction — see the note on the two classifiers in
+ * docs/specs/space-model/5-transactions.md.)
  *
  * The event-handler commit path treats the same rejection as the signal to
  * apply committed-write backpressure: re-running the handler against fresh
@@ -109,7 +114,11 @@ export function isStorageTransactionInconsistent(
  * never have seen it, may have committed it, may have replied successfully in a
  * frame that was garbled after the fact. What is certain is that nothing about
  * the commit was evaluated and refused, so it is a liveness failure and not a
- * verdict, and a re-run over a healthy connection can land the identical write.
+ * verdict. Unlike a `SessionError` the connection is typically still usable —
+ * one frame failed to decode, the socket did not close — so the next attempt is
+ * a fresh request that may well be answered. That is a reason to allow the
+ * retry, not a guarantee it lands: if frames keep arriving undecodable the
+ * budget is spent and the caller sees the real name.
  * (For it to be classified at all the name must survive normalization —
  * `toRejectedError` in storage/v2.ts preserves it explicitly for that reason.)
  *

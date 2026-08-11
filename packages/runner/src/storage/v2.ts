@@ -4796,10 +4796,16 @@ const toRejectedError = (
   //    (memory/v2/sqlite/commit-eval.ts), classified terminal by
   //    `isTerminalRejection`. Re-running recomputes the identical refused
   //    write, so the doomed re-runs would only starve sibling commits.
-  //  - `ProtocolError`: the server refused the SHAPE of the commit (an ACL
-  //    mutation that is not a whole-document `set`, a multi-operation ACL
-  //    commit — memory/v2/server.ts `#validateAclCommit`). Nothing about the
-  //    commit changes on a re-run, so it can never become well-formed.
+  //  - `ProtocolError`: the server refused the commit rather than losing it.
+  //    `#validateAclCommit` (memory/v2/server.ts) raises it both for the SHAPE
+  //    of an ACL commit (not a whole-document `set`; more than one operation)
+  //    and for its VALUE (malformed, or retaining no concrete OWNER). Neither
+  //    changes when the identical function is re-run. The name is broader than
+  //    those two, though: the engine also raises it for conditions that are a
+  //    function of server log state — a pending read whose basis is ahead of
+  //    the log, a commit-replay mismatch — and those CAN converge. Treating the
+  //    whole name as terminal is a deliberate over-approximation, open on
+  //    #5259 pending a decision on marking retriability at the throw site.
   //  - `AuthorizationError`: the server evaluated the request and denied it.
   //    The server's own `retriable` marker (a session-open anti-replay race a
   //    fresh handshake heals) rides along, as it already does on the pull path
