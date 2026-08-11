@@ -2617,9 +2617,7 @@ export interface HandlerFunction {
  * result overload below was initially missed.
  */
 export type ActionFunction = {
-  // Overload 1: Zero-parameter callback returns Stream<void>
   (fn: () => void): Stream<void>;
-  // Overload 2: Parameterized callback returns Stream<E>
   <E>(fn: (event: E) => void): Stream<E>;
   // Overload 3: a declared result, reached only by naming both type arguments.
   // Never inferred — a concise arrow body returns whatever its last call
