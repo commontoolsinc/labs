@@ -1,6 +1,9 @@
 // Shared daily-spend projection and charting for the dashboard's spend tiles.
 // A monthly estimate uses every settled day in the current month. Until that
 // supplies two weeks, it fills the rate window from the end of the prior month.
+// A chart line ends on the day its source is known through — its last
+// reported day, or the newest day its reporting lag has settled — even when
+// another source's line runs further.
 import type { Status } from "./types.ts";
 import { multiSparkline, SPARK_FADE } from "./lib.ts";
 
@@ -34,6 +37,7 @@ export interface SpendChartSource {
   spend: ChartSpend | null;
   color: string;
   label?: string;
+  lagDays: number;
 }
 
 export function settled(
@@ -182,7 +186,25 @@ export function spendChart(
   if (allDays.size < 2) return { chart: "", duration: 0 };
   const sorted = [...allDays].sort();
   const timeOf = (day: string) => Date.parse(`${day}T00:00:00Z`);
-  const end = timeOf(sorted[sorted.length - 1]);
+  // A source is known through its last reported day or through the newest day
+  // its reporting lag has settled, whichever is later. A settled day with no
+  // report is a real $0; a day past that horizon has no figure yet, and the
+  // source's line stops there rather than drawing the missing days as zero.
+  const today = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  const knownThrough = new Map<SpendChartSource, number>();
+  for (const source of sources) {
+    if (!source.spend) continue;
+    let known = today - source.lagDays * DAY_MS;
+    for (const day of source.spend.byDay.keys()) {
+      known = Math.max(known, timeOf(day));
+    }
+    knownThrough.set(source, known);
+  }
+  const end = Math.max(...knownThrough.values());
   const start = Math.max(
     timeOf(sorted[0]),
     end - (SPEND_HISTORY_DAYS - 1) * DAY_MS,
@@ -191,15 +213,6 @@ export function spendChart(
   for (let time = start; time <= end; time += DAY_MS) {
     grid.push(new Date(time).toISOString().slice(0, 10));
   }
-  const lines = sources.flatMap((source) =>
-    source.spend
-      ? [{
-        vals: grid.map((day) => source.spend!.byDay.get(day) ?? 0),
-        color: source.color,
-        label: source.label,
-      }]
-      : []
-  );
   const monthStart = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
   const currentDays = grid.filter((day) => day >= monthStart).length;
   const highlightDays = Math.min(
@@ -207,6 +220,28 @@ export function spendChart(
     estimateDays ??
       Math.max(currentDays, MIN_SPEND_WINDOW_DAYS),
   );
+  const lines = sources.flatMap((source) => {
+    const known = knownThrough.get(source);
+    if (known === undefined) return [];
+    const covered = Math.min(
+      grid.length,
+      Math.max(0, Math.round((known - start) / DAY_MS) + 1),
+    );
+    if (covered === 0) return [];
+    const days = grid.slice(0, covered);
+    return [{
+      vals: days.map((day) => source.spend!.byDay.get(day) ?? 0),
+      // A line the grid outlives keeps its points on the shared day axis and
+      // its highlight aligned to the shared trailing window.
+      xs: covered === grid.length
+        ? undefined
+        : days.map((_, index) => index / (grid.length - 1)),
+      color: source.color,
+      label: source.label,
+      highlightCount: Math.max(0, covered - (grid.length - highlightDays)),
+      showSinglePoint: true,
+    }];
+  });
   return {
     chart: multiSparkline(lines, {
       fadeFrom: SPARK_FADE[status],

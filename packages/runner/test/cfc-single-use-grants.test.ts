@@ -7,10 +7,8 @@ import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
   EmulatedStorageManager,
-  type Options as StorageManagerOptions,
   StorageManager,
 } from "../src/storage/cache.deno.ts";
-import { StorageManager as V2StorageManager } from "../src/storage/v2.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import { isPermanentRejection } from "../src/storage/rejection.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -941,30 +939,12 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       // guard first (previous test). A second storage manager sharing the
       // base manager's in-process server plays the remote releaser whose
       // replica never observed the winner's receipt.
-      class SharedServerStorageManager extends EmulatedStorageManager {
-        static shareServerOf(
-          base: EmulatedStorageManager,
-        ): SharedServerStorageManager {
-          return new SharedServerStorageManager(
-            {
-              as: signer,
-              memoryHost: new URL("memory://"),
-            } satisfies StorageManagerOptions,
-            () =>
-              (base as unknown as { server(): MemoryV2Server.Server })
-                .server(),
-          );
-        }
-        // The server belongs to the base manager; EmulatedStorageManager's
-        // close would close the shared instance's cached reference to it.
-        // Close only the storage-manager half (the grandparent close).
-        override close(): Promise<void> {
-          return V2StorageManager.prototype.close.call(this);
-        }
-      }
-
       const base = StorageManager.emulate({ as: signer });
-      const remote = SharedServerStorageManager.shareServerOf(base);
+      // The server belongs to the base manager; connectTo never closes it.
+      const remote = EmulatedStorageManager.connectTo(
+        (base as unknown as { server(): MemoryV2Server.Server }).server(),
+        { as: signer },
+      );
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager: base,

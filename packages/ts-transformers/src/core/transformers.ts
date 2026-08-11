@@ -2,8 +2,6 @@ import ts from "typescript";
 import { TransformationContext } from "./mod.ts";
 import { CrossStageState } from "./cross-stage-state.ts";
 
-export type TransformMode = "transform" | "error";
-
 /**
  * Hints for schema generation that override default behavior.
  * Used to communicate access patterns (like array-property-only access)
@@ -114,9 +112,6 @@ export type SchemaHints = WeakMap<ts.Node, SchemaHint>;
 export type SyntheticReactiveCollectionRegistry = WeakSet<ts.Symbol>;
 
 export interface TransformationOptions {
-  readonly mode?: TransformMode;
-  readonly debug?: boolean;
-  readonly logger?: (message: string) => void;
   /**
    * Single owner of the pipeline's cross-transformer communication registries
    * (typeRegistry, schemaHints, the marker sets, etc.). Replaces the formerly

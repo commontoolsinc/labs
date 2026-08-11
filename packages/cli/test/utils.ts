@@ -46,6 +46,49 @@ export interface CliResult {
   stderr: string[];
 }
 
+export interface CliOptions {
+  // Text written to the command's standard input.
+  stdin?: string;
+  // Names the command's environment holds. A name mapped to `undefined` is
+  // absent from it. The CLI's own configuration comes from here and from
+  // nowhere else, so a configuration name this map leaves out is absent too;
+  // every other name the command takes from this process.
+  env?: Record<string, string | undefined>;
+}
+
+// The names the CLI reads as its own configuration: the `CF_` variables, the
+// experimental flags, and the two that point at a local memory store.
+const CONFIG_ENV_PREFIXES = ["CF_", "EXPERIMENTAL_"];
+const CONFIG_ENV_NAMES = ["DB_PATH", "MEMORY_DIR"];
+
+function isConfigEnvName(name: string): boolean {
+  return CONFIG_ENV_PREFIXES.some((prefix) => name.startsWith(prefix)) ||
+    CONFIG_ENV_NAMES.includes(name);
+}
+
+// The environment a spawned command runs with: `inherited` without the CLI's
+// own configuration, and then `declared` applied over that, where a value of
+// `undefined` leaves the name absent.
+//
+// `deno test --parallel` runs each test file on its own thread of a single
+// process, and those threads share one environment. Configuration a command
+// inherited would therefore be whatever the file running beside this one had
+// set, so the call decides it instead.
+export function commandEnv(
+  inherited: Record<string, string>,
+  declared: Record<string, string | undefined>,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [name, value] of Object.entries(inherited)) {
+    if (!isConfigEnvName(name)) env[name] = value;
+  }
+  for (const [name, value] of Object.entries(declared)) {
+    if (value === undefined) delete env[name];
+    else env[name] = value;
+  }
+  return env;
+}
+
 // Splits a command string into arguments on spaces outside of double quotes,
 // then strips the quotes.
 function parseCliCommand(command: string): string[] {
@@ -59,11 +102,14 @@ function parseCliCommand(command: string): string[] {
 async function spawnCli(
   executable: string,
   args: string[],
-  stdin?: string,
+  options: CliOptions,
 ): Promise<CliResult> {
+  const { stdin } = options;
   const child = new Deno.Command(executable, {
     cwd: join(import.meta.dirname!, ".."),
     args,
+    clearEnv: true,
+    env: commandEnv(Deno.env.toObject(), options.env ?? {}),
     // `.output()` requires stdout/stderr to be piped; `.spawn()` would
     // otherwise default them to "inherit".
     stdout: "piped",
@@ -88,7 +134,7 @@ async function spawnCli(
 async function runCliTask(
   task: "cli-no-pwd-override",
   command: string,
-  stdin?: string,
+  options: CliOptions,
 ): Promise<CliResult> {
   return await spawnCli(
     Deno.execPath(),
@@ -102,18 +148,19 @@ async function runCliTask(
       task,
       ...parseCliCommand(command),
     ],
-    stdin,
+    options,
   );
 }
 
 // Executes the `cf` command via CLI
 // `const { stdout, stderr, code } = cf("check --no-run ./pattern.tsx")`
-// Pass `stdin` to feed the command's standard input.
+// Pass `stdin` to feed the command's standard input, and `env` to give it
+// fabric configuration; it starts with none.
 export async function cf(
   command: string,
-  stdin?: string,
+  options: CliOptions = {},
 ): Promise<CliResult> {
-  return await runCliTask("cli-no-pwd-override", command, stdin);
+  return await runCliTask("cli-no-pwd-override", command, options);
 }
 
 let cfBinaryProbe: Promise<boolean> | undefined;
@@ -148,14 +195,19 @@ function cfBinaryAvailable(): Promise<boolean> {
 // CF_CLI_INTEGRATION_USE_LOCAL=1 to force the source-tree CLI.
 export async function integrationCf(
   command: string,
-  stdin?: string,
+  options: CliOptions = {},
 ): Promise<CliResult> {
   if (await cfBinaryAvailable()) {
-    return await spawnCli("cf", parseCliCommand(command), stdin);
+    return await spawnCli("cf", parseCliCommand(command), options);
   }
-  return await cf(command, stdin);
+  return await cf(command, options);
 }
 
+// Runs `fn` with `name` set on this process. Every test file in a
+// `deno test --parallel` run shares one environment, so a file that calls
+// this cannot run beside one that reads the same name: list it in
+// SERIAL_TESTS in test/run-tests.ts. Configuring a spawned CLI needs none of
+// this — pass `env` to `cf` instead.
 export async function withEnv(
   name: string,
   value: string | undefined,

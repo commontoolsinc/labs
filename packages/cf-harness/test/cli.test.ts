@@ -1838,6 +1838,152 @@ Deno.test("runCfHarnessCli executes the prompt loop and prints result metadata",
   assertEquals(stderr, []);
 });
 
+Deno.test("runCfHarnessCli forwards --compact-threshold to a fresh run", async () => {
+  // Parsing was already covered; this pins the handoff. The option was
+  // forwarded on the resume path only, so a fresh run silently lost it.
+  const { io } = createIoBuffers();
+  let createdOptions: Record<string, unknown> | undefined;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--workspace",
+      "/tmp/project",
+      "--focus-root",
+      "packages/cf-harness",
+      "--prompt",
+      "Inspect the workspace",
+      "--model",
+      "gpt-5.4",
+      "--compact-threshold",
+      "12000",
+      "--print-transcript",
+    ],
+    {
+      io,
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      createPromptLoop: (options) => {
+        createdOptions = options as Record<string, unknown>;
+        return {
+          runPrompt: () => {
+            return Promise.resolve(
+              ({
+                model: "gpt-5.4",
+                finalAssistantText: "Inspection complete.",
+                transcript: [
+                  { role: "user", content: "Inspect the workspace" },
+                  { role: "assistant", content: "Inspection complete." },
+                ],
+                modelTurns: 1,
+                runState: {
+                  runId: "run-cli",
+                  status: "completed",
+                  createdAt: "2026-04-15T22:00:00.000Z",
+                  updatedAt: "2026-04-15T22:00:01.000Z",
+                  cfcEnforcementMode: "disabled",
+                  currentDir: "/workspace",
+                  artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli",
+                  transcriptPath:
+                    "/tmp/project/.cf-harness-artifacts/run-cli/transcript.json",
+                  runReportPath:
+                    "/tmp/project/.cf-harness-artifacts/run-cli/run-report.json",
+                  policyEvents: [],
+                  toolOutputs: [],
+                },
+              }) satisfies HarnessPromptLoopResult,
+            );
+          },
+          runTranscript: () =>
+            Promise.reject(new Error("unexpected resume path")),
+        };
+      },
+    },
+  );
+
+  assertEquals(exitCode, 0);
+  assertEquals(createdOptions?.compactThreshold, 12_000);
+});
+
+Deno.test("runCfHarnessCli reads CF_HARNESS_COMPACT_THRESHOLD from the process environment", async () => {
+  // Every other CLI test injects `env`, which bypasses the default projection
+  // built from `Deno.env.get` — exactly where this variable was missing:
+  // documented and parsed, but never populated in a real run.
+  const projected = [
+    "CF_HARNESS_COMPACT_THRESHOLD",
+    "CF_HARNESS_API_KEY",
+    "CF_HARNESS_MODEL",
+    "CF_HARNESS_MODEL_PROVIDER",
+    "CF_HARNESS_REASONING_EFFORT",
+    "CF_HARNESS_PROMPT_CACHE_MODE",
+    "CF_HARNESS_GATEWAY_BASE_URL",
+    "CF_HARNESS_GATEWAY_AUTH_MODE",
+  ];
+  const saved = new Map(projected.map((name) => [name, Deno.env.get(name)]));
+  for (const name of projected) Deno.env.delete(name);
+  Deno.env.set("CF_HARNESS_API_KEY", "test-key");
+  Deno.env.set("CF_HARNESS_COMPACT_THRESHOLD", "9000");
+  try {
+    const { io } = createIoBuffers();
+    let createdOptions: Record<string, unknown> | undefined;
+    const exitCode = await runCfHarnessCli(
+      [
+        "--workspace",
+        "/tmp/project",
+        "--focus-root",
+        "packages/cf-harness",
+        "--prompt",
+        "Inspect the workspace",
+        "--model",
+        "gpt-5.4",
+        "--print-transcript",
+      ],
+      {
+        io,
+        createPromptLoop: (options) => {
+          createdOptions = options as Record<string, unknown>;
+          return {
+            runPrompt: () => {
+              return Promise.resolve(
+                ({
+                  model: "gpt-5.4",
+                  finalAssistantText: "Inspection complete.",
+                  transcript: [
+                    { role: "user", content: "Inspect the workspace" },
+                    { role: "assistant", content: "Inspection complete." },
+                  ],
+                  modelTurns: 1,
+                  runState: {
+                    runId: "run-cli",
+                    status: "completed",
+                    createdAt: "2026-04-15T22:00:00.000Z",
+                    updatedAt: "2026-04-15T22:00:01.000Z",
+                    cfcEnforcementMode: "disabled",
+                    currentDir: "/workspace",
+                    artifactRoot: "/tmp/project/.cf-harness-artifacts/run-cli",
+                    transcriptPath:
+                      "/tmp/project/.cf-harness-artifacts/run-cli/transcript.json",
+                    runReportPath:
+                      "/tmp/project/.cf-harness-artifacts/run-cli/run-report.json",
+                    policyEvents: [],
+                    toolOutputs: [],
+                  },
+                }) satisfies HarnessPromptLoopResult,
+              );
+            },
+            runTranscript: () =>
+              Promise.reject(new Error("unexpected resume path")),
+          };
+        },
+      },
+    );
+    assertEquals(exitCode, 0);
+    assertEquals(createdOptions?.compactThreshold, 9_000);
+  } finally {
+    for (const [name, value] of saved) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
+});
+
 Deno.test("runCfHarnessCli passes image attachments to the prompt loop", async () => {
   const workspace = await Deno.makeTempDir();
   await Deno.writeFile(join(workspace, "capture.png"), ONE_PIXEL_PNG);
@@ -3725,7 +3871,7 @@ Deno.test("runCfHarnessCli threads fabric-mount into engine additionalMounts", a
   assertEquals(exitCode, 0);
   assertEquals(stderr, []);
   const engine = createdOptions?.engine as CfHarnessEngine | undefined;
-  const mounts = engine?.sandbox.describe?.()?.cfc?.mounts;
+  const mounts = engine?.sandbox.describe().cfc?.mounts;
   assertEquals(mounts?.length, 2);
   assertEquals(mounts?.[1]?.kind, "fabric-fuse");
   assertEquals(mounts?.[1]?.sandboxPath, "/fabric");
@@ -3794,7 +3940,7 @@ Deno.test("runCfHarnessCli threads host-mount into engine additionalMounts", asy
   assertEquals(exitCode, 0);
   assertEquals(stderr, []);
   const engine = createdOptions?.engine as CfHarnessEngine | undefined;
-  const mounts = engine?.sandbox.describe?.()?.cfc?.mounts;
+  const mounts = engine?.sandbox.describe().cfc?.mounts;
   assertEquals(mounts?.[1], {
     kind: "host-bind",
     name: "file-cabinet",
@@ -3864,7 +4010,7 @@ Deno.test("runCfHarnessCli threads sandbox-image into engine sandbox config", as
   assertEquals(stderr, []);
   const engine = createdOptions?.engine as CfHarnessEngine | undefined;
   assertEquals(
-    engine?.sandbox.describe?.()?.cfc?.image,
+    engine?.sandbox.describe().cfc?.image,
     "registry.example/cf:deno2",
   );
 });
@@ -4417,4 +4563,45 @@ Deno.test("resume rejects manifest provider and credential-owner switches", asyn
   assertEquals(ownerSwitch.stderr, [
     "resume credential owner mismatch: requested owner does not match the recorded run\n",
   ]);
+});
+
+Deno.test("parseCfHarnessCliArgs validates --compact-threshold", async () => {
+  const parse = (args: string[], env: Record<string, string> = {}) =>
+    parseCfHarnessCliArgs(args, { cwd: "/tmp/project", env });
+
+  const ok = await parse(["--compact-threshold", "12000", "hi"]);
+  if ("help" in ok) throw new Error("expected config result");
+  assertEquals(ok.compactThreshold, 12_000);
+
+  // 0 is meaningful — it disables compaction — so it must not read as absent.
+  const zero = await parse(["--compact-threshold", "0", "hi"]);
+  if ("help" in zero) throw new Error("expected config result");
+  assertEquals(zero.compactThreshold, 0);
+
+  const omitted = await parse(["hi"]);
+  if ("help" in omitted) throw new Error("expected config result");
+  assertEquals(omitted.compactThreshold, undefined);
+
+  const fromEnv = await parse(["hi"], { CF_HARNESS_COMPACT_THRESHOLD: "9000" });
+  if ("help" in fromEnv) throw new Error("expected config result");
+  assertEquals(fromEnv.compactThreshold, 9_000);
+
+  // Every rejection names the requirement. `--compact-threshold -5` is the
+  // subtle one: the parser reads `-5` as a separate flag, so the option
+  // arrives with no string value and must not report merely "non-empty".
+  for (
+    const args of [
+      ["--compact-threshold", "abc", "hi"],
+      ["--compact-threshold", "1.5", "hi"],
+      ["--compact-threshold=-5", "hi"],
+      ["--compact-threshold", "-5", "hi"],
+      ["--compact-threshold", "hi"],
+    ]
+  ) {
+    await assertRejects(
+      () => parse(args),
+      Error,
+      "--compact-threshold requires a non-negative integer token count",
+    );
+  }
 });

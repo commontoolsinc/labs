@@ -18,7 +18,7 @@ function makeTaggedDid(code: number, keyBytes: Uint8Array): DIDKey {
 }
 
 // The unsupported-multicodec branch is covered in ed25519.test.ts and
-// memory/test/util-test.ts. This covers the adjacent length-check branch,
+// memory/test/util.test.ts. This covers the adjacent length-check branch,
 // which those tests skip because their non-ed25519 DID throws first: a
 // correct ed25519 tag with one byte too few reaches the length check.
 Deno.test("didToBytes rejects an ed25519 key of the wrong length", () => {

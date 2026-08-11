@@ -1,4 +1,4 @@
-import { NAME, pattern, UI } from "commonfabric";
+import { NAME, pattern, UI, type VNode } from "commonfabric";
 
 interface Entry {
   piece: string;
@@ -18,13 +18,13 @@ interface RowInput {
 
 interface RowOutput {
   rendered: string;
-  [UI]: string;
+  [UI]: VNode;
   [NAME]: string;
 }
 
 const EntryRow = pattern<RowInput, RowOutput>((input) => ({
   rendered: input.piece,
-  [UI]: input.piece,
+  [UI]: <div />,
   [NAME]: input.name,
 }));
 

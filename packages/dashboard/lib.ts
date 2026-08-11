@@ -1,6 +1,7 @@
 // Shared helpers used across tiles and the core.
 import type { Status } from "./types.ts";
 import { PROD_SERVICE } from "./config.ts";
+import { RUNNING_COLOR, STATUS_COLOR } from "./palette.ts";
 import {
   type GitHubPrimaryRateLimit,
   performanceGitHubRateLimit,
@@ -150,14 +151,7 @@ export const STATUS_DOT: Record<Status, string> = { good: "green", warn: "amber"
 export const escapeHtml = (s: string) =>
   s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
 
-// Per-status left edge for a sparkline's fade gradient — a shade just below the
-// tile's own (status-tinted) background, so the line fades up out of the tile.
-export const SPARK_FADE: Record<Status, string> = {
-  good: "#0e1915",
-  warn: "#1a1713",
-  bad: "#1e1113",
-  unknown: "#121317",
-};
+export { SPARK_FADE } from "./palette.ts";
 
 // How a sparkline caption spells a day span, consistently across tiles:
 // "5 days", "1 day", "<1 day".
@@ -329,7 +323,10 @@ export function sparkline(
     const tail = pts.slice(vals.length - highlight.count);
     lines.push(`<polyline points="${tail.join(" ")}" fill="none" stroke="${highlight.color}" stroke-width="2"/>`);
   }
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="24" preserveAspectRatio="none" style="margin-top:9px">${defs}${lines.join("")}</svg>`;
+  // The svg is a block, so the chart's box is the height it draws: an inline svg
+  // sits on a text baseline, and the line box around it reserves descender space
+  // underneath.
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="24" preserveAspectRatio="none" style="display:block;margin-top:9px">${defs}${lines.join("")}</svg>`;
 }
 
 // Overlaid trend lines (each oldest -> newest) sharing one vertical scale, each
@@ -512,7 +509,7 @@ export function multiSparkline(
 
   const labeled = drawable.filter((s) => s.label !== undefined);
   if (labeled.length === 0) {
-    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="32" preserveAspectRatio="none" style="margin-top:9px">${defsBlock}${lines}</svg>`;
+    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="32" preserveAspectRatio="none" style="display:block;margin-top:9px">${defsBlock}${lines}</svg>`;
   }
   const RH = 32; // rendered svg height, px
   // Each label sits at its line's end height; when a chart is drawn its value
@@ -550,7 +547,13 @@ export function thin<T>(arr: T[], max: number): T[] {
 export function strip(cells: { outcome: string; href: string }[], cols: number): string {
   if (!cells.length) return "";
   const col = (d: string) =>
-    d === "green" ? "#43c574" : d === "red" ? "#e2504a" : d === "run" ? "#6ea8fe" : "#7c828c";
+    d === "green"
+      ? STATUS_COLOR.good
+      : d === "red"
+      ? STATUS_COLOR.bad
+      : d === "run"
+      ? RUNNING_COLOR
+      : STATUS_COLOR.unknown;
   const html = cells.map((c) =>
     `<a class="cell" href="${escapeHtml(c.href)}" target="_blank" rel="noopener" style="background:${col(c.outcome)}"></a>`
   ).join("");

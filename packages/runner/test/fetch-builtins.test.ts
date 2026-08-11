@@ -114,8 +114,10 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     tx.commit();
     tx = runtime.edit();
 
+    // Pull to trigger computation, then drain the in-flight transport frames
+    // and post-commit fetch work.
     await result.pull();
-    await result.pull();
+    await clock.settle();
 
     return result.get() as { pending: any; result: any; error: any };
   }
@@ -306,7 +308,7 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     tx = runtime.edit();
 
     await resultCell.pull();
-    await resultCell.pull();
+    await clock.settle();
 
     expect((resultCell.get() as { result: unknown }).result).toBe(
       "hello fetch builtins",
@@ -319,7 +321,7 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     tx = runtime.edit();
 
     await resultCell.pull();
-    await resultCell.pull();
+    await clock.settle();
 
     const cleared = resultCell.get() as {
       pending: boolean;

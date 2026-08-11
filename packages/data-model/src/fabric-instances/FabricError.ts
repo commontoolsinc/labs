@@ -45,7 +45,7 @@ const FABRIC_ERROR_RESERVED_KEYS: FrozenSet<string> = new FrozenSet([
  * instance; they are not exposed as an own property.
  */
 export type FabricErrorState = {
-  /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
+  /** Constructor name of the originating native `Error`, e.g. `TypeError`. */
   readonly type: string;
   /**
    * The `.name` property. Pass `null` (or omit) to mean "same as `type`"; the
@@ -82,26 +82,28 @@ export type FabricErrorState = {
  * `toNativeValue()`.
  *
  * Like all `FabricInstance`s, a `FabricError` is wholeheartedly mutable
- * until frozen and immutable thereafter. The fixed-schema slots are plain
- * writable own properties: assigning to one throws once the instance is
- * `Object.freeze`'d (strict-mode non-writable-property semantics). The
- * extras bag mirrors this by gating `setExtra` / `deleteExtra` on the
- * frozen state. The serialization layer handles `FabricError` via its static
- * `[CODEC]`, which is the source of truth for the encoded form.
+ * until frozen and immutable thereafter. Every mutator -- the slot setters
+ * along with `setExtra` / `deleteExtra` -- throws once the instance is
+ * `Object.freeze`'d. The serialization layer handles `FabricError` via its
+ * static `[CODEC]`, which is the source of truth for the encoded form.
  * See Section 1.4.1 of the formal spec.
  */
 export class FabricError extends FabricNativeWrapper<Error>
   implements ApiFabricError {
-  /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
-  type: string;
+  /** Constructor name of the originating native `Error`, e.g. `TypeError`. */
+  #type: string;
+
   /** The `.name` property (always a concrete string). */
-  name: string;
+  #name: string;
+
   /** The `.message` property. */
-  message: string;
+  #message: string;
+
   /** The `.stack` property, or `undefined`. */
-  stack: string | undefined;
+  #stack: string | undefined;
+
   /** The `.cause` value, in `FabricValue` form, or `undefined`. */
-  cause: FabricValue | undefined;
+  #cause: FabricValue | undefined;
 
   /** Hidden bag of custom enumerable properties, in `FabricValue` form. */
   readonly #extras: Map<string, FabricValue>;
@@ -115,7 +117,8 @@ export class FabricError extends FabricNativeWrapper<Error>
   #nativeFrozen: Error | undefined;
 
   /**
-   * Constructs from a `FabricErrorState` record. All state values must already
+   * Constructs an instance from a `FabricErrorState` record. All state values
+   * must already
    * be in `FabricValue` form -- the conversion layer is responsible for
    * ensuring this when constructing from a native `Error`. Use
    * `FabricError.fromNativeError()` for shallow conversion from a native
@@ -123,11 +126,11 @@ export class FabricError extends FabricNativeWrapper<Error>
    */
   constructor(state: FabricErrorState) {
     super();
-    this.type = state.type;
-    this.name = state.name ?? state.type;
-    this.message = state.message;
-    this.stack = state.stack;
-    this.cause = state.cause;
+    this.#type = state.type;
+    this.#name = state.name ?? state.type;
+    this.#message = state.message;
+    this.#stack = state.stack;
+    this.#cause = state.cause;
     this.#extras = new Map();
     const extras = state.extras;
     if (extras !== undefined) {
@@ -142,6 +145,81 @@ export class FabricError extends FabricNativeWrapper<Error>
         this.#extras.set(key, value);
       }
     }
+  }
+
+  /** Constructor name of the originating native `Error`, e.g. `TypeError`. */
+  get type(): string {
+    return this.#type;
+  }
+
+  /**
+   * Sets {@link type}.
+   *
+   * @throws If this instance is frozen.
+   */
+  set type(value: string) {
+    this.#assertNotFrozen();
+    this.#type = value;
+  }
+
+  /** The `.name` property (always a concrete string). */
+  get name(): string {
+    return this.#name;
+  }
+
+  /**
+   * Sets {@link name}.
+   *
+   * @throws If this instance is frozen.
+   */
+  set name(value: string) {
+    this.#assertNotFrozen();
+    this.#name = value;
+  }
+
+  /** The `.message` property. */
+  get message(): string {
+    return this.#message;
+  }
+
+  /**
+   * Sets {@link message}.
+   *
+   * @throws If this instance is frozen.
+   */
+  set message(value: string) {
+    this.#assertNotFrozen();
+    this.#message = value;
+  }
+
+  /** The `.stack` property, or `undefined`. */
+  get stack(): string | undefined {
+    return this.#stack;
+  }
+
+  /**
+   * Sets {@link stack}.
+   *
+   * @throws If this instance is frozen.
+   */
+  set stack(value: string | undefined) {
+    this.#assertNotFrozen();
+    this.#stack = value;
+  }
+
+  /** The `.cause` value, in `FabricValue` form, or `undefined`. */
+  get cause(): FabricValue | undefined {
+    return this.#cause;
+  }
+
+  /**
+   * Sets {@link cause}.
+   *
+   * @throws If this instance is frozen.
+   */
+  set cause(value: FabricValue | undefined) {
+    this.#assertNotFrozen();
+    this.#cause = value;
   }
 
   /**
@@ -189,15 +267,15 @@ export class FabricError extends FabricNativeWrapper<Error>
    * prototype-sensitive key (`__proto__`, `constructor`).
    */
   setExtra(key: string, value: FabricValue): void {
-    if (Object.isFrozen(this)) {
-      throw new Error("Cannot modify frozen FabricError");
-    }
+    this.#assertNotFrozen();
     if (isUnsafeObjectKey(key)) {
-      throw new Error(`Cannot use unsafe key in FabricError extras: ${key}`);
+      throw new Error(
+        `Cannot use unsafe key in \`FabricError\` extras: \`${key}\``,
+      );
     }
     if (FABRIC_ERROR_RESERVED_KEYS.has(key)) {
       throw new Error(
-        `Cannot use fixed-schema slot name in FabricError extras: ${key}`,
+        `Cannot use fixed-schema slot name in \`FabricError\` extras: \`${key}\``,
       );
     }
     this.#extras.set(key, value);
@@ -208,9 +286,7 @@ export class FabricError extends FabricNativeWrapper<Error>
    * Throws if this instance is frozen.
    */
   deleteExtra(key: string): boolean {
-    if (Object.isFrozen(this)) {
-      throw new Error("Cannot modify frozen FabricError");
-    }
+    this.#assertNotFrozen();
     return this.#extras.delete(key);
   }
 
@@ -241,8 +317,8 @@ export class FabricError extends FabricNativeWrapper<Error>
   [DEEP_FREEZE](
     subFreeze: (value: FabricValue) => FabricValue,
   ): FabricValue {
-    if (this.cause !== undefined) {
-      subFreeze(this.cause);
+    if (this.#cause !== undefined) {
+      subFreeze(this.#cause);
     }
     for (const value of this.#extras.values()) {
       subFreeze(value);
@@ -259,7 +335,7 @@ export class FabricError extends FabricNativeWrapper<Error>
     subIsDeepFrozen: (value: FabricValue) => boolean,
   ): boolean {
     if (!Object.isFrozen(this)) return false;
-    if (this.cause !== undefined && !subIsDeepFrozen(this.cause)) {
+    if (this.#cause !== undefined && !subIsDeepFrozen(this.#cause)) {
       return false;
     }
     for (const value of this.#extras.values()) {
@@ -271,11 +347,11 @@ export class FabricError extends FabricNativeWrapper<Error>
   /** @inheritDoc */
   protected [SHALLOW_UNFROZEN_CLONE](): FabricError {
     return new FabricError({
-      type: this.type,
-      name: this.name,
-      message: this.message,
-      stack: this.stack,
-      cause: this.cause,
+      type: this.#type,
+      name: this.#name,
+      message: this.#message,
+      stack: this.#stack,
+      cause: this.#cause,
       extras: this.#extras,
     });
   }
@@ -313,15 +389,26 @@ export class FabricError extends FabricNativeWrapper<Error>
    * need recursive unwrap should use `nativeFromFabricValue()`.
    */
   #buildNativeError(frozen: boolean): Error {
-    const ErrorClass = errorClassFromType(this.type);
-    const error = new ErrorClass(this.message);
-    if (error.name !== this.name) error.name = this.name;
-    if (this.stack !== undefined) error.stack = this.stack;
-    if (this.cause !== undefined) error.cause = this.cause;
+    const ErrorClass = errorClassFromType(this.#type);
+    const error = new ErrorClass(this.#message);
+    if (error.name !== this.#name) error.name = this.#name;
+    if (this.#stack !== undefined) error.stack = this.#stack;
+    if (this.#cause !== undefined) error.cause = this.#cause;
     for (const [key, value] of this.#extras) {
       (error as unknown as Record<string, unknown>)[key] = value;
     }
     return frozen ? Object.freeze(error) : error;
+  }
+
+  /**
+   * Guards a mutator against a frozen instance.
+   *
+   * @throws If this instance is frozen.
+   */
+  #assertNotFrozen(): void {
+    if (Object.isFrozen(this)) {
+      throw new Error("Cannot modify frozen `FabricError`");
+    }
   }
 
   /**
@@ -331,10 +418,10 @@ export class FabricError extends FabricNativeWrapper<Error>
    * this clone's `frozen` intent (the `deepClone()` template owns the final
    * top-level freeze).
    *
-   * KNOWN GAP (pre-existing): `encode()` passes `cause` and the extras through
-   * by reference, so an unfrozen clone still SHARES those nested values with
-   * the original -- it is not yet fully deeply independent. Pinned by a test
-   * in `FabricError.test.ts`.
+   * Known gap: `encode()` passes `cause` and the extras through by reference,
+   * so an unfrozen clone still _shares_ those nested values with the original,
+   * and is to that extent not deeply independent. Pinned by a test in
+   * `FabricError.test.ts`.
    */
   protected override [DEEP_CLONE_CORE](frozen: boolean): FabricError {
     const codec = FabricError[CODEC];
@@ -351,6 +438,7 @@ export class FabricError extends FabricNativeWrapper<Error>
 
   static #codec = Object.freeze(
     new (class FabricErrorCodec extends BaseFabricCodec {
+      /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.Error, FabricError);
       }

@@ -65,14 +65,16 @@ describe("FabricMap", () => {
       });
     });
 
-    // FabricMap deliberately keeps throwing stubs for the protocol methods
-    // (per Dan's PR #3612 review: not yet used, reworked separately).
+    // The protocol methods are unimplemented stubs that throw, which these
+    // cases pin at both entry points: dispatch and direct invocation.
     describe("`[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`", () => {
       it("via dispatch: `[DEEP_FREEZE]` throws not-yet-implemented", () => {
         const fm = new FabricMap(
           new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
         );
-        expect(() => deepFreeze(fm)).toThrow("FabricMap: not yet implemented");
+        expect(() => deepFreeze(fm)).toThrow(
+          "`FabricMap`: not yet implemented",
+        );
       });
 
       it("via dispatch: `[IS_DEEP_FROZEN]` throws not-yet-implemented (via type guard)", () => {
@@ -81,7 +83,7 @@ describe("FabricMap", () => {
         );
         Object.freeze(fm);
         expect(() => isDeepFrozenFabricValue(fm)).toThrow(
-          "FabricMap: not yet implemented",
+          "`FabricMap`: not yet implemented",
         );
       });
 
@@ -90,7 +92,7 @@ describe("FabricMap", () => {
           new FrozenMap<FabricValue, FabricValue>([["a", 1]]),
         );
         expect(() => fm[DEEP_FREEZE](subFreeze)).toThrow(
-          "FabricMap: not yet implemented",
+          "`FabricMap`: not yet implemented",
         );
       });
 
@@ -100,7 +102,7 @@ describe("FabricMap", () => {
         );
         Object.freeze(fm);
         expect(() => fm[IS_DEEP_FROZEN](subIsDeepFrozen)).toThrow(
-          "FabricMap: not yet implemented",
+          "`FabricMap`: not yet implemented",
         );
       });
     });

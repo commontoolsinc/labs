@@ -57,3 +57,9 @@ docs/.doccheck*
 # `finally`, so these survive only when a run is interrupted -- at which point
 # `git add -A` will happily commit one, and `deno fmt --check` then rejects it.
 .deno.standard-decorators.*.json
+
+# Uncompiled source written under tasks/ by tasks/write-coverage-lcov.test.ts,
+# which needs a tracked file the Deno cache holds no transpiled form of. It
+# removes each one in a `finally`, so these survive only when a run is
+# interrupted, at which point `git add -A` would otherwise commit one.
+tasks/.write-lcov-uncompiled.*.ts

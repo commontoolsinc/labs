@@ -46,6 +46,12 @@ export interface HarnessModelTurnRequest {
   cacheAffinityKey?: string;
   promptCacheMode?: "implicit" | "explicit";
   reasoningEffort?: string;
+  /**
+   * Overrides the server-side compaction threshold for this turn. Omitted
+   * means the client derives it from the model's input budget; `0` disables
+   * compaction entirely.
+   */
+  compactThreshold?: number;
   signal?: AbortSignal;
   onAttempt?: (
     attempt: HarnessModelAttemptDiagnostic,
@@ -114,6 +120,10 @@ export interface HarnessModelCatalogEntry {
   description?: string;
   inputModalities: readonly string[];
   supportedReasoningEfforts: readonly string[];
+  /** Total context (input + output) advertised by the registry, when known. */
+  contextWindow?: number;
+  /** Maximum output tokens; needed to derive the usable input budget. */
+  maxOutputTokens?: number;
   supportsParallelToolCalls: boolean;
 }
 

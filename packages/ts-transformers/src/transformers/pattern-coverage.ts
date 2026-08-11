@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { isSyntheticNode } from "../ast/mod.ts";
 import {
   PATTERN_COVERAGE_GLOBAL,
   type PatternCoverageSpan,
@@ -56,7 +57,7 @@ export class PatternCoverageTransformer extends Transformer {
       const original = ts.getOriginalNode(node);
       const candidates = original === node ? [node] : [node, original];
       for (const candidate of candidates) {
-        if (candidate.pos < 0 || candidate.end < 0) continue;
+        if (isSyntheticNode(candidate)) continue;
         try {
           const start = candidate.getStart(context.sourceFile);
           const end = candidate.getEnd();

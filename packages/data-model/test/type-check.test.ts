@@ -373,8 +373,9 @@ describe("type-check", () => {
       });
 
       it("returns `true` for an unfrozen `FabricInstance` (member by type)", () => {
-        // A `FabricInstance` is a member by type; membership does not require it
-        // to be deep-frozen and does not recurse into its private interior.
+        // A `FabricInstance` is a member by type. Membership does not require
+        // it to be deep-frozen, and does not recurse into its private
+        // interior.
         const fe = FabricError.fromNativeError(new Error("test"));
         expect(Object.isFrozen(fe)).toBe(false);
         expect(isFabricValue(fe)).toBe(true);
@@ -572,8 +573,8 @@ describe("type-check", () => {
       });
 
       it("returns `false` for a non-plain class instance (`Date`, `Map`, …)", () => {
-        // Not representable as a `FabricPlainObject`; reachable only via an unsound
-        // cast, so the guard is fed them as `unknown`.
+        // Not representable as a `FabricPlainObject`, and reachable only via
+        // an unsound cast, so the guard is fed them as `unknown`.
         expect(isFabricPlainObject(new Date() as unknown as FabricValue))
           .toBe(false);
         expect(isFabricPlainObject(new Map() as unknown as FabricValue))

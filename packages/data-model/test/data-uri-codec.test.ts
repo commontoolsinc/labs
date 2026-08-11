@@ -6,10 +6,10 @@ import {
   toUnpaddedBase64url,
 } from "@commonfabric/utils/base64url";
 import {
-  JsonEncodingContext,
-  jsonFromValue,
+  JsonCodec,
   seemsLikeJsonEncodedFabricValue,
 } from "@/codec-json/index.ts";
+import { jsonFromValue } from "@/codecs.ts";
 import {
   DATA_URI_MEDIA_TYPE,
   dataUriFromValue,
@@ -163,7 +163,7 @@ describe("data-uri-codec", () => {
     it("rejects invalid payload text past the codec tag", () => {
       expect(() =>
         valueFromDataUriPayloadText(
-          JsonEncodingContext.wrapEncodedValueForTesting("{nope", true),
+          JsonCodec.wrapEncodedValueForTesting("{nope", true),
         )
       ).toThrow();
     });
@@ -301,7 +301,7 @@ describe("data-uri-codec", () => {
         expect(() =>
           valueFromDataUri(
             uriOf(
-              JsonEncodingContext.wrapEncodedValueForTesting("{nope", true),
+              JsonCodec.wrapEncodedValueForTesting("{nope", true),
             ),
           )
         ).toThrow();

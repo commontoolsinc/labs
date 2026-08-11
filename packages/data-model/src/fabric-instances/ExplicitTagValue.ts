@@ -19,6 +19,7 @@ export abstract class ExplicitTagValue extends BaseFabricInstance {
   /** The value of {@link #state}. */
   readonly #state;
 
+  /** Constructs an instance with the given tag and state. */
   constructor(
     /** The original wire type tag, e.g. `"FutureType@2"`. */
     wireTypeTag: string,

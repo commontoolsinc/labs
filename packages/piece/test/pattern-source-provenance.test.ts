@@ -8,7 +8,6 @@ import {
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
-import { PieceManager } from "../src/manager.ts";
 import {
   DEFAULT_APP_PATTERN_SOURCE,
   deriveSystemPatternSource,
@@ -80,7 +79,6 @@ describe("deriveSystemPatternSource", () => {
 describe("ensureDefaultPattern stamps patternSource", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
   let controller: PiecesController;
   let restoreFetch: () => void;
 
@@ -97,9 +95,8 @@ describe("ensureDefaultPattern stamps patternSource", () => {
       identity: signer,
       spaceName: "provenance-space-" + crypto.randomUUID(),
     });
-    manager = new PieceManager(session, runtime);
-    await manager.synced();
-    controller = new PiecesController(manager);
+    controller = new PiecesController(session, runtime);
+    await controller.synced();
   });
 
   afterEach(async () => {

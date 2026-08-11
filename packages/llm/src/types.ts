@@ -1,7 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONValue } from "@commonfabric/api";
 import { isPureJson } from "@commonfabric/pure-json";
-import { LlmPrompt } from "./prompts/prompting.ts";
 import type {
   BuiltInLLMContent,
   BuiltInLLMMessage,
@@ -15,7 +14,6 @@ export const DEFAULT_MODEL_NAME: ModelName = "default";
 
 // NOTE(ja): This should be an array of models, the first model will be tried, if it
 // fails, the second model will be tried, etc.
-export const DEFAULT_IFRAME_MODELS: ModelName = "openai:gpt-5-mini";
 export const DEFAULT_GENERATE_OBJECT_MODELS: ModelName = "openai:gpt-5-mini";
 
 export type LLMResponse = BuiltInLLMMessage & {
@@ -25,7 +23,6 @@ export type LLMResponse = BuiltInLLMMessage & {
 };
 
 export type ModelName = string;
-export type LLMPrompt = LlmPrompt;
 // Use BuiltIn types directly
 export type LLMContent = BuiltInLLMContent;
 

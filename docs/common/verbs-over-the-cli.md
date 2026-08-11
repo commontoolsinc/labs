@@ -163,18 +163,20 @@ readback or exits once the commit is acknowledged.
 
 ## Which results arrive, and when
 
-Two paths deliver a result, and they behave differently today:
+Two paths deliver a result, and both arrive by default:
 
 - A result **carrying cells or pieces** — like a create returning the piece it
-  made — arrives on any runtime. It travels the result-pattern projection path.
-- A result that is **plain JSON** — a record of what was written — requires the
-  `plainResultReceipts` runtime option. Until its default flips, enable it per
-  process with `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=true`
-  ([EXPERIMENTAL_OPTIONS.md](../development/EXPERIMENTAL_OPTIONS.md)).
+  made — travels the result-pattern projection path.
+- A result that is **plain JSON** — a record of what was written — projects into
+  the receipt under the `plainResultReceipts` runtime option, which is on by
+  default ([EXPERIMENTAL_OPTIONS.md](../development/EXPERIMENTAL_OPTIONS.md)).
+  `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false` restores the discard, which is a
+  rollback switch rather than something a caller opts into.
 
-With the option off, a plain-record verb still performs its write and simply
-reports no result. **Treat an absent result as "not enabled here", never as
-"the mutation did not land."**
+So a verb that declares a result hands one back. Where a plain record is absent,
+the option was explicitly turned off — the verb still performed its write.
+**Treat an absent result as "not enabled here", never as "the mutation did not
+land."**
 
 One more caveat worth carrying: a verb's result shape is not part of the piece's
 stored schema, so nothing validates it and nothing protects it across a pattern
@@ -200,8 +202,8 @@ Run it against any host:
 API_URL=http://localhost:8000 packages/cli/integration/verbs-over-the-cli.sh
 ```
 
-CI runs it in the `piece-call` shard. It takes about ten seconds and eleven `cf`
-invocations against a warm local toolshed.
+CI runs it in the `piece-call` shard. It takes under half a minute and around
+twenty `cf` invocations against a warm local toolshed.
 
 Each step demonstrates one use case:
 
@@ -210,12 +212,14 @@ Each step demonstrates one use case:
 | 1–2 | Deploy a pattern, then ask what it can do |
 | 3 | A create hands back the piece it created |
 | 4 | A verb returns what it wrote, including what only it could compute |
-| 5 | A replayed id returns the original result; nothing runs twice |
-| 6 | A piece result needs no option; a plain record does — and the write lands either way |
-| 7 | A value-less verb settles with the empty witness |
-| 8 | A refused call does not spend its invocation id |
-| 9 | Reading a verb redirects to `cf piece call` |
-| 10 | Timings on stderr, Invocation JSON still clean on stdout |
+| 5 | A call's result names the document behind each path, and that address calls |
+| 6 | A read returns an address in place of what is behind it |
+| 7 | A replayed id returns the original result; nothing runs twice |
+| 8 | A piece result survives `plainResultReceipts=false`; a plain record does not — and the write lands either way |
+| 9 | A value-less verb settles with the empty witness |
+| 10 | A refused call does not spend its invocation id |
+| 11 | Reading a verb redirects to `cf piece call` |
+| 12 | Timings on stderr, Invocation JSON still clean on stdout |
 
 ## Addressing a piece you were handed
 
@@ -254,3 +258,51 @@ rather than to the result.
 A pattern should not mint identifier fields to make any of this easier —
 rendering identity is the client's job, and a pattern-authored fid is a copy
 that can go stale.
+
+### Asking a read for an address
+
+A cell is a point in a graph, so a read that does not say where to stop follows
+links onward and hands back a copy of everything behind them. `--schema` says
+where to stop: a position marked `{"$link": true}` returns that position's
+address rather than its contents.
+
+```bash
+cf piece get --piece <board> notes \
+  --schema '{"type":"array","items":{"$link":true}}'
+```
+
+```json
+[
+  { "$link": { "id": "of:fid1:…", "space": "did:key:…", "scope": "space", "path": [] } }
+]
+```
+
+Those four fields are always present, so a caller indexes them without
+branching. `id` keeps its scheme, because the scheme is the kind and dropping
+it retargets the address silently. No schema is inlined: a stored link can
+carry an entire one, and what was asked for is where the value lives.
+
+Marking a position deeper than a link names the linked document and the path
+below it — `notes[0].title`, where `notes` holds links, renders the note's own
+`id` with `path` `["title"]`. A link is a durable identity; the slot that holds
+it stops naming the same value the moment the collection is reordered.
+
+The marker sits beside a projection when both are wanted, and the answer
+carries both:
+
+```bash
+cf piece get --piece <board> notes --schema \
+  '{"type":"array","items":{"$link":true,"type":"object","properties":{"title":true}}}'
+```
+
+```json
+[{ "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" }]
+```
+
+A marked position is not fetched — the address is stored in the document that
+contains it, so a marked collection of a hundred notes costs the one read that
+document already needed. Where the marker is the whole selection, nothing
+behind it is read at all.
+
+The address a marked read returns is one `cf piece call` accepts, minus the
+`of:` prefix, which is the reason to ask for it.

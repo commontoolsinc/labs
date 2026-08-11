@@ -614,6 +614,56 @@ describe("cfc schema sanitization", () => {
     expect(validateSchemaDefinition(localOnlyDefinition)).toBeUndefined();
   });
 
+  it("validates fabric-primitive schema types by prototype", () => {
+    const bytes = new FabricBytes(new Uint8Array([1, 2]));
+
+    // The fabric-primitive names are legal schema definitions.
+    expect(validateSchemaDefinition({ type: "FabricBytes" })).toBeUndefined();
+    expect(validateSchemaDefinition({ type: ["FabricHash", "null"] }))
+      .toBeUndefined();
+
+    // A FabricBytes satisfies its own type, and "object" via the subtype
+    // rule (each fabric-primitive type is a subtype of "object").
+    expect(validateSchemaValue({ type: "FabricBytes" }, bytes))
+      .toBeUndefined();
+    expect(validateSchemaValue({ type: "object" }, bytes)).toBeUndefined();
+
+    // The specific types don't cross-match, and the subtype relation is
+    // one-way: a plain record is not a FabricBytes.
+    expect(validateSchemaValue({ type: "FabricHash" }, bytes))
+      .toContain("value does not match type FabricHash");
+    expect(validateSchemaValue({ type: "FabricBytes" }, { a: 1 }))
+      .toContain("value does not match type FabricBytes");
+    expect(validateSchemaValue({ type: "FabricBytes" }, "bytes-ish"))
+      .toContain("value does not match type FabricBytes");
+  });
+
+  it("checks an object schema's required keys against a FabricPrimitive's accessors", () => {
+    const bytes = new FabricBytes(new Uint8Array([1, 2]));
+
+    // Required keys must exist on the leaf; class accessors count (`in`,
+    // prototype chain included). typeMatches stays permissive; this is the
+    // complete check behind the filter.
+    expect(validateSchemaValue({ type: "object", required: ["x"] }, bytes))
+      .toContain("missing required property x");
+    expect(validateSchemaValue({ required: ["x"] }, bytes))
+      .toContain("missing required property x");
+    expect(validateSchemaValue({ type: "object", required: ["length"] }, bytes))
+      .toBeUndefined();
+    // The nominal brand key generated schemas require has no runtime
+    // existence; a fabric value satisfies it by construction. This is the
+    // shape the schema-generator emits for a FabricBytes-typed field today.
+    expect(validateSchemaValue({
+      type: "object",
+      required: ["length", "@commonfabric/FabricSpecialObject"],
+    }, bytes)).toBeUndefined();
+    expect(validateSchemaValue({ type: "object", required: [] }, bytes))
+      .toBeUndefined();
+    // A fabric-primitive-typed schema is not gated by `required`.
+    expect(validateSchemaValue({ type: "FabricBytes", required: ["x"] }, bytes))
+      .toBeUndefined();
+  });
+
   it("keeps referenced definition bodies in their child-local scope", () => {
     const schema: JSONSchema = {
       type: "object",

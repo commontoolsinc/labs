@@ -111,7 +111,11 @@ class InProcessWorkerTransport extends EventEmitter<RuntimeTransportEvents>
     super();
   }
 
-  send(message: IPCClientMessage | IPCClientNotification): void {
+  send(original: IPCClientMessage | IPCClientNotification): void {
+    // Cloned, as a real transport delivers it: `BaseRequest` entitles a handler
+    // to own what its request carries, and handing over the sender's own object
+    // would let a handler that cedes a payload reach back into the sender.
+    const message = structuredClone(original);
     if (!("msgId" in message)) {
       throw new Error("This test sends no one-way client notifications");
     }

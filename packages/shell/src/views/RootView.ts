@@ -1,15 +1,29 @@
 import { css, html, PropertyValues } from "lit";
 import {
-  applyCommand,
   AppState,
-  AppUpdateEvent,
+  AppStateConfigKey,
+  AppStateSerialized,
+  AppView,
+  assertIdentityChangeAllowed,
   clone,
-  Command,
-  isCommand,
+  isAppStateConfigKey,
+  isViewingDefaultPatternView,
   navigate,
+  resolveIdentity,
+  serialize,
+  ShellApp,
 } from "../../shared/mod.ts";
-import { BaseView, createDefaultAppState, SHELL_COMMAND } from "./BaseView.ts";
-import { type Identity, KeyStore } from "@commonfabric/identity";
+import {
+  BaseView,
+  type Command,
+  createDefaultAppState,
+  SHELL_COMMAND,
+} from "./BaseView.ts";
+import {
+  type Identity,
+  KeyStore,
+  type TransferrableInsecureCryptoKeyPair,
+} from "@commonfabric/identity";
 import { property, state } from "lit/decorators.js";
 import { Task } from "@lit/task";
 import {
@@ -45,10 +59,11 @@ function getCommonfabricGlobal(): typeof globalThis & {
 
 // The root element for the shell application.
 //
-// Derives `RuntimeInternals` for the application from its `AppState`.
-// `Command` mutates the app state, which can be fired as events
-// from children elements.
-export class XRootView extends BaseView {
+// Derives `RuntimeInternals` for the application from its `AppState`, and owns
+// every write to that state. A child element asks for a change by firing a
+// `Command` as a `SHELL_COMMAND` event; the shell's `Navigation`, the key
+// bootstrap and the integration harness call the methods directly.
+export class XRootView extends BaseView implements ShellApp {
   static override styles = css`
     :host {
       display: block;
@@ -344,37 +359,73 @@ export class XRootView extends BaseView {
     this._themePreference = (e as CustomEvent).detail;
   };
 
+  // An event handler cannot await, so a command that fails after its first
+  // suspension point reports as an unhandled rejection.
   onCommand = (e: Event) => {
-    const { detail: command } = e as CustomEvent;
-    if (!isCommand(command)) {
-      throw new Error(`Received a non-command: ${command}`);
-    }
-    this.processCommand(command);
+    void this.#runCommand((e as CustomEvent<Command>).detail);
   };
 
-  apply(command: Command): Promise<void> {
-    this.processCommand(command);
-    this.requestUpdate();
-    return this.updateComplete.then((_) => undefined);
+  #runCommand(command: Command): Promise<void> {
+    switch (command.type) {
+      case "set-view":
+        return this.setView(command.view);
+      case "set-identity":
+        return this.setIdentity(command.identity);
+      case "set-config":
+        return this.setConfig(command.key, command.value);
+    }
+    throw new Error(`Received a non-command: ${JSON.stringify(command)}`);
   }
 
   state(): AppState {
     return clone(this.app);
   }
 
-  private processCommand(command: Command) {
-    try {
-      // Apply command synchronously for state changes
-      const state = applyCommand(this.app, command);
-      this.app = state;
-      this.dispatchEvent(new AppUpdateEvent(command, { state }));
-    } catch (e) {
-      const error = e as Error;
-      this.dispatchEvent(
-        new AppUpdateEvent(command, { error: error as Error }),
-      );
-      throw new Error(error.message, { cause: error });
+  // The application state in the JSON-shaped form that survives the page
+  // boundary the integration harness reads across.
+  serialize(): AppStateSerialized {
+    return serialize(this.state());
+  }
+
+  setView(view: AppView): Promise<void> {
+    const next = clone(this.app);
+    next.view = view;
+    // Addressing a piece hands the main view area to that piece, so the
+    // shell's own piece list closes on the way.
+    if (!isViewingDefaultPatternView(view)) {
+      next.config.showShellPieceListView = false;
     }
+    return this.#commit(next, "set-view");
+  }
+
+  async setIdentity(
+    id: Identity | TransferrableInsecureCryptoKeyPair | undefined,
+  ): Promise<void> {
+    const identity = await resolveIdentity(id);
+    assertIdentityChangeAllowed(this.app.identity, identity);
+    const next = clone(this.app);
+    next.identity = identity;
+    await this.#commit(next, "set-identity");
+  }
+
+  setConfig(key: AppStateConfigKey, value: boolean): Promise<void> {
+    if (!isAppStateConfigKey(key)) {
+      throw new Error(`Invalid config key: ${key}`);
+    }
+    const next = clone(this.app);
+    next.config[key] = value;
+    return this.#commit(next, `set-config ${key}=${value}`);
+  }
+
+  // Adopts the next application state and resolves once the render it triggers
+  // has landed.
+  #commit(next: AppState, description: string): Promise<void> {
+    this.app = next;
+    if (ENVIRONMENT !== "production") {
+      const time = (globalThis.performance.now() / 1000).toFixed(3);
+      console.log(`[app] ${time}s ${description}`, next);
+    }
+    return this.updateComplete.then((_) => undefined);
   }
 
   getRuntimeSpaceDID(): DID | undefined {

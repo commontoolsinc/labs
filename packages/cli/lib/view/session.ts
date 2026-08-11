@@ -21,6 +21,9 @@ import {
   DIFF_MARGIN_WIDTH,
   type DiffAnnotation,
   diffAnnotationDecoration,
+  type DiffTotals,
+  diffTotalsDecoration,
+  diffTotalsWidth,
   type KeyHint,
   labeledDiffMetadataLine,
   type Match,
@@ -433,6 +436,29 @@ export class Session {
       };
     }
     return this.foldFileCache.files;
+  }
+
+  /** Whole-diff totals for the corner label on the first line, summed over the
+   * diff's files. Null when the source is not a diff, when the text parses to
+   * no diff files, or while the text cursor is active (edit mode reflows the
+   * content the label would cover). */
+  private activeDiffTotals(): DiffTotals | null {
+    if (this.cursorOn || this.source?.isDiff !== true) return null;
+    const files = this.foldFiles();
+    if (files.length === 0) return null;
+    let adds = 0;
+    let dels = 0;
+    for (const file of files) {
+      adds += file.adds;
+      dels += file.dels;
+    }
+    return { adds, dels };
+  }
+
+  /** Columns the whole-diff totals label occupies, 0 when hidden. */
+  private cornerTotalsWidth(): number {
+    const totals = this.activeDiffTotals();
+    return totals ? diffTotalsWidth(totals) : 0;
   }
 
   /** Whether the document holds any non-printable character, so cycling the
@@ -906,6 +932,7 @@ export class Session {
       canExpand: offeredExpand !== null,
       expandMargin: diffMargin,
       diffAnnotations,
+      diffTotals: this.activeDiffTotals(),
       expandRow,
       expandUp: offeredExpand?.up ?? null,
       diffMetadataRows: diffMargin
@@ -2811,19 +2838,23 @@ export class Session {
     return this.maxDisplayWidthCache.width;
   }
 
-  /** Source cells available on one folded line after its annotation. */
+  /** Source cells available on one folded line after its annotation and, on
+   * the first line, the whole-diff totals label. */
   private lineContentWidth(
     foldedLine: number,
     annotations = this.activeDiffAnnotations(),
     contentWidth = this.contentWidth(),
   ): number {
     const annotation = annotations.find((item) => item.line === foldedLine);
-    if (!annotation) return contentWidth;
-    const decoration = diffAnnotationDecoration(annotation.kind, contentWidth);
-    return Math.max(1, contentWidth - decoration.firstWidth);
+    const annotationWidth = annotation
+      ? diffAnnotationDecoration(annotation.kind, contentWidth).firstWidth
+      : 0;
+    const totalsWidth = foldedLine === 0 ? this.cornerTotalsWidth() : 0;
+    return Math.max(1, contentWidth - annotationWidth - totalsWidth);
   }
 
-  /** Furthest horizontal offset needed by any line under its own annotation. */
+  /** Furthest horizontal offset needed by any line under its own annotation
+   * or, on the first line, the whole-diff totals label. */
   private maxLeft(
     annotations: readonly DiffAnnotation[] = this.activeDiffAnnotations(),
   ): number {
@@ -2831,17 +2862,17 @@ export class Session {
     const contentWidth = this.contentWidth();
     let width = this.maxDisplayWidth() - contentWidth;
     const lines = this.foldPlan().displayLines;
-    for (const annotation of annotations) {
-      const line = lines[annotation.line];
+    const constrained = new Set(
+      annotations.map((annotation) => annotation.line),
+    );
+    if (this.cornerTotalsWidth() > 0) constrained.add(0);
+    for (const lineIdx of constrained) {
+      const line = lines[lineIdx];
       if (!line) continue;
       width = Math.max(
         width,
         displayWidth(line, this.displayMode) -
-          this.lineContentWidth(
-            annotation.line,
-            annotations,
-            contentWidth,
-          ),
+          this.lineContentWidth(lineIdx, annotations, contentWidth),
       );
     }
     return Math.max(0, width);
@@ -2851,7 +2882,7 @@ export class Session {
   private horizontalStep(): number {
     if (!this.hasDiffMargin()) return HORIZONTAL_STEP;
     const annotations = this.activeDiffAnnotations();
-    let width = this.contentWidth();
+    let width = this.lineContentWidth(0, annotations);
     for (const annotation of annotations) {
       width = Math.min(
         width,
@@ -3675,12 +3706,14 @@ export class Session {
   ): { decorations: Map<number, WrapDecoration>; key: string } {
     const decorations = new Map<number, WrapDecoration>();
     const contentWidth = this.contentWidth();
+    const totalsWidth = this.wrapLines ? this.cornerTotalsWidth() : 0;
     const metadataLabelLine = this.wrapLines
       ? labeledDiffMetadataLine(
         this.foldPlan().displayLines,
         this.displayMode,
         contentWidth,
         annotations,
+        totalsWidth,
       )
       : null;
     if (this.wrapLines) {
@@ -3695,9 +3728,17 @@ export class Session {
           ),
         );
       }
+      if (totalsWidth > 0) {
+        decorations.set(
+          0,
+          diffTotalsDecoration(totalsWidth, contentWidth, decorations.get(0)),
+        );
+      }
     }
     const key = this.wrapLines
-      ? `${contentWidth}|${this.displayMode}|${metadataLabelLine ?? "-"}|${
+      ? `${contentWidth}|${this.displayMode}|${
+        metadataLabelLine ?? "-"
+      }|${totalsWidth}|${
         annotations.map((annotation) => `${annotation.line}:${annotation.kind}`)
           .join(",")
       }`

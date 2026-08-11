@@ -34,7 +34,7 @@ Two overlapping distinctions matter:
 - **Structural vs value-only.** `add`, `remove`, and `move` change a container's
   key-set (they add, drop, or reorder a child key). The rest change a value in
   place or at an array's own path. Structural ops need extra care in the conflict
-  and replay machinery (below).
+  machinery (below).
 - **Generated vs mergeable.** The structural and `replace`/`splice` ops are
   *generated* by diffing a handler's whole-value write against the transaction's
   base snapshot. The **mergeable** ops (`append`, `add-unique`, `increment`,
@@ -93,16 +93,18 @@ compile error). Each descriptor owns:
   leaf paths.
 - `structural` — whether the op changes a container's key-set.
 
-Three separate path computations derive from `pointerFields` + `structural` via
-the exported `touchedPointerPaths` / `patchOpIsStructural` helpers, instead of
+Two path computations derive from `pointerFields` + `structural` via the
+exported `touchedPointerPaths` / `patchOpIsStructural` helpers, instead of
 re-enumerating the ops:
 
 - `engine.ts` `touchedLeafPathsForPatch` — the exact leaf paths, for
   recursive-read commit conflicts and the scheduler reader-dirty index.
 - `engine.ts` `touchedPathsForPatch` — leaf paths plus the parent path for
   structural ops, for shape-only (nonRecursive) readers.
-- `runner storage/v2.ts` `changedPathsForPendingPatch` — leaf paths,
-  replay-resolved for structural ops, for the client's optimistic pending replay.
+
+The client's optimistic pending replay derives no paths: it applies a pending
+layer's ops to the delivered base through the shared `applyPatchToDocument`
+(`memory/v2/patch.ts`), skipping the whole layer when its ops cannot apply.
 
 ### 2. Mergeable-op descriptors — `packages/runner/src/storage/mergeable-ops.ts`
 
@@ -166,7 +168,7 @@ What catches a mistake, and how loudly:
 | Wire shape (`PatchOp` union) | `memory/v2.ts` |
 | Apply + `pointerFields` + `structural` | `memory/v2/patch.ts` (`patchOpDescriptors`) |
 | Conflict / reactivity touched paths | `memory/v2/engine.ts` (derives from the descriptors) |
-| Client pending-replay paths | `runner storage/v2.ts` (derives from the descriptors) |
+| Client pending replay | `runner storage/v2.ts` `applyPendingVersion` (applies ops via the shared `applyPatchToDocument`) |
 | Whole-value diff → structural/`replace`/`splice` ops | `runner storage/v2-transaction.ts` |
 | Mergeable intent fold + build | `runner storage/mergeable-ops.ts` |
 | Intent transport (`recordMergeableOp`) | `runner storage/interface.ts`, `extended-storage-transaction.ts` |

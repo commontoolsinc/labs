@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { TwoLevelWeakCache } from "@commonfabric/utils/two-level-weak-cache";
 
 describe("TwoLevelWeakCache", () => {
-  describe("memoize", () => {
+  describe("memoize()", () => {
     it("computes once per (outer, key) pair", () => {
       const cache = new TwoLevelWeakCache<object, object, number>();
       const outer = {};
@@ -31,7 +31,7 @@ describe("TwoLevelWeakCache", () => {
       expect(second).toBe(value);
     });
 
-    it("caches a computed undefined and does not recompute", () => {
+    it("caches a computed `undefined` and does not recompute", () => {
       const cache = new TwoLevelWeakCache<object, object, number | undefined>();
       const outer = {};
       const key = {};
@@ -53,7 +53,8 @@ describe("TwoLevelWeakCache", () => {
       const key = {};
 
       expect(cache.memoize(outerA, key, () => "a")).toBe("a");
-      // Same inner key, different outer key: a distinct entry, not the cached "a".
+      // Same inner key, different outer key: a distinct entry rather than the
+      // cached `a`.
       expect(cache.memoize(outerB, key, () => "b")).toBe("b");
       expect(cache.memoize(outerA, key, () => "ignored")).toBe("a");
     });
@@ -70,7 +71,7 @@ describe("TwoLevelWeakCache", () => {
     });
   });
 
-  describe("groupFor", () => {
+  describe("groupFor()", () => {
     it("returns the same inner map across calls for one outer key", () => {
       const cache = new TwoLevelWeakCache<object, object, number>();
       const outer = {};

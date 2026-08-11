@@ -9,11 +9,11 @@
  * - `set(path, value)` / `get(path)` / `has(path)` / `delete(path)` /
  *   `clear()` behave like the corresponding `Map<string[], V>` operations,
  *   except keys are compared by segment-array contents rather than by
- *   reference. Distinct from `set()` is a key's *presence*: a key whose
+ *   reference. Distinct from a key's value is its _presence_: a key whose
  *   value is `undefined` (when `V` admits `undefined`) is still considered
  *   present by `has()`.
  * - `invalidateChain(path)` drops the cached value at every ancestor of
- *   `path` (including the root and `path` itself) AND drops the entire
+ *   `path` (including the root and `path` itself) _and_ drops the entire
  *   subtree rooted at `path`. Sibling subtrees off a divergent ancestor
  *   are preserved.
  *
@@ -77,9 +77,9 @@ export class PathKeyMap<V> {
   }
 
   /**
-   * Drops the cached value at every ancestor of `path` (including the
-   * root and `path` itself) AND drops the entire subtree rooted at
-   * `path`. For `path === []` (root), behaves like `clear()`.
+   * Drops the cached value at every ancestor of `path` (including the root
+   * and `path` itself) _and_ drops the entire subtree rooted at `path`. For
+   * `path === []` (root), behaves like `clear()`.
    */
   invalidateChain(path: readonly string[]): void {
     if (path.length === 0) {
@@ -103,18 +103,20 @@ export class PathKeyMap<V> {
     node.children.delete(path[path.length - 1]!);
   }
 
-  /** Yields every present path in the map. Order is depth-first by
-   *  insertion order of each node's child entries (Map iteration order). */
+  /**
+   * Yields every present path in the map. Order is depth-first by insertion
+   * order of each node's child entries (`Map` iteration order).
+   */
   *keys(): Generator<readonly string[]> {
     yield* this.#root.keys([]);
   }
 
-  /** Yields every `[path, value]` entry in the map. Same ordering as
-   *  `keys()`. */
+  /** Yields every `[path, value]` entry in the map, ordered as `keys()` is. */
   *entries(): Generator<readonly [readonly string[], V]> {
     yield* this.#root.entries([]);
   }
 
+  /** Returns the node at `path`, or `undefined` if there is none. */
   #findNode(path: readonly string[]): PathKeyMapNode<V> | undefined {
     let node: PathKeyMapNode<V> | undefined = this.#root;
     for (const seg of path) {
@@ -125,11 +127,18 @@ export class PathKeyMap<V> {
   }
 }
 
+/** One node of a `PathKeyMap`'s trie, that is, one path prefix. */
 class PathKeyMapNode<V> {
+  /** Whether this node's path is present in the map. */
   hasValue = false;
+
+  /** Value at this node's path, meaningful only when `hasValue` is true. */
   value: V | undefined = undefined;
+
+  /** Child nodes, by the segment that reaches each. */
   children: Map<string, PathKeyMapNode<V>> = new Map();
 
+  /** Indicates whether this node's subtree holds no values at all. */
   isEmpty(): boolean {
     if (this.hasValue) return false;
     for (const child of this.children.values()) {
@@ -138,6 +147,7 @@ class PathKeyMapNode<V> {
     return true;
   }
 
+  /** Yields every present path in this node's subtree, under `prefix`. */
   *keys(prefix: readonly string[]): Generator<readonly string[]> {
     if (this.hasValue) yield prefix;
     for (const [seg, child] of this.children) {
@@ -145,6 +155,7 @@ class PathKeyMapNode<V> {
     }
   }
 
+  /** Yields every present entry in this node's subtree, under `prefix`. */
   *entries(
     prefix: readonly string[],
   ): Generator<readonly [readonly string[], V]> {

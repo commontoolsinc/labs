@@ -27,8 +27,9 @@ behave like the bare form.
 The path survives even when the value does not, which is why cells and rendering
 still work: a `$cell` binding passes the path, and the renderer reads it under a
 schema of its own (`asSchema(rendererVDOMSchema)` — `runner/src/runner.ts` on the
-mainline path, `shell/src/views/BodyView.ts`, and `html/src/render.ts` for legacy
-main-thread rendering), while every read of the *value* comes back empty.
+mainline path, `shell/src/views/BodyView.ts`, and `html/src/in-process.ts` when
+the reconciler runs in the caller's own process), while every read of the
+*value* comes back empty.
 
 Two transformer diagnostics cover neighbouring cases and neither catches this
 one: `reactive-capture:unknown-type` reports a closure capture whose inferred

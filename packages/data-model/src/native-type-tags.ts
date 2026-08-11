@@ -122,9 +122,9 @@ export function tagFromNativeClass(
  * value is a recognized convertible native instance, or `null` otherwise.
  * Non-object types (`null`, `undefined`, primitives) return `Primitive`.
  *
- * An array answers `Array` before anything else is consulted.
+ * An array is tagged `Array` before anything else is consulted.
  * `Array.isArray()` is realm-agnostic and sees through both a subclass and a
- * severed prototype, so every array reaches array handling and is answered by
+ * severed prototype, so every array reaches array handling and is decided by
  * the array rule, which alone decides what an array may be.
  *
  * Otherwise dispatches via the value's constructor (O(1) switch in
@@ -143,12 +143,12 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     return NATIVE_TAGS.Array;
   }
 
-  // The constructor is read from the PROTOTYPE, not from the value. What is
+  // The constructor is read from the _prototype_, not from the value. What is
   // being asked is which class the value is an instance of, and that is a fact
   // about its prototype; an own `constructor` property is ordinary data that
   // happens to share the name, and must not decide the value's type. Reading
-  // it off the value would let `{constructor: Error}` -- a plain record --
-  // answer `Error` and be silently rebuilt as one.
+  // it off the value would let `{constructor: Error}` -- a plain record -- be
+  // tagged `Error` and silently rebuilt as one.
   //
   // Guard: a null-prototype object has no constructor to find, and an exotic
   // one may not have a callable one.
@@ -172,8 +172,8 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
   if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
 
   // Null-prototype objects (`Object.create(null)`), which have no constructor
-  // to have been recognized. Answered `Object` so the object rule decides them
-  // by name, the same way an indirect array is answered `Array`.
+  // to have been recognized. Tagged `Object` so the object rule decides them
+  // by name, the same way an indirect array is tagged `Array`.
   if (proto === null) return NATIVE_TAGS.Object;
 
   return null;

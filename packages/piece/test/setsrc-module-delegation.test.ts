@@ -12,7 +12,6 @@ import {
   loadVerifiedSourceClosure,
   setCompileCacheRuntimeVersionForTesting,
 } from "../../runner/src/compilation-cache/cell-cache.ts";
-import { PieceManager } from "../src/manager.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("setsrc module delegation");
@@ -60,7 +59,6 @@ export const revision = ${JSON.stringify(version)};
 describe("setsrc module delegation", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
   let pieces: PiecesController;
 
   beforeEach(async () => {
@@ -74,9 +72,8 @@ describe("setsrc module delegation", () => {
       identity: signer,
       spaceName: "setsrc-delegation-" + crypto.randomUUID(),
     });
-    manager = new PieceManager(session, runtime);
-    await manager.synced();
-    pieces = new PiecesController(manager);
+    pieces = new PiecesController(session, runtime);
+    await pieces.synced();
   });
 
   afterEach(async () => {
@@ -115,9 +112,9 @@ describe("setsrc module delegation", () => {
     const successorRef = getPatternIdentityRef(first.getCell())!;
 
     await runtime.patternManager.flushCompileCacheWrites();
-    await manager.synced();
-    const patternSpace = manager.getSpace();
-    const patternSpaceName = manager.getSpaceName()!;
+    await pieces.synced();
+    const patternSpace = pieces.getSpace();
+    const patternSpaceName = pieces.getSpaceName()!;
 
     const loadClosure = async (targetRuntime: Runtime, identity: string) => {
       const tx = targetRuntime.edit();
@@ -145,14 +142,14 @@ describe("setsrc module delegation", () => {
         freshRuntimes.push(freshRuntime);
         return freshRuntime;
       };
-      const createFreshManager = async (freshRuntime: Runtime) => {
+      const createFreshPieces = async (freshRuntime: Runtime) => {
         const freshSession = await createSession({
           identity: signer,
           spaceName: patternSpaceName,
         });
-        const freshManager = new PieceManager(freshSession, freshRuntime);
-        await freshManager.synced();
-        return freshManager;
+        const freshPieces = new PiecesController(freshSession, freshRuntime);
+        await freshPieces.synced();
+        return freshPieces;
       };
 
       // Restart before the second pattern converges on the already-stored
@@ -166,8 +163,7 @@ describe("setsrc module delegation", () => {
       );
       try {
         const mergeRuntime = createFreshRuntime();
-        const mergeManager = await createFreshManager(mergeRuntime);
-        const mergePieces = new PiecesController(mergeManager);
+        const mergePieces = await createFreshPieces(mergeRuntime);
         const mergeSecond = await mergePieces.get(second.id, true);
         await mergeSecond.setPattern(authorizedWriterProgram("v3"));
         expect(getPatternIdentityRef(mergeSecond.getCell())).toEqual(
@@ -190,7 +186,7 @@ describe("setsrc module delegation", () => {
         expect(await invokeSetName(mergeFirst, "merged")).toBe("v3:merged");
 
         await mergeRuntime.patternManager.flushCompileCacheWrites();
-        await mergeManager.synced();
+        await mergePieces.synced();
 
         const firstClosure = await loadClosure(mergeRuntime, firstRef.identity);
         const intermediateClosure = await loadClosure(
@@ -242,8 +238,8 @@ describe("setsrc module delegation", () => {
         // A later cold runtime can warm-hit only the repaired compiled set;
         // both predecessor chains still have to authorize the first pattern.
         const coldRuntime = createFreshRuntime();
-        const coldManager = await createFreshManager(coldRuntime);
-        const coldPiece = await new PiecesController(coldManager).get(
+        const coldPieces = await createFreshPieces(coldRuntime);
+        const coldPiece = await coldPieces.get(
           first.id,
           true,
         );

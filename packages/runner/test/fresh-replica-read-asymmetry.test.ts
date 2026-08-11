@@ -4,12 +4,11 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
 import { resolveCellPath } from "../src/piece-helpers.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 // Fresh-replica read asymmetry: writes from one replica commit durably, but a
 // second (fresh) replica's reads of the same data used to come back masked —
@@ -22,36 +21,6 @@ import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 // `Cell.pull()`'s convergence loop awaits — so schema-less pulls now resolve
 // to the true value. This suite mirrors the CLI `piece get` read path
 // (schema-less cell -> pull() -> resolveCellPath).
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
-
 const signer = await Identity.fromPassphrase("fresh-replica-read-asymmetry");
 const space = signer.did();
 
@@ -76,12 +45,12 @@ const CONTAINER_CAUSE = "asymmetry-container";
 
 describe("fresh-replica read asymmetry", () => {
   let server: MemoryV2Server.Server;
-  let writerStorage: SharedServerStorageManager;
+  let writerStorage: EmulatedStorageManager;
   let writerRt: Runtime;
 
   beforeEach(async () => {
     server = newSharedServer();
-    writerStorage = SharedServerStorageManager.connectTo(server, {
+    writerStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     writerRt = new Runtime({
@@ -121,7 +90,7 @@ describe("fresh-replica read asymmetry", () => {
   });
 
   function freshReader(): { rt: Runtime; close: () => Promise<void> } {
-    const storage = SharedServerStorageManager.connectTo(server, {
+    const storage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     const rt = new Runtime({
@@ -346,7 +315,7 @@ describe("fresh-replica read asymmetry", () => {
     // reservation back — otherwise one transient failure masks the doc for
     // the manager's lifetime. Scope is part of the key: scoped instances
     // are distinct docs.
-    const storage = SharedServerStorageManager.connectTo(server, {
+    const storage = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     try {

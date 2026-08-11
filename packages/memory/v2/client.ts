@@ -234,6 +234,12 @@ export class Client {
         ? signal.reason
         : new Error("memory session mount cancelled");
     }
+    // Between openSession resolving (the session now exists server-side)
+    // and the registration below, a session-scoped frame would find no
+    // routing entry. Unreachable for a transport that delivers one frame
+    // per event-loop task: this continuation is synchronous plus
+    // microtasks, which drain before the next task, and only a
+    // resume-mount has frames to deliver that early.
     const session = new SpaceSession(
       this,
       space,
@@ -262,6 +268,13 @@ export class Client {
     }
     const requestId = message.requestId as string;
     const pending = Promise.withResolvers<unknown>();
+    // The rejection handler below only attaches after the transport send
+    // completes, and send suspends across event-loop turns on any real
+    // transport — close()'s rejectPending() can fire in that window with
+    // no handler attached yet, surfacing as an unhandled rejection. The
+    // pre-attached no-op keeps the window closed; the await below still
+    // observes the rejection.
+    pending.promise.catch(() => {});
     this.#pending.set(requestId, pending);
     await this.transport.send(encodeMemoryBoundary(message));
     const result = await pending.promise as ResponseMessage<Result>;
@@ -1138,10 +1151,11 @@ export class SpaceSession {
     if (!this.#concurrentWatchRefresh) {
       // Single-flight (default): send + apply run together, chained on the
       // prior mutation's completion. Nothing is issued until the previous
-      // mutation fully resolves. Structurally identical to the pre-concurrency
-      // path (a single `work` closure chained on the mutation promise, then
-      // `await`-ed) so its microtask timing — which some downstream ordering
-      // depends on — is unchanged.
+      // mutation fully resolves. `apply` runs in the microtask cascade
+      // rooted at the response frame's delivery, and one-frame-per-turn
+      // transports (loopback included) cannot deliver a later effect frame
+      // until that cascade completes — so no handleEffect can mutate the
+      // watch view between the response resolving and `apply` running.
       const previous = this.#watchApply;
       const current = previous.catch(() => undefined).then(async () =>
         apply(await send())
@@ -1608,16 +1622,51 @@ export class WatchView {
 
 export const connect = Client.connect;
 
+// Loopback delivers server frames on zero-delay TIMER turns, one frame per
+// turn, like a socket: no response or push ever arrives inside the sender's
+// own await cascade, so code that accidentally depends on "nothing arrives
+// until I yield" fails here the way it would against a deployment. One
+// frame per macrotask also guarantees a frame's full microtask cascade
+// (response resolution, request() continuation, caller continuation)
+// completes before the next frame delivers. Client→server keeps awaiting
+// the server's processing: the server's fan-out drain-wait counts a frame
+// from receive() entry, and a send that merely enqueued would let fan-out
+// read heads that predate a write already handed to the transport. Frames
+// staged at close() are dropped — nothing arrives after the socket is
+// gone. Remaining fidelity gap: setCloseReceiver is a no-op, so a
+// server-initiated disconnect is invisible over loopback.
 export const loopback = (server: Server): Transport => {
   let receiver = (_payload: string) => {};
+  let closed = false;
+  const queue: string[] = [];
+  let pump: ReturnType<typeof setTimeout> | null = null;
+  const drainOne = () => {
+    pump = null;
+    if (closed) return;
+    const frame = queue.shift();
+    if (frame === undefined) return;
+    receiver(frame);
+    if (queue.length > 0) schedule();
+  };
+  const schedule = () => {
+    pump ??= setTimeout(drainOne, 0);
+  };
   const connection = server.connect((message) => {
-    receiver(encodeMemoryBoundary(message));
+    if (closed) return;
+    queue.push(encodeMemoryBoundary(message));
+    schedule();
   });
   return {
     async send(payload: string) {
       await connection.receive(payload);
     },
     close() {
+      closed = true;
+      if (pump !== null) {
+        clearTimeout(pump);
+        pump = null;
+      }
+      queue.length = 0;
       connection.close();
       return Promise.resolve();
     },

@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { StaticCacheFS } from "@commonfabric/static";
+import { StaticCache } from "@commonfabric/static";
 import { isRecord } from "@commonfabric/utils/types";
 import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import type { JSONSchemaObj } from "@commonfabric/api";
@@ -51,7 +51,7 @@ async function getTypeScriptEnvironmentTypes(): Promise<
     return typeLibsCache;
   }
 
-  const cache = new StaticCacheFS();
+  const cache = StaticCache.fromFileSystem();
   const es2023 = await cache.getText("types/es2023.d.ts");
   const jsx = await cache.getText("types/jsx.d.ts");
   const dom = await cache.getText("types/dom.d.ts");

@@ -5,7 +5,7 @@ import {
   pieceCallRawArgs,
   writePieceRenderStatus,
 } from "../commands/piece.ts";
-import { cf, stripAnsi, withEnv } from "./utils.ts";
+import { cf, stripAnsi } from "./utils.ts";
 import { ConsoleMethod } from "@commonfabric/runner";
 import {
   hasJsonArgument,
@@ -82,22 +82,23 @@ describe("JSON command contracts", () => {
   });
 
   it("keeps the profiling marker off pattern JSON stdout", async () => {
-    await withEnv("CF_PROFILE_DONE_MARKER", "profile finished", async () => {
-      const { code, stdout, stderr } = await cf(
-        "check fixtures/check-json-no-evaluate.ts --pattern-json",
-      );
+    const env = { CF_PROFILE_DONE_MARKER: "profile finished" };
+    const { code, stdout, stderr } = await cf(
+      "check fixtures/check-json-no-evaluate.ts --pattern-json",
+      { env },
+    );
 
-      expect(code).toBe(0);
-      expect(stdout).toEqual(["1"]);
-      expect(stderr.join("\n")).toContain("profile finished");
+    expect(code).toBe(0);
+    expect(stdout).toEqual(["1"]);
+    expect(stderr.join("\n")).toContain("profile finished");
 
-      const transformed = await cf(
-        "check fixtures/check-json-no-evaluate.ts --show-transformed",
-      );
-      expect(transformed.code).toBe(0);
-      expect(transformed.stdout.join("\n")).not.toContain("profile finished");
-      expect(transformed.stderr.join("\n")).toContain("profile finished");
-    });
+    const transformed = await cf(
+      "check fixtures/check-json-no-evaluate.ts --show-transformed",
+      { env },
+    );
+    expect(transformed.code).toBe(0);
+    expect(transformed.stdout.join("\n")).not.toContain("profile finished");
+    expect(transformed.stderr.join("\n")).toContain("profile finished");
   });
 
   it("keeps parser help off reserved stdout modes", async () => {

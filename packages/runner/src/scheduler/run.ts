@@ -563,18 +563,22 @@ function finalizeReactiveActionCommit(
   if (!log) {
     throw new Error("scheduler action commit did not build a reactivity log");
   }
-  // Track the commit as in-flight async builtin work so `runtime.settled()`
-  // waits for its post-commit outbox flush (the sqlite query RPC + writeback;
-  // also the barrier that guarantees a fire-and-forget builtin's flush has
-  // registered its own network/LLM work). Registered before this run's running
-  // promise resolves, so a reader observes the settled result rather than racing
-  // the flush. `idle()` deliberately stays free of this. Commits with no
-  // post-commit effects keep the fire-and-forget fast path.
+  // Track the effect layer as in-flight async builtin work so
+  // `runtime.settled()` waits for the post-commit outbox flush (the sqlite
+  // query RPC + writeback; also the barrier that guarantees a
+  // fire-and-forget builtin's flush has registered its own network/LLM
+  // work). The effect layer, not the commit promise: effects run at the
+  // verdict, while the promise additionally waits for the subscribed view
+  // to cover the write — an incoming-frame wait quiescence must not depend
+  // on. Registered before this run's running promise resolves, so a reader
+  // observes the settled result rather than racing the flush. `idle()`
+  // deliberately stays free of this. Commits with no post-commit effects
+  // keep the fire-and-forget fast path.
   if (hasPostCommitEffects) {
-    state.runtime.trackAsyncWork(commitPromise);
+    state.runtime.trackAsyncWork(args.tx.postCommitEffectsSettled());
   }
   const committedLog = log;
-  watchReactiveActionCommit({
+  const handled = watchReactiveActionCommit({
     action: args.action,
     tx: args.tx,
     log: committedLog,
@@ -597,6 +601,13 @@ function finalizeReactiveActionCommit(
       }
     },
   });
+  // The barrier entry commit() registered settles with the commit promise,
+  // but the disposition above — a conflict's catch-up-then-requeue in
+  // particular — runs afterwards. Register the handled chain too, so
+  // idleWithPendingCommits cannot release in the window between a
+  // rejection settling and its retry being requeued (the event path in
+  // events.ts registers the same way).
+  state.runtime.storageManager.trackPendingCommit(handled);
 
   logger.debug("schedule-run-complete", () => [
     `[RUN] Action completed: ${args.actionId}`,
