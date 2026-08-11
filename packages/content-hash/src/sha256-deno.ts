@@ -1,7 +1,6 @@
-/**
- * Deno version of SHA256.
- */
+/** Deno version of SHA256. */
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isDeno } from "@commonfabric/utils/env";
 import type { IncrementalHasher } from "@/interface.ts";
 import { BaseIncrementalHasher } from "@/BaseIncrementalHasher.ts";
@@ -28,9 +27,7 @@ function assertUsable() {
   }
 }
 
-/**
- * Deno-specific incremental hasher.
- */
+/** Deno-specific incremental hasher. */
 class DenoHasher extends BaseIncrementalHasher {
   #hasher = crypto!.createHash("sha256");
 
@@ -56,22 +53,18 @@ class DenoHasher extends BaseIncrementalHasher {
         );
       }
       default: {
-        throw new Error(`Unknown encoding: ${encoding}`);
+        throw new Error(`Unknown encoding: ${backtickQuote(encoding)}`);
       }
     }
   }
 }
 
-/**
- * Indicates whether this module is usable.
- */
+/** Indicates whether this module is usable. */
 export function canUseDeno() {
   return crypto !== null;
 }
 
-/**
- * Performs a hash on a single array.
- */
+/** Performs a hash on a single array. */
 export function sha256Deno(payload: Uint8Array): Uint8Array {
   assertUsable();
 
@@ -82,9 +75,7 @@ export function sha256Deno(payload: Uint8Array): Uint8Array {
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
-/**
- * Creates an incremental hasher.
- */
+/** Creates an incremental hasher. */
 export function createHasherDeno(): IncrementalHasher {
   assertUsable();
   return new DenoHasher();

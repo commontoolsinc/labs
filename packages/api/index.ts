@@ -142,7 +142,7 @@ export interface FabricHash extends FabricPrimitive {
 }
 
 export interface FabricHashConstructor {
-  new (hash: Uint8Array, tag: string): FabricHash;
+  new (hash: Uint8Array, tag: string, transfer?: boolean): FabricHash;
   prototype: FabricHash;
 }
 
@@ -174,12 +174,12 @@ export declare const FabricLink: FabricLinkConstructor;
  */
 export interface FabricBytes extends FabricPrimitive {
   readonly length: number;
-  slice(start?: number, end?: number): Uint8Array;
+  slice(start?: number, end?: number): Uint8Array<ArrayBuffer>;
   copyInto(target: Uint8Array, offset?: number, length?: number): number;
 }
 
 export interface FabricBytesConstructor {
-  new (bytes: Uint8Array): FabricBytes;
+  new (bytes: Uint8Array, transfer?: boolean): FabricBytes;
   prototype: FabricBytes;
 }
 
@@ -1945,9 +1945,19 @@ export type JSONSchemaObj = {
   readonly examples?: readonly JSONValue[];
   readonly $schema?: string;
   readonly $comment?: string;
+  // Standard JSON Schema annotation. On a stream property it is a verb
+  // listing mark (`@deprecated` JSDoc lowers to it): `cf piece verbs` hides
+  // the verb by default, everything stays callable. Annotation-class in the
+  // piece compat checker, so it adds and removes freely.
+  readonly deprecated?: boolean;
 
   // Common Fabric extensions
   readonly scope?: SchemaScope;
+  // Verb listing mark on stream properties: a UI affordance outside the
+  // headless contract (inferred at compile time from session-scoped handler
+  // bindings + a void event). Hidden from the default `cf piece verbs`
+  // listing; always callable; never consulted by `cf piece call`.
+  readonly tier?: "wrapper";
   // Discovery hashtags from the doc comment (lowercased, without the leading
   // `#`). Populated by the schema generator; mirrors the description text.
   readonly tags?: readonly string[];

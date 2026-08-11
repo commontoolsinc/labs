@@ -1,6 +1,7 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import type { FabricValue } from "@commonfabric/api";
 import { parseClientMessage, Server, SessionRegistry } from "../v2/server.ts";
 import {
   decodeMemoryBoundary,
@@ -10,11 +11,13 @@ import {
   type HelloOkMessage,
   MAX_ENTITY_ID_PAGE_SIZE,
   MEMORY_PROTOCOL,
+  resetOwnWriteEchoConfig,
   type ResponseMessage,
   type ServerMessage,
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
   type SessionSync,
+  setOwnWriteEchoConfig,
 } from "../v2.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
 
@@ -239,6 +242,45 @@ const assertCommitBurstBeforeFanout = async (
     time.restore();
   }
 };
+
+Deno.test("memory v2 server keeps publication locks independent per space", async () => {
+  const server = createServer("memory://memory-v2-publication-lock-spaces");
+  const internals = server as unknown as {
+    withSpacePublicationLock<T>(
+      space: string,
+      run: () => Promise<T>,
+    ): Promise<T>;
+  };
+  const firstEntered = Promise.withResolvers<void>();
+  const releaseFirst = Promise.withResolvers<void>();
+  let sameSpaceEntered = false;
+  let otherSpaceEntered = false;
+
+  const first = internals.withSpacePublicationLock("space-a", async () => {
+    firstEntered.resolve();
+    await releaseFirst.promise;
+  });
+  await firstEntered.promise;
+  const sameSpace = internals.withSpacePublicationLock("space-a", () => {
+    sameSpaceEntered = true;
+    return Promise.resolve();
+  });
+  const otherSpace = internals.withSpacePublicationLock("space-b", () => {
+    otherSpaceEntered = true;
+    return Promise.resolve();
+  });
+
+  try {
+    await otherSpace;
+    assertEquals(otherSpaceEntered, true);
+    assertEquals(sameSpaceEntered, false);
+  } finally {
+    releaseFirst.resolve();
+    await Promise.all([first, sameSpace]);
+    await server.close();
+  }
+  assertEquals(sameSpaceEntered, true);
+});
 
 Deno.test("memory v2 server stateless respond does not issue hello.ok", async () => {
   const server = createServer("memory://memory-v2-server-stateless-respond");
@@ -2614,7 +2656,7 @@ Deno.test("memory v2 server accepts cross-client commit bursts before fan-out", 
   );
 });
 
-Deno.test("memory v2 server does not echo same-session operation docs through watches", async () => {
+Deno.test("memory v2 server elides own set heads and delivers own patch heads through watches", async () => {
   const server = createServer("memory://memory-v2-server-suppress-own-watch");
   const writerMessages: ServerMessage[] = [];
   const observerMessages: ServerMessage[] = [];
@@ -2698,8 +2740,9 @@ Deno.test("memory v2 server does not echo same-session operation docs through wa
 
     await server.flushSessions([space]);
 
-    // The writer hears no echo of its own doc — only the accept's marker on
-    // an otherwise-empty frame (CT-1927).
+    // The writer hears no echo of its own SET — it provably holds those
+    // bytes (CT-1965 elision) — only the accept's marker on an
+    // otherwise-empty frame (CT-1927).
     const writerMarker = assertEffect(shiftMessage(writerMessages));
     assertEquals(writerMarker.effect.upserts, []);
     assertEquals(writerMarker.effect.caughtUpLocalSeq, 1);
@@ -2716,6 +2759,369 @@ Deno.test("memory v2 server does not echo same-session operation docs through wa
     }]);
     assertEquals(observerEffect.effect.removes, []);
     assertEquals(observerMessages, []);
+
+    // A PATCH head rides the writer's own covering frame as the full
+    // post-apply document (CT-1965): merged state is truth the writer
+    // cannot extrapolate, so the frame is the truth channel.
+    await writer.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "writer-patch",
+      space,
+      sessionId: writerSessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:doc:1",
+          patches: [{ op: "replace", path: "/value/version", value: 2 }],
+        }],
+      },
+    }));
+    const patched = nextResponse<any>(writerMessages);
+    assertEquals(patched.requestId, "writer-patch");
+    assertEquals(patched.ok?.seq, 2);
+
+    await server.flushSessions([space]);
+
+    const writerEcho = assertEffect(shiftMessage(writerMessages));
+    assertEquals(writerEcho.effect.upserts, [{
+      branch: "",
+      id: "of:doc:1",
+      scope: "space",
+      seq: 2,
+      doc: {
+        value: { version: 2 },
+      },
+    }]);
+    assertEquals(writerEcho.effect.caughtUpLocalSeq, 2);
+    assertEquals(writerMessages, []);
+    const observerPatchEffect = assertEffect(shiftMessage(observerMessages));
+    assertEquals(observerPatchEffect.effect.upserts.map((u) => u.seq), [2]);
+    assertEquals(observerMessages, []);
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server classifies own-write echo by the head-producing op", async () => {
+  const server = createServer("memory://memory-v2-server-echo-classification");
+  const messages: ServerMessage[] = [];
+  const writer = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-echo-classification";
+
+  try {
+    await writer.receive(encodeMemoryBoundary(HELLO));
+    const sessionOpen = expectHelloOk(messages);
+    await writer.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open",
+      space,
+      session: {},
+      invocation: authInvocation(sessionOpen),
+    }));
+    const sessionId =
+      nextResponse<{ sessionId: string }>(messages).ok!.sessionId;
+    await writer.receive(encodeMemoryBoundary({
+      type: "session.watch.set",
+      requestId: "watch",
+      space,
+      sessionId,
+      watches: [{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:c",
+            selector: { path: [], schema: false },
+          }],
+        },
+      }],
+    }));
+    shiftMessage(messages);
+
+    const transact = async (
+      requestId: string,
+      localSeq: number,
+      operations: FabricValue[],
+    ) => {
+      await writer.receive(encodeMemoryBoundary({
+        type: "transact",
+        requestId,
+        space,
+        sessionId,
+        commit: {
+          localSeq,
+          reads: { confirmed: [], pending: [] },
+          operations,
+        },
+      }));
+      return nextResponse<any>(messages).ok!.seq;
+    };
+
+    await transact("seed", 1, [{
+      op: "set",
+      id: "of:doc:c",
+      value: { value: { items: [] } },
+    }]);
+    await server.flushSessions([space]);
+    const seeded = assertEffect(shiftMessage(messages));
+    assertEquals(seeded.effect.upserts, []);
+    assertEquals(seeded.effect.caughtUpLocalSeq, 1);
+
+    // Multi-op ending in a set: the set produced the head, the writer holds
+    // its bytes — elided.
+    await transact("patch-then-set", 2, [
+      {
+        op: "patch",
+        id: "of:doc:c",
+        patches: [{ op: "replace", path: "/value/items", value: ["a"] }],
+      },
+      { op: "set", id: "of:doc:c", value: { value: { items: ["b"] } } },
+    ]);
+    await server.flushSessions([space]);
+    const elided = assertEffect(shiftMessage(messages));
+    assertEquals(elided.effect.upserts, []);
+    assertEquals(elided.effect.caughtUpLocalSeq, 2);
+
+    // Multi-op ending in a patch: the patch produced the head — full
+    // post-apply doc.
+    await transact("set-then-patch", 3, [
+      { op: "set", id: "of:doc:c", value: { value: { items: [] } } },
+      {
+        op: "patch",
+        id: "of:doc:c",
+        patches: [{ op: "replace", path: "/value/items", value: ["c"] }],
+      },
+    ]);
+    await server.flushSessions([space]);
+    const echoed = assertEffect(shiftMessage(messages));
+    assertEquals(echoed.effect.upserts, [{
+      branch: "",
+      id: "of:doc:c",
+      scope: "space",
+      seq: 3,
+      doc: { value: { items: ["c"] } },
+    }]);
+    assertEquals(echoed.effect.caughtUpLocalSeq, 3);
+
+    // Two commits coalesced into one flush: the origin tracks the latest
+    // commit — a patch head — so the frame carries the full doc at the
+    // latest seq.
+    await transact("coalesced-set", 4, [{
+      op: "set",
+      id: "of:doc:c",
+      value: { value: { items: ["d"] } },
+    }]);
+    await transact("coalesced-patch", 5, [{
+      op: "patch",
+      id: "of:doc:c",
+      patches: [{ op: "append", path: "/value/items", values: ["e"] }],
+    }]);
+    await server.flushSessions([space]);
+    const coalesced = assertEffect(shiftMessage(messages));
+    assertEquals(coalesced.effect.upserts, [{
+      branch: "",
+      id: "of:doc:c",
+      scope: "space",
+      seq: 5,
+      doc: { value: { items: ["d", "e"] } },
+    }]);
+    assertEquals(coalesced.effect.caughtUpLocalSeq, 5);
+
+    // An own DELETE head is elided: the writer trivially holds its outcome.
+    await transact("delete", 6, [{ op: "delete", id: "of:doc:c" }]);
+    await server.flushSessions([space]);
+    const deleted = assertEffect(shiftMessage(messages));
+    assertEquals(deleted.effect.upserts, []);
+    assertEquals(deleted.effect.caughtUpLocalSeq, 6);
+    assertEquals(messages, []);
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server suppresses own patch heads when the own-write echo config is off", async () => {
+  setOwnWriteEchoConfig(false);
+  const server = createServer("memory://memory-v2-server-echo-config-off");
+  const messages: ServerMessage[] = [];
+  const writer = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-memory-v2-echo-config-off";
+
+  try {
+    await writer.receive(encodeMemoryBoundary(HELLO));
+    const sessionOpen = expectHelloOk(messages);
+    await writer.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open",
+      space,
+      session: {},
+      invocation: authInvocation(sessionOpen),
+    }));
+    const sessionId =
+      nextResponse<{ sessionId: string }>(messages).ok!.sessionId;
+    await writer.receive(encodeMemoryBoundary({
+      type: "session.watch.set",
+      requestId: "watch",
+      space,
+      sessionId,
+      watches: [{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:k",
+            selector: { path: [], schema: false },
+          }],
+        },
+      }],
+    }));
+    shiftMessage(messages);
+
+    for (
+      const [requestId, localSeq, operations] of [
+        ["seed", 1, [{
+          op: "set",
+          id: "of:doc:k",
+          value: { value: { version: 1 } },
+        }]],
+        ["patch", 2, [{
+          op: "patch",
+          id: "of:doc:k",
+          patches: [{ op: "replace", path: "/value/version", value: 2 }],
+        }]],
+      ] as const
+    ) {
+      await writer.receive(encodeMemoryBoundary({
+        type: "transact",
+        requestId,
+        space,
+        sessionId,
+        commit: {
+          localSeq,
+          reads: { confirmed: [], pending: [] },
+          operations: operations as unknown as FabricValue[],
+        },
+      }));
+      nextResponse<any>(messages);
+      await server.flushSessions([space]);
+      // Config off restores full suppression: patch heads included.
+      const marker = assertEffect(shiftMessage(messages));
+      assertEquals(marker.effect.upserts, []);
+      assertEquals(marker.effect.caughtUpLocalSeq, localSeq);
+    }
+    assertEquals(messages, []);
+  } finally {
+    resetOwnWriteEchoConfig();
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server delivers a foreign-moved head to the earlier own-set writer", async () => {
+  const server = createServer("memory://memory-v2-server-echo-foreign-moved");
+  const firstMessages: ServerMessage[] = [];
+  const secondMessages: ServerMessage[] = [];
+  const first = server.connect((message) => firstMessages.push(message));
+  const second = server.connect((message) => secondMessages.push(message));
+  const space = "did:key:z6Mk-memory-v2-echo-foreign-moved";
+
+  try {
+    const firstSessionId = await openTestSession(
+      first,
+      firstMessages,
+      space,
+      "first",
+    );
+    const secondSessionId = await openTestSession(
+      second,
+      secondMessages,
+      space,
+      "second",
+    );
+
+    for (
+      const [connection, sessionId, messages] of [
+        [first, firstSessionId, firstMessages],
+        [second, secondSessionId, secondMessages],
+      ] as const
+    ) {
+      await connection.receive(encodeMemoryBoundary({
+        type: "session.watch.set",
+        requestId: "watch",
+        space,
+        sessionId,
+        watches: [{
+          id: "root",
+          kind: "graph",
+          query: {
+            roots: [{
+              id: "of:doc:f",
+              selector: { path: [], schema: false },
+            }],
+          },
+        }],
+      }));
+      shiftMessage(messages);
+    }
+
+    // The first session sets; a foreign set moves the head PAST it inside
+    // the same un-flushed batch. The first writer no longer holds the head,
+    // so its frame MUST carry the doc — with the foreign value — despite
+    // its own set being elidable a moment earlier.
+    await first.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "first-set",
+      space,
+      sessionId: firstSessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:f",
+          value: { value: { author: "first" } },
+        }],
+      },
+    }));
+    assertEquals(nextResponse<any>(firstMessages).requestId, "first-set");
+
+    await second.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "second-set",
+      space,
+      sessionId: secondSessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:doc:f",
+          value: { value: { author: "second" } },
+        }],
+      },
+    }));
+    assertEquals(nextResponse<any>(secondMessages).requestId, "second-set");
+
+    await server.flushSessions([space]);
+
+    const firstEffect = assertEffect(shiftMessage(firstMessages));
+    assertEquals(firstEffect.effect.upserts, [{
+      branch: "",
+      id: "of:doc:f",
+      scope: "space",
+      seq: 2,
+      doc: { value: { author: "second" } },
+    }]);
+    assertEquals(firstEffect.effect.caughtUpLocalSeq, 1);
+    assertEquals(firstMessages, []);
+
+    // Mixed provenance also delivers to the head-owning second writer: the
+    // doc fans out authoritatively to every session once two sessions wrote
+    // it in one batch window.
+    const secondEffect = assertEffect(shiftMessage(secondMessages));
+    assertEquals(secondEffect.effect.upserts.map((u) => u.seq), [2]);
+    assertEquals(secondEffect.effect.caughtUpLocalSeq, 1);
+    assertEquals(secondMessages, []);
   } finally {
     await server.close();
   }
@@ -2962,13 +3368,14 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
 
   (server as unknown as {
     transact(
-      message: Parameters<Server["transact"]>[0],
+      ...args: Parameters<Server["transact"]>
     ): ReturnType<Server["transact"]>;
-  }).transact = async (message) => {
+  }).transact = async (...args) => {
+    const [message] = args;
     if (message.requestId === "tx-2") {
       await releaseTx2.promise;
     }
-    return await originalTransact(message);
+    return await originalTransact(...args);
   };
 
   try {
@@ -3129,13 +3536,14 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
 
   (server as unknown as {
     transact(
-      message: Parameters<Server["transact"]>[0],
+      ...args: Parameters<Server["transact"]>
     ): ReturnType<Server["transact"]>;
-  }).transact = async (message) => {
+  }).transact = async (...args) => {
+    const [message] = args;
     if (message.requestId === "tx-3") {
       await releaseTx3.promise;
     }
-    return await originalTransact(message);
+    return await originalTransact(...args);
   };
 
   try {
@@ -3224,7 +3632,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     await time.tickAsync(1);
     await time.tickAsync(0);
 
-    await writer.receive(encodeMemoryBoundary({
+    const tx2 = writer.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-2",
       space,
@@ -3239,10 +3647,6 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
         }],
       },
     }));
-    assertEquals(
-      nextResponse<any>(writerMessages).requestId,
-      "tx-2",
-    );
 
     const tx3 = writer.receive(encodeMemoryBoundary({
       type: "transact",
@@ -3265,7 +3669,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     await time.tickAsync(0);
 
     const firstEffect = assertEffect(shiftMessage(messages));
-    assertEquals(firstEffect.effect.toSeq, 2);
+    assertEquals(firstEffect.effect.toSeq, 1);
     assertEquals(firstEffect.effect.upserts, [{
       branch: "",
       id: "of:doc:1",
@@ -3277,8 +3681,15 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
     }]);
     assertEquals(messages, []);
 
+    await tx2;
+    assertEquals(
+      nextResponse<any>(writerMessages).requestId,
+      "tx-2",
+    );
+
     releaseTx3.resolve();
     await tx3;
+    await time.tickAsync(1);
     await time.tickAsync(0);
 
     assertEquals(
@@ -3344,13 +3755,14 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
 
   (server as unknown as {
     transact(
-      message: Parameters<Server["transact"]>[0],
+      ...args: Parameters<Server["transact"]>
     ): ReturnType<Server["transact"]>;
-  }).transact = async (message) => {
+  }).transact = async (...args) => {
+    const [message] = args;
     if (message.requestId === "tx-3") {
       await releaseTx3.promise;
     }
-    return await originalTransact(message);
+    return await originalTransact(...args);
   };
 
   try {
@@ -3439,7 +3851,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
     await time.tickAsync(1);
     await time.tickAsync(0);
 
-    await writer.receive(encodeMemoryBoundary({
+    const tx2 = writer.receive(encodeMemoryBoundary({
       type: "transact",
       requestId: "tx-2",
       space,
@@ -3454,10 +3866,6 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
         }],
       },
     }));
-    assertEquals(
-      nextResponse<any>(writerMessages).requestId,
-      "tx-2",
-    );
 
     const tx3 = writer.receive(encodeMemoryBoundary({
       type: "transact",
@@ -3480,7 +3888,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
     await time.tickAsync(0);
 
     const firstEffect = assertEffect(shiftMessage(messages));
-    assertEquals(firstEffect.effect.toSeq, 2);
+    assertEquals(firstEffect.effect.toSeq, 1);
     assertEquals(firstEffect.effect.upserts, [{
       branch: "",
       id: "of:doc:1",
@@ -3490,6 +3898,23 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
         value: { version: 1 },
       },
     }]);
+    assertEquals(messages, []);
+
+    await tx2;
+    assertEquals(
+      nextResponse<any>(writerMessages).requestId,
+      "tx-2",
+    );
+
+    await time.tickAsync(1);
+    await time.tickAsync(0);
+
+    await time.tickAsync(499);
+    await time.tickAsync(0);
+    assertEquals(messages, []);
+
+    await time.tickAsync(1);
+    await time.tickAsync(0);
     assertEquals(messages, []);
 
     await time.tickAsync(499);

@@ -1,6 +1,4 @@
-/**
- * WASM version of SHA256.
- */
+/** WASM version of SHA256. */
 
 import { createSHA256, type IHasher } from "hash-wasm";
 import {
@@ -8,9 +6,7 @@ import {
 } from "@/BaseSmallChunkUpdatingHasher.ts";
 import type { IncrementalHasher } from "@/interface.ts";
 
-/**
- * How many hashers to have available for concurrent use.
- */
+/** How many hashers to have available for concurrent use. */
 const HASHER_POOL_SIZE = 5;
 
 /**
@@ -18,7 +14,7 @@ const HASHER_POOL_SIZE = 5;
  * tactic that is necessary since this module exposes a synchronous interface
  * for actual hashing (once loaded), whereas `hash-wasm` only allows
  * asynchronous hasher construction. Once constructed, though, hashers can be
- * used synchronously).
+ * used synchronously.
  */
 const hasherPool: IHasher[] = [];
 
@@ -50,9 +46,7 @@ function holdHasher(owner: WeakKey, hasher: IHasher) {
   hasherRepooler.register(owner, hasher, hasher);
 }
 
-/**
- * Returns a hasher taken by `takeHasher()` to the pool.
- */
+/** Returns a hasher taken by `takeHasher()` to the pool. */
 function releaseHasher(hasher: IHasher) {
   hasherRepooler.unregister(hasher);
   hasherPool.push(hasher);
@@ -70,14 +64,10 @@ const theOneShotHasher: IHasher[] = [];
  */
 let initResult: Promise<boolean> | null = null;
 
-/**
- * Whether this module is actually usable.
- */
+/** Whether this module is actually usable. */
 let moduleIsUsable: boolean = false;
 
-/**
- * Gets and initializes the unique one-shot hasher instance.
- */
+/** Gets and initializes the unique one-shot hasher instance. */
 function getOneShotHasher(): IHasher {
   const result = theOneShotHasher[0]!;
   result.init();
@@ -127,6 +117,10 @@ class WasmCollectingHasher extends BaseSmallChunkUpdatingHasher {
 class WasmUpdatingHasher extends BaseSmallChunkUpdatingHasher {
   #hasher: IHasher;
 
+  /**
+   * Constructs an instance which hashes into `hasher`, taking over
+   * responsibility for returning it to the pool.
+   */
   constructor(hasher: IHasher) {
     super();
     this.#hasher = hasher;
@@ -173,9 +167,7 @@ export function initWasm() {
   return initResult;
 }
 
-/**
- * Performs a hash on a single array.
- */
+/** Performs a hash on a single array. */
 export function sha256Wasm(payload: Uint8Array): Uint8Array {
   assertUsable();
   const hasher = getOneShotHasher();
@@ -184,9 +176,7 @@ export function sha256Wasm(payload: Uint8Array): Uint8Array {
   return hasher.digest("binary");
 }
 
-/**
- * Creates an incremental hasher.
- */
+/** Creates an incremental hasher. */
 export function createHasherWasm(): IncrementalHasher {
   assertUsable();
   const hasher = takeHasher();
@@ -194,11 +184,9 @@ export function createHasherWasm(): IncrementalHasher {
 }
 
 /**
- * Creates a collecting incremental hasher. This is exported just for
- * testing. (We don't need to do this for the updating hasher, because it gets
- * sufficiently tested via `createHasherWasm()` and would fail the concurrency
- * test anyway because there aren't enough pooled instances to satisfy the
- * concurrency required by the test.)
+ * Creates a collecting incremental hasher, that is, the variant used when the
+ * pool is empty. Exported so that it can be exercised directly, which
+ * `createHasherWasm()` cannot be made to do on demand.
  */
 export function createHasherWasmCollecting(): IncrementalHasher {
   assertUsable();

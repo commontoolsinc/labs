@@ -1,7 +1,8 @@
 import { DID, Identity, type Session } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { JsonCodec } from "@commonfabric/data-model/codec-json";
-import { PieceManager } from "@commonfabric/piece";
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { newDefaultJsonCodec } from "@commonfabric/data-model/codecs";
 import {
   PieceController,
   PiecesController,
@@ -39,9 +40,11 @@ import {
   setBlindStructuralTarget,
   setPatternEnvironment,
   type SigilLink,
+  SpaceHostValidationError,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
 import { linkRefPayload } from "@commonfabric/runner/shared";
+import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 import {
   cfcLabelViewForCell,
   createRenderConfidentialityResolver,
@@ -170,7 +173,7 @@ import {
 } from "./runtime-error.ts";
 
 const MAX_SERIALIZATION_DEPTH = 5;
-const blobUploadCodec = new JsonCodec();
+const blobUploadCodec = newDefaultJsonCodec();
 
 // Split-timing for the CFC label IPC path. Counts/timing are readable via
 // getLoggerCounts(); enabled silently so the hot path pays only the timestamp.
@@ -179,34 +182,9 @@ const cfcLabelLogger = getLogger("runtime-client.cfc-label", {
   level: "error",
 });
 
-/**
- * PageId intake: accepts both the bare tagged hash (`fid1:<hash>`, the
- * routing form `PageHandle.id()` emits) and the `of:`-schemed URI
- * (`CellHandle.id()` emits the full schemed id). Without the strip, a
- * schemed pageId would silently parse as a hash whose TAG is `of:fid1`
- * and address the nonexistent entity `of:of:fid1:<hash>` — no error,
- * just a page that never resolves. `computed:` ids are deliberately NOT
- * accepted: pages are pieces (result cells, always `of:`-schemed), and
- * the scheme is part of the identity, so stripping `computed:` would
- * silently alias a different entity.
- */
-function pageIdForRouting(pageId: string): string {
-  if (pageId.startsWith("computed:")) {
-    throw new Error("Computed ids are not valid page ids.");
-  }
-  return pageId.startsWith("of:") ? pageId.slice("of:".length) : pageId;
-}
-
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   const spaceBaseUrl = new URL(`/${space}/`, apiUrl);
   return new URL(url, spaceBaseUrl).href;
-}
-
-/** Whether the home root must take the reconcile-before-start path. */
-export function shouldReconcileHomeRoot(
-  runtime: Pick<Runtime, "experimental">,
-): boolean {
-  return runtime.experimental?.systemPatternAutoUpdate === true;
 }
 
 /**
@@ -430,13 +408,18 @@ function sanitizedBody(
     );
   }
 
+  // A `FabricSpecialObject` keeps its state in private fields and has zero
+  // enumerable own properties, so the property walk below would rebuild one as
+  // `{}` -- a dump asserting "empty object" about a value that is nothing of
+  // the kind. Both arms are named instead of descended: a primitive is atomic
+  // and has nothing to descend into, and an instance's codec contents are not
+  // reachable by property name. Naming beats refusing here, because what a
+  // debug dump was handed is the very thing being debugged.
+  if (obj instanceof FabricSpecialObject) {
+    return toCompactDebugString(obj);
+  }
+
   // Plain objects - walk properties.
-  //
-  // TODO(danfuzz): a `FabricSpecialObject` lands here and is shown as `{}`,
-  // its state being in private fields rather than enumerable members. A
-  // `FabricPrimitive` wants formatting by its codec and a `FabricInstance` by
-  // its codec contents -- the same gap marked at the sibling walks, and here it
-  // makes a debug dump silently wrong rather than losing stored data.
   try {
     const result: Record<string, unknown> = {};
     for (const key of Object.keys(obj)) {
@@ -472,16 +455,10 @@ export const hasExplicitSubscriptionSchema = (schema: unknown): boolean =>
     typeof schema === "object" && schema !== null &&
     Object.keys(schema).length > 0);
 
-type SpaceContext = {
-  pieceManager: PieceManager;
-  cc: PiecesController;
-};
-
 export class RuntimeProcessor {
   private runtime: Runtime;
-  private pieceManager: PieceManager;
   private cc: PiecesController;
-  private spaces = new Map<DID, SpaceContext>();
+  private spaces = new Map<DID, PiecesController>();
   private identity: Identity;
   private _isDisposed = false;
   private disposingPromise: Promise<void> | undefined;
@@ -518,16 +495,14 @@ export class RuntimeProcessor {
 
   private constructor(
     runtime: Runtime,
-    pieceManager: PieceManager,
     cc: PiecesController,
     initSpace: DID,
     identity: Identity,
     telemetry: RuntimeTelemetry,
   ) {
     this.runtime = runtime;
-    this.pieceManager = pieceManager;
     this.cc = cc;
-    this.spaces.set(initSpace, { pieceManager, cc });
+    this.spaces.set(initSpace, cc);
     this.identity = identity;
     this.telemetry = telemetry;
     this.telemetry.addEventListener("telemetry", this.#onTelemetry);
@@ -577,7 +552,7 @@ export class RuntimeProcessor {
       });
     });
 
-    let pieceManager: PieceManager | undefined = undefined;
+    let homePieces: PiecesController | undefined = undefined;
     let processor: RuntimeProcessor | undefined = undefined;
     // Everything below goes through the browserWorker preset (CT-1814):
     // host-decided data via the params mapper, plus this worker's declared
@@ -614,15 +589,15 @@ export class RuntimeProcessor {
       pieceCreatedCallback: (piece) => {
         const writeContext = runtime.getWriteDebugContext();
         // Register the piece in ITS space's list: a piece created by a
-        // running foreign-space pattern routes to that space's manager
+        // running foreign-space pattern routes to that space's controller
         // (the context exists — it started the pattern). Fallback to
-        // the home manager, the sole pre-multi-space behavior.
-        const manager = (piece.space && processor?.managerFor(piece.space)) ??
-          pieceManager;
-        if (!manager) return;
+        // the home controller, the sole pre-multi-space behavior.
+        const pieces = (piece.space && processor?.piecesFor(piece.space)) ??
+          homePieces;
+        if (!pieces) return;
         void runtime.withWriteDebugContext(
           writeContext,
-          () => manager.add([piece]),
+          () => pieces.add([piece]),
         ).catch((e: unknown) => {
           console.error(
             "[RuntimeProcessor] Failed to add created piece:",
@@ -641,14 +616,12 @@ export class RuntimeProcessor {
     }
 
     // Allow the worker to acknowledge initialization immediately. Consumers
-    // that need storage/piece-manager convergence should call `synced()`.
-    pieceManager = new PieceManager(session, runtime);
-    const cc = new PiecesController(pieceManager);
+    // that need storage/piece convergence should call `synced()`.
+    homePieces = new PiecesController(session, runtime);
 
     processor = new RuntimeProcessor(
       runtime,
-      pieceManager,
-      cc,
+      homePieces,
       space,
       identity,
       telemetry,
@@ -685,9 +658,9 @@ export class RuntimeProcessor {
   #siteTableWarned = new Set<string>();
 
   /**
-   * Subscribe to the home-space site table and register the last valid HTTP or
-   * HTTPS entry for each space as a host hint. Fire-and-forget: resolution
-   * hints are an enhancement, never a boot dependency.
+   * Subscribes to the home-space site table and registers the last entry for
+   * each space that contains only an HTTP or HTTPS origin. Fire-and-forget:
+   * resolution hints are an enhancement, never a boot dependency.
    *
    * ORDERING CONTRACT for embedders: push a newly learned hint through the
    * RegisterSpaceHost IPC before relying on that space, and proceed only when
@@ -723,18 +696,21 @@ export class RuntimeProcessor {
               ) {
                 continue;
               }
+              let host: URL;
               try {
-                const host = normalizeSpaceHost(entry.host);
-                latestEntries.set(entry.did, {
-                  did: entry.did as DID,
-                  host: host.toString(),
-                });
+                host = normalizeSpaceHost(entry.host);
               } catch (error) {
+                if (!(error instanceof SpaceHostValidationError)) throw error;
                 console.warn(
                   `[RuntimeProcessor] Ignoring invalid site-table entry for ${entry.did}:`,
-                  error instanceof Error ? error.message : error,
+                  error.message,
                 );
+                continue;
               }
+              latestEntries.set(entry.did, {
+                did: entry.did as DID,
+                host: host.toString(),
+              });
             }
             for (const entry of latestEntries.values()) {
               try {
@@ -784,13 +760,13 @@ export class RuntimeProcessor {
   }
 
   /**
-   * The PieceManager already serving a space, if any. Used by the
+   * The PiecesController already serving a space, if any. Used by the
    * piece-created callback to register a piece in its own space's
    * list; deliberately does NOT create a context (a piece can only be
    * created by a pattern some existing context started).
    */
-  managerFor(space: DID): PieceManager | undefined {
-    return this.spaces.get(space)?.pieceManager;
+  piecesFor(space: DID): PiecesController | undefined {
+    return this.spaces.get(space);
   }
 
   dispose(): Promise<void> {
@@ -830,7 +806,7 @@ export class RuntimeProcessor {
   /**
    * Resolve the piece context for a space. The space the worker was
    * initialized with gets the context built at initialize; any other
-   * space lazily gets its own PieceManager/PiecesController, sharing
+   * space lazily gets its own PiecesController, sharing
    * this worker's runtime/scheduler/storage (the storage layer is
    * already multi-space). The per-space session authenticates as the
    * user — no per-space signer, matching the storage connections.
@@ -839,21 +815,17 @@ export class RuntimeProcessor {
    * with no implicit default at this layer. (The runtime guard catches
    * out-of-date callers that still omit it.)
    */
-  private getSpaceCtx(space: DID): SpaceContext {
+  private getSpaceCtx(space: DID): PiecesController {
     const target: DID | undefined = space;
     if (!target) {
       throw new Error("Page operations must name a space explicitly.");
     }
     let ctx = this.spaces.get(target);
     if (!ctx) {
-      const pieceManager = new PieceManager(
+      const created = new PiecesController(
         { as: this.identity, space: target },
         this.runtime,
       );
-      const created: SpaceContext = {
-        pieceManager,
-        cc: new PiecesController(pieceManager),
-      };
       ctx = created;
       this.spaces.set(target, ctx);
       // The constructor kicks the space-cell sync into `ready` without
@@ -861,7 +833,7 @@ export class RuntimeProcessor {
       // error (unreachable host, bad space) doesn't poison this space
       // for the worker's lifetime — the next request rebuilds the
       // context — and doesn't surface as an unhandled rejection.
-      pieceManager.ready.catch((error: unknown) => {
+      created.ready.catch((error: unknown) => {
         if (this.spaces.get(target) === created) {
           this.spaces.delete(target);
         }
@@ -1156,35 +1128,18 @@ export class RuntimeProcessor {
     const homeSpaceCell = this.runtime.getHomeSpaceCell();
     await homeSpaceCell.sync();
 
-    const defaultPatternCell = homeSpaceCell.key("defaultPattern").get()
-      .resolveAsCell();
-    await defaultPatternCell.sync();
-
-    // Fast path: pattern already exists. When home auto-update is enabled,
-    // deliberately fall through to PiecesController.ensureDefaultPattern():
-    // it reconciles the persisted identity before starting the root. Starting
-    // here first would recreate the stale-root bootstrap dependency.
-    // (Value is a Cell itself, and pattern metadata means it's instantiated)
-    // We've followed all the links from "defaultPattern", so our cell should
-    // be the result cell for the default pattern.
-    const reconcileHome = shouldReconcileHomeRoot(this.runtime);
-    if (getMetaLink(defaultPatternCell, "pattern") && !reconcileHome) {
-      await this.runtime.start(defaultPatternCell);
-      await this.runtime.idle();
-      return {
-        cell: createCellRef(defaultPatternCell),
-      };
-    }
-
-    // Pattern is absent, or update-enabled and must be reconciled before start:
-    // use the home-space PiecesController for the complete ensure sequence.
+    // Always the PiecesController path: ensureDefaultPattern() reconciles the
+    // persisted identity and carries the cold-start setup repair that heals an
+    // aged home root. Starting the pattern directly here would skip that
+    // repair, and with systemPatternAutoUpdate unset (every default
+    // deployment) nothing else heals the root — so no fast path belongs in
+    // front of the controller.
     const homeSession: Session = {
       as: this.identity,
       space: this.runtime.userIdentityDID,
     };
-    const homeManager = new PieceManager(homeSession, this.runtime);
-    await homeManager.synced();
-    const homeCC = new PiecesController(homeManager);
+    const homeCC = new PiecesController(homeSession, this.runtime);
+    await homeCC.synced();
 
     const homePattern = await homeCC.ensureDefaultPattern();
 
@@ -1214,7 +1169,7 @@ export class RuntimeProcessor {
   async handlePieceCreate(
     request: PageCreateRequest,
   ): Promise<PageResponse> {
-    const { cc } = this.getSpaceCtx(request.space);
+    const cc = this.getSpaceCtx(request.space);
     let program: Program | undefined;
     let origin: string | undefined;
     if ("url" in request.source && request.source.url) {
@@ -1223,7 +1178,7 @@ export class RuntimeProcessor {
         throw new Error("Piece source URL must use HTTP or HTTPS.");
       }
       origin = sourceUrl.href;
-      program = await cc.manager().runtime.harness.resolve(
+      program = await cc.runtime.harness.resolve(
         new HttpProgramResolver(sourceUrl),
       );
     } else if ("program" in request.source) {
@@ -1245,7 +1200,7 @@ export class RuntimeProcessor {
   async handleGetSpaceRootPattern(
     request: PatternGetSpaceRoot,
   ): Promise<PageResponse> {
-    const { cc } = this.getSpaceCtx(request.space);
+    const cc = this.getSpaceCtx(request.space);
     const piece = await cc.ensureDefaultPattern();
     return {
       page: createPageRef(piece.getCell()),
@@ -1255,7 +1210,7 @@ export class RuntimeProcessor {
   async handleRecreateSpaceRootPattern(
     request: RecreateSpaceRootPatternRequest,
   ): Promise<PageResponse> {
-    const { cc } = this.getSpaceCtx(request.space);
+    const cc = this.getSpaceCtx(request.space);
     const piece = await cc.recreateDefaultPattern();
     return {
       page: createPageRef(piece.getCell()),
@@ -1267,11 +1222,10 @@ export class RuntimeProcessor {
   async handlePageGet(
     request: PageGetRequest,
   ): Promise<PageResponse> {
-    const { pieceManager, cc } = this.getSpaceCtx(request.space);
-    const pageId = pageIdForRouting(request.pageId);
+    const cc = this.getSpaceCtx(request.space);
     const requestedCell = this.runtime.getCellFromEntityId(
-      pieceManager.getSpace(),
-      entityIdFrom(pageId),
+      cc.getSpace(),
+      entityIdFrom(request.pageId),
     );
     await requestedCell.sync();
     const redirect = parseLink(
@@ -1281,7 +1235,7 @@ export class RuntimeProcessor {
     if (redirect?.overwrite === "redirect") {
       const target = this.runtime.getCellFromLink({
         ...redirect,
-        space: redirect.space ?? pieceManager.getSpace(),
+        space: redirect.space ?? cc.getSpace(),
         scope: redirect.scope ?? "space",
       });
       await target.sync();
@@ -1298,7 +1252,7 @@ export class RuntimeProcessor {
         };
       }
 
-      const cell = await cc.manager().get(
+      const cell = await cc.getPieceCell(
         target,
         request.runIt ?? false,
       );
@@ -1307,8 +1261,8 @@ export class RuntimeProcessor {
       };
     }
 
-    const cell = await cc.manager().get(
-      pageId,
+    const cell = await cc.getPieceCell(
+      request.pageId,
       request.runIt ?? false,
     );
 
@@ -1320,10 +1274,10 @@ export class RuntimeProcessor {
   async handlePageGetSlug(
     request: PageGetSlugRequest,
   ): Promise<SlugResponse> {
-    const { pieceManager } = this.getSpaceCtx(request.space);
+    const pieces = this.getSpaceCtx(request.space);
     const cell = this.runtime.getCellFromEntityId(
-      pieceManager.getSpace(),
-      entityIdFrom(pageIdForRouting(request.pageId)),
+      pieces.getSpace(),
+      entityIdFrom(request.pageId),
     );
     await cell.sync();
     const slug = cell.getMetaRaw("slug");
@@ -1333,15 +1287,15 @@ export class RuntimeProcessor {
   async handlePageRemove(
     request: PageRemoveRequest,
   ): Promise<BooleanResponse> {
-    const { cc } = this.getSpaceCtx(request.space);
+    const cc = this.getSpaceCtx(request.space);
     return { value: await cc.remove(request.pageId) };
   }
 
   async handlePageStart(
     request: PageStartRequest,
   ): Promise<BooleanResponse> {
-    const { cc } = this.getSpaceCtx(request.space);
-    await cc.start(request.pageId);
+    const cc = this.getSpaceCtx(request.space);
+    await cc.startPiece(request.pageId);
     // @TODO(runtime-worker-refactor): Return status based on if
     // pattern was actually found and stopped
     return { value: true };
@@ -1350,34 +1304,34 @@ export class RuntimeProcessor {
   async handlePageStop(
     request: PageStopRequest,
   ): Promise<BooleanResponse> {
-    const { cc } = this.getSpaceCtx(request.space);
-    await cc.stop(request.pageId);
+    const cc = this.getSpaceCtx(request.space);
+    await cc.stopPiece(request.pageId);
     // @TODO(runtime-worker-refactor): Return status based on if
     // pattern was actually found and stopped
     return { value: true };
   }
 
   async handlePageGetAll(request: PageGetAllRequest): Promise<CellResponse> {
-    const { pieceManager } = this.getSpaceCtx(request.space);
-    const piecesCell = await pieceManager.getPieceRegistry();
+    const pieces = this.getSpaceCtx(request.space);
+    const piecesCell = await pieces.getPieceRegistry();
     return {
       cell: createCellRef(piecesCell),
     };
   }
 
   async handlePageSynced(request: PageSyncedRequest): Promise<void> {
-    const { pieceManager } = this.getSpaceCtx(request.space);
-    await pieceManager.synced();
+    const pieces = this.getSpaceCtx(request.space);
+    await pieces.synced();
   }
 
   async handlePieceGetSource(
     request: PieceGetSourceRequest,
   ): Promise<PieceSourceResponse> {
-    const { pieceManager } = this.getSpaceCtx(request.space);
+    const pieces = this.getSpaceCtx(request.space);
     // The reader syncs the piece itself, as its first step.
     const cell = this.runtime.getCellFromEntityId(
-      pieceManager.getSpace(),
-      entityIdFrom(pageIdForRouting(request.pieceId)),
+      pieces.getSpace(),
+      entityIdFrom(request.pieceId),
     );
     const state = await readPieceSourceState(this.runtime, cell);
     return { source: { ...state, space: state.space as DID } };
@@ -1393,9 +1347,12 @@ export class RuntimeProcessor {
     ) {
       throw new Error("confirmationToken must be a non-empty string");
     }
-    const { pieceManager } = this.getSpaceCtx(request.space);
+    const pieces = this.getSpaceCtx(request.space);
+    // Keyed on the piece's bare hash rather than the request's spelling of it:
+    // a caller may prepare a change under one accepted address form and
+    // confirm it under the other, and both must reach the one pending entry.
     const confirmationKey = `${request.space}\u0000${
-      pageIdForRouting(request.pieceId)
+      hashStringForEntityAddress(request.pieceId)
     }`;
     let confirmedChange: PreparedPieceSourceChange | undefined;
     if (request.confirmationToken === undefined) {
@@ -1414,10 +1371,10 @@ export class RuntimeProcessor {
       confirmedChange = pending.prepared;
     }
     const cell = this.runtime.getCellFromEntityId(
-      pieceManager.getSpace(),
-      entityIdFrom(pageIdForRouting(request.pieceId)),
+      pieces.getSpace(),
+      entityIdFrom(request.pieceId),
     );
-    const controller = new PieceController(pieceManager, cell);
+    const controller = new PieceController(pieces, cell);
     const result = await controller.changeSource(request.action, {
       confirmedChange,
     });
@@ -1480,9 +1437,7 @@ export class RuntimeProcessor {
   /** Convergence across every opened space — no space named, none implied. */
   async handleRuntimeSynced(): Promise<void> {
     await Promise.all(
-      [...this.spaces.values()].map(({ pieceManager }) =>
-        pieceManager.synced()
-      ),
+      [...this.spaces.values()].map((pieces) => pieces.synced()),
     );
   }
 
@@ -1605,7 +1560,6 @@ export class RuntimeProcessor {
       throw new Error("uploadBlob requires a space DID");
     }
     const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";
-    const bytes = Uint8Array.from(request.body);
     // The blob belongs to the named space, so it uploads to — and its
     // returned URL resolves against — THAT space's host.
     const host = this.runtime.hostForSpace(request.space);
@@ -1613,11 +1567,16 @@ export class RuntimeProcessor {
       `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
       host,
     );
+    // The `true` below cedes `request.body` to the `FabricBytes` rather than
+    // having it copied. That is legitimate because a handler owns the values
+    // its request carries, per `BaseRequest`, so nothing else can be reading
+    // this array.
+    const bytes = new FabricBytes(request.body, true);
     // Blob upload payloads must preserve FabricBytes even when the wider
     // process is running with legacy memory JSON flags.
     const body = blobUploadCodec.encode({
       type: request.contentType,
-      body: new FabricBytes(bytes),
+      body: bytes,
     });
     const response = await fetch(target, {
       method: "POST",

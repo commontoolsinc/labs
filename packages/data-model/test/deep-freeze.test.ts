@@ -10,7 +10,7 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 
 describe("deep-freeze", () => {
-  describe("isDeepFrozen", () => {
+  describe("isDeepFrozen()", () => {
     describe("primitives", () => {
       it("returns `true` for `null`", () => {
         expect(isDeepFrozen(null)).toBe(true);
@@ -44,9 +44,9 @@ describe("deep-freeze", () => {
     describe("functions (opaque immutable leaves)", () => {
       // `deepFreeze()`/`isDeepFrozen()` treat a function as an opaque immutable
       // leaf -- a code reference, not fabric data -- so general-purpose callers
-      // that freeze objects-with-methods (e.g. `api/cfc.ts`'s `cfcPattern`) keep
-      // working. Its internal `prototype`/closure mutability is a known
-      // limitation, closed by the strict `FabricValue`-only migration follow-up.
+      // that freeze objects-with-methods keep working. A function's internal
+      // `prototype` and closure state stays mutable, which the opacity does not
+      // and cannot cover.
       it("returns `true` for a function", () => {
         expect(isDeepFrozen(() => {})).toBe(true);
         expect(isDeepFrozen(function () {})).toBe(true);
@@ -231,10 +231,11 @@ describe("deep-freeze", () => {
 
     // Coverage for `isDeepFrozen` on `FabricInstance` and `FabricPrimitive`
     // inputs, including a `FabricInstance` participating in a circular
-    // reference. `isDeepFrozen`'s recursion threads an `inProgress: Set<object>`
-    // for cycle-safety and answers a `FabricInstance` via its `[IS_DEEP_FROZEN]`
-    // protocol member -- inspecting its logical contents, not its enumerable
-    // own-props -- so values held in non-enumerable slots (such as
+    // reference. `isDeepFrozen`'s recursion threads an
+    // `inProgress: Set<object>` for cycle-safety and answers a
+    // `FabricInstance` via its `[IS_DEEP_FROZEN]` protocol member --
+    // inspecting its logical contents, not its enumerable own-props -- so
+    // values held in non-enumerable slots (such as
     // `FabricError`'s private extras `Map`) are checked too.
     // (`isDeepFrozenFabricValue` uses the same protocol dispatch but
     // additionally type-guards the value as a `FabricValue`; it has its own
@@ -259,9 +260,9 @@ describe("deep-freeze", () => {
       });
 
       it("returns `false` for a partially-frozen `FabricInstance` (wrapper frozen but cause not)", () => {
-        // FabricError no longer has a wrapped-native-Error slot; the only
-        // recursing slot is `cause` (and any extras). Construct one whose
-        // `cause` is a mutable plain object, freeze only the wrapper.
+        // The recursing slots on a `FabricError` are `cause` and any extras.
+        // Construct one whose `cause` is a mutable plain object, and freeze
+        // only the wrapper.
         const err = new Error("partial", { cause: { mutable: true } });
         const fe = FabricError.fromNativeError(err);
         Object.freeze(fe);
@@ -324,12 +325,12 @@ describe("deep-freeze", () => {
 
         const result = deepFreeze(fe);
 
-        // Freeze-in-place: same identity, now deep-frozen (wrapper + wrapped
-        // Error + recursed cause).
+        // Freeze-in-place: same identity, deep-frozen across the wrapper and
+        // the recursed `cause`.
         expect(result).toBe(fe);
         expect(Object.isFrozen(fe)).toBe(true);
-        // (FabricError no longer has a wrapped Error slot to check directly;
-        // the native projection is lazy, and any built projection is frozen.)
+        // There is no wrapped-`Error` slot to check directly: the native
+        // projection is lazy, and any projection that gets built is frozen.
         expect(Object.isFrozen(inner)).toBe(true);
       });
 
@@ -339,17 +340,17 @@ describe("deep-freeze", () => {
         deepFreeze(container);
         expect(Object.isFrozen(container)).toBe(true);
         expect(Object.isFrozen(fe)).toBe(true);
-        // (FabricError no longer has a wrapped Error slot to check directly;
-        // the native projection is lazy, and any built projection is frozen.)
+        // There is no wrapped-`Error` slot to check directly: the native
+        // projection is lazy, and any projection that gets built is frozen.
       });
     });
   });
 
   describe("`isDeepFrozenFabricValue()` with `FabricInstance` (R6)", () => {
-    it("no longer throws on a `FabricInstance`; classifies via protocol", () => {
+    it("returns `false` without throwing for an unfrozen `FabricInstance`", () => {
       const fe = FabricError.fromNativeError(new Error("test"));
-      // Pre-freeze: not deep-frozen, but must NOT throw (the #3604
-      // `FabricInstance`-arm throw is retired).
+      // Two separate guarantees, hence two assertions: an unfrozen instance is
+      // classified rather than refused, and the classification is `false`.
       expect(() => isDeepFrozenFabricValue(fe)).not.toThrow();
       expect(isDeepFrozenFabricValue(fe)).toBe(false);
     });

@@ -152,6 +152,16 @@ One line per archived document; each document's header carries the fuller
   — the CFC future-work epics (clause core, exchange rules/policy,
   observation classes, integrity floors, sqlite row-set, deployment flips),
   executed 2026-07.
+- [pattern-verb-contract-implementation.md](plans/pattern-verb-contract-implementation.md)
+  — the verb-contract workstreams as built: the `topics` Part 1 rework, the
+  `Stream<E, R>` authoring surface, the invocation protocol with caller-supplied
+  ids and receipt readback, and the client affordances. Records the C3
+  result-schema withdrawal, the closed-world event-emission migration the update
+  gate forced, and the measurements behind each, July–August 2026.
+- [shaped-reads-implementation.md](plans/shaped-reads-implementation.md) — the
+  read-layer stages, the reasoning for ordering session-scoped invocation ids
+  ahead of anything that publishes a receipt address, and the descriptive-receipt
+  decision, August 2026.
 - [retiring-llm-tool-call-deadlines.md](development/proposals/retiring-llm-tool-call-deadlines.md)
   — replacing the LLM tool-call deadline with a run-scoped quiescence barrier,
   and narrowing the dialog message-drop heuristic the deadline's argument did
@@ -286,6 +296,10 @@ One line per archived document; each document's header carries the fuller
 - [2026-07-binary-artifact-transfer.md](development/performance/2026-07-binary-artifact-transfer.md)
   — binary artifact file and byte transfer snapshot before the per-binary
   workflow split, July 2026.
+- [2026-08-scheduler-liveness-maintenance.md](development/performance/2026-08-scheduler-liveness-maintenance.md)
+  — why deriving demand refcounts from the roots on every change cost a growing
+  list cubic work, and what incremental maintenance measured instead, August
+  2026.
 - [coverage-ratchet-noise-2026-07-28.md](development/coverage-ratchet-noise-2026-07-28.md)
   — why a rename-only pull request owed coverage debt: a wall-clock-guarded
   diagnostic and a shard re-partition each moved the `packages/runner`

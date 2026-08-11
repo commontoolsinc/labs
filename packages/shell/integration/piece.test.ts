@@ -214,10 +214,10 @@ describe("shell piece tests", () => {
       // on the result cell, drains the scheduler, and resolves once the value
       // reaches its target, so the sequential checks (0, then -1, then -2) each
       // wait on a real committed change rather than a timer.
-      const resultCell = controller.manager().getResult(currentPiece.getCell());
+      const resultCell = controller.getResult(currentPiece.getCell());
       const awaitResultValue = (target: number): Promise<unknown> =>
         waitForCellValue<{ value?: number }>(
-          controller.manager().runtime,
+          controller.runtime,
           resultCell,
           (value) => value?.value === target,
         );

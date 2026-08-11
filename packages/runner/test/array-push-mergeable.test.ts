@@ -4,7 +4,6 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { Options } from "../src/storage/v2.ts";
 import type { Cell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
@@ -12,43 +11,8 @@ import {
   getDirectTransactionMergeableOpAddresses,
   getDirectTransactionNativeCommit,
 } from "../src/storage/transaction-inspection.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
-
-// A storage manager with its OWN per-space client replicas, loopback-connected
-// to a SHARED in-process memory server (mirrors cross-space-value-read.test.ts).
-// Two of these connected to one server model two real sessions: data written by
-// one session reaches the other only through an explicit per-space server
-// query/subscription.
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
-
-const newSharedServer = () =>
-  new MemoryV2Server.Server({
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-  });
 
 const signer = await Identity.fromPassphrase("array-push-mergeable");
 const space = signer.did();
@@ -84,7 +48,7 @@ const anySchema = {
 async function readDurable(
   server: MemoryV2Server.Server,
 ): Promise<string[]> {
-  const storage = SharedServerStorageManager.connectTo(server, { as: signer });
+  const storage = EmulatedStorageManager.connectTo(server, { as: signer });
   const rt = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
@@ -105,7 +69,7 @@ async function readDurableNested(
   server: MemoryV2Server.Server,
   cause: string,
 ): Promise<string[][]> {
-  const storage = SharedServerStorageManager.connectTo(server, { as: signer });
+  const storage = EmulatedStorageManager.connectTo(server, { as: signer });
   const rt = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
@@ -124,7 +88,7 @@ async function readDurableNested(
 async function readDurableNumber(
   server: MemoryV2Server.Server,
 ): Promise<number | undefined> {
-  const storage = SharedServerStorageManager.connectTo(server, { as: signer });
+  const storage = EmulatedStorageManager.connectTo(server, { as: signer });
   const rt = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
@@ -142,13 +106,15 @@ async function readDurableNumber(
 
 describe("mergeable array appends", () => {
   let server: MemoryV2Server.Server;
-  let storage1: SharedServerStorageManager;
-  let storage2: SharedServerStorageManager;
+  let storage1: EmulatedStorageManager;
+  let storage2: EmulatedStorageManager;
 
   beforeEach(() => {
-    server = newSharedServer();
-    storage1 = SharedServerStorageManager.connectTo(server, { as: signer });
-    storage2 = SharedServerStorageManager.connectTo(server, { as: signer });
+    // Manual fan-out: controlled staleness is a gated state, not a timing
+    // accident.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    storage1 = EmulatedStorageManager.connectTo(server, { as: signer });
+    storage2 = EmulatedStorageManager.connectTo(server, { as: signer });
   });
   afterEach(async () => {
     await storage1?.close();
@@ -924,7 +890,7 @@ describe("mergeable array appends", () => {
       await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
-      const storage = SharedServerStorageManager.connectTo(server, {
+      const storage = EmulatedStorageManager.connectTo(server, {
         as: signer,
       });
       const rt2 = new Runtime({
@@ -1133,7 +1099,7 @@ describe("mergeable array appends", () => {
       await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
-      const storage = SharedServerStorageManager.connectTo(server, {
+      const storage = EmulatedStorageManager.connectTo(server, {
         as: signer,
       });
       const rt2 = new Runtime({
@@ -1710,7 +1676,7 @@ describe("mergeable array appends", () => {
       await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
-      const storage = SharedServerStorageManager.connectTo(server, {
+      const storage = EmulatedStorageManager.connectTo(server, {
         as: signer,
       });
       const rt2 = new Runtime({
@@ -1765,7 +1731,7 @@ describe("mergeable array appends", () => {
       await tx1.commit({ resolveAt: "verdict" });
       await rt1.storageManager.synced();
 
-      const storage = SharedServerStorageManager.connectTo(server, {
+      const storage = EmulatedStorageManager.connectTo(server, {
         as: signer,
       });
       const rt2 = new Runtime({
@@ -1809,7 +1775,7 @@ describe("mergeable array appends", () => {
     } as any;
     const HOLDER_CAUSE = "sibling-remove-holder";
     const readHolder = async () => {
-      const storage = SharedServerStorageManager.connectTo(server, {
+      const storage = EmulatedStorageManager.connectTo(server, {
         as: signer,
       });
       const rt = new Runtime({
@@ -1952,7 +1918,7 @@ describe("mergeable array appends", () => {
 
       // Durable truth from a fresh session: the concurrent edit AND the
       // added value both survive.
-      const storage3 = SharedServerStorageManager.connectTo(server, {
+      const storage3 = EmulatedStorageManager.connectTo(server, {
         as: signer,
       });
       const rt3 = new Runtime({
@@ -2030,7 +1996,7 @@ const voteListSchema = {
 async function readDurableVotes(
   server: MemoryV2Server.Server,
 ): Promise<Vote[]> {
-  const storage = SharedServerStorageManager.connectTo(server, { as: signer });
+  const storage = EmulatedStorageManager.connectTo(server, { as: signer });
   const rt = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
@@ -2048,13 +2014,15 @@ async function readDurableVotes(
 
 describe("keyed collections via elementById", () => {
   let server: MemoryV2Server.Server;
-  let storage1: SharedServerStorageManager;
-  let storage2: SharedServerStorageManager;
+  let storage1: EmulatedStorageManager;
+  let storage2: EmulatedStorageManager;
 
   beforeEach(() => {
-    server = newSharedServer();
-    storage1 = SharedServerStorageManager.connectTo(server, { as: signer });
-    storage2 = SharedServerStorageManager.connectTo(server, { as: signer });
+    // Manual fan-out: controlled staleness is a gated state, not a timing
+    // accident.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    storage1 = EmulatedStorageManager.connectTo(server, { as: signer });
+    storage2 = EmulatedStorageManager.connectTo(server, { as: signer });
   });
   afterEach(async () => {
     await storage1?.close();
@@ -2309,12 +2277,14 @@ describe("keyed collections via elementById", () => {
 // concurrency, only the op machinery, so they run against a single runtime.
 describe("mergeable op guards and single-session branches", () => {
   let server: MemoryV2Server.Server;
-  let storage1: SharedServerStorageManager;
+  let storage1: EmulatedStorageManager;
   let rt: Runtime;
 
   beforeEach(() => {
-    server = newSharedServer();
-    storage1 = SharedServerStorageManager.connectTo(server, { as: signer });
+    // Manual fan-out: controlled staleness is a gated state, not a timing
+    // accident.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    storage1 = EmulatedStorageManager.connectTo(server, { as: signer });
     rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,
@@ -2518,7 +2488,7 @@ describe("mergeable op guards and single-session branches", () => {
     await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
-    const readBack = SharedServerStorageManager.connectTo(server, {
+    const readBack = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     const rt2 = new Runtime({
@@ -2806,7 +2776,7 @@ describe("mergeable op guards and single-session branches", () => {
     await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
-    const readBack = SharedServerStorageManager.connectTo(server, {
+    const readBack = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     const rt2 = new Runtime({
@@ -2838,7 +2808,7 @@ describe("mergeable op guards and single-session branches", () => {
     await tx.commit({ resolveAt: "verdict" });
     await rt.storageManager.synced();
 
-    const readBack = SharedServerStorageManager.connectTo(server, {
+    const readBack = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
     const rt2 = new Runtime({
@@ -2918,7 +2888,7 @@ const namedListSchema = {
 async function readDurableNamed(
   server: MemoryV2Server.Server,
 ): Promise<NamedEntry[]> {
-  const storage = SharedServerStorageManager.connectTo(server, { as: signer });
+  const storage = EmulatedStorageManager.connectTo(server, { as: signer });
   const rt = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: storage,
@@ -2936,13 +2906,15 @@ async function readDurableNamed(
 
 describe("keyed object list (home spaces shape)", () => {
   let server: MemoryV2Server.Server;
-  let storage1: SharedServerStorageManager;
-  let storage2: SharedServerStorageManager;
+  let storage1: EmulatedStorageManager;
+  let storage2: EmulatedStorageManager;
 
   beforeEach(() => {
-    server = newSharedServer();
-    storage1 = SharedServerStorageManager.connectTo(server, { as: signer });
-    storage2 = SharedServerStorageManager.connectTo(server, { as: signer });
+    // Manual fan-out: controlled staleness is a gated state, not a timing
+    // accident.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    storage1 = EmulatedStorageManager.connectTo(server, { as: signer });
+    storage2 = EmulatedStorageManager.connectTo(server, { as: signer });
   });
   afterEach(async () => {
     await storage1?.close();
@@ -3184,12 +3156,14 @@ function favoriteKeyFor(piece: { getAsNormalizedFullLink(): unknown }): string {
 
 describe("keyed entity holding a cell reference (home favorites shape)", () => {
   let server: MemoryV2Server.Server;
-  let storage1: SharedServerStorageManager;
+  let storage1: EmulatedStorageManager;
   let rt: Runtime;
 
   beforeEach(() => {
-    server = newSharedServer();
-    storage1 = SharedServerStorageManager.connectTo(server, { as: signer });
+    // Manual fan-out: controlled staleness is a gated state, not a timing
+    // accident.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    storage1 = EmulatedStorageManager.connectTo(server, { as: signer });
     rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage1,

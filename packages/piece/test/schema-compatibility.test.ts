@@ -1874,6 +1874,91 @@ describe("piece schema compatibility", () => {
         .toThrow(/invalid schema/i);
     }
   });
+
+  describe("fabric-primitive schema vocabulary transitions", () => {
+    // The schema generator used to describe a fabric special object
+    // structurally: an object schema whose `required` carries the
+    // `FabricSpecialObject` nominal brand key. It now emits the
+    // fabric-primitive type name instead. That transition is refused, for
+    // pattern evolution too: the structural schema admits values by shape
+    // (a plain record carrying the brand key as an own property, or a
+    // primitive of another class whose members cover `required`), the
+    // fabric-primitive-typed schema matches by prototype, and a pattern
+    // update rewrites stored data verbatim -- so any such value would
+    // survive the update only to be rejected by every subsequent read.
+    // See the note in `schemaSubsetIssue`.
+    const brand = "@commonfabric/FabricSpecialObject";
+    const oldBytes: JSONSchema = {
+      type: "object",
+      properties: { length: { type: "number" } },
+      required: ["length", brand],
+    };
+    const newBytes: JSONSchema = { type: "FabricBytes" };
+    const withField = (schema: JSONSchema): JSONSchema => ({
+      type: "object",
+      properties: { blob: schema },
+      required: ["blob"],
+    });
+
+    it("refuses an argument field moving from the brand-marked structural emission to its fabric-primitive type", () => {
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(withField(oldBytes), true),
+          pattern(withField(newBytes), true),
+        )
+      ).toThrow(/type object is not accepted/);
+    });
+
+    it("accepts a result field moving from the brand-marked structural emission to its fabric-primitive type", () => {
+      // The result direction proves candidate-within-previous: the new
+      // schema's population is prototype-matched primitives, and every one
+      // satisfies the old structural contract (fabric-primitive types are
+      // subtypes of "object", members are present via `in`, and the brand
+      // is exempt for instances). Nothing is stranded, so no allowance is
+      // involved -- this holds through the ordinary subset machinery.
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(true, withField(oldBytes)),
+          pattern(true, withField(newBytes)),
+        )
+      ).not.toThrow();
+    });
+
+    it("refuses the epoch-shaped structural emission against either epoch class", () => {
+      const oldEpoch: JSONSchema = {
+        type: "object",
+        properties: { value: { type: "integer" } },
+        required: ["value", brand],
+      };
+      for (const epochType of ["FabricEpochNsec", "FabricEpochDays"]) {
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(withField(oldEpoch), true),
+            pattern(withField({ type: epochType } as JSONSchema), true),
+          )
+        ).toThrow(/type object is not accepted/);
+      }
+    });
+
+    it("refuses a plain object schema without the brand against a fabric-primitive type", () => {
+      const plainObject: JSONSchema = {
+        type: "object",
+        properties: { length: { type: "number" } },
+        required: ["length"],
+      };
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(withField(plainObject), true),
+          pattern(withField(newBytes), true),
+        )
+      ).toThrow(/type object is not accepted/);
+    });
+
+    it("keeps durable-link subset proofs strict about the transition", () => {
+      expect(() => assertSchemaSubset(oldBytes, newBytes))
+        .toThrow(/type object is not accepted/);
+    });
+  });
 });
 
 describe("verb event closed-world transitions", () => {
@@ -2022,5 +2107,53 @@ describe("verb event closed-world transitions", () => {
         verbPattern(widened),
       )
     ).not.toThrow();
+  });
+});
+
+describe("listing marks are annotation-class", () => {
+  // `tier: "wrapper"` and standard `deprecated: true` shape only what
+  // `cf piece verbs` shows by default (verb contract WS-F); neither
+  // constrains a value, so both must ADD and REMOVE freely across pattern
+  // updates. Classified before the generator emits them — the checker
+  // equality-compares unknown keywords, so an unclassified mark would be
+  // refused in both directions: the C3 append-only lesson.
+  const verbArgument = (marks: Record<string, unknown>): Pattern =>
+    pattern(
+      {
+        type: "object",
+        properties: {
+          submitTopic: {
+            type: "object",
+            properties: { body: { type: "string" } },
+            asCell: ["stream"],
+            ...marks,
+          },
+        },
+      },
+      { type: "object", properties: {} },
+    );
+
+  const unmarked = verbArgument({});
+  const marked = verbArgument({ tier: "wrapper", deprecated: true });
+
+  it("lets both marks arrive on a recorded verb", () => {
+    expect(() => assertPatternSchemasBackwardCompatible(unmarked, marked)).not
+      .toThrow();
+  });
+
+  it("lets both marks leave again", () => {
+    expect(() => assertPatternSchemasBackwardCompatible(marked, unmarked)).not
+      .toThrow();
+  });
+
+  it("still refuses a genuinely unknown keyword (control)", () => {
+    // The pin proves classification, not a checker that stopped looking:
+    // an unclassified key on the same node is refused exactly as before.
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        unmarked,
+        verbArgument({ mysteryDial: 7 }),
+      )
+    ).toThrow(/mysteryDial|unknown/i);
   });
 });

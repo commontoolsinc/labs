@@ -44,6 +44,7 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237); `hold` removed CT-1925 (#5110) | keep `preempt` as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
+| [`ownWriteEcho`](#ownwriteecho) | `setOwnWriteEchoConfig()` (server-side only, not negotiated) | on | Robin McCollum (CT-1965) | remove the switch once the echo has field-soaked | implemented, on by default |
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off | Ben Follington (#4937; shell toggle #4974) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default, not yet measured over real latency |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
@@ -148,7 +149,7 @@ propagate](#how-flags-propagate).
   default in place), so the opt-out while the flag exists is an explicit
   `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false`.
 - **Added by.** Mike Salisbury, verb-contract WS-C
-  (`docs/plans/pattern-verb-contract-implementation.md`).
+  (`docs/history/plans/pattern-verb-contract-implementation.md`).
 - **Purpose.** A handler's return value containing reactives/cells projects
   into its per-event receipt cell via the result-pattern path, but a **plain
   JSON return is discarded** — the receipt-only branch writes `{}`. Under this
@@ -637,6 +638,25 @@ the per-epic implementation notes).
 - **Path to removal.** Either it finds a workload where `preempt` pays off and
   graduates into a documented tuning knob, or it is removed once the underlying
   conflict-retry behavior is settled and the experiment is closed.
+
+### `ownWriteEcho`
+
+- **Toggle via.** `setOwnWriteEchoConfig()` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts). Server-side only; not
+  a hello capability — every client generation handles the echoed frames, so
+  there is nothing to negotiate.
+- **Added by.** Robin McCollum, for CT-1965.
+- **Purpose.** A sync frame includes a doc unless the writing session provably
+  holds it: own accepted `patch`-produced heads ride the covering frame as full
+  post-apply documents (merged state the writer cannot extrapolate), while own
+  `set`- and `delete`-produced heads stay elided. Off restores full echo
+  suppression — the pre-CT-1965 behavior, where promotion extrapolates every
+  own write from the client's own ops.
+- **Current default and planned end state.** On by default. The switch exists
+  as an operational backstop while the echo field-soaks.
+- **Status on 2026-08-08.** Implemented and on by default.
+- **Path to removal.** After the echo has soaked in production, delete the
+  config trio and the suppression branch it re-enables.
 
 ### `syncSchemaTableV2`
 

@@ -73,9 +73,21 @@ const ANNOTATION_KEYS = new Set([
   "$schema",
   "default",
   "definitions",
+  // Standard JSON Schema annotation. The generator emits it from
+  // `@deprecated` JSDoc so `cf piece verbs` can hide legacy streams by
+  // default; it is validation-neutral by spec, so it must add and remove
+  // freely across pattern updates (verb contract WS-F listing marks — the
+  // C3 append-only lesson is why this is classified BEFORE the generator
+  // emits it).
+  "deprecated",
   "description",
   "examples",
   "tags",
+  // Listing-tier extension (`tier: "wrapper"`): a UI affordance outside the
+  // headless contract, inferred from session-scoped handler bindings.
+  // Validation-neutral by construction — it shapes only what `cf piece
+  // verbs` shows by default; `cf piece call` never consults it.
+  "tier",
   "title",
 ]);
 
@@ -367,6 +379,22 @@ function schemaSubsetIssue(
       }
       return undefined;
     }
+
+    // A brand-marked structural emission (the pre-vocabulary generator's
+    // shape for a fabric special object) moving to a fabric-primitive-typed
+    // schema is deliberately NOT allowed through here, even under
+    // `allowEvolutionPolicy`. The structural schema is an ordinary object
+    // schema, so its value population is decided structurally: a plain
+    // record carrying the brand key as an own property satisfies it, and the
+    // presence-only `required` checks admit primitives of other classes
+    // (`FabricHash` has `length`, so it inhabits the `FabricBytes` emission).
+    // A fabric-primitive-typed schema matches by prototype, and a pattern
+    // update rewrites the stored argument verbatim -- nothing converts -- so
+    // every such inhabitant would survive the update only to be rejected by
+    // reads. The transition therefore narrows for every class, and it is
+    // refused here (`type object is not accepted`) rather than deferred to a
+    // read-time rejection; updating such a piece requires redeployment or
+    // `dangerouslyAllowIncompatibleSchema`.
 
     const literalIssue = literalSubsetIssue(source, target, path);
     if (literalIssue) return literalIssue;

@@ -1,9 +1,11 @@
 import {
   fabricFromNativeValue,
+  FabricInstance,
   type FabricValue,
   nativeFromFabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { refuseFabricInstance } from "./fabric-special-object.ts";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import {
   getPersistentSchedulerStateConfig,
@@ -14,7 +16,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isRecord } from "@commonfabric/utils/types";
+import { isPlainObject, isRecord } from "@commonfabric/utils/types";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { PatternManager } from "./pattern-manager.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
@@ -41,6 +43,7 @@ import {
   pushFrameFromCause,
 } from "./builder/pattern.ts";
 import { type Cell, createCell, isCell } from "./cell.ts";
+import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import { type Action } from "./scheduler.ts";
 import {
   isSchedulerActionObservation,
@@ -270,6 +273,41 @@ function patternDefaultScope(pattern: Pattern): CellScope | undefined {
   return schemaCellScope(pattern.resultSchema) ?? pattern.defaultScope;
 }
 
+/**
+ * Structural description of `value` for the durable `schema` metadata of the
+ * receipt cell it is about to be written into: the root container kind, plus
+ * the property names when that kind is a record. Returns `undefined` for a
+ * value with no container kind of its own — a scalar, a `FabricSpecialObject`,
+ * or a link, whose kind belongs to whatever it resolves to rather than to the
+ * receipt.
+ *
+ * A `data:` link is the exception among links: it carries its value inside
+ * its own identifier, and the write inlines it, so the receipt holds that
+ * value rather than a link to it. The description comes from the same
+ * inlining, so it describes what is stored.
+ *
+ * This is DESCRIPTIVE — what this one receipt holds — and never a contract
+ * bearing on anything written later. Description and authority cannot diverge
+ * here, because the receipt's create-only mark means the value it describes is
+ * the only value the document ever holds.
+ *
+ * The root kind is what lets a reader's selection become a fetch selector
+ * instead of a filter applied after loading, since the same selection means
+ * different things over a record and over an array. The property schemas are
+ * left as `true` — everything is admissible at every position — which is what
+ * keeps a link position honest: spelling one out means `asCell`, and `["cell"]`
+ * asserts a writable handle on a document nothing can be written through.
+ */
+function receiptShapeSchema(value: unknown): JSONSchema | undefined {
+  const stored = isCellLink(value) ? findAndInlineDataUriLinks(value) : value;
+  if (isCellLink(stored)) return undefined;
+  if (Array.isArray(stored)) return { type: "array" };
+  if (!isPlainObject(stored)) return undefined;
+  const properties: Record<string, JSONSchema> = {};
+  for (const key of Object.keys(stored)) properties[key] = true;
+  return { type: "object", properties };
+}
+
 const recordOutputSchemaPolicyInputs = (
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
@@ -337,12 +375,29 @@ const recordOutputSchemaPolicyInputs = (
     return;
   }
 
-  // TODO(danfuzz): `isRecord` admits a `FabricSpecialObject`, whose enumerable
-  // properties are empty, so descent stops here rather than reaching a
-  // `FabricInstance`'s codec contents. What is lost is not data but a policy
-  // input: a write-redirect link nested inside one records no `kind: "schema"`
-  // entry. It fails _closed_ -- a later write is refused rather than allowed
-  // -- so this is a completeness gap, not a hole.
+  // A `FabricInstance` is refused. `isRecord` admits one, and its enumerable
+  // properties are empty, so descent would stop without reaching its codec
+  // contents -- and a write-redirect link nested inside one would record no
+  // `kind: "schema"` entry.
+  //
+  // Unlike the argument walks below, what that costs is not a hole: these
+  // entries GRANT, so a missing one leaves a later write refused rather than
+  // wrongly allowed, and the gap fails _closed_. The refusal is here because a
+  // write refused far away for a reason nothing names is worse to diagnose
+  // than a throw at the site that owes the work.
+  //
+  // Nothing reaches this in production today, de facto rather than by
+  // construction.
+  //
+  // TODO(danfuzz): descend by codec-mediated traversal into instance state, at
+  // which point this becomes a walk rather than a refusal.
+  if (outputBinding instanceof FabricInstance) {
+    refuseFabricInstance(
+      outputBinding,
+      "when recording output-schema policy inputs",
+    );
+  }
+
   if (isRecord(outputBinding) && !isCellLink(outputBinding)) {
     for (const [key, child] of Object.entries(outputBinding)) {
       recordOutputSchemaPolicyInputs(
@@ -643,12 +698,21 @@ const recordSetupProjectionPolicyInputs = (
     return;
   }
 
-  // TODO(danfuzz): same gap as `recordOutputSchemaPolicyInputs()` above, and
-  // more reachable here: `projection` is the _raw_ pattern argument, so a
-  // `FabricSpecialObject` a pattern actually wrote is what arrives. `isRecord`
-  // admits one and its empty entries end the descent, so a link inside a
-  // `FabricInstance`'s codec contents records no structural-provenance input.
-  // Fails closed, as above.
+  // Refused for the same reason as `recordOutputSchemaPolicyInputs()` above,
+  // and this site is the more reachable of the two: `projection` is the _raw_
+  // pattern argument, so a `FabricSpecialObject` a pattern actually wrote is
+  // what arrives here. Fails _closed_ as well, so the throw buys diagnosis
+  // rather than safety.
+  //
+  // TODO(danfuzz): descend by codec-mediated traversal into instance state, at
+  // which point this becomes a walk rather than a refusal.
+  if (projection instanceof FabricInstance) {
+    refuseFabricInstance(
+      projection,
+      "when recording setup-projection policy inputs",
+    );
+  }
+
   if (isRecord(projection) && !isCellLink(projection)) {
     for (const [key, child] of Object.entries(projection)) {
       recordSetupProjectionPolicyInputs(
@@ -1641,7 +1705,7 @@ export class Runner {
     // but a piece whose `schema` meta is missing or stale-but-same-version
     // still gets it repaired, which is what keeps its reads typed and its
     // durable write contract present. Both branches need it: a caller may
-    // re-run a running piece WITH an argument (`PieceManager.runWithPattern`),
+    // re-run a running piece WITH an argument (`PiecesController.runWithPattern`),
     // and that piece's metadata is no less worth repairing.
     if (setupState.storedSetupMatches) {
       this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
@@ -1716,9 +1780,9 @@ export class Runner {
     // The conversion MUST precede the no-op gate. A raw result is not
     // necessarily a `FabricValue` — one carrying `toJSON`, say, only becomes one
     // here — and `valueEqual` hashes its operands, so comparing a raw result
-    // throws `hashOf: unsupported object type` instead of deciding anything.
-    // Converting first also makes the gate compare what a write would actually
-    // store, since the stored side is already a `FabricValue`.
+    // throws `` `hashOf()`: unsupported object type `` instead of deciding
+    // anything. Converting first also makes the gate compare what a write
+    // would actually store, since the stored side is already a `FabricValue`.
     // A result can carry a builder artifact -- a pattern tool, say -- and an
     // artifact is not a `FabricValue`, so it is replaced before the
     // conversion. That keeps the gate below comparing what a write would
@@ -4738,6 +4802,35 @@ export class Runner {
         seen.set(schema, new Set([pathKey]));
       }
 
+      // Ahead of the `asCell` branch below, deliberately. That branch collects
+      // and returns, so a guard placed after it never sees a value standing at
+      // an `asCell` or `writeonly` node -- and a link nested in an instance
+      // there would be missed while the walk reported success.
+      //
+      // A `FabricSpecialObject` at a container position is INDEXED rather than
+      // rebuilt, so nothing is decomposed. For a `FabricPrimitive` that settles
+      // it: zero enumerable own properties, every keyed read yields
+      // `undefined`, and a leaf holds no link to collect anyway.
+      //
+      // A `FabricInstance` is refused. A write-redirect link nested in its
+      // codec contents is unreachable by property name, so passing one through
+      // _misses_ that link -- and over-collection is this walker's safe
+      // direction, which makes a miss the unsafe one.
+      //
+      // Nothing reaches this in production today, de facto rather than by
+      // construction: a `FabricError` is ungated and exposed to pattern
+      // authors, so what keeps this safe is that no action argument yet
+      // carries one.
+      //
+      // TODO(danfuzz): descend by codec-mediated traversal into instance
+      // state, at which point this becomes a walk rather than a refusal.
+      if (currentValue instanceof FabricInstance) {
+        refuseFabricInstance(
+          currentValue,
+          "when collecting writable cell links from an argument",
+        );
+      }
+
       const asCell = schema.asCell;
       if (
         Array.isArray(asCell) &&
@@ -4762,10 +4855,6 @@ export class Runner {
       // could let an asCell marker escape tracking; over-collection is this
       // walker's safe direction (mirrors joinSchema's `not` union).
       //
-      // TODO(danfuzz): The properties/additionalProperties cases descend
-      // live `FabricValue` action inputs with no `FabricSpecialObject`
-      // guard, decomposing `FabricPrimitive` values and walking
-      // `FabricInstance` values by internal slots.
       forEachSubschema(schema as JSONSchema, (child, keyword, key, index) => {
         switch (keyword) {
           case "properties":
@@ -4875,10 +4964,25 @@ export class Runner {
       seenValues.add(currentValue);
       seen.set(schema, seenValues);
 
-      // TODO(danfuzz): This descends live `FabricValue` action inputs via
-      // `Object.entries` (guards only `isWriteRedirectLink`/`isCellLink`, not
-      // `FabricSpecialObject`), so `FabricPrimitive`/`FabricInstance` values are
-      // mishandled.
+      // Indexed, not rebuilt. Right for a `FabricPrimitive`: zero enumerable
+      // own properties, and a leaf holds no link to collect.
+      //
+      // A `FabricInstance` is refused, for the same reason as the sibling walk
+      // in `collectWritableCellArgumentLinks()`: a link in its codec contents
+      // is unreachable by property name, so passing one through misses it, and
+      // a miss is the unsafe direction here.
+      //
+      // Nothing reaches this in production today, de facto rather than by
+      // construction.
+      //
+      // TODO(danfuzz): descend by codec-mediated traversal into instance
+      // state, at which point this becomes a walk rather than a refusal.
+      if (currentValue instanceof FabricInstance) {
+        refuseFabricInstance(
+          currentValue,
+          "when collecting scheduler read links from an argument",
+        );
+      }
       if (isRecord(schema.properties) && isRecord(currentValue)) {
         for (const [key, propertySchema] of Object.entries(schema.properties)) {
           visit(propertySchema, currentValue[key]);
@@ -5273,7 +5377,15 @@ export class Runner {
             result !== undefined
             ? result
             : {};
-        receiptCell.withTx(tx).set(receiptValue);
+        const receipt = receiptCell.withTx(tx);
+        receipt.set(receiptValue);
+        // The receipt says what it holds, the way any other cell does. The
+        // shape is only knowable here: the cell is minted at the top of the
+        // dispatch, before the handler runs. Both writes ride this one
+        // transaction, which the create-only mark below gates, so the schema
+        // and the value it describes commit together or not at all.
+        const shape = receiptShapeSchema(receiptValue);
+        if (shape !== undefined) receipt.setMetaRaw("schema", shape);
         tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
       }
       return result;
@@ -6682,6 +6794,9 @@ export class Runner {
     const builtinResumeMode = isRawBuiltinResult(builtinResult)
       ? builtinResult.resumeMode
       : undefined;
+    const builtinOnActionRegistered = isRawBuiltinResult(builtinResult)
+      ? builtinResult.onActionRegistered
+      : undefined;
 
     // Name the raw action for debugging - use implementation name or fallback to "raw"
     const impl = module.implementation as ((...args: unknown[]) => Action) & {
@@ -6777,6 +6892,9 @@ export class Runner {
         )
         : this.runtime.scheduler.subscribe(action, schedulerOptions),
     );
+    // The scheduler is keyed by the wrapper's identity, so hand the builtin
+    // the wrapper — its own `action` cannot address the subscription.
+    builtinOnActionRegistered?.(action);
   }
 
   private instantiatePassthroughNode(

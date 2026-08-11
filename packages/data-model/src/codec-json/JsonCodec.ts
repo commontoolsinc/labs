@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
@@ -11,73 +12,10 @@ import { deepFreeze } from "@/deep-freeze.ts";
 import { EmptyReconstructionContext } from "@/codec-common/EmptyReconstructionContext.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
-import { createDefaultRegistry } from "@/codec-common/createDefaultRegistry.ts";
-import type { JsonCodecValue } from "./interface.ts";
+import { ENCODING_PREFIX_TAG, type JsonCodecValue } from "./interface.ts";
+import { createBaseJsonRegistry } from "./createBaseJsonRegistry.ts";
 import { type CodecRegistry, SELF_REP } from "@/codec-common/CodecRegistry.ts";
 import { CODEC_META_TAGS } from "@/codec-common/codec-meta-tags.ts";
-
-/**
- * Tag prefix for the encoded form used by this module. We use this explicit
- * prefix so as to make it unambiguous when a given JSON-ish text string is
- * the result of encoding via this module vs. being JSON from some other source.
- * The tag stands for "Fabric Value Json, version 1."
- */
-const ENCODING_PREFIX_TAG = "fvj1:";
-
-/** Shared text encoder, created once. */
-const textEncoder = new TextEncoder();
-
-/** Shared text decoder, created once. */
-const textDecoder = new TextDecoder();
-
-/** Shared default handler registry, created once. */
-const defaultRegistry: CodecRegistry = createDefaultRegistry();
-
-/** Returns true if `v` is a single-key object whose key starts with `/` —
- * the wire form of an encoded instance (tag-wrapped value). */
-function isEncodedInstance(v: JsonCodecValue): boolean {
-  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
-  const keys = Object.keys(v);
-  return keys.length === 1 && keys[0]!.startsWith("/");
-}
-
-/**
- * Returns true if the already-encoded codec value `v` can be embedded
- * inside a /quote wrap without inner deserialization: primitives, plain
- * objects/arrays free of non-/quote encoded instances, and /quote-wrapped
- * values (which `unquote()` can collapse).
- */
-function isQuoteSafe(v: JsonCodecValue): boolean {
-  if (v === null || typeof v !== "object") return true;
-  if (Array.isArray(v)) return v.every((item) => isQuoteSafe(item));
-  if (!isEncodedInstance(v)) {
-    return Object.values(v).every((item) =>
-      isQuoteSafe(item as JsonCodecValue)
-    );
-  }
-  return Object.keys(v)[0] === "/quote";
-}
-
-/**
- * Unwraps /quote forms one level so their literal content can be embedded
- * directly inside a parent /quote. The inner content of a /quote is already
- * literal and must not be recursed into.
- */
-function unquote(v: JsonCodecValue): JsonCodecValue {
-  if (v === null || typeof v !== "object") {
-    return v;
-  } else if (Array.isArray(v)) {
-    const result = v.map(unquote) as JsonCodecValue;
-    return Object.freeze(result);
-  } else if (isEncodedInstance(v) && Object.keys(v)[0] === "/quote") {
-    return (v as Record<string, JsonCodecValue>)["/quote"]!;
-  } else {
-    const result = Object.fromEntries(
-      Object.entries(v).map(([k, val]) => [k, unquote(val as JsonCodecValue)]),
-    ) as JsonCodecValue;
-    return Object.freeze(result);
-  }
-}
 
 /**
  * Whole-value JSON codec implementing the `/<Type>@<Version>` wire format from
@@ -92,16 +30,25 @@ function unquote(v: JsonCodecValue): JsonCodecValue {
  * the `CodecRegistry`.
  */
 export class JsonCodec implements SerializationContext<string> {
-  /** Whether failed reconstructions produce `ProblematicValue` instead of
-   *  throwing. */
+  /**
+   * Whether a failed reconstruction produces a `ProblematicValue` instead of
+   * throwing.
+   */
   readonly lenient: boolean;
 
+  /** Registry consulted for per-type encoding and decoding. */
+  readonly #registry: CodecRegistry;
+
   /**
-   * Constructs an instance, optionally configured for lenient mode (which
-   * produces `ProblematicValue` on failed reconstruction instead of throwing).
+   * Constructs an instance. `options.registry` supplies the codecs this
+   * instance encodes and decodes with, and so decides which classes it can
+   * carry; there is no default, because which classes participate is a
+   * question this class has no standing to answer. `options.lenient` makes a
+   * failed reconstruction produce a `ProblematicValue` instead of throwing.
    */
-  constructor(options?: { lenient?: boolean }) {
-    this.lenient = options?.lenient ?? false;
+  constructor(options: { registry: CodecRegistry; lenient?: boolean }) {
+    this.lenient = options.lenient ?? false;
+    this.#registry = options.registry;
   }
 
   //
@@ -124,7 +71,7 @@ export class JsonCodec implements SerializationContext<string> {
     if (!JsonCodec.seemsLikeEncoded(data)) {
       const excerpt = (data.length <= 50) ? data : `${data.slice(0, 50)}...`;
       throw new Error(
-        `Not a JSON-encoded \`FabricValue\` string: \`${excerpt}\``,
+        `Not a JSON-encoded \`FabricValue\` string: ${backtickQuote(excerpt)}`,
       );
     }
 
@@ -133,17 +80,12 @@ export class JsonCodec implements SerializationContext<string> {
     return this.#decodeValue(parsed, context);
   }
 
-  /**
-   * Serializes a fabric value to UTF-8 JSON bytes. (Public for now -- used by
-   * byte-level round-trip tests.)
-   */
+  /** Serializes a fabric value to UTF-8 JSON bytes. */
   encodeToBytes(value: FabricValue): Uint8Array {
     return this.toBytes(this.#encodeValue(value));
   }
 
-  /**
-   * Deserializes UTF-8 JSON bytes back into a fabric value.
-   */
+  /** Deserializes UTF-8 JSON bytes back into a fabric value. */
   decodeFromBytes(
     bytes: Uint8Array,
     context: ReconstructionContext,
@@ -175,11 +117,11 @@ export class JsonCodec implements SerializationContext<string> {
       return null;
     }
 
-    if (!isEncodedInstance(data)) {
+    if (!JsonCodec.#isEncodedInstance(data)) {
       return null;
     }
 
-    // `isEncodedInstance()` guaranteed a single-property object, so this
+    // `#isEncodedInstance()` guaranteed a single-property object, so this
     // destructures that one entry.
     const [key, value] = Object.entries(data)[0]!;
     return { tag: key.slice(1), state: value };
@@ -187,12 +129,12 @@ export class JsonCodec implements SerializationContext<string> {
 
   /** Converts a codec-value tree to UTF-8-encoded JSON bytes. */
   private toBytes(data: JsonCodecValue): Uint8Array {
-    return textEncoder.encode(JSON.stringify(data));
+    return JsonCodec.#textEncoder.encode(JSON.stringify(data));
   }
 
   /** Parses UTF-8-encoded JSON bytes back into a codec-value tree. */
   private fromBytes(bytes: Uint8Array): JsonCodecValue {
-    const json = textDecoder.decode(bytes);
+    const json = JsonCodec.#textDecoder.decode(bytes);
     return JsonCodec.#parseWireText(json);
   }
 
@@ -203,9 +145,8 @@ export class JsonCodec implements SerializationContext<string> {
   #encodeValue(
     value: FabricValue,
     _seen?: Set<object>,
-    registry: CodecRegistry = defaultRegistry,
   ): JsonCodecValue {
-    const codec = registry.codecFromValue(value);
+    const codec = this.#registry.codecFromValue(value);
 
     if (codec === SELF_REP) {
       // A self-representing primitive is its own wire form.
@@ -229,7 +170,7 @@ export class JsonCodec implements SerializationContext<string> {
       const tag = codec.tagForValue(value);
 
       const unprocessedState = codec.encode(value);
-      const finalState = this.#encodeValue(unprocessedState, seen, registry);
+      const finalState = this.#encodeValue(unprocessedState, seen);
       const result: JsonCodecValue = { [`/${tag}`]: finalState };
 
       if (addedToSeen) {
@@ -243,7 +184,9 @@ export class JsonCodec implements SerializationContext<string> {
       // recognized by a registered codec. Complain here since we didn't find a
       // `codec` above.
       throw new Error(
-        `No codec registered for fabric object class: ${value.constructor.name}`,
+        `No codec registered for fabric object class: ${
+          backtickQuote(value.constructor.name)
+        }`,
       );
     }
 
@@ -270,7 +213,7 @@ export class JsonCodec implements SerializationContext<string> {
           result.push(this.wrapTag(CODEC_META_TAGS.hole, count));
         } else {
           result.push(
-            this.#encodeValue(value[i], seen, registry),
+            this.#encodeValue(value[i], seen),
           );
           i++;
         }
@@ -288,7 +231,7 @@ export class JsonCodec implements SerializationContext<string> {
     if (!isPlainObject(value)) {
       throw new Error(
         `Cannot encode ${
-          toCompactDebugString(value, 50)
+          backtickQuote(toCompactDebugString(value, 50))
         }: no applicable codec.`,
       );
     }
@@ -307,7 +250,7 @@ export class JsonCodec implements SerializationContext<string> {
     const result: Record<string, JsonCodecValue> = {};
     const valueRec = value as Record<string, FabricValue>;
     for (const key of utf8SortedKeysOf(valueRec)) {
-      result[key] = this.#encodeValue(valueRec[key], seen, registry);
+      result[key] = this.#encodeValue(valueRec[key], seen);
     }
     seen.delete(value as object);
 
@@ -317,10 +260,10 @@ export class JsonCodec implements SerializationContext<string> {
     // Otherwise wrap with /object so the decoder deserializes entries.
     const keys = Object.keys(result);
     if (keys.some((k) => k.startsWith("/"))) {
-      if (Object.values(result).every((v) => isQuoteSafe(v))) {
+      if (Object.values(result).every((v) => JsonCodec.#isQuoteSafe(v))) {
         const unquoted = Object.freeze(
           Object.fromEntries(
-            Object.entries(result).map(([k, v]) => [k, unquote(v)]),
+            Object.entries(result).map(([k, v]) => [k, JsonCodec.#unquote(v)]),
           ),
         );
         return this.wrapTag(CODEC_META_TAGS.quote, unquoted) as JsonCodecValue;
@@ -343,7 +286,6 @@ export class JsonCodec implements SerializationContext<string> {
   #decodeValue(
     data: JsonCodecValue,
     context: ReconstructionContext,
-    registry: CodecRegistry = defaultRegistry,
   ): FabricValue {
     const decoded = this.unwrapTag(data);
     if (decoded !== null) {
@@ -368,13 +310,14 @@ export class JsonCodec implements SerializationContext<string> {
               `object contains a key this runtime reserves: "${key}"`,
             );
           }
-          result[key] = this.#decodeValue(val, context, registry);
+          result[key] = this.#decodeValue(val, context);
         }
         return Object.freeze(result);
       }
 
-      // Except for `/quote` and `/object`, the `state` needs to be fully decoded.
-      const state = this.#decodeValue(rawState, context, registry);
+      // Except for `/quote` and `/object`, the `state` needs to be fully
+      // decoded.
+      const state = this.#decodeValue(rawState, context);
 
       // A bare `"/"` key (empty tag after stripping the leading slash) is
       // always an encoding error per spec §9 — no valid tag has an empty
@@ -398,7 +341,7 @@ export class JsonCodec implements SerializationContext<string> {
       // lenient-mode `ProblematicValue` fallback. The class-registry
       // fallback below is a separate arm and is intentionally NOT covered by
       // this contract.
-      const codec = registry.codecFromTag(tag);
+      const codec = this.#registry.codecFromTag(tag);
       if (codec) {
         if (this.lenient) {
           try {
@@ -452,7 +395,7 @@ export class JsonCodec implements SerializationContext<string> {
         ) {
           targetIndex += entryDecoded.state as number;
         } else {
-          result[targetIndex] = this.#decodeValue(entry, context, registry);
+          result[targetIndex] = this.#decodeValue(entry, context);
           targetIndex++;
         }
       }
@@ -483,7 +426,7 @@ export class JsonCodec implements SerializationContext<string> {
           `object contains a key this runtime reserves: "${key}"`,
         );
       }
-      result[key] = this.#decodeValue(val, context, registry);
+      result[key] = this.#decodeValue(val, context);
     }
     return Object.freeze(result);
   }
@@ -491,6 +434,35 @@ export class JsonCodec implements SerializationContext<string> {
   //
   // Static members
   //
+
+  /** Shared text encoder, created once. */
+  static readonly #textEncoder = new TextEncoder();
+
+  /** Shared text decoder, created once. */
+  static readonly #textDecoder = new TextDecoder();
+
+  /**
+   * Registry for the throwaway checks in the testing helpers below: this
+   * format's primitive determination, plus the two classes the format uses to
+   * represent its own failures. No domain class is registered.
+   *
+   * That line is what makes those checks answer the question they are asked.
+   * They validate that text is well-formed in this wire format, not that any
+   * particular class is available to receive it, so a body naming any fabric
+   * class has to survive the round trip regardless of who registered what.
+   * Both fallbacks are needed for it to:
+   *
+   * * `UnknownValue` receives an unrecognized tag, and re-encodes to the tag
+   *   it came from.
+   * * `ProblematicValue` receives a state its codec rejects -- which a codec
+   *   may hand back directly rather than throwing, independent of `lenient`
+   *   -- and likewise re-encodes.
+   *
+   * A helper drawing on a fuller registry would instead accept or reject text
+   * according to a roster its caller never chose.
+   */
+  static readonly #testingRegistry: CodecRegistry = createBaseJsonRegistry()
+    .extend([UnknownValue, ProblematicValue]);
 
   /**
    * Reconstruction context for the throwaway checks in the testing helpers
@@ -504,6 +476,60 @@ export class JsonCodec implements SerializationContext<string> {
       "no runtime context (validity check in a test-only helper).",
     ),
   );
+
+  /**
+   * Returns true if `v` is a single-key object whose key starts with `/` --
+   * the wire form of an encoded instance (tag-wrapped value).
+   */
+  static #isEncodedInstance(v: JsonCodecValue): boolean {
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+    const keys = Object.keys(v);
+    return keys.length === 1 && keys[0]!.startsWith("/");
+  }
+
+  /**
+   * Returns true if the already-encoded codec value `v` can be embedded
+   * inside a /quote wrap without inner deserialization: primitives, plain
+   * objects/arrays free of non-/quote encoded instances, and /quote-wrapped
+   * values (which `#unquote()` can collapse).
+   */
+  static #isQuoteSafe(v: JsonCodecValue): boolean {
+    if (v === null || typeof v !== "object") return true;
+    if (Array.isArray(v)) {
+      return v.every((item) => JsonCodec.#isQuoteSafe(item));
+    }
+    if (!JsonCodec.#isEncodedInstance(v)) {
+      return Object.values(v).every((item) =>
+        JsonCodec.#isQuoteSafe(item as JsonCodecValue)
+      );
+    }
+    return Object.keys(v)[0] === "/quote";
+  }
+
+  /**
+   * Unwraps /quote forms one level so their literal content can be embedded
+   * directly inside a parent /quote. The inner content of a /quote is already
+   * literal and must not be recursed into.
+   */
+  static #unquote(v: JsonCodecValue): JsonCodecValue {
+    if (v === null || typeof v !== "object") {
+      return v;
+    } else if (Array.isArray(v)) {
+      const result = v.map(JsonCodec.#unquote) as JsonCodecValue;
+      return Object.freeze(result);
+    } else if (
+      JsonCodec.#isEncodedInstance(v) && Object.keys(v)[0] === "/quote"
+    ) {
+      return (v as Record<string, JsonCodecValue>)["/quote"]!;
+    } else {
+      const result = Object.fromEntries(
+        Object.entries(v).map(
+          ([k, val]) => [k, JsonCodec.#unquote(val as JsonCodecValue)],
+        ),
+      ) as JsonCodecValue;
+      return Object.freeze(result);
+    }
+  }
 
   /**
    * Indicates if the given text has a "first-blush" appearance as valid JSON
@@ -541,15 +567,23 @@ export class JsonCodec implements SerializationContext<string> {
    * The tag itself is still required either way. That is not a judgment about
    * the payload: removing a prefix that is not there does not produce the body,
    * it produces nonsense, so there is nothing for this to return.
+   *
+   * `registry` decides what the check is able to read, and so what counts as
+   * decodable. It defaults to the format-only registry described above, under
+   * which any tag is acceptable; pass one carrying a class roster to hold the
+   * payload to that roster's codecs as well.
    */
   static unwrapEncodedValueForTesting(
     encoded: string,
     isMalformed = false,
+    registry: CodecRegistry = JsonCodec.#testingRegistry,
   ): string {
     if (isMalformed) {
       if (!JsonCodec.seemsLikeEncoded(encoded)) {
         throw new Error(
-          `Not a JSON-encoded \`FabricValue\` string: \`${encoded}\``,
+          `Not a JSON-encoded \`FabricValue\` string: ${
+            backtickQuote(encoded)
+          }`,
         );
       }
     } else {
@@ -557,7 +591,7 @@ export class JsonCodec implements SerializationContext<string> {
       // establish that `encoded` really is one of ours, rather than a string
       // that happens to begin with the right few characters. (`decode()` checks
       // the tag first, so the malformed branch above loses nothing.)
-      new JsonCodec().decode(
+      new JsonCodec({ registry }).decode(
         encoded,
         JsonCodec.#testingReconstructionContext,
       );
@@ -591,16 +625,20 @@ export class JsonCodec implements SerializationContext<string> {
    * asked to survive a decode. The result is the tag with `json` after it,
    * whatever `json` is. The flag is the call site saying out loud that the
    * badness is the point.
+   *
+   * `registry` decides what the check is able to read, exactly as for
+   * `unwrapEncodedValueForTesting()`.
    */
   static wrapEncodedValueForTesting(
     json: string,
     isMalformed = false,
+    registry: CodecRegistry = JsonCodec.#testingRegistry,
   ): string {
     const encoded = ENCODING_PREFIX_TAG + json;
 
     if (!isMalformed) {
       // Throwaway decode and re-encode; both results are discarded. See above.
-      const jsonCodec = new JsonCodec();
+      const jsonCodec = new JsonCodec({ registry });
       jsonCodec.encode(
         jsonCodec.decode(
           encoded,
@@ -612,9 +650,7 @@ export class JsonCodec implements SerializationContext<string> {
     return encoded;
   }
 
-  /**
-   * Parses the JSON-text wire form, _without_ a tag prefix.
-   */
+  /** Parses the JSON-text wire form, _without_ a tag prefix. */
   static #parseWireText(jsonText: string): JsonCodecValue {
     return deepFreeze(JSON.parse(jsonText) as JsonCodecValue);
   }

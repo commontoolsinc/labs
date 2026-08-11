@@ -8,11 +8,8 @@ import {
   createUnifiedDiff,
   defineFixtureSuite,
 } from "@commonfabric/test-support/fixture-runner";
-import {
-  JsonCodec,
-  jsonFromValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
+import { JsonCodec } from "@commonfabric/data-model/codec-json";
+import { jsonFromValue, valueFromJson } from "@commonfabric/data-model/codecs";
 import {
   FabricPrimitive,
   type FabricValue,

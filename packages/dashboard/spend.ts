@@ -6,6 +6,7 @@
 // another source's line runs further.
 import type { Status } from "./types.ts";
 import { multiSparkline, SPARK_FADE } from "./lib.ts";
+import { themedChartSeries } from "./theme.ts";
 
 export const DAY_MS = 86_400_000;
 export const MIN_SPEND_WINDOW_DAYS = 14;
@@ -236,7 +237,7 @@ export function spendChart(
       xs: covered === grid.length
         ? undefined
         : days.map((_, index) => index / (grid.length - 1)),
-      color: source.color,
+      ...themedChartSeries(source.color),
       label: source.label,
       highlightCount: Math.max(0, covered - (grid.length - highlightDays)),
       showSinglePoint: true,

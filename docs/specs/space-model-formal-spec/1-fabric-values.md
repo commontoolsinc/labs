@@ -987,11 +987,11 @@ export class FabricEpochDays extends FabricPrimitive {
  * is the unpadded base64url encoding (RFC 4648 Section 5) of the hash
  * bytes. For example: `fid1:n4bQgYhMfWWaL-qgxVrQFaO_TxsrC4Is0V1sFbDwCgg`.
  *
- * Immutable by convention: instances are `Object.freeze()`-d at construction
- * time, and the constructor assumes ownership of the `hash` bytes (callers
- * must not mutate the `Uint8Array` after passing it in, since JS cannot
- * freeze `ArrayBuffer` contents). The string form is cached internally so
- * that repeated `toString()` calls are O(1).
+ * Immutable: instances are `Object.freeze()`-d at construction time, and an
+ * instance owns its hash bytes outright, holding a buffer no other code can
+ * reach. (JS cannot freeze `ArrayBuffer` contents, so sole ownership is the
+ * defense.) The string form is cached internally so that repeated
+ * `toString()` calls are O(1).
  */
 export class FabricHash extends FabricPrimitive {
   readonly #hash: Uint8Array;
@@ -1000,14 +1000,17 @@ export class FabricHash extends FabricPrimitive {
   readonly #fullStringForm: string;
 
   /**
-   * @param hash - The raw hash bytes (ownership transferred to this instance).
+   * @param hash - The raw hash bytes.
    * @param tag - Algorithm identifier (e.g., `"fid1"` for fabric ID v1).
+   * @param transfer - Whether the caller cedes `hash` to this instance, which
+   *   permits taking over its buffer instead of copying it. When `true`, the
+   *   caller must not use `hash` afterwards.
    */
-  constructor(hash: Uint8Array, tag: string) {
+  constructor(hash: Uint8Array, tag: string, transfer: boolean = false) {
     super();
-    this.#hash = hash;
+    this.#hash = toOwnedUint8Array(hash, transfer);
     this.#tag = tag;
-    this.#justHashString = toUnpaddedBase64url(hash);
+    this.#justHashString = toUnpaddedBase64url(this.#hash);
     this.#fullStringForm = `${tag}:${this.#justHashString}`;
     Object.freeze(this);
   }
@@ -1062,7 +1065,9 @@ export class FabricHash extends FabricPrimitive {
     }
     const tag = source.substring(0, colonIndex);
     const hashBase64url = source.substring(colonIndex + 1);
-    return new FabricHash(fromBase64url(hashBase64url), tag);
+    // The decoded array is freshly allocated and reaches nothing else, so it
+    // is ceded rather than copied.
+    return new FabricHash(fromBase64url(hashBase64url), tag, true);
   }
 }
 ```
@@ -1113,21 +1118,24 @@ state. See Section 5 of `3-json-encoding.md` for the wire format.
  * - `slice()` — returns an unshared copy (or sub-range).
  * - `copyInto()` — copies bytes into a caller-provided buffer.
  *
- * Immutable by convention: instances are `Object.freeze()`-d at construction
- * time, and the constructor copies the input bytes so the caller cannot mutate
- * them after construction. (JS cannot freeze `ArrayBuffer` contents, so the
- * copy is the defense.)
+ * Immutable: instances are `Object.freeze()`-d at construction time, and an
+ * instance owns its bytes outright, holding a buffer no other code can reach.
+ * (JS cannot freeze `ArrayBuffer` contents, so sole ownership is the defense.)
  */
 export class FabricBytes extends FabricPrimitive {
   readonly #bytes: Uint8Array;
 
   /**
-   * Constructs a `FabricBytes` from raw bytes. The input is copied;
-   * the caller may freely mutate the original after construction.
+   * Constructs an instance holding the given bytes, which it owns outright.
+   *
+   * @param bytes - The raw bytes to wrap.
+   * @param transfer - Whether the caller cedes `bytes` to this instance, which
+   *   permits taking over its buffer instead of copying it. When `true`, the
+   *   caller must not use `bytes` afterwards.
    */
-  constructor(bytes: Uint8Array) {
+  constructor(bytes: Uint8Array, transfer: boolean = false) {
     super();
-    this.#bytes = new Uint8Array(bytes);
+    this.#bytes = toOwnedUint8Array(bytes, transfer);
     Object.freeze(this);
   }
 
@@ -1409,6 +1417,11 @@ lifecycle symbols live on the implementation base class `BaseFabricInstance`
 (Section 2.3), kept off the pure-protocol `FabricInstance` interface as
 implementation plumbing.
 
+Each is a genuinely unique symbol rather than a registry-interned one, so a
+member keyed by it is reachable only by importing the symbol. The string passed
+to `Symbol()` is a description, for debugging; it is not a key anything can look
+the symbol up by.
+
 ```typescript
 // file: packages/data-model/codec-common/interface.ts
 
@@ -1417,7 +1430,7 @@ implementation plumbing.
  * A class hosts its serialization codec as a static getter keyed by this
  * symbol (see Section 2.4).
  */
-export const CODEC: unique symbol = Symbol.for('data-model.codec');
+export const CODEC: unique symbol = Symbol('data-model.codec');
 ```
 
 ```typescript
@@ -1429,7 +1442,7 @@ export const CODEC: unique symbol = Symbol.for('data-model.codec');
  * into any nested `FabricValue`s via a `subFreeze` callback supplied by the
  * generic `deepFreeze()` utility. See Section 8.6.
  */
-export const DEEP_FREEZE = Symbol.for('data-model.deepFreeze');
+export const DEEP_FREEZE: unique symbol = Symbol('data-model.deepFreeze');
 
 /**
  * Well-known symbol for checking whether a fabric instance is already
@@ -1439,7 +1452,7 @@ export const DEEP_FREEZE = Symbol.for('data-model.deepFreeze');
  * via a `subIsDeepFrozen` callback, returning the boolean conjunction.
  * See Section 8.6.
  */
-export const IS_DEEP_FROZEN = Symbol.for('data-model.isDeepFrozen');
+export const IS_DEEP_FROZEN: unique symbol = Symbol('data-model.isDeepFrozen');
 
 /**
  * Well-known symbol for the **internal** shallow-clone hook: a `protected`
@@ -1450,9 +1463,12 @@ export const IS_DEEP_FROZEN = Symbol.for('data-model.isDeepFrozen');
  * `shallowClone()` template method on `BaseFabricInstance` is its only caller
  * (Section 2.3).
  */
-export const SHALLOW_UNFROZEN_CLONE = Symbol.for('data-model.shallowUnfrozenClone');
+export const SHALLOW_UNFROZEN_CLONE: unique symbol = Symbol(
+  'data-model.shallowUnfrozenClone',
+);
 
-// Protocol evolution: Symbol.for('data-model.codec@2'), etc.
+// Protocol evolution: a further exported symbol, e.g.
+// `Symbol('data-model.codec@2')`.
 ```
 
 ### 2.3 Instance Protocol
@@ -2431,14 +2447,23 @@ registered codecs:
 
 #### The default registry
 
-`createDefaultRegistry()` (`codec-common/createDefaultRegistry.ts`) builds
-the registry the shared JSON codec uses. The wire-format surface is
-**explicit and curated**: fabric classes whose instances have a fixed wire
-tag supply their codec via the static `[CODEC]`, and the curated
-`codecClasses()` list from each of `fabric-primitives/` and
-`fabric-instances/` is the source of truth for which classes participate —
-the wire surface is curated there, in one obvious place per area, rather
-than implied by scattered registrations.
+Building a registry takes two decisions, held apart because they belong to
+different things.
+
+`createBaseJsonRegistry()` (`codec-json/createBaseJsonRegistry.ts`) makes the
+one the JSON format owns: which of JavaScript's primitive types are their own
+wire form, and which need a tagged encoding. It registers no fabric class, so
+another wire format supplies its own counterpart here without disturbing
+anything below.
+
+`createDefaultJsonRegistry()` (`codecs.ts`) adds the classes, and is the
+registry the shared JSON codec uses. The wire-format surface is **explicit and
+curated**: fabric classes whose instances have a fixed wire tag supply their
+codec via the static `[CODEC]`, and the curated `codecClasses()` list from each
+of `fabric-primitives/` and `fabric-instances/` is the source of truth for
+which classes participate — the wire surface is curated there, in one obvious
+place per area, rather than implied by scattered registrations. A caller
+needing classes of its own extends what this returns.
 
 | Registration | Codec / type | Tag | Notes |
 |--------------|--------------|-----|-------|
@@ -2582,12 +2607,15 @@ version requirements.
 
 The storage boundary routes through functions that bridge between the
 storage layer (JSON strings) and the runtime layer (`FabricValue`). These
-functions live in a dedicated module
-(`packages/data-model/codec-json/impl.ts`).
+functions live in the package's codec-defaults module
+(`packages/data-model/src/codecs.ts`), which pairs the JSON format with the
+set of fabric classes this package defines. The format itself, and the
+recognizer for text in it, live one layer down in
+`packages/data-model/src/codec-json/`.
 
 ```typescript
 // Shown for illustration only.
-// file: packages/data-model/codec-json/impl.ts
+// file: packages/data-model/src/codecs.ts
 
 /**
  * Encodes a fabric value to a JSON string in the standard `FabricValue`
@@ -2614,16 +2642,20 @@ export function plainObjectFromJson<T extends object = object>(
   json: string,
   context?: ReconstructionContext,
 ): T;
+```
+
+```typescript
+// Shown for illustration only.
+// file: packages/data-model/src/codec-json/impl.ts
 
 /**
- * Indicates if the given text has a "first-blush" appearance as valid
- * encoded JSON as defined by this module (i.e., carries the `fvj1:`
- * prefix).
+ * Indicates if the given text has a "first-blush" appearance as text in the
+ * JSON-embedded encoding (i.e., carries the `fvj1:` prefix).
  */
 export function seemsLikeJsonEncodedFabricValue(value: string): boolean;
 ```
 
-The module creates a single stateless `JsonCodec` instance at module load
+`codecs.ts` creates a single stateless `JsonCodec` instance at module load
 time and reuses it for all encode/decode operations.
 
 The `memory` package wraps these at its serialization boundary

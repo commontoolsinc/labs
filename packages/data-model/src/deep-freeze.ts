@@ -7,22 +7,18 @@ import {
 import { BaseFabricPrimitive } from "./fabric-primitives/BaseFabricPrimitive.ts";
 import { isFabricValue } from "./type-check.ts";
 
-/**
- * Cache of confirmed deep-frozen objects.
- */
+/** Cache of confirmed deep-frozen objects. */
 const deepFrozenCache = new WeakSet<object>();
 
 /**
  * Object graphs proven to be deep-frozen `FabricValue`s, memoized by root
  * identity for `isDeepFrozenFabricValue()`. Sound to cache because the
- * deep-frozen-honesty mandate makes such a proof permanent (see `[IS_DEEP_FROZEN]`
- * on `BaseFabricInstance` and the `FabricValue` doc).
+ * deep-frozen-honesty mandate makes such a proof permanent (see
+ * `[IS_DEEP_FROZEN]` on `BaseFabricInstance` and the `FabricValue` doc).
  */
 const deepFrozenFabricValueCache = new WeakSet<object>();
 
-/**
- * Adds a value which has been determined to be deep-frozen to the cache.
- */
+/** Adds a value which has been determined to be deep-frozen to the cache. */
 function addToDeepFrozenCache(obj: object) {
   deepFrozenCache.add(obj);
 }
@@ -37,20 +33,21 @@ function isInDeepFrozenCache(obj: object): boolean {
 
 /**
  * Indicates whether the given value is "necessarily frozen" -- immutable by its
- * very nature, without any `Object.freeze()` having been applied. Reports `true`
- * for every primitive (`null`, `undefined`, booleans, numbers, strings,
+ * very nature, without any `Object.freeze()` having been applied. Reports
+ * `true` for every primitive (`null`, `undefined`, booleans, numbers, strings,
  * `bigint`s, symbols) and `FabricPrimitive` instances (which self-freeze at
- * construction and hold no outbound references). Ordinary objects and arrays are
- * `false`, as are `FabricInstance`s (whose frozen-ness depends on
+ * construction and hold no outbound references). Ordinary objects and arrays
+ * are `false`, as are `FabricInstance`s (whose frozen-ness depends on
  * `Object.freeze()` and their `[IS_DEEP_FROZEN]` report).
  *
  * KNOWN LIMITATION -- these do the wrong thing for `function`s, specifically. A
- * function reports `true` here (its `typeof` is not `"object"`), so `deepFreeze()`
- * and `isDeepFrozen()` treat it as an opaque immutable leaf: `isDeepFrozen(fn)` is
- * `true`, and a frozen graph reaching a function reads as deep-frozen, even
- * though the function's internals -- its `prototype` object and closure state --
- * remain mutable. This is deliberate, so general-purpose callers that freeze
- * objects-with-methods (e.g. `api/cfc.ts`'s `cfcPattern`) keep working.
+ * function reports `true` here (its `typeof` is not `"object"`), so
+ * `deepFreeze()` and `isDeepFrozen()` treat it as an opaque immutable leaf:
+ * `isDeepFrozen(fn)` is `true`, and a frozen graph reaching a function reads as
+ * deep-frozen, even though the function's internals -- its `prototype` object
+ * and closure state -- remain mutable. This is deliberate, so general-purpose
+ * callers that freeze objects-with-methods (e.g. `api/cfc.ts`'s `cfcPattern`)
+ * keep working.
  *
  * TODO(danfuzz): Migrate `deepFreeze()` to accept `FabricValue` only. A
  * function is not a `FabricValue`, so a strict signature removes the case
@@ -122,10 +119,10 @@ export function isDeepFrozen(value: unknown): boolean {
       // `check`, which shares this call's cycle state. Gating via
       // `BaseFabricInstance.isInstance()` keeps this generic (and enforces the
       // "every `FabricInstance` is a `BaseFabricInstance`" invariant); the
-      // member is abstract on `BaseFabricInstance`, so every instance implements
-      // it. (A `FabricPrimitive` never reaches here: it is necessarily frozen,
-      // so it short-circuits at the `isNecessarilyOrKnownDeepFrozen` check
-      // above.)
+      // member is abstract on `BaseFabricInstance`, so every instance
+      // implements it. (A `FabricPrimitive` never reaches here: it is
+      // necessarily frozen, so it short-circuits at the
+      // `isNecessarilyOrKnownDeepFrozen` check above.)
       result = obj[IS_DEEP_FROZEN](check);
     } else if (Array.isArray(obj)) {
       for (let i = 0; i < obj.length; i++) {
@@ -253,8 +250,8 @@ export function deepFreeze<T>(value: T): T {
 
 /**
  * Indicates whether the value is a deep-frozen `FabricValue`: both a
- * `FabricValue` (`isFabricValue()`) and deeply frozen (`isDeepFrozen()`), with an
- * identity-cached fast path. The cache is sound per the deep-frozen-honesty
+ * `FabricValue` (`isFabricValue()`) and deeply frozen (`isDeepFrozen()`), with
+ * an identity-cached fast path. The cache is sound per the deep-frozen-honesty
  * mandate (see `[IS_DEEP_FROZEN]` and the `FabricValue` doc), which makes a
  * deep-frozen proof permanent.
  */

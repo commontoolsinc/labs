@@ -18,7 +18,6 @@ import {
   githubCiSpend,
 } from "./tiles/github-ci-spend.ts";
 import { projectMonthly, settled } from "./spend.ts";
-import { RUNNING_COLOR, STATUS_COLOR } from "./palette.ts";
 import { modelSpend } from "./tiles/model-spend.ts";
 import {
   benchmark,
@@ -113,7 +112,7 @@ Deno.test(
       "first-try green · 199 of last 200 runs",
     );
     assert(
-      !(view.extra ?? "").includes(STATUS_COLOR.bad),
+      !(view.extra ?? "").includes("var(--status-bad)"),
       "the 201st run must be outside the grid and percentage window",
     );
   },
@@ -131,14 +130,14 @@ Deno.test("labs ci trust grid: cell colors match trust scoring", async () => {
   ];
   const view = await labsCiTrust.collect(ctx(runs));
   const colors = [
-    ...(view.extra ?? "").matchAll(/background:(#[0-9a-f]+)/g),
+    ...(view.extra ?? "").matchAll(/background:(var\(--[^)]+\))/g),
   ].map((match) => match[1]);
   assertEquals(view.value, "25.0%");
-  assertEquals(colors.filter((color) => color === STATUS_COLOR.good).length, 1);
-  assertEquals(colors.filter((color) => color === STATUS_COLOR.bad).length, 3);
-  assertEquals(colors.filter((color) => color === RUNNING_COLOR).length, 1);
+  assertEquals(colors.filter((color) => color === "var(--status-good)").length, 1);
+  assertEquals(colors.filter((color) => color === "var(--status-bad)").length, 3);
+  assertEquals(colors.filter((color) => color === "var(--running)").length, 1);
   assertEquals(
-    colors.filter((color) => color === STATUS_COLOR.unknown).length,
+    colors.filter((color) => color === "var(--status-unknown)").length,
     2,
   );
 });

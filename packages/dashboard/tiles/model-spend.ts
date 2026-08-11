@@ -21,6 +21,7 @@
 import type { Status, Tile, TileView } from "../types.ts";
 import { budgetStatus, readBudget, usd } from "../lib.ts";
 import { DAY_MS, SPEND_HISTORY_DAYS, spendChart, summarizeDailySpend } from "../spend.ts";
+import { themedChartSeries } from "../theme.ts";
 
 // The provider billing APIs are slow — OpenAI's costs endpoint alone takes ~12-16s
 // for a 46-day query and slows further under repeated calls — and this tile pages
@@ -184,7 +185,8 @@ export const modelSpend: Tile = {
     // abbreviated "OR") and any provider we couldn't read show their value inline
     // ("$???" when missing). Items are bullet-separated. The combined MTD is in the
     // header aside; the span the chart covers goes to the tile's duration slot.
-    const swatch = (c: string) => `<span class="swatch" style="background:${c}"></span>`;
+    const swatch = (c: string) =>
+      `<span class="swatch" style="background:${themedChartSeries(c).color}"></span>`;
     const charted = (p: { mtd: number } | null, name: string, color: string) =>
       p ? (chart.chart ? `${swatch(color)} ${name}` : `${swatch(color)} ${name} ${usd(p.mtd)}`) : `${name} $???`;
     const seg: string[] = [];

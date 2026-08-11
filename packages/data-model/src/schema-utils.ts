@@ -1,6 +1,4 @@
-/**
- * Runtime utilities for working with JSONSchema values.
- */
+/** Runtime utilities for working with JSONSchema values. */
 
 import type {
   JSONSchema,
@@ -289,9 +287,7 @@ export function schemaForValueType(
   return getBasicSchema(type);
 }
 
-/**
- * Gets the standard interned empty schema _object_, a literal `{}`.
- */
+/** Gets the standard interned empty schema _object_, a literal `{}`. */
 export function emptySchemaObject() {
   const key = "emptySchema";
   const found = BASIC_SCHEMAS[key];
@@ -305,15 +301,18 @@ export function emptySchemaObject() {
 
 /**
  * Common shape of the two canonical-selector maps. Its key type spans both
- * maps' keys, so a single variable selected between the object `WeakMap` and the
- * primitive `Map` accepts the un-narrowed interned schema as a key — without
- * TypeScript collapsing the two maps' key types to `never` (which is what a bare
- * `WeakMap | Map` union does).
+ * maps' keys, so a single variable selected between the object `WeakMap` and
+ * the primitive `Map` accepts the un-narrowed interned schema as a key —
+ * without TypeScript collapsing the two maps' key types to `never` (which is
+ * what a bare `WeakMap | Map` union does).
  */
 type CanonicalSelectorMap = {
+  /** Returns the selectors for `key`, or `undefined` if there are none. */
   get(
     key: JSONSchema | undefined,
   ): Map<string, WeakRef<SchemaPathSelector>> | undefined;
+
+  /** Sets the selectors for `key`. */
   set(
     key: JSONSchema | undefined,
     value: Map<string, WeakRef<SchemaPathSelector>>,
@@ -334,8 +333,8 @@ type CanonicalSelectorMap = {
  * reference its schema — the outer `WeakMap` key — pinning both forever.
  * Dead refs are dropped lazily on lookup.
  *
- * As a `WeakMap`, this can only map from GC-able objects, so {@link
- * #canonicalSelectorsByPrimitiveSchema} handles primitives.
+ * As a `WeakMap`, this can only map from GC-able objects, so primitives are
+ * handled by {@link #canonicalSelectorsByPrimitiveSchema}.
  */
 const canonicalSelectorsByObjectSchema = new WeakMap<
   object,
@@ -343,8 +342,8 @@ const canonicalSelectorsByObjectSchema = new WeakMap<
 >();
 
 /**
- * Like {@link #canonicalSelectorsByObjectSchema}, except for primitive-valued schemas
- * including the "schema" `undefined`.
+ * Like {@link #canonicalSelectorsByObjectSchema}, except for primitive-valued
+ * schemas including the "schema" `undefined`.
  */
 const canonicalSelectorsByPrimitiveSchema = new Map<
   boolean | undefined,

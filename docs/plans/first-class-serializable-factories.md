@@ -197,8 +197,8 @@ Expected implementation files:
 - [ ] Add a dedicated callable-factory codec slot to
   `packages/data-model/src/codec-common/CodecRegistry.ts`; do not classify all
   functions as primitives or match `Function` by constructor.
-- [ ] Register the codec in
-  `packages/data-model/src/codec-common/createDefaultRegistry.ts`.
+- [ ] Register the codec where the class rosters are applied, in
+  `packages/data-model/src/codecs.ts`.
 - [ ] Route callable factories through codec lookup before the generic function
   rejection.
 - [ ] Include callable factories in JSON encoder cycle tracking.
@@ -210,7 +210,7 @@ Expected implementation and test files:
 - `packages/data-model/src/codec-common/` for the codec/state validator
 - `packages/data-model/src/codec-common/CodecRegistry.ts`
 - `packages/data-model/src/codec-json/JsonCodec.ts`
-- `packages/data-model/src/codec-common/createDefaultRegistry.ts`
+- `packages/data-model/src/codecs.ts`
 - `packages/data-model/src/codec-json/impl.ts`
 - `packages/data-model/test/codec-common/FactoryCodec.test.ts`
 - `packages/data-model/test/codec-common/CodecRegistry.test.ts`
@@ -912,8 +912,7 @@ original pattern with `entries`.
   compatibility reader, migration fixture, or historical documentation:
 
   ```sh
-  rg -n "patternTool|PatternToolResult|extraParams" packages docs/common \
-    --glob '!packages/patterns/deprecated/**'
+  rg -n "patternTool|PatternToolResult|extraParams" packages docs/common
   ```
 
 ### WP4.4 — Stop canonical production of legacy list and tool shapes

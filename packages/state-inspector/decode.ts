@@ -14,10 +14,8 @@
 // live runtime/Cell needed). In the encoded form embedded links are
 // `/quote`-escaped literals, so a context-less decode is inert.
 
-import {
-  seemsLikeJsonEncodedFabricValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
+import { seemsLikeJsonEncodedFabricValue } from "@commonfabric/data-model/codec-json";
+import { valueFromJson } from "@commonfabric/data-model/codecs";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isPlainObject } from "@commonfabric/utils/types";

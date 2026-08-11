@@ -9,6 +9,7 @@ import {
   assertRejects,
   assertStringIncludes,
 } from "@std/assert";
+import { expect } from "@std/expect";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import {
   CLICK_TARGET_ATTR,
@@ -269,6 +270,408 @@ describe("CFC browser helpers", () => {
       "the click reached the replacement before its handler was bound",
     );
     assertEquals(result.settleCalls, 3);
+  });
+
+  it("delivers a click when the control moves after aiming", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      host.id = "moving-click-host";
+      const root = host.attachShadow({ mode: "open" });
+      const button = document.createElement("button");
+      button.id = "moving-guest-button";
+      button.textContent = "Continue as guest";
+      Object.assign(button.style, {
+        display: "block",
+        width: "200px",
+        height: "32px",
+      });
+      root.append(button);
+      document.body.append(host);
+
+      let clicks = 0;
+      let ready = false;
+      button.addEventListener("click", () => {
+        if (!ready) return;
+        clicks++;
+        const input = document.createElement("input");
+        input.id = "moving-join-name";
+        document.body.append(input);
+      });
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+        __moveClickTarget: () => void;
+        __movingClickResult: () => {
+          clicks: number;
+          inputPresent: boolean;
+        };
+      }).commonfabric = {
+        viewSettled: () => {
+          ready = true;
+          return Promise.resolve();
+        },
+      };
+      (globalThis as typeof globalThis & {
+        __moveClickTarget: () => void;
+      }).__moveClickTarget = () => {
+        ready = false;
+        button.style.transform = "translateX(400px)";
+      };
+      (globalThis as typeof globalThis & {
+        __movingClickResult: () => {
+          clicks: number;
+          inputPresent: boolean;
+        };
+      }).__movingClickResult = () => ({
+        clicks,
+        inputPresent: document.querySelector("#moving-join-name") !== null,
+      });
+    });
+
+    let moved = false;
+    page.setInteractionObserver({
+      beforeClick: async () => {
+        if (moved) return;
+        moved = true;
+        // Move the target after the helper measures it and before the browser
+        // dispatches the trusted click.
+        await page.evaluate(() =>
+          (globalThis as typeof globalThis & {
+            __moveClickTarget: () => void;
+          }).__moveClickTarget()
+        );
+      },
+    });
+    try {
+      await clickCfButton(page, "#moving-guest-button");
+    } finally {
+      page.setInteractionObserver();
+    }
+
+    const result = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __movingClickResult: () => {
+          clicks: number;
+          inputPresent: boolean;
+        };
+      }).__movingClickResult()
+    );
+    expect(result.clicks).toBe(1);
+    expect(result.inputPresent).toBe(true);
+  });
+
+  it("preserves page state and coordinates for a moved control", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      host.id = "native-moved-click-host";
+      const root = host.attachShadow({ mode: "open" });
+      const style = document.createElement("style");
+      style.textContent = `
+        #native-moved-click-button::after { content: "AUTHOR"; }
+      `;
+      const button = document.createElement("button");
+      button.id = "native-moved-click-button";
+      button.textContent = "Continue";
+      const sibling = document.createElement("button");
+      sibling.id = "native-moved-click-sibling";
+      sibling.textContent = "Other";
+      Object.assign(button.style, {
+        position: "fixed",
+        left: "40px",
+        top: "120px",
+        width: "120px",
+        height: "40px",
+        margin: "0",
+      });
+      Object.assign(sibling.style, {
+        position: "fixed",
+        left: "40px",
+        top: "220px",
+        width: "120px",
+        height: "40px",
+        margin: "0",
+      });
+      root.append(style, button, sibling);
+      document.body.append(host);
+
+      let result: {
+        clicks: number;
+        trusted: boolean;
+        pointInside: boolean;
+        pseudoContent: string;
+        siblingPointerEvents: string;
+        siblingHit: boolean;
+      } | undefined;
+      button.addEventListener("click", (event) => {
+        const rect = button.getBoundingClientRect();
+        const siblingRect = sibling.getBoundingClientRect();
+        result = {
+          clicks: 1,
+          trusted: event.isTrusted,
+          pointInside: event.clientX >= rect.left &&
+            event.clientX <= rect.right && event.clientY >= rect.top &&
+            event.clientY <= rect.bottom,
+          pseudoContent: getComputedStyle(button, "::after").content,
+          siblingPointerEvents: getComputedStyle(sibling).pointerEvents,
+          siblingHit: root.elementFromPoint(
+            siblingRect.x + siblingRect.width / 2,
+            siblingRect.y + siblingRect.height / 2,
+          ) === sibling,
+        };
+      });
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+        __nativeMovedClickResult: () => typeof result;
+      }).commonfabric = { viewSettled: () => Promise.resolve() };
+      (globalThis as typeof globalThis & {
+        __nativeMovedClickResult: () => typeof result;
+      }).__nativeMovedClickResult = () => result;
+    });
+
+    page.setInteractionObserver({
+      beforeClick: () =>
+        page.evaluate(() => {
+          const button = document.querySelector("#native-moved-click-host")
+            ?.shadowRoot?.querySelector<HTMLElement>(
+              "#native-moved-click-button",
+            );
+          if (!button) throw new Error("Moved click target is missing");
+          button.style.transform = "translateX(400px)";
+        }),
+    });
+    try {
+      await clickCfButton(page, "#native-moved-click-button");
+    } finally {
+      page.setInteractionObserver();
+    }
+
+    const result = await page.evaluate(() => {
+      const result = (globalThis as typeof globalThis & {
+        __nativeMovedClickResult: () => {
+          clicks: number;
+          trusted: boolean;
+          pointInside: boolean;
+          pseudoContent: string;
+          siblingPointerEvents: string;
+          siblingHit: boolean;
+        } | undefined;
+      }).__nativeMovedClickResult();
+      document.querySelector("#native-moved-click-host")?.remove();
+      return result;
+    });
+    expect(result).toEqual({
+      clicks: 1,
+      trusted: true,
+      pointInside: true,
+      pseudoContent: '"AUTHOR"',
+      siblingPointerEvents: "auto",
+      siblingHit: true,
+    });
+  });
+
+  it("settles a same-position replacement before clicking it", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      host.id = "same-position-host";
+      const root = host.attachShadow({ mode: "open" });
+      const button = document.createElement("button");
+      button.id = "same-position-button";
+      button.textContent = "Continue";
+      Object.assign(button.style, {
+        position: "fixed",
+        left: "40px",
+        top: "40px",
+        width: "120px",
+        height: "40px",
+        margin: "0",
+      });
+      root.append(button);
+      document.body.append(host);
+
+      let clicks = 0;
+      let bound: HTMLButtonElement | undefined;
+      const bind = () => {
+        const current = root.querySelector<HTMLButtonElement>(
+          "#same-position-button",
+        );
+        if (current && current !== bound) {
+          bound = current;
+          current.addEventListener("click", () => clicks++);
+        }
+      };
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+        __samePositionClicks: () => number;
+      }).commonfabric = {
+        viewSettled: () => {
+          bind();
+          return Promise.resolve();
+        },
+      };
+      (globalThis as typeof globalThis & {
+        __samePositionClicks: () => number;
+      }).__samePositionClicks = () => clicks;
+    });
+
+    page.setInteractionObserver({
+      beforeClick: async () => {
+        await page.evaluate(() => {
+          const current = document.querySelector("#same-position-host")
+            ?.shadowRoot?.querySelector<HTMLButtonElement>(
+              "#same-position-button",
+            );
+          if (!current) throw new Error("Same-position target is missing");
+          current.replaceWith(current.cloneNode(true));
+        });
+      },
+    });
+    try {
+      await clickCfButton(page, "#same-position-button");
+    } finally {
+      page.setInteractionObserver();
+    }
+
+    const clicks = await page.evaluate(() => {
+      const clicks = (globalThis as typeof globalThis & {
+        __samePositionClicks: () => number;
+      }).__samePositionClicks();
+      document.querySelector("#same-position-host")?.remove();
+      return clicks;
+    });
+    expect(clicks).toBe(1);
+  });
+
+  it("clicks the current selector match when the old control remains", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      host.id = "retargeted-click-host";
+      const root = host.attachShadow({ mode: "open" });
+      const oldButton = document.createElement("button");
+      oldButton.id = "retargeted-old-button";
+      oldButton.className = "retargeted-click-target";
+      oldButton.textContent = "Old";
+      const newButton = document.createElement("button");
+      newButton.id = "retargeted-new-button";
+      newButton.textContent = "New";
+      Object.assign(oldButton.style, {
+        position: "fixed",
+        left: "40px",
+        top: "320px",
+        width: "120px",
+        height: "40px",
+        margin: "0",
+      });
+      Object.assign(newButton.style, {
+        position: "fixed",
+        left: "240px",
+        top: "320px",
+        width: "120px",
+        height: "40px",
+        margin: "0",
+      });
+      root.append(oldButton, newButton);
+      document.body.append(host);
+
+      let oldClicks = 0;
+      let newClicks = 0;
+      oldButton.addEventListener("click", () => oldClicks++);
+      newButton.addEventListener("click", () => newClicks++);
+      const pageState = globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+        __retargetClick: () => void;
+        __retargetClickResult: () => {
+          oldClicks: number;
+          newClicks: number;
+        };
+      };
+      pageState.commonfabric = { viewSettled: () => Promise.resolve() };
+      pageState.__retargetClick = () => {
+        oldButton.classList.remove("retargeted-click-target");
+        oldButton.style.transform = "translateX(400px)";
+        newButton.classList.add("retargeted-click-target");
+      };
+      pageState.__retargetClickResult = () => ({ oldClicks, newClicks });
+    });
+
+    page.setInteractionObserver({
+      beforeClick: () =>
+        page.evaluate(() =>
+          (globalThis as typeof globalThis & {
+            __retargetClick: () => void;
+          }).__retargetClick()
+        ),
+    });
+    try {
+      await clickCfButton(page, ".retargeted-click-target");
+    } finally {
+      page.setInteractionObserver();
+    }
+
+    const result = await page.evaluate(() => {
+      const result = (globalThis as typeof globalThis & {
+        __retargetClickResult: () => {
+          oldClicks: number;
+          newClicks: number;
+        };
+      }).__retargetClickResult();
+      document.querySelector("#retargeted-click-host")?.remove();
+      return result;
+    });
+    expect(result).toEqual({ oldClicks: 0, newClicks: 1 });
+  });
+
+  it("preserves page-owned click identity globals", async () => {
+    const identityPage = await browser.newPage();
+    try {
+      await identityPage.evaluate(() => {
+        const button = document.createElement("button");
+        button.id = "identity-global-button";
+        button.textContent = "Continue";
+        document.body.append(button);
+
+        let clicks = 0;
+        button.addEventListener("click", () => clicks++);
+        const ownedIds = new WeakMap<Element, number>();
+        const pageState = globalThis as typeof globalThis & {
+          commonfabric: { viewSettled: () => Promise<void> };
+          __cfClickTargetIds: WeakMap<Element, number>;
+          __cfClickTargetIdNext: number;
+          __identityGlobalResult: () => {
+            clicks: number;
+            idsPreserved: boolean;
+            next: number;
+          };
+        };
+        pageState.commonfabric = {
+          viewSettled: () => Promise.resolve(),
+        };
+        pageState.__cfClickTargetIds = ownedIds;
+        pageState.__cfClickTargetIdNext = 47;
+        pageState.__identityGlobalResult = () => ({
+          clicks,
+          idsPreserved: pageState.__cfClickTargetIds === ownedIds,
+          next: pageState.__cfClickTargetIdNext,
+        });
+      });
+
+      await clickCfButton(identityPage, "#identity-global-button");
+
+      const result = await identityPage.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __identityGlobalResult: () => {
+            clicks: number;
+            idsPreserved: boolean;
+            next: number;
+          };
+        }).__identityGlobalResult()
+      );
+      expect(result).toEqual({
+        clicks: 1,
+        idsPreserved: true,
+        next: 47,
+      });
+    } finally {
+      await identityPage.close();
+    }
   });
 
   it("drives the page while waiting for text", async () => {
@@ -1018,6 +1421,109 @@ describe("CFC browser helpers", () => {
       assertEquals({ x: observed[1].x, y: observed[1].y }, { x: 100, y: 60 });
     } finally {
       page.setInteractionObserver(undefined);
+    }
+  });
+
+  it("places the presentation cursor where a refreshed click lands", async () => {
+    const presentationPage = await browser.newPage();
+    const presentation = installPresentationInteractions(
+      presentationPage,
+      testPresentationConfig,
+      { label: "Guest", color: "#2563eb" },
+    );
+    try {
+      await presentationPage.evaluate(() => {
+        const button = document.createElement("button");
+        button.id = "presentation-moving-button";
+        button.textContent = "Continue";
+        Object.assign(button.style, {
+          position: "fixed",
+          left: "40px",
+          top: "40px",
+          width: "120px",
+          height: "40px",
+          margin: "0",
+        });
+        document.body.append(button);
+
+        let clicks = 0;
+        let clickX = 0;
+        button.addEventListener("click", (event) => {
+          clicks++;
+          clickX = event.clientX;
+        });
+        (globalThis as typeof globalThis & {
+          commonfabric: { viewSettled: () => Promise<void> };
+          __presentationClickResult: () => {
+            clicks: number;
+            clickX: number;
+            cursorX: number;
+            cursorY: number;
+          };
+        }).commonfabric = { viewSettled: () => Promise.resolve() };
+        (globalThis as typeof globalThis & {
+          __presentationClickResult: () => {
+            clicks: number;
+            clickX: number;
+            cursorX: number;
+            cursorY: number;
+          };
+        }).__presentationClickResult = () => {
+          const cursor = document.getElementById(
+            "__cf_demo_presentation_overlay",
+          )?.shadowRoot?.getElementById("cursor");
+          if (!cursor) throw new Error("Presentation cursor is missing");
+          const transform = new DOMMatrix(getComputedStyle(cursor).transform);
+          return {
+            clicks,
+            clickX,
+            cursorX: transform.m41,
+            cursorY: transform.m42,
+          };
+        };
+      });
+      await presentation.prepareDocument();
+      await presentationPage.evaluate(() => {
+        const button = document.querySelector<HTMLElement>(
+          "#presentation-moving-button",
+        );
+        const cursor = document.getElementById(
+          "__cf_demo_presentation_overlay",
+        )?.shadowRoot?.getElementById("cursor");
+        if (!button || !cursor) {
+          throw new Error("Presentation click fixture is incomplete");
+        }
+        const observer = new MutationObserver(() => {
+          observer.disconnect();
+          button.style.transform = "translateX(400px)";
+        });
+        observer.observe(cursor, {
+          attributes: true,
+          attributeFilter: ["style"],
+        });
+      });
+
+      await clickCfButton(presentationPage, "#presentation-moving-button");
+
+      const result = await presentationPage.evaluate(() =>
+        (globalThis as typeof globalThis & {
+          __presentationClickResult: () => {
+            clicks: number;
+            clickX: number;
+            cursorX: number;
+            cursorY: number;
+          };
+        }).__presentationClickResult()
+      );
+      expect(result).toEqual({
+        clicks: 1,
+        clickX: 500,
+        cursorX: 500,
+        cursorY: 60,
+      });
+    } finally {
+      presentation.uninstall();
+      await presentationPage.close();
     }
   });
 

@@ -206,10 +206,12 @@ its packages with `DENO_COVERAGE_DIR` and uploads it as
 `coverage-profile-workspace-<shard>`.
 
 The root task is `tasks/test.ts`. It reads the workspace list from
-`deno.jsonc`, selects this shard's packages by round-robin over the sorted
-package-name list (`selectShardMembers`), and runs `deno task test` in every
-selected package. The test runner uses half the available cores for package
-workers. This is two package workers on the standard four-core CI runner.
+`deno.jsonc`, assigns package test units to shards by observed test cost
+(`selectShardMembers`), and runs `deno task test` in every selected package.
+Unknown packages receive a default weight, so adding a workspace member cannot
+make it fall out of CI. The test runner uses half the available cores for
+package workers. This is two package workers on the standard four-core CI
+runner.
 `TEST_CONCURRENCY` can override that default for a diagnostic run. Each shard's
 test time follows the longest chain of package tasks assigned to one worker,
 plus initialization inside the root task. Fixed workflow setup and coverage
@@ -219,21 +221,39 @@ tests. Package tests that are already running finish before the summary is
 printed.
 
 When a shard becomes the long pole, start with the `Package timings:` block
-printed by `tasks/test.ts`. The round-robin split carries no per-package
-weighting, so first check whether one shard simply drew several slow packages.
-Changing the shard count in the workflow matrix reshuffles the assignment. A
-shard-count change must also update the `coverage-profile-workspace-*` entries
-in `EXPECTED_COVERAGE_ARTIFACT_NAMES` in `tasks/coverage-check.ts`, which the
-Coverage Check gate uses to require every shard's coverage artifact.
+printed by `tasks/test.ts`. Update `WORKSPACE_TEST_WEIGHTS` in
+`tasks/test-timing-weights.ts` when package costs have drifted enough to affect
+the critical path. Changing the shard count in the workflow matrix recomputes
+the weighted assignment. A shard-count change must also update the
+`coverage-profile-workspace-*` entries in `EXPECTED_COVERAGE_ARTIFACT_NAMES` in
+`tasks/coverage-check.ts`, which the Coverage Check gate uses to require every
+shard's coverage artifact.
 
-A package too heavy for any single shard can be split internally: the cli
-package runs as three units via `CLI_TEST_SHARD` (see
+A package too heavy for any single shard can be split internally: the cli,
+piece, and tasks packages run as three units via their package-specific shard
+variables (see
 `INTERNALLY_SHARDED_PACKAGES` in `tasks/workspace-tests.ts` and
-`packages/cli/test/run-tests.ts`), so its slices spread across workspace
-shards. A package that dominates a shard can be given the same treatment. A
-slow package may also be running many independent test modules serially.
-Deno's `--parallel` mode can reduce that package's wall time, but only after
-checking for tests that share process-wide state.
+`packages/cli/test/run-tests.ts` or `tasks/run-sharded-test-files.ts`), so their
+slices spread across workspace shards. Slices of one package occupy distinct
+workspace shards whenever the matrix has enough shards. A package that
+dominates a shard can be given the same treatment. A slow package may also be
+running many independent test modules serially. Deno's `--parallel` mode can
+reduce that package's wall time, but only after checking for tests that share
+process-wide state.
+
+### Runner Test Sharding
+
+Runner test modules are assigned across five jobs by observed per-file cost.
+`RUNNER_TEST_WEIGHTS` in `tasks/test-timing-weights.ts` records only files whose
+cost materially affects placement; every other file receives a unit weight.
+The longest-processing-time assignment in `tasks/weighted-shards.ts` places
+expensive files first and uses the filename to break ties, so the result is
+stable across machines. Selector tests require every real runner test file to
+appear exactly once and keep the modeled shard loads close.
+
+Refresh the weights from timestamped `running ... from ./test/...` boundaries
+in successful CI logs. Deno's JUnit output attributes runner cases to the
+preloaded clock module, so it does not carry usable per-file runner timings.
 
 Deno runs each parallel test file on its own thread of a single process, so
 "process-wide state" means state every file shares: environment variables,

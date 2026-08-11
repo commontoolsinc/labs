@@ -2,6 +2,7 @@ import ts from "typescript";
 
 import {
   detectCallKind,
+  isSyntheticNode,
   type NormalizedDataFlow,
   preserveSourceMapRange,
   setParentPointers,
@@ -28,7 +29,7 @@ function isNestedFunctionLocalCapture(
   wrappedExpression: ts.Expression,
   checker: ts.TypeChecker,
 ): boolean {
-  const wrappedSourceNode = wrappedExpression.pos >= 0
+  const wrappedSourceNode = !isSyntheticNode(wrappedExpression)
     ? wrappedExpression
     : ts.getOriginalNode(wrappedExpression);
   const root = getCaptureRootExpression(expression);

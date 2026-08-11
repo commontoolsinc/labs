@@ -911,7 +911,7 @@ export async function clickNthCfButton(
 // Where a trusted click is about to be aimed, or why the marked control could
 // not be aimed at.
 type ClickAim =
-  | { x: number; y: number }
+  | { x: number; y: number; targetId: number }
   | { missing: true; sawTarget: boolean };
 
 // Resolve the marked control, hold until it has a settled layout box, scroll it
@@ -943,6 +943,7 @@ const aimAtMarkedTarget = async (
   selector: string,
   remarkSource: string | null,
   remarkArgs: readonly unknown[],
+  identityKey: string,
 ): Promise<ClickAim | false> => {
   type AimDiag = { phase: string; frames: number; lastBox: string };
   const registry = ((globalThis as typeof globalThis & {
@@ -953,6 +954,26 @@ const aimAtMarkedTarget = async (
 
   const find = (): HTMLElement | undefined =>
     probe.collect(selector)[0] as HTMLElement | undefined;
+  type IdentityState = {
+    identities: WeakMap<Element, number>;
+    next: number;
+  };
+  const pageState = globalThis as unknown as Record<string, unknown>;
+  let identityState = pageState[identityKey] as IdentityState | undefined;
+  if (identityState === undefined) {
+    identityState = { identities: new WeakMap(), next: 0 };
+    Object.defineProperty(pageState, identityKey, {
+      configurable: true,
+      value: identityState,
+    });
+  }
+  const identify = (target: Element): number => {
+    const known = identityState.identities.get(target);
+    if (known !== undefined) return known;
+    const created = ++identityState.next;
+    identityState.identities.set(target, created);
+    return created;
+  };
   const remark = remarkSource === null ? null : new Function(
     "return (" + remarkSource + ")",
   )() as (
@@ -1056,8 +1077,74 @@ const aimAtMarkedTarget = async (
     });
     const rect = target.getBoundingClientRect();
     diag.phase = "aimed";
-    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    return {
+      x: rect.x + rect.width / 2,
+      y: rect.y + rect.height / 2,
+      targetId: identify(target),
+    };
   }
+};
+
+// Read the marked control's current center in one page turn for a coordinate
+// refresh after any interaction observer has finished.
+const readMarkedClickPoint = async (
+  page: Page,
+  selector: string,
+  identityKey: string,
+): Promise<{ x: number; y: number; targetId: number } | undefined> => {
+  return await page.evaluate((targetSelector: string, identityKey: string) => {
+    function find(root: Document | ShadowRoot): HTMLElement | undefined {
+      for (const element of root.querySelectorAll("*")) {
+        if (element.matches(targetSelector)) return element as HTMLElement;
+        if (element.shadowRoot) {
+          const match = find(element.shadowRoot);
+          if (match) return match;
+        }
+      }
+    }
+
+    const target = find(document);
+    if (!target) return undefined;
+    const identityState = (globalThis as unknown as Record<string, unknown>)[
+      identityKey
+    ] as {
+      identities: WeakMap<Element, number>;
+      next: number;
+    } | undefined;
+    if (identityState === undefined) return undefined;
+    let targetId = identityState.identities.get(target);
+    if (targetId === undefined) {
+      targetId = ++identityState.next;
+      identityState.identities.set(target, targetId);
+    }
+    target.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+      behavior: "instant",
+    });
+    const style = globalThis.getComputedStyle(target);
+    const rect = target.getBoundingClientRect();
+    if (
+      style.display === "none" || style.visibility === "hidden" ||
+      rect.width === 0 || rect.height === 0
+    ) {
+      return undefined;
+    }
+    return {
+      x: rect.x + rect.width / 2,
+      y: rect.y + rect.height / 2,
+      targetId,
+    };
+  }, { args: [selector, identityKey] });
+};
+
+const clearClickIdentityState = async (
+  page: Page,
+  identityKey: string,
+): Promise<void> => {
+  await page.evaluate((key: string) => {
+    delete (globalThis as unknown as Record<string, unknown>)[key];
+  }, { args: [identityKey] });
 };
 
 /**
@@ -1088,9 +1175,10 @@ export interface ClickMark {
  * target through its own predicate, and the aim/click/untag tail is the same
  * for all of them.
  *
- * One wait settles the control and measures where to click it; one dispatch
- * follows. Nothing separates the measurement from the decision that produced
- * it, so the coordinates describe the control as the wait left it.
+ * One wait settles the control and measures where to click it. The point is
+ * measured again in one page turn immediately before the trusted click, after
+ * any interaction observer has finished. A moved or missing target goes
+ * through the same settle and replacement handling before dispatch.
  */
 export async function clickMarked(
   page: Page,
@@ -1098,44 +1186,80 @@ export async function clickMarked(
 ): Promise<void> {
   const { token, remark } = typeof mark === "string" ? { token: mark } : mark;
   const markSelector = `[${CLICK_TARGET_ATTR}~="${token}"]`;
+  const identityKey = `__commonToolsClickIdentity_${crypto.randomUUID()}`;
   try {
-    let aim: ClickAim | undefined;
-    try {
-      aim = await waitForCondition(page, aimAtMarkedTarget, {
-        args: [
+    const measureAim = async (): Promise<{
+      x: number;
+      y: number;
+      targetId: number;
+    }> => {
+      let aim: ClickAim | undefined;
+      try {
+        aim = await waitForCondition(page, aimAtMarkedTarget, {
+          args: [
+            markSelector,
+            remark ? remark.predicate.toString() : null,
+            remark ? remark.args : [],
+            identityKey,
+          ],
+        });
+      } catch (cause) {
+        const probe = await readTextProbe(page, markSelector).catch(() =>
+          undefined
+        );
+        const progress = await readAimProgress(page, markSelector).catch(() =>
+          undefined
+        );
+        throw new Error(
+          `Marked click target ${markSelector} never presented a stable box. ` +
+            `Aim reached: ${toIndentedDebugString(progress)}. ` +
+            `Last probe: ${toIndentedDebugString(probe)}`,
+          { cause },
+        );
+      }
+      if (aim === undefined || "missing" in aim) {
+        const probe = await readTextProbe(page, markSelector).catch(() =>
+          undefined
+        );
+        throw new Error(
+          `The control marked for click was replaced before the click could ` +
+            `be aimed at it${
+              aim?.sawTarget ? " while its box was settling" : ""
+            }. Last probe: ${toIndentedDebugString(probe)}`,
+        );
+      }
+      return aim;
+    };
+
+    const aim = await measureAim();
+    await page.clickPoint({ x: aim.x, y: aim.y }, {
+      refreshPoint: async () => {
+        const current = await readMarkedClickPoint(
+          page,
           markSelector,
-          remark ? remark.predicate.toString() : null,
-          remark ? remark.args : [],
-        ],
-      });
-    } catch (cause) {
-      const probe = await readTextProbe(page, markSelector).catch(() =>
-        undefined
-      );
-      const progress = await readAimProgress(page, markSelector).catch(() =>
-        undefined
-      );
-      throw new Error(
-        `Marked click target ${markSelector} never presented a stable box. ` +
-          `Aim reached: ${toIndentedDebugString(progress)}. ` +
-          `Last probe: ${toIndentedDebugString(probe)}`,
-        { cause },
-      );
-    }
-    if (aim === undefined || "missing" in aim) {
-      const probe = await readTextProbe(page, markSelector).catch(() =>
-        undefined
-      );
-      throw new Error(
-        `The control marked for click was replaced before the click could be ` +
-          `aimed at it${
-            aim?.sawTarget ? " while its box was settling" : ""
-          }. Last probe: ${toIndentedDebugString(probe)}`,
-      );
-    }
-    await page.clickPoint(aim);
+          identityKey,
+        );
+        if (
+          current?.targetId === aim.targetId && current.x === aim.x &&
+          current.y === aim.y
+        ) {
+          return { x: current.x, y: current.y };
+        }
+        if (remark) {
+          await clearClickMark(page, token);
+          await waitForCondition(page, remark.predicate, {
+            args: [...remark.args],
+          });
+        }
+        const settled = await measureAim();
+        return { x: settled.x, y: settled.y };
+      },
+    });
   } finally {
-    await clearClickMark(page, token).catch(() => {});
+    await Promise.all([
+      clearClickMark(page, token).catch(() => {}),
+      clearClickIdentityState(page, identityKey).catch(() => {}),
+    ]);
   }
 }
 
@@ -1579,7 +1703,7 @@ export async function collectBrowserLoadSummary(
       // Prefix-match so sub-loggers are included: storage commit/conflict
       // timings live under `storage.v2` (+ `.transaction`/`.multi-space-commit`),
       // not a bare `storage` logger; runner/scheduler similarly have sub-loggers.
-      // `piece` carries the PieceManager/PiecesController phase timers (boot,
+      // `piece` carries the PiecesController phase timers (boot,
       // default-pattern ensure/resume); `runner.ipc`/`runner.loop` (worker
       // request delivery/handling + event-loop lag) ride the `runner` prefix;
       // `pattern-manager` carries the compile-cache read/evaluate spans that

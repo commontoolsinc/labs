@@ -7,6 +7,7 @@
  * the full algorithm.
  */
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   createHasher,
   type IncrementalHasher,
@@ -89,9 +90,7 @@ const TAG_REGEXP_BYTES = new Uint8Array([TAG_REGEXP]);
  */
 const MAX_DIRECT_STRING_LENGTH = 64;
 
-/**
- * Maximum value (inclusive) of the small-length-number cache.
- */
+/** Maximum value (inclusive) of the small-length-number cache. */
 const MAX_CACHED_SMALL_LENGTH = 500;
 
 /** Shared TextEncoder for UTF-8 string encoding. */
@@ -243,7 +242,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 
     default:
       throw new Error(
-        `hashOf: unsupported type: ${typeof value}`,
+        `\`hashOf()\`: unsupported type \`${typeof value}\``,
       );
   }
 }
@@ -342,17 +341,15 @@ function feedObjectValue(
       // Nothing else is handled. As of this writing, specifically missing are
       // `Map`, `Set`, and `Error`.
       throw new Error(
-        `hashOf: unsupported object type: ${
-          value?.constructor?.name ?? typeof value
+        `\`hashOf()\`: unsupported object type ${
+          backtickQuote(value?.constructor?.name ?? typeof value)
         }`,
       );
     }
   }
 }
 
-/**
- * Feed an array value with sparse hole handling, terminated by `TAG_END`.
- */
+/** Feed an array value with sparse hole handling, terminated by `TAG_END`. */
 function feedArray(hasher: IncrementalHasher, value: unknown[]): void {
   hasher.update(TAG_ARRAY_BYTES);
   let i = 0;
@@ -404,13 +401,11 @@ function feedPlainObject(
 // Uncached hash computation
 //
 
-/**
- * Computes the hash of a value without consulting or populating any cache.
- */
+/** Computes the hash of a value without consulting or populating any cache. */
 function computeHash(value: unknown): FabricHash {
   const hasher = createHasher();
   feedValue(hasher, value);
-  return new FabricHash(hasher.digest(), "fid1");
+  return new FabricHash(hasher.digest(), "fid1", true);
 }
 
 /**
@@ -541,7 +536,7 @@ function hashOfInternal(
     }
 
     default: {
-      throw new Error(`Cannot hash value of type ${typeof value}`);
+      throw new Error(`Cannot hash value of type \`${typeof value}\``);
     }
   }
 }

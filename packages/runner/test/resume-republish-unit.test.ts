@@ -161,6 +161,10 @@ function makeRepublisher(opts: {
     contribute: opts.contribute ?? filterContribution,
     aggregateNoun: "filtered list",
     elementNoun: "predicate",
+    // The owed-setup re-arm path is pinned by the integration suites
+    // (resume-append-exclusion*); these unit cases exercise the republish
+    // fold only.
+    rearmReconcile: () => {},
   });
 }
 

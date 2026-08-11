@@ -72,16 +72,16 @@ export abstract class FabricInstance extends FabricSpecialObject {
   /**
    * Returns a new deep clone of this instance with equivalent data but no
    * shared structure for any unfrozen data in the original. When `frozen ===
-   * true`, produces a frozen instance with maximal structural sharing, including
-   * returning `this` if it is already deep-frozen. When `frozen === false`,
-   * produces a deeply-mutable instance with no visible shared reference
+   * true`, produces a frozen instance with maximal structural sharing,
+   * including returning `this` if it is already deep-frozen. When `frozen ===
+   * false`, produces a deeply-mutable instance with no visible shared reference
    * structure with the original.
    *
-   * The concrete template-method implementation lives on
-   * `BaseFabricInstance` (deferring to the `[DEEP_CLONE_CORE]` sibling,
-   * mirroring the `shallowClone()`/`[SHALLOW_UNFROZEN_CLONE]()` split); this
-   * declaration just pins the protocol surface so that callers can invoke it
-   * through a `FabricInstance` reference.
+   * The concrete template-method implementation lives on `BaseFabricInstance`
+   * (deferring to the `[DEEP_CLONE_CORE]` sibling, mirroring the
+   * `shallowClone()`/`[SHALLOW_UNFROZEN_CLONE]()` split); this declaration just
+   * pins the protocol surface so that callers can invoke it through a
+   * `FabricInstance` reference.
    */
   abstract deepClone(frozen: boolean): FabricInstance;
 
@@ -116,6 +116,7 @@ export abstract class FabricInstance extends FabricSpecialObject {
  * See Section 1.4.5 and 1.4.6 of the formal spec.
  */
 export abstract class FabricPrimitive extends FabricSpecialObject {
+  /** Constructs an instance. */
   constructor() {
     super();
   }
@@ -126,29 +127,29 @@ export abstract class FabricPrimitive extends FabricSpecialObject {
 //
 
 /**
- * The full set of values that the fabric storage layer can represent. This
- * is the strongly-typed "middle layer" of the three-layer architecture:
+ * The full set of values that the fabric storage layer can represent. This is
+ * the strongly-typed "middle layer" of the three-layer architecture:
  *
- *   JavaScript "wild west" (`unknown`) <-> `FabricValue` <-> Serialized (`Uint8Array`)
+ *     JavaScript "wild west" (`unknown`)
+ *       <-> `FabricValue`
+ *       <-> serialized (`Uint8Array`)
  *
- * Most native JS object types enter the fabric layer via wrapper classes
- * that extend `FabricInstance`; other special values extend `FabricPrimitive`.
- * Both of those reach `FabricValue` through the common `FabricSpecialObject`
- * arm. The non-object values (`bigint` and the other scalars) are direct
- * members of the union instead, not routed through that arm. Some native types
- * are converted to fabric primitives during conversion.
+ * Most native JS object types enter the fabric layer via wrapper classes that
+ * extend `FabricInstance`; other special values extend `FabricPrimitive`. Both
+ * of those reach `FabricValue` through the common `FabricSpecialObject` arm.
+ * The non-object values (`bigint` and the other scalars) are direct members of
+ * the union instead, not routed through that arm. Some native types are
+ * converted to fabric primitives during conversion.
  *
  * `undefined` is preserved.
  *
- * `symbol` values are restricted at runtime to **registry-interned** symbols
- * -- those for which `Symbol.keyFor(s)` returns a string. These are
- * portable across realms and processes via their registry key. Unique
- * symbols (`Symbol(desc)`) are not portable and are rejected at the fabric
- * boundary. TypeScript's `symbol` type cannot distinguish the two, so the
- * gate is a runtime one. Note also that the fabric-value path
- * separately rejects all symbols at the entrance (relaxation deferred to a
- * follow-up); the type union admits `symbol` so the lower layers (hashing,
- * JSON encoding) can be written and tested ahead of that gate change.
+ * `symbol` values are restricted at runtime to **registry-interned** symbols --
+ * those for which `Symbol.keyFor(s)` returns a string. These are portable
+ * across realms and processes via their registry key. Unique symbols
+ * (`Symbol(desc)`) are not portable and are rejected at the fabric boundary.
+ * TypeScript's `symbol` type cannot distinguish the two, so the gate is a
+ * runtime one, and it is the same gate at every point a symbol is admitted or
+ * refused: `Symbol.keyFor(value) !== undefined`.
  *
  * **Deep-frozen honesty (mandatory).** A `FabricValue` must report its frozen
  * state truthfully and permanently. In particular, a fabric record or array is

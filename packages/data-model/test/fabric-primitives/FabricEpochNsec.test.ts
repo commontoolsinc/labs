@@ -46,7 +46,7 @@ describe("FabricEpochNsec", () => {
         expect(sn.value).toBe(-1000000000n);
       });
 
-      it("handles a large future date (year 3000)", () => {
+      it("returns the value it was given for a year-3000 timestamp", () => {
         const nsec = 32503680000000000000n;
         const sn = new FabricEpochNsec(nsec);
         expect(sn.value).toBe(nsec);
@@ -120,7 +120,8 @@ describe("FabricEpochNsec", () => {
         });
 
         it("round-trips positive nanosecond timestamp", () => {
-          // 2024-01-01T00:00:00Z = 1704067200 seconds = 1704067200000000000 nsec
+          // 2024-01-01T00:00:00Z is 1704067200 seconds, so
+          // 1704067200000000000 nsec.
           const nsec = 1704067200000000000n;
           const sn = new FabricEpochNsec(nsec);
           const decoded = codec.decode(

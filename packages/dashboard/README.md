@@ -1,6 +1,6 @@
 # Fabric wall — modular dev/company dashboard
 
-A small Deno server that renders a dark, glanceable wall of status tiles and
+A small Deno server that renders a glanceable wall of status tiles and
 updates their markup in place over Server-Sent Events. Every tile is one file
 with a fixed interface; a single file registers them.
 
@@ -25,6 +25,11 @@ deno task watch
 deno task test
 ```
 
+The dashboard uses dark mode on its first visit. The switch at the bottom right
+of each page cycles through dark, light, and the operating-system preference.
+It saves that choice for the dashboard and all of its drill-down pages. Inline
+charts and generated CI Gantt images use the active theme as well.
+
 ## Architecture
 
 ```
@@ -32,6 +37,7 @@ dashboard/
   types.ts      the interface: Tile, TileView, Status, Ctx, Route
   config.ts     port, repo, tunable status thresholds
   palette.ts    THE ONE PLACE status colors, washes and dot shapes are chosen
+  theme.ts      light/dark surface colors, theme switch markup and browser behavior
   lib.ts        shared helpers (github, memo, escapeHtml, sparkline, strip, …)
   blacksmith.ts authenticated read client for Blacksmith billing data
   ctx.ts        shared, memoized data sources handed to every tile (ctx.runs)
@@ -55,7 +61,9 @@ A later ticker pass skips a tile or shared workflow fetch that is still
 updating. It starts every other due collection, so pending work does not pause
 the rest of the dashboard. A collection that remains active for one minute
 turns its tile gray with "refresh still pending" while retaining its last value
-and visuals. Its completed view replaces that pending state.
+and visuals. Its completed view replaces that pending state. A tile with
+`showOnlyCompletedViews` keeps its last completed color and values, ignores
+intermediate views, and still shows the pending warning.
 A tile whose `collect()` throws is desaturated to a gray "unknown" — it keeps
 its last-known value and shows a short reason (e.g. "source unreachable"), with
 the full error in the server log — so one unreachable source never blanks or
@@ -644,12 +652,15 @@ Notes:
   run's wall clock therefore barely moves with performance. The per-operation
   times do move, so the tile trends those values instead. Because the index
   comes from artifacts, the tile turns gray when no in-window run has readable
-  data and the latest run is neither failed nor empty. It shows
-  **collecting…** while a fetch is in progress. This state appears before the
-  run list is fetched, so a newly loaded dashboard is never blank. It shows
-  **benchmark data unavailable** after an empty fetch finishes. Adding or
-  removing a benchmark does not move an index. The benchmark is absent from
-  one side of that adjacent comparison, so it drops out of the geometric mean.
+  data and the latest run is neither failed nor empty. A collection leaves its
+  last completed color and values in place until the workflow status and
+  artifact refresh have both settled. A collection that takes more than a
+  minute says **refresh still pending** without changing that color. A newly
+  loaded dashboard keeps its neutral placeholder until its first collection
+  settles. An empty completed fetch shows **benchmark data unavailable**.
+  Adding or removing a benchmark does not move an index. The benchmark is
+  absent from one side of that adjacent comparison, so it drops out of the
+  geometric mean.
   A CPU change starts another line instead of connecting measurements from
   unlike machines. A gap longer than one fifth of the chart width breaks a
   CPU's line. Any sample isolated by those breaks appears as a point. A CPU
@@ -679,9 +690,11 @@ Notes:
   - The tile collects every minute, which is what the run state needs: a
     benchmark run lasts about an hour, so a slower collection could miss one from
     start to finish and never show its **running** badge. Each collection pages
-    the run list. The artifact history behind it is left alone while the last
-    refresh is recent and already covers the runs that list names — nothing new
-    has been sampled, so there is nothing to download.
+    the run list. It publishes only the completed view, so a partial refresh
+    cannot temporarily replace the last settled status. The artifact history
+    behind it is left alone while the last refresh is recent and already covers
+    the runs that list names. Nothing new has been sampled, so there is nothing
+    to download.
   - The tile drills through to the per-benchmark history behind `/bench`, which the
     tile's collection keeps warm in the background. The collection lists
     benchmark runs on main. It samples one run per shortest-view bucket,

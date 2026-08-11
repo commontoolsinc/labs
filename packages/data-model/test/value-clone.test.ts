@@ -13,7 +13,7 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 const obj = (v: unknown) => v as any;
 
 describe("value-clone", () => {
-  describe("cloneWithValueAtPath", () => {
+  describe("cloneWithValueAtPath()", () => {
     it("copies only the mutated spine; off-spine subtrees are shared", () => {
       const root = deepFreeze({
         value: { left: { nested: { stable: true } }, right: { count: 1 } },
@@ -57,9 +57,9 @@ describe("value-clone", () => {
     });
 
     it("throws rather than overwrite a present non-container leaf with spine structure", () => {
-      // Apparently-unintentional inconsistency now surfaced: descending a write
-      // path *through* a present primitive used to silently clobber it with a
-      // fresh container.
+      // Descending a write path *through* a present non-container leaf would
+      // have to replace that leaf with a fresh container, discarding whatever
+      // it held. Refusing is what keeps the write from destroying it silently.
       expect(() =>
         cloneWithValueAtPath(deepFreeze({ a: "string" }), ["a", "b"], 1)
       )
@@ -77,15 +77,15 @@ describe("value-clone", () => {
         cloneWithValueAtPath(root, ["value", "target", "count"], 2),
       );
 
-      // `value` is shallow-cloned (on the spine); its `keep` sibling rides along
-      // by identity rather than being reconstructed/demoted.
+      // `value` is shallow-cloned, being on the spine. Its `keep` sibling
+      // rides along by identity rather than being reconstructed or demoted.
       expect(result.value.keep).toBe(hash);
       expect(result.value.keep).toBeInstanceOf(FabricHash);
       expect(result.value.keep.tag).toBe("sha256");
     });
   });
 
-  describe("cloneWithoutValueAtPath", () => {
+  describe("cloneWithoutValueAtPath()", () => {
     it("removes an object key, copying only the mutated spine", () => {
       const root = deepFreeze({
         value: { left: { nested: true }, right: { keep: 1, remove: 2 } },
@@ -155,14 +155,14 @@ describe("value-clone", () => {
       const hash = FabricHash.fromString("sha256:abcd");
       const root = deepFreeze({ value: { wrapper: hash } });
 
-      // There is nothing path-addressable under an opaque wrapper, so removal is
-      // a no-op rather than an attempt to clone/mutate the wrapper.
+      // There is nothing path-addressable under an opaque wrapper, so removal
+      // is a no-op rather than an attempt to clone or mutate the wrapper.
       expect(cloneWithoutValueAtPath(root, ["value", "wrapper", "x"])).toBe(
         root,
       );
     });
 
-    it("removes the whole value for undefined root or empty path", () => {
+    it("removes the whole value for an `undefined` root or an empty path", () => {
       expect(cloneWithoutValueAtPath(undefined, ["a"])).toBeUndefined();
       expect(cloneWithoutValueAtPath(deepFreeze({ a: 1 }), [])).toBeUndefined();
     });

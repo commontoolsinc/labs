@@ -128,10 +128,13 @@ memory route.
 - Recompute watch-union results per session and emit:
   - `upserts` for relevant current entity state
   - `removes` when an entity leaves the watch union
-- Return transact verdicts inline; stage a `caughtUpLocalSeq` catch-up
-  obligation for accepts and conflict rejections (CT-1927), delivered by the
-  batched fan-out, so the CLIENT parks each verdict's state application
-  until the marker covers it.
+- Return transact verdicts inline before the independently batched fan-out;
+  serialize transaction publication and fan-out with one lock per space. Send
+  the verdict while the transaction holds the lock, finish its post-commit
+  scheduler bookkeeping, and release the lock for fan-out. Stage a
+  `caughtUpLocalSeq` catch-up obligation for accepts and conflict rejections
+  (CT-1927), delivered by the batched fan-out, so the CLIENT parks each verdict's
+  state application until the marker covers it.
 
 ## Phase 3: Client Rewrite
 

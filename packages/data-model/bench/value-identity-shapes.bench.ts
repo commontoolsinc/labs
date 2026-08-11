@@ -2,30 +2,31 @@
  * Identity-shape benchmarks for value hashing and deep-freeze.
  *
  * Motivated by CPU profiles of the default-app integration test
- * (docs/history/development/performance/default-app-note-create.md): in steady-state
- * note creation, ~29% of runtime-worker busy CPU is value hashing
+ * (docs/history/development/performance/default-app-note-create.md): in
+ * steady-state note creation, ~29% of runtime-worker busy CPU is value hashing
  * (`feedPlainObject` + wasm SHA-256) and ~12% is deep-freeze walks
  * (`deepFreeze()`/`isDeepFrozen()`).
  *
  * Both subsystems cache by OBJECT IDENTITY (`WeakMap`/`WeakSet`), so any
  * fresh-identity but structurally-equal value — e.g. query results, specs, or
- * vdom built anew on every render — pays a full O(tree) walk every time.
- * These benches separate the cache-hit identity path from the cache-defeating
+ * vdom built anew on every render — pays a full O(tree) walk every time. These
+ * benches separate the cache-hit identity path from the cache-defeating
  * fresh-identity path so the gap (and any future structural-caching fix) is
  * measurable in isolation.
  *
  * Run with:
- *   deno bench --allow-read --allow-write --allow-net --allow-ffi --allow-env \
- *     --no-check bench/value-identity-shapes.bench.ts
+ *
+ *     deno bench --allow-read --allow-write --allow-net --allow-ffi \
+ *       --allow-env --no-check bench/value-identity-shapes.bench.ts
  */
 
 import { hashOf } from "../src/value-hash.ts";
 import { deepFreeze, isDeepFrozen } from "../src/deep-freeze.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Doc-shaped test data, mirroring the default-app integration:
 // a note doc (~30 nodes) and a home-list doc holding N note entries.
-// ---------------------------------------------------------------------------
+//
 
 function makeNoteDoc(i: number): Record<string, unknown> {
   return {
@@ -69,9 +70,9 @@ function makeCopies<T>(make: () => T, freeze: "none" | "plain" | "deep"): T[] {
   return copies;
 }
 
-// ---------------------------------------------------------------------------
-// hashOf
-// ---------------------------------------------------------------------------
+//
+// `hashOf()`
+//
 
 const frozenNote = deepFreeze(makeNoteDoc(1));
 const frozenHome128 = deepFreeze(makeHomeDoc(128));
@@ -124,9 +125,9 @@ Deno.bench({
   b.end();
 });
 
-// ---------------------------------------------------------------------------
-// deep-freeze
-// ---------------------------------------------------------------------------
+//
+// `deepFreeze()`
+//
 
 Deno.bench({
   name: "isDeepFrozen: cached home doc @128 (cache hit)",

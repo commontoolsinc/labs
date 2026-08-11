@@ -20,7 +20,7 @@ import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { FabricPrimitive, FabricSpecialObject } from "@/interface.ts";
 
-describe("cloneIfNecessary", () => {
+describe("cloneIfNecessary()", () => {
   describe(`error cases`, () => {
     it("throws for `frozen=true`, `force=true`", () => {
       const value = { a: 1 };
@@ -44,7 +44,7 @@ describe("cloneIfNecessary", () => {
       expect(cloneIfNecessary(undefined)).toBe(undefined);
     });
 
-    it("passes through bigint unchanged", () => {
+    it("passes through a `bigint` unchanged", () => {
       expect(cloneIfNecessary(42n)).toBe(42n);
     });
 
@@ -465,7 +465,7 @@ describe("cloneIfNecessary", () => {
       );
     });
 
-    it("handles shared (diamond) references without throwing", () => {
+    it("clones a diamond-shared reference into two equal subtrees", () => {
       const shared = { x: 1 };
       const value = { a: shared, b: shared };
       // Shared (non-circular) references should not throw.
@@ -478,21 +478,22 @@ describe("cloneIfNecessary", () => {
   // Per-subclass coverage matrix.
   //
   // Systematically exercises every concrete `FabricInstance` and
-  // `FabricPrimitive` subclass in this package across the full `cloneIfNecessary`
-  // option matrix, and validates the result -- frozenness, identity preservation,
-  // observable state -- or that the call throws when a subclass's protocol
-  // implementation is a documented stub.
+  // `FabricPrimitive` subclass in this package across the full
+  // `cloneIfNecessary` option matrix, and validates the result -- frozenness,
+  // identity preservation, observable state -- or that the call throws when a
+  // subclass's protocol implementation is a documented stub.
   //
   // The point is twofold: (a) make sure existing subclasses behave consistently
   // under every option combination callers in production are likely to use, and
-  // (b) make sure any future subclass added to the package without full protocol
-  // coverage trips this matrix instead of silently breaking call sites.
+  // (b) make sure any future subclass added to the package without full
+  // protocol coverage trips this matrix instead of silently breaking call
+  // sites.
 
   /**
    * Describes what `cloneIfNecessary` is expected to do for a given subclass on
-   * a given option vector. `kind: "ok"` means the call returns; `kind: "throws"`
-   * means it throws (we don't pin the exact message -- subclass stubs use
-   * varying phrasing).
+   * a given option vector. `kind: "ok"` means the call returns; `kind:
+   * "throws"` means it throws (we don't pin the exact message -- subclass stubs
+   * use varying phrasing).
    */
   type ExpectedOutcome =
     | { kind: "ok" }
@@ -583,7 +584,7 @@ describe("cloneIfNecessary", () => {
   ];
 
   /**
-   * Compute the expected outcome of a `cloneIfNecessary(value, opts)` call for
+   * Computes the expected outcome of a `cloneIfNecessary(value, opts)` call for
    * a given subclass, by inspecting the *actual* value to predict which
    * `cloneHelper` arm is reached. The point of computing rather than tabulating
    * is so that adding a new subclass to `subclassCases` (or changing what its

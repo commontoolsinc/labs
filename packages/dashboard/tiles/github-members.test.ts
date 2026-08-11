@@ -1,7 +1,12 @@
 // github users: GitHub and the history file are replaced with in-memory
 // stand-ins. The tests cover pagination, both organization rosters, retained
 // history, and the gray states for unavailable data.
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertMatch,
+  assertStringIncludes,
+} from "@std/assert";
 import { REPO } from "../config.ts";
 import { dashboardCacheFile } from "../history-files.ts";
 import type { Ctx } from "../types.ts";
@@ -212,8 +217,14 @@ Deno.test("github users: transitional overlap counts once and draws retained his
     assertStringIncludes(view.extra ?? "", "<svg");
     assertStringIncludes(view.extra ?? "", "members ·");
     assertStringIncludes(view.extra ?? "", "collaborators");
-    assertStringIncludes(view.extra ?? "", "background:#58a6ff");
-    assertStringIncludes(view.extra ?? "", "background:#a371f7");
+    assertMatch(
+      view.extra ?? "",
+      /background:light-dark\(#[0-9a-f]{6},#58a6ff\)/,
+    );
+    assertMatch(
+      view.extra ?? "",
+      /background:light-dark\(#[0-9a-f]{6},#a371f7\)/,
+    );
 
     assertEquals(wire.calls.length, 2);
     assertEquals(

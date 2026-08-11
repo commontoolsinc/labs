@@ -26,7 +26,7 @@ import { expect } from "@std/expect";
 
 import type { OpaqueCell } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
-import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
@@ -34,8 +34,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import type { Options } from "../src/storage/v2.ts";
-import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("replica eviction invariants");
 const space = signer.did();
@@ -130,44 +129,20 @@ describe("a list projection survives its input emptying", () => {
 
 // Two managers over one in-process server, so a commit on one can conflict with
 // a commit on the other.
-class SharedServerStorageManager extends EmulatedStorageManager {
-  static connectTo(
-    server: MemoryV2Server.Server,
-    options: Omit<Options, "memoryHost" | "spaceHostMap">,
-  ): SharedServerStorageManager {
-    const manager = new SharedServerStorageManager(
-      { ...options, memoryHost: new URL("memory://") },
-      () => server,
-    );
-    manager.sharedServer = server;
-    return manager;
-  }
-
-  private sharedServer!: MemoryV2Server.Server;
-
-  protected override server(): MemoryV2Server.Server {
-    return this.sharedServer;
-  }
-}
 
 describe("a cross-replica conflict settles", () => {
   let server: MemoryV2Server.Server;
-  let storageA: SharedServerStorageManager;
-  let storageB: SharedServerStorageManager;
+  let storageA: EmulatedStorageManager;
+  let storageB: EmulatedStorageManager;
   let rtA: Runtime;
   let rtB: Runtime;
 
   beforeEach(() => {
-    server = new MemoryV2Server.Server({
-      authorizeSessionOpen(message) {
-        const principal = (message.authorization as { principal?: unknown })
-          ?.principal;
-        return typeof principal === "string" ? principal : undefined;
-      },
-      sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
-    });
-    storageA = SharedServerStorageManager.connectTo(server, { as: signer });
-    storageB = SharedServerStorageManager.connectTo(server, { as: signer });
+    // Manual fan-out: the controlled staleness below is a gated state, not
+    // a timing accident — frames spread only when the test flushes.
+    server = newSharedServer({ subscriptionRefreshDelayMs: "manual" });
+    storageA = EmulatedStorageManager.connectTo(server, { as: signer });
+    storageB = EmulatedStorageManager.connectTo(server, { as: signer });
     rtA = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storageA,
@@ -221,12 +196,17 @@ describe("a cross-replica conflict settles", () => {
     }
     expect(docB.get()).toEqual({ v: "v0" });
 
-    // Settling this needs a sync frame to reach B, which needs the watch behind
-    // the document. If that watch were gone the wait would never end — there is
-    // no timer on it — so this test hanging is the symptom, not a failure
-    // message.
-    const rejected = await txB.commit();
+    // The rejection receipt resolves at the verdict; the DROP still has to
+    // travel through the read-repair gate, which needs a sync frame to
+    // reach B through the watch behind the document. The flush below is
+    // that frame's release, and synced() settling is the proof the gate
+    // opened — if the watch were gone the wait would never end, so synced()
+    // hanging is the symptom, not a failure message.
+    const rejected = await txB.commit({ resolveAt: "verdict" });
     expect(rejected.error?.name).toBe("ConflictError");
+    await server.flushSessions([space]);
+    await clock.settle();
+    await rtB.storageManager.synced();
 
     // And B is left able to see the server's value rather than its stale one.
     await docB.sync();

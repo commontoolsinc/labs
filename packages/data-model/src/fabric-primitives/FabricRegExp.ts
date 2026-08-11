@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import type {
   FabricRegExp as ApiFabricRegExp,
   FabricRegExpConstructor as ApiFabricRegExpConstructor,
@@ -58,7 +59,7 @@ export class FabricRegExp extends BaseFabricPrimitive
   readonly #value: RegExp | undefined;
 
   /**
-   * Constructs a `FabricRegExp`, either from a native `RegExp` (implying the
+   * Constructs an instance, either from a native `RegExp` (implying the
    * `"es2025"` flavor) or from explicit `flavor` / `source` / `flags`.
    *
    * When the resulting flavor is `"es2025"`, the `source` and `flags` are
@@ -121,7 +122,9 @@ export class FabricRegExp extends BaseFabricPrimitive
   get value(): RegExp {
     if (this.#value === undefined) {
       throw new Error(
-        `Cannot represent flavor \`${this.#flavor}\` as a native \`RegExp\`.`,
+        `Cannot represent flavor ${
+          backtickQuote(this.#flavor)
+        } as a native \`RegExp\`.`,
       );
     }
     return new RegExp(this.#value);
@@ -133,6 +136,7 @@ export class FabricRegExp extends BaseFabricPrimitive
 
   static #codec = Object.freeze(
     new (class RegExpCodec extends BaseFabricCodec {
+      /** Constructs an instance. */
       constructor() {
         super(CODEC_TYPE_TAGS.RegExp, FabricRegExp);
       }
@@ -195,7 +199,7 @@ export class FabricRegExp extends BaseFabricPrimitive
 function rejectExtraRegExpProperties(regex: RegExp): void {
   if (Object.keys(regex).length > 0) {
     throw new Error(
-      "Not representable as a `FabricValue`: RegExp with extra enumerable " +
+      "Not representable as a `FabricValue`: `RegExp` with extra enumerable " +
         "properties",
     );
   }

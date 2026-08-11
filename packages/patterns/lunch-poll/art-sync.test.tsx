@@ -17,6 +17,11 @@
  */
 
 import { action, computed, pattern, UI } from "commonfabric";
+import {
+  findElement,
+  findNodeByProp,
+  readValue,
+} from "../test/vnode-helpers.ts";
 import CozyPoll from "./main.tsx";
 
 // 1×1 transparent PNG, the mocked generation response body. The persisted
@@ -36,67 +41,6 @@ export const fetchMocks = [
     base64Body: TINY_PNG_BASE64,
   },
 ];
-
-const isRecord = (value: unknown): value is Record<PropertyKey, unknown> =>
-  typeof value === "object" && value !== null;
-
-const readValue = (value: unknown): unknown => {
-  if (!isRecord(value) || typeof value.get !== "function") {
-    return value;
-  }
-  return (value.get as () => unknown)();
-};
-
-const propsOf = (node: unknown): Record<PropertyKey, unknown> | undefined => {
-  const value = readValue(node);
-  if (!isRecord(value)) return undefined;
-  const props = readValue(value.props);
-  return isRecord(props) ? props : undefined;
-};
-
-const childrenArray = (children: unknown): unknown[] => {
-  const value = readValue(children);
-  if (Array.isArray(value)) return value;
-  return value === undefined || value === null || typeof value === "boolean"
-    ? []
-    : [value];
-};
-
-const childNodes = (node: unknown): unknown[] => {
-  const value = readValue(node);
-  if (Array.isArray(value)) return value;
-  if (!isRecord(value)) return [];
-  const ui = value[UI];
-  return [
-    ...(ui === undefined || ui === value ? [] : [ui]),
-    ...childrenArray(value.children),
-  ];
-};
-
-const findNodeByProp = (
-  root: unknown,
-  prop: string,
-  expected: unknown,
-): unknown | undefined => {
-  const value = readValue(root);
-  const props = propsOf(value);
-  if (props && readValue(props[prop]) === expected) return value;
-  return childNodes(value)
-    .map((child) => findNodeByProp(child, prop, expected))
-    .find((child) => child !== undefined);
-};
-
-// Walk the rendered tree for a vnode by element name (e.g. "cf-image").
-const findNodeByName = (
-  root: unknown,
-  name: string,
-): unknown | undefined => {
-  const value = readValue(root);
-  if (isRecord(value) && readValue(value.name) === name) return value;
-  return childNodes(value)
-    .map((child) => findNodeByName(child, name))
-    .find((child) => child !== undefined);
-};
 
 export default pattern(() => {
   const poll = CozyPoll({});
@@ -118,7 +62,7 @@ export default pattern(() => {
   // read chain through both sub-pattern boundaries works. (Until CT-1836's
   // traversal fix this file carried a canary pinning the opposite.)
   const assert_generated_overlay_renders = computed(() =>
-    findNodeByName(poll[UI], "cf-image") !== undefined
+    findElement(poll[UI], "cf-image") !== undefined
   );
 
   // The host keeps the art: the same payload the card's keep button sends

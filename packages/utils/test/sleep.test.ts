@@ -11,12 +11,12 @@ import {
 // `sleep` and `timeout` are delay utilities, so their tests want controlled
 // time rather than a padded real-time bound. Each opens a `FakeTime` (from
 // `@std/testing/time`) with `using`, which freezes the real timer `sleep` and
-// `timeout` arm and restores the clock when the block ends. `time.tickAsync(ms)`
-// advances the fake clock and settles the promises the fired timers resolve, and
-// `Date.now()` reports the faked time, so the timing assertions are exact and
-// cannot flake. The suites below that measure real elapsed time or touch real
-// Deno timers — `yieldToEventLoop` and `unrefTimer` — open no `FakeTime` and run
-// on the real clock.
+// `timeout` arm and restores the clock when the block ends.
+// `time.tickAsync(ms)` advances the fake clock and settles the promises the
+// fired timers resolve, and `Date.now()` reports the faked time, so the timing
+// assertions are exact and cannot flake. The suites below that measure real
+// elapsed time or touch real Deno timers -- `yieldToEventLoop` and
+// `unrefTimer` -- open no `FakeTime` and run on the real clock.
 
 /** Hold the event loop synchronously for ~ms, like a CPU-bound compile step. */
 const busySpin = (ms: number) => {
@@ -26,7 +26,7 @@ const busySpin = (ms: number) => {
   }
 };
 
-describe("sleep", () => {
+describe("sleep()", () => {
   it("resolves once logical time reaches the delay, not before", async () => {
     using time = new FakeTime();
     const start = Date.now();
@@ -46,7 +46,7 @@ describe("sleep", () => {
   });
 });
 
-describe("timeout", () => {
+describe("timeout()", () => {
   it("rejects with the given message once the delay elapses, not before", async () => {
     using time = new FakeTime();
     let state: "pending" | "rejected" = "pending";
@@ -67,7 +67,7 @@ describe("timeout", () => {
   });
 });
 
-describe("yieldToEventLoop", () => {
+describe("yieldToEventLoop()", () => {
   it("runs a message task queued before the yield ahead of the continuation", async () => {
     // Awaiting a resolved promise only yields a MICROtask, which would leave
     // this already-queued message event unhandled. yieldToEventLoop must be a
@@ -114,7 +114,7 @@ describe("yieldToEventLoop", () => {
     expect(ticks).toBeGreaterThan(0);
   });
 
-  it("falls back to a plain timeout when MessageChannel is unavailable", async () => {
+  it("falls back to a plain timeout when `MessageChannel` is unavailable", async () => {
     const holder = globalThis as { MessageChannel?: unknown };
     const original = holder.MessageChannel;
     holder.MessageChannel = undefined;
@@ -129,7 +129,7 @@ describe("yieldToEventLoop", () => {
   });
 });
 
-describe("unrefTimer", () => {
+describe("unrefTimer()", () => {
   it("returns the id and is safe to call on a live interval", () => {
     const id = setInterval(() => {}, 60_000);
     try {
@@ -139,7 +139,7 @@ describe("unrefTimer", () => {
     }
   });
 
-  it("detaches the timer through Deno.unrefTimer", () => {
+  it("detaches the timer through `Deno.unrefTimer()`", () => {
     const deno = (globalThis as {
       Deno?: { unrefTimer?: (id: number) => void };
     }).Deno!;
@@ -161,7 +161,7 @@ describe("unrefTimer", () => {
     }
   });
 
-  it("is a no-op that still returns the id when Deno.unrefTimer is unavailable", () => {
+  it("is a no-op that still returns the id when `Deno.unrefTimer()` is unavailable", () => {
     // In the browser there is no Deno namespace; the nearest equivalent here
     // is a Deno namespace without unrefTimer. The call must not throw and
     // must still hand the id back for chaining.

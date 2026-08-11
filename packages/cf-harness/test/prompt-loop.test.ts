@@ -7015,3 +7015,94 @@ Deno.test("CfHarnessPromptLoop keeps a positive threshold off profile-overridden
     );
   }
 });
+
+Deno.test("CfHarnessPromptLoop grounds host-command children in the workspace, not the parent cwd", async () => {
+  // A browser child executes host commands, so its paths — including its
+  // cwd — must resolve against its own host-backed mounts, which are
+  // workspace-only. A parent working elsewhere (Loom capture runs sit at
+  // /file-cabinet) previously killed every browser child at its first host
+  // command with "path escapes host-backed sandbox roots" (CT-1984).
+  const requestBodies: Array<{
+    messages: Array<{ role: string; content: string }>;
+    tools: Array<{ function: { name: string } }>;
+  }> = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["delegate_task"],
+    allowedSubagentProfiles: ["browser"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      workspaceHostPath: "/tmp/project",
+      cwd: "/file-cabinet",
+      runId: "run-delegate-browser-cwd",
+      model: "gpt-5.4",
+      cfcEnforcementMode: "enforce-explicit",
+    }),
+    fetchFn: (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ role: string; content: string }>;
+        tools: Array<{ function: { name: string } }>;
+      };
+      requestBodies.push(body);
+      const payload = requestBodies.length === 1
+        ? {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [{
+                id: "call-browser-cwd",
+                type: "function",
+                function: {
+                  name: "delegate_task",
+                  arguments: JSON.stringify({
+                    goal: "Snapshot the local app with agent-browser.",
+                    profile: "browser",
+                  }),
+                },
+              }],
+            },
+          }],
+        }
+        : {
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: requestBodies.length === 2
+                ? "Browser child completed."
+                : "Parent completed.",
+            },
+          }],
+        };
+      return Promise.resolve(
+        new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+          status: 200,
+        }),
+      );
+    },
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate browser work from the file cabinet.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  assertEquals(result.runState.status, "completed");
+  // The parent keeps its own working directory…
+  assertEquals(result.runState.currentDir, "/file-cabinet");
+  // …while the host-command child is grounded in the workspace.
+  assertEquals(
+    chatViewOfRequest(requestBodies[1]).messages[0].content.includes(
+      "Current sandbox directory: /workspace",
+    ),
+    true,
+  );
+  assertEquals(
+    chatViewOfRequest(requestBodies[1]).messages[0].content.includes(
+      "/file-cabinet",
+    ),
+    false,
+  );
+});

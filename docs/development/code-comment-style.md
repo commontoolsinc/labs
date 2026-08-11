@@ -266,6 +266,58 @@ The exception is a table, where they are part of the layout.
 
 ## Doc comments
 
+### Format
+
+This project uses JSDoc-style comments: open them with `/**`, and close them
+with `*/`.
+
+If a doc comment would fit in the 80-column line width limit including
+indentation and comment markers, then it should be written on a single line,
+e.g.:
+
+```ts
+// Indented as if it were a doc comment on an inner declaration.
+
+    /** Desired fryer temperature, in Kelvin. */
+```
+
+For any other doc comment, the opener and closer go on their own lines, with
+a `*` on continuation lines aligned with the _first_ opener `*`, e.g.:
+
+```ts
+// Indented as if it were a doc comment on an inner declaration.
+
+    /**
+     * A `FryerCat` is twelve cats in a trenchcoat, who operate donut fryers.
+     */
+```
+
+Note that if the comment above were formatted as a single line, that line would
+exceed the line width limit. This is why it is rendered as a multiline comment.
+
+As a _counterexample_, do not make multiline doc comments where either the
+open or close marker is _not_ on its own line, e.g. don't do this:
+
+```ts
+// Shown as alternative snippets.
+
+// Wrong: Multiline comment whose delimiters are on lines with text.
+
+/** Full list of all known donut styles, whether or not the system is capable of
+ *  constructing them. */
+```
+
+```ts
+// Shown as alternative snippets.
+
+// Right: Multiline comment whose delimiters are each on their own line.
+
+/**
+ * Full list of all known donut styles, whether or not the system is capable of
+ * constructing them.
+ */
+```
+
 ### What gets one
 
 - Every exported symbol: variable, function, class, type.

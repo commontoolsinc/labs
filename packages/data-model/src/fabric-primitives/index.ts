@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import type { FabricPrimitiveSchemaType } from "@commonfabric/api";
 
 import type { FabricClassWithCodec } from "@/codec-common/interface.ts";
@@ -59,7 +60,7 @@ export function schemaTypeOfFabricPrimitive(
   if (value instanceof FabricRegExp) return "FabricRegExp";
   throw new Error(
     `Shouldn't happen: \`FabricPrimitive\` subclass without a schema type ` +
-      `name: \`${value.constructor.name}\`. Add it to ` +
+      `name: ${backtickQuote(value.constructor.name)}. Add it to ` +
       "`schemaTypeOfFabricPrimitive()` and `FABRIC_PRIMITIVE_SCHEMA_TYPES`.",
   );
 }

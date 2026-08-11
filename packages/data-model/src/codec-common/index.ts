@@ -1,3 +1,13 @@
+// Barrel for the shared codec machinery: the registry, the codec and
+// reconstruction-context base classes, and the tag vocabularies.
+//
+// Everything here is format-agnostic and class-agnostic. Nothing in this
+// directory knows which wire format is in play or which fabric classes exist:
+// the only references to the value domain are `import type`, so there is no
+// runtime dependency on a fabric class at all. A codec that exists because one
+// particular format cannot carry some type belongs with that format instead --
+// `codec-json/` holds the four that JSON needs.
+
 export {
   CODEC,
   type FabricClassWithCodec,
@@ -16,12 +26,5 @@ export {
   EmptyReconstructionContext,
 } from "./EmptyReconstructionContext.ts";
 
-// Standalone codecs for JS primitives (no owned class to host a `[CODEC]`).
-export { UndefinedCodec } from "./UndefinedCodec.ts";
-export { BigIntCodec } from "./BigIntCodec.ts";
-export { SpecialNumberCodec } from "./SpecialNumberCodec.ts";
-export { SymbolCodec } from "./SymbolCodec.ts";
-
-// Codec registry and factory.
+// Codec registry.
 export { CodecRegistry } from "./CodecRegistry.ts";
-export { createDefaultRegistry } from "./createDefaultRegistry.ts";

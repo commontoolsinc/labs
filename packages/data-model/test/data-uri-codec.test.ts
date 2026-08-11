@@ -7,9 +7,9 @@ import {
 } from "@commonfabric/utils/base64url";
 import {
   JsonCodec,
-  jsonFromValue,
   seemsLikeJsonEncodedFabricValue,
 } from "@/codec-json/index.ts";
+import { jsonFromValue } from "@/codecs.ts";
 import {
   DATA_URI_MEDIA_TYPE,
   dataUriFromValue,
@@ -22,7 +22,7 @@ import {
 
 describe("data-uri-codec", () => {
   describe("media-type predicates", () => {
-    it("accepts exactly the data-cell media type", () => {
+    it("returns `true` only for the data-cell media type", () => {
       expect(isDataUriMediaType(DATA_URI_MEDIA_TYPE)).toBe(true);
       expect(isDataUriMediaType("application/json")).toBe(false);
       expect(isDataUriMediaType(`${DATA_URI_MEDIA_TYPE};charset=utf-8`))
@@ -142,16 +142,16 @@ describe("data-uri-codec", () => {
       expect(valueFromDataUriPayloadText(jsonFromValue(null))).toBe(null);
     });
 
-    it("rejects historical bare-JSON payload text", () => {
+    it("throws given historical bare-JSON payload text", () => {
       expect(() => valueFromDataUriPayloadText('{"value":{"x":1}}')).toThrow();
       expect(() => valueFromDataUriPayloadText("[1,2,3]")).toThrow();
     });
 
-    it("rejects invalid payload text", () => {
+    it("throws given invalid payload text", () => {
       expect(() => valueFromDataUriPayloadText("{nope")).toThrow();
     });
 
-    it("rejects empty payload text", () => {
+    it("throws given empty payload text", () => {
       expect(() => valueFromDataUriPayloadText("")).toThrow();
     });
 
@@ -160,7 +160,7 @@ describe("data-uri-codec", () => {
       expect(valueFromDataUriPayloadText(jsonFromValue(value))).toEqual(value);
     });
 
-    it("rejects invalid payload text past the codec tag", () => {
+    it("throws given invalid payload text past the codec tag", () => {
       expect(() =>
         valueFromDataUriPayloadText(
           JsonCodec.wrapEncodedValueForTesting("{nope", true),
@@ -176,7 +176,7 @@ describe("data-uri-codec", () => {
         toUnpaddedBase64url(new TextEncoder().encode(payload))
       }`;
 
-    it("rejects a URI whose media type is not the data-cell type", () => {
+    it("throws given a URI whose media type is not the data-cell type", () => {
       expect(() => valueFromDataUri("data:text/plain,aGVsbG8")).toThrow(
         /Invalid URI/,
       );
@@ -184,7 +184,7 @@ describe("data-uri-codec", () => {
 
     // Exactly one media type is accepted; the historical `application/json`
     // form is not.
-    it("rejects the `application/json` media type", () => {
+    it("throws given the `application/json` media type", () => {
       const payload = toUnpaddedBase64url(
         new TextEncoder().encode(jsonFromValue({ a: 1 })),
       );
@@ -194,7 +194,7 @@ describe("data-uri-codec", () => {
 
     // There are no header parameters in this format; a header carrying any
     // fails the media-type check.
-    it("rejects header parameters (charset, base64)", () => {
+    it("throws given header parameters (charset, base64)", () => {
       const payload = toUnpaddedBase64url(
         new TextEncoder().encode(jsonFromValue({})),
       );
@@ -210,14 +210,14 @@ describe("data-uri-codec", () => {
       ).toThrow(/Invalid URI/);
     });
 
-    it("rejects a URI with no comma", () => {
+    it("throws given a URI with no comma", () => {
       expect(() => valueFromDataUri(`data:${DATA_URI_MEDIA_TYPE}`))
         .toThrow(
           /Invalid data URI format/,
         );
     });
 
-    it("rejects a percent-encoded payload", () => {
+    it("throws given a percent-encoded payload", () => {
       const payload = encodeURIComponent(jsonFromValue({ a: 1 }));
       expect(() =>
         valueFromDataUri(
@@ -228,13 +228,13 @@ describe("data-uri-codec", () => {
 
     // Both `data:` URI payload readers (this one and attestation `load()`)
     // reject an empty payload uniformly; see `valueFromDataUriPayloadText()`.
-    it("rejects an empty payload", () => {
+    it("throws given an empty payload", () => {
       expect(() => valueFromDataUri(`data:${DATA_URI_MEDIA_TYPE},`))
         .toThrow();
     });
 
     describe("historical bare-JSON payloads", () => {
-      it("rejects one", () => {
+      it("throws given one", () => {
         expect(() => valueFromDataUri(uriOf('{"value":{"b":1}}')))
           .toThrow();
       });
@@ -297,7 +297,7 @@ describe("data-uri-codec", () => {
         expect(valueFromDataUri(`${uri}?q=1`)).toEqual({ a: 1 });
       });
 
-      it("rejects a malformed payload past the tag", () => {
+      it("throws given a malformed payload past the tag", () => {
         expect(() =>
           valueFromDataUri(
             uriOf(

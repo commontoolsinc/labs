@@ -699,7 +699,7 @@ describe("native-conversion", () => {
         const date = new Date(0) as Date & { extra?: number };
         date.extra = 1;
         expect(() => shallowFabricFromNativeValue(date)).toThrow(
-          "Not representable as a `FabricValue`: Date with extra enumerable properties",
+          "Not representable as a `FabricValue`: `Date` with extra enumerable properties",
         );
       });
 
@@ -790,9 +790,8 @@ describe("native-conversion", () => {
 
       it("throws for `constructor`, naming it as the cause", () => {
         // Type dispatch reads the constructor from the prototype, so an own
-        // `constructor` property no longer decides the value's type: it
-        // reaches the object rule and is named, rather than failing as some
-        // unrecognized type or being rebuilt as whatever class it held.
+        // `constructor` property does not decide the value's type. It reaches
+        // the object rule, which names it as the reserved property it is.
         expect(() => fabricFromNativeValue({ ["constructor"]: "c" })).toThrow(
           "Not representable as a `FabricValue`: object with a property name " +
             "this runtime reserves (`constructor`)",
@@ -1128,14 +1127,14 @@ describe("native-conversion", () => {
     });
 
     describe("handles shared references (same object from multiple places)", () => {
-      it("allows shared object references", () => {
+      it("duplicates a shared object reference into equal subtrees", () => {
         const shared = { value: 42 };
         const obj = { first: shared, second: shared };
         const result = fabricFromNativeValue(obj);
         expect(result).toEqual({ first: { value: 42 }, second: { value: 42 } });
       });
 
-      it("allows shared array references", () => {
+      it("duplicates a shared array reference into equal subtrees", () => {
         const shared = [1, 2, 3];
         const obj = { a: shared, b: shared };
         const result = fabricFromNativeValue(obj);
@@ -1196,7 +1195,7 @@ describe("native-conversion", () => {
         );
       });
 
-      it("throws when array with undefined references itself", () => {
+      it("throws when an array holding `undefined` references itself", () => {
         const arr: any[] = [1, undefined, null];
         arr[3] = arr; // array with undefined element + circular reference
         expect(() => fabricFromNativeValue(arr)).toThrow(
@@ -1219,7 +1218,7 @@ describe("native-conversion", () => {
           );
       });
 
-      it("accepts nested `bigint`", () => {
+      it("returns a nested `bigint` unchanged", () => {
         const result = fabricFromNativeValue([1n, 2n]) as bigint[];
         expect(result).toEqual([1n, 2n]);
       });
@@ -1349,12 +1348,13 @@ describe("native-conversion", () => {
         const outer = new Error("outer", { cause: inner });
         fabricFromNativeValue(outer);
 
-        // Original Error's cause should still be the raw Error, not FabricError.
+        // The original `Error`'s cause is still the raw `Error`, not a
+        // `FabricError`.
         expect(outer.cause).toBe(inner);
         expect(outer.cause).not.toBeInstanceOf(FabricError);
       });
 
-      it("handles `Error` with `undefined` cause (no conversion needed)", () => {
+      it("leaves `.cause` as `undefined` for an `Error` that has none", () => {
         const error = new Error("simple");
         const result = fabricFromNativeValue(error) as FabricError;
         expect(result.cause).toBeUndefined();
@@ -1806,7 +1806,7 @@ describe("native-conversion", () => {
         expect(Object.isFrozen(result[0])).toBe(false);
       });
 
-      it("allows mutation when `freeze=false`", () => {
+      it("returns a mutable value when `freeze=false`", () => {
         const result = fabricFromNativeValue({ a: 1 }, false) as Record<
           string,
           unknown

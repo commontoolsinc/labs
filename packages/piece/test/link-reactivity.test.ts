@@ -9,14 +9,14 @@ import {
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
-import { PieceManager } from "../src/manager.ts";
+import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("test link reactivity");
 
-describe("PieceManager.link() reactivity", () => {
+describe("PiecesController.link() reactivity", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
+  let pieces: PiecesController;
 
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -29,8 +29,8 @@ describe("PieceManager.link() reactivity", () => {
       identity: signer,
       spaceName: "test-space-" + crypto.randomUUID(),
     });
-    manager = new PieceManager(session, runtime);
-    await manager.synced();
+    pieces = new PiecesController(session, runtime);
+    await pieces.synced();
   });
 
   afterEach(async () => {
@@ -39,14 +39,14 @@ describe("PieceManager.link() reactivity", () => {
 
   it("should store a link reference, not a snapshot value", async () => {
     // Create source cell with data
-    const sourceCell = runtime.getCell(manager.getSpace(), "source");
+    const sourceCell = runtime.getCell(pieces.getSpace(), "source");
     await runtime.editWithRetry((tx) => {
       sourceCell.withTx(tx).set({ data: "source value" });
     });
     await runtime.idle();
 
     // Create target cell
-    const targetCell = runtime.getCell(manager.getSpace(), "target");
+    const targetCell = runtime.getCell(pieces.getSpace(), "target");
     await runtime.editWithRetry((tx) => {
       targetCell.withTx(tx).set({ linked: null });
     });
@@ -77,8 +77,8 @@ describe("PieceManager.link() reactivity", () => {
 
   it("should be idempotent - writing a link at a path that already has a link should overwrite, not follow", async () => {
     // Create source and target cells
-    const sourceCell = runtime.getCell(manager.getSpace(), "source-idem");
-    const targetCell = runtime.getCell(manager.getSpace(), "target-idem");
+    const sourceCell = runtime.getCell(pieces.getSpace(), "source-idem");
+    const targetCell = runtime.getCell(pieces.getSpace(), "target-idem");
 
     await runtime.editWithRetry((tx) => {
       sourceCell.withTx(tx).set({ data: "original" });
@@ -105,7 +105,7 @@ describe("PieceManager.link() reactivity", () => {
     await runtime.editWithRetry((tx) => {
       const target = targetCell.withTx(tx);
       const source = sourceCell.withTx(tx);
-      // This is what manager.link() does (without resolveAsCell)
+      // This is what pieces.link() does (without resolveAsCell)
       target.key("linked").setRawUntyped(
         source.key("data").getAsLink({
           base: target,
@@ -135,13 +135,13 @@ describe("PieceManager.link() reactivity", () => {
     const sourceCell = runtime.getCellFromLink({
       id: `of:${sourceId}`,
       path: [],
-      space: manager.getSpace(),
+      space: pieces.getSpace(),
       scope: "user",
     });
     const targetCell = runtime.getCellFromLink({
       id: `of:${targetId}`,
       path: [],
-      space: manager.getSpace(),
+      space: pieces.getSpace(),
       scope: "session",
     });
 
@@ -151,7 +151,7 @@ describe("PieceManager.link() reactivity", () => {
     });
     await runtime.idle();
 
-    await manager.link(
+    await pieces.link(
       sourceId,
       ["data"],
       targetId,
@@ -176,10 +176,10 @@ describe("PieceManager.link() reactivity", () => {
       properties: { value: cellSchema },
       default: { value: 0 },
     } as const;
-    const sourceArgument = runtime.getCell(manager.getSpace(), "source-arg");
-    const sourceResult = runtime.getCell(manager.getSpace(), "source-result");
+    const sourceArgument = runtime.getCell(pieces.getSpace(), "source-arg");
+    const sourceResult = runtime.getCell(pieces.getSpace(), "source-result");
     const targetArgument = runtime.getCell(
-      manager.getSpace(),
+      pieces.getSpace(),
       "target-arg",
       modelSchema,
     );

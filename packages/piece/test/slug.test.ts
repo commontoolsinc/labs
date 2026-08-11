@@ -6,7 +6,8 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../../runner/src/builder/factory.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
 import { slugIdForSpace } from "../../runner/src/slugs.ts";
-import { pieceId, PieceManager } from "../src/manager.ts";
+import { pieceId } from "../src/piece-id.ts";
+import { PiecesController } from "../src/ops/pieces-controller.ts";
 import {
   assignSlug,
   resolvePieceAddress,
@@ -19,7 +20,7 @@ const signer = await Identity.fromPassphrase("piece slug tests");
 describe("piece slugs", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let manager: PieceManager;
+  let pieces: PiecesController;
 
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -31,8 +32,8 @@ describe("piece slugs", () => {
       identity: signer,
       spaceName: "piece-slugs-" + crypto.randomUUID(),
     });
-    manager = new PieceManager(session, runtime);
-    await manager.synced();
+    pieces = new PiecesController(session, runtime);
+    await pieces.synced();
   });
 
   afterEach(async () => {
@@ -45,12 +46,12 @@ describe("piece slugs", () => {
     const piecePattern = commonfabric.pattern<{ value: number }>((
       { value },
     ) => ({ value }));
-    return await manager.runPersistent(piecePattern, { value: 1 }, cause);
+    return await pieces.runPersistent(piecePattern, { value: 1 }, cause);
   }
 
   function readRootMeta(id: string, key: string): unknown {
     return runtime.readTx().readOrThrow({
-      space: manager.getSpace(),
+      space: pieces.getSpace(),
       id: `of:${id}` as URI,
       scope: "space",
       path: [key],
@@ -61,23 +62,23 @@ describe("piece slugs", () => {
     const piece = await createPiece("slug-target");
     const id = pieceId(piece)!;
 
-    await assignSlug(manager, piece, "demo");
+    await assignSlug(pieces, piece, "demo");
 
-    const slugId = slugIdForSpace(manager.getSpace(), "demo");
+    const slugId = slugIdForSpace(pieces.getSpace(), "demo");
     expect(readRootMeta(id, "slug")).toBe("demo");
     expect(readRootMeta(slugId, "slug")).toBe("demo");
-    expect(await resolvePieceAddress(manager, "demo")).toBe(id);
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(id);
   });
 
   it("sets slug redirects to arbitrary cell links", async () => {
     const piece = await createPiece("slug-link-target");
-    const slugId = slugIdForSpace(manager.getSpace(), "value-link");
+    const slugId = slugIdForSpace(pieces.getSpace(), "value-link");
     const slugCell = runtime.getCellFromEntityId(
-      manager.getSpace(),
+      pieces.getSpace(),
       entityIdFrom(slugId),
     );
 
-    await setSlugLink(manager, "value-link", piece.key("value"));
+    await setSlugLink(pieces, "value-link", piece.key("value"));
 
     await slugCell.sync();
     const link = parseLink(slugCell.getRaw(), slugCell);
@@ -89,41 +90,41 @@ describe("piece slugs", () => {
 
   it("resolves slug redirects to arbitrary cells without treating them as pieces", async () => {
     const cell = runtime.getCell(
-      manager.getSpace(),
-      { space: manager.getSpace(), random: "slug-cell-target" },
+      pieces.getSpace(),
+      { space: pieces.getSpace(), random: "slug-cell-target" },
     );
     await runtime.editWithRetry((tx) => {
       cell.withTx(tx).set({ value: 1 });
     });
 
-    await setSlugLink(manager, "value-link", cell);
+    await setSlugLink(pieces, "value-link", cell);
 
-    const target = await resolveSlugTargetCell(manager, "value-link");
+    const target = await resolveSlugTargetCell(pieces, "value-link");
     expect(target.getAsNormalizedFullLink().id).toBe(
       cell.getAsNormalizedFullLink().id,
     );
     expect(target.getAsNormalizedFullLink().path).toEqual([]);
     expect(target.get()).toEqual({ value: 1 });
 
-    await expect(resolvePieceAddress(manager, "value-link")).rejects.toThrow(
+    await expect(resolvePieceAddress(pieces, "value-link")).rejects.toThrow(
       /not a piece/,
     );
   });
 
   it("can resolve source links before setting a slug redirect", async () => {
     const piece = await createPiece("slug-resolved-link-target");
-    await setSlugLink(manager, "first-link", piece);
+    await setSlugLink(pieces, "first-link", piece);
 
     const firstSlugCell = runtime.getCellFromEntityId(
-      manager.getSpace(),
-      entityIdFrom(slugIdForSpace(manager.getSpace(), "first-link")),
+      pieces.getSpace(),
+      entityIdFrom(slugIdForSpace(pieces.getSpace(), "first-link")),
     );
     const secondSlugCell = runtime.getCellFromEntityId(
-      manager.getSpace(),
-      entityIdFrom(slugIdForSpace(manager.getSpace(), "second-link")),
+      pieces.getSpace(),
+      entityIdFrom(slugIdForSpace(pieces.getSpace(), "second-link")),
     );
 
-    await setSlugLink(manager, "second-link", firstSlugCell, {
+    await setSlugLink(pieces, "second-link", firstSlugCell, {
       resolveBeforeLinking: true,
     });
 
@@ -136,12 +137,12 @@ describe("piece slugs", () => {
 
   it("stores slug metadata on the fully resolved target", async () => {
     const output = runtime.getCell(
-      manager.getSpace(),
-      { space: manager.getSpace(), random: "slug-final-target" },
+      pieces.getSpace(),
+      { space: pieces.getSpace(), random: "slug-final-target" },
     );
     const intermediate = runtime.getCell(
-      manager.getSpace(),
-      { space: manager.getSpace(), random: "slug-intermediate-target" },
+      pieces.getSpace(),
+      { space: pieces.getSpace(), random: "slug-intermediate-target" },
     );
 
     await runtime.editWithRetry((tx) => {
@@ -153,13 +154,13 @@ describe("piece slugs", () => {
       );
     });
 
-    await setSlugLink(manager, "resolved-target", intermediate.key("child"), {
+    await setSlugLink(pieces, "resolved-target", intermediate.key("child"), {
       writeTargetMetadata: true,
     });
 
     const slugCell = runtime.getCellFromEntityId(
-      manager.getSpace(),
-      entityIdFrom(slugIdForSpace(manager.getSpace(), "resolved-target")),
+      pieces.getSpace(),
+      entityIdFrom(slugIdForSpace(pieces.getSpace(), "resolved-target")),
     );
     await slugCell.sync();
     const link = parseLink(slugCell.getRaw(), slugCell);
@@ -174,18 +175,18 @@ describe("piece slugs", () => {
 
   it("preserves resolved slug redirect paths", async () => {
     const piece = await createPiece("slug-resolved-path-target");
-    await setSlugLink(manager, "first-path-link", piece.key("value"));
+    await setSlugLink(pieces, "first-path-link", piece.key("value"));
 
     const firstSlugCell = runtime.getCellFromEntityId(
-      manager.getSpace(),
-      entityIdFrom(slugIdForSpace(manager.getSpace(), "first-path-link")),
+      pieces.getSpace(),
+      entityIdFrom(slugIdForSpace(pieces.getSpace(), "first-path-link")),
     );
     const secondSlugCell = runtime.getCellFromEntityId(
-      manager.getSpace(),
-      entityIdFrom(slugIdForSpace(manager.getSpace(), "second-path-link")),
+      pieces.getSpace(),
+      entityIdFrom(slugIdForSpace(pieces.getSpace(), "second-path-link")),
     );
 
-    await setSlugLink(manager, "second-path-link", firstSlugCell, {
+    await setSlugLink(pieces, "second-path-link", firstSlugCell, {
       resolveBeforeLinking: true,
     });
 
@@ -199,10 +200,10 @@ describe("piece slugs", () => {
   });
 
   it("preserves URI-shaped piece addresses", async () => {
-    expect(await resolvePieceAddress(manager, "fid1:piece-123")).toBe(
+    expect(await resolvePieceAddress(pieces, "fid1:piece-123")).toBe(
       "fid1:piece-123",
     );
-    expect(await resolvePieceAddress(manager, "of:fid1:piece-123")).toBe(
+    expect(await resolvePieceAddress(pieces, "of:fid1:piece-123")).toBe(
       "of:fid1:piece-123",
     );
   });
@@ -211,27 +212,27 @@ describe("piece slugs", () => {
     const first = await createPiece("slug-first");
     const second = await createPiece("slug-second");
 
-    await assignSlug(manager, first, "demo");
-    await assignSlug(manager, second, "demo");
+    await assignSlug(pieces, first, "demo");
+    await assignSlug(pieces, second, "demo");
 
-    expect(await resolvePieceAddress(manager, "demo")).toBe(pieceId(second));
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(second));
   });
 
   it("reports missing and malformed slug documents", async () => {
-    await expect(resolvePieceAddress(manager, "missing")).rejects.toThrow(
+    await expect(resolvePieceAddress(pieces, "missing")).rejects.toThrow(
       /Slug "missing" not found/,
     );
 
-    const slugId = slugIdForSpace(manager.getSpace(), "malformed");
+    const slugId = slugIdForSpace(pieces.getSpace(), "malformed");
     const slugCell = runtime.getCellFromEntityId(
-      manager.getSpace(),
+      pieces.getSpace(),
       entityIdFrom(slugId),
     );
     await runtime.editWithRetry((tx) => {
       slugCell.withTx(tx).setRawUntyped("not a redirect");
     });
 
-    await expect(resolvePieceAddress(manager, "malformed")).rejects.toThrow(
+    await expect(resolvePieceAddress(pieces, "malformed")).rejects.toThrow(
       /does not contain a valid redirect/,
     );
   });

@@ -73,6 +73,23 @@ export interface Signer<ID extends DID = DID> extends Principal<ID> {
 
   verifier: Verifier<ID>;
 
+  /**
+   * Returns this signer's key material in a form no holder can use to reach or
+   * alter this signer. Callers may rely on that rather than defending
+   * themselves.
+   *
+   * Note what is _not_ promised: that two calls return different values. The
+   * requirement is unreachability, and the two key forms meet it by different
+   * means. A `CryptoKeyPair` carries opaque platform keys with no reachable
+   * material, so one frozen pair can serve every call. An
+   * `InsecureCryptoKeyPair` carries the raw private key -- the signing secret
+   * itself -- and freezing does not reach `ArrayBuffer` contents, so its arrays
+   * must instead be freshly allocated per call, and a caller mutating what it
+   * receives harms only itself.
+   *
+   * The result is plain by design: a value of this shape travels as an IPC
+   * payload, and structured cloning does not preserve a class.
+   */
   serialize(): KeyPairRaw;
 }
 
@@ -87,6 +104,15 @@ export interface AuthorizationError extends Error {
   name: "AuthorizationError";
 }
 
+/**
+ * Raw ed25519 key material. Deliberately plain arrays rather than a richer
+ * byte type: a value of this shape crosses worker boundaries as an IPC
+ * payload, and structured cloning does not preserve a class.
+ *
+ * TODO(danfuzz): Change these properties to `FabricBytes` once `codec-realm`
+ * exists and is used to carry this across that boundary. The bytes would then
+ * be immutable end to end, instead of only within a signer.
+ */
 export type InsecureCryptoKeyPair = {
   privateKey: Uint8Array;
   publicKey: Uint8Array;

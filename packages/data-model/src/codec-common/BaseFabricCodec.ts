@@ -9,9 +9,7 @@ export abstract class BaseFabricCodec implements FabricCodec {
   #recognizedTypeTag: string | undefined;
   #uniqueHandledClass: Constructor | undefined;
 
-  /**
-   * Constructs an instance.
-   */
+  /** Constructs an instance. */
   constructor(
     /**
      * The wire type tag this codec recognizes, or `undefined` for a codec with
@@ -54,7 +52,8 @@ export abstract class BaseFabricCodec implements FabricCodec {
   tagForValue(_value: FabricValue): string {
     if (this.#recognizedTypeTag === undefined) {
       throw new Error(
-        "Shouldn't happen: codec has no recognized tag; `tagForValue()` must be overridden.",
+        "Shouldn't happen: codec has no recognized tag; `tagForValue()` must " +
+          "be overridden.",
       );
     }
     return this.#recognizedTypeTag;

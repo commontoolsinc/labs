@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { type Immutable, isPlainContainer } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
@@ -6,9 +7,7 @@ import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "./deep-freeze.ts";
 import { toDebugKindString } from "./value-debug.ts";
 
-/**
- * Options for `cloneIfNecessary()`.
- */
+/** Options for `cloneIfNecessary()`. */
 export interface CloneOptions {
   /** Whether the result should be frozen. Default: `true`. */
   frozen?: boolean;
@@ -58,11 +57,12 @@ function trackForCircularity(
  * fabric wrappers), this function assumes the input is already a valid
  * `FabricValue` and only adjusts frozenness by cloning where necessary.
  *
- * Cyclic values are not yet supported: a deep clone (the default) throws on a
- * detected cycle. Handling cycles here is intended future work.
+ * Cyclic values are not supported: a deep clone (the default) throws on a
+ * detected cycle.
  *
  * @param value - An already-valid `FabricValue`.
- * @param options - See `CloneOptions`. Defaults: `{ frozen: true, deep: true }`.
+ * @param options - See `CloneOptions`. Defaults to
+ *   `{ frozen: true, deep: true }`.
  */
 export function cloneIfNecessary<T extends FabricValue>(
   value: T,
@@ -86,14 +86,14 @@ export function cloneIfNecessary<T extends FabricValue>(
 
   if (frozen && force) {
     throw new Error(
-      "cloneIfNecessary: { frozen: true, force: true } is invalid " +
+      "`cloneIfNecessary()`: `{ frozen: true, force: true }` is invalid " +
         "(pointless to force-copy an immutable value)",
     );
   }
 
   if (!frozen && !force && deep) {
     throw new Error(
-      "cloneIfNecessary: { frozen: false, force: false, deep: true } is invalid " +
+      "`cloneIfNecessary()`: `{ frozen: false, force: false, deep: true }` is invalid " +
         "(ambiguous: mixed-frozenness trees have no clear shallow-thaw semantics)",
     );
   }
@@ -109,10 +109,10 @@ export function cloneIfNecessary<T extends FabricValue>(
  * `Object.freeze()` (or `deepFreeze()`) on the result to obtain a
  * fully-deep-frozen value, with no leftover mutable bits hiding underneath.
  *
- * Children are made safe via `cloneIfNecessary()` with its default (deep-frozen)
- * options, so already-deep-frozen children are identity-passed (zero-copy) while
- * mutable children are deep-cloned-and-frozen. The input is never mutated:
- * mutable children are cloned, not frozen in place.
+ * Children are made safe via `cloneIfNecessary()` with its default
+ * (deep-frozen) options, so already-deep-frozen children are identity-passed
+ * (zero-copy) while mutable children are deep-cloned-and-frozen. The input is
+ * never mutated: mutable children are cloned, not frozen in place.
  *
  * Inherently-immutable inputs (primitives, `FabricPrimitive`s) are returned
  * as-is, since there is no mutable top level to produce.
@@ -243,7 +243,9 @@ export function cloneHelper(
     default:
       // All valid `FabricValue` types are handled above.
       throw new Error(
-        `Cannot clone: ${(value as object).constructor?.name ?? typeof value}`,
+        `Cannot clone: ${
+          backtickQuote((value as object).constructor?.name ?? typeof value)
+        }`,
       );
   }
 }
@@ -283,6 +285,7 @@ export type CloneForMutationErrorKind =
  *   `toDebugKindString()`).
  */
 export class CloneForMutationError extends Error {
+  /** Constructs an instance describing one clone-for-mutation failure. */
   constructor(
     readonly kind: CloneForMutationErrorKind,
     readonly pathIndex: number,
@@ -294,9 +297,7 @@ export class CloneForMutationError extends Error {
   }
 }
 
-/**
- * Options for `cloneForMutation()`.
- */
+/** Options for `cloneForMutation()`. */
 export interface CloneForMutationOptions {
   /**
    * Force fresh shallow copies of every spine container, even when the
@@ -319,8 +320,8 @@ export interface CloneForMutationOptions {
   force?: boolean;
 
   /**
-   * Create missing intermediate containers along `path` as the helper
-   * descends. Default: `false` (throws `CloneForMutationError` with kind
+   * Whether to create missing intermediate containers along `path` as the
+   * helper descends. Default: `false` (throws `CloneForMutationError` with kind
    * `"missing-segment"` on the first missing slot).
    *
    * When `createMissing: true`, at each path step where the container at
@@ -396,9 +397,11 @@ export interface CloneForMutationResult<T extends FabricValue> {
  *
  * ### Mutation patterns supported via the returned `pathValue`
  *
- * - Object property add / set / delete: `pathValue.k = v`, `delete pathValue.k`.
+ * - Object property add / set / delete: `pathValue.k = v`, and
+ *   `delete pathValue.k`.
  * - Array set-element / push / splice / length: `pathValue[i] = v`,
- *   `pathValue.push(v)`, `pathValue.splice(i, n, ...add)`, `pathValue.length = n`.
+ *   `pathValue.push(v)`, `pathValue.splice(i, n, ...add)`, and
+ *   `pathValue.length = n`.
  * - "Replace the value at some slot": pass the parent's path as `path`,
  *   then assign through `pathValue[lastKey] = newValue`.
  *
@@ -451,7 +454,9 @@ export function cloneForMutation<T extends FabricValue>(
         "non-mutable-root",
         -1,
         toDebugKindString(value),
-        `cloneForMutation: cannot mutate ${toDebugKindString(value)} at root ` +
+        `\`cloneForMutation()\`: cannot mutate ${
+          backtickQuote(toDebugKindString(value))
+        } at root ` +
           `(empty path)`,
       );
     }
@@ -467,7 +472,9 @@ export function cloneForMutation<T extends FabricValue>(
       "non-container-root",
       -1,
       toDebugKindString(value),
-      `cloneForMutation: cannot descend into ${toDebugKindString(value)} at ` +
+      `\`cloneForMutation()\`: cannot descend into ${
+        backtickQuote(toDebugKindString(value))
+      } at ` +
         `root (path has ${path.length} segment${path.length === 1 ? "" : "s"})`,
     );
   }
@@ -504,8 +511,10 @@ export function cloneForMutation<T extends FabricValue>(
         "missing-segment",
         i,
         "undefined",
-        `cloneForMutation: missing path segment ${JSON.stringify(key)} at ` +
-          `index ${i}`,
+        `\`cloneForMutation()\`: missing path segment ${
+          backtickQuote(key)
+        } at ` +
+          `index \`${i}\``,
       );
     }
 
@@ -515,10 +524,10 @@ export function cloneForMutation<T extends FabricValue>(
           "non-mutable-leaf",
           i,
           toDebugKindString(next),
-          `cloneForMutation: cannot mutate ${
-            toDebugKindString(next)
+          `\`cloneForMutation()\`: cannot mutate ${
+            backtickQuote(toDebugKindString(next))
           } at path ` +
-            `index ${i} (final segment)`,
+            `index \`${i}\` (final segment)`,
         );
       }
     } else {
@@ -527,10 +536,10 @@ export function cloneForMutation<T extends FabricValue>(
           "non-container-descent",
           i,
           toDebugKindString(next),
-          `cloneForMutation: cannot descend into ${
-            toDebugKindString(next)
+          `\`cloneForMutation()\`: cannot descend into ${
+            backtickQuote(toDebugKindString(next))
           } at ` +
-            `path index ${i}`,
+            `path index \`${i}\``,
         );
       }
     }
@@ -557,7 +566,7 @@ export function cloneForMutation<T extends FabricValue>(
   // Unreachable: the loop always returns on its final iteration when
   // `path.length > 0` (handled above for `path.length === 0`).
   /* c8 ignore next 3 */
-  throw new Error("cloneForMutation: unreachable");
+  throw new Error("`cloneForMutation()`: unreachable");
 }
 
 /**
@@ -625,7 +634,8 @@ const hasChildAt = (
  * Like `cloneForMutation`, descent through a *present* non-container along the
  * path -- a primitive, or a `FabricInstance`/`FabricPrimitive` -- throws a
  * `CloneForMutationError` rather than silently replacing that leaf with fresh
- * spine structure. Cyclic values are not yet supported (see `cloneIfNecessary`).
+ * spine structure. Cyclic values are not yet supported (see
+ * `cloneIfNecessary`).
  */
 export function cloneWithValueAtPath(
   root: FabricValue,

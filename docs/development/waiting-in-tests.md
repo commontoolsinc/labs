@@ -130,9 +130,12 @@ before marking any of them. Mark the targets inside the successful predicate so
 the click addresses the elements that passed the settle check.
 
 `clickCfButton` and `clickCfButtonsConcurrently` work this way.
-`clickTrustedAction`, `submitViaEnter`, and `settleAndClickNoteButton` in
-`packages/patterns/integration/note-button-helpers.ts` still settle before
-resolving their target, and carry the gap described above.
+`clickTrustedAction` and `settleAndClickNoteButton` in
+`packages/patterns/integration/note-button-helpers.ts` use `clickMarked` for
+the final geometry check and replacement handling. Their earlier readiness
+checks differ from `clickCfButton`'s settle-and-mark predicate.
+`submitViaEnter` is a keyboard interaction and settles before resolving its
+input.
 
 Ask `probe.isRendered` for that check rather than hand-rolling it, and note that
 it is deliberately not `probe.isVisible`, which additionally requires the
@@ -161,22 +164,29 @@ the click, and the surface the control sits in can still be settling: a join
 card's profile surface toggles display through its entrance, a re-render relays
 out the region, or a piece re-render replaces the control with an equivalent one.
 So `clickMarked` settles the control and works out where to click it in a single
-page turn, and dispatches immediately afterwards. That one turn holds until the
-tagged control's bounding box is unchanged across two consecutive animation
-frames, then scrolls it into view and measures the point, all without handing
-control back to the test process in between. The hold is frame-driven and drops
-its baseline whenever the box disappears, so a control hidden partway through is
-picked up once it returns rather than clicked mid-shift; the stuck-condition net
-bounds a box that never settles.
+page turn. That turn holds until the tagged control's bounding box is unchanged
+across two consecutive animation frames. It then scrolls the control into view
+and measures the point without handing control back to the test process in
+between. The hold is frame-driven and drops its baseline whenever the box
+disappears. A control hidden partway through is picked up once it returns rather
+than clicked mid-shift. The stuck-condition net bounds a box that never settles.
+
+The page can move again after that first measurement. An interaction observer
+also runs before the trusted click and can give the page time to change. Just
+before dispatch, `clickMarked` resolves the marked control in one page turn and
+reads its current center. If the control has moved or disappeared, the helper
+settles it again and applies the caller's tagging predicate to any replacement.
+It takes one final current measurement after that settle, then dispatches the
+single trusted click at that point.
 
 Deciding and measuring in one turn is the point of the design, not an
 optimization. Split across protocol round trips, the measurement describes a
-different moment from the decision, and a control the page dropped in between
-measures as nothing at all — which is what "Unable to get stable box model to
+different moment from the decision. A control the page dropped in between then
+measures as nothing at all. This is what "Unable to get stable box model to
 click on" means. A helper that tags a control by name also passes its tagging
-predicate to `clickMarked`, so a control the page rebuilt is tagged again on
-whatever took its place, under that helper's own readiness rules, rather than
-reported as gone.
+predicate to `clickMarked`. A control the page rebuilt is therefore tagged
+again on whatever took its place, under that helper's own readiness rules,
+rather than reported as gone.
 
 That error message covers more than a missing layout box: the underlying
 `DOM.getBoxModel` reports a node the browser's DOM agent no longer knows about
@@ -490,6 +500,31 @@ never arrives quiesce the loop so Deno fails the pending wait. The multi-space
 mergeable-commit test's move onto the fake clock is the worked example, in [the
 rationale
 document](waiting-in-tests-rationale.md#the-runner-clock-retired-exemptions-and-converted-waits).
+
+### Gating storage fan-out: manual flush, not a long delay
+
+A multi-session storage test whose premise is controlled staleness — one
+replica provably NOT having received a concurrent write — gates the shared
+in-process memory server's fan-out rather than racing it. The primitive is the
+server's `subscriptionRefreshDelayMs: "manual"` mode (via
+`newSharedServer({ subscriptionRefreshDelayMs: "manual" })` in the runner's
+test utils, or `newLoopbackServer` for other packages): the flush timer is
+never armed, dirty spaces accumulate, and frames spread only at the explicit
+synchronization points — `server.flushSessions([space])` at the point delivery
+is wanted, or `server.idle()`, which drains held fan-out to keep its
+quiescence contract.
+
+A large numeric delay is not a substitute. Under auto-advance the pump fires
+the earliest pending `src/`-armed timer regardless of its nominal delay, so a
+"held" 60-second flush timer fires as soon as the event loop idles — the hold
+only ever worked by accident. Manual mode has no timer to fire, on any clock.
+
+Single-manager `StorageManager.emulate()` harnesses need none of this: their
+private server flushes on a zero-delay timer, so awaited round trips deliver
+their own fan-out and there is no second session to keep stale. The loopback
+transport itself delivers each server frame on its own zero-delay timer turn,
+so `clock.settle()` drains in-flight deliveries without letting any coalescing
+window elapse.
 
 ## The background-piece-service suite: the same clock for a polling loop
 

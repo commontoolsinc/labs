@@ -25,10 +25,16 @@ import type {
   ViewMode,
 } from "./model.ts";
 import { flattenStructure } from "./model.ts";
-import type { DiffFile, DiffHunk, DiffModel } from "./diff.ts";
+import { type DiffFile, type DiffHunk, type DiffModel } from "./diff.ts";
 import { computeLineStarts, lineIndexOf } from "./lines.ts";
 import type { Language } from "./languages/language.ts";
-import { languageForFile, renderedLinesFor } from "./languages/language.ts";
+import {
+  canRenderDiffLines,
+  decodeLanguageInput,
+  languageForFile,
+  readOnlyReasonFor,
+  renderedLinesFor,
+} from "./languages/language.ts";
 import { cpLen } from "./ansi.ts";
 import { dirname, isAbsolute, join, relative } from "@std/path";
 import { spawnSync } from "@node/child_process";
@@ -39,8 +45,14 @@ export interface DiffWorkspace {
   resolve(path: string): string | null;
   /** Read an absolute path's current content, or null. */
   read(absPath: string): string | null;
+  /** Report the UTF-8 BOM state recorded by the latest successful read. */
+  hasUtf8Bom?(absPath: string): boolean | undefined;
+  /** Write decoded text back with the encoding observed by {@link read}. */
+  write?(absPath: string, text: string): void;
   /** Read a Git blob by object name, or null when it is unavailable. */
   readBlob?(object: string): string | null;
+  /** Report the UTF-8 BOM state recorded for a successfully read Git blob. */
+  blobHasUtf8Bom?(object: string): boolean | undefined;
   /** Read available Git blobs in one local Git operation. */
   readBlobs?(
     objects: readonly string[],
@@ -71,16 +83,22 @@ export function realWorkspace(cwd: string): DiffWorkspace {
     return real !== null && realBases.some((base) => within(real, base));
   };
   const blobCache = new Map<string, string | null>();
+  const blobBomCache = new Map<string, boolean>();
+  const encoders = new Map<string, (text: string) => Uint8Array>();
+  const fileBomCache = new Map<string, boolean>();
   const readBlobs = (
     objects: readonly string[],
   ): ReadonlyMap<string, string> => {
     const valid = [...new Set(objects.filter(validGitObject))];
     const missing = valid.filter((object) => !blobCache.has(object));
+    const loadedBomStates = new Map<string, boolean>();
     const loaded = repoRoot === null
       ? new Map<string, string>()
-      : readGitBlobs(repoRoot, missing);
+      : readGitBlobs(repoRoot, missing, undefined, loadedBomStates);
     for (const object of missing) {
       blobCache.set(object, loaded.get(object) ?? null);
+      const hasBom = loadedBomStates.get(object);
+      if (hasBom !== undefined) blobBomCache.set(object, hasBom);
     }
     const found = new Map<string, string>();
     for (const object of valid) {
@@ -103,14 +121,55 @@ export function realWorkspace(cwd: string): DiffWorkspace {
     },
     read(absPath) {
       if (!bounded(absPath)) return null;
+      if (readOnlyReasonFor(languageForFile(absPath)) !== undefined) {
+        return null;
+      }
       try {
-        return Deno.readTextFileSync(absPath);
+        const decoded = decodeLanguageInput(
+          absPath,
+          Deno.readFileSync(absPath),
+        );
+        if (readOnlyReasonFor(decoded.language) !== undefined) return null;
+        encoders.set(absPath, decoded.source.encode);
+        fileBomCache.set(absPath, decoded.source.hasUtf8Bom);
+        return decoded.source.text;
       } catch {
         return null;
       }
     },
+    write(absPath, text) {
+      if (!bounded(absPath)) {
+        throw new Error(`Cannot write outside the workspace: ${absPath}`);
+      }
+      const selected = languageForFile(absPath);
+      const selectedReadOnlyReason = readOnlyReasonFor(selected);
+      if (selectedReadOnlyReason !== undefined) {
+        throw new Error(selectedReadOnlyReason);
+      }
+      let encode = encoders.get(absPath);
+      if (encode === undefined) {
+        const decoded = decodeLanguageInput(
+          absPath,
+          Deno.readFileSync(absPath),
+        );
+        const decodedReadOnlyReason = readOnlyReasonFor(decoded.language);
+        if (decodedReadOnlyReason !== undefined) {
+          throw new Error(decodedReadOnlyReason);
+        }
+        encode = decoded.source.encode;
+        encoders.set(absPath, encode);
+        fileBomCache.set(absPath, decoded.source.hasUtf8Bom);
+      }
+      Deno.writeFileSync(absPath, encode(text));
+    },
+    hasUtf8Bom(absPath) {
+      return fileBomCache.get(absPath);
+    },
     readBlob(object) {
       return readBlobs([object]).get(object) ?? null;
+    },
+    blobHasUtf8Bom(object) {
+      return blobBomCache.get(object);
     },
     readBlobs,
   };
@@ -147,6 +206,7 @@ function readGitBlobs(
   objects: readonly string[],
   run: GitBatchRunner = (command, args, options) =>
     spawnSync(command, args, options),
+  bomStates?: Map<string, boolean>,
 ): Map<string, string> {
   const blobs = new Map<string, string>();
   if (objects.length === 0) return blobs;
@@ -158,13 +218,18 @@ function readGitBlobs(
       maxBuffer: Number.MAX_SAFE_INTEGER,
     });
     if (result.status !== 0 || !result.stdout) return blobs;
-    return parseGitBatchOutput(objects, new Uint8Array(result.stdout));
+    return parseGitBatchOutput(
+      objects,
+      new Uint8Array(result.stdout),
+      bomStates,
+    );
   }) ?? blobs;
 }
 
 function parseGitBatchOutput(
   objects: readonly string[],
   output: Uint8Array,
+  bomStates?: Map<string, boolean>,
 ): Map<string, string> {
   const blobs = new Map<string, string>();
   const decoder = new TextDecoder();
@@ -185,7 +250,12 @@ function parseGitBatchOutput(
     }
     const content = output.subarray(offset, offset + size);
     offset += size + 1;
-    if (match[1] === "blob") blobs.set(object, decoder.decode(content));
+    if (match[1] !== "blob") continue;
+    const decoded = decodeLanguageInput(undefined, content);
+    if (readOnlyReasonFor(decoded.language) === undefined) {
+      blobs.set(object, decoded.source.text);
+      bomStates?.set(object, decoded.source.hasUtf8Bom);
+    }
   }
   return blobs;
 }
@@ -248,6 +318,10 @@ export interface DiffHunkInfo {
   readonly newStart: number;
   readonly newCount: number;
   readonly verified: boolean;
+  /** Whether the reconstructed old file is encoded with a UTF-8 BOM. */
+  readonly oldFileHasUtf8Bom?: boolean;
+  /** Whether the captured new file is encoded with a UTF-8 BOM. */
+  readonly newFileHasUtf8Bom?: boolean;
   /** The original diff marks the old side as having no final newline. */
   readonly oldNoTrailingNewline?: boolean;
   /** The original diff marks the new side as having no final newline. */
@@ -286,6 +360,8 @@ interface LoadedFile {
   fileText: string | null;
   fileDoc: Document | null;
   fileLineStarts: number[];
+  /** The encoding state kept outside the BOM-stripped parser text. */
+  hasUtf8Bom?: boolean;
   /** Syntax-only lines used by complete old files. */
   highlightedLines?: readonly Line[] | null;
   /** Alternate rendered lines, computed once when that view is opened. */
@@ -305,7 +381,12 @@ function loadFile(
     ? language.parseDocument(fileText, absPath)
     : null;
   const fileLineStarts = fileText !== null ? computeLineStarts(fileText) : [];
-  const entry: LoadedFile = { fileText, fileDoc, fileLineStarts };
+  const entry: LoadedFile = {
+    fileText,
+    fileDoc,
+    fileLineStarts,
+    hasUtf8Bom: fileText === null ? undefined : ws.hasUtf8Bom?.(absPath),
+  };
   cache?.set(absPath, entry);
   return entry;
 }
@@ -337,13 +418,37 @@ function diffBodyMatches(
   rawLines: string[],
   hunk: DiffHunk,
   line: number,
+  sourceLine?: number,
+  sourceHasUtf8Bom?: boolean,
 ): boolean {
-  return sourceText === diffBodyText(rawLines, hunk, line) ||
-    sourceText === diffBodyText(rawLines, hunk, line, true);
+  const exactBody = diffBodyText(rawLines, hunk, line);
+  if (
+    sourceLine === 0 && sourceHasUtf8Bom !== undefined &&
+    exactBody.startsWith("\uFEFF") !== sourceHasUtf8Bom
+  ) {
+    return false;
+  }
+  const exact = decodedInitialDiffBodyLine(
+    exactBody,
+    sourceLine,
+  );
+  const transportStripped = decodedInitialDiffBodyLine(
+    diffBodyText(rawLines, hunk, line, true),
+    sourceLine,
+  );
+  return sourceText === exact || sourceText === transportStripped;
 }
 
-function contentLines(text: string): string[] {
-  if (text.length === 0) return [];
+/** Remove the encoding marker while reading an original diff body. */
+function decodedInitialDiffBodyLine(
+  body: string,
+  sourceLine: number | undefined,
+): string {
+  return sourceLine === 0 ? body.replace(/^\uFEFF/, "") : body;
+}
+
+function contentLines(text: string, hasUtf8Bom = false): string[] {
+  if (text.length === 0) return hasUtf8Bom ? [""] : [];
   const lines = text.split("\n");
   if (text.endsWith("\n")) lines.pop();
   return lines;
@@ -370,6 +475,37 @@ function noTrailingNewline(
   return false;
 }
 
+/** The BOM state declared by a side when a hunk includes its first line. */
+function hunkSideHasUtf8Bom(
+  hunk: DiffHunk,
+  side: "old" | "new",
+  rawLines: string[],
+  modelLines: DiffModel["lines"],
+): boolean | undefined {
+  for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
+    const entry = modelLines[i];
+    if (!belongsToSide(entry?.kind, side)) continue;
+    const sourceLine = side === "old" ? entry.oldLine : entry.newLine;
+    if (sourceLine === 0) {
+      return diffBodyText(rawLines, hunk, i).startsWith("\uFEFF");
+    }
+  }
+  return undefined;
+}
+
+function fileSideHasUtf8Bom(
+  file: DiffFile,
+  side: "old" | "new",
+  rawLines: string[],
+  modelLines: DiffModel["lines"],
+): boolean | undefined {
+  for (const hunk of file.hunks) {
+    const hasBom = hunkSideHasUtf8Bom(hunk, side, rawLines, modelLines);
+    if (hasBom !== undefined) return hasBom;
+  }
+  return undefined;
+}
+
 /** Whether every visible line on one side agrees with a complete file. */
 function fileMatchesSide(
   file: DiffFile,
@@ -377,8 +513,15 @@ function fileMatchesSide(
   text: string,
   rawLines: string[],
   modelLines: DiffModel["lines"],
+  hasUtf8Bom?: boolean,
 ): boolean {
-  const sourceLines = contentLines(text);
+  if (
+    text.length === 0 && hasUtf8Bom &&
+    fileSideHasUtf8Bom(file, side, rawLines, modelLines) !== true
+  ) {
+    return false;
+  }
+  const sourceLines = contentLines(text, hasUtf8Bom);
   for (const hunk of file.hunks) {
     for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
       const entry = modelLines[i];
@@ -386,7 +529,14 @@ function fileMatchesSide(
       const sourceLine = side === "old" ? entry.oldLine : entry.newLine;
       if (
         sourceLine === undefined ||
-        !diffBodyMatches(sourceLines[sourceLine], rawLines, hunk, i)
+        !diffBodyMatches(
+          sourceLines[sourceLine],
+          rawLines,
+          hunk,
+          i,
+          sourceLine,
+          hasUtf8Bom,
+        )
       ) {
         return false;
       }
@@ -412,7 +562,11 @@ function hunkSideLines(
   for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
     const kind = modelLines[i]?.kind;
     if (belongsToSide(kind, side)) {
-      out.push(diffBodyText(rawLines, hunk, i, stripTransport));
+      const sourceLine = side === "old"
+        ? modelLines[i]?.oldLine
+        : modelLines[i]?.newLine;
+      const text = diffBodyText(rawLines, hunk, i, stripTransport);
+      out.push(decodedInitialDiffBodyLine(text, sourceLine));
     }
   }
   return out;
@@ -431,10 +585,20 @@ function reconstructOldFile(
   newText: string,
   rawLines: string[],
   modelLines: DiffModel["lines"],
+  newHasUtf8Bom?: boolean,
 ): string | null {
-  if (!fileMatchesSide(file, "new", newText, rawLines, modelLines)) return null;
+  if (
+    !fileMatchesSide(
+      file,
+      "new",
+      newText,
+      rawLines,
+      modelLines,
+      newHasUtf8Bom,
+    )
+  ) return null;
 
-  const lines = contentLines(newText);
+  const lines = contentLines(newText, newHasUtf8Bom);
   let trailingNewline = newText.endsWith("\n");
   const hunks = [...file.hunks].sort((a, b) => {
     const byStart = hunkStart(b.newStart, b.newCount) -
@@ -475,7 +639,20 @@ function reconstructOldFile(
   const oldText = lines.length === 0
     ? ""
     : lines.join("\n") + (trailingNewline ? "\n" : "");
-  return fileMatchesSide(file, "old", oldText, rawLines, modelLines)
+  const oldHasUtf8Bom = fileSideHasUtf8Bom(
+    file,
+    "old",
+    rawLines,
+    modelLines,
+  ) ?? newHasUtf8Bom;
+  return fileMatchesSide(
+      file,
+      "old",
+      oldText,
+      rawLines,
+      modelLines,
+      oldHasUtf8Bom,
+    )
     ? oldText
     : null;
 }
@@ -498,11 +675,13 @@ function highlightedFile(
   fileText: string | null,
   fileName: string | undefined,
   language: Language,
+  hasUtf8Bom?: boolean,
 ): LoadedFile {
   return {
     fileText,
     fileDoc: null,
     fileLineStarts: [],
+    hasUtf8Bom,
     highlightedLines: fileText === null
       ? null
       : language.highlightLines(fileText, fileName),
@@ -518,7 +697,10 @@ function displayedFileLines(
 ): readonly Line[] | null {
   if (!file) return null;
   const source = file.fileDoc?.lines ?? file.highlightedLines ?? null;
-  if (mode === "source" || !language.renderLines || file.fileText === null) {
+  if (
+    mode === "source" || !canRenderDiffLines(language) ||
+    file.fileText === null
+  ) {
     return source;
   }
   if (file.renderedLines === undefined) {
@@ -540,7 +722,7 @@ function loadOldFile(
   modelLines: DiffModel["lines"],
   cache?: WorkspaceCache,
 ): LoadedFile {
-  if (file.hunks.length === 0) {
+  if (file.hunks.length === 0 || readOnlyReasonFor(language) !== undefined) {
     return {
       fileText: null,
       fileDoc: null,
@@ -549,6 +731,12 @@ function loadOldFile(
     };
   }
   const fileName = file.oldPath ?? file.newPath;
+  const inferredOldHasUtf8Bom = fileSideHasUtf8Bom(
+    file,
+    "old",
+    rawLines,
+    modelLines,
+  ) ?? newFile?.hasUtf8Bom;
   if (
     file.oldObject && validGitObject(file.oldObject) &&
     (oldBlobs !== undefined || ws.readBlob)
@@ -561,12 +749,26 @@ function loadOldFile(
       const blobText = oldBlobs
         ? oldBlobs.get(file.oldObject) ?? null
         : ws.readBlob!(file.oldObject);
-      blob = highlightedFile(blobText, fileName, language);
+      blob = highlightedFile(
+        blobText,
+        fileName,
+        language,
+        blobText === null
+          ? undefined
+          : ws.blobHasUtf8Bom?.(file.oldObject) ?? inferredOldHasUtf8Bom,
+      );
       cache?.set(blobKey, blob);
     }
     if (
       blob.fileText !== null &&
-      fileMatchesSide(file, "old", blob.fileText, rawLines, modelLines)
+      fileMatchesSide(
+        file,
+        "old",
+        blob.fileText,
+        rawLines,
+        modelLines,
+        blob.hasUtf8Bom,
+      )
     ) {
       return blob;
     }
@@ -581,8 +783,14 @@ function loadOldFile(
     newText,
     rawLines,
     modelLines,
+    newFile?.hasUtf8Bom,
   );
-  const entry = highlightedFile(fileText, fileName, language);
+  const entry = highlightedFile(
+    fileText,
+    fileName,
+    language,
+    inferredOldHasUtf8Bom,
+  );
   cache?.set(key, entry);
   return entry;
 }
@@ -605,7 +813,9 @@ export function buildDiffDocument(
   const oldBlobs = ws.readBlobs?.(
     model.files.flatMap((file) =>
       file.hunks.length > 0 && file.oldObject &&
-        validGitObject(file.oldObject)
+        validGitObject(file.oldObject) &&
+        readOnlyReasonFor(languageForFile(file.oldPath ?? file.newPath)) ===
+          undefined
         ? [file.oldObject]
         : []
     ),
@@ -627,7 +837,9 @@ export function buildDiffDocument(
     const newLanguage = languageForFile(file.newPath ?? file.oldPath);
     const oldLanguage = languageForFile(file.oldPath ?? file.newPath);
     const absPath = file.newPath ? ws.resolve(file.newPath) : null;
-    const loaded = absPath ? loadFile(absPath, newLanguage, ws, cache) : null;
+    const loaded = absPath && readOnlyReasonFor(newLanguage) === undefined
+      ? loadFile(absPath, newLanguage, ws, cache)
+      : null;
     const fileText = loaded?.fileText ?? null;
     const fileDoc = loaded?.fileDoc ?? null;
     const fileLineStarts = loaded?.fileLineStarts ?? [];
@@ -696,6 +908,8 @@ export function buildDiffDocument(
         fileDoc,
         fileText,
         fileLineStarts,
+        oldFileHasUtf8Bom: oldFile.hasUtf8Bom,
+        newFileHasUtf8Bom: loaded?.hasUtf8Bom,
         newFileLines,
         oldFileLines: oldDisplayedLines,
         newSourceLines,
@@ -783,6 +997,8 @@ interface MutableLine {
 interface FragmentLine {
   diffLine: number;
   code: string;
+  /** Whether decoding removed a BOM before parsing this source line. */
+  omitsUtf8Bom?: boolean;
   /** Context can establish old-side state without replacing new-side colours. */
   render?: boolean;
 }
@@ -795,6 +1011,8 @@ interface HunkCtx {
   fileDoc: Document | null;
   fileText: string | null;
   fileLineStarts: number[];
+  oldFileHasUtf8Bom?: boolean;
+  newFileHasUtf8Bom?: boolean;
   newFileLines: readonly Line[] | null;
   oldFileLines: readonly Line[] | null;
   newSourceLines: readonly Line[] | null;
@@ -845,14 +1063,31 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     modelLines,
   );
 
-  let verified = ctx.fileDoc !== null;
+  const diffHasUtf8Bom = hunkSideHasUtf8Bom(
+    hunk,
+    "new",
+    rawLines,
+    modelLines,
+  );
+  let verified = ctx.fileDoc !== null &&
+    !(
+      ctx.fileText === "" && ctx.newFileHasUtf8Bom &&
+      diffHasUtf8Bom !== true
+    );
   for (let i = hunk.headerLine + 1; verified && i <= hunk.endLine; i++) {
     const entry = modelLines[i];
     if (entry?.kind !== "ctx" && entry?.kind !== "add") continue;
     const fileText = fileLineText(ctx, entry.newLine!);
     if (
       fileText === null ||
-      !diffBodyMatches(fileText, rawLines, hunk, i)
+      !diffBodyMatches(
+        fileText,
+        rawLines,
+        hunk,
+        i,
+        entry.newLine,
+        ctx.newFileHasUtf8Bom,
+      )
     ) {
       verified = false;
     }
@@ -867,6 +1102,8 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     newStart: hunk.newStart,
     newCount: hunk.newCount,
     verified,
+    oldFileHasUtf8Bom: ctx.oldFileHasUtf8Bom,
+    newFileHasUtf8Bom: ctx.newFileHasUtf8Bom,
     oldNoTrailingNewline,
     newNoTrailingNewline,
   });
@@ -891,22 +1128,34 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     if (entry.kind !== "ctx" && entry.kind !== "add" && entry.kind !== "del") {
       continue;
     }
-    const code = t.slice(1);
+    const body = t.slice(1);
+    const oldCode = decodedInitialDiffBodyLine(body, entry.oldLine);
+    const newCode = decodedInitialDiffBodyLine(body, entry.newLine);
     if (entry.kind === "add") lines[i].bg = "add";
     if (entry.kind === "del") lines[i].bg = "del";
 
     if (entry.kind === "ctx") {
-      oldFragment.push({ diffLine: i, code, render: false });
+      oldFragment.push({
+        diffLine: i,
+        code: oldCode,
+        omitsUtf8Bom: oldCode !== body,
+        render: false,
+      });
     }
     if (entry.kind === "del") {
-      const fragment = { diffLine: i, code, render: false };
+      const fragment = {
+        diffLine: i,
+        code: oldCode,
+        omitsUtf8Bom: oldCode !== body,
+        render: false,
+      };
       oldFragment.push(fragment);
       const sourceLine = ctx.oldSourceLines?.[entry.oldLine!];
       if (sourceLine) sourceFallbacks.set(i, sourceLine);
       const oldSpans = ctx.oldFileLines?.[entry.oldLine!]?.spans;
       const displayed = ctx.oldFileLines?.[entry.oldLine!];
       const lineText = displayed && ctx.viewMode === "rendered" &&
-          !!ctx.oldLanguage.renderLines
+          canRenderDiffLines(ctx.oldLanguage)
         ? `${t.slice(0, 1)}${displayed.text}`
         : t;
       if (ctx.viewMode === "rendered" && displayed?.renderedSourceHidden) {
@@ -935,7 +1184,7 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
         ctx.mapping.newToDiff.set(n, i);
       }
       const shifted = shiftCompleteLineSpans(
-        ctx.viewMode === "rendered" && !!ctx.newLanguage.renderLines &&
+        ctx.viewMode === "rendered" && canRenderDiffLines(ctx.newLanguage) &&
           ctx.newFileLines?.[n]
           ? `${t.slice(0, 1)}${ctx.newFileLines[n].text}`
           : t,
@@ -943,7 +1192,8 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
       );
       if (shifted) {
         if (
-          ctx.viewMode === "rendered" && !!ctx.newLanguage.renderLines &&
+          ctx.viewMode === "rendered" &&
+          canRenderDiffLines(ctx.newLanguage) &&
           ctx.newFileLines?.[n]
         ) {
           lines[i].text = `${t.slice(0, 1)}${ctx.newFileLines[n].text}`;
@@ -953,10 +1203,18 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
         }
         lines[i].spans = shifted;
       } else {
-        newFragment.push({ diffLine: i, code });
+        newFragment.push({
+          diffLine: i,
+          code: newCode,
+          omitsUtf8Bom: newCode !== body,
+        });
       }
     } else {
-      newFragment.push({ diffLine: i, code });
+      newFragment.push({
+        diffLine: i,
+        code: newCode,
+        omitsUtf8Bom: newCode !== body,
+      });
     }
   }
 
@@ -1006,13 +1264,19 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
   // new-side language projects its own structure into the hunk's coordinates.
   const children: StructureNode[] = [];
   let source:
-    | { doc: Document; lineToDiff: Map<number, number>; lineStarts: number[] }
+    | {
+      doc: Document;
+      lineToDiff: Map<number, number>;
+      lineStarts: number[];
+      omitsUtf8Bom: boolean;
+    }
     | null = null;
   if (ctx.fileDoc && newToDiff.size > 0) {
     source = {
       doc: ctx.fileDoc,
       lineToDiff: newToDiff,
       lineStarts: ctx.fileLineStarts,
+      omitsUtf8Bom: ctx.newFileHasUtf8Bom === true,
     };
   } else if (newParsed && newFragment.length > 0) {
     // Fragment line i is the i-th ctx/add line of the hunk, in order.
@@ -1020,12 +1284,14 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
       doc: newParsed,
       lineToDiff: new Map(newFragment.map((f, i) => [i, f.diffLine])),
       lineStarts: computeLineStarts(newFragment.map((f) => f.code).join("\n")),
+      omitsUtf8Bom: newFragment.some((fragment) => fragment.omitsUtf8Bom),
     };
   }
   if (source) {
     children.push(...ctx.newLanguage.hunkStructure({
       doc: source.doc,
       lineToDiff: source.lineToDiff,
+      sourceOmitsUtf8Bom: source.omitsUtf8Bom,
       sourceLineStarts: source.lineStarts,
       hunkEnd: hunk.endLine,
       diffLineStarts,
@@ -1177,12 +1443,19 @@ function shiftCompleteLineSpans(
 ): Span[] | null {
   const code = lineText.slice(1);
   const sourceText = spans.map((span) => span.text).join("");
-  if (code !== sourceText && code !== `${sourceText}\r`) return null;
-  const shifted = shiftSpans(markerSpan(lineText), spans);
-  if (code.length > sourceText.length) {
+  const restoresUtf8Bom = code.startsWith("\uFEFF") &&
+    (code.slice(1) === sourceText || code.slice(1) === `${sourceText}\r`);
+  const completeSourceText = restoresUtf8Bom
+    ? `\uFEFF${sourceText}`
+    : sourceText;
+  if (code !== completeSourceText && code !== `${completeSourceText}\r`) {
+    return null;
+  }
+  const shifted = shiftFragmentSpans(lineText, spans, restoresUtf8Bom);
+  if (code.length > completeSourceText.length) {
     shifted.push({
-      col: cpLen(sourceText) + 1,
-      text: code.slice(sourceText.length),
+      col: cpLen(completeSourceText) + 1,
+      text: code.slice(completeSourceText.length),
       cls: "whitespace",
     });
   }
@@ -1207,28 +1480,47 @@ function applyFragmentSpans(
   if (fragment.length === 0) return null;
   const text = fragment.map((f) => f.code).join("\n");
   const parsed = language.parseDocument(text, fileName);
+  const sourceLines = language.renderLineTopology === "independent"
+    ? language.highlightLines(text, fileName)
+    : parsed.lines;
   const rendered = viewMode === "rendered" &&
-    !!language.renderLines &&
+    canRenderDiffLines(language) &&
     (!language.renderNeedsCompleteFile || completeFileContext);
   const displayed = rendered
-    ? renderedLinesFor(language, text, fileName) ?? parsed.lines
-    : parsed.lines;
+    ? renderedLinesFor(language, text, fileName) ?? sourceLines
+    : sourceLines;
   for (let i = 0; i < fragment.length; i++) {
     if (fragment[i].render === false) continue;
     const { diffLine } = fragment[i];
+    const decodedBom = fragment[i].omitsUtf8Bom === true ? "\uFEFF" : "";
     const lineText = rendered
-      ? `${rawLines[diffLine].slice(0, 1)}${displayed[i]?.text ?? ""}`
+      ? `${rawLines[diffLine].slice(0, 1)}${decodedBom}${
+        displayed[i]?.text ?? ""
+      }`
       : rawLines[diffLine];
     lines[diffLine].text = lineText;
     if (rendered && displayed[i]?.renderedSourceHidden) {
       lines[diffLine].renderedSourceHidden = true;
     }
-    lines[diffLine].spans = shiftSpans(
-      markerSpan(lineText),
+    lines[diffLine].spans = shiftFragmentSpans(
+      lineText,
       displayed[i]?.spans ?? [],
+      fragment[i].omitsUtf8Bom === true,
     );
   }
   return parsed;
+}
+
+function shiftFragmentSpans(
+  lineText: string,
+  spans: readonly Span[],
+  omitsUtf8Bom: boolean,
+): Span[] {
+  if (!omitsUtf8Bom) return shiftSpans(markerSpan(lineText), spans);
+  return shiftSpans(markerSpan(lineText), [
+    { col: 0, text: "\uFEFF", cls: "whitespace" },
+    ...spans.map((span) => ({ ...span, col: span.col + 1 })),
+  ]);
 }
 
 // --- offset maps for semantics ----------------------------------------------
@@ -1253,9 +1545,13 @@ function buildMaps(
       if (!hit) return null;
       const col = diffOffset - diffLineStarts[d];
       if (col < 1) return null; // the marker column belongs to the diff
+      const bomWidth = hit.newLine === 0 && rawLines[d]?.[1] === "\uFEFF"
+        ? 1
+        : 0;
       return {
         path: hit.m.absPath,
-        offset: hit.m.fileLineStarts[hit.newLine] + (col - 1),
+        offset: hit.m.fileLineStarts[hit.newLine] +
+          Math.max(0, col - 1 - bomWidth),
       };
     },
     fromFile(path, fileOffset) {
@@ -1267,7 +1563,10 @@ function buildMaps(
       const col = fileOffset - m.fileLineStarts[n];
       // A trimmed empty context line has no marker character at all.
       const marker = (rawLines[diffLine] ?? "").length === 0 ? 0 : 1;
-      return diffLineStarts[diffLine] + marker + col;
+      const bomWidth = n === 0 && rawLines[diffLine]?.[marker] === "\uFEFF"
+        ? 1
+        : 0;
+      return diffLineStarts[diffLine] + marker + bomWidth + col;
     },
   };
 }

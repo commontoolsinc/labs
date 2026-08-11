@@ -441,13 +441,22 @@ export class Page extends EventTarget {
   //
   // For a caller that has already worked out where to click — a wait that
   // measured its target at the instant the target was ready, say — this is the
-  // dispatch on its own, with no measurement of its own to go stale.
+  // dispatch on its own. A caller whose target can move may provide a function
+  // that refreshes the point after the interaction observer has finished.
   // The interaction observer sees this dispatch as it sees an element's, with
   // no element to name, so a presentation recording still moves and pulses its
   // cursor over a click aimed by coordinates.
-  async clickPoint(point: { x: number; y: number }): Promise<void> {
+  async clickPoint(
+    point: { x: number; y: number },
+    options?: { refreshPoint?: () => Promise<{ x: number; y: number }> },
+  ): Promise<void> {
     this.checkIsOk();
-    await this.dispatchObservedClick(undefined, point);
+    await this.dispatchObservedClick(
+      undefined,
+      point,
+      undefined,
+      options?.refreshPoint,
+    );
   }
 
   // Passthru of `@astral/astral`'s `Page#close`
@@ -556,22 +565,34 @@ export class Page extends EventTarget {
   }
 
   // Dispatch one trusted click at `point`, with the interaction observer told
-  // before and after. The observer's failure is reported only when the click
-  // itself succeeded, so a recording problem never masks a click problem.
+  // before and after. The point can be refreshed after the observer has
+  // finished. The observer's failure is reported only when the click itself
+  // succeeded, so a recording problem never masks a click problem.
   private async dispatchObservedClick(
     element: ElementHandle | undefined,
     point: { x: number; y: number },
     options?: Parameters<AstralElementHandle["click"]>[0],
+    refreshPoint?: () => Promise<{ x: number; y: number }>,
   ): Promise<void> {
     await this.interactionObserver?.beforeClick?.(element, point);
+    let dispatchPoint = point;
     let actionError: unknown;
     try {
-      await this.page!.mouse.click(point.x, point.y, options);
+      dispatchPoint = await refreshPoint?.() ?? point;
+      await this.page!.mouse.click(
+        dispatchPoint.x,
+        dispatchPoint.y,
+        options,
+      );
     } catch (error) {
       actionError = error;
     }
     try {
-      await this.interactionObserver?.afterClick?.(element, point, actionError);
+      await this.interactionObserver?.afterClick?.(
+        element,
+        dispatchPoint,
+        actionError,
+      );
     } catch (observerError) {
       if (actionError === undefined) throw observerError;
     }

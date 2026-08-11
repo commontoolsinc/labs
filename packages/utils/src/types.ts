@@ -59,7 +59,9 @@ export function isRecord(
   return typeof value === "object" && value !== null;
 }
 
-/** A record whose string keys can be read but not assigned through this type. */
+/**
+ * A record whose string keys can be read but not assigned through this type.
+ */
 export type ReadonlyRecord = Readonly<Record<string, unknown>>;
 
 /**
@@ -83,7 +85,7 @@ export function isFunction(
 }
 
 /**
- * Check whether the value is a non-`null`, non-plain, non-array `object`.
+ * Indicates whether the value is a non-`null`, non-plain, non-array `object`.
  * @param value - The value to check
  * @returns True if the value is an instance
  */
@@ -96,7 +98,7 @@ export function isInstance(value: unknown): boolean {
 }
 
 /**
- * Check whether a value is a non-array/non-null `object` type.
+ * Indicates whether a value is a non-array, non-`null` `object` type.
  * @param value - The value to check
  * @returns True if the value is an object (not array or null)
  */
@@ -127,7 +129,7 @@ export function isNumber(value: unknown): value is number {
 }
 
 /**
- * Check whether a value is a finite number type
+ * Indicates whether a value is a finite number.
  * @param value - The value to check
  * @returns True if the value is a finite number
  */
@@ -136,7 +138,7 @@ export function isFiniteNumber(value: unknown): boolean {
 }
 
 /**
- * Check whether a value is a plain object: prototype `Object.prototype` or
+ * Indicates whether a value is a plain object: prototype `Object.prototype` or
  * `null`, with no constraint on its properties.
  *
  * This is the shape question -- "may I read this by property name?" -- and is
@@ -178,7 +180,7 @@ export function isPlainObject(
 }
 
 /**
- * Check whether a value is a plain container -- a plain object (per
+ * Indicates whether a value is a plain container -- a plain object (per
  * `isPlainObject`) or an `Array`. Useful when the relevant question is
  * "can I do property-name / array-index member access on this?", since
  * plain objects and arrays are the two value shapes that support that
@@ -221,16 +223,12 @@ export function isBoolean(value: unknown): value is boolean {
   return typeof value === "boolean";
 }
 
-/**
- * Helper type to recursively remove `readonly` properties from type `T`.
- */
+/** Helper type to recursively remove `readonly` properties from type `T`. */
 export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
   : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
   : T;
 
-/**
- * Helper type to recursively add `readonly` properties to type `T`.
- */
+/** Helper type to recursively add `readonly` properties to type `T`. */
 export type Immutable<T> = T extends ReadonlyArray<infer U>
   ? ReadonlyArray<Immutable<U>>
   : T extends object ? ({ readonly [P in keyof T]: Immutable<T[P]> })
@@ -243,8 +241,9 @@ const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor"]);
 
 /**
  * Indicates whether `key` must never be copied onto an object from untrusted
- * input, because assigning it can pollute the prototype chain. Use at boundaries
- * where external data enters the system (deserialization, structural copying).
+ * input, because assigning it can pollute the prototype chain. Use at
+ * boundaries where external data enters the system (deserialization,
+ * structural copying).
  */
 export function isUnsafeObjectKey(key: string): boolean {
   return UNSAFE_OBJECT_KEYS.has(key);

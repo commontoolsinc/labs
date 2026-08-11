@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   isInstance,
   isRecord,
@@ -32,7 +33,7 @@ import { isDeepFrozenFabricValue } from "./deep-freeze.ts";
 function rejectExtraProperties(value: object, typeName: string): void {
   if (Object.keys(value).length > 0) {
     throw new Error(
-      `Not representable as a \`FabricValue\`: ${typeName} with extra ` +
+      `Not representable as a \`FabricValue\`: \`${typeName}\` with extra ` +
         "enumerable properties",
     );
   }
@@ -245,7 +246,8 @@ export function shallowFabricFromNativeValue(
 
     case NATIVE_TAGS.Uint8Array: {
       // Native `Uint8Array` instances are wrapped in `FabricBytes`.
-      // `FabricBytes` self-freezes in its constructor (`FabricPrimitive` contract).
+      // `FabricBytes` self-freezes in its constructor (`FabricPrimitive`
+      // contract).
       return new FabricBytes(value as Uint8Array);
     }
 
@@ -353,7 +355,7 @@ export function shallowFabricFromNativeValue(
           return value;
         default:
           throw new Error(
-            `Shouldn't happen: Unrecognized type ${typeof value}`,
+            `Shouldn't happen: Unrecognized type \`${typeof value}\``,
           );
       }
     }
@@ -363,7 +365,7 @@ export function shallowFabricFromNativeValue(
       // not valid `FabricValue`. Death before confusion!
       throw new Error(
         `Not representable as a \`FabricValue\`: ${
-          (value as object).constructor?.name ?? typeof value
+          backtickQuote((value as object).constructor?.name ?? typeof value)
         } (not a recognized fabric type)`,
       );
   }
@@ -614,7 +616,8 @@ function isFabricCompatibleInternal(
       // `FabricSpecialObject` -- already a valid `FabricValue`.
       if (value instanceof FabricSpecialObject) return true;
 
-      // `FabricNativeObject` types would be wrapped by `fabricFromNativeValue()`.
+      // `FabricNativeObject` types would be wrapped by
+      // `fabricFromNativeValue()`.
       if (isConvertibleNativeInstance(value)) {
         return true;
       }

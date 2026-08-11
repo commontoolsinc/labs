@@ -39,8 +39,12 @@ type TransactResponse = {
   ok?: unknown;
   error?: { name: string; message: string; precondition?: string };
 };
+type PublishTransactVerdict = (response: TransactResponse) => void;
 type TestMemoryServer = {
-  transact(message: TransactMessage): Promise<TransactResponse>;
+  transact(
+    message: TransactMessage,
+    publishVerdict?: PublishTransactVerdict,
+  ): Promise<TransactResponse>;
 };
 
 function emulatedServer(
@@ -62,10 +66,10 @@ function holdServerTransacts(
   const original = server.transact.bind(server);
   let held = 0;
   const gates: (() => void)[] = [];
-  server.transact = async (message) => {
+  server.transact = async (message, publishVerdict) => {
     held++;
     await new Promise<void>((resolve) => gates.push(resolve));
-    return original(message);
+    return original(message, publishVerdict);
   };
   return {
     held: () => held,
@@ -90,16 +94,18 @@ function rejectServerTransacts(
   const server = emulatedServer(storageManager);
   const original = server.transact.bind(server);
   let rejected = 0;
-  server.transact = (message) => {
+  server.transact = (message, publishVerdict) => {
     if (rejected < count) {
       rejected++;
-      return Promise.resolve({
+      const response: TransactResponse = {
         type: "response",
         requestId: message.requestId,
         error,
-      });
+      };
+      publishVerdict?.(response);
+      return Promise.resolve(response);
     }
-    return original(message);
+    return original(message, publishVerdict);
   };
   return {
     rejected: () => rejected,

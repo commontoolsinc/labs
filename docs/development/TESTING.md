@@ -15,6 +15,42 @@ deno task test
 
 **Important:** Always use `deno task test` from the root, NOT `deno test`, as the task includes necessary flags.
 
+### Browser tests in agent sandboxes
+
+On macOS, an agent must request unsandboxed execution before its first attempt
+to run a command that can launch a browser. Headless Chrome still registers
+with AppKit and needs access to Launch Services and WindowServer. The macOS
+agent sandbox can deny that access and make Chrome abort during startup.
+
+The following repository commands and test paths launch a browser:
+
+- The root `deno task test` command, which reaches browser-backed workspace
+  package tests.
+- The unfiltered root `deno task integration` command. With no target, it
+  includes browser tests from `shell` and `patterns`. Unfiltered target runs
+  for `shell`, `patterns`, and `patterns-reload` also include browser tests.
+- A filtered integration run when the selected test launches a browser. A
+  package name associated with browser tests does not by itself establish that
+  a filtered test launches one.
+- The `deno task demo` command.
+- Tests that run `deno-web-test`, call `Browser.launch()`, or bind a
+  `ShellIntegration` lifecycle.
+
+An `@astral/astral` import alone is not proof that a test launches Chrome. It
+can be a type-only import or support a fake browser. When it is not clear
+whether a focused test starts a browser, inspect its suite setup and launch
+call path before running it.
+
+Use the agent environment's narrowly scoped escalation mechanism for the test
+command. Do not run the command in the sandbox first to see whether it fails.
+Deno's `-A` flag changes Deno's permission checks but does not escape the outer
+agent sandbox. Chrome's `--no-sandbox` flag disables a different protection;
+do not add it as a workaround.
+
+If a browser command was accidentally run inside the agent sandbox, disregard
+its browser-startup failure and rerun it outside the sandbox before
+interpreting the test result.
+
 ### Tests that start Deno
 
 For deliberate import-map and lockfile changes, follow the

@@ -38,6 +38,7 @@ import type {
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { defer } from "@commonfabric/utils/defer";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import { resolveLink } from "../src/link-resolution.ts";
 import {
   computeBackoffDelayMs,
@@ -51,8 +52,12 @@ type TransactResponse = {
   ok?: unknown;
   error?: { name: string; message: string; precondition?: string };
 };
+type PublishTransactVerdict = (response: TransactResponse) => void;
 type TestMemoryServer = {
-  transact(message: TransactMessage): Promise<TransactResponse>;
+  transact(
+    message: TransactMessage,
+    publishVerdict?: PublishTransactVerdict,
+  ): Promise<TransactResponse>;
 };
 
 function emulatedServer(
@@ -74,16 +79,18 @@ function rejectServerTransacts(
   const server = emulatedServer(storageManager);
   const original = server.transact.bind(server);
   let rejected = 0;
-  server.transact = (message) => {
+  server.transact = (message, publishVerdict) => {
     if (rejected < count) {
       rejected++;
-      return Promise.resolve({
+      const response: TransactResponse = {
         type: "response",
         requestId: message.requestId,
         error,
-      });
+      };
+      publishVerdict?.(response);
+      return Promise.resolve(response);
     }
-    return original(message);
+    return original(message, publishVerdict);
   };
   return {
     rejected: () => rejected,
@@ -115,6 +122,10 @@ function collectEventCommitMarkers(runtime: Runtime): {
     firstMarker: firstMarker.promise,
     dispose: () => runtime.telemetry.removeEventListener("telemetry", listener),
   };
+}
+
+function schedulerWarningCount(): number {
+  return getLoggerCountsBreakdown().scheduler?.scheduler?.warn ?? 0;
 }
 
 async function waitFor(
@@ -316,6 +327,52 @@ describe("committed-write backpressure", () => {
         // The write converged, so no terminal error.
         expect(terminalErrors).toHaveLength(0);
       } finally {
+        injector.restore();
+      }
+    },
+  );
+
+  it(
+    "does not warn when a transient conflict converges on retry",
+    async () => {
+      const piece = buildCounterPiece(runtime, tx, "backpressure-warning-root");
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+
+      const warningBaseline = schedulerWarningCount();
+      const injector = rejectServerTransacts(storageManager, 1, {
+        name: "ConflictError",
+        message: "forced transient conflict",
+      });
+      const converged = defer<void>();
+      const listener = (event: Event) => {
+        const marker = (event as CustomEvent<{
+          marker: RuntimeTelemetryMarker;
+        }>).detail.marker;
+        if (
+          marker.type === "scheduler.event.commit" &&
+          marker.error === undefined
+        ) {
+          converged.resolve();
+        }
+      };
+      runtime.telemetry.addEventListener("telemetry", listener);
+
+      try {
+        piece.queueAdd(
+          3,
+          "evt:backpressure-warning:0:backpressure-warning-root",
+        );
+
+        await converged.promise;
+        await runtime.idle();
+
+        expect(piece.total()).toBe(3);
+        expect(injector.rejected()).toBe(1);
+        expect(schedulerWarningCount() - warningBaseline).toBe(0);
+      } finally {
+        runtime.telemetry.removeEventListener("telemetry", listener);
         injector.restore();
       }
     },

@@ -8,7 +8,7 @@ import env from "@/env.ts";
 import { Identity } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { JsonCodec } from "@commonfabric/data-model/codec-json";
+import { newDefaultJsonCodec } from "@commonfabric/data-model/codecs";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import type { URI } from "@commonfabric/memory/interface";
 import { Runtime } from "@commonfabric/runner";
@@ -25,7 +25,7 @@ const app = createApp()
 const encodeBlobPayload = (payload: { type: string; body: FabricBytes }) =>
   encodeMemoryBoundary(payload);
 
-const blobUploadCodec = new JsonCodec();
+const blobUploadCodec = newDefaultJsonCodec();
 
 describe("Blob Routes", () => {
   let server: Deno.HttpServer;
@@ -92,7 +92,7 @@ describe("Blob Routes", () => {
     expect(new Uint8Array(await get.arrayBuffer())).toEqual(bytes);
   });
 
-  it("accepts blob upload encoding from an explicit codec, without ambient data-model flags", async () => {
+  it("accepts blob upload encoding from an explicit codec", async () => {
     const identity = await Identity.fromPassphrase(
       "toolshed-blob-route-explicit-codec",
     );
