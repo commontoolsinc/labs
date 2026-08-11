@@ -14,10 +14,10 @@ import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
 import {
-  CODEC,
   type FabricCodec,
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
+import { JSON_CODEC } from "@/interface.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 
@@ -182,7 +182,7 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): FabricCodec {
+  static get [JSON_CODEC](): FabricCodec {
     return this.#codec;
   }
 }

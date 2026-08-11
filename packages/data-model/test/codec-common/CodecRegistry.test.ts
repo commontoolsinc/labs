@@ -6,11 +6,7 @@ import type { Constructor } from "@commonfabric/utils/types";
 import { toCompactDebugString } from "@/value-debug.ts";
 import { CodecRegistry, SELF_REP } from "@/codec-common/CodecRegistry.ts";
 import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
-import {
-  CODEC,
-  type FabricClassWithCodec,
-  type ReconstructionContext,
-} from "@/codec-common/interface.ts";
+import type { ReconstructionContext } from "@/codec-common/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { type FabricValue } from "@/interface.ts";
@@ -174,24 +170,13 @@ describe("CodecRegistry", () => {
   });
 
   describe("`extend()`", () => {
-    // A class whose static `[CODEC]` is a `TestCodec`, which is what
-    // `extend()` accepts.
-    function classWithCodec(tag: string): FabricClassWithCodec {
-      const codec = new TestCodec(tag, undefined);
-      return {
-        get [CODEC]() {
-          return codec;
-        },
-      };
-    }
-
     it("returns a different instance", () => {
       const base = new CodecRegistry();
-      expect(base.extend([])).not.toBe(base);
+      expect(base.extend()).not.toBe(base);
     });
 
     it("returns a frozen instance", () => {
-      expect(Object.isFrozen(new CodecRegistry().extend([]))).toBe(true);
+      expect(Object.isFrozen(new CodecRegistry().extend())).toBe(true);
     });
 
     it("carries over every kind of registration the base holds", () => {
@@ -202,23 +187,36 @@ describe("CodecRegistry", () => {
       base.registerPrimitive("bigint", primitive);
       base.registerSelfRep("string");
 
-      const extended = base.extend([]);
+      const extended = base.extend();
 
       expect(extended.codecFromTag("carried@1")).toBe(codec);
       expect(extended.codecFromTag("prim@1")).toBe(primitive);
       expect(extended.codecFromValue("florp")).toBe(SELF_REP);
     });
 
-    it("registers the given classes' codecs", () => {
-      const added = classWithCodec("added@1");
-      const extended = new CodecRegistry().extend([added]);
+    it("registers a codec given on its own", () => {
+      const added = new TestCodec("added@1", undefined);
+      const extended = new CodecRegistry().extend(added);
 
-      expect(extended.codecFromTag("added@1")).toBe(added[CODEC]);
+      expect(extended.codecFromTag("added@1")).toBe(added);
+    });
+
+    it("registers codecs given individually and in lists, in any mix", () => {
+      const loose = new TestCodec("loose@1", undefined);
+      const listed = new TestCodec("listed@1", undefined);
+      const alsoListed = new TestCodec("alsoListed@1", undefined);
+
+      const extended = new CodecRegistry()
+        .extend(loose, [listed, alsoListed]);
+
+      expect(extended.codecFromTag("loose@1")).toBe(loose);
+      expect(extended.codecFromTag("listed@1")).toBe(listed);
+      expect(extended.codecFromTag("alsoListed@1")).toBe(alsoListed);
     });
 
     it("leaves the base without the added registrations", () => {
       const base = new CodecRegistry();
-      base.extend([classWithCodec("added@1")]);
+      base.extend(new TestCodec("added@1", undefined));
 
       expect(base.codecFromTag("added@1")).toBe(undefined);
     });

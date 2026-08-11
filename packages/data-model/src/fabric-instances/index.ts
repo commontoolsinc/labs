@@ -1,4 +1,8 @@
-import type { FabricClassWithCodec } from "@/codec-common/interface.ts";
+import {
+  CODEC,
+  type FabricClassWithCodec,
+  type FabricCodec,
+} from "@/codec-common/interface.ts";
 import { FabricError } from "./FabricError.ts";
 import { FabricLink } from "./FabricLink.ts";
 import { FabricMap } from "./FabricMap.ts";
@@ -33,6 +37,17 @@ export function codecClasses(): readonly FabricClassWithCodec[] {
   return CODEC_CLASSES;
 }
 
+/**
+ * The codecs of {@link codecClasses}, in the same order. This is what a
+ * registry wants: reading `[CODEC]` is the business of the module that knows
+ * these classes bind it, not of every caller assembling a registry.
+ *
+ * Returned frozen so callers cannot mutate the shared list.
+ */
+export function codecs(): readonly FabricCodec[] {
+  return CODECS;
+}
+
 const CODEC_CLASSES: readonly FabricClassWithCodec[] = Object.freeze([
   FabricError,
   FabricLink,
@@ -41,3 +56,7 @@ const CODEC_CLASSES: readonly FabricClassWithCodec[] = Object.freeze([
   ProblematicValue,
   UnknownValue,
 ]);
+
+const CODECS: readonly FabricCodec[] = Object.freeze(
+  CODEC_CLASSES.map((cls) => cls[CODEC]),
+);

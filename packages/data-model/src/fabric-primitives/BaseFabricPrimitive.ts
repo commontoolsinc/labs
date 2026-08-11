@@ -1,4 +1,5 @@
-import { FabricPrimitive } from "@/interface.ts";
+import type { FabricCodec } from "@/codec-common/interface.ts";
+import { FabricPrimitive, JSON_CODEC } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 
 /**
@@ -17,6 +18,15 @@ import { toCompactDebugString } from "@/value-debug.ts";
 export const EXAMPLE_METHOD: unique symbol = Symbol(
   "data-model.exampleMethod",
 );
+
+/**
+ * Interface for `FabricPrimitive` classes that provide a codec for the JSON
+ * wire format, guaranteed to operate on instances of the class.
+ */
+export interface FabricClassWithJsonCodec {
+  /** The JSON codec to use for instances of this class. */
+  get [JSON_CODEC](): FabricCodec;
+}
 
 /**
  * Abstract base class for `FabricPrimitive` subclasses. Concrete

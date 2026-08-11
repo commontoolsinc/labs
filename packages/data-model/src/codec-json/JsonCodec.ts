@@ -5,6 +5,7 @@ import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 import { FabricSpecialObject, type FabricValue } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
 import {
+  CODEC,
   type ReconstructionContext,
   type SerializationContext,
 } from "@/codec-common/interface.ts";
@@ -462,7 +463,7 @@ export class JsonCodec implements SerializationContext<string> {
    * according to a roster its caller never chose.
    */
   static readonly #testingRegistry: CodecRegistry = createBaseJsonRegistry()
-    .extend([UnknownValue, ProblematicValue]);
+    .extend(UnknownValue[CODEC], ProblematicValue[CODEC]);
 
   /**
    * Reconstruction context for the throwaway checks in the testing helpers

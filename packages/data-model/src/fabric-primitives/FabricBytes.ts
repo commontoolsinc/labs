@@ -10,10 +10,10 @@ import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import {
-  CODEC,
   FabricCodec,
   ReconstructionContext,
 } from "@/codec-common/interface.ts";
+import { JSON_CODEC } from "@/interface.ts";
 
 /**
  * Immutable byte sequence in the fabric type system.
@@ -140,7 +140,7 @@ export class FabricBytes extends BaseFabricPrimitive {
   );
 
   /** The codec for instances of this class. */
-  static get [CODEC](): FabricCodec {
+  static get [JSON_CODEC](): FabricCodec {
     return this.#codec;
   }
 }

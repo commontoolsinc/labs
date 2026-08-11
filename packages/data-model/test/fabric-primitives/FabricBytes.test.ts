@@ -1,9 +1,9 @@
+import { JSON_CODEC } from "@/interface.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { CODEC } from "@/codec-common/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { EMPTY_RECONSTRUCTION_CONTEXT } from "@/codec-common/EmptyReconstructionContext.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
@@ -121,8 +121,8 @@ describe("FabricBytes", () => {
   });
 
   describe("static members", () => {
-    describe("[CODEC]", () => {
-      const codec = FabricBytes[CODEC];
+    describe("`[JSON_CODEC]`", () => {
+      const codec = FabricBytes[JSON_CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Bytes;
       const context = EMPTY_RECONSTRUCTION_CONTEXT;
 

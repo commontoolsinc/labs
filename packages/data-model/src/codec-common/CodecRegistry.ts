@@ -1,9 +1,5 @@
 import type { FabricValue } from "@/interface.ts";
-import {
-  CODEC,
-  type FabricClassWithCodec,
-  type FabricCodec,
-} from "./interface.ts";
+import type { FabricCodec } from "./interface.ts";
 import type { Constructor } from "@commonfabric/utils/types";
 
 /**
@@ -129,18 +125,31 @@ export class CodecRegistry {
   }
 
   /**
-   * Creates a frozen copy of this instance with the given classes' codecs
-   * additionally registered. This instance is left untouched, so a shared
-   * registry can be built on without being altered, and the result is frozen
-   * so that it in turn can be shared.
+   * Creates a frozen copy of this instance with the given codecs additionally
+   * registered. This instance is left untouched, so a shared registry can be
+   * built on without being altered, and the result is frozen so that it in
+   * turn can be shared.
    *
-   * This is the intended way to add classes to a registry someone else
-   * assembled: extending what a factory returns is what keeps a caller from
-   * omitting, by accident, everything that factory put there.
+   * This is the intended way to add to a registry someone else assembled:
+   * extending what a factory returns is what keeps a caller from omitting, by
+   * accident, everything that factory put there.
    *
-   * @param classes Classes whose static `[CODEC]` is to be registered.
+   * It takes codecs rather than the classes carrying them, because which
+   * symbol a class binds its codec to is the caller's business: a
+   * `FabricPrimitive` binds one per wire format, a `FabricInstance` binds one
+   * for all of them. A caller therefore reads the symbol it means and passes
+   * the result, which is what lets this module stay format-agnostic.
+   *
+   * Arguments are taken as `Array.concat()` takes them -- any number, each
+   * either a codec or a list of them -- so that a caller combining rosters
+   * need not splice them into one array first.
+   *
+   * @param codecs The codecs to register in addition, individually or in
+   *   lists.
    */
-  extend(classes: readonly FabricClassWithCodec[]): CodecRegistry {
+  extend(
+    ...codecs: readonly (FabricCodec | readonly FabricCodec[])[]
+  ): CodecRegistry {
     const result = new CodecRegistry();
 
     for (const [key, value] of this.#tagMap) result.#tagMap.set(key, value);
@@ -150,8 +159,14 @@ export class CodecRegistry {
     }
     for (const type of this.#selfRepTypes) result.#selfRepTypes.add(type);
 
-    for (const cls of classes) {
-      result.register(cls[CODEC]);
+    for (const arg of codecs) {
+      if (Array.isArray(arg)) {
+        for (const codec of arg) {
+          result.register(codec);
+        }
+      } else {
+        result.register(arg as FabricCodec);
+      }
     }
 
     // Frozen as a statement rather than by returning `Object.freeze()`'s
