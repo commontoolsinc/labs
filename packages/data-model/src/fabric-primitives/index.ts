@@ -8,6 +8,7 @@ import { FabricEpochDays } from "./FabricEpochDays.ts";
 import { FabricEpochNsec } from "./FabricEpochNsec.ts";
 import { FabricHash } from "./FabricHash.ts";
 import { FabricRegExp } from "./FabricRegExp.ts";
+import { backtickQuote } from "@/value-debug.ts";
 
 export { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 export { FabricBytes } from "./FabricBytes.ts";
