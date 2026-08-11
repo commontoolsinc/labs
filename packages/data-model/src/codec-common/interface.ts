@@ -116,9 +116,9 @@ export type NonterminalCodec = FabricCodec<FabricValue>;
  * string, where a format that carries bytes natively wants the bytes
  * themselves, and no one codec can answer both.
  *
- * This is an alias rather than a distinct interface because the difference is
- * not in the shape of a codec but in what its state means to the walker. A
- * class declares which it is by the base class it extends; see
+ * The difference between the two kinds is not in the shape of a codec -- both
+ * have the same members -- but in what its state means to the walker. A class
+ * declares which it is by the base class it extends; see
  * {@link MatchedCodec}.
  */
 export type TerminalCodec<Encoded> = FabricCodec<Encoded>;

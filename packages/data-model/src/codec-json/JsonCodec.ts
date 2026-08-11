@@ -443,8 +443,9 @@ export class JsonCodec implements SerializationContext<string> {
    * the lenient-mode fallback alike.
    *
    * Lenience: when `lenient` is set, a throw becomes a `ProblematicValue` over
-   * `state` -- which is the state the codec was actually handed, so the report
-   * says what the codec choked on.
+   * `state`. Nothing here ties `state` to what `decode` goes on to hand the
+   * codec, the two being separate arguments; each call site passes the same
+   * value for both, so that the report says what the codec choked on.
    */
   #decodeChecked(
     tag: string,

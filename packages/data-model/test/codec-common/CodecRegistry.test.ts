@@ -139,10 +139,10 @@ const UNCLASSIFIABLE_CODEC: FabricCodec<string> = {
 
 describe("CodecRegistry", () => {
   describe("codec-kind classification", () => {
-    // Which kind a codec is comes from the base class it extends, and this is
-    // the only place that is decided. Everything downstream -- which
+    // Which kind a codec is comes from the base class it extends, and the
+    // registry reads that once, here. Everything downstream -- which
     // `encode()` signature applies, whether a walker expands the state --
-    // follows from the key the registry puts a codec under here.
+    // follows from the key a codec is filed under.
 
     it("files a `BaseNonterminalCodec` subclass under `nonterminal`", () => {
       const codec = new TestCodec("nonterm@1", FabricRegExp);

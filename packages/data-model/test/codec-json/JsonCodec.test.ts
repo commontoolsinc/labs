@@ -1299,10 +1299,9 @@ describe("JsonCodec", () => {
     });
 
     it("wraps a throw from a terminal codec, over the wire-form state", () => {
-      // The two lenient cases around this one drive codecs that never reach
-      // the lenient catch at all (`BigInt@1` reports by returning) or that
-      // reach it from the nonterminal arm (`Map@1`). `Undefined@1` is
-      // terminal and throws, which is the remaining combination.
+      // `Undefined@1` is terminal and throws outright, so it reaches the
+      // lenient catch from the terminal arm. A codec that reports a bad state
+      // by returning a `ProblematicValue` never reaches that catch at all.
       //
       // What the state assertion pins is what the *report* carries, which is
       // the wire form. That the *codec* is handed the wire form is a separate
