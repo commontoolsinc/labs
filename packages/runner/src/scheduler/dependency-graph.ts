@@ -81,6 +81,54 @@ export function resetLivenessWork(): void {
 }
 
 /**
+ * Every-mutation equivalence verifier, disabled unless
+ * `SCHEDULER_LIVENESS_EQUIVALENCE=1`. With it on, every exit from the four
+ * liveness mutators asserts the incrementally maintained refcounts equal a
+ * full rebuild from the demand roots ({@link recomputeLiveRefs}), which is
+ * the definition they implement. The rebuild overwrites in place, so state
+ * is canonical after the check either way; drift throws with the mutation
+ * site and the drifted nodes. Run it across the whole runner suite after
+ * changes that touch liveness maintenance, registration ordering, or edge
+ * derivation — the original pass over this suite is what caught
+ * `unregisterDependentEdge` dropping a decrement for root writers (see
+ * docs/history/development/performance/2026-08-scheduler-liveness-maintenance.md).
+ * Off by default: the check costs the full-graph walk the incremental path
+ * exists to avoid.
+ */
+const LIVENESS_EQUIVALENCE_CHECK: boolean = (() => {
+  try {
+    return typeof Deno !== "undefined" &&
+      Deno.env.get("SCHEDULER_LIVENESS_EQUIVALENCE") === "1";
+  } catch {
+    return false; // no env permission: stay disabled
+  }
+})();
+
+function assertLivenessEquivalence(
+  state: SchedulerLivenessState,
+  site: string,
+): void {
+  if (!LIVENESS_EQUIVALENCE_CHECK) return;
+  const records = [...state.nodes.nodes()];
+  const incremental = records.map((record) => record.liveRefs);
+  recomputeLiveRefs(state);
+  const drift: string[] = [];
+  records.forEach((record, i) => {
+    if (record.liveRefs !== incremental[i]) {
+      const name = (record.action as { name?: string }).name || "<anonymous>";
+      drift.push(
+        `${name}: incremental=${incremental[i]} rebuilt=${record.liveRefs}`,
+      );
+    }
+  });
+  if (drift.length > 0) {
+    throw new Error(
+      `liveness drift after ${site}: ${drift.join("; ")}`,
+    );
+  }
+}
+
+/**
  * Take account of a node whose root status or registration changed underneath
  * the graph — it became an effect, gained or lost materializer envelopes, or
  * (re-)registered.
@@ -91,6 +139,15 @@ export function resetLivenessWork(): void {
  * when the node still holds demand of its own, so the common case stays cheap.
  */
 export function notifyNodeLivenessChange(
+  state: SchedulerDemandState,
+  action: Action,
+  wasLive: boolean,
+): void {
+  notifyNodeLivenessChangeImpl(state, action, wasLive);
+  assertLivenessEquivalence(state, "notifyNodeLivenessChange");
+}
+
+function notifyNodeLivenessChangeImpl(
   state: SchedulerDemandState,
   action: Action,
   wasLive: boolean,
@@ -124,6 +181,16 @@ export function notifyNodeLivenessChange(
 }
 
 export function setNodeProvisionalDemand(
+  state: SchedulerDemandState,
+  node: SchedulerNode,
+  provisionalDemand: boolean,
+  passId?: number,
+): void {
+  setNodeProvisionalDemandImpl(state, node, provisionalDemand, passId);
+  assertLivenessEquivalence(state, "setNodeProvisionalDemand");
+}
+
+function setNodeProvisionalDemandImpl(
   state: SchedulerDemandState,
   node: SchedulerNode,
   provisionalDemand: boolean,
@@ -409,6 +476,16 @@ export function registerDependentEdge(
   writer: Action,
   dependent: Action,
 ): boolean {
+  const changed = registerDependentEdgeImpl(state, writer, dependent);
+  assertLivenessEquivalence(state, "registerDependentEdge");
+  return changed;
+}
+
+function registerDependentEdgeImpl(
+  state: DependencyGraphState,
+  writer: Action,
+  dependent: Action,
+): boolean {
   if (writer === dependent) return false;
   livenessWork.operations++;
 
@@ -464,6 +541,16 @@ export function registerDependentsForWriterSurface(
 }
 
 export function unregisterDependentEdge(
+  state: DependencyGraphState,
+  writer: Action,
+  dependent: Action,
+): boolean {
+  const changed = unregisterDependentEdgeImpl(state, writer, dependent);
+  assertLivenessEquivalence(state, "unregisterDependentEdge");
+  return changed;
+}
+
+function unregisterDependentEdgeImpl(
   state: DependencyGraphState,
   writer: Action,
   dependent: Action,
