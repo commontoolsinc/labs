@@ -2,11 +2,14 @@
 
 ## The short version
 
-`traverseAndCellify` in the LLM dialog builtin resolves `{"@link": "…"}` into a
-live cell before dispatching to a handler. **A model can hand a pattern a
-reference. The CLI, a webhook, and the ingest path reach the same handler and
-cannot** — they validate structurally, and the payload they *do* accept stores a
-detached copy instead of an edge, reporting success.
+**A pattern handler that declares a reference should accept one — a live
+read/write cell — from any external caller. Today only a model can pass one:**
+the LLM dialog builtin resolves `{"@link": "…"}` into a live cell before
+dispatch (`traverseAndCellify`). The CLI, a webhook, and the ingest path reach
+the same handler, and none of them resolves a reference — the CLI rejects the
+address, the webhook sends it through unresolved. **The shape-matching payload
+the CLI does accept stores a detached copy instead of an edge, and reports
+success.**
 
 **The ask:** move that resolution to the boundary every external caller crosses.
 
@@ -16,14 +19,15 @@ the address it was just handed, and the capability does not compose. Which
 spelling wins is the implementer's call.
 
 **Decide first:** whether accepting a caller-named address is a confinement
-question. If it is, this is the wrong-sized change and CFC owns it. If it is
-not, the work is medium and mostly relocating code that already runs in
-production.
+question — noting that the model, the least trusted caller in the system,
+already has this capability. If it is, this is the wrong-sized change and CFC
+owns it. If it is not, the work is medium and mostly relocating code that
+already runs in production.
 
 **True either way:** refusing the structural copy, instead of storing it, needs
 no encoding decision and no confinement ruling.
 
-The rest of this document is the evidence for those four paragraphs.
+The rest of this document is the evidence for the paragraphs above.
 
 ## The team already needed this and already built it
 
