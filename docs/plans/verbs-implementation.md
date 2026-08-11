@@ -266,19 +266,35 @@ Whichever merges second owes a golden regeneration. That is a note on the pair,
 not an edge in the table above.
 
 **Two PRs can each be green and still break main together.** CI judges a PR
-against a base, so a rename in one branch and a new caller of the old name in
-another are both green until they meet. #5469 and #5505 merged twenty-six
-seconds apart and #5582 reverted both. Nothing in the checks catches this; the
-only thing that does is a driver noticing that two open PRs touch one
+against a base, so when one branch narrows a type and another still writes to
+the old shape, both stay green until they meet. #5469 and #5505 merged
+twenty-six seconds apart and #5582 reverted both. Nothing in the checks catches
+it; the only thing that does is a driver noticing that two open PRs touch one
 vocabulary, and merging them far enough apart that the second rebases onto the
-first. The tell is a green PR whose base is older than a merge that renamed
-something it uses.
+first. The tell is a green PR whose base predates a merge that changed
+something it writes to — a rename is the obvious case, but any narrowing
+counts.
 
-The cost is worse than a red gate, because a stale field name is an *unknown
-key* rather than an error: the nine tests #5505 added did not merely fail to
-compile, they ran with no invocation at all and asserted on a receipt that
-could never arrive. Type-checking is what caught it, and the package suites
-run `--no-check`, so a green package suite says nothing about this class.
+The cost is worse than a red gate, because the stale field arrives as an
+*excess property*, silently dropped rather than rejected. The nine tests #5505
+added did not merely fail to compile: they dispatched with no invocation at all
+and awaited a receipt that could never arrive. Type-checking is the only gate
+that sees an excess property. A `--no-check` suite sees a value that is simply
+absent — and the package suites run `--no-check`, so `172 passed | 0 failed`
+reads identically either side of this bug and is not evidence about it.
+
+**A test that inspects stored shape is testing the harness, not the runtime.**
+A pattern result stores each field as a redirect link into the argument
+document, while a unit fixture writes the value inline. So a check reading
+`position.stored` succeeds against the fixture and never fires against a real
+server. Anything asserting on how a value is *stored*, rather than on what a
+read *returns*, wants a live-server case before it is believed.
+
+This is the same shape as the rejected-position defect split out as #5609: the
+`boardSchema` fixture declares no `required` while a generated pattern schema
+does, so every fixture in that file agreed with the bug and the suite could
+only confirm it. Twice now the fixture has been the thing that was wrong. When
+a test cannot fail, the fixture is the first place to look.
 
 **A squash merge invalidates the fork point of everything stacked on it.**
 Rebasing a child with `git rebase <new-base>` then replays commits the base
