@@ -50,17 +50,17 @@ without reconstructing it.
 | 2. an unrecognized projection key is refused | not started |
 | 3. a rejection propagates up through what holds it | not started |
 | 5. `cf wish` and `cf exec` take the read options | not started |
+| 11. a caller may name a reference | not started; sequenced, gated on one measurement |
 
 Item 9 is split because its two halves have different fates: the marks landed,
-the emission is parked. A further item 11 arrives with #5617, which is not yet
-on main.
+the emission is parked.
 
 These pull requests remain open against this work. They are listed here because
 a driver needs to know what is already moving before scheduling anything new.
 
 | PR | What | State |
 | --- | --- | --- |
-| #5629 | a verb listing row carries the handler's declared result | item 10, the consumer half of the declared result. Collides with #5623, which relocates a doc comment in the same region of `packages/cli/lib/piece.ts`; the collision is a real git conflict rather than a silent merge, and whichever lands second keeps both |
+| #5629 | a verb listing row carries the handler's declared result | item 10, the consumer half of the declared result |
 | #5307 | closed-world verb event schemas | parked on #5589; the minting is built, and what stays red is a renderer-semantics ruling rather than an implementation gap |
 
 **Most of the read layer has landed.** #5309, #5459, #5468, #5470, #5497 and
@@ -320,7 +320,7 @@ its own track.
 
 | # | Step | Delivers | After | Why here |
 | --- | --- | --- | --- | --- |
-| 1 | The doubly-linked tracker fixture and its walkthrough | #5639 with #5631; repro for #5577, #5632, #5633, #5637; item 11's subject | — | Five things verify against a piece that holds a back-reference, and none of them can be demonstrated until one exists. The two land together or the doc first: the walkthrough names the verbs, so a fixture arriving alone leaves main describing verbs it does not have |
+| 1 | The doubly-linked tracker fixture and its walkthrough | **on main** (#5639, #5631) — repro for #5577, #5632, #5633, #5637; item 11's subject | — | Five things verify against a piece that holds a back-reference, and none could be demonstrated until one existed. `verb-session-gaps.sh` is where they are asserted, and four of its assertions expect a gap and fail loudly the day it closes — so a capability arriving announces itself instead of quietly turning a check green |
 | 2 | A projected read survives a handler | #5633 | 1 | Breaks call-then-read-shaped, which is the loop items 4, 5, 10 and #5577 all demonstrate against. Diagnose before estimating: if it sits in runner materialization rather than the read path, it moves after step 7 rather than holding the line |
 | 3 | Listing rows carry a handler's declared result | item 10, #5619 | — | The consumer half of item 1 |
 | 4 | The forced-stream fallback stops inventing verbs | #5576 | 3 | Same file as step 3. It narrows the listing, so sweep the open branches for writers first |
