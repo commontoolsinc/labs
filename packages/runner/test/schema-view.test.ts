@@ -15,6 +15,7 @@ import { isSchemaMismatchError } from "../src/schema-view.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { getTransactionReadActivities } from "../src/storage/transaction-inspection.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { toCell } from "../src/back-to-cell.ts";
 
 const signer = await Identity.fromPassphrase("schema-view");
 const space = signer.did();
@@ -666,6 +667,81 @@ describe("schema-view", () => {
         const targetId = target.getAsNormalizedFullLink().id;
         expect(contentReads(tx).filter((read) => read.startsWith(targetId)))
           .toContain(`${targetId}/value`);
+      } finally {
+        await tx.commit();
+      }
+    });
+  });
+
+  describe("an array element that is an inline object", () => {
+    /** Seed a cell with the value stored as given — `set()` would split array
+     * elements into documents of their own, which is the other shape. */
+    const seededRaw = async (cause: string, value: unknown) => {
+      const write = runtime.edit();
+      runtime.getCell<Record<string, unknown>>(space, cause, undefined, write)
+        .setRaw(value as never);
+      await write.commit();
+    };
+
+    const ITEMS = {
+      type: "object",
+      properties: {
+        xs: {
+          type: "array",
+          items: { type: "object", properties: { n: { type: "number" } } },
+        },
+      },
+    } as const;
+
+    const linkOfElement = (tx: IExtendedStorageTransaction, cause: string) => {
+      const element = (runtime.getCell(space, cause, ITEMS, tx).get() as {
+        xs: Array<Record<string | symbol, unknown>>;
+      }).xs[0];
+      const cell = (element[toCell] as () => {
+        getAsNormalizedFullLink: () => {
+          id: string;
+          path: readonly string[];
+        };
+      })();
+      return cell.getAsNormalizedFullLink();
+    };
+
+    it("takes its identity from its own value, not from the slot it sits in", async () => {
+      // `toCell` on `xs[0]` must not name INDEX 0 of the array: written
+      // anywhere else that link would follow whatever lands there next rather
+      // than this object. An eager read rebases such an element onto a `data:`
+      // URI, and the value is already in hand, so the identity costs no read.
+      await seededRaw("inline-element", { xs: [{ n: 1 }, { n: 2 }] });
+
+      const eagerTx = runtime.edit();
+      const lazyTx = runtime.edit();
+      lazyTx.markLazyMaterialize(true);
+      try {
+        const eager = linkOfElement(eagerTx, "inline-element");
+        const lazy = linkOfElement(lazyTx, "inline-element");
+        expect(eager.id.startsWith("data:")).toBe(true);
+        expect(lazy.id).toBe(eager.id);
+        expect(lazy.path).toEqual(eager.path);
+      } finally {
+        await eagerTx.commit();
+        await lazyTx.commit();
+      }
+    });
+
+    it("still reads only the element the reader touched", async () => {
+      await seededRaw("inline-frugal", {
+        xs: [{ n: 1 }, { n: 2 }, { n: 3 }],
+      });
+
+      const tx = runtime.edit();
+      tx.markLazyMaterialize(true);
+      try {
+        const value = runtime.getCell(space, "inline-frugal", ITEMS, tx)
+          .get() as { xs: Array<{ n: number }> };
+        expect(value.xs[0].n).toBe(1);
+        const paths = pathsRead(tx);
+        expect(paths.some((path) => path.endsWith("xs/0"))).toBe(true);
+        expect(paths.some((path) => path.endsWith("xs/2"))).toBe(false);
       } finally {
         await tx.commit();
       }

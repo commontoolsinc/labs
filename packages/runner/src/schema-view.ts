@@ -58,8 +58,11 @@ import {
   combineSchema,
   mergeAnyOfBranchSchemas,
   opaqueLeafMissesRequired,
+  SchemaObjectTraverser,
   schemaTypeMatchesValueType,
 } from "./traverse.ts";
+import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
+import { isSigilLink } from "./link-utils.ts";
 import { schemaTypeOfFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
 import { processDefaultValue, validateAndTransform } from "./schema.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -532,6 +535,24 @@ const readChild = (
     path: [...link.path, key],
     schema,
   };
+  return readChildAt(runtime, tx, childLink, [key], cfcLabelView, synced);
+};
+
+/**
+ * Read a child whose link the caller has already built.
+ *
+ * `readChild` addresses a child by the key under its parent; an array element
+ * that is an inline object is addressed by its own value instead, so it needs
+ * this.
+ */
+const readChildAt = (
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  childLink: NormalizedFullLink,
+  labelPath: readonly string[],
+  cfcLabelView: CfcLabelView | undefined,
+  synced: boolean,
+): unknown => {
   // Back through the front door: link resolution, `asCell` dispatch and schema
   // combination all belong there, and a marked transaction lands back here for
   // whatever the child turns out to be. `mismatchThrows` is what makes a
@@ -540,7 +561,10 @@ const readChild = (
   return validateAndTransform(
     runtime,
     tx,
-    { link: childLink, cfcLabelView: rebaseCfcLabelView(cfcLabelView, [key]) },
+    {
+      link: childLink,
+      cfcLabelView: rebaseCfcLabelView(cfcLabelView, [...labelPath]),
+    },
     [],
     { synced, mismatchThrows: true, viewChild: true },
   );
@@ -653,16 +677,49 @@ function createArrayView(
   synced: boolean,
 ): unknown {
   const schema = link.schema;
-  const element = (index: number): unknown =>
-    readChild(
-      runtime,
-      tx,
-      link,
-      String(index),
-      childSchema(schema, String(index)),
-      cfcLabelView,
-      synced,
-    );
+  const element = (index: number): unknown => {
+    const key = String(index);
+    const itemSchema = childSchema(schema, key);
+    const item = value[index];
+    const slotLink: NormalizedFullLink = {
+      ...link,
+      path: [...link.path, key],
+      schema: itemSchema,
+    };
+    // An inline object element takes its identity from its own value, not from
+    // the slot it sits in. `toCell` on `xs[0]` would otherwise hand back a link
+    // to INDEX 0 of this array: write that anywhere and it names whatever lands
+    // there next rather than this object. Eager traversal rebases the same
+    // elements onto a `data:` URI, and the value is already in hand here, so
+    // the identity costs no read. An element that is itself a link already
+    // carries its own identity, and an `asCell` item is a handle whose link is
+    // the point of it.
+    if (
+      isRecord(item) && !Array.isArray(item) && !isSigilLink(item) &&
+      !SchemaObjectTraverser.hasAsCell(itemSchema)
+    ) {
+      // The read still belongs to the slot, and recursively: the identity is
+      // derived from the whole element value, so anything inside it changing
+      // changes what the reader was handed. Rebasing onto the URI moves where
+      // the value is READ FROM, not what the reader depends on — without this
+      // the element's own document is all that is registered, and a write into
+      // the array never reaches the reader.
+      tx.readValueOrThrow(slotLink);
+      return readChildAt(
+        runtime,
+        tx,
+        {
+          ...slotLink,
+          id: dataUriFromValueWithResolvedLinks(item, slotLink),
+          path: [],
+        },
+        [key],
+        cfcLabelView,
+        synced,
+      );
+    }
+    return readChildAt(runtime, tx, slotLink, [key], cfcLabelView, synced);
+  };
 
   // A read-only array method runs against element views built on demand. The
   // methods that would reshape the array are absent: a view is a read.
