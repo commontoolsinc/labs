@@ -13,7 +13,7 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 const obj = (v: unknown) => v as any;
 
 describe("value-clone", () => {
-  describe("cloneWithValueAtPath", () => {
+  describe("cloneWithValueAtPath()", () => {
     it("copies only the mutated spine; off-spine subtrees are shared", () => {
       const root = deepFreeze({
         value: { left: { nested: { stable: true } }, right: { count: 1 } },
@@ -85,7 +85,7 @@ describe("value-clone", () => {
     });
   });
 
-  describe("cloneWithoutValueAtPath", () => {
+  describe("cloneWithoutValueAtPath()", () => {
     it("removes an object key, copying only the mutated spine", () => {
       const root = deepFreeze({
         value: { left: { nested: true }, right: { keep: 1, remove: 2 } },
@@ -162,7 +162,7 @@ describe("value-clone", () => {
       );
     });
 
-    it("removes the whole value for undefined root or empty path", () => {
+    it("removes the whole value for an `undefined` root or an empty path", () => {
       expect(cloneWithoutValueAtPath(undefined, ["a"])).toBeUndefined();
       expect(cloneWithoutValueAtPath(deepFreeze({ a: 1 }), [])).toBeUndefined();
     });

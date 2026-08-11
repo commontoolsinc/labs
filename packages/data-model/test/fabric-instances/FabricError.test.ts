@@ -186,7 +186,7 @@ describe("FabricError", () => {
         expect(state.message).toBe("original");
       });
 
-      it("omits stack when undefined", () => {
+      it("omits `stack` when it is `undefined`", () => {
         const err = new Error("no stack");
         err.stack = undefined;
         const se = FabricError.fromNativeError(err);
@@ -288,7 +288,7 @@ describe("FabricError", () => {
         expect(fe.deleteExtra("a")).toBe(false);
       });
 
-      it("rejects a fixed-schema slot name as an extras key", () => {
+      it("throws given a fixed-schema slot name as an extras key", () => {
         const fe = FabricError.fromNativeError(new Error("test"));
         for (const key of ["type", "name", "message", "stack", "cause"]) {
           expect(() => fe.setExtra(key, 1)).toThrow(
@@ -297,7 +297,7 @@ describe("FabricError", () => {
         }
       });
 
-      it("rejects a prototype-sensitive extras key", () => {
+      it("throws given a prototype-sensitive extras key", () => {
         const fe = FabricError.fromNativeError(new Error("test"));
         for (const key of ["__proto__", "constructor"]) {
           expect(() => fe.setExtra(key, 1)).toThrow(
@@ -594,7 +594,7 @@ describe("FabricError", () => {
           expect(Object.getPrototypeOf({})).toBe(Object.prototype);
         });
 
-        it("creates a `FabricError` from state (null `name` = same as `type`)", () => {
+        it("creates a `FabricError` from state, with `name === null` meaning same as `type`", () => {
           const state = { type: "Error", name: null, message: "hello" };
           const result = codec.decode(
             expectedTag,
@@ -607,7 +607,7 @@ describe("FabricError", () => {
           expect(result.message).toBe("hello");
         });
 
-        it("creates the correct `Error` subclass from `type` (null `name`)", () => {
+        it("creates the correct `Error` subclass from `type` when `name === null`", () => {
           const cases: [string, ErrorConstructor][] = [
             ["TypeError", TypeError],
             ["RangeError", RangeError],
@@ -628,7 +628,7 @@ describe("FabricError", () => {
           }
         });
 
-        it("handles `type != name` (e.g. `TypeError` with custom `name`)", () => {
+        it("keeps a custom `name` on the `Error` subclass named by `type`", () => {
           const state = {
             type: "TypeError",
             name: "CustomTypeName",
@@ -653,7 +653,7 @@ describe("FabricError", () => {
           expect(result.toNativeValue(true)).toBeInstanceOf(TypeError);
         });
 
-        it("handles a custom `name`", () => {
+        it("returns the custom `name` it decoded", () => {
           const state = { type: "Error", name: "MyCustomError", message: "x" };
           const result = codec.decode(
             expectedTag,

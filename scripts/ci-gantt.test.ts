@@ -63,14 +63,15 @@ function inputRun(databaseId: number, jobs: TestJob[]) {
   };
 }
 
-async function render(input: unknown): Promise<string> {
-  const result = await runGantt(input);
+async function render(input: unknown, theme = "dark"): Promise<string> {
+  const result = await runGantt(input, theme);
   assert(result.success, result.stderr);
   return result.svg;
 }
 
 async function runGantt(
   input: unknown,
+  theme = "dark",
 ): Promise<{ success: boolean; stderr: string; svg: string }> {
   const directory = await Deno.makeTempDir({ prefix: "ci-gantt-test-" });
   const inputPath = `${directory}/input.json`;
@@ -88,7 +89,7 @@ async function runGantt(
         "--out",
         outputPath,
         "--theme",
-        "dark",
+        theme,
         "--min-runs",
         "1",
       ],
@@ -201,6 +202,16 @@ Deno.test("single-run CI Gantt draws every rerun attempt on one row", async () =
   assertStringIncludes(successfulAttempt, ">2:00</text>");
   assertEquals(successfulAttempt.includes("attempt-failure"), false);
   assertStringIncludes(svg, "failed attempts end in ×");
+});
+
+Deno.test("CI Gantt light theme paints a light SVG", async () => {
+  const svg = await render({
+    runs: [inputRun(42, [job("Test", 1, 60, 120)])],
+  }, "default");
+
+  assertStringIncludes(svg, 'fill="#ffffff"');
+  assertStringIncludes(svg, 'fill="#1f2328"');
+  assertEquals(svg.includes('fill="#0d0e11"'), false);
 });
 
 Deno.test("CI Gantt rejects a rerun whose jobs carry no attempt", async () => {

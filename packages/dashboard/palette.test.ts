@@ -7,6 +7,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { Status } from "./types.ts";
 import {
+  LIGHT_STATUS_TEXT,
+  LIGHT_TILE_BASE,
   rgba,
   STATUS_COLOR,
   STATUS_EDGE,
@@ -18,14 +20,24 @@ type Triple = [number, number, number];
 
 function channels(hex: string): Triple {
   const n = parseInt(hex.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => c / 255) as
-    Triple;
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) =>
+    c / 255
+  ) as Triple;
 }
 
 // sRGB stores a color with a curve applied, so light has to be taken back out
 // of that curve before any of it can be added up or mixed.
 const toLinear = (c: number) =>
   c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+
+function contrastRatio(first: string, second: string): number {
+  const luminance = (color: string) => {
+    const [red, green, blue] = channels(color).map(toLinear);
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  };
+  const values = [luminance(first), luminance(second)].sort((a, b) => b - a);
+  return (values[0] + 0.05) / (values[1] + 0.05);
+}
 
 function apply(m: readonly Triple[], rgb: Triple): Triple {
   const linear = rgb.map(toLinear) as Triple;
@@ -109,7 +121,8 @@ function difference(first: Triple, second: Triple): number {
   const t = 1 - 0.17 * Math.cos(rad(hMean - 30)) +
     0.24 * Math.cos(rad(2 * hMean)) + 0.32 * Math.cos(rad(3 * hMean + 6)) -
     0.20 * Math.cos(rad(4 * hMean - 63));
-  const sL = 1 + (0.015 * (lMean - 50) ** 2) / Math.sqrt(20 + (lMean - 50) ** 2);
+  const sL = 1 +
+    (0.015 * (lMean - 50) ** 2) / Math.sqrt(20 + (lMean - 50) ** 2);
   const sC = 1 + 0.045 * cpMean;
   const sH = 1 + 0.015 * cpMean * t;
   const rT = -2 * Math.sqrt(cpMean ** 7 / (cpMean ** 7 + 25 ** 7)) *
@@ -172,6 +185,36 @@ describe("palette", () => {
         const [text] = lab(apply(TRICHROMAT, channels(STATUS_TEXT[status])));
         const [base] = lab(apply(TRICHROMAT, channels(STATUS_COLOR[status])));
         expect(text).toBeGreaterThan(base);
+      }
+    });
+  });
+
+  describe("LIGHT_STATUS_TEXT", () => {
+    for (const [name, vision] of Object.entries(VISION)) {
+      for (const [first, second] of PAIRS) {
+        it(`tells ${first} from ${second} under ${name}`, () => {
+          expect(
+            apart(LIGHT_STATUS_TEXT[first], LIGHT_STATUS_TEXT[second], vision),
+          )
+            .toBeGreaterThan(LEGIBLE);
+        });
+      }
+    }
+
+    it("is darker than the status color it carries on a light tile", () => {
+      for (const status of STATUSES) {
+        const [text] = lab(
+          apply(TRICHROMAT, channels(LIGHT_STATUS_TEXT[status])),
+        );
+        const [base] = lab(apply(TRICHROMAT, channels(STATUS_COLOR[status])));
+        expect(text).toBeLessThan(base);
+      }
+    });
+
+    it("keeps small text and status indicators legible on a light tile", () => {
+      for (const status of STATUSES) {
+        expect(contrastRatio(LIGHT_STATUS_TEXT[status], LIGHT_TILE_BASE))
+          .toBeGreaterThanOrEqual(4.5);
       }
     });
   });

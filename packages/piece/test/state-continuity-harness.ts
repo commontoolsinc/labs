@@ -1058,7 +1058,7 @@ export interface StateFinding {
  *
  * `deepEqual` rather than the data-model's `valueEqual`, which is the more
  * obvious choice. `valueEqual` refuses a materialized root outright — measured,
- * it throws `Cannot compare value {"/":{"link@1":{…}}}` — but NOT for the
+ * it throws ``Cannot compare value `{"/":{"link@1":{…}}}` `` — but NOT for the
  * reason that message reads as: a link sigil compares fine, and the value it
  * actually refused was a live CELL, rendered through its `toJSON()` and so
  * printed as the sigil it points at. That is the same fact `comparableState`

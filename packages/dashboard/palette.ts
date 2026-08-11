@@ -29,6 +29,15 @@ export const STATUS_TEXT: Record<Status, string> = {
   unknown: "#9aa0ab",
 };
 
+// Headline shades for text on a light tile. They retain the status hues while
+// carrying enough weight to read against white.
+export const LIGHT_STATUS_TEXT: Record<Status, string> = {
+  good: "#0f765d",
+  warn: "#985000",
+  bad: "#a51f45",
+  unknown: "#59616e",
+};
+
 // How much of its color a tile's background carries, and how much its border
 // does. The three rise together with the seriousness of the status, so the
 // tiles separate by weight as well as by hue. An unknown tile takes no color
@@ -64,6 +73,7 @@ export const RUNNING_COLOR = "#6ea8fe";
 // The flat surface a status tints: the tile itself, and the rows of the
 // drill-down pages that wear a status the same way.
 export const TILE_BASE = "#16181d";
+export const LIGHT_TILE_BASE = "#ffffff";
 
 function channels(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);
@@ -80,11 +90,11 @@ function hex(channels: readonly number[]): string {
 const FADE_DEPTH = 0.6;
 
 /** The shade a sparkline fades up out of, on a tile of the given status. */
-function fadeUnder(status: Status): string {
-  const base = channels(TILE_BASE);
+function fadeUnder(status: Status, tileBase: string, depth: number): string {
+  const base = channels(tileBase);
   const tint = channels(STATUS_COLOR[status]);
   return hex(
-    base.map((b, i) => (b + (tint[i] - b) * STATUS_WASH[status]) * FADE_DEPTH),
+    base.map((b, i) => (b + (tint[i] - b) * STATUS_WASH[status]) * depth),
   );
 }
 
@@ -93,10 +103,26 @@ function fadeUnder(status: Status): string {
 // and the tile's wash rather than written down beside them, so a change to
 // either carries here on its own.
 export const SPARK_FADE: Record<Status, string> = {
-  good: fadeUnder("good"),
-  warn: fadeUnder("warn"),
-  bad: fadeUnder("bad"),
-  unknown: fadeUnder("unknown"),
+  good: fadeUnder("good", TILE_BASE, FADE_DEPTH),
+  warn: fadeUnder("warn", TILE_BASE, FADE_DEPTH),
+  bad: fadeUnder("bad", TILE_BASE, FADE_DEPTH),
+  unknown: fadeUnder("unknown", TILE_BASE, FADE_DEPTH),
+};
+
+// On a light tile the line can disappear into the tile's own tinted surface.
+// The CSS theme chooses between these shades and the dark ones above.
+export const LIGHT_SPARK_FADE: Record<Status, string> = {
+  good: fadeUnder("good", LIGHT_TILE_BASE, 1),
+  warn: fadeUnder("warn", LIGHT_TILE_BASE, 1),
+  bad: fadeUnder("bad", LIGHT_TILE_BASE, 1),
+  unknown: fadeUnder("unknown", LIGHT_TILE_BASE, 1),
+};
+
+export const SPARK_FADE_CSS: Record<Status, string> = {
+  good: "var(--spark-fade-good)",
+  warn: "var(--spark-fade-warn)",
+  bad: "var(--spark-fade-bad)",
+  unknown: "var(--spark-fade-unknown)",
 };
 
 /** A `#rrggbb` color as a CSS `rgba()` at the given alpha. */

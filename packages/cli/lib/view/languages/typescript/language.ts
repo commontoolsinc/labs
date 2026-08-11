@@ -7,6 +7,7 @@
  * contract.
  */
 import type { Language } from "../language.ts";
+import { utf8Decoder } from "../decoder.ts";
 import { remapStructure } from "../../diffremap.ts";
 import {
   createHighlighter,
@@ -18,6 +19,8 @@ import { createDiffSemantics, createSemantics } from "./semantics.ts";
 
 export const typeScriptLanguage: Language = {
   id: "typescript",
+
+  input: { kind: "text", decoder: utf8Decoder },
 
   metadata: {
     extensions: [

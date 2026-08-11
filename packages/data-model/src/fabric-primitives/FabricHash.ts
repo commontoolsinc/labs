@@ -1,3 +1,4 @@
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import type {
   FabricHash as ApiFabricHash,
   FabricHashConstructor as ApiFabricHashConstructor,
@@ -125,7 +126,9 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
   static fromString(source: string): FabricHash {
     const colonIndex = source.indexOf(":");
     if (colonIndex === -1) {
-      throw new ReferenceError(`Invalid content hash string: \`${source}\``);
+      throw new ReferenceError(
+        `Invalid content hash string: ${backtickQuote(source)}`,
+      );
     }
     const tag = source.substring(0, colonIndex);
     const hashBase64url = source.substring(colonIndex + 1);
