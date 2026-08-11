@@ -378,9 +378,9 @@ value is ignored with a warning rather than coerced. See
 - **Design, measurements and staging.**
   [`../plans/lazy-cell-materialization.md`](../plans/lazy-cell-materialization.md).
 
-**Status against the test suites.** The runner unit suite passes with the flag
-on, the group-chat pattern tests pass with it on, and the whole integration
-suite passes with it off.
+**Status against the test suites.** Both suites pass either way: the runner unit
+suite and the whole integration suite are green with the flag on and with it
+off.
 
 One behavior difference is deliberate rather than a defect, and it is the point
 of the mode: a lift that FORWARDS its argument onward without reading through it
