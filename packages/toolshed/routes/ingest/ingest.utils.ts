@@ -1,4 +1,5 @@
 import type { JSONSchema, MemorySpace, Runtime } from "@commonfabric/runner";
+import { isLink } from "@commonfabric/runner";
 import {
   custodyIngest,
   durableSet,
@@ -49,6 +50,48 @@ export const MAX_BATCH = 1000;
 const SEGMENT_RE = /^[A-Za-z0-9._-]{1,64}$/;
 export const isValidSegment = (s: string): boolean =>
   SEGMENT_RE.test(s) && s !== "." && s !== "..";
+
+/**
+ * Does this value contain anything the runtime would treat as a LINK?
+ *
+ * Records are opaque JSON, but opaque is not the same as inert. The runtime
+ * decides on WRITE whether a value is a link — `data-updating.ts` tests the
+ * incoming value with `isPrimitiveCellLink` — so a body carrying
+ * `{"/": {"link@1": …}}` does not store that text, it stores a live reference.
+ * Nothing else on this path would catch it: the shape is a non-null,
+ * non-array object, which is the entire record contract.
+ *
+ * Three guarantees break at once if one lands:
+ *   - The journal stops being append-only. A link's target can be changed
+ *     afterwards, so a historical record mutates with no ingest touching it.
+ *   - The ExternalIngest mark attests to the wrong bytes. Its digest binds the
+ *     sigil, not what a reader resolves through it, so provenance vouches for
+ *     content nobody ingested.
+ *   - The record can address a document the channel was never authorized to
+ *     write, which the space's owner then reads as their own captured data.
+ *
+ * Uses the runtime's own predicate rather than matching the envelope here, so
+ * this cannot drift from what the writer actually interprets.
+ *
+ * Rejected rather than stripped: silently rewriting a record would break the
+ * verbatim-storage contract from the other side, and a client sending one is
+ * either malfunctioning or hostile — both should hear about it.
+ *
+ * Iterative, because the walk is over attacker-controlled nesting.
+ */
+export const containsLink = (value: unknown): boolean => {
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (isLink(current)) return true;
+    if (Array.isArray(current)) {
+      for (const item of current) stack.push(item);
+    } else if (current !== null && typeof current === "object") {
+      for (const item of Object.values(current)) stack.push(item);
+    }
+  }
+  return false;
+};
 export const isValidPartition = isValidSegment;
 
 export interface IngestRegistration {
@@ -1115,6 +1158,14 @@ export async function processIngest(
     return {
       status: 400,
       body: { error: "records must be a non-empty array of objects" },
+    };
+  }
+  if (records.some(containsLink)) {
+    return {
+      status: 400,
+      body: {
+        error: "records must not contain cell links",
+      },
     };
   }
   if (records.length > MAX_BATCH) {

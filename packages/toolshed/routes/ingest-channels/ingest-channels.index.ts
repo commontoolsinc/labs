@@ -35,9 +35,22 @@ router.use(
 // can trigger, so it gets the tighter bucket; listing is read-only.
 const mintLimiter = createRateLimiter({ capacity: 10, refillPerSecond: 0.1 });
 const readLimiter = createRateLimiter({ capacity: 60, refillPerSecond: 1 });
-for (const verb of ["mint", "rotate", "revoke"]) {
+// Revoke gets its OWN bucket, deliberately not shared with mint and rotate.
+// These limiters run ahead of auth and are keyed by client address, so anything
+// that drains the mint bucket also refuses revoke — and "come back in a few
+// minutes" is the wrong answer to "kill this credential". Under the
+// deployment misconfiguration the clientKey comment describes (a real proxy
+// with RATE_LIMIT_TRUST_FORWARDED_FOR off), every caller collapses onto one
+// bucket and one client's minting would refuse everyone else's revokes.
+//
+// Same asymmetry the claim-store-full path answers on the other side: minting
+// and rotating are safe to refuse, because nothing bad happens when they do not
+// run. Revoke is the verb where refusing IS the bad outcome.
+const revokeLimiter = createRateLimiter({ capacity: 30, refillPerSecond: 0.5 });
+for (const verb of ["mint", "rotate"]) {
   router.use(`${routes.BASE}/${verb}`, rateLimit(mintLimiter));
 }
+router.use(`${routes.BASE}/revoke`, rateLimit(revokeLimiter));
 router.use(`${routes.BASE}/list`, rateLimit(readLimiter));
 
 // Deliberately NO cors(): a credentialed control plane must not opt into the

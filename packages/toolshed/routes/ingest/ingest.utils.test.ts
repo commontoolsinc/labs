@@ -349,6 +349,58 @@ describe("ingest journal sink", () => {
     expect(res.status).toBe(413);
   });
 
+  // A link sigil is a non-null, non-array object, so it satisfies the entire
+  // record contract — and the runtime interprets it on WRITE, storing a live
+  // reference instead of the text. That would make journal entries mutable
+  // after the fact and leave the ExternalIngest mark attesting to a digest of
+  // the sigil rather than to anything a reader resolves through it.
+  it("processIngest: a link sigil anywhere in a record -> 400, nothing written", async () => {
+    const { secret } = await savedReg({ id: "ing_sigil" });
+    const link = {
+      "/": {
+        "link@1": {
+          id: "of:somewhere-else",
+          space,
+          path: [],
+        },
+      },
+    };
+
+    for (
+      const [where, records] of [
+        ["the record itself", [link]],
+        ["a nested value", [{ reading: link }]],
+        ["inside an array", [{ readings: [1, link] }]],
+        ["buried deep", [{ a: { b: { c: [{ d: link }] } } }]],
+        ["one record among valid ones", [{ x: 1 }, { y: link }, { z: 3 }]],
+      ] as const
+    ) {
+      const res = await call("ing_sigil", secret, {
+        partition: "2026-07-07",
+        records,
+      });
+      expect(res.status, `link in ${where}`).toBe(400);
+    }
+
+    // Nothing from any of those attempts landed.
+    const stored = journalCell(
+      runtime,
+      await getRegistration(runtime, space, "ing_sigil") as IngestRegistration,
+      "2026-07-07",
+    );
+    await stored.sync();
+    await runtime.storageManager.synced();
+    expect(stored.get()).toBeUndefined();
+
+    // And an ordinary record on the same channel still works, so the check
+    // rejects links rather than anything object-shaped.
+    const ok = await call("ing_sigil", secret, {
+      partition: "2026-07-07",
+      records: [{ nested: { deep: [1, 2, { fine: true }] } }],
+    });
+    expect(ok.status).toBe(200);
+  });
+
   it("processIngest: bad token + malformed body stays a uniform 401 (not 400)", async () => {
     await savedReg({ id: "ing_mal" });
     // Malformed JSON with a wrong token must NOT leak a 400 — auth runs first.

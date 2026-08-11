@@ -128,6 +128,16 @@ try {
       installId,
       sink: "journal",
       secretHash,
+      // Re-provisioning an existing channel replaces its secret, so it IS a
+      // rotation and must leave the re-pair signal behind. Without it a device
+      // still holding the old token gets the equalized 401 — indistinguishable
+      // from "unknown channel" — on the single most likely path to reach it,
+      // which is exactly the case `previousSecretHash` exists for. The
+      // self-serve rotate path already does this; the operator path is the one
+      // an operator reaches for when a device is already misbehaving.
+      ...(existing?.secretHash !== undefined
+        ? { previousSecretHash: existing.secretHash }
+        : {}),
       createdBy: identity.did(),
       createdAt: existing?.createdAt ?? now.toISOString(),
       enabled: true,

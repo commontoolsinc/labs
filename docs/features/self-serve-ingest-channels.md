@@ -427,6 +427,21 @@ only after auth; storage errors → 502 never 401; channel id stays derived
 per-UTC-day partition cells `<causePrefix>/<YYYY-MM-DD>`, no server-added
 fields, no server-side dedup; a day cell is never pre-created (absent ≠ empty).
 
+One addition to the data plane, because verbatim storage turned out to have a
+hole: a record containing a **link sigil** is rejected with 400. Records are
+opaque JSON, but opaque is not inert — the runtime decides on *write* whether a
+value is a link, so `{"/": {"link@1": …}}` was not stored as text, it was stored
+as a live reference. That is a non-null, non-array object, which was the whole
+record contract, so nothing else caught it. It broke three guarantees at once:
+the journal stopped being append-only (a link's target can change afterwards, so
+a historical record mutates with no ingest touching it), the ExternalIngest mark
+attested to a digest of the sigil rather than to anything a reader resolves
+through it, and the record could address a document the channel was never
+authorized to write. The check uses the runtime's own `isLink` predicate rather
+than matching the envelope locally, so it cannot drift from what the writer
+interprets, and it rejects rather than strips — silently rewriting a record
+would break verbatim storage from the other side.
+
 The cross-repo contract in `ingest-channels-journal-sink.md` §"Cross-repo
 contract" is untouched: the data plane `POST /api/ingest/:id` does not change.
 
@@ -588,6 +603,22 @@ a multi-instance deployment multiplies it, and its LRU hands an evicted key a
 fresh bucket — which makes key churn a reset primitive. Enforce the real
 deployment-wide budget at trusted ingress (the reverse proxy or CDN), and set
 `RATE_LIMIT_TRUST_FORWARDED_FOR` only when such a proxy is actually in front.
+
+When it is set, the key is the **rightmost** `X-Forwarded-For` entry. A proxy
+appends the address it saw to whatever the request already carried, so every
+entry to the left of it is client-authored: keying on the leftmost lets a caller
+send a different value each request and draw a fresh full bucket every time,
+which is the limiter not existing. The rightmost is the only entry the client
+could not choose. This assumes exactly one trusted proxy appends — behind a
+chain of N, count in by the number of trusted hops instead.
+
+**`revoke` has its own bucket.** These limiters run ahead of authentication and
+are keyed by address, so anything that drains the shared bucket also refuses
+revokes — and under the misconfiguration above (a real proxy with the flag off)
+every caller collapses onto one bucket, so one client's minting would refuse
+everyone else's revokes. Minting and rotating are safe to refuse because nothing
+bad happens when they do not run; revoke is the verb where refusing *is* the bad
+outcome. Same asymmetry the claim-store-full path answers from the other side.
 
 Durable bookkeeping is bounded rather than unbounded, on four axes:
 

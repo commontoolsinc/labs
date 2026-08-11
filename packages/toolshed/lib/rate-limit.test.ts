@@ -87,10 +87,24 @@ describe("clientKey", () => {
 
   // .env.test sets RATE_LIMIT_TRUST_FORWARDED_FOR=true, so this exercises the
   // trusted-proxy branch.
-  it("takes the leftmost X-Forwarded-For entry when a proxy is trusted", () => {
+  // The RIGHTMOST entry. A proxy appends what it saw to whatever the request
+  // already carried, so everything to its left is client-authored.
+  it("takes the rightmost X-Forwarded-For entry when a proxy is trusted", () => {
     expect(
       clientKey(req({ "x-forwarded-for": "203.0.113.7, 10.0.0.1, 10.0.0.2" })),
-    ).toBe("203.0.113.7");
+    ).toBe("10.0.0.2");
+  });
+
+  // The property that matters: a caller cannot choose their own bucket. Taking
+  // the leftmost entry made every request from one client look like a different
+  // one, which is the limiter not existing.
+  it("gives a client no way to pick its own bucket by forging the header", () => {
+    const proxySaw = "10.0.0.2";
+    const forged = ["evil-1", "evil-2", "evil-3"].map((spoof) =>
+      clientKey(req({ "x-forwarded-for": `${spoof}, ${proxySaw}` }))
+    );
+    expect(new Set(forged).size).toBe(1);
+    expect(forged[0]).toBe(proxySaw);
   });
 
   it("falls back to unknown when there is no header and no connection info", () => {
