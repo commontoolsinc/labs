@@ -2505,6 +2505,331 @@ describe("cf piece get transforms", () => {
       await expect(parseSelectionProjection('{"asCell":["cell"]}')).rejects
         .toThrow('"asCell" is controlled by the source schema');
     });
+
+    describe("the `@` suffix a concise field path writes", () => {
+      it("desugars to the marker the JSON spelling writes", async () => {
+        const written = await parseSelectionProjection(
+          '{"properties":{"topic":{"$link":true}}}',
+        );
+        for (
+          const parsed of [
+            parseSelectProjection("topic@"),
+            await parseSelectionProjection("topic@"),
+          ]
+        ) {
+          expect(parsed.schema).toEqual(written.schema);
+          expect(parsed.markers).toEqual(written.markers);
+        }
+      });
+
+      it("unions a marked path with a sibling projection into one position", () => {
+        const union = {
+          type: "object",
+          properties: {
+            topic: {
+              type: "object",
+              properties: { title: true },
+              additionalProperties: false,
+            },
+          },
+          additionalProperties: false,
+        };
+        for (
+          const source of [
+            "topic@,topic.title",
+            "topic.title,topic@",
+            "topic@.title",
+          ]
+        ) {
+          const parsed = parseSelectProjection(source);
+          expect(parsed.schema).toEqual(union);
+          expect(parsed.markers).toEqual({
+            properties: { topic: { marked: true } },
+          });
+        }
+      });
+
+      it("returns a marked position's address instead of its contents", async () => {
+        const { board, notes } = await seedBoard("at-suffix-instead", true);
+        expect(
+          await deriveSelectedValue(runtime, space, board, {
+            projection: parseSelectProjection("topic@"),
+          }),
+        ).toEqual({ topic: { $link: addressOf(notes[0]) } });
+      });
+
+      it("returns one result carrying the address and the projection", async () => {
+        const { board, notes } = await seedBoard("at-suffix-union", true);
+        for (
+          const source of [
+            "topic@,topic.title",
+            "topic.title,topic@",
+            "topic@.title",
+          ]
+        ) {
+          expect(
+            await deriveSelectedValue(runtime, space, board, {
+              projection: parseSelectProjection(source),
+            }),
+          ).toEqual({ topic: { $link: addressOf(notes[0]), title: "a" } });
+        }
+      });
+
+      it("returns the address beside the contents a bare sibling path asked for", async () => {
+        const { board, notes } = await seedBoard("at-suffix-whole", true);
+        expect(
+          await deriveSelectedValue(runtime, space, board, {
+            projection: parseSelectProjection("topic,topic@"),
+          }),
+        ).toEqual({
+          topic: { $link: addressOf(notes[0]), title: "a", body: "body a" },
+        });
+      });
+
+      it("desugars a bare `@` to the marker at the projection's root", async () => {
+        const written = await parseSelectionProjection('{"$link":true}');
+        const parsed = parseSelectProjection("@");
+        expect(parsed.schema).toEqual(written.schema);
+        expect(parsed.markers).toEqual(written.markers);
+      });
+
+      it("returns the read source's own address for a bare `@`", async () => {
+        const { board, notes } = await seedBoard("at-suffix-root", true);
+        expect(
+          await deriveSelectedValue(runtime, space, board, {
+            projection: parseSelectProjection("@"),
+          }),
+        ).toEqual({ $link: addressOf(board) });
+        expect(
+          await deriveSelectedValue(runtime, space, board.key("topic"), {
+            projection: parseSelectProjection("@"),
+          }),
+        ).toEqual({ $link: addressOf(notes[0]) });
+      });
+
+      it("returns the read source's address beside a sibling projection", async () => {
+        const { board } = await seedBoard("at-suffix-root-union", true);
+        for (const source of ["@,label", "label,@"]) {
+          expect(
+            await deriveSelectedValue(runtime, space, board, {
+              projection: parseSelectProjection(source),
+            }),
+          ).toEqual({ $link: addressOf(board), label: "Field notes" });
+        }
+      });
+
+      it("points a leading `@` that names a file at --schema", () => {
+        for (const source of ["@projection.json", "@label", "@label,label"]) {
+          expect(() => parseSelectProjection(source)).toThrow(
+            "--select takes comma-separated field paths",
+          );
+        }
+      });
+
+      it("returns an address per element for a marked array", async () => {
+        const { board, notes } = await seedBoard("at-suffix-array", true);
+        const elementAddresses = notes.map((note) => ({
+          $link: addressOf(note),
+        }));
+        const concise = await deriveSelectedValue(runtime, space, board, {
+          projection: parseSelectProjection("notes@"),
+        });
+        expect(concise).toEqual({ notes: elementAddresses });
+        // The concise spelling of the JSON items marker, so it answers with
+        // what the JSON items marker answers.
+        expect(concise).toEqual(
+          await deriveSelectedValue(runtime, space, board, {
+            projection: await parseSelectionProjection(
+              '{"properties":{"notes":{"type":"array","items":{"$link":true}}}}',
+            ),
+          }),
+        );
+        expect(
+          await deriveSelectedValue(runtime, space, board, {
+            projection: parseSelectProjection("notes@,label"),
+          }),
+        ).toEqual({ notes: elementAddresses, label: "Field notes" });
+      });
+
+      it("leaves a JSON marker on an array naming that array's own position", async () => {
+        const { board } = await seedBoard("at-suffix-json-array", true);
+        expect(
+          await deriveSelectedValue(runtime, space, board, {
+            projection: await parseSelectionProjection(
+              '{"properties":{"notes":{"$link":true}}}',
+            ),
+          }),
+        ).toEqual({
+          notes: { $link: { ...addressOf(board), path: ["notes"] } },
+        });
+      });
+
+      it("returns an address per element for a bare `@` at an array", async () => {
+        const { board, notes } = await seedBoard("at-suffix-array-root", true);
+        expect(
+          await deriveSelectedValue(runtime, space, board.key("notes"), {
+            projection: parseSelectProjection("@"),
+          }),
+        ).toEqual(notes.map((note) => ({ $link: addressOf(note) })));
+      });
+
+      it("returns each element's address beside the addresses marked below it", async () => {
+        const { board, notes } = await seedBoard("at-suffix-array-deep", true);
+        expect(
+          await deriveSelectedValue(runtime, space, board, {
+            projection: parseSelectProjection("notes@,notes.title@"),
+          }),
+        ).toEqual({
+          notes: notes.map((note) => ({
+            $link: addressOf(note),
+            title: { $link: { ...addressOf(note), path: ["title"] } },
+          })),
+        });
+      });
+
+      it("marks a position below an array for each of its elements", async () => {
+        const { board, notes } = await seedBoard("at-suffix-elements", true);
+        const titleAddresses = notes.map((note) => ({
+          title: { $link: { ...addressOf(note), path: ["title"] } },
+        }));
+
+        expect(
+          await deriveSelectedValue(runtime, space, board, {
+            projection: parseSelectProjection("notes.title@"),
+          }),
+        ).toEqual({ notes: titleAddresses });
+        expect(
+          await deriveSelectedValue(runtime, space, board.key("notes"), {
+            projection: parseSelectProjection("title@"),
+          }),
+        ).toEqual(titleAddresses);
+        expect(
+          await deriveSelectedValue(runtime, space, board, {
+            projection: await parseSelectionProjection(
+              '{"properties":{"notes":{"items":' +
+                '{"properties":{"title":{"$link":true}}}}}}',
+            ),
+          }),
+        ).toEqual({ notes: titleAddresses });
+      });
+
+      it("marks a position below an array the source schema leaves open", async () => {
+        const openSchema = {
+          type: "object",
+          properties: { comments: true },
+        } as const satisfies JSONSchema;
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          space,
+          "at-suffix-ambiguous",
+          openSchema,
+          tx,
+        );
+        source.set({
+          comments: [{ body: "Visible", privateNote: "hidden" }],
+        });
+        expect((await tx.commit()).ok).toBeDefined();
+
+        // Writing an object into an array gives it a document of its own, and
+        // the slot stores a link to it. That link is the deepest one the walk
+        // crosses, so `body` is addressed inside the element's own document.
+        const comment = source.key("comments").key(0).resolveAsCell();
+        expect(
+          await deriveSelectedValue(
+            runtime,
+            space,
+            runtime.getCell(space, "at-suffix-ambiguous", openSchema),
+            { projection: parseSelectProjection("comments.body@") },
+          ),
+        ).toEqual({
+          comments: [{
+            body: { $link: { ...addressOf(comment), path: ["body"] } },
+          }],
+        });
+      });
+
+      it("reads one document for a marked collection, not one per element", async () => {
+        const { board, notes } = await seedBoard("at-suffix-reads", false);
+        const provider = storageManager.open(space);
+        const originalSync = provider.sync.bind(provider);
+        let syncedUris: string[] = [];
+        provider.sync = ((uri, selector, scope) => {
+          syncedUris.push(uri);
+          return originalSync(uri, selector, scope);
+        }) as typeof provider.sync;
+        const boardUri = board.getAsNormalizedFullLink().id;
+        const noteUris: string[] = notes.map((note) =>
+          note.getAsNormalizedFullLink().id
+        );
+        const boardDocuments = (uris: string[]) =>
+          uris.filter((uri) => uri === boardUri || noteUris.includes(uri));
+
+        syncedUris = [];
+        await deriveSelectedValue(runtime, space, board, {
+          projection: parseSelectProjection("notes@"),
+        });
+        const marked = boardDocuments(syncedUris);
+
+        syncedUris = [];
+        await deriveSelectedValue(
+          runtime,
+          space,
+          runtime.getCell(space, "at-suffix-reads-board", boardSchema),
+          { projection: parseSelectProjection("notes.title") },
+        );
+
+        expect(marked).toEqual([boardUri]);
+        expect(boardDocuments(syncedUris)).toEqual(noteUris);
+      });
+
+      it("reaches a field whose name holds an `@` of its own", async () => {
+        const oddNameSchema = {
+          type: "object",
+          properties: {
+            "user@home": { type: "string" },
+            "a@": { type: "string" },
+          },
+        } as const satisfies JSONSchema;
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          space,
+          "at-suffix-escapes",
+          oddNameSchema,
+          tx,
+        );
+        source.set({ "user@home": "here", "a@": "there" });
+        expect((await tx.commit()).ok).toBeDefined();
+
+        expect(
+          await deriveSelectedValue(
+            runtime,
+            space,
+            runtime.getCell(space, "at-suffix-escapes", oddNameSchema),
+            { projection: parseSelectProjection("user@home,a\\@") },
+          ),
+        ).toEqual({ "user@home": "here", "a@": "there" });
+      });
+
+      it("refuses a marked path combined with a filter, naming the flag", async () => {
+        const { board } = await seedBoard("at-suffix-filter", true);
+        await expect(
+          deriveSelectedValue(runtime, space, board.key("notes"), {
+            filter: parseSelectionFilter('.title == "a"'),
+            projection: parseSelectProjection("title@"),
+          }),
+        ).rejects.toThrow(
+          "--filter cannot be combined with an `@` suffix in --select",
+        );
+        await expect(
+          deriveSelectedValue(runtime, space, board.key("notes"), {
+            filter: parseSelectionFilter('.title == "a"'),
+            projection: await parseSelectionProjection("title@"),
+          }),
+        ).rejects.toThrow(
+          "--filter cannot be combined with an `@` suffix in --schema",
+        );
+      });
+    });
   });
 
   describe("--select", () => {

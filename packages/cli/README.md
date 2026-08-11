@@ -175,7 +175,8 @@ missing value and is also falsey. Filtering happens before schema projection.
 
 Two flags project, one per input language:
 
-- `--select` takes a comma-separated field list such as `id,title,author.name`;
+- `--select` takes a comma-separated field list such as `id,title,author.name`,
+  in which a segment ending in `@` asks for an address rather than contents;
 - `--schema` takes an inline JSON Schema object or `@path/to/schema.json`, and
   also accepts the same field list `--select` takes.
 
@@ -229,8 +230,8 @@ override `ifc`, `asCell`, `scope`, or `default` through `--schema`.
 
 #### Asking for an address instead of contents
 
-A JSON `--schema` marks a position with `"$link": true` to get that position's
-address rather than what is behind it:
+A projection marks a position to get that position's address rather than what is
+behind it. A JSON `--schema` marks with `"$link": true`:
 
 ```bash
 cf piece get --piece ID notes --schema '{"type":"array","items":{"$link":true}}'
@@ -271,13 +272,66 @@ and the title — and replaces the contents when it is alone. It is accepted
 anywhere `properties` is, except under `additionalProperties`, whose membership
 the stored value rather than the selection decides.
 
+A field list marks with a trailing `@`, which is that same marker at the
+position the segment names:
+
+```bash
+cf piece get --piece ID --select 'topic@,topic.title'
+```
+
+```json
+{ "topic": { "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" } }
+```
+
+The two paths union into the one position, and `topic@.title` says the same
+thing in one path. `@` is special only as the final character of a segment:
+`user@home` names a field, and `\@` writes a literal `@` where a trailing one
+would otherwise mark, so `a\@` names the field `a@`. Naming a position both
+ways, `topic,topic@`, returns the address beside the whole contents.
+
+A field list applies to each element wherever it crosses an array, and an
+address is one of the things it applies. Where the marked position holds an
+array the answer is one address per element, so `notes@` is the concise spelling
+of `{"type":"array","items":{"$link":true}}`:
+
+```bash
+cf piece get --piece ID --select 'notes@'
+```
+
+```json
+{ "notes": [{ "$link": { "id": "of:fid1:…", "…": "…" } }] }
+```
+
+Those element documents are what a caller cannot work out for themselves; the
+array position's own address is only the source address plus the path they just
+typed. Where the marked position holds anything else, `topic@` among them, the
+address is that position's own. Marking below an array — `notes.title@` — is
+element-wise for the same reason, and answers with each note's own `id` and
+`path` `["title"]`.
+
+A path that is only `@` names the position the read is already at, which no
+field path reaches because it sits above every field:
+
+```bash
+cf piece get --piece ID topic --select '@,title'
+```
+
+```json
+{ "$link": { "id": "of:fid1:…", "…": "…" }, "title": "First note" }
+```
+
+It composes exactly as a suffix one level down does: `@` alone replaces the
+contents with the address, `@` beside a field path returns both in the one
+result, and a source that holds an array answers with one address per element. A
+leading `@` followed by anything else is an `@file`, which `--schema` reads and
+`--select` does not, so `--select '@fields.json'` is refused and pointed there.
+
 A marked position is never fetched: it contributes a rejecting selector to the
 same path union the projection builds, and the address is composed from links
 already stored in the documents the read visited rather than by following one. A
 marked collection therefore costs one document read rather than one per element.
-The marker is a JSON-schema spelling only, and it cannot be combined with
-`--filter`: the elements a predicate keeps no longer say which positions they
-came from, and an address names a position.
+Neither spelling can be combined with `--filter`: the elements a predicate keeps
+no longer say which positions they came from, and an address names a position.
 
 #### What a selection means for a call
 
