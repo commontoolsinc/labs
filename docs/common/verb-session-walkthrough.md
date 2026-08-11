@@ -122,12 +122,9 @@ verb's result, because
 bytes unshaped, 140 with `--select 'item.title'`.
 
 **The prose above does not reach a caller.** Each verb carries a doc comment
-saying what it is for, which is where that documentation belongs — and a
-comment on a `Stream` property is dropped in emission, so `cf piece verbs` can
-list a verb and never say what it does. Measured on this pattern: the data
-property `items` keeps "Root items only…", the verb `addItem` keeps nothing.
-It is one of three sites where an author's prose goes nowhere; step 2 has the
-full picture.
+saying what it is for, which is where that documentation belongs — and it is
+emitted correctly and then lost, so `cf piece verbs` can list a verb and never
+say what it does. Step 2 has the measurement.
 
 
 ## 1. Arrive with a slug **[today]**
@@ -188,24 +185,27 @@ The structural half needs nothing authored per pattern: `parseInputFlags`
 builds a descriptor per input-schema property, so `--title <string> Required.`
 falls out of the type. That is why the page exists at all.
 
-The prose half is dropped in emission, at three separate sites:
+The prose half is **emitted and then lost**, which is worth stating precisely
+because the obvious guess sends the fix to the wrong place:
 
-| An author writes… | Reaches the compiled pattern? | Reaches `cf`? |
+| An author writes… | In the compiled pattern | Served to `cf` |
 | --- | --- | --- |
-| a comment on an **event field** (what `title` means) | yes — `$defs.<Event>.properties.title.description` | **no, stripped** |
-| a comment on the **event interface** (what the verb is for) | **no** | no |
-| a comment on the **verb itself**, as in the model above | **no** | no |
+| a comment on an **event field** (what `title` means) | **yes** — `$defs.<Event>.properties.title.description` | no |
+| a comment on the **verb itself**, as in the model above | **yes** — beside the `$ref` | no |
+| a comment on the **event interface** (what the verb is for) | no | no |
 
-One emitter is dropping all three
-([#5637](https://github.com/commontoolsinc/labs/issues/5637)), and for two of
-them that is the whole fix: `specificFlagLines` reads a `description` through
-`schemaDescription` and would print one the moment it were given one, and a
-listing row would carry one as soon as the emitter supplied it.
+So the generator handles two of the three correctly — one pattern here carries
+descriptions on 36 `Stream` properties. What the CLI is served is the
+*resolved* form of the event schema, with no `$defs` and no `$ref`, and the
+descriptions are not in it. The loss is in that resolution, not in emission
+([#5637](https://github.com/commontoolsinc/labs/issues/5637)).
 
-The verb's *purpose* is the exception, and needs a second change. Even with a
-description on the event schema's root, `renderPieceCallHelp` has nowhere to
-put it — the page runs Usage, JSON input, Flags, Output, with no summary line,
-and `schemaDescription` is consulted only from the per-property loop.
+The renderer is ready for two of the three: `specificFlagLines` reads a
+`description` through `schemaDescription` and would print one the moment it
+were given one, and a listing row would carry one as soon as it were supplied.
+The verb's *purpose* needs a second change on top, because
+`renderPieceCallHelp` has nowhere to put it — the page runs Usage, JSON input,
+Flags, Output, with no summary line.
 
 So the help page shows `--title <string>  Required.` and stops.
 
@@ -254,10 +254,10 @@ prints the fixed string regardless.
 **A flag's prose never arrives**, per the measurement above — the renderer is
 ready for it and the generator does not supply it.
 
-**The verb's purpose is absent**, and unlike the flags it is absent from the
-source of truth as well: an event interface's own doc comment is dropped in
-emission, so there is nothing downstream to render. `cf` can say what `addItem`
-takes and not what it is for.
+**The verb's purpose is absent**, and unlike the other two it never reaches the
+compiled pattern at all, so there is nothing downstream to render even once the
+resolution is fixed. `cf` can say what `addItem` takes and not what it is
+for.
 
 ## 3. Complete against the live piece **[today]**
 
@@ -357,9 +357,9 @@ Declared results make an **output** self-describing; this is about what an
 | Gap | Needs |
 | --- | --- |
 | `Output:` claims a handler returns nothing | Nothing — it is wrong, not missing |
-| A flag's prose absent from its help page | An emission fix — the renderer already reads a `description`; the schema the CLI is served has none |
-| A verb's purpose absent from its help page | An emission fix, then a renderer one — an event interface's doc comment reaches neither, and the page has no summary line |
-| A verb's own doc comment absent everywhere | An emission fix — JSDoc survives on a data property and is dropped on a `Stream` one |
+| A flag's prose absent from its help page | Same loss as the row below — emitted into the `$def`, absent from the resolved schema the CLI is served |
+| A verb's purpose absent from its help page | A genuine emission gap, then a renderer one — an event interface's comment never compiles, and the page has no summary line |
+| A verb's own doc comment absent everywhere | Not emission — it is emitted and lost when the event `$ref` is resolved for the CLI |
 | A result field's prose | Item 1 first — there is no declared result on the wire to hang it on |
 | Result fields listed in help | A declared result |
 | `--select` completion, and refusal before the call | A declared result |
