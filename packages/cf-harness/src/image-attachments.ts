@@ -177,8 +177,12 @@ const writeImageAttachmentSnapshot = async (
     if (stat.isFile && stat.size === bytes.byteLength) {
       return snapshotPath;
     }
-  } catch {
-    // Missing snapshot — write it below.
+  } catch (error) {
+    // A missing snapshot is written below; anything else (permissions,
+    // I/O) must surface as itself rather than as a later write failure.
+    if (!(error instanceof Deno.errors.NotFound)) {
+      throw error;
+    }
   }
   await Deno.mkdir(snapshotDir, { recursive: true });
   const tempPath = `${snapshotPath}.tmp-${crypto.randomUUID()}`;
