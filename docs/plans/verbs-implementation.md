@@ -107,8 +107,8 @@ pricing, so the pricing needs to be the honest one.
 
 ## Ready to build
 
-Unblocked and independent of the decision above. Small, except item 11, which
-is here because nothing gates it rather than because it is quick.
+Unblocked and independent of the decision above. Not all small — items 2 and
+11 are both (M); what these share is that nothing gates them.
 
 **2. An unrecognized projection key is refused.** *(M)* Two denylists are
 consulted and every key in neither is accepted and ignored, so a typo selects
@@ -209,28 +209,38 @@ arguments, so the options object defaults to `{}`. Same validator; the outer
 gate never got the option. The design is
 [references as arguments](references-as-arguments.md).
 
-Four parts, and only the first is independent:
+*Measured: `send()` already resolves a native sigil.* A raw sigil link riding
+an event payload reaches the handler as the **resolved target**, not an
+envelope — probed against a local toolshed with an `any`-typed event field, so
+nothing gated it: the handler saw the target's own properties and read its
+`title`. That settles the question
+[references as arguments](references-as-arguments.md) flagged untested, and it
+means the door is already open under the native spelling. This item names a
+capability rather than adding one.
+
+Four parts. Two are independent of everything:
 
 - **Refuse the structural copy.** Correct under any road, needs no vocabulary
   and no gate change, and converts silent corruption into an error.
 - **Give the CLI gate the option the dispatch gate already passes.** One
-  argument at one call site.
+  argument at one call site — and on the measurement above, *sufficient on its
+  own* for the native sigil spelling, since the gate is the only thing between
+  that payload and a `send()` that already resolves it. Worth confirming
+  against a declared field rather than the `any` the probe used.
 - **Lift resolution to a shared home**, beside `parseLink` and the LLM-friendly
-  pair in `packages/runner/src/link-utils.ts`.
+  pair in `packages/runner/src/link-utils.ts`. This is what admits the *other*
+  spellings — the `$link` shape a read emits, and the LLM-friendly form — so it
+  serves composition rather than basic capability.
 - **Fix event-schema emission.** An inline `Writable<{…}>` disappears from the
-  emitted properties entirely — needed under any road, and doubly once event
-  schemas close, since a field the schema does not name cannot be supplied at
-  all. The `asCell` marker is needed only if resolution goes schema-directed.
-
-*Order is not free.* Resolution precedes the gate, which is the order
-`llm-dialog` already proves. Aligning the gate first would pass a raw envelope
-to a handler expecting a cell.
+  emitted properties entirely. That half is independent and needed under any
+  road, doubly once event schemas close, since a field the schema does not name
+  cannot be supplied at all. Only the `asCell` marker hangs on the decision
+  below.
 
 *One decision inside the item:* schema-blind or schema-directed resolution.
 Schema-blind is proven twice — `traverseAndCellify` and the dispatch gate;
 schema-directed is checkable and refuses a typo. It decides whether the `asCell`
-half of emission is required or merely useful, so reach it before starting
-emission.
+marker is required or merely useful, so reach it before starting that half.
 
 *A constraint rather than a decision:* what is accepted inbound must include the
 shape a read emits, or a caller cannot submit the address it was just handed.
@@ -239,8 +249,9 @@ shape a read emits, or a caller cannot submit the address it was just handed.
 the user's own model session to external principals.
 
 *Exit:* `cf piece call --piece <root> addPiece '{"piece": <address>}'` registers
-the piece. That is the root pattern's own verb, reachable today only from inside
-the runtime.
+the piece — the root pattern's own verb, reachable today by `pieces.add` from
+inside the runtime and by a model through the dialog builtin, and by no other
+caller.
 
 ## Landed, and what consumes it
 
@@ -289,7 +300,7 @@ joins them.
 | 5 | 4 | the fourth and fifth arrivals inherit whatever a read costs |
 | 10 | 1 | listing rows carry a handler's `outputSchema`; the plumbing exists for tools already |
 | 1 | — | decided; 8 and 10 are no longer provisional, and item 10 carries the revisit condition |
-| 11 | — | independent of 1: declared results make an *output* self-describing, this is what an *input* accepts. Shares `schema-injection.ts` with item 10's emission, so one holder suits both |
+| 11 | — | independent of 1 in what it decides — declared results make an *output* self-describing, this is what an *input* accepts — but shares `schema-injection.ts` with item 1's emission (#5501), so one holder suits both |
 
 Items 2, 3 and 5 touch one file heavily and want to land one at a time rather
 than in parallel. Item 4 is the only one that touches the call envelope.
