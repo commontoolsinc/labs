@@ -918,7 +918,7 @@ Exposed via the existing `/api/health/stats` shape, replacing v1's pool
 block: `servingLoop: { activeSpaces, waves, wavesBudgetExhausted,
 supersededWrites, authoredSeen, effectAcks, derivedCommits,
 structureLoadFailures, structureLoadDeferred, watermarkClamped,
-watermarkLag, events:
+unstampedSealRefusals, watermarkLag, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent}, memo:
 {hits, misses, inflight}, outbox: {queued, completed, failed}, lease:
 {held, lost} }` (`structureLoadFailures`/`structureLoadDeferred`
@@ -928,7 +928,13 @@ nothing, RULED 2026-08-07; `watermarkClamped` counts waves whose W
 advance was actually clamped below the input batch head by the
 Phase-2 settle input barrier — inbound foreign novelty still
 shadowed by a parked own write; the clamp is honesty, not failure,
-and lifts by itself) (`effectAcks` counts effect-channel ack writes, so the
+and lifts by itself; `unstampedSealRefusals` counts write-carrying
+transactions refused at the seal by §3d's unstamped refusal —
+structurally ZERO when every server-side commit path declares its
+run context, so any non-zero count names an undeclared commit path,
+the class that wedged the resumed list builtins' recovery seeds
+until they stamped `bookkeeping`) (`effectAcks` counts
+effect-channel ack writes, so the
 §3 amplification metric is computable from counters alone). Every
 Phase gate in the plan reads these counters; tests MUST assert on
 counters, not logs.

@@ -450,6 +450,7 @@ export class WaveAccumulator
    * ride this wave's transaction. */
   readonly #pendingAppendsByTx = new WeakMap<object, OutboxAppendRow[]>();
   readonly #sealedTxs = new WeakSet<object>();
+  readonly #onUnstampedSeal: (() => void) | undefined;
 
   constructor(options: {
     /** The home space this wave derives for. */
@@ -467,6 +468,12 @@ export class WaveAccumulator
     scopeKeyIdentity: ScopeKeyIdentity;
     replicaFor: (space: MemorySpace) => ISpaceReplica;
     lease?: WaveLease;
+    /** Counted observation of §3d's unstamped-seal refusal (the
+     * serving loop feeds its §7 `unstampedSealRefusals` counter):
+     * called once per refused write-carrying transaction, right
+     * before the refusal throws. The refusal semantics are unchanged
+     * — this only makes the storm a counter fact. */
+    onUnstampedSeal?: () => void;
   }) {
     this.#space = options.space;
     this.#basisSeq = options.basisSeq;
@@ -474,6 +481,7 @@ export class WaveAccumulator
     this.#replicaFor = options.replicaFor;
     this.#lease = options.lease;
     this.#sealedTenure = options.lease?.tenure ?? 0;
+    this.#onUnstampedSeal = options.onUnstampedSeal;
   }
 
   get space(): MemorySpace {
@@ -599,6 +607,7 @@ export class WaveAccumulator
             },
           });
         }
+        this.#onUnstampedSeal?.();
         throw new Error(
           "unstamped transaction sealed into a wave: stamp the run " +
             "context (stampWaveRunContext) before sealing — every " +

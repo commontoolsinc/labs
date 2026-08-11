@@ -173,6 +173,14 @@ export function fetchProgram(
     if (!cellsInitialized || inFlight.size === 0) return;
 
     const tx = runtime.edit();
+    // Teardown tx on piece stop — no scheduler run stamps it;
+    // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
+    // serving runtime releases this replica's claims instead of
+    // refusing the unstamped seal. No-op off the serving posture.
+    runtime.stampServerRun(tx, {
+      actionId: `fetchProgram/teardown/${parentCell.sourceURI}`,
+      kind: "bookkeeping",
+    });
 
     try {
       // If we were fetching, transition back to idle

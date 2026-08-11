@@ -3176,6 +3176,14 @@ export function llmDialog(
     if (!cellsInitialized) return;
 
     const tx = runtime.edit();
+    // Teardown tx on piece stop — no scheduler run stamps it;
+    // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
+    // serving runtime releases the claim instead of refusing the
+    // unstamped seal. No-op off the serving posture.
+    runtime.stampServerRun(tx, {
+      actionId: `llmDialog/teardown/${parentCell.sourceURI}`,
+      kind: "bookkeeping",
+    });
 
     // If the pending request is ours, set pending to false and clear the requestId.
     if (internal.withTx(tx).key("requestId").get() === requestId) {

@@ -57,6 +57,15 @@ export type ServingLoopStats = {
    * not a failure — W catches up the wave after the shadow clears — but
    * a count that grows without settling flags a wedged marker channel. */
   watermarkClamped: number;
+  /** Write-carrying transactions REFUSED at the wave's seal because no
+   * run context was stamped (serving-loop.md §3d, RULED 2026-08-05).
+   * Structurally zero when every server-side commit path declares its
+   * run context; any non-zero count names an undeclared commit path —
+   * the class that wedged the resumed list builtins' recovery seeds
+   * (the out-of-band editWithRetry retried the refusal without ever
+   * landing, so the demanded derivation never materialized). Counted
+   * here so the storm is a health-stats fact, not a log-grep. */
+  unstampedSealRefusals: number;
   /** max over active spaces of (store head seq − W). */
   watermarkLag: number;
   events: {
@@ -81,6 +90,7 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   structureLoadFailures: 0,
   structureLoadDeferred: 0,
   watermarkClamped: 0,
+  unstampedSealRefusals: 0,
   watermarkLag: 0,
   events: {
     appended: 0,

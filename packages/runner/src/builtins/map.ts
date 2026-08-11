@@ -130,6 +130,12 @@ export function map(
         .then(() =>
           !active ? undefined : runtime.editWithRetry((settleTx) => {
             if (!active || !result) return;
+            // Out-of-band recovery write — stamped bookkeeping for the
+            // same §3d reason as the resume-seed below.
+            runtime.stampServerRun(settleTx, {
+              actionId: `map/resume-settle/${parentCell.sourceURI}`,
+              kind: "bookkeeping",
+            });
             const raw = inputsCell.key("list").withTx(settleTx).resolveAsCell()
               .withTx(settleTx).getRaw();
             if (raw === undefined || (Array.isArray(raw) && raw.length === 0)) {
@@ -295,6 +301,23 @@ export function map(
       const seedIfStillAbsent = () =>
         !active ? Promise.resolve() : runtime.editWithRetry((seedTx) => {
           if (!active) return;
+          // Out-of-band recovery write (serving-loop.md §3d, RULED
+          // 2026-08-05): this tx is minted OUTSIDE any scheduler run, so
+          // nothing else stamps it, and on a SERVING runtime the wave
+          // REFUSES an unstamped seal — the seed then never lands and
+          // the demanded derivation stays wedged while editWithRetry
+          // burns on the refusal (the lunch-gate throw storm). The seed
+          // is legitimate server work but not a derivation or handler
+          // run: declare it with the sanctioned internal bookkeeping
+          // kind, like the pattern-swap setup write. Stamped inside the
+          // callback so every retry's fresh tx carries it. A no-op on
+          // the OFF arm; under client speculation bookkeeping commits
+          // exactly as unstamped txs do (overlay routes only
+          // derivation-kind runs).
+          runtime.stampServerRun(seedTx, {
+            actionId: `map/resume-seed/${parentCell.sourceURI}`,
+            kind: "bookkeeping",
+          });
           const container = result!.withTx(seedTx);
           if (container.getRaw() === undefined) container.set([]);
         }).then(({ error }) => {

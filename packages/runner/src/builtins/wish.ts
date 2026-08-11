@@ -988,6 +988,14 @@ function writeIntervalNowTick(
   const cell = timer.cell;
   void runtime.editWithRetry((tx) => {
     if (generation !== timer.generation) return; // torn down, skip
+    // Pure timer write (setTimeout — no scheduler run stamps it):
+    // bookkeeping per serving-loop.md §3d, RULED 2026-08-05, so a
+    // serving runtime's wave admits the tick instead of refusing the
+    // unstamped seal. No-op off the serving posture.
+    runtime.stampServerRun(tx, {
+      actionId: `wish/interval-now-tick/${cell.sourceURI}`,
+      kind: "bookkeeping",
+    });
     const coarsened = coarsenTimestamp(Date.now(), intervalMs);
     const current = cell.withTx(tx).get() as number | null | undefined;
     if (current == null || current !== coarsened) {
@@ -1966,6 +1974,12 @@ export function wish(
     message: string,
   ): void {
     const errorTx = runtime.edit();
+    // Async error surfacing after the originating wish tx is gone — no
+    // scheduler run stamps it; bookkeeping per serving-loop.md §3d.
+    runtime.stampServerRun(errorTx, {
+      actionId: `wish/pattern-error-ui/${resultCell.sourceURI}`,
+      kind: "bookkeeping",
+    });
     resultCell.withTx(errorTx).set({ [UI]: errorUI(message) });
     runtime.prepareTxForCommit(errorTx);
     errorTx.commit();
@@ -1982,6 +1996,12 @@ export function wish(
   ): void {
     try {
       const runTx = runtime.edit();
+      // Sidecar run from a cache-fetch continuation — no scheduler run
+      // stamps it; bookkeeping per serving-loop.md §3d.
+      runtime.stampServerRun(runTx, {
+        actionId: `wish/sidecar-run/${resultCell.sourceURI}`,
+        kind: "bookkeeping",
+      });
       runtime.run(runTx, pattern, inputForTx(runTx), resultCell.withTx(runTx));
       runtime.prepareTxForCommit(runTx);
       runTx.commit().then(({ error }) => {
@@ -2055,6 +2075,13 @@ export function wish(
       void profileCreatePatternCache.fetch(runtime, () => {
         if (profileCreatePatternReadyCell) {
           const readyTx = runtime.edit();
+          // Cache-fetch onLoaded continuation — no scheduler run stamps
+          // it; bookkeeping per serving-loop.md §3d.
+          runtime.stampServerRun(readyTx, {
+            actionId:
+              `wish/profile-create-ready/${profileCreatePatternReadyCell.sourceURI}`,
+            kind: "bookkeeping",
+          });
           profileCreatePatternReadyCell.withTx(readyTx).set(true);
           runtime.prepareTxForCommit(readyTx);
           readyTx.commit();
