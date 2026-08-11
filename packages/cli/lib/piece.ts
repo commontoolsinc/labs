@@ -1687,16 +1687,6 @@ export function partitionVerbListing(
   return { shown, wrapper, deprecated };
 }
 
-/**
- * Enumerate every callable a piece exposes (verb contract: Verb discovery,
- * docs/plans/pattern-verb-contract.md). Everything in the durable schema is
- * listed — hiding is a display default driven by the listing marks
- * (`tier: "wrapper"`, `deprecated: true`), never a capability boundary: the
- * rows carry the marks, `partitionVerbListing` decides the default view, and
- * `--all` shows the full surface. Walks result then input with the same classification
- * `cf piece call` resolves through, so the listing and the dispatcher can
- * never disagree about what is callable.
- */
 /** The listing marks as they appear on the durable schema's property. */
 function listingMarks(
   rootSchema: unknown,
@@ -1711,6 +1701,16 @@ function listingMarks(
   };
 }
 
+/**
+ * Enumerate every callable a piece exposes (verb contract: Verb discovery,
+ * docs/plans/pattern-verb-contract.md). Everything in the durable schema is
+ * listed — hiding is a display default driven by the listing marks
+ * (`tier: "wrapper"`, `deprecated: true`), never a capability boundary: the
+ * rows carry the marks, `partitionVerbListing` decides the default view, and
+ * `--all` shows the full surface. Walks result then input with the same classification
+ * `cf piece call` resolves through, so the listing and the dispatcher can
+ * never disagree about what is callable.
+ */
 export async function listPieceCallables(
   config: PieceConfig,
   deps: PieceCallableDependencies = {},
