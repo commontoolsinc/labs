@@ -495,6 +495,35 @@ describe("schema-view", () => {
   });
 
   describe("once the transaction has written", () => {
+    it("stays lazy after a write batch that staged nothing", async () => {
+      const read = await seeded(
+        "empty-batch",
+        { a: 1, untouched: { leaf: 2 } },
+        {
+          type: "object",
+          properties: {
+            a: { type: "number" },
+            untouched: {
+              type: "object",
+              properties: { leaf: { type: "number" } },
+            },
+          },
+        } as const,
+      );
+
+      const lazy = read(true);
+      try {
+        lazy.tx.writeValuesOrThrow([]);
+        expect((lazy.get() as { a: number }).a).toBe(1);
+        // Eager materialization would have walked the sibling; a view that is
+        // still lazy never looks at it.
+        expect(pathsRead(lazy.tx).some((path) => path.includes("untouched")))
+          .toBe(false);
+      } finally {
+        await lazy.tx.commit();
+      }
+    });
+
     // A view resolves each path when it is touched, so a read taken after a
     // write would report the new value where an eager read hands back one
     // detached at the moment it was taken. A read is materialized eagerly once

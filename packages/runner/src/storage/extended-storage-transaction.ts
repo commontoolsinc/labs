@@ -1809,7 +1809,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     >,
   ): void {
     this.assertWritable("writeValuesOrThrow()");
-    this.noteWrite();
     this.invalidateReadResultCache();
     if (this.tx.writeBatch) {
       // Keep the batch path on the same noteSystemWrite chokepoint as single
@@ -1834,15 +1833,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // `packages/runner/test/memory-v2-acl-mutation.test.ts`.
       const noteSystemWrite = (address: IMemorySpaceAddress) =>
         this.noteSystemWrite(address);
-      // Note the write identity per yielded write (not once up front): an
-      // empty batch must not mark the tx as written-to.
+      // Note the write per yielded write (not once up front): an empty batch
+      // must not mark the tx as written-to, for the identity or for the
+      // has-written flag lazy materialization reads.
       const noteWriteIdentity = () => this.noteWriteIdentity();
+      const noteWrite = () => this.noteWrite();
       const result = this.tx.writeBatch(
         (function* () {
           for (const write of writes) {
             const address = toMemorySpaceAddress(write.address);
             noteSystemWrite(address);
             noteWriteIdentity();
+            noteWrite();
             yield { address, value: write.value, delete: write.delete };
           }
         })(),
