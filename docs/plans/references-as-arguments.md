@@ -1,11 +1,26 @@
 # References as arguments
 
-**The ask: lift address resolution out of the LLM builtin and into the boundary
-every external caller crosses, and settle one encoding for it.**
+## The short version
 
-A caller outside the runtime can be *handed* an address and cannot hand one
-back — unless that caller is an LLM, which can, because the LLM dialog builtin
-solved this for itself.
+`traverseAndCellify` in the LLM dialog builtin resolves `{"@link": "…"}` into a
+live cell before dispatching to a handler. **A model can hand a pattern a
+reference. The CLI, a webhook, and the ingest path reach the same handler and
+cannot** — they validate structurally, and the payload they *do* accept stores a
+detached copy instead of an edge, reporting success.
+
+**The ask:** move that resolution to the boundary every external caller crosses,
+and settle one encoding. There are three spellings of "an address goes here" and
+only one is accepted inbound.
+
+**Decide first:** whether accepting a caller-named address is a confinement
+question. If it is, this is the wrong-sized change and CFC owns it. If it is
+not, the work is medium and mostly relocating code that already runs in
+production.
+
+**True either way:** refusing the structural copy, instead of storing it, needs
+no encoding decision and no confinement ruling.
+
+The rest of this document is the evidence for those four paragraphs.
 
 ## The team already needed this and already built it
 
