@@ -28,10 +28,19 @@
  * exercise inverse operations on matching data.
  *
  * A second section measures the base64url convenience pair
- * (`bigintToUnpaddedBase64url()` / `bigintFromUnpaddedBase64url()`) against the
- * two steps it composes, so that the cost of the composition itself -- the
- * intermediate `Uint8Array` and the hand-off -- reads directly as the gap
- * between `combined` and the sum of the two parts. It sweeps every size up to
+ * (`bigintToUnpaddedBase64url()` / `bigintFromUnpaddedBase64url()`). Each of
+ * its groups carries four tracks. The two's-complement step and the base64url
+ * step, measured alone, show where the time goes. Then `two-step inline` --
+ * the same two calls written out in one loop -- against `combined`, which is
+ * the pair that answers whether wrapping them costs anything.
+ *
+ * Read the composition's cost off that pair, NOT off `combined` against the
+ * sum of the two step tracks. Summing two tracks double-counts the batch loop,
+ * and each step track is handed a pre-built input where the composition
+ * allocates its intermediate one step earlier -- so the sum is biased by a
+ * loop iteration and describes different allocation behavior besides.
+ *
+ * It sweeps every size up to
  * 33 bytes and then doubles out to 1 MiB: the base64url layer is linear in byte
  * count with no branch structure of its own, so past the crossovers in the
  * layer below it, reach matters more than resolution. Positive and negative
@@ -327,6 +336,16 @@ for (const bytes of B64_BYTE_SIZES) {
     });
 
     Deno.bench({
+      name: `b64 encode ${signLabel} ${label} two-step inline (${batch} ops)`,
+      group: encodeGroup,
+      fn() {
+        for (let i = 0; i < batch; i++) {
+          toUnpaddedBase64url(bigintToMinimalTwosComplement(values[i]!));
+        }
+      },
+    });
+
+    Deno.bench({
       name: `b64 encode ${signLabel} ${label} combined (${batch} ops)`,
       group: encodeGroup,
       fn() {
@@ -354,6 +373,16 @@ for (const bytes of B64_BYTE_SIZES) {
       fn() {
         for (let i = 0; i < batch; i++) {
           fromBase64url(encodedStrings[i]!);
+        }
+      },
+    });
+
+    Deno.bench({
+      name: `b64 decode ${signLabel} ${label} two-step inline (${batch} ops)`,
+      group: decodeGroup,
+      fn() {
+        for (let i = 0; i < batch; i++) {
+          bigintFromMinimalTwosComplement(fromBase64url(encodedStrings[i]!));
         }
       },
     });
