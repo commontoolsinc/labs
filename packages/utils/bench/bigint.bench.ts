@@ -31,10 +31,12 @@
  * (`bigintToUnpaddedBase64url()` / `bigintFromUnpaddedBase64url()`) against the
  * two steps it composes, so that the cost of the composition itself -- the
  * intermediate `Uint8Array` and the hand-off -- reads directly as the gap
- * between `combined` and the sum of the two parts. It sweeps a sparse set of
- * sizes: the base64url layer is linear in byte count with no branch structure
- * of its own, so the dense sweep the first section needs would only repeat
- * itself here.
+ * between `combined` and the sum of the two parts. It sweeps every size up to
+ * 33 bytes and then doubles out to 1 MiB: the base64url layer is linear in byte
+ * count with no branch structure of its own, so past the crossovers in the
+ * layer below it, reach matters more than resolution. Its batch size shrinks as
+ * values grow, and so is stated per benchmark rather than being BATCH
+ * throughout.
  *
  * Run with: deno bench --no-check bench/bigint.bench.ts
  */
@@ -212,34 +214,54 @@ for (const { name: implName, biToMtc, biFromMtc } of IMPLS) {
 //
 
 /**
- * Byte sizes for the base64url benchmarks: the whole small-value range, both
- * sides of the 8-byte and 32-byte crossovers in the underlying encoders, and a
- * doubling sweep out to 1 KiB.
+ * Byte sizes for the base64url benchmarks: every size from 1 to 33 inclusive,
+ * which brackets both the 8-byte and the 32-byte crossover in the underlying
+ * encoders, and then a doubling sweep out to 1 MiB.
  */
-const B64_BYTE_SIZES: readonly number[] = [
-  1,
-  2,
-  3,
-  4,
-  5,
-  6,
-  7,
-  8,
-  9,
-  16,
-  32,
-  33,
-  64,
-  128,
-  256,
-  512,
-  1024,
-];
+const B64_BYTE_SIZES: readonly number[] = (() => {
+  const result: number[] = [];
+  for (let i = 1; i <= 33; i++) result.push(i);
+  for (let i = 64; i <= (1 << 20); i *= 2) result.push(i);
+  return result;
+})();
+
+/**
+ * Payload budget per benchmark, in bytes. The batch shrinks as values grow, so
+ * that the megabyte end of the sweep measures a single operation rather than
+ * allocating 64 MiB of them. Each benchmark's name carries its own batch size,
+ * since it is no longer `BATCH` throughout.
+ */
+const B64_BATCH_BYTES = 1 << 18;
+
+/** Returns the batch size for `bytes`-sized values. */
+function b64BatchFor(bytes: number): number {
+  return Math.max(1, Math.min(BATCH, Math.floor(B64_BATCH_BYTES / bytes)));
+}
+
+/**
+ * Returns the minimal two's-complement encoding of a positive value that needs
+ * exactly `bytes` bytes. The leading byte lands in `[0x40, 0x7f]`, so the value
+ * sits in the upper half of its band -- the same guarantee `makePositive()`
+ * gives -- while staying linear to build at megabyte sizes, where repeated
+ * bigint shifting is not.
+ */
+function makePositiveBytes(bytes: number, rng: () => number): Uint8Array {
+  const out = new Uint8Array(bytes);
+  for (let i = 0; i < bytes; i++) {
+    out[i] = rng() & 0xff;
+  }
+  out[0] = 0x40 | (out[0]! & 0x3f);
+  return out;
+}
 
 // Warm up all six measured paths, for the same reason the first section does.
 {
-  const warmVals = makeBatch(8, 1n, 3);
-  const warmBytes = warmVals.map((v) => bigintToMinimalTwosComplement(v));
+  const rng = makeRng(7);
+  const warmBytes = Array.from(
+    { length: BATCH },
+    () => makePositiveBytes(8, rng),
+  );
+  const warmVals = warmBytes.map((b) => bigintFromMinimalTwosComplement(b));
   const warmStrings = warmBytes.map((b) => toUnpaddedBase64url(b));
   for (let i = 0; i < 200; i++) {
     for (const v of warmVals) {
@@ -261,72 +283,77 @@ for (const bytes of B64_BYTE_SIZES) {
   // Negatives are not tracked separately here: sign changes the cost of the
   // two's-complement step, which the first section already measures both ways,
   // and leaves the base64url step's cost untouched.
-  const values = makeBatch(bytes, 1n, bytes * 37 + 3);
-  const encodedBytes = values.map((v) => bigintToMinimalTwosComplement(v));
+  const batch = b64BatchFor(bytes);
+  const rng = makeRng(bytes * 37 + 3);
+  const encodedBytes = Array.from(
+    { length: batch },
+    () => makePositiveBytes(bytes, rng),
+  );
+  const values = encodedBytes.map((b) => bigintFromMinimalTwosComplement(b));
   const encodedStrings = encodedBytes.map((b) => toUnpaddedBase64url(b));
   // Pad the group key so Deno bench's grouped output sorts in size order.
-  const groupKey = String(bytes).padStart(4, "0");
+  const groupKey = String(bytes).padStart(7, "0");
   const encodeGroup = `b64-encode-${groupKey}B`;
   const decodeGroup = `b64-decode-${groupKey}B`;
   const label = `${bytes}B`;
 
   Deno.bench({
-    name: `b64 encode ${label} two's-complement step (${BATCH} ops)`,
+    name: `b64 encode ${label} two's-complement step (${batch} ops)`,
     group: encodeGroup,
     baseline: true,
     fn() {
-      for (let i = 0; i < BATCH; i++) {
+      for (let i = 0; i < batch; i++) {
         bigintToMinimalTwosComplement(values[i]!);
       }
     },
   });
 
   Deno.bench({
-    name: `b64 encode ${label} base64url step (${BATCH} ops)`,
+    name: `b64 encode ${label} base64url step (${batch} ops)`,
     group: encodeGroup,
     fn() {
-      for (let i = 0; i < BATCH; i++) {
+      for (let i = 0; i < batch; i++) {
         toUnpaddedBase64url(encodedBytes[i]!);
       }
     },
   });
 
   Deno.bench({
-    name: `b64 encode ${label} combined (${BATCH} ops)`,
+    name: `b64 encode ${label} combined (${batch} ops)`,
     group: encodeGroup,
     fn() {
-      for (let i = 0; i < BATCH; i++) {
+      for (let i = 0; i < batch; i++) {
         bigintToUnpaddedBase64url(values[i]!);
       }
     },
   });
 
   Deno.bench({
-    name: `b64 decode ${label} two's-complement step (${BATCH} ops)`,
+    name: `b64 decode ${label} two's-complement step (${batch} ops)`,
     group: decodeGroup,
     baseline: true,
     fn() {
-      for (let i = 0; i < BATCH; i++) {
+      for (let i = 0; i < batch; i++) {
         bigintFromMinimalTwosComplement(encodedBytes[i]!);
       }
     },
   });
 
   Deno.bench({
-    name: `b64 decode ${label} base64url step (${BATCH} ops)`,
+    name: `b64 decode ${label} base64url step (${batch} ops)`,
     group: decodeGroup,
     fn() {
-      for (let i = 0; i < BATCH; i++) {
+      for (let i = 0; i < batch; i++) {
         fromBase64url(encodedStrings[i]!);
       }
     },
   });
 
   Deno.bench({
-    name: `b64 decode ${label} combined (${BATCH} ops)`,
+    name: `b64 decode ${label} combined (${batch} ops)`,
     group: decodeGroup,
     fn() {
-      for (let i = 0; i < BATCH; i++) {
+      for (let i = 0; i < batch; i++) {
         bigintFromUnpaddedBase64url(encodedStrings[i]!);
       }
     },
