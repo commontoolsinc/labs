@@ -1027,6 +1027,43 @@ describe("capture-deno-inspector-profile helpers", () => {
     });
   });
 
+  it("stops from a marker that arrived while the profiler was still enabling", async () => {
+    await withTempDir(async (tmpDir) => {
+      const celestial = new FakeCelestial();
+      const gate = Promise.withResolvers<void>();
+      celestial.profilerEnableGate = gate;
+      const logs: string[] = [];
+      const started = Promise.withResolvers<void>();
+      const done = captureDenoInspectorProfile(
+        [
+          `--output=${tmpDir}/profile.cpuprofile`,
+          "--summary-pattern=done",
+          "--profile-start-pattern=profile start",
+          "--profile-stop-pattern=profile stop",
+          "--websocket-url=ws://127.0.0.1:9333/session",
+        ],
+        createCaptureRuntime({ celestial, logs, started }),
+      );
+
+      // No stop preceded the start marker, so the stop that follows it is the
+      // live one and survives the profiler actually starting.
+      await celestial.profilerEnableCalled.promise;
+      celestial.dispatchConsole({ value: "profile start" });
+      celestial.dispatchConsole({ value: "profile stop" });
+
+      gate.resolve();
+      await started.promise;
+      await Promise.resolve();
+      // Ends the run if the stop above was dropped, so the reason below is
+      // what distinguishes the two outcomes rather than a hang.
+      celestial.dispatchConsole({ value: "done" });
+
+      assertEquals(await done, 0);
+      assertEquals(logs.includes("profile: profile stop matched"), true);
+      assertEquals(celestial.stops, 1);
+    });
+  });
+
   it("stops from a marker that arrives while profiler start is in flight", async () => {
     await withTempDir(async (tmpDir) => {
       const celestial = new FakeCelestial();
