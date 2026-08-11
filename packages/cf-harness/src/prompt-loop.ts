@@ -2745,7 +2745,16 @@ export class CfHarnessPromptLoop {
           gatewayAuthMode: this.engine.config.gatewayAuthMode,
         }
         : {}),
-      cwd: parentRunState.currentDir,
+      // A host-command child (non-empty hostToolIds, i.e. the browser
+      // profile) resolves every path — including its cwd — against its own
+      // host-backed mounts, which are workspace-only. Inheriting a parent
+      // cwd outside the workspace (Loom capture runs sit at /file-cabinet)
+      // killed every such child at its first host command with "path
+      // escapes host-backed sandbox roots" (CT-1984). Ground host-command
+      // children in the workspace; sandboxed children keep the parent cwd.
+      cwd: profileConfig.hostToolIds.length > 0
+        ? this.engine.workspaceMountPath
+        : parentRunState.currentDir,
       ...(this.engine.config.skillsRoot !== undefined
         ? { skillsRoot: this.engine.config.skillsRoot }
         : {}),
